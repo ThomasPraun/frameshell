@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Clip, type ClipTrack, type Timeline, type Track, flattenTimeline, isSubjectClip, withSubjectLayers } from "../src/index.js";
+import { type Clip, type ClipTrack, type Timeline, type Track, flattenTimeline, isSubjectClip, subjectOf, withSubjectLayers } from "../src/index.js";
 
 const talk = (id: string, start: number, extra: Partial<Clip> = {}): Clip =>
   ({ id, type: "media", asset: "assets/talk.mp4", start, in: 2, out: 5, audio: { gain: -3 }, ...extra }) as Clip;
@@ -60,6 +60,30 @@ describe("withSubjectLayers (ADR 0032)", () => {
     // A shown track in between is in front of the person: each run gets its own layer.
     between.tracks[3] = { id: "v_h", kind: "video", clips: [] };
     expect(ids(withSubjectLayers(between))).toEqual(["v1", "a1", "v2", "v2/subject", "v_h", "v3", "v3/subject"]);
+  });
+
+  it("marks each copy with the source seconds it draws: under the track behind, not under a shown track between", () => {
+    const windows = (timeline: Timeline, track: string) =>
+      clipsOf(withSubjectLayers(timeline).tracks.find((other) => other.id === track)).map((clip) => {
+        const mark = subjectOf(clip)!;
+        return { id: clip.id, windows: mark.windows.map(([a, b]) => [Math.round(a * 1000) / 1000, Math.round(b * 1000) / 1000]), covered: mark.covered };
+      });
+    // Title at 1-4 s: c_a (0-3 s, source 2-5) draws from 1 s and past its end over c_b's dissolve; c_b from its dissolve.
+    expect(windows(stack(), "v2/subject")).toEqual([
+      { id: "c_a", windows: [[3, 5.4]], covered: [] },
+      { id: "c_b", windows: [[1.6, 3]], covered: [] },
+    ]);
+    // A cutaway between the plate and the title from 3.5 s: no subject while it shows; a plate clip under no title is left out.
+    const cutaway = stack({ v2: { clips: [{ id: "c_t", type: "media", asset: "assets/title.png", start: 1, in: 0, out: 3 }] } });
+    cutaway.tracks.splice(2, 0, { id: "v_c", kind: "video", clips: [{ id: "c_c", type: "media", asset: "assets/broll.mp4", start: 3.5, in: 0, out: 3 }] });
+    expect(windows(cutaway, "v2/subject")).toEqual([
+      { id: "c_a", windows: [[3, 5.4]], covered: [] },
+      { id: "c_b", windows: [[1.6, 2.5]], covered: ["v_c"] },
+    ]);
+    const short = stack({ v2: { clips: [{ id: "c_t", type: "media", asset: "assets/title.png", start: 1, in: 0, out: 1 }] } });
+    expect(windows(short, "v2/subject")).toEqual([{ id: "c_a", windows: [[3, 4]], covered: [] }]);
+    // Nothing behind the plate at any time: no layer at all.
+    expect(ids(withSubjectLayers(stack({ v2: { clips: [] } })))).toEqual(["v1", "a1", "v2", "v3"]);
   });
 
   it("runs inside flattenTimeline after track mutes, at every nesting level", () => {

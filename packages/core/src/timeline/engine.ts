@@ -402,14 +402,23 @@ class Edit {
 
   /**
    * Clear `behind` where its plate is gone or no longer a video track below (ADR 0032 decision 8: removed or
-   * reordered), with a warning: the operation goes on instead of failing on a flag it did not mean to break.
+   * reordered), with a warning: the operation goes on instead of failing on a flag it did not mean to break. Only
+   * a `behind` that held before the operation is cleared: one the operation set wrong is left for the schema to refuse.
    */
   clearStaleBehind(): void {
+    const held = (tracks: readonly Track[], index: number): boolean => {
+      const track = tracks[index]!;
+      const found = tracks.findIndex((candidate) => track.kind === "video" && candidate.id === track.behind);
+      return found !== -1 && found < index && tracks[found]!.kind === "video";
+    };
     this.draft.tracks.forEach((track, index) => {
       if (track.kind !== "video" || track.behind === undefined) return;
       const plate = track.behind;
+      if (held(this.draft.tracks, index)) return;
+      const was = this.before.tracks.findIndex((candidate) => candidate.id === track.id);
+      const prior = this.before.tracks[was];
+      if (prior?.kind !== "video" || prior.behind !== plate || !held(this.before.tracks, was)) return;
       const found = this.draft.tracks.find((candidate) => candidate.id === plate);
-      if (found?.kind === "video" && this.draft.tracks.indexOf(found) < index) return;
       delete track.behind;
       const why = found ? `${plate} is no longer below it` : `${plate} is gone`;
       this.warnings.push(`track ${track.id} no longer sits behind the subject of ${plate}: ${why}. \`revert\` brings it back.`);

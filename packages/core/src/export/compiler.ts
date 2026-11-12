@@ -30,7 +30,7 @@ import {
   isKeyed,
   isIdentityPlacement,
   isProgramSound,
-  isSubjectClip,
+  subjectOf,
   layerRect,
   nestingOf,
   placementOf,
@@ -366,6 +366,8 @@ interface Placed {
    * alpha first. Opacity, fades and shapes later multiply alpha too, so the result is ADR 0031's order (shape, then matte).
    */
   matte?: ExportSource;
+  /** On a subject layer: the only timeline frames [from, to) it is drawn on (`SubjectMark.windows`), sorted. */
+  windows?: [number, number][];
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -684,6 +686,8 @@ function layoutTimeline(
   const warnings: string[] = [];
   /** Assets a subject clip plays without a matte, each warned about once. */
   const unmatted = new Set<string>();
+  /** Plate, track behind it and covering track of each warning about a track between them (`SubjectMark.covered`). */
+  const betweenWarned = new Set<string>();
   /** Picture layers in track order (SPEC §5.3: track order is stacking order). */
   const pictures: { program: boolean; placed: Placed[] }[] = [];
   const audio: Placed[][] = [];
@@ -716,7 +720,16 @@ function layoutTimeline(
       const render = clip.asset.startsWith(GENERATED) ? generated.get(clip.id) : undefined;
       const source = render ? generatedSource(render) : sources.get(clip.asset);
       if (!source) throw new Error(`no export source for ${clip.asset}`);
-      const subject = track.kind === "video" && isSubjectClip(listed);
+      const subject = track.kind === "video" ? subjectOf(listed) : null;
+      for (const covering of subject?.covered ?? []) {
+        const key = `${subject!.plate}\n${subject!.behind}\n${covering}`;
+        if (betweenWarned.has(key)) continue;
+        betweenWarned.add(key);
+        warnings.push(
+          `Track ${covering} lies between plate track ${subject!.plate} and track ${subject!.behind}, which is behind its subject: ` +
+            `while ${covering} shows a clip there, ${subject!.behind} is drawn in front of the person. Move ${covering} above ${subject!.behind} to keep it in front of both.`,
+        );
+      }
       const found = subject && source.video && !source.video.still ? mattes.get(clip.asset) : undefined;
       if (subject && !found) {
         if (!unmatted.has(clip.asset)) {
@@ -732,6 +745,7 @@ function layoutTimeline(
       const speed = clip.speed ?? 1;
       const start = grid.frame(clip.start);
       const end = Math.max(start + 1, grid.frame(clip.start + (clip.out - clip.in) / speed));
+      const frameOfSource = (seconds: number) => grid.frame(clip.start + (seconds - clip.in) / speed);
       // Program sound flattened onto an audio track plays at exact samples, like a program track's own.
       const exact = isProgramSound(clip) ? { exact: true as const } : {};
       const edges = transitions?.get(clip.id);
@@ -757,7 +771,7 @@ function layoutTimeline(
         ...(render ? { hold: true as const } : {}),
         ...(sound !== undefined ? { sound } : {}),
         ...(covers ? { cover: formatCover(picture, output) } : {}),
-        ...(matte ? { matte } : {}),
+        ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -877,7 +891,20 @@ function layoutTimeline(
       ...(pushed > 0 ? [{ placed, from: placed.end - pushed, to: placed.end + pushed }] : []),
     ];
   });
-  const overlays = [baseLayers, ...upper.map((layer) => layer.flatMap(wipeSplit))].map((layer) => layer.filter(visible)).filter((layer) => layer.length > 0);
+  /** `spans` of `placed` cut to its windows: a subject is drawn only where a track behind its plate shows (ADR 0032). */
+  const inWindows = (placed: Placed, spans: Span[]): Span[] =>
+    placed.windows
+      ? spans.flatMap((span) =>
+          placed.windows!.flatMap(([a, b]): Span[] => {
+            const from = Math.max(span.from, a);
+            const to = Math.min(span.to, b);
+            return to > from ? [{ ...span, from, to }] : [];
+          }),
+        )
+      : spans;
+  const overlays = [baseLayers, ...upper.map((layer) => layer.flatMap((placed) => inWindows(placed, wipeSplit(placed))))]
+    .map((layer) => layer.filter(visible))
+    .filter((layer) => layer.length > 0);
   for (const angle of pictureless) {
     warnings.push(`Multicam angle ${angle} has no picture; its tile stays black.`);
   }

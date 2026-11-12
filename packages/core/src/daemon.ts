@@ -504,15 +504,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           const { hash, proxy } = await media.ingested(dir, asset);
           if (proxy) ready.push({ asset, hash, proxy });
         }
-        return async (onProgress, signal) => {
-          const found = new Map<string, MatteSource>();
-          for (const [index, one] of ready.entries()) {
-            const share = (fraction: number) => onProgress?.((index + fraction) / ready.length);
-            const made = await makeMatte(dir, one.asset, one, { signal, onProgress: share });
-            found.set(one.asset, { path: join(dir, ...mattePaths(made.key).video.split("/")), width: made.info.width, height: made.info.height });
-          }
-          onProgress?.(1);
-          return found;
+        return {
+          assets: ready.map((one) => one.asset),
+          make: async (onProgress, signal) => {
+            const found = new Map<string, MatteSource>();
+            for (const [index, one] of ready.entries()) {
+              const share = (fraction: number) => onProgress?.((index + fraction) / ready.length);
+              const made = await makeMatte(dir, one.asset, one, { signal, onProgress: share });
+              found.set(one.asset, { path: join(dir, ...mattePaths(made.key).video.split("/")), width: made.info.width, height: made.info.height });
+            }
+            onProgress?.(1);
+            return found;
+          },
         };
       },
     },

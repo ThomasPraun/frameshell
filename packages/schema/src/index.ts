@@ -337,6 +337,8 @@ export {
   withTrackMutes,
   withSubjectLayers,
   isSubjectClip,
+  subjectOf,
+  type SubjectMark,
   showsPicture,
 } from "./composite.js";
 export {

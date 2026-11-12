@@ -221,6 +221,14 @@ describe("track operations", () => {
       expect(kept.warnings).toEqual([]);
     });
 
+    it("a patch that sets behind to no lower video track is refused, not cleared", async () => {
+      const timeline = await stacked();
+      for (const plate of ["t_a", "t_none"]) {
+        const patch = { tracks: [{ id: "t_t", track: { id: "t_t", kind: "video" as const, name: "Title", behind: plate, clips: [] } }] };
+        expect((await rejection(apply(timeline, "timeline.patch", patch))).message).toMatch(/must name a video track listed before this one/);
+      }
+    });
+
     it("a timeline file whose behind names no lower video track, or sits on an audio track, is not valid", () => {
       const tracks = (behind: string, kind: "video" | "audio" = "video") => [
         { id: "t_v", kind: "video", clips: [] },

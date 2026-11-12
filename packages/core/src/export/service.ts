@@ -23,7 +23,7 @@ import {
   type Size,
   type Timeline,
   type Transcript,
-  isSubjectClip,
+  subjectOf,
   programGroup,
   resolveFormat,
   sameAspect,
@@ -196,11 +196,15 @@ export interface ExportServiceOptions {
   };
   /**
    * Subject mattes (ADR 0032) of the assets subject layers play. `prepare` runs before any job, since an ingest may
-   * need a slot of the shared queue; the `make` it returns makes the mattes still missing without taking one (a render
-   * job calls it) and returns every matte by asset. Absent: subject layers are left out, with a warning.
+   * need a slot of the shared queue. It returns the `assets` that can get a matte (those with a proxy) and `make`,
+   * which makes their mattes still missing without taking a slot (a render job calls it) and returns every matte by
+   * asset. Absent: subject layers are left out, with a warning.
    */
   mattes?: {
-    prepare(root: string, assets: readonly string[]): Promise<(onProgress?: (fraction: number) => void, signal?: AbortSignal) => Promise<ReadonlyMap<string, MatteSource>>>;
+    prepare(
+      root: string,
+      assets: readonly string[],
+    ): Promise<{ assets: readonly string[]; make(onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<ReadonlyMap<string, MatteSource>> }>;
   };
   /** H.264 encoder for renders that ask for a quality tier: the first that works on this machine. Absent: x264. */
   encoder?(ffmpeg: string): Promise<EncoderName>;
@@ -260,8 +264,10 @@ export class ExportService {
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
     const sources = await this.#sources(root, timeline);
     const matted = subjectAssets(timeline, sources);
-    const makeMattes = matted.length > 0 && this.#options.mattes ? await this.#options.mattes.prepare(root, matted) : null;
-    const standInMattes = new Map(makeMattes ? matted.map((asset) => [asset, { path: "", ...pictureSize(sources.get(asset)!) }]) : []);
+    const prepared = matted.length > 0 && this.#options.mattes ? await this.#options.mattes.prepare(root, matted) : null;
+    const makeMattes = prepared?.make ?? null;
+    // Only the assets that can get one: the plan's warnings name the others, as the final plan does.
+    const standInMattes = new Map((prepared?.assets ?? []).map((asset) => [asset, { path: "", ...pictureSize(sources.get(asset)!) }]));
     const encoder = params.quality ? ((await this.#options.encoder?.(await this.#options.ffmpeg(root))) ?? "libx264") : null;
     const shared = {
       timeline,
@@ -499,9 +505,9 @@ export class ExportService {
     const generated =
       generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, undefined, renderSize) : new Map();
     const sources = await this.#sources(root, timeline);
-    const matted = subjectAssets(timeline, sources);
-    // Not in a job: the mattes are made here, as a render job would.
-    const mattes = matted.length > 0 && this.#options.mattes ? await (await this.#options.mattes.prepare(root, matted))() : new Map<string, MatteSource>();
+    const matted = subjectAssets(timeline, sources, params.at);
+    // Not in a job: the mattes of the subjects drawn at `at` are made here, as a render job would.
+    const mattes = matted.length > 0 && this.#options.mattes ? await (await this.#options.mattes.prepare(root, matted)).make() : new Map<string, MatteSource>();
     const plan = compileFrame({
       timeline,
       fps,
@@ -659,15 +665,23 @@ export function frameFormatOf(path: string): FrameFormat {
   return ext === ".jpg" || ext === ".jpeg" ? "jpg" : ext === ".webp" ? "webp" : "png";
 }
 
-/** Moving-picture assets the shown subject layers of `timeline` (flattened) play: each needs a matte to export (ADR 0032). */
-function subjectAssets(timeline: Timeline, sources: ReadonlyMap<string, ExportSource>): string[] {
+/**
+ * Moving-picture assets the shown subject layers of `timeline` (flattened) play: each needs a matte to export (ADR
+ * 0032). With `at`, only those a subject is drawn with near that timeline second (a frame capture).
+ */
+function subjectAssets(timeline: Timeline, sources: ReadonlyMap<string, ExportSource>, at?: number): string[] {
   const found = new Set<string>();
   for (const track of timeline.tracks) {
     if (track.kind !== "video" || !showsPicture(track)) continue;
     for (const clip of track.clips) {
-      if (!isSubjectClip(clip) || !("asset" in clip)) continue;
+      const mark = subjectOf(clip);
+      if (!mark || !("asset" in clip)) continue;
       const video = sources.get(clip.asset)?.video;
-      if (video && !video.still) found.add(clip.asset);
+      if (!video || video.still) continue;
+      const speed = clip.speed ?? 1;
+      const time = (source: number) => clip.start + (source - clip.in) / speed;
+      // A tenth of a second each side covers the snap of `at` to its frame: a matte too many costs time, one too few drops the subject.
+      if (at === undefined || mark.windows.some(([a, b]) => time(a) - 0.1 <= at && at < time(b) + 0.1)) found.add(clip.asset);
     }
   }
   return [...found];

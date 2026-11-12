@@ -60,7 +60,8 @@ async function picture(file: string, at = 0): Promise<{ at(x: number, y: number)
   return { at: (x, y) => [bytes[(y * 320 + x) * 3]!, bytes[(y * 320 + x) * 3 + 1]!, bytes[(y * 320 + x) * 3 + 2]!] };
 }
 
-const red = (rgb: [number, number, number]) => rgb[0] > 200 && rgb[1] < 60 && rgb[2] < 60;
+// Strict: a black matte read as limited range (alpha 16/255) would let the plate's black dim the red to about 240.
+const red = (rgb: [number, number, number]) => rgb[0] > 245 && rgb[1] < 20 && rgb[2] < 20;
 const white = (rgb: [number, number, number]) => rgb.every((value) => value > 200);
 
 describe("tracks behind a subject (ADR 0032)", () => {
