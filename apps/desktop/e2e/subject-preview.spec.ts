@@ -118,7 +118,8 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   const dropped = 120 - inside.length;
   const delta = Object.fromEntries(Object.entries(after ?? {}).map(([key, value]) => [key, key === "decoders" ? value : value - (before?.[key] ?? 0)]));
   test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ dropped, ...delta }) });
-  expect(inside.length).toBeGreaterThan(100);
+  // Threshold 3 allows 0.1 % (none of 120); 2 leaves room for a late rAF of the sampler, not the preview.
+  expect(dropped).toBeLessThanOrEqual(2);
   // The plate and the subject's colour and matte decoders (the word is a still).
   expect(after?.["decoders"]).toBe(3);
 });

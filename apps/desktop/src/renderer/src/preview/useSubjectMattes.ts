@@ -1,5 +1,5 @@
 // Ready subject mattes (ADR 0032) for the preview's program; `matte.status` also queues the missing ones.
-import type { TimelineView } from "@frameshell/protocol";
+import type { AssetInfo, TimelineView } from "@frameshell/protocol";
 import { useEffect, useMemo, useState } from "react";
 import { reviewView } from "../review/store.js";
 import { readyMattes } from "./program.js";
@@ -13,14 +13,20 @@ const hasBehind = (view: TimelineView) => view.tracks.some((track) => track.kind
 
 /**
  * Ready subject mattes of the plates `view` and the timelines it nests play, by asset: re-read on every revision of
- * any of them and every {@link MATTE_POLL_MS} while one is pending. Empty (no daemon call) while no track is `behind`
+ * any of them, when an asset's content or proxy changes (a new matte key), and every {@link MATTE_POLL_MS} while one
+ * is pending. Empty (no daemon call) while no track is `behind`
  * one; a subject whose matte is not ready shows a note, the plate as it is.
  */
-export function useSubjectMattes(view: TimelineView | null, nested: ReadonlyMap<string, TimelineView>): ReadonlyMap<string, string> {
+export function useSubjectMattes(
+  view: TimelineView | null,
+  nested: ReadonlyMap<string, TimelineView>,
+  assets: ReadonlyMap<string, AssetInfo> | null,
+): ReadonlyMap<string, string> {
   const [mattes, setMattes] = useState<{ key: string; map: ReadonlyMap<string, string> }>({ key: "", map: EMPTY });
   const timeline = view?.timeline ?? null;
   const revision = view?.revision ?? null;
   const nestedRevisions = useMemo(() => [...nested.values()].map((v) => `${v.timeline}@${v.revision}`).join(","), [nested]);
+  const contents = useMemo(() => [...(assets?.values() ?? [])].map((a) => `${a.path}:${a.hash}:${a.proxy}`).join(","), [assets]);
   const affected = useMemo(() => (view ? hasBehind(view) || [...nested.values()].some(hasBehind) : false), [view, nested]);
 
   useEffect(() => {
@@ -50,7 +56,7 @@ export function useSubjectMattes(view: TimelineView | null, nested: ReadonlyMap<
       disposed = true;
       clearTimeout(timer);
     };
-  }, [timeline, revision, nestedRevisions, affected]);
+  }, [timeline, revision, nestedRevisions, affected, contents]);
 
   return mattes.map;
 }

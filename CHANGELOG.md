@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jobs (shared with `matte.prepare`, never made twice); until a matte is ready the plate plays as it is, the word in
   front, with a note over the picture. A test checks that preview and export draw a subject on the same frames. On an
   Apple M3, 6 s of a 540p take with a word behind it played with 0 dropped and 0 starved frames and 3 decoders (plate,
-  subject picture, matte). Plates with their own alpha (VP9 proxies) get no subject in the preview yet.
+  subject picture, matte). Plates with their own alpha (VP9 proxies) get no subject in the preview yet, only a note
+  that export draws it.
 
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames

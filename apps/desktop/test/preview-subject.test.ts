@@ -148,6 +148,13 @@ describe("subject layers in the preview (ADR 0032)", () => {
     expect(placeholdersAt(program(plain, new Map()), 60).notes).toEqual([]);
   });
 
+  it("notes a subject of a plate with its own alpha instead of drawing it", () => {
+    const alpha = new Map(ASSETS).set(TALK, { ...video(TALK), proxy: ".frameshell/proxies/talk.webm" });
+    const shown = compileProgram(viewOf(stack()), alpha, { mattes: MATTES });
+    expect(subjectsAt(shown, 60)).toEqual([]);
+    expect(placeholdersAt(shown, 60).notes).toEqual([expect.objectContaining({ span: expect.objectContaining({ reason: "matteAlpha", clip: "c_a" }) })]);
+  });
+
   it("takes only ready mattes from matte.status", () => {
     const base = { matte: null, progress: 0, job: null, error: null };
     expect(

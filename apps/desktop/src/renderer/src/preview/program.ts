@@ -48,7 +48,9 @@ export type PlaceholderReason =
   /** Shot of a program track inside a nested clip with a transform: shots fill the frame, so they would show in the wrong place. */
   | "multicam"
   /** Subject of a plate (ADR 0032) whose matte is not made yet: the tracks behind the plate show in front of the person meanwhile. */
-  | "matte";
+  | "matte"
+  /** Subject of a plate whose proxy has its own alpha (VP9 WebM): export draws it, the preview does not yet. */
+  | "matteAlpha";
 
 /** One stretch of a video layer, program frames `[start, end)`. */
 export type VideoSpan =
@@ -1005,7 +1007,7 @@ function pictureOf(
 /**
  * Picture of a subject clip (ADR 0032): its plate clip's proxy drawn through the asset's matte; a `matte` note while the
  * matte is not ready. Null where export draws no subject either: no proxy (the plate shows its own placeholder), a still,
- * audio only. A proxy with its own alpha (VP9 WebM) has no subject in the preview yet.
+ * audio only. A proxy with its own alpha (VP9 WebM) has no subject in the preview yet: a `matteAlpha` note.
  */
 function subjectPicture(
   clip: Clip,
@@ -1015,7 +1017,8 @@ function subjectPicture(
   fps: number,
   mattes: ReadonlyMap<string, string> | undefined,
 ): PlacedSpan | PlaceholderSpan | null {
-  if (!("asset" in clip) || !info?.proxy || !info.media?.video || info.media.video.still || info.proxy.endsWith(".webm")) return null;
+  if (!("asset" in clip) || !info?.proxy || !info.media?.video || info.media.video.still) return null;
+  if (info.proxy.endsWith(".webm")) return { kind: "placeholder", clip: clip.id, start, end, reason: "matteAlpha", type: clip.type };
   const matte = mattes?.get(clip.asset);
   if (matte === undefined) return { kind: "placeholder", clip: clip.id, start, end, reason: "matte", type: clip.type };
   const picture = pictureOf(clip, info, start, end, fps, undefined);

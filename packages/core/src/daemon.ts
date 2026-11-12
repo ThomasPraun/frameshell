@@ -2301,9 +2301,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
         const active = () => jobs.list({ project: dir, active: true }).find((job) => job.kind === "matte" && job.asset === asset);
         if (!active()) {
-          matteInJob(dir, asset, ready).catch((error: unknown) => {
-            matteFailures.set(slot, error instanceof Error ? error.message : String(error));
+          // The job's own end, not the promise: a job canceled by the user or a daemon stop is queued again next read.
+          matteInJob(dir, asset, ready).catch(() => {});
+          const queued = active()?.id;
+          const stop = jobs.watch(({ job: change }) => {
+            if (change.id !== queued || (change.state !== "done" && change.state !== "failed" && change.state !== "canceled")) return;
+            stop();
+            if (change.state === "failed") matteFailures.set(slot, change.error ?? "The matte could not be made.");
           });
+          if (queued === undefined) stop();
         }
         const job = active();
         mattes.push({ ...base, state: job?.state === "running" ? "making" : "queued", progress: job?.progress ?? 0, job: job?.id ?? null });

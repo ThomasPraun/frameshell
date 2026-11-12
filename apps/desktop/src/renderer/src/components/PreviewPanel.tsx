@@ -50,6 +50,7 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
   unavailable: t.preview.noPreview,
   multicam: t.preview.multicam,
   matte: t.preview.matte,
+  matteAlpha: t.preview.matteAlpha,
 };
 
 /**

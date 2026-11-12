@@ -26,7 +26,7 @@ export function useProgram(): Program | null {
   const nested = useNestedViews(view);
   const renders = useClipRenders(view, nested);
   const bakes = useAudioBakes(view, nested);
-  const mattes = useSubjectMattes(view, nested);
+  const mattes = useSubjectMattes(view, nested, assets);
   return useMemo(
     () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes }) : null),
     [view, assets, resolution, nested, renders, bakes, mattes],
