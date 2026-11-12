@@ -253,6 +253,7 @@ export {
   BatchFileSchema,
   BatchRowIdSchema,
   BatchRowSchema,
+  PROTOTYPE_KEYS,
   type BatchFile,
   type BatchRow,
   type SlotTarget,

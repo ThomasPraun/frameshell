@@ -23,6 +23,9 @@ describe("batch file", () => {
     [{ slots: { title: "c_card.title" } }, "slots.title: must be `<clipId>.asset` or `<clipId>.props.<path>`"],
     [{ slots: { id: "c_card.asset" }, rows: [{ id: "es" }] }, "slots.id"],
     [{ slots: {} }, "slots: must name at least one slot"],
+    [{ slots: { title: "c_card.props.__proto__.polluted" }, rows: [{ id: "es" }] }, "slots.title: a props path may not use `__proto__`"],
+    [{ slots: { title: "c_card.props.constructor.prototype.x" }, rows: [{ id: "es" }] }, "slots.title: a props path may not use"],
+    [{ slots: { constructor: "c_card.props.title" }, rows: [{ id: "es" }] }, "slots.constructor"],
     [{ rows: [] }, "rows:"],
   ])("refuses %j", (extra, message) => {
     const parsed = parseBatchFile(file(extra));
@@ -44,6 +47,13 @@ describe("withValueAt", () => {
     expect(withValueAt(props, ["inputProps", "items", "0", "name"], "b").inputProps).toMatchObject({ items: [{ name: "b" }] });
     expect(withValueAt({}, ["a", "b"], 1)).toEqual({ a: { b: 1 } });
     expect(props.inputProps.title).toBe("Launch");
+  });
+
+  it("never reaches a prototype: refuses its keys and creates own objects over inherited names", () => {
+    expect(() => withValueAt({}, ["__proto__", "polluted"], "yes")).toThrow(/uses __proto__/);
+    expect(() => withValueAt({}, ["constructor", "prototype", "polluted"], "yes")).toThrow(/uses constructor/);
+    expect(({} as Record<string, unknown>)["polluted"]).toBeUndefined();
+    expect(withValueAt({}, ["toString", "label"], "x")).toEqual({ toString: { label: "x" } });
   });
 
   it("refuses a path through a value that is not an object", () => {

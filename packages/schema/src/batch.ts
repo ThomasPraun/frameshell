@@ -11,11 +11,18 @@ export const BatchRowIdSchema = z
   .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, "must be lowercase letters, digits and `-`, up to 64, e.g. `es` or `product-12`")
   .describe("Row id, used as the output file name: lowercase letters, digits and `-`, up to 64, e.g. `es` or `product-12`.");
 
+/**
+ * Keys a slot name or props path may not use: on a plain object they reach `Object.prototype` (pollution of the
+ * long-lived daemon) or inherited members rather than own data.
+ */
+export const PROTOTYPE_KEYS: ReadonlySet<string> = new Set(["__proto__", "prototype", "constructor"]);
+
 /** Slot name: the key rows set, never `id`. */
 const SlotNameSchema = z
   .string()
   .regex(/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/, "must start with a letter or `_` and hold letters, digits, `_` and `-`, e.g. `title`")
-  .refine((name) => name !== "id", { message: "`id` is the row id, not a slot" });
+  .refine((name) => name !== "id", { message: "`id` is the row id, not a slot" })
+  .refine((name) => !PROTOTYPE_KEYS.has(name), { message: "`__proto__`, `prototype` and `constructor` are not slot names" });
 
 /** What a slot points at, as {@link parseSlotTarget} splits it. */
 export type SlotTarget = { clip: string; kind: "asset" } | { clip: string; kind: "props"; path: string[] };
@@ -32,6 +39,13 @@ export function parseSlotTarget(slot: string): SlotTarget | null {
 const SlotSchema = z
   .string()
   .regex(SLOT_PATTERN, "must be `<clipId>.asset` or `<clipId>.props.<path>`, e.g. `c_8f2a1b.props.title`")
+  .refine(
+    (slot) => {
+      const target = parseSlotTarget(slot);
+      return target?.kind !== "props" || !target.path.some((key) => PROTOTYPE_KEYS.has(key));
+    },
+    { message: "a props path may not use `__proto__`, `prototype` or `constructor`" },
+  )
   .describe("`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props) or `<clipId>.asset` (a media clip's asset).");
 
 /** One row: its `id` and a value per slot it sets; a slot it leaves out keeps the template's value. */

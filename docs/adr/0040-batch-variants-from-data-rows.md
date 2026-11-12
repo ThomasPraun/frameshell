@@ -33,7 +33,10 @@ Outputs are `<out>/<row>.<container>`, with `-<format>` before the extension whe
 ## Limits in v1
 
 - Slots reach only top-level clips of the template: not clips inside nested timelines, multicam angles, `elements` or per-format props.
-- A second `batch.render` into the same `out` while one runs is refused.
+- A second `batch.render` into the same `out` (compared after symlinks resolve) while one runs is refused, and so is a batch whose rows would write one output twice (row `a` in format `web-1x1` and row `a-web` in `1x1`).
+- Props paths and slot names may not use `__proto__`, `prototype` or `constructor`.
+- An asset swap does not rewrite the `phrases` of a subtitle track that follows the clip: they keep the template asset's word ids, so the new asset's words fall back to the style's grouping.
+- No call cancels a whole batch: later rows are not queued yet, so `job.cancel` on a row's job skips that row and the next one starts. A batch cancel belongs with slice 3.
 - Variant clip renders are cache entries no timeline keys, so `gc` removes them once no batch runs; a re-run renders them again.
 
 ## Slices

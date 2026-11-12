@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { type BatchEntry, type BatchManifest, type BatchRenderResult, ErrorCode, type JobInfo, RpcError } from "@frameshell/protocol";
 import { type BatchFile, type Timeline, parseBatchFile } from "@frameshell/schema";
@@ -6,7 +6,7 @@ import type { PlannedRender, RenderRequest } from "../export/service.js";
 import { canonicalPathSync, writeJsonAtomic } from "../fs-util.js";
 import type { JobChange, JobQueue } from "../jobs/queue.js";
 import type { AppliedOperation, OperationRequest, SourceInfo } from "../timeline/engine.js";
-import { rowVariant } from "./variant.js";
+import { rowError, rowVariant } from "./variant.js";
 
 /** Options for {@link BatchService}. */
 export interface BatchServiceOptions {
@@ -51,7 +51,7 @@ interface PlannedRow {
  */
 export class BatchService {
   readonly #options: BatchServiceOptions;
-  /** Running batches by canonical manifest path. */
+  /** Running batches by canonical out folder. */
   readonly #runs = new Map<string, BatchRun>();
 
   constructor(options: BatchServiceOptions) {
@@ -72,6 +72,8 @@ export class BatchService {
       hasTranscript: (asset: string) => this.#options.hasTranscript(root, asset),
     };
     const rows: PlannedRow[] = [];
+    // Format ids may hold `-`, so row `a` in format `web-1x1` and row `a-web` in `1x1` both write `a-web-1x1.mp4`.
+    const outputs = new Map<string, string>();
     for (const row of file.rows) {
       const variant = await rowVariant(loaded.timeline, file, row, context);
       let planned: PlannedRender;
@@ -97,6 +99,17 @@ export class BatchService {
         duration: null,
         warnings: [...render.warnings, ...planned.provenance],
       }));
+      for (const entry of entries) {
+        const other = outputs.get(entry.output);
+        if (other !== undefined) {
+          throw rowError(row.id, null, `writes ${entry.output}, as row ${other} does. Rename one row so their outputs differ.`, {
+            reason: "output clash",
+            output: entry.output,
+            other,
+          });
+        }
+        outputs.set(entry.output, row.id);
+      }
       rows.push({ id: row.id, planned, entries });
     }
     const first = rows[0]!.planned.result;
@@ -104,7 +117,9 @@ export class BatchService {
     if (request.dryRun) return { ...base, manifest: null, dryRun: true, entries: rows.flatMap((row) => row.entries), jobs: [] };
 
     const manifest = join(out, "manifest.json");
-    const key = canonicalPathSync(manifest);
+    // Keyed on the folder once it exists, so two spellings of it (a symlink, macOS `/tmp`) share one key.
+    await mkdir(out, { recursive: true });
+    const key = canonicalPathSync(out);
     if (this.#runs.has(key)) {
       throw new RpcError(
         ErrorCode.InvalidOperation,

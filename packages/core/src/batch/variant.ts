@@ -1,5 +1,5 @@
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import { type AnyClip, type BatchFile, type BatchRow, type MediaClip, type Timeline, parseSlotTarget } from "@frameshell/schema";
+import { type AnyClip, type BatchFile, type BatchRow, type MediaClip, PROTOTYPE_KEYS, type Timeline, parseSlotTarget } from "@frameshell/schema";
 import type { AppliedOperation, OperationRequest, SourceInfo } from "../timeline/engine.js";
 import { FrameGrid } from "../timeline/grid.js";
 
@@ -28,7 +28,7 @@ export function rowError(row: string, slot: string | null, message: string, data
 export async function rowVariant(template: Timeline, file: BatchFile, row: BatchRow, context: VariantContext): Promise<Timeline> {
   let timeline = template;
   for (const [slot, target] of Object.entries(file.slots)) {
-    if (!(slot in row)) continue;
+    if (!Object.hasOwn(row, slot)) continue;
     const value = row[slot];
     const parsed = parseSlotTarget(target)!;
     const found = findClip(timeline, parsed.clip);
@@ -110,22 +110,25 @@ export function assetSwapProblem(
 
 /**
  * `target` with `value` at `path`, deep-copied: missing objects on the way are created, an array is indexed by a
- * whole-number key. Throws when the path runs through a value that is neither (a string, a number).
+ * whole-number key. Throws when the path runs through a value that is neither (a string, a number), or uses a key
+ * of {@link PROTOTYPE_KEYS}. Only own properties are read and written, so no path reaches a prototype.
  */
 export function withValueAt(target: Record<string, unknown>, path: readonly string[], value: unknown): Record<string, unknown> {
+  const reserved = path.find((key) => PROTOTYPE_KEYS.has(key));
+  if (reserved !== undefined) throw new Error(`props.${path.join(".")} uses ${reserved}, which a props path may not.`);
   const copy = structuredClone(target);
   let node: unknown = copy;
   for (const [index, key] of path.entries()) {
     const last = index === path.length - 1;
     const container = node as Record<string, unknown> | unknown[];
-    if (Array.isArray(container)) {
-      if (!/^\d+$/.test(key)) throw new Error(`props.${path.slice(0, index).join(".")} is a list; index it with a number, not ${key}.`);
-      if (last) container[Number(key)] = value;
-      else node = container[Number(key)] ??= {};
-    } else {
-      if (last) container[key] = value;
-      else node = container[key] ??= {};
+    if (Array.isArray(container) && !/^\d+$/.test(key)) {
+      throw new Error(`props.${path.slice(0, index).join(".")} is a list; index it with a number, not ${key}.`);
     }
+    const slot = Array.isArray(container) ? Number(key) : key;
+    if (last || !Object.hasOwn(container, slot) || (container as Record<string | number, unknown>)[slot] == null) {
+      Object.defineProperty(container, slot, { value: last ? value : {}, writable: true, enumerable: true, configurable: true });
+    }
+    if (!last) node = (container as Record<string | number, unknown>)[slot];
     if (!last && (typeof node !== "object" || node === null)) {
       throw new Error(`props.${path.slice(0, index + 1).join(".")} is ${JSON.stringify(node)}, not an object, so props.${path.join(".")} cannot be set.`);
     }

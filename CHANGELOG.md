@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory: nothing is written to `timelines/`, journaled or proposed. Every row × format is checked first, so a bad row
   fails the call with InvalidOperation naming its `row` and `slot` (props the adapter refuses, an unknown clip, a file
   shorter than the clip's out or without the stream its track plays, a voice file without the transcript a subtitle
-  track follows). Then the rows render one at a time as ordinary `render` jobs into `exports/<batch name>/<row>.mp4`
+  track follows, two rows writing the same output; slot names and props paths refuse `__proto__`, `prototype` and
+  `constructor`). Then the rows render one at a time as ordinary `render` jobs into `exports/<batch name>/<row>.mp4`
   (`<row>-<format>.mp4` with formats from `frameshell.json`), and `manifest.json` there keeps each row × format's status,
   job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
   generates voiceover. Re-running failed rows (`--rows`, `--failed`, `--force`) comes next.
