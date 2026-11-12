@@ -139,6 +139,17 @@ describe("review safe sheet", () => {
   );
 
   it(
+    "the metrics of a timeline count the cues of its subtitle tracks",
+    async () => {
+      const metrics = (await conn.request("review", { cwd: project, projectFormat: "9x16", sheets: ["metrics"] })).metrics!;
+      expect(metrics.subtitles).toMatchObject({ cues: expect.any(Number), shortCues: [] });
+      expect(metrics.subtitles!.cues).toBeGreaterThan(0);
+      expect(metrics.loudness).toBeNull();
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "a file has the zones but no flags, and a platform of the other orientation is scaled with a warning",
     async () => {
       const file = await conn.request("review", { cwd: project, file: footage, platform: "instagram-reels", sheets: ["safe"] });

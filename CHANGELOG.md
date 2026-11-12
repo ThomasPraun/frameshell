@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `metrics.json` of `review`, third slice of #457 (epic #451; `review` writes it without `--sheets` or with `--sheets metrics`,
+  MCP `review` `sheets: ["metrics"]`, result `metrics`, protocol 103): numbers a sheet cannot tell, measured on the grey frames
+  `review` already samples for the motion strips (a file up to 15 a second, a timeline at most 90) and, for a `--file`, on its
+  decoded sound. Picture: the longest still stretch (change under 0.35 grey levels), the largest gap between visual events
+  (peaks above the larger of 1 level and 2.5 times the median change, the ends of the range counted), near-blank pictures (luma
+  standard deviation under 4) and whether frame 0, the thumbnail, is empty. Subtitle cues of a timeline on screen for less than
+  their words take to read (0.4 s for one or two words, else 0.75 x (0.5 + 0.3 per word)). Loudness of a file by `ebur128`
+  (integrated LUFS, range, true peak) and in the phone band (200 Hz to 6 kHz), through the same meter as `analyze`; a timeline
+  has none (render a draft and review the file). `craft` lists warnings, never failures, with their thresholds from the
+  launch-film checklist of the ticket: still over 3 s, empty frame 0, a blank picture, a short cue, a true peak above -1 dBTP,
+  a phone band 6 LU under the mix and over 15 s with no sound. The critique loop of the skill reads them in place of a hand-made
+  `ebur128` command. Not yet: sync of sounds to picture events, captions over graphics, the loop seam jump, the delivery check
+  of an export against the plan, assertions and per-clip waivers.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
