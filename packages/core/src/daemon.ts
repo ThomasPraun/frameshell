@@ -464,8 +464,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         profile: (asset) => energy.profile(dir, asset),
       }),
     // `root` is canonical, the hub's key; each connection gets `project` spelled as it subscribed.
-    onChanged: ({ root, timeline, revision, author, changes }) => {
-      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes });
+    onChanged: ({ root, timeline, revision, author, changes, warnings }) => {
+      events.publish("timeline.changed", root, { project: root, timeline, revision, author, changes, ...(warnings ? { warnings } : {}) });
       // A new or changed generated clip renders in the background (SPEC §6.5).
       const opened = openedRoots.get(root);
       if (opened) void clips.refresh(opened).catch(() => {});

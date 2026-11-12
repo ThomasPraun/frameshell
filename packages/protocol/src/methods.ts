@@ -3577,6 +3577,10 @@ export const notifications = {
         .string()
         .describe("`ui`, `cli:<session>`, `cli`, `agent:<label>:<session>`, `file` (direct edit of the file) or `plugin:<name>`."),
       changes: OperationResultSchema.shape.changes,
+      warnings: z
+        .array(z.string())
+        .optional()
+        .describe("What the change did beyond what was asked, e.g. a `behind` cleared because a direct edit removed or moved its plate. Absent: none."),
     }),
   },
   "timeline.rejected": {

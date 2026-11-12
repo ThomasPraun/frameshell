@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`alphamerge`, on the same frames as the plate, with its transitions), so a big word or a logo sits between the
   background and the person. The person is drawn again only while the track behind shows a clip, and not while a
   shown track between the plate and it (a cutaway) does, with a warning. A `render` job makes missing mattes in a new
-  `matte` step; `frame` makes those of the frame it captures first. Removing or moving the plate track clears the flag in the same operation, with a warning. Track views
+  `matte` step; `frame` makes those of the frame it captures first. Removing or moving the plate track, also by editing the timeline file, clears the flag in the same operation, with
+  a warning (`timeline.changed` gains `warnings`). Track views
   (`timeline show`, `track list`) show `behind`. Not in the preview yet, nor in image projects; nested, generated and
   multicam plates are not lifted.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
