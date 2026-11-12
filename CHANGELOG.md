@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retried request with the same idempotency key never charges twice. No voice ships yet: a test-only stand-in
   (`FRAMESHELL_SPEECH_STAND_IN=1`) says words as tones. New error codes `SpeechProviderNotFound`, `SpeechFailed`,
   `ConfirmationRequired`; `plugin list` shows speech providers.
+- Voiceover, slice 2 of #470 (ADR 0034): the machine-level `command` speech provider. Set `speech.command` in the global
+  `config.json` (`run`: the TTS program and its arguments with `{voice}`, `{language}`, `{out}`; optional `voices`,
+  `defaultVoice`, `version`, `timeoutSeconds`) and `frameshell voiceover generate --provider command` says each line
+  with it: the text goes to stdin, the WAV comes from `{out}` or stdout. It is free, works in untrusted projects, and
+  is read from the global config only: a `speech` key in `frameshell.json` is refused. A voice or language starting
+  with `-` is never passed to the program. The global config now has one reader shared with binary overrides.
+- Speech providers: a provider without `estimate()` counts as paid at an unknown cost (`ConfirmationRequired` with
+  `cost: null`) unless it declares `free: true` on the contract. The stand-in and `command` declare it.
 - Video subject matte, slice 1 of #461 (ADR 0032): `matte.prepare` (protocol 84), CLI `frameshell matte <asset>`
   and MCP `matte_prepare` compute which pixels of each frame of a video are the person in front, locally on CPU:
   MediaPipe's selfie segmenter (Apache-2.0, 0.46 MB, downloaded on first use; pinned in the binaries manifest) on

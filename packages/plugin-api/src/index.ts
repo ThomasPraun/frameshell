@@ -388,9 +388,15 @@ export interface SpeechProvider {
   /** Voices this provider speaks with, for pickers and to check a requested voice before anything is generated. */
   voices(): readonly SpeechVoice[] | Promise<readonly SpeechVoice[]>;
   /**
+   * Set to `true` by a provider that never charges (a local engine) and has no {@link estimate}. Without
+   * `estimate` and without `free: true` the cost is unknown, which counts as paid: the host refuses to generate
+   * until the person confirms (CLI `--yes`, app dialog). Ignored when `estimate` exists.
+   */
+  readonly free?: boolean;
+  /**
    * Optional. What saying `text` would cost. A total above 0 makes the provider paid: the host refuses to
-   * generate until the person confirms the cost (CLI `--yes`, app dialog), also when an agent asks.
-   * Absent: free.
+   * generate until the person confirms the cost (CLI `--yes`, app dialog), also when an agent asks. A provider
+   * with neither `estimate` nor `free: true` is paid at an unknown cost.
    */
   estimate?(text: string, voice: string, options: SpeechOptions): SpeechEstimate | Promise<SpeechEstimate>;
   /**
