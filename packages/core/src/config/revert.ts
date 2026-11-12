@@ -72,6 +72,20 @@ export function planConfigRevert(
   return restored;
 }
 
+/**
+ * Whether a config `revert` of exactly `target` in `entries` still stands: no later `revert` of that revert (by its
+ * op id, or by its tx unless that is `target` itself, as for `tx.abort`) stands in turn. Reverting a revert redoes.
+ */
+export function configReverted(entries: readonly ConfigJournalEntry[], target: string): boolean {
+  return entries.some(
+    (entry) =>
+      entry.op === "revert" &&
+      entry.args.target === target &&
+      !configReverted(entries, entry.id) &&
+      (entry.tx === target || !configReverted(entries, entry.tx)),
+  );
+}
+
 /** Where `tail` fails to account for every change up to `current`, as a phrase; null when it does. */
 function configGap(current: ConfigState, tail: readonly ConfigJournalEntry[]): string | null {
   for (let i = 1; i < tail.length; i++) {

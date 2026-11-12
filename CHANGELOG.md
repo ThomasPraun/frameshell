@@ -201,6 +201,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operations now (`doc`, `patch`, `tx`, hash chain); older lines are read as they are. While review mode is on, an
   agent still cannot change or revert formats. Wire: `format.add`/`format.remove` results carry `tx`, `history`
   operations `doc`, `revert` and `tx.abort` results `config`. The History panel marks such transactions `project`.
+  A transaction that changed several timelines reverts one `--timeline` at a time, its format changes with the
+  first; naming a timeline it never changed fails with HistoryNotFound naming the ones it did (`data.timelines`).
 - Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
   `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
   `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.

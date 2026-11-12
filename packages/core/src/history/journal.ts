@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { type JournalEntry, JournalEntrySchema } from "@frameshell/protocol";
 import { type Timeline, parseTimeline } from "@frameshell/schema";
@@ -27,6 +27,18 @@ export async function readJournal(root: string, id: string): Promise<JournalEntr
     if (parsed.success) entries.push(parsed.data);
   }
   return entries;
+}
+
+/**
+ * Timelines of project `root` whose journal has an entry with op id or tx id `target`, sorted. Only names that
+ * are timeline ids count, so the config journal (`project.config.jsonl`) is never one.
+ */
+export async function timelinesHolding(root: string, target: string): Promise<string[]> {
+  const names = await readdir(join(root, ".frameshell", "history")).catch(() => [] as string[]);
+  const ids = names.filter((name) => /^[A-Za-z0-9][A-Za-z0-9_-]*\.jsonl$/.test(name)).map((name) => name.slice(0, -".jsonl".length));
+  const holding: string[] = [];
+  for (const id of ids.sort()) if ((await readJournal(root, id)).some((entry) => entry.id === target || entry.tx === target)) holding.push(id);
+  return holding;
 }
 
 /** Append one entry. Callers serialize writes per timeline. */

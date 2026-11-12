@@ -139,7 +139,8 @@ export function historyView(
     if (found === -1) {
       throw new RpcError(
         ErrorCode.HistoryNotFound,
-        `No transaction ${since} in the history of timeline ${timeline}. It may have changed another timeline: pass --timeline.`,
+        `No transaction ${since} in the history of timeline ${timeline} or in the project config. It may have changed ` +
+          "another timeline: pass --timeline.",
         { target: since, timeline },
       );
     }
@@ -170,6 +171,16 @@ export function historyNotFound(target: string, timeline: string): RpcError {
     `No ${target.startsWith("tx_") ? "transaction" : "operation"} ${target} in the history of timeline ${timeline}. ` +
       "List ids with `frameshell history` (pass --timeline for another timeline).",
     { target, timeline },
+  );
+}
+
+/** HistoryNotFound for a target missing from `timeline`'s journal but in the journals of timelines `holding`. */
+export function historyElsewhere(target: string, timeline: string, holding: readonly string[]): RpcError {
+  return new RpcError(
+    ErrorCode.HistoryNotFound,
+    `No ${target.startsWith("tx_") ? "transaction" : "operation"} ${target} in the history of timeline ${timeline}: it ` +
+      `changed timeline ${holding.join(", ")}. Pass --timeline ${holding[0]} to act on it there.`,
+    { target, timeline, timelines: [...holding] },
   );
 }
 

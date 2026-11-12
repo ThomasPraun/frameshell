@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type AppDirs, type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
+import { createTimeline } from "@frameshell/schema";
 import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
@@ -162,6 +163,54 @@ describe("format changes in history", () => {
     expect(await formatIds()).toEqual(["16x9"]);
     expect(await tracks()).toBe(0);
     expect(journal().at(-1)).toMatchObject({ op: "revert", tx: aborted.tx, txLabel: "try square" });
+  });
+
+  it("reverts a transaction spanning a format and two timelines one timeline at a time", async () => {
+    const { dir, ui, connect, formatIds } = await setup();
+    await ui.request("file.write", { path: join(dir, "timelines", "intro.json"), content: JSON.stringify(createTimeline("intro")) });
+    const session = await connect("cli/test", "agent");
+    const tracks = async (timeline: string) => (await session.request("track.list", { cwd: dir, timeline })).tracks.length;
+    const both = await session.request("tx.begin", { label: "vertical everywhere" });
+    await session.request("format.add", { cwd: dir, id: "9x16" });
+    await session.request("track.add", { cwd: dir, timeline: "main", kind: "video", name: "V1" });
+    await session.request("track.add", { cwd: dir, timeline: "intro", kind: "video", name: "V1" });
+    await session.request("tx.commit", {});
+
+    const first = await session.request("revert", { cwd: dir, timeline: "main", target: both.tx });
+    expect(first.config).toMatchObject([{ op: "revert", touched: ["format:9x16"] }]);
+    expect([await formatIds(), await tracks("main"), await tracks("intro")]).toEqual([["16x9"], 0, 1]);
+    const second = await session.request("revert", { cwd: dir, timeline: "intro", target: both.tx });
+    expect(second).toMatchObject({ timeline: "intro", operation: { op: "revert" }, config: [] });
+    expect([await formatIds(), await tracks("main"), await tracks("intro")]).toEqual([["16x9"], 0, 0]);
+
+    // Clips only on intro: naming main keeps the --timeline hint instead of reverting the config part alone.
+    const elsewhere = await session.request("tx.begin", { label: "square intro" });
+    await session.request("format.add", { cwd: dir, id: "1x1" });
+    await session.request("track.add", { cwd: dir, timeline: "intro", kind: "video", name: "V2" });
+    await session.request("tx.commit", {});
+    for (const call of [
+      session.request("revert", { cwd: dir, timeline: "main", target: elsewhere.tx }),
+      session.request("history.diff", { cwd: dir, timeline: "main", target: elsewhere.tx }),
+    ]) {
+      await expect(call).rejects.toMatchObject({
+        code: ErrorCode.HistoryNotFound,
+        message: expect.stringContaining("--timeline intro"),
+        data: { target: elsewhere.tx, timeline: "main", timelines: ["intro"] },
+      });
+    }
+    expect(await formatIds()).toEqual(["16x9", "1x1"]);
+    const there = await session.request("revert", { cwd: dir, timeline: "intro", target: elsewhere.tx });
+    expect(there.config).toMatchObject([{ op: "revert", touched: ["format:1x1"] }]);
+    expect([await formatIds(), await tracks("intro")]).toEqual([["16x9"], 0]);
+  });
+
+  it("aborts a transaction whose only format change failed while review mode is on", async () => {
+    const { dir, ui, connect } = await setup();
+    const session = await connect("cli/test", "agent");
+    const begun = await session.request("tx.begin", { label: "nothing written" });
+    await expect(session.request("format.add", { cwd: dir, id: "16x9" })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+    await ui.request("review.set", { cwd: dir, enabled: true });
+    expect(await session.request("tx.abort", {})).toMatchObject({ tx: begun.tx, reverted: [], config: [] });
   });
 
   it("leaves format changes and their reverts to the person while review mode is on", async () => {

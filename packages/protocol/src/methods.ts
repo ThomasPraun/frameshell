@@ -2955,7 +2955,7 @@ export const methods = {
       "and end right before and right after the target. Later operations do not change the answer. Use it to see what " +
       "a transaction from `history` changed before you `revert` it. A target only in the project-config journal " +
       "(`format.add`/`format.remove`, ADR 0036) changed no clips: `clips` is empty. Fails with HistoryNotFound when the " +
-      "id is in neither journal, HistoryUnavailable when the file changed outside the journal after the target.",
+      "id is in neither journal, or changed only other timelines (`data.timelines` names them), HistoryUnavailable when the file changed outside the journal after the target.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -2976,8 +2976,10 @@ export const methods = {
       "conflicts like a clip (`ids` holds keys such as `format:9x16`), and a hand edit of `formats` in `frameshell.json` " +
       "refuses like a hand edit of the timeline. When only config was reverted, `operation` is the config `revert` with " +
       "an empty inverse and `revision` is unchanged; `config` lists the config `revert` operations. While review mode " +
-      "is on, only the person may revert config (ProposalState `forbidden` for others). Fails with HistoryNotFound when " +
-      "the id is in neither the timeline's journal nor the config journal.",
+      "is on, only the person may revert config (ProposalState `forbidden` for others). A transaction that changed " +
+      "several timelines reverts one timeline per call: its config goes with the first, later calls skip it. Fails " +
+      "with HistoryNotFound when the id is in neither the timeline's journal nor the config journal, or changed only " +
+      "other timelines (`data.timelines` names them: pass one as `timeline`).",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

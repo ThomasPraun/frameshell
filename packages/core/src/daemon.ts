@@ -63,7 +63,8 @@ import { probeMedia } from "./media/ffmpeg.js";
 import { type TurnsSource, groupTurns } from "./multicam/group-turns.js";
 import { MotionStore, groupMotion } from "./multicam/motion.js";
 import { humanShots, loadDirectorRules, lowShots, unknownWeights } from "./multicam/direct.js";
-import { readJournal } from "./history/journal.js";
+import { readJournal, timelinesHolding } from "./history/journal.js";
+import { historyElsewhere } from "./history/revert.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
@@ -95,7 +96,8 @@ import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
 import { FormatService, builtinFormatInfos, formatInfos, projectConfigDocument } from "./formats.js";
-import { ConfigJournal, configOperation } from "./config/journal.js";
+import { ConfigJournal, configOperation, readConfigJournal } from "./config/journal.js";
+import { configReverted } from "./config/revert.js";
 import { ProjectRegistry, readEnclosingProject } from "./projects.js";
 import { syncedFolder } from "./synced-folder.js";
 import { FileTransactionStore, TransactionTracker, isTouchedTimeline } from "./history/transactions.js";
@@ -865,11 +867,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   /**
    * `revert` of a target the config journal holds (ADR 0036): its config operations, and its operations on
    * `timeline` when that journal holds some too, in one standalone transaction. Config is planned first and
-   * written last, so a timeline conflict leaves both untouched.
+   * written last, so a timeline conflict leaves both untouched; a config write that still throws (invalid file)
+   * leaves the timeline reverted. A target that changed other timelines is reverted one timeline at a time: its
+   * config goes with the first, later ones skip it, and naming a timeline it never changed is HistoryNotFound.
    */
   const revertConfig = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller): Promise<MethodResult<"revert">> => {
-    await formatsOutsideReview(dir, caller);
     const inTimeline = (await readJournal(dir, timeline)).some((entry) => entry.id === target || entry.tx === target);
+    if (!inTimeline) {
+      const holding = await timelinesHolding(dir, target);
+      if (holding.length > 0) throw historyElsewhere(target, timeline, holding);
+    } else if (configReverted(await readConfigJournal(dir), target)) {
+      return { ...(await revert(dir, cwd, timeline, target, caller)), config: [] };
+    }
+    await formatsOutsideReview(dir, caller);
     const key = authorOf(caller);
     const author = journalAuthorOf(caller);
     const tx = transactions.next(key, { standalone: true });
@@ -1951,7 +1961,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "tx.abort": async (_params, caller) => {
       const author = authorOf(caller);
       const { tx, touched } = transactions.peek(author);
-      const configRoots = touched.filter((where) => !isTouchedTimeline(where)).map((where) => where.root);
+      const configRoots: string[] = [];
+      // A config root whose change failed journaled nothing: nothing to undo there.
+      for (const where of touched) if (!isTouchedTimeline(where) && (await configJournal.has(where.root, tx.id))) configRoots.push(where.root);
       // Config undo cannot wait as a proposal yet (ADR 0036 slice 2): refused before anything is dropped.
       for (const dir of configRoots) await formatsOutsideReview(dir, caller);
       // A proposal still building holds what the file never got (ADR 0019 §3).
@@ -1992,9 +2004,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       try {
         return await timelines.diff(dir, timeline, target);
       } catch (error) {
+        if (!(error instanceof RpcError && error.code === ErrorCode.HistoryNotFound && (await configJournal.has(dir, target)))) throw error;
+        const holding = await timelinesHolding(dir, target);
+        if (holding.length > 0) throw historyElsewhere(target, timeline, holding);
         // A config-only target (ADR 0036) changed no clips.
-        if (error instanceof RpcError && error.code === ErrorCode.HistoryNotFound && (await configJournal.has(dir, target))) return { timeline, target, clips: [] };
-        throw error;
+        return { timeline, target, clips: [] };
       }
     },
     revert: async ({ cwd, timeline, target }, caller) => {
