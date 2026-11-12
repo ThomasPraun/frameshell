@@ -20,6 +20,7 @@ import {
   type FormatSource,
   type MulticamGroup,
   type ResolvedFormat,
+  type ResolvedSubtitleTrack,
   type Size,
   type Timeline,
   type Transcript,
@@ -388,14 +389,13 @@ export class ExportService {
   }
 
   /**
-   * Timeline seconds where the subtitle cues of `loaded` start, over every subtitle track (what `review` marks on
-   * its contact sheet); `loaded`: see {@link ExportService.frame}.
+   * Every subtitle track of `loaded` with its style and cues (frames at the track's `fps`), as export burns them
+   * (what `review` marks and measures on its sheets); `loaded`: see {@link ExportService.frame}.
    */
-  async subtitleCueStarts(root: string, loaded: { timeline: Timeline; fps: number }): Promise<number[]> {
+  async resolvedSubtitles(root: string, loaded: { timeline: Timeline; fps: number }): Promise<ResolvedSubtitleTrack[]> {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
-    const tracks = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
-    return tracks.flatMap((track) => track.cues.map((cue) => cue.start / fps));
+    return subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
   }
 
   /**

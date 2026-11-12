@@ -605,7 +605,7 @@ frameshell revert <tx|op>
 
 frameshell render [--preset p] [--formats id,id] [--out file]   # export; one file per format with --formats (ADR 0027)
 frameshell frame --at <s> --out <png> [--format <id>]   # composited frame, same path as MCP frame_capture; --format lays it out in a format
-frameshell review [--file <video>] [--range a,b] [--sheets contact,phone,motion,seam] [--every s]   # contact sheet, phone sheet, fast-motion strips, loop seam into .frameshell/review/<n>/ (#457)
+frameshell review [--file <video>] [--range a,b] [--sheets contact,safe,phone,motion,seam] [--platform p] [--every s]   # contact sheet, safe-zone sheet (platform UI zones from `@frameshell/schema` `safe-zones.ts` shaded over up to 36 frames, captions crossing a zone marked `!subtitle` and listed in `review.json` `safeZones`), phone sheet, fast-motion strips, loop seam into .frameshell/review/<n>/ (#457)
 frameshell analyze <video> [--name n] [--threshold 0.3]   # measure a reference video into .frameshell/analysis/<name>/: shot table, contact sheet at 2 fps, palette, loudness, tempo (#471)
 frameshell format list | add <id> [--size WxH] [--index n] | remove <id>   # delivery formats of the project (ADR 0027)
 frameshell inspect --at <s> --point x,y [--segment]   # clip stack and element under a point; --segment adds the photo's masks (ADR 0011, 0022)

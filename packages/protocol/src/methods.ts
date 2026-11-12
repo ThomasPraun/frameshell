@@ -69,7 +69,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 96;
+export const PROTOCOL_VERSION = 97;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1176,7 +1176,10 @@ export const methods = {
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
       "frames each: pops, overlaps and blank frames only show there) and `seam` (the last 6 and the first 6 frames, to " +
-      "judge a loop). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
+      "judge a loop). `safe` (with `platform`, or the platforms the style guide names on a vertical film): up to 36 frames chosen like the " +
+      "contact sheet with the platform's UI zones (`style.show` safeZones, one source in `@frameshell/schema`) shaded red; a frame where the captions of a " +
+      "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
+      "can measure; a file has none). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
       "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). The MCP tool returns the sheets as images. " +
@@ -1196,6 +1199,11 @@ export const methods = {
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
       sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default all four."),
+      platform: SafeZoneSchema.shape.platform
+        .optional()
+        .describe(
+          "Platform whose UI zones the `safe` sheet draws (instagram-reels, tiktok, youtube-shorts, youtube); adds `safe` to the default sheets. Default: the platforms of the style guide, when `sheets` names `safe` or the film is vertical.",
+        ),
       every: z
         .number()
         .positive()

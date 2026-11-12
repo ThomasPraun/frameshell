@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Safe-zone sheet of `review`, second slice of #457 (epic #451; `review --platform instagram|tiktok|shorts|youtube`,
+  `--sheets safe`, MCP `review` `platform`, protocol 97): up to 36 frames chosen like the contact sheet with the
+  platform's UI zones shaded red and outlined, drawn from the one table in `@frameshell/schema` (`safe-zones.ts`),
+  scaled to the film's size. A frame where the captions of a subtitle track reach into a zone is marked
+  `!subtitle` (box measured from the bundled face, the track's style and each cue's words), and `review.json`
+  `safeZones` lists, per platform, the zones in the film's pixels and the captions that cross them by track and
+  zone (how many cues, when, how many px deep). `--platform` adds the sheet to the default ones; a vertical film
+  whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
+  are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them. Titles, graphics
+  and faces are not measured yet.
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset

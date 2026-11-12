@@ -1,16 +1,18 @@
+import { SafeZoneSchema } from "@frameshell/schema";
 import { z } from "zod";
 import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
 // `review` (#457, epic #451): contact sheets and strips an agent looks at before it shows the person anything.
 
 /** The sheets `review` can write, in the order it writes them. */
-export const REVIEW_SHEETS = ["contact", "phone", "motion", "seam"] as const;
+export const REVIEW_SHEETS = ["contact", "safe", "phone", "motion", "seam"] as const;
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
 export const ReviewSheetKindSchema = z
   .enum(REVIEW_SHEETS)
   .describe(
     "`contact`: frames at critical times (clip starts and ends, cuts, markers, subtitle cues, the deepest zoom) and every `every` seconds. " +
+      "`safe`: the same kind of frames (up to 36) with the platform's UI zones shaded red and a `!subtitle` mark on the frames where a caption crosses one; needs a `platform` (or the style guide's). " +
       "`phone`: one frame per second, 360 px wide. `motion`: the two fastest moments as 12 consecutive frames each. " +
       "`seam`: the last 6 and the first 6 frames, to judge a loop.",
   );
@@ -32,6 +34,10 @@ export const ReviewTileSchema = z.object({
   label: z.string().describe("Text drawn on the tile: the time in seconds and, for all but the grid, the tag."),
   row: z.int().describe("0-based."),
   column: z.int().describe("0-based."),
+  flags: z
+    .array(z.string())
+    .optional()
+    .describe("`safe` sheet: what crosses a platform zone in this frame (`subtitle`), also marked on the tile as `!subtitle`. Absent: nothing review can measure does."),
 });
 
 /** One image `review` wrote. */
@@ -59,6 +65,41 @@ export const ReviewPeakSchema = z.object({
 /** A fast moment of the picture. */
 export type ReviewPeak = z.output<typeof ReviewPeakSchema>;
 
+/** Edge of the frame a platform's UI covers. */
+export const ZONE_EDGES = ["top", "right", "bottom", "left"] as const;
+
+/** One of {@link ZONE_EDGES}. */
+export type ZoneEdge = (typeof ZONE_EDGES)[number];
+
+/** Text or a subject that crosses a platform zone, as far as review can measure it. */
+export const ReviewSafeFlagSchema = z.object({
+  subject: z.literal("subtitle").describe("What crosses: the captions of a subtitle track (box measured from the bundled face, the track's style and each cue's words)."),
+  track: z.string().describe("Subtitle track id."),
+  zone: z.enum(ZONE_EDGES).describe("Which zone the captions reach into."),
+  cues: z.int().describe("How many cues reach into it."),
+  first: z.number().describe("Seconds the first of them starts."),
+  last: z.number().describe("Seconds the last of them starts."),
+  reach: z.int().describe("Most pixels (of the film's frame) any of them reaches into the zone."),
+});
+
+/** See {@link ReviewSafeFlagSchema}. */
+export type ReviewSafeFlag = z.output<typeof ReviewSafeFlagSchema>;
+
+/** The safe zones of one platform as drawn on the `safe` sheet, with what crosses them. */
+export const ReviewSafeZoneSchema = z.object({
+  platform: SafeZoneSchema.shape.platform,
+  measured: z.boolean().describe("The platform's numbers were measured on its app; false: taken from editing guides."),
+  source: z.string().describe("Where the numbers come from."),
+  insets: z
+    .object({ top: z.int(), right: z.int(), bottom: z.int(), left: z.int() })
+    .describe("Pixels of the film's frame each edge's zone covers (the platform's reference numbers scaled to the film's size)."),
+  sheets: z.array(z.string()).describe("Absolute paths of the `safe` images of this platform."),
+  flags: z.array(ReviewSafeFlagSchema).describe("Captions that cross a zone, by track and zone; empty when none do. Only the timeline's captions are known: a file has no flags."),
+});
+
+/** See {@link ReviewSafeZoneSchema}. */
+export type ReviewSafeZone = z.output<typeof ReviewSafeZoneSchema>;
+
 /** What `review` wrote. */
 export interface ReviewResultShape {
   /** Which timeline the result shows. */
@@ -85,6 +126,8 @@ export interface ReviewResultShape {
   sheets: ReviewSheet[];
   /** The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves. */
   peaks: ReviewPeak[];
+  /** One entry per platform of the `safe` sheet; empty without it. */
+  safeZones: ReviewSafeZone[];
   /** What could not be shown (a seam on a one-frame film, nothing moving…); empty when none. */
   warnings: string[];
 }
@@ -106,5 +149,6 @@ export const ReviewResultSchema: z.ZodType<ReviewResultShape> = z.object({
   height: z.int(),
   sheets: z.array(ReviewSheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
   peaks: z.array(ReviewPeakSchema).describe("The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves."),
+  safeZones: z.array(ReviewSafeZoneSchema).describe("One entry per platform of the `safe` sheet: its zones in the film's pixels and the captions that cross them; empty without the sheet."),
   warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
 });

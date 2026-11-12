@@ -604,6 +604,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const reviews = new ReviewService({
     timelines,
     exports,
+    platforms: async (dir) => (await showStyle(dir)).style?.platforms.value ?? [],
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
   });
@@ -1244,7 +1245,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, loaded)) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, every, projectFormat, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, view }, caller) => {
       const dir = await root(cwd);
       return reviews.run(dir, {
         timeline,
@@ -1252,6 +1253,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         from,
         to,
         sheets,
+        platform,
         every,
         projectFormat,
         view: await viewOf(dir, caller, view),
