@@ -438,3 +438,19 @@ export {
   stagger,
   durationFromDistance,
 } from "./motion.js";
+export {
+  SFX_KINDS,
+  SFX_VARIANTS,
+  SFX_SEED_MAX,
+  SFX_PEAK_DBFS,
+  SFX_JITTER,
+  SFX_PITCH_RANGE,
+  SFX_LENGTH_RANGE,
+  SOUND_SAMPLE_RATE,
+  SOUND_ROLES,
+  SOUND_ROLE_OFFSETS,
+  SOUND_RISER_END_BEFORE_MS,
+  SfxKindSchema,
+  type SfxKind,
+  type SoundRole,
+} from "./sound.js";

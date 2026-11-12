@@ -667,7 +667,7 @@ export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typ
  * (upsert or delete one clip in a track), then `order`; `markers` (upsert or
  * delete one marker) touch nothing else.
  */
-export const TimelinePatchSchema = z.strictObject({
+const PatchShape = z.strictObject({
   markers: z
     .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
     .optional(),
@@ -690,7 +690,13 @@ export const TimelinePatchSchema = z.strictObject({
 });
 
 /** See {@link TimelinePatchSchema}. */
-export type TimelinePatch = z.output<typeof TimelinePatchSchema>;
+export type TimelinePatch = z.output<typeof PatchShape>;
+
+/**
+ * {@link TimelinePatch} as a schema. Typed by name, not by its structure: every operation result carries it as its
+ * inverse, and written out per method it makes the type of the `methods` registry too long to emit (TS7056).
+ */
+export const TimelinePatchSchema: z.ZodType<TimelinePatch> = PatchShape;
 
 /** Transaction id: `tx_` + 8 hex digits. */
 export const TxIdSchema = z
