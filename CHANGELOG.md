@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Loudness cache, candidate tracks and `duck --level`, third slice of #485 (ADR 0037, epic #451; daemon
+  `music.candidates` and `track.duck` `level`, CLI `music candidates` and `duck --level`, MCP `music_candidates`,
+  protocol 103): every asset's EBU R128 loudness (integrated LUFS, range, true peak, ffmpeg `ebur128`) is measured once
+  and cached by content under `.frameshell/loudness/` (swept by `gc`, kind `loudness`). `music candidates <asset> <asset>…
+  [--end t] [--from t] [--loudness LUFS] [--dry-run]` puts 2 to 7 files on their own new audio tracks `Music 1..n`, all
+  muted but the first, with the static gain that brings them to one loudness (`--loudness`, else the quietest file's own,
+  so none is made louder); with `--end` each file's final hit is fitted onto it like `music fit` slides a clip and the
+  candidates are ranked (files covering the picture first, then hit confidence). One transaction. `duck <track> --under
+  <track> --level 12` first sets each clip's static gain so the music's loudness sits 12 dB under the voice's, then dips
+  from that level (one transaction). `track.duck` now keeps what it was asked in `audio.duck` of each clip it ducks, and
+  `music fit` runs the same duck again after it moves such a clip (clips ducked before keep getting the defaults); the
+  result's `duck.parameters` says `stored` or `defaults`. Older Frameshell versions reject a timeline whose clips carry
+  `audio.duck`.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading

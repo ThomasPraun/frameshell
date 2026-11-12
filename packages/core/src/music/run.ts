@@ -1,5 +1,5 @@
 import { ErrorCode, MUSIC_FIT_MIN_CONFIDENCE, type MusicFitResult, RpcError } from "@frameshell/protocol";
-import { type AnyClip, type ClipTrack, type MediaClip, type Timeline, clipLength } from "@frameshell/schema";
+import { type AnyClip, type ClipTrack, type DuckSettings, type MediaClip, type Timeline, clipLength } from "@frameshell/schema";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { resolveTimeRefArg } from "../timeline/time-ref.js";
@@ -30,8 +30,12 @@ export interface MusicFitRequest {
 export interface MusicFitPlan extends Omit<MusicFitResult, "timeline" | "revision" | "dryRun" | "applied" | "tx"> {
   /** Clip operations to apply in order (each names the clip); empty when nothing changes. */
   operations: ({ clip: string } & FitOperation)[];
-  /** Duck to run again in the same transaction: the music track and the tracks to listen to; null when none. */
-  duckAgain: { track: string; under: string[] } | null;
+  /**
+   * Duck to run again in the same transaction: the music track, the tracks to listen to and the parameters of the duck
+   * that wrote the clip's keys (`audio.duck`); `settings` is null when the clip has none stored (the method's defaults
+   * apply). Null when no duck runs.
+   */
+  duckAgain: { track: string; under: string[]; settings: DuckSettings | null } | null;
 }
 
 const BINARY_ERRORS: readonly number[] = [ErrorCode.BinaryUnavailable, ErrorCode.BinaryNotFound, ErrorCode.BinaryInstallFailed, ErrorCode.BinaryChecksumMismatch];
@@ -97,18 +101,22 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
   let duckAgain: MusicFitPlan["duckAgain"] = null;
   const steps = [...plan.steps];
   if (keyed && changes) {
-    const under = voiceTracks(timeline, track.id);
+    const stored = clip.audio?.duck && storedUnder(timeline, track.id, clip.audio.duck).length > 0 ? clip.audio.duck : null;
+    const under = stored ? storedUnder(timeline, track.id, stored) : voiceTracks(timeline, track.id);
+    const parameters = stored ? "stored" : "defaults";
     const skipped = request.skip?.includes("duck") === true;
     if (under.length === 0) {
-      duck = { under, rerun: false };
+      duck = { under, rerun: false, parameters };
       warnings.push(`${clip.id} carries duck keys, which no longer line up with the voice, and there is no other video or audio track to listen to: run \`duck\` again by hand.`);
     } else if (skipped) {
-      duck = { under, rerun: false };
+      duck = { under, rerun: false, parameters };
       warnings.push(`${clip.id} carries duck keys, which no longer line up with the voice (skipped): run \`duck ${track.id} --under ${under.join(" --under ")}\` again.`);
     } else {
-      duck = { under, rerun: true };
-      duckAgain = { track: track.id, under };
-      warnings.push(`${clip.id} carries duck keys: duck ${request.dryRun === true ? "would run" : "ran"} again on ${track.id} over ${under.join(", ")} with its defaults, replacing the old duck keys of every clip of that track.`);
+      duck = { under, rerun: true, parameters };
+      duckAgain = { track: track.id, under, settings: stored };
+      warnings.push(
+        `${clip.id} carries duck keys: duck ${request.dryRun === true ? "would run" : "ran"} again on ${track.id} over ${under.join(", ")} with ${stored ? "the parameters of its last run" : "its defaults (the clip has none stored)"}, replacing the old duck keys of every clip of that track.`,
+      );
     }
     if (under.length > 0) steps.push({ id: "duck", detail: `run duck again on ${track.id} over ${under.join(", ")}`, skippable: true });
   }
@@ -173,6 +181,11 @@ function voiceTracks(timeline: Timeline, music: string): string[] {
   return timeline.tracks
     .filter((track) => (track.kind === "video" || track.kind === "audio") && track.id !== music && track.muted !== true && !ducked(track.clips))
     .map((track) => track.id);
+}
+
+/** The tracks of a stored duck that still exist as video or audio tracks, other than the music's own. */
+function storedUnder(timeline: Timeline, music: string, settings: DuckSettings): string[] {
+  return settings.under.filter((id) => id !== music && timeline.tracks.some((track) => track.id === id && (track.kind === "video" || track.kind === "audio")));
 }
 
 /** Refuse before writing when the clip's new place would overlap another clip of its track (the engine would refuse mid-fit). */

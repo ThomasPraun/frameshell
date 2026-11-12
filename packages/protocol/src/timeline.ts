@@ -4,6 +4,7 @@ import {
   AudioEffectSchema,
   BackdropSchema,
   DirectorRulesSchema,
+  DuckSettingsSchema,
   ElementAdjustSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
@@ -454,6 +455,10 @@ export const operationArgs = {
         "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last. " +
           "The `track.duck` method measures it from the speech tracks and passes it here.",
       ),
+    settings: DuckSettingsSchema.optional().describe(
+      "What the method was asked, kept in `audio.duck` of each clip that gets duck keys so a later run (`music.fit` moving a ducked clip) " +
+        "dips the same way; a clip with no duck keys after the run loses it.",
+    ),
   }),
   "multicam.create": z.strictObject({
     angles: z
@@ -1055,6 +1060,23 @@ export const TrackDuckResultSchema = OperationResultSchema.extend({
   under: z.array(z.string()).describe("Tracks listened to for speech."),
   stretches: z.int().describe("Stretches of speech found, after merging those closer than `gap`."),
   speechSeconds: z.number().describe("Total seconds of those stretches."),
+  level: z
+    .object({
+      under: z.number().describe("dB under the voice that was asked (`level`)."),
+      voice: z.number().describe("Loudness of the voice, LUFS: the integrated loudness of each voice file plus its gain, averaged by the time it plays."),
+      target: z.number().describe("Loudness the music was set to, LUFS (`voice - under`)."),
+      clips: z
+        .array(
+          z.object({
+            clip: z.string(),
+            loudness: z.number().describe("Integrated loudness of the clip's file, LUFS."),
+            gain: z.number().describe("Static gain written to the clip, dB (`target - loudness`, 0.1 dB steps)."),
+          }),
+        )
+        .describe("Clips of the track whose gain was set."),
+    })
+    .nullable()
+    .describe("Set when `level` was asked: how the music's static gain was chosen; null otherwise."),
 });
 
 /** See {@link TrackDuckResultSchema}. */

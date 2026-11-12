@@ -294,6 +294,7 @@ export {
   snapToPause,
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
+export { LOUDNESS_DIR, LoudnessStore, type LoudnessStoreOptions } from "./media/loudness-store.js";
 export {
   ANALYSIS_RATE as BEAT_ANALYSIS_RATE,
   BEAT_DETECTOR,
