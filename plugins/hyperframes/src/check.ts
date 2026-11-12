@@ -5,7 +5,7 @@ import { compositionDir } from "./adapter.js";
 import { seekSafetyFindings } from "./seek-safety.js";
 
 /** Directory of `frameshell hyperframes new` compositions, project-relative. */
-const COMPOSITIONS = "compositions/hyperframes";
+export const COMPOSITIONS = "compositions/hyperframes";
 
 /** Composition name as `hyperframes new` takes it. */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
@@ -68,7 +68,7 @@ function parseArgs(args: readonly string[]): CheckArgs {
 }
 
 /** Project-relative HTML entries of every `hyperframes new` composition: `compositions/hyperframes/<name>/index.html`. */
-async function scaffoldedEntries(projectDir: string): Promise<string[]> {
+export async function scaffoldedEntries(projectDir: string): Promise<string[]> {
   const entries = await readdir(join(projectDir, ...COMPOSITIONS.split("/")), { withFileTypes: true }).catch(() => []);
   const found: string[] = [];
   for (const entry of entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -83,7 +83,7 @@ async function scaffoldedEntries(projectDir: string): Promise<string[]> {
  * directory holding `index.html`, or an HTML file. Paths are read from the
  * project root first, then from where the command ran.
  */
-async function entryOf(argument: string, ctx: CommandContext): Promise<string> {
+export async function entryOf(argument: string, ctx: CommandContext): Promise<string> {
   if (NAME.test(argument)) {
     const scaffolded = `${COMPOSITIONS}/${argument}/index.html`;
     if (await isFile(join(ctx.project.dir, ...scaffolded.split("/")))) return scaffolded;

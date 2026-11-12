@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { AUDIO_EFFECT_LIMITS, type NormalizedAudioEffect } from "./effects.js";
 import { EASE_CURVES, SPRING_PRESETS } from "./motion.js";
 import { PLATFORM_IDS } from "./safe-zones.js";
 
@@ -303,7 +304,7 @@ export const STYLE_DEFAULTS: Readonly<Omit<StyleValues, "motion">> = {
     sfxUnderVoice: 20,
     duck: { depth: 7, attack: 0.04, release: 0.45 },
     voice: {
-      highpass: 80,
+      highpass: 85,
       denoise: { floor: -30, reduction: 8 },
       compressor: { threshold: -20, ratio: 2.5, attack: 0.008, release: 0.14, makeup: 2 },
     },
@@ -341,6 +342,34 @@ const StyleSourceSchema = z
 function sourcedSchema(schema: z.ZodType): z.ZodType {
   if (!(schema instanceof z.ZodObject)) return z.object({ value: schema, source: StyleSourceSchema });
   return z.object(Object.fromEntries(Object.entries(schema.shape as Record<string, z.ZodType>).map(([key, inner]) => [key, sourcedSchema(inner)])));
+}
+
+/**
+ * The voice chain a style asks for (`sound.voice`, ADR 0028), as the explicit entries `clip set --voice` writes
+ * (ADR 0031): style seconds become effect milliseconds and every number is held to the effect's range. A
+ * noise reduction of 0 leaves the `denoise` entry out. The default style gives `VOICE_CHAIN`.
+ */
+export function voiceChainOf(voice: ResolvedStyle["sound"]["voice"]): NormalizedAudioEffect[] {
+  const limits = AUDIO_EFFECT_LIMITS;
+  const fit = ({ min, max }: { min: number; max: number }, value: number) => Math.min(max, Math.max(min, Math.round(value * 1e6) / 1e6));
+  const chain: NormalizedAudioEffect[] = [{ kind: "highpass", frequency: fit(limits.highpass.frequency, voice.highpass.value) }];
+  if (voice.denoise.reduction.value > 0) {
+    chain.push({
+      kind: "denoise",
+      floor: fit(limits.denoise.floor, voice.denoise.floor.value),
+      reduction: fit(limits.denoise.reduction, voice.denoise.reduction.value),
+    });
+  }
+  const compressor = voice.compressor;
+  chain.push({
+    kind: "compressor",
+    threshold: fit(limits.compressor.threshold, compressor.threshold.value),
+    ratio: fit(limits.compressor.ratio, compressor.ratio.value),
+    attack: fit(limits.compressor.attack, compressor.attack.value * 1000),
+    release: fit(limits.compressor.release, compressor.release.value * 1000),
+    makeup: fit(limits.compressor.makeup, compressor.makeup.value),
+  });
+  return chain;
 }
 
 /** Zod model of {@link ResolvedStyle}: {@link StyleValuesSchema} with `{ value, source }` at every leaf. */

@@ -20,7 +20,7 @@ import type {
   TrackSummary,
 } from "@frameshell/protocol";
 import { SECONDS_TEXT } from "@frameshell/protocol";
-import { VOICE_CHAIN, resolveSubtitleStyle } from "@frameshell/schema";
+import { resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -66,9 +66,9 @@ mutations print the new revision):
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
-                               --voice writes the voice chain as explicit audio effects (high-pass 85 Hz, denoise
-                               floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms release 140 ms
-                               makeup +2 dB); --audio-effects replaces the list, e.g.
+                               --voice writes the style's voice chain (style.json sound.voice; by default high-pass
+                               85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
+                               release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
                                '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
@@ -332,6 +332,8 @@ export interface TimelineInvocation {
   params: Record<string, unknown>;
   /** False for `tx.*`: session-scoped, no project directory. */
   withCwd: boolean;
+  /** `clip set --voice`: `audioEffects` is filled from the project's style (`sound.voice`) before the request. */
+  voiceFromStyle?: boolean;
 }
 
 /** Bad arguments; the message says which and how to fix. Exit code 2. */
@@ -714,11 +716,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         audioEffects:
-          values["voice"] === true
-            ? VOICE_CHAIN.map((effect) => ({ ...effect }))
-            : values["clear-audio-effects"] === true
-              ? null
-              : jsonList("audio-effects"),
+          values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -928,7 +926,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   if (params["transform"]) params["transform"] = clean(params["transform"] as Record<string, unknown>);
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
-  return { kind: "timeline", method, params: clean(params)!, withCwd: true };
+  const voiceFromStyle = method === "clip.set" && values["voice"] === true;
+  return { kind: "timeline", method, params: clean(params)!, withCwd: true, ...(voiceFromStyle ? { voiceFromStyle } : {}) };
 }
 
 /** Run a parsed timeline command; returns stdout text. `onProgress` gets the progress of long ones (`multicam faces`). */
@@ -940,6 +939,10 @@ export async function executeTimeline(
   onProgress?: (progress: Progress) => void,
 ): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
+  if (inv.voiceFromStyle) {
+    const { style } = await conn.request("style.show", { cwd });
+    params["audioEffects"] = voiceChainOf((style ?? resolveStyle(null)).sound.voice);
+  }
   // Params are validated by the daemon against the method registry.
   const result = (await conn.request(inv.method, params as never, onProgress ? { onProgress } : {})) as unknown;
   if (inv.method === "timeline.show") {

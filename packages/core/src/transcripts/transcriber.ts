@@ -1,8 +1,9 @@
 import { mkdir, realpath, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ModelFormat, TranscribeContext, TranscriptionProvider, TranscriptionResult, UserModel } from "@frameshell/plugin-api";
 import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
+import { assetFileNames } from "../asset-names.js";
 import { exists, readJsonIfExists, renameRetrying, sha256File, writeJsonAtomic } from "../fs-util.js";
 import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
@@ -313,8 +314,8 @@ export async function transcriptionAudio(options: {
  * `assets/` keep their full project-relative path.
  */
 export function transcriptPathsFor(assetRel: string): [string, string] {
-  const inner = assetRel.startsWith("assets/") ? assetRel.slice("assets/".length) : assetRel;
-  return [`transcripts/${stripExtension(inner)}.words.json`, `transcripts/${inner}.words.json`];
+  const [short, long] = assetFileNames(assetRel);
+  return [`transcripts/${short}.words.json`, `transcripts/${long}.words.json`];
 }
 
 /**
@@ -351,11 +352,6 @@ function nameTaken(assetRel: string, transcripts: { path: string; asset: string 
       "one of those transcripts if it is stale.",
     { asset: assetRel, transcripts },
   );
-}
-
-function stripExtension(path: string): string {
-  const ext = posix.extname(path);
-  return ext ? path.slice(0, -ext.length) : path;
 }
 
 /**

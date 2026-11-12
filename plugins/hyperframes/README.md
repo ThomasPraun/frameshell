@@ -5,8 +5,12 @@ Official [Frameshell](https://github.com/ThomasPraun/frameshell) clip adapter. I
 ```sh
 frameshell plugin install @frameshell/hyperframes
 frameshell hyperframes new title --duration 4
+frameshell hyperframes new hook --template kinetic-headline   # motion template: typed props, brand tokens from style.json
 frameshell hyperframes check            # lint every composition; exit 1 on errors
+frameshell hyperframes update           # refresh the frozen motion runtime copies
 ```
+
+`new --template <kinetic-headline|end-card>` scaffolds a composition painted by the Frameshell motion runtime (springs and eases as a pure function of time, ADR 0033), with `frameshell-motion.js` copied next to it so a plugin upgrade never changes an existing clip. Each template declares typed props (change one with `frameshell clip set <clip> --props '{...}'`), lays out for 16:9, 1:1, 4:5 and 9:16, and takes colours, fonts and brand texts from the project's `style.json` as defaults. `update [<composition>] [--dry-run] [--force]` refreshes older runtime copies; clips that use one render again.
 
 `check [<composition>] [--strict] [--json]` runs the HyperFrames linter ([`@hyperframes/lint`](https://www.npmjs.com/package/@hyperframes/lint)) in the daemon, with no network and no telemetry, plus Frameshell's GSAP seek-safety rules. It prints `file:line:column severity rule message` and a fix per finding; errors exit 1, warnings only with `--strict`. The plugin never uses the `hyperframes` CLI.
 

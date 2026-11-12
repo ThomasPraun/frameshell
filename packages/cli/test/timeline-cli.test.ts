@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -456,6 +456,23 @@ describe("audio effects (ADR 0031)", () => {
     expect(audio()).toEqual({ gain: -2, effects: [{ kind: "highpass", frequency: 120 }] });
     expect(frameshell(["clip", "set", clip, "--clear-audio-effects"]).code).toBe(0);
     expect(audio()).toEqual({ gain: -2 });
+
+    // The project's style.json (sound.voice) gives the chain; a number it leaves out stays the default.
+    const stylePath = join(project, "style.json");
+    writeFileSync(stylePath, JSON.stringify({ schemaVersion: 1, sound: { voice: { highpass: 100, compressor: { ratio: 3, attack: 0.012 } } } }));
+    try {
+      expect(frameshell(["clip", "set", clip, "--voice"]).code).toBe(0);
+      expect(audio().effects).toEqual([
+        { kind: "highpass", frequency: 100 },
+        { kind: "denoise", floor: -30, reduction: 8 },
+        { kind: "compressor", threshold: -20, ratio: 3, attack: 12, release: 140, makeup: 2 },
+      ]);
+      writeFileSync(stylePath, "{ not json");
+      expect(frameshell(["clip", "set", clip, "--voice"]).code).toBe(1);
+    } finally {
+      rmSync(stylePath, { force: true });
+    }
+    expect(frameshell(["clip", "set", clip, "--clear-audio-effects"]).code).toBe(0);
 
     expect(frameshell(["clip", "set", clip, "--voice", "--clear-audio-effects"]).stderr).toMatch(/one of --voice, --audio-effects or --clear-audio-effects/);
     expect(frameshell(["clip", "set", clip, "--audio-effects", '{"kind":"highpass"}']).stderr).toMatch(/expected a JSON array/);

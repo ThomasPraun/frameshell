@@ -1,6 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/plugin-api";
+import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "./motion-runtime.js";
+import { TEMPLATES, type Template, type TemplateVariable, findTemplate, fontSetup, readTokens } from "./templates/index.js";
 
 /** Composition name: becomes a directory and the composition id. */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
@@ -8,37 +10,50 @@ const NAME = /^[a-z0-9][a-z0-9-]*$/;
 /** Parsed `hyperframes new` arguments. */
 interface NewArgs {
   name: string;
-  duration: number;
+  duration: number | undefined;
+  template: Template | undefined;
 }
+
+const USAGE = `usage: frameshell hyperframes new <name> [--template <${TEMPLATES.map((t) => t.id).join("|")}>] [--duration <seconds>]; <name> is lowercase letters, digits and dashes, e.g. \`intro\``;
 
 function parseArgs(args: readonly string[]): NewArgs {
   const [name, ...rest] = args;
   if (!name || !NAME.test(name)) {
-    throw new Error("usage: frameshell hyperframes new <name> [--duration <seconds>]; <name> is lowercase letters, digits and dashes, e.g. `intro`");
+    throw new Error(USAGE);
   }
-  let duration = 5;
+  let duration: number | undefined;
+  let template: Template | undefined;
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
     if (flag === "--duration") {
       duration = Number(rest[++i]);
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("--duration takes seconds greater than 0, e.g. `--duration 8`");
+    } else if (flag === "--template") {
+      const id = rest[++i];
+      template = id === undefined ? undefined : findTemplate(id);
+      if (!template) throw new Error(`--template takes one of ${TEMPLATES.map((t) => t.id).join(", ")}${id ? `; got ${id}` : ""}`);
     } else {
-      throw new Error(`unknown argument ${flag}; usage: frameshell hyperframes new <name> [--duration <seconds>]`);
+      throw new Error(`unknown argument ${flag}; ${USAGE}`);
     }
   }
-  return { name, duration };
+  return { name, duration, template };
 }
 
 /**
- * `frameshell hyperframes new <name> [--duration s]`: scaffold
- * `compositions/hyperframes/<name>/index.html` at the project resolution,
- * with a transparent background, one clip, and a CSS animation driven by the
- * HyperFrames clock. Never overwrites.
+ * `frameshell hyperframes new <name> [--template t] [--duration s]`: scaffold
+ * `compositions/hyperframes/<name>/index.html` at the project resolution.
+ * Without a template: a transparent background, one clip and a CSS animation
+ * driven by the HyperFrames clock. With `--template` (ADR 0033, #466): a motion
+ * composition painted by the Frameshell motion runtime, which is copied next
+ * to it (frozen per composition; `hyperframes update` refreshes it), with typed
+ * props and the brand values of `style.json` as their defaults. Never overwrites.
  */
 export const newComposition: PluginCommand = {
-  description: "Scaffold compositions/hyperframes/<name>/index.html at the project resolution",
+  description: "Scaffold compositions/hyperframes/<name>/index.html at the project resolution (--template for a motion template)",
   async run({ args, project }: CommandContext): Promise<CommandResult> {
-    const { name, duration } = parseArgs(args);
+    const parsed = parseArgs(args);
+    const { name, template } = parsed;
+    const duration = parsed.duration ?? template?.defaultDuration ?? 5;
     const config = JSON.parse(await readFile(join(project.dir, "frameshell.json"), "utf8")) as {
       resolution?: { width?: number; height?: number };
     };
@@ -46,22 +61,70 @@ export const newComposition: PluginCommand = {
     const height = config.resolution?.height ?? 1080;
     const dir = join(project.dir, "compositions", "hyperframes", name);
     const entry = `compositions/hyperframes/${name}/index.html`;
+    const tokens = await readTokens(project.dir);
+    const input = { id: name, width, height, duration, tokens };
     await mkdir(dir, { recursive: true });
     try {
-      await writeFile(join(dir, "index.html"), template(name, width, height, duration), { flag: "wx" });
+      await writeFile(join(dir, "index.html"), template ? template.render(input) : plainHtml(name, width, height, duration), { flag: "wx" });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${entry} already exists; edit it, or pick another name`, { cause: error });
       throw error;
     }
     const add = `frameshell clip add <video track> --type hyperframes --source ${entry} --start <s> --duration ${duration}`;
+    if (!template) {
+      return {
+        output: `Created ${entry} (${width}x${height}, ${duration} s). Add it to the timeline:\n  ${add}`,
+        data: { source: entry, width, height, duration },
+      };
+    }
+    await writeFile(join(dir, MOTION_RUNTIME_FILE), MOTION_RUNTIME);
+    for (const { from, to } of fontSetup(tokens).copies) {
+      await mkdir(dirname(join(dir, to)), { recursive: true });
+      await copyFile(join(project.dir, ...from.split("/")), join(dir, to));
+    }
+    const variables = template.variables(input);
+    const lines = [
+      `Created ${entry} from the ${template.id} template (${width}x${height}, ${duration} s) with ${MOTION_RUNTIME_FILE} (runtime ${MOTION_RUNTIME_VERSION}, frozen for this clip: \`frameshell hyperframes update\` refreshes it).`,
+      tokens.used.length > 0
+        ? `From style.json: ${tokens.used.join(", ")}. Everything else is a placeholder default.`
+        : "No style.json values used: colours, fonts and texts are placeholder defaults.",
+      ...(tokens.problem ? [`Note: ${tokens.problem}.`] : []),
+      "Props (change one with `frameshell clip set <clip> --props '{...}'`):",
+      ...variables.map((variable) => `  ${variable.id}  ${describeVariable(variable)}`),
+      "Add it to the timeline:",
+      `  ${add}`,
+    ];
     return {
-      output: `Created ${entry} (${width}x${height}, ${duration} s). Add it to the timeline:\n  ${add}`,
-      data: { source: entry, width, height, duration },
+      output: lines.join("\n"),
+      data: {
+        source: entry,
+        width,
+        height,
+        duration,
+        template: template.id,
+        runtime: MOTION_RUNTIME_VERSION,
+        tokens: tokens.used,
+        props: variables,
+      },
     };
   },
 };
 
-function template(id: string, width: number, height: number, duration: number): string {
+function describeVariable(variable: TemplateVariable): string {
+  const shown = JSON.stringify(variable.default);
+  switch (variable.type) {
+    case "number":
+      return `number, ${variable.min} to ${variable.max}, default ${shown}: ${variable.label}`;
+    case "enum":
+      return `one of ${variable.options.map((option) => option.value).join(", ")}, default ${shown}: ${variable.label}`;
+    case "image":
+      return `image path inside the composition directory, default ${shown}: ${variable.label}`;
+    default:
+      return `${variable.type}, default ${shown}: ${variable.label}`;
+  }
+}
+
+function plainHtml(id: string, width: number, height: number, duration: number): string {
   return `<!doctype html>
 <html lang="en" data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Title"}]'>
   <head>
