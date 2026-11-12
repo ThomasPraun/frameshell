@@ -1,5 +1,5 @@
-import { ErrorCode, type OperationName, RpcError, TIME_REF_FIELDS } from "@frameshell/protocol";
-import { type Timeline, markerLabelKey } from "@frameshell/schema";
+import { ErrorCode, type OperationName, RpcError, SECONDS_TEXT, TIME_REF_FIELDS } from "@frameshell/protocol";
+import { type Timeline, describeMarkers, findMarker } from "@frameshell/schema";
 import type { OperationRequest } from "./engine.js";
 
 /**
@@ -60,15 +60,14 @@ export function resolveTimeRef(ref: number | string, scope: TimeRefScope): numbe
   if (typeof ref === "number") return checked(ref, String(ref));
   const text = ref.trim();
   if (text === "") throw new TimeRefError("A time reference is empty.", "Give seconds, or a marker id or label.");
-  const seconds = Number(text);
-  if (Number.isFinite(seconds)) return checked(seconds, text);
+  if (SECONDS_TEXT.test(text)) return checked(Number(text), text);
 
-  const marker = markerNamed(text, scope);
+  const marker = findMarker(scope.timeline.markers, text);
   if (marker) return marker.at;
 
-  const offset = /^(.+?)\s*([+-])\s*(\d+(?:\.\d+)?)$/.exec(text);
+  const offset = /^(.+?)\s*([+-])\s*(\d+(?:\.\d*)?|\.\d+)$/.exec(text);
   if (offset) {
-    const base = markerNamed(offset[1]!, scope);
+    const base = findMarker(scope.timeline.markers, offset[1]!);
     if (base) return checked(base.at + (offset[2] === "-" ? -1 : 1) * Number(offset[3]), text);
   }
 
@@ -116,11 +115,6 @@ export function resolveTimeRefs(request: WireRequestLike, timeline: Pick<Timelin
 /** An operation request whose time arguments may still be names: what a caller sends before {@link resolveTimeRefs}. */
 export type WireRequestLike = { op: OperationName | "timeline.patch"; args: unknown };
 
-function markerNamed(name: string, scope: TimeRefScope) {
-  const markers = scope.timeline.markers ?? [];
-  return markers.find((marker) => marker.id === name) ?? markers.find((marker) => markerLabelKey(marker.label) === markerLabelKey(name));
-}
-
 function checked(seconds: number, shown: string): number {
   if (!Number.isFinite(seconds) || seconds < 0) {
     throw new TimeRefError(`"${shown}" is ${seconds < 0 ? "before the start of the timeline" : "not a time"}.`, "Times are 0 or more seconds.");
@@ -129,8 +123,7 @@ function checked(seconds: number, shown: string): number {
 }
 
 function unknownName(text: string, scope: TimeRefScope): TimeRefError {
-  const markers = scope.timeline.markers ?? [];
-  const known = markers.map((marker) => `${marker.id} "${marker.label}" at ${marker.at} s`).join(", ");
+  const known = describeMarkers(scope.timeline.markers);
   return new TimeRefError(
     `"${text}" is neither seconds nor a marker of timeline ${scope.timeline.id}.`,
     known ? `Markers: ${known}.` : "It has no markers: use seconds, or add one with `marker.add`.",

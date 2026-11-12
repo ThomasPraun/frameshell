@@ -41,6 +41,8 @@ import {
   gainAt,
   isShotClip,
   markerLabelKey,
+  findMarker,
+  describeMarkers,
   keyedValueAt,
   paintStretches,
   placementAt,
@@ -1995,10 +1997,9 @@ class Edit {
 
   /** The draft's marker with id `ref`, else with label `ref` ignoring case; InvalidOperation listing the markers when none. */
   marker(ref: string): Marker {
-    const markers = this.draft.markers ?? [];
-    const found = markers.find((marker) => marker.id === ref) ?? markers.find((marker) => markerLabelKey(marker.label) === markerLabelKey(ref));
+    const found = findMarker(this.draft.markers, ref);
     if (found) return found;
-    const known = markers.map((marker) => `${marker.id} "${marker.label}" at ${marker.at}`).join(", ");
+    const known = describeMarkers(this.draft.markers);
     throw this.invalid(`no marker "${ref}" in timeline ${this.draft.id}.`, {
       field: "marker",
       hint: known ? `Markers: ${known}.` : "It has no markers: add one with `marker.add`.",

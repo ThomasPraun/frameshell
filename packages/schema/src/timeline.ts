@@ -586,6 +586,16 @@ export function markerLabelKey(label: string): string {
   return label.toLowerCase();
 }
 
+/** The marker `ref` names (ADR 0029 decision 2): the one with that id, else the one with that label ignoring case. */
+export function findMarker(markers: readonly Marker[] | undefined, ref: string): Marker | undefined {
+  return markers?.find((marker) => marker.id === ref) ?? markers?.find((marker) => markerLabelKey(marker.label) === markerLabelKey(ref));
+}
+
+/** The markers as a hint reads them: `m_a "intro" at 1 s, …`, or the empty string when there are none. */
+export function describeMarkers(markers: readonly Marker[] | undefined): string {
+  return (markers ?? []).map((marker) => `${marker.id} "${marker.label}" at ${marker.at} s`).join(", ");
+}
+
 /**
  * Zod model of a timeline file (SPEC §5.3). `revision` guards direct edits
  * (SPEC §6.4); duration is derived, never stored. Checks here need no project

@@ -36,6 +36,12 @@ describe("resolveTimeRef", () => {
     expect(resolveTimeRef(" 12 ", scope)).toBe(12);
   });
 
+  it("reads only plain decimals as seconds, and accepts a leading dot in an offset", () => {
+    expect(resolveTimeRef(".5", scope)).toBe(0.5);
+    expect(resolveTimeRef("hook+.5", scope)).toBe(4.5);
+    for (const text of ["0x10", "1e2"]) expect(failure(() => resolveTimeRef(text, scope)).message).toContain("neither seconds nor a marker");
+  });
+
   it("finds a marker by id, or by label ignoring case", () => {
     expect(resolveTimeRef("m_b", scope)).toBe(4);
     expect(resolveTimeRef("hook", scope)).toBe(4);
@@ -186,6 +192,17 @@ describe("time references in operations", () => {
     expect(key.operation.args).toMatchObject({ time: 4.5 });
     const cut = await run("cut", { from: "hook", to: "hook+0.5", snap: false });
     expect(cut.operation.args).toMatchObject({ from: 4, to: 4.5 });
+  });
+
+  it("resolves a marker in clip.add start, clip.move start and clip.trim start/end", async () => {
+    const { run } = await marked();
+    const added = await run("clip.add", { track: "t_v", type: "media", asset: "assets/a.mp4", start: "hook+4" });
+    expect(added.operation.args).toMatchObject({ start: 8 });
+    const clip = added.changes.added[0]!;
+    const moved = await run("clip.move", { clip, start: "hook+5" });
+    expect(moved.operation.args).toMatchObject({ start: 9 });
+    const trimmed = await run("clip.trim", { clip, start: "hook+6", end: "hook+8", snap: false });
+    expect(trimmed.operation.args).toMatchObject({ start: 10, end: 12 });
   });
 
   it("sees a marker added earlier, and one a later operation of the same turn moved", async () => {

@@ -241,7 +241,7 @@ describe("frameshell timeline editing", () => {
   it("exits 2 with a precise message on bad arguments", () => {
     const noAt = frameshell(["clip", "split", "c_x"]);
     expect(noAt.code).toBe(2);
-    expect(noAt.stderr).toMatch(/needs --at <seconds>/);
+    expect(noAt.stderr).toMatch(/needs --at <seconds\|marker>/);
     const notNumber = frameshell(["clip", "trim", "c_x", "--in", "soon"]);
     expect(notNumber.code).toBe(2);
     expect(notNumber.stderr).toMatch(/--in: expected a number, got "soon"/);
@@ -517,7 +517,7 @@ describe("markers (ADR 0029)", () => {
     expect(frameshell(["marker", "remove", hook, ...on]).code).toBe(0);
     expect(frameshell(["marker", "list", ...on]).stdout).toMatch(/has no markers/);
 
-    expect(frameshell(["marker", "add", "--label", "x", ...on]).stderr).toMatch(/needs --at <seconds> and --label <label>/);
+    expect(frameshell(["marker", "add", "--label", "x", ...on]).stderr).toMatch(/needs --at <seconds\|marker> and --label <label>/);
     expect(frameshell(["marker", "set", "x", "--color", "red", "--clear-color", ...on]).code).toBe(2);
     expect(frameshell(["marker", "remove", ...on]).code).toBe(2);
     expect(frameshell(["marker", "set", "nope", "--at", "1", ...on]).stderr).toMatch(/no marker "nope"/);

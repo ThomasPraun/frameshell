@@ -19,6 +19,7 @@ import type {
   TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
+import { SECONDS_TEXT } from "@frameshell/protocol";
 import { VOICE_CHAIN, resolveSubtitleStyle } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
@@ -494,8 +495,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     const raw = values[flag];
     if (raw === undefined) return undefined;
     if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds or a marker id or label, got "${String(raw)}".`);
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : raw.trim();
+    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
   };
   const list = (flag: string): string[] | undefined => {
     const raw = values[flag];
@@ -643,7 +643,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "clip split":
       method = "clip.split";
-      if (values["at"] === undefined) throw new UsageError("`frameshell clip split <clip>` needs --at <seconds>.");
+      if (values["at"] === undefined) throw new UsageError("`frameshell clip split <clip>` needs --at <seconds|marker>.");
       Object.assign(params, { clip: args[0], at: when("at") });
       break;
     case "clip remove":
@@ -675,14 +675,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "transition set":
     case "transition remove": {
       method = command === "transition set" ? "transition.set" : "transition.remove";
-      if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds>, a clip edge.`);
+      if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds|marker>, a clip edge.`);
       Object.assign(params, { at: when("at"), tracks });
       if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
       break;
     }
     case "marker add":
       method = "marker.add";
-      if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds> and --label <label>.");
+      if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds|marker> and --label <label>.");
       Object.assign(params, { at: when("at"), label: str("label"), color: str("color") });
       break;
     case "marker set":

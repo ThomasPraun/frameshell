@@ -41,6 +41,9 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
  * A time on the timeline clock the daemon resolves before the operation runs: seconds, or a name from the timeline
  * (ADR 0029 decision 7, ADR 0037). Fields that take one are listed in {@link TIME_REF_FIELDS}.
  */
+/** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
+export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
 const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])
