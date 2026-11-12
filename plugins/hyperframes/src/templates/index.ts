@@ -1,6 +1,7 @@
 import { appWindow } from "./app-window.js";
 import { bigWord } from "./big-word.js";
 import { checklist } from "./checklist.js";
+import { commentBox } from "./comment-box.js";
 import { comparison } from "./comparison.js";
 import { counter } from "./counter.js";
 import { cursorClick } from "./cursor-click.js";
@@ -18,7 +19,7 @@ export { type FontSetup, type Template, type TemplateInput, type TemplateVariabl
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
 /** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField];
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {

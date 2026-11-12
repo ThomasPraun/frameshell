@@ -151,3 +151,45 @@ export const BACKDROP_CSS = "#backdrop { position: absolute; inset: 0; }";
 export const BACKDROP_SETUP = String.raw`
       var backdrop = document.getElementById("backdrop");
       backdrop.style.background = "radial-gradient(ellipse at 50% 40%, " + mix(P.bg, "#ffffff", 0.09) + " 0%, " + P.bg + " 72%)";`;
+
+/**
+ * Shared page-script text of a kit (cursor, typing, camera): drops whole-line `//`
+ * comments and blank lines, and writes each top-level function on one line (a
+ * function carrying a trailing comment keeps its lines). The explanation lives
+ * in the kit's source, and `hyperframes check` warns on a composition file over
+ * 300 lines, which the kit would otherwise fill by itself.
+ */
+export function kitScript(code: string): string {
+  const out: string[] = [];
+  let open: string[] | null = null;
+  const flush = (lines: string[]): void => {
+    out.push(lines.some((line) => line.includes("//")) ? lines.join("\n") : `      ${lines.map((line) => line.trim()).join(" ")}`);
+  };
+  for (const line of code.split("\n")) {
+    const text = line.trim();
+    if (text === "" || text.startsWith("//")) continue;
+    if (open) {
+      open.push(line);
+      if (line === "      }") {
+        flush(open);
+        open = null;
+      }
+    } else if (line.startsWith("      function ") && !text.endsWith("}")) {
+      open = [line];
+    } else out.push(line);
+  }
+  if (open) out.push(...open);
+  return out.join("\n");
+}
+
+/**
+ * The page script of `html` without whole-line `//` comments and blank lines: for a
+ * template whose own script is long enough to draw the lint warning on a
+ * composition file over 300 lines. The explanation stays in the template's source.
+ */
+export function trimScript(html: string): string {
+  return html.replace(/<script>([\s\S]*?)<\/script>/, (_all, body: string) => {
+    const kept = body.split("\n").filter((line) => line.trim() !== "" && !line.trim().startsWith("//"));
+    return `<script>\n${kept.join("\n")}\n    </script>`;
+  });
+}

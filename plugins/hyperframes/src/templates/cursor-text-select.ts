@@ -192,12 +192,18 @@ export const cursorTextSelect: Template = {
         var start = { x: segs[0].l, y: segs[0].yc };
         var lastSeg = segs[segs.length - 1];
         var end = { x: lastSeg.r, y: lastSeg.yc };
-        var approach = journey(FROM, [{ x: start.x, y: start.y, hesitate: P.hesitate, wait: 0.18 }], START);
-        var downAt = approach.legs[0].arrive + 0.04;
-        var dragStart = approach.legs[0].leave;
-        var dur = Math.max(0.45, M.durationFromDistance((total * 1080) / unit, "normal") * 1.5);
+        var made = fitFirst(CURSOR_TRIES, function (hesitate, rate) {
+          var approach = journey(FROM, [{ x: start.x, y: start.y, hesitate: P.hesitate * hesitate, wait: 0.18 }], START, undefined, rate);
+          var dragStart = approach.legs[0].leave;
+          var dur = Math.max(0.45 / rate, (M.durationFromDistance((total * 1080) / unit, "normal") * 1.5) / rate);
+          return { approach: approach, downAt: approach.legs[0].arrive + 0.04, dragStart: dragStart, dur: dur, ready: dragStart + dur + 0.08 };
+        }, latest(0.5));
+        var approach = made.approach;
+        var downAt = made.downAt;
+        var dragStart = made.dragStart;
+        var dur = made.dur;
         var dragEnd = dragStart + dur;
-        var upAt = dragEnd + 0.08;
+        var upAt = made.ready;
         var rest = inFrame({ x: end.x + 0.06 * unit, y: oy + block.offsetHeight + pillH * 1.6 + 0.03 * unit }, 0.05);
         var leave = journey(end, [{ x: rest.x, y: rest.y, weight: "light", bend: 0.2 }], upAt + 0.45, { x: 0.004 * unit, y: 0.003 * unit });
         var below = Math.abs(lastSeg.top - items[n - 1].top) < 2;
