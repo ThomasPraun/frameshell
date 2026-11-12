@@ -30,7 +30,7 @@ import {
 } from "./program.js";
 import { mediaSrc } from "./media-src.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
-import { type EncodedPicture, type VideoSource, isReadWhole, openVideoSource } from "./video-source.js";
+import { type EncodedPicture, type VideoSource, isReadWhole, mattedPath, mattedSource, openVideoSource, splitMattedPath } from "./video-source.js";
 
 /** DedicatedWorkerGlobalScope, as far as the engine uses it (the DOM lib types `self` as Window). */
 interface WorkerScope {
@@ -106,10 +106,11 @@ interface LayerHost {
 }
 
 /**
- * File and timing a span decodes from: a media or shot angle span's proxy, or a generated span's ready render (one
- * render frame per program frame).
+ * File and timing a span decodes from: a media or shot angle span's proxy (with its matte as alpha on a subject layer,
+ * ADR 0032), or a generated span's ready render (one render frame per program frame).
  */
 function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | null {
+  if (span.kind === "media" && span.matte !== undefined) return { path: mattedPath(span.proxy, span.matte), timing: span };
   if (span.kind === "media" || span.kind === "angle") return { path: span.proxy, timing: span };
   if (span.kind === "generated" && span.render?.state === "ready") {
     return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: span.hold ? 0 : 1 } };
@@ -119,7 +120,7 @@ function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | nu
 
 /**
  * The decode pipeline of one video layer: its own `VideoDecoder` (plus one
- * for the alpha plane of renders and proxies with alpha), fed the layer's media and
+ * for the alpha plane of renders, proxies with alpha and subject mattes), fed the layer's media and
  * rendered spans from a program frame on, keeping up to {@link MAX_AHEAD}
  * decoded frames in program order.
  */
@@ -304,7 +305,7 @@ class LayerDecoder {
     }
     if (this.#alphaConfigured !== path) {
       // Software: frames stay in memory (I420), so the alpha plane is read without a GPU readback.
-      this.#alphaDecoder.configure({ ...source.config, hardwareAcceleration: "prefer-software", optimizeForLatency: true });
+      this.#alphaDecoder.configure({ ...(source.alphaConfig ?? source.config), hardwareAcceleration: "prefer-software", optimizeForLatency: true });
       this.#alphaConfigured = path;
     }
     return this.#alphaDecoder;
@@ -928,19 +929,22 @@ class Engine implements LayerHost {
 
   // ---------- media I/O ----------
 
-  /** The proxy or render at `path`, opened once. */
+  /** The proxy or render at `path` (or a proxy and its matte, `mattedPath`), opened once. */
   source(path: string): Promise<VideoSource> {
     let source = this.#sources.get(path);
     if (!source) {
-      source = openVideoSource(
-        path,
-        (start, end) => this.fetch(path, start, end),
-        async () => {
-          const response = await fetch(this.#url(path));
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return new Uint8Array(await response.arrayBuffer());
-        },
-      );
+      const matted = splitMattedPath(path);
+      source = matted
+        ? Promise.all([this.source(matted.picture), this.source(matted.matte)]).then(([picture, matte]) => mattedSource(picture, matte))
+        : openVideoSource(
+            path,
+            (start, end) => this.fetch(path, start, end),
+            async () => {
+              const response = await fetch(this.#url(path));
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              return new Uint8Array(await response.arrayBuffer());
+            },
+          );
       const opened = source;
       source.catch(() => {
         if (this.#sources.get(path) === opened) this.#sources.delete(path);

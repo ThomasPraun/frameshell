@@ -9,6 +9,7 @@ import {
   type HandshakeResult,
   type JobInfo,
   type JsonRpcRequest,
+  type MatteStateInfo,
   type MethodName,
   type MethodResult,
   type OpenTransaction,
@@ -52,7 +53,7 @@ import { runDoctor } from "./binaries/doctor.js";
 import { CreditsService, readCredits } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import type { MatteSource } from "./export/compiler.js";
-import { ExportService } from "./export/service.js";
+import { ExportService, subjectAssets } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
@@ -924,6 +925,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       matting.delete(slot);
     }
   };
+  /**
+   * Queue the `matte` job of asset `rel` (or join the one queued or running) and wait for it: `matte.prepare` and the
+   * preview's `matte.status` share it, so a matte is never made twice.
+   */
+  const matteInJob = (dir: string, rel: string, ready: { hash: string; proxy: string }, report?: (update: Progress) => void) =>
+    inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
+      ctx.update({ step: "matte", progress: 0, cached: false });
+      // Made already when a job or an export of the same content finished while this one waited.
+      const made = await makeMatte(dir, rel, ready, { signal: ctx.signal, onProgress: (progress) => ctx.update({ progress }), ...(report ? { report } : {}) });
+      if (made.cached) ctx.update({ cached: true, progress: 1 });
+      return made;
+    });
+  /** Why the matte of a canonical root and cache key could not be made, for `matte.status`: a changed asset has another key. */
+  const matteFailures = new Map<string, string>();
   /** Media facts `multicam.turns` and `multicam.direct` measure turns from. */
   const turnsSource: TurnsSource = {
     probe: (d, a) => media.probe(d, a),
@@ -2353,13 +2368,60 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           // Connection closed.
         }
       };
-      return inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
-        ctx.update({ step: "matte", progress: 0, cached: false });
-        // Made already when a job or an export of the same content finished while this one waited.
-        const made = await makeMatte(dir, rel, { hash: ready.hash, proxy }, { signal: ctx.signal, onProgress: (progress) => ctx.update({ progress }), report: tell });
-        if (made.cached) ctx.update({ cached: true, progress: 1 });
-        return describe(made.info, made.cached);
-      });
+      const made = await matteInJob(dir, rel, { hash: ready.hash, proxy }, tell);
+      return describe(made.info, made.cached);
+    },
+    "matte.status": async ({ cwd, timeline, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const flat = await resolveNested(dir, shown.timeline, undefined, shown.fps);
+      const listed = new Map((await media.list(dir)).map((info) => [info.path, info]));
+      // Not probed yet counts as moving: it is `waiting` until its ingest says.
+      const moving = (asset: string) => {
+        const info = listed.get(asset);
+        if (info?.kind !== "media" || info.state === "failed") return false;
+        return info.media === null || (info.media.video !== null && !info.media.video.still);
+      };
+      const assets = subjectAssets(flat, moving);
+      if (assets.length === 0) return { timeline, revision: shown.timeline.revision, mattes: [] };
+      const fps = (await readEnclosingProject(dir))?.config.fps ?? 30;
+      const canonical = canonicalPathSync(dir);
+      const mattes: MatteStateInfo[] = [];
+      for (const asset of assets) {
+        const info = listed.get(asset)!;
+        const base = { asset, matte: null, progress: 0, job: null, error: null };
+        if (info.state !== "ready" || info.hash === null || info.proxy === null) {
+          mattes.push({ ...base, state: "waiting" });
+          continue;
+        }
+        const ready = { hash: info.hash, proxy: info.proxy };
+        const key = matteKey(ready.hash, matteModel, fps);
+        if (await readMatteInfo(dir, key, ready.hash)) {
+          mattes.push({ ...base, state: "ready", matte: mattePaths(key).video, progress: 1 });
+          continue;
+        }
+        const slot = `${canonical}\0${key}`;
+        const failed = matteFailures.get(slot);
+        if (failed !== undefined) {
+          mattes.push({ ...base, state: "failed", error: failed });
+          continue;
+        }
+        const active = () => jobs.list({ project: dir, active: true }).find((job) => job.kind === "matte" && job.asset === asset);
+        if (!active()) {
+          // The job's own end, not the promise: a job canceled by the user or a daemon stop is queued again next read.
+          matteInJob(dir, asset, ready).catch(() => {});
+          const queued = active()?.id;
+          const stop = jobs.watch(({ job: change }) => {
+            if (change.id !== queued || (change.state !== "done" && change.state !== "failed" && change.state !== "canceled")) return;
+            stop();
+            if (change.state === "failed") matteFailures.set(slot, change.error ?? "The matte could not be made.");
+          });
+          if (queued === undefined) stop();
+        }
+        const job = active();
+        mattes.push({ ...base, state: job?.state === "running" ? "making" : "queued", progress: job?.progress ?? 0, job: job?.id ?? null });
+      }
+      return { timeline, revision: shown.timeline.revision, mattes };
     },
     "beats.measure": async ({ cwd, asset, bpm, resetEdits }, _caller, request) => {
       const dir = await root(cwd);

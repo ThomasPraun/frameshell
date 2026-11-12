@@ -5,6 +5,10 @@ const en = {
   ingest: "Building the preview proxy",
   noPreview: "No preview for this clip",
   multicam: "Multicam shots inside a moved, scaled or faded nested timeline cannot be shown",
+  /** Note on a subject layer (ADR 0032) while its plate has no subject matte (being made, or failed). */
+  matte: "No subject matte yet: what goes behind the person shows in front of them",
+  /** Note on a subject layer whose plate has its own transparency: export draws the subject, the preview does not. */
+  matteAlpha: "Subjects of transparent clips show only in export: what goes behind the person shows in front of them here",
   noAudio: "No audio output: playing without sound",
   /** Notice when the preview's audio output cannot be set up; `{reason}` is the system's message. */
   audioUnavailable: (reason: string) => `Preview audio unavailable: ${reason}`,
@@ -75,6 +79,8 @@ const es: typeof en = {
   ingest: "Creando el proxy de la vista previa",
   noPreview: "Este clip no tiene vista previa",
   multicam: "Las tomas multicámara dentro de una línea de tiempo anidada movida, escalada o atenuada no se pueden mostrar",
+  matte: "Aún no hay máscara del sujeto: lo que va detrás de la persona se ve delante",
+  matteAlpha: "El sujeto de los clips con transparencia solo se ve al exportar: aquí lo que va detrás de la persona se ve delante",
   noAudio: "Sin salida de audio: se reproduce sin sonido",
   audioUnavailable: (reason) => `Audio de la vista previa no disponible: ${reason}`,
   playhead: "Cursor de reproducción",

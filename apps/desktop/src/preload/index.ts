@@ -119,6 +119,7 @@ const api: FrameshellApi = {
   media: {
     assets: () => invokeOutcome(Channel.mediaAssets),
     bakes: (timeline, view) => invokeOutcome(Channel.mediaBakes, timeline, view),
+    mattes: (timeline, view) => invokeOutcome(Channel.mediaMattes, timeline, view),
     read: (path) => invokeOutcome(Channel.mediaRead, path),
     onChanged: (listener) => subscribe(Channel.mediaChanged, listener),
     import: (paths) => invokeOutcome(Channel.mediaImport, paths),

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Subject layers in the preview (#461 slice 3, ADR 0032; protocol 95): a track `behind` a plate now shows behind the
+  person in the app's preview too, as in export and `frame`. The preview reads the plate's proxy through its subject
+  matte (the matte as the alpha of a second, software decoder; frame N of the matte is frame N of the proxy), on the
+  frames export draws the subject (where a track behind the plate shows and no shown track between covers it), with
+  the plate's push or wipe when the plate is the bottom track (an outgoing subject shows in the rest of a wipe). The
+  internal daemon method `matte.status` reports each plate's matte and queues the missing ones as background `matte`
+  jobs (shared with `matte.prepare`, never made twice); until a matte is ready the plate plays as it is, the word in
+  front, with a note over the picture. A test checks that preview and export draw a subject on the same frames. On an
+  Apple M3, 6 s of a 540p take with a word behind it played with 0 dropped and 0 starved frames and 3 decoders (plate,
+  subject picture, matte). Plates with their own alpha (VP9 proxies) get no subject in the preview yet, only a note
+  that export draws it.
+
 - `frameshell analyze <video>` (#471 slice 1, epic #451, decided in #478; daemon `analyze` as a background job of kind `analyze`, MCP `analyze`, protocol 93):
   measure a reference video into `.frameshell/analysis/<name>/` (any file; a run of the same name replaces the folder; project
   files untouched). The shot table comes from ffmpeg's scene score on every frame (`--threshold`, default 0.3; hard cuts, a run of

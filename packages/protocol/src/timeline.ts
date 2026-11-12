@@ -727,15 +727,22 @@ export const AuthorSchema = z
   );
 
 /**
+ * Inverse of a journaled operation. Typed explicitly: inferred, the timeline patch it holds pushes the `methods` registry
+ * past the declaration size the compiler can print.
+ */
+const InverseSchema: z.ZodType<
+  { op: "timeline.patch"; args: TimelinePatch },
+  { op: "timeline.patch"; args: z.input<typeof TimelinePatchSchema> }
+> = z.object({ op: z.literal("timeline.patch"), args: TimelinePatchSchema });
+
+/**
  * One applied operation (SPEC §6.1). `inverse` applied to the timeline right
  * after this operation restores it as it was before.
  */
 export const OperationRecordSchema = z.object({
   op: z.string().describe("Operation name, e.g. `clip.trim`."),
   args: z.record(z.string(), z.unknown()).describe("Validated args, defaults filled in."),
-  inverse: z
-    .object({ op: z.literal("timeline.patch"), args: TimelinePatchSchema })
-    .describe("Undoes this operation when applied right after it."),
+  inverse: InverseSchema.describe("Undoes this operation when applied right after it."),
   id: OpIdSchema,
   author: AuthorSchema,
   tx: TxIdSchema.describe("Transaction the operation belongs to; `revert` takes it to undo the whole transaction."),
