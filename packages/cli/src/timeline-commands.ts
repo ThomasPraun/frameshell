@@ -1169,7 +1169,8 @@ function formatHistory(result: HistoryResult): string {
       const target = op.op === "revert" ? ` ${String(op.args["target"])}` : "";
       const touched = op.touched.length > 0 ? `  ${op.touched.join(", ")}` : "";
       // A config operation changes no timeline (ADR 0036): it says which file instead of a revision.
-      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? "project config" : `revision ${op.revision}`})`);
+      const doc = op.doc === "style" ? "style.json" : "project config";
+      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? doc : `revision ${op.revision}`})`);
     }
   }
   return `${lines.join("\n")}\n`;
