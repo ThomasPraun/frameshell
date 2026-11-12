@@ -473,7 +473,8 @@ Optional (ADR 0028). Without it, nothing changes. Nothing renders from it yet: a
 - Resolution (`resolveStyle`, `packages/schema`): Frameshell's defaults, the motion values of the named personality (default `corporate`), then the file; objects merge field by field, lists, colours and fonts replace. Every resolved value carries its source: `file`, `personality` or `default`.
 - The integrated loudness target is `export.loudness` (§5.2), never the style; an effect set on a clip overrides the style's voice-chain default.
 - Safe zones are not in the style: `packages/schema/src/safe-zones.ts` holds one per platform (pixels of a reference frame the platform's app covers, `measured` or from guides); styles, formats and review name the platform.
-- `style.show` resolves it; `file.write` refuses an invalid file. A journaled `style.set`, user styles in `configDir/styles/` (copied in with `from`) and captions, fonts and generated clips taking the style come later (ADR 0028).
+- `style.show` resolves it; `file.write` refuses an invalid file. Every change of it is a config operation of the `style` document (ADR 0036), keyed `style:<path>` per value: `style.set <path> <value>`, `style.apply`, and a `file.write` that changes a value are journaled, reverted and held by review mode like format changes. A state with no value is no file.
+- User styles live in `configDir/styles/<id>.json` (same schema; only via `resolveAppDirs()`): `style.save` copies the project file out (without `from`), `style.apply <id|personality>` copies one in value by value (`replace` overwrites) and records `from` with its SHA-256; `style.show` says when the user style changed since. Captions, fonts and generated clips taking the style come later (ADR 0028).
 
 ### 5.9 Beat grid (`beats/*.beats.json`)
 
@@ -594,6 +595,10 @@ frameshell matte <asset>                      # background job: subject matte of
 frameshell transcribe --verify <export>       # lost-word report vs sources
 frameshell script outline <file> [--json]
 frameshell style show [--json]                # style.json resolved: each value and its source, safe zones of its platforms (ADR 0028)
+frameshell style set <path> <value>           # one value (JSON or text; null removes it), journaled (ADR 0036)
+frameshell style apply <name> [--replace]     # copy a user style or a motion personality in, value by value
+frameshell style save <name> [--force]        # the project's style.json as a user style (configDir/styles/)
+frameshell style list                         # user styles on this machine, motion personalities
 frameshell voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes]   # one take per line into assets/voiceover/, cached, trimmed, imported; paid providers need --yes (ADR 0034)
 frameshell sound sfx <kind> [--variant n] [--seed n] [--pitch x] [--length s]   # synthesized sound effect into assets/sound/, same arguments = same file; prints peakAt (ADR 0038)
 
@@ -640,7 +645,7 @@ Design rules:
 - Default project of a call without `cwd`: the project enclosing the server's directory; when that is in no project (one global server, e.g. Claude Desktop), the project of the app window focused last, named in the result. No window: the call fails asking to open a project or pass `cwd` (ADR 0014).
 - CLI parity: `frameshell frame --at <s> --out <png>` and `frameshell inspect --at <s> --point x,y` exist for non-MCP agents.
 - People (ADR 0020): every `people.*` method is a tool (`people_suggest`, `people_confirm`, `people_ranges`, …); a person picked in the People panel shows in `ui_state`.
-- Style (ADR 0028): `style_show` reads the resolved style guide; agents write `style.json` with `file_write` until a style write tool exists.
+- Style (ADR 0028): `style_show` reads the resolved style guide; `style_set` changes one value and `style_apply` copies a user style or a personality in, both journaled and held by review mode (ADR 0036); `style_save` and `style_list` manage the user styles.
 - Review mode (ADR 0019): `proposal_status` and `proposal_wait` are tools; accepting, rejecting and turning review on or off are internal methods only the app calls, never tools.
 
 ## 8. Plugin system

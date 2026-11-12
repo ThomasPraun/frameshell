@@ -71,7 +71,7 @@ Go through these one by one, on the sheets and strips:
 - Banned looks: a centred title on a gradient, corner labels, frame borders, glow on UI, generic particles, crossfades between every shot, a whoosh on every cut, the same sound machine-gunned.
 - Numbers or claims on screen the person or a source did not give.
 
-Add every default you catch the video falling into to `banned` in the project's `style.json` (with the person's agreement), so the next round and the next video avoid it. Judge brand, type sizes, motion and sound levels against `frameshell style show`, not your taste.
+Add every default you catch the video falling into to `banned` in the project's `style.json` with `frameshell style set banned '[…]'` (the whole list; with the person's agreement), so the next round and the next video avoid it. Judge brand, type sizes, motion and sound levels against `frameshell style show`, not your taste.
 
 ## 5. Notes, then fixes
 

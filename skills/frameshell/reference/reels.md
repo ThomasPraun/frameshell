@@ -44,7 +44,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 - **A note is a rule for the whole video**, not one moment: "it covers my chin" means check every graphic at its deepest zoom; "the effects are loud" means lower all of them.
 - **Redo only what they name:** "redo 0:04 to 0:07" changes that range and leaves the rest exactly as it was.
-- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake.
+- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` with `frameshell style set` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake, and `style save <name>` keeps it for their next project.
 
 ## Before you hand it over
 

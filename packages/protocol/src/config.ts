@@ -1,17 +1,23 @@
 import { z } from "zod";
 
-/** Project-config document a config operation changes (ADR 0036). `project`: `formats` of `frameshell.json`. */
-export const ConfigDocSchema = z.enum(["project"]).describe("Config document changed: `project` = `formats` of `frameshell.json`.");
+/**
+ * Project-config document a config operation changes (ADR 0036). `project`: `formats` of `frameshell.json`;
+ * `style`: `style.json` (ADR 0028).
+ */
+export const ConfigDocSchema = z
+  .enum(["project", "style"])
+  .describe("Config document changed: `project` = `formats` of `frameshell.json`, `style` = `style.json`.");
 
 /** See {@link ConfigDocSchema}. */
 export type ConfigDoc = z.output<typeof ConfigDocSchema>;
 
 /**
  * One key a config operation changed (ADR 0036). Keys: `format:<id>`, value `{ id, width, height, index }`
- * (`index` = position, 1 = right after the primary, which is never a key). `null`: absent.
+ * (`index` = position, 1 = right after the primary, which is never a key); `style:<path>` (`style:colors.accent`),
+ * value the one `style.json` holds there, and `style:from`. `null`: absent.
  */
 export const ConfigPatchEntrySchema = z.object({
-  key: z.string().describe("Entity key, e.g. `format:9x16`."),
+  key: z.string().describe("Entity key, e.g. `format:9x16` or `style:colors.accent`."),
   before: z.unknown().describe("Value before the operation; null when the key was absent."),
   after: z.unknown().describe("Value after the operation; null when it was removed."),
 });
