@@ -57,6 +57,8 @@ const TimeRef = (what: string) =>
         "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; needs `tempo`, refused when the grid is LOW confidence); the daemon turns it into " +
         "seconds first, so the history records seconds.",
     );
+/** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
+export { TimeRef as TimeRefParam };
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 
 /** What `snapTo` lands on (ADR 0029 decision 6). */

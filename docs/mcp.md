@@ -150,6 +150,7 @@ People changes are not timeline operations: review mode does not hold them, `his
 | Tool | Does |
 |---|---|
 | `sound_sfx(kind, variant?, seed?, pitch?, length?)` | Synthesize a sound effect offline (`click`, `tick`, `pop`, `whoosh`, `riser`, `thump`, `impact`, `shutter`; `variant` 1 to 3) into `assets/sound/<kind>-<key>.wav` and import it. The same arguments always give the same file (`state: "cached"`, nothing written); `seed` is a family seed, `pitch` multiplies every frequency, `length` is for `whoosh` and `riser`. `peakAt` is the second of the take that must land on the cue; nothing is placed on a timeline. Records the take as `own` work in `credits.json` when the project keeps one (`credited`). Idempotent per `idempotencyKey`. |
+| `sound_place(cues?, cuts?, typing?, track?, timeline?)` | Make the takes (as `sound_sfx`) and place them in one transaction `Sound: …` (one proposal in review mode): `cues` are `{ at, kind, … }` with `at` seconds or a marker (`hook+0.5`), `cuts` puts a sound on the start of every clip after the first of a track (or the numbered `which`), `typing` is a run of tick or click keys between `from` and `to`. The take's `peakAt` falls on the time plus the offset of its `role` (a riser ends 75 ms before it); the clip starts on a frame. Sounds go on the audio track `SFX` (more where they overlap) with a gain from the style's `sfxUnderVoice` and the `tier`. Returns each clip, `skipped` sounds and `warnings` for crowded frames, short gaps and repeated takes. Idempotent per `idempotencyKey`. |
 
 ## Beat grid (ADR 0029)
 

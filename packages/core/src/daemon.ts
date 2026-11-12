@@ -49,6 +49,7 @@ import {
   parseStyleFile,
   parseTimeline,
   projectFormats,
+  resolveStyle,
   subtitleTracks,
   subtitleWords,
 } from "@frameshell/schema";
@@ -132,6 +133,7 @@ import {
   writeSessionTranscripts,
 } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
+import { readStyleFile } from "./style/read.js";
 import { styleConfigDocument, styleState } from "./style/doc.js";
 import { StyleService } from "./style/service.js";
 import type { OperationRequest } from "./timeline/engine.js";
@@ -140,6 +142,7 @@ import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
+import { resolveTimeRef } from "./timeline/time-ref.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -154,7 +157,8 @@ import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { generateVoiceover } from "./voiceover/generate.js";
-import { generateSfx } from "./sound/generate.js";
+import { type SfxRequest, generateSfx } from "./sound/generate.js";
+import { allWarnings, planSounds, runPlan } from "./sound/place.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
 
@@ -506,6 +510,34 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const voiceoverRuns = new Map<string, Promise<void>>();
   /** Running `sound.sfx` calls, by canonical project root: one at a time per project, so two calls never write one take. */
   const soundRuns = new Map<string, Promise<void>>();
+  /** Run sound work of project `dir` after the sound work already running there: takes are written one at a time. */
+  const serialSound = <T>(dir: string, work: () => Promise<T>): Promise<T> => {
+    const key = canonicalPathSync(dir);
+    const run = (soundRuns.get(key) ?? Promise.resolve()).then(work);
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    soundRuns.set(key, settled);
+    void settled.then(() => {
+      if (soundRuns.get(key) === settled) soundRuns.delete(key);
+    });
+    return run;
+  };
+  /** One sound effect take of project `dir` (`sound.sfx`): written and imported, or found; its credit recorded when the project keeps a ledger. */
+  const makeTake = (dir: string, spec: Pick<SfxRequest, "kind" | "variant" | "seed" | "pitch" | "length">) =>
+    generateSfx({
+      root: dir,
+      ...spec,
+      importAssets: (files) => media.import(dir, files, "copy"),
+      credit: async (file) => {
+        // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
+        if (!(await exists(join(dir, CREDITS_FILE)))) return false;
+        const ledger = await readCredits(dir);
+        if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
+        return true;
+      },
+    });
   /** Aborts provider calls when the daemon stops. */
   const voiceoverAbort = new AbortController();
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
@@ -1614,34 +1646,68 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "sound.sfx": async ({ cwd, kind, variant, seed, pitch, length }) => {
       const dir = await root(cwd);
-      const work = () =>
-        generateSfx({
-          root: dir,
-          kind,
-          variant,
-          seed,
-          pitch,
-          length,
-          importAssets: (files) => media.import(dir, files, "copy"),
-          credit: async (file) => {
-            // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
-            if (!(await exists(join(dir, CREDITS_FILE)))) return false;
-            const ledger = await readCredits(dir);
-            if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
-            return true;
-          },
-        });
-      const key = canonicalPathSync(dir);
-      const run = (soundRuns.get(key) ?? Promise.resolve()).then(work);
-      const settled = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      soundRuns.set(key, settled);
-      void settled.then(() => {
-        if (soundRuns.get(key) === settled) soundRuns.delete(key);
+      return serialSound(dir, () => makeTake(dir, { kind, variant, seed, pitch, length }));
+    },
+    "sound.place": async (params, caller) => {
+      const { cwd, timeline } = params;
+      const dir = await root(cwd);
+      const plan = await planSounds(params, {
+        root: dir,
+        timeline,
+        load: async () => loadFor(dir, timeline, caller),
+        resolve: (ref, loaded) => resolveTimeRef(ref, { timeline: loaded }),
+        take: (spec) => serialSound(dir, () => makeTake(dir, spec)),
+        sfxUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.sfxUnderVoice.value,
       });
-      return run;
+      if (plan.sounds.length === 0) {
+        return { timeline, revision: plan.revision, tx: null, tracks: [], placed: [], skipped: plan.skipped, generated: plan.generated, warnings: plan.warnings };
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: plan.label };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const author = journalAuthorOf(caller);
+      try {
+        // Each step checks the revision its predecessor left: a person's edit in between fails the step instead of putting a clip on lanes fitted for an older timeline.
+        let expected = plan.revision;
+        const written = await runPlan(plan, async (step) => {
+          const request = step as OperationRequest;
+          const result = await timelines.apply({
+            root: dir,
+            cwd,
+            timeline,
+            request,
+            author,
+            tx,
+            prepare: async (current) => {
+              if (current.revision !== expected) {
+                throw new RpcError(ErrorCode.StaleRevision, `sound.place: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the sounds were placed. Check it with timeline show.`, {
+                  op: "sound.place",
+                  timeline,
+                  revision: expected,
+                  current: current.revision,
+                });
+              }
+              return request;
+            },
+          });
+          expected = result.revision;
+          await transactions.applied(key, tx);
+          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
+        });
+        return {
+          timeline,
+          revision: written.revision,
+          tx: tx.id,
+          tracks: written.tracks,
+          placed: written.placed,
+          skipped: plan.skipped,
+          generated: plan.generated,
+          warnings: allWarnings(plan, written.warnings),
+        };
+      } finally {
+        await settle(key, tx);
+      }
     },
     "timeline.show": async ({ cwd, timeline, view, grid }, caller) => {
       const dir = await root(cwd);

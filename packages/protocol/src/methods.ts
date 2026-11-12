@@ -32,7 +32,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -45,6 +45,7 @@ import {
   OpIdSchema,
   OperationResultSchema,
   RejectionRecordSchema,
+  TimeRefParam,
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineRejectionSchema,
@@ -69,7 +70,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 99;
+export const PROTOCOL_VERSION = 100;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -720,6 +721,52 @@ const UncertainWordSchema = VerifiedWordSchema.extend({
         "re-transcribing the audio around it): a transcription miss, not a cut; check by ear, never trim for it.",
     ),
   heardAs: z.string().nullable().describe("What was heard in the word's slot for `garbled`; null otherwise."),
+});
+
+/** Fields every sound of `sound.place` takes, whichever way its time is given (ADR 0038). */
+const soundFields = {
+  role: SoundRoleSchema.optional().describe("What the sound does to the picture; it picks the offset against the cue. Default: by kind."),
+  tier: SoundTierSchema.optional().describe("`primary` (carries the picture), `secondary`, `texture` (background); it picks the gain. Default: by kind."),
+  seed: z.number().int().min(0).max(SFX_SEED_MAX).default(0).describe("Family seed, as in `sound.sfx`: one seed per film keeps one timbre."),
+  pitch: z.number().min(SFX_PITCH_RANGE.min).max(SFX_PITCH_RANGE.max).optional().describe("Multiplier of every frequency, as in `sound.sfx`."),
+  offset: z.number().min(-1000).max(1000).optional().describe("Milliseconds from the cue to the take's anchor, replacing the role's offset (negative = before the picture)."),
+  gain: z.number().min(-60).max(12).optional().describe("Clip gain in dB, replacing the one from the style and the tier."),
+};
+
+/** The fields of a sound that has a kind of its own. */
+const soundKindFields = {
+  kind: SfxKindSchema.describe("What the sound is, as in `sound.sfx`."),
+  variant: z.number().int().min(1).max(SFX_VARIANTS).optional().describe(`Recipe of the kind, 1 to ${SFX_VARIANTS}. Default: rotates through them along the timeline.`),
+  length: z.number().positive().optional().describe("Seconds, for `whoosh` and `riser` only, as in `sound.sfx`."),
+};
+
+/** One sound of `sound.place` `cues`. */
+const SoundCueSchema = z.strictObject({
+  at: TimeRefParam("Timeline time of the picture event the sound belongs to."),
+  ...soundKindFields,
+  ...soundFields,
+});
+
+/** `cuts` of `sound.place`. */
+const SoundCutsSchema = z.strictObject({
+  track: z.string().min(1).describe("Video or audio track whose cuts (the start of every clip after the first) get a sound, from `track.list`."),
+  which: z.array(z.int().min(1)).min(1).optional().describe("Only these cuts, counted from 1 in time order. Default: every cut."),
+  ...soundKindFields,
+  ...soundFields,
+});
+
+/** `typing` of `sound.place`. */
+const SoundTypingSchema = z.strictObject({
+  from: TimeRefParam("Timeline time of the first key."),
+  to: TimeRefParam("Timeline time the run ends; no key at or after it. After `from`."),
+  rate: z
+    .number()
+    .positive()
+    .max(SOUND_TYPING_RATE.max)
+    .default(SOUND_TYPING_RATE.default)
+    .describe(`Keys per second, at most ${SOUND_TYPING_RATE.max}. Default ${SOUND_TYPING_RATE.default}.`),
+  kind: z.enum(["tick", "click"]).default("tick").describe("`tick` (default) or `click`."),
+  ...soundFields,
 });
 
 /**
@@ -2210,6 +2257,76 @@ export const methods = {
         .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
         .describe("The take when this call wrote it, imported; empty when `cached`. Follow its ingest with `job.list`."),
       credited: z.boolean().describe("The project's `credits.json` holds an `own` entry for the take. False when the project keeps no ledger."),
+    }),
+  },
+  "sound.place": {
+    mutating: true,
+    description:
+      "Place generated sound effects (ADR 0038) on a timeline, in one transaction `Sound: …` (one proposal in review mode; " +
+      "`revert` undoes it whole). Each sound is made like `sound.sfx` (reused when the same take exists, else written to " +
+      "`assets/sound/` and imported) and put on an audio track so that the instant of the take that must meet the picture " +
+      "(`peakAt`: the transient of a hit, the peak of a whoosh, the end of a riser) falls on its cue plus an offset by role " +
+      `(ms, negative = before the picture: ${Object.entries(SOUND_ROLE_OFFSETS).map(([role, ms]) => `${role} ${ms}`).join(", ")}; ` +
+      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click and shutter \`click\`, tick \`tap\`, ` +
+      "pop and thump `pop`, whoosh `whoosh`, impact `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
+      "a frame of where asked, and it plays whole frames (a sound shorter than one frame is skipped, with a reason). " +
+      "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`), `cuts` (the edit point at the start of every clip after the first of a video " +
+      "or audio `track`, or only the numbered ones in `which`) and `typing` (a run of keys between `from` and `to`, " +
+      `${SOUND_TYPING_RATE.default} keys a second by default, at most ${SOUND_TYPING_RATE.max}, spaced at least ${SOUND_KEY_GAP_MS} ms apart (a warning when whole frames bring two keys closer), with a seeded ±10 % timing jitter ` +
+      "and rotating takes). Sounds go on the audio track named `SFX` (made when absent) or on `track`; sounds that overlap in time " +
+      "go on further tracks `SFX 2`, `SFX 3`… The clip `gain` (dB) is minus the style's `sound.sfxUnderVoice` (20 by default) " +
+      `plus the tier: ${Object.entries(SOUND_TIER_OFFSETS_DB).map(([tier, db]) => `${tier} ${db}`).join(", ")} dB (\`gain\` replaces it). ` +
+      "Without `variant` the takes of one kind rotate through variants 1 to 3 along the timeline, so the same whoosh is never twice in a row. " +
+      "Taste is a warning, never a refusal: the call warns (`warnings`) when more than " +
+      `${SOUND_MAX_PER_FRAME} sounds land on one frame, when two sounds of one kind are closer than their minimum gap ` +
+      `(${Object.entries(SOUND_MIN_GAP_MS).map(([kind, ms]) => `${kind} ${ms} ms`).join(", ")}) and when one take plays twice in a row, counting sounds already on the timeline. ` +
+      "Example: `{ cues: [{ at: \"hook\", kind: \"whoosh\" }, { at: 6.2, kind: \"click\", seed: 3 }] }`. " +
+      `At most ${SOUND_MAX_PLACEMENTS} sounds per call. Fails with InvalidParams (nothing to place), InvalidOperation (an unknown ` +
+      "marker, a `track` that is not an audio track, a hand-made file in the way of a take) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      cues: z.array(SoundCueSchema).min(1).optional().describe("Sounds at given times; each is one sound."),
+      cuts: SoundCutsSchema.optional().describe("Sounds on the edit points of a track."),
+      typing: SoundTypingSchema.optional().describe("A run of key sounds between two times."),
+      track: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Audio track for the sounds, from `track.list`. Default: the audio track named `SFX`, made when absent."),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline id."),
+      revision: z.int().describe("Revision after the last change; the one before the call when nothing was placed."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null when nothing was placed."),
+      tracks: z
+        .array(z.object({ id: z.string(), name: z.string().nullable(), created: z.boolean().describe("This call made the track.") }))
+        .describe("The audio tracks the sounds went on, first lane first."),
+      placed: z
+        .array(
+          z.object({
+            clip: z.string().describe("Id of the new clip."),
+            track: z.string(),
+            file: z.string().describe("The take, project-relative: `assets/sound/<kind>-<key>.wav`."),
+            state: z.enum(["generated", "cached"]).describe("`generated`: this call wrote the take. `cached`: it already existed."),
+            kind: SfxKindSchema,
+            role: SoundRoleSchema.nullable().describe("Role whose offset applied; null for a riser's own rule or an `offset` given."),
+            tier: SoundTierSchema,
+            from: z.enum(["cue", "cut", "typing"]).describe("Which part of the call asked for it."),
+            cue: z.number().describe("Timeline second the sound belongs to."),
+            offset: z.number().describe("Milliseconds from the cue to the take's anchor that were used."),
+            start: z.number().describe("Timeline second the clip starts, on the frame grid."),
+            in: z.number().describe("Source seconds cut off the head of the take; above 0 only when it would start before the timeline does."),
+            anchorAt: z.number().describe("Timeline second where the take's anchor falls after rounding to frames."),
+            gain: z.number().describe("Clip gain, dB."),
+          }),
+        )
+        .describe("The clips made, in time order."),
+      skipped: z
+        .array(z.object({ cue: z.number(), kind: SfxKindSchema, reason: z.string() }))
+        .describe("Sounds asked for and not placed, with why (shorter than one frame, would start before the timeline)."),
+      generated: z.int().describe("Takes this call wrote (the others were reused)."),
+      warnings: z.array(z.string()).describe("Crowded frames, short gaps, a take twice in a row, trimmed heads, and the engine's own warnings."),
     }),
   },
   "shoot.status": {
@@ -4160,6 +4277,8 @@ export type ScriptCheckResult = MethodResult<"script.check">;
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 /** Result of `sound.sfx`. */
 export type SoundSfxResult = MethodResult<"sound.sfx">;
+/** Result of `sound.place`. */
+export type SoundPlaceResult = MethodResult<"sound.place">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
