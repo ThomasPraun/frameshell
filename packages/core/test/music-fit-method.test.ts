@@ -197,6 +197,8 @@ describe("music.fit", () => {
     expect(marker.message).toContain("end-card");
     expect((await rejection(conn.request("music.fit", { cwd: project, timeline: "main", clip: "c_nope", end: 11 }))).code).toBe(ErrorCode.ClipNotFound);
     expect((await rejection(conn.request("music.fit", { cwd: project, timeline: "main", clip, end: 11, skip: ["place"] }))).data).toMatchObject({ reason: "skip" });
+    // `duck` is accepted on a clip without duck keys: nothing to skip, no error.
+    expect(await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card", skip: ["duck"], dryRun: true })).toMatchObject({ dryRun: true, duck: null });
   });
 
   it(

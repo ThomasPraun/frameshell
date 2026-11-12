@@ -3190,7 +3190,8 @@ export const methods = {
       "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
       "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
       "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +
-      "where the track is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
+      "where the clip plays the file from later than 0 and the start lands after `from`, the intro comes back as far as the file has it; " +
+      "where the file is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
       "or spliced. `exact: true` keeps the start (the clip's own, or `from`) and changes the speed so the hit lands exactly on " +
       "`end`: at most ±1.7 % of the clip's speed (export keeps the pitch with atempo; the preview still shifts it a little until " +
       "its stretch lands); beyond that it refuses and says which `end` would fit, or to drop `exact`. A detected hit under " +

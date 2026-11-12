@@ -1752,7 +1752,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "music.fit": async ({ cwd, timeline, clip, end, from, hit, exact, dryRun, skip }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
-      const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip }, {
+      const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
         profile: (asset) => energy.profile(dir, asset),
         // A grid of other content (the file was replaced) places nothing.
         onsets: async (asset) => {

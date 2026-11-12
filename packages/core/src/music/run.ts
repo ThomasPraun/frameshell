@@ -1,6 +1,7 @@
 import { ErrorCode, MUSIC_FIT_MIN_CONFIDENCE, type MusicFitResult, RpcError } from "@frameshell/protocol";
 import { type AnyClip, type ClipTrack, type MediaClip, type Timeline, clipLength } from "@frameshell/schema";
 import type { EnergyProfile } from "../media/energy.js";
+import { FrameGrid } from "../timeline/grid.js";
 import { resolveTimeRefArg } from "../timeline/time-ref.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";
@@ -21,6 +22,8 @@ export interface MusicFitRequest {
   hit?: number | undefined;
   exact: boolean;
   skip?: readonly string[] | undefined;
+  /** Nothing is written: warnings say what would happen, not what happened. */
+  dryRun?: boolean | undefined;
 }
 
 /** A fit before anything is written: the report, and the operations that make it. */
@@ -105,12 +108,12 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
     } else {
       duck = { under, rerun: true };
       duckAgain = { track: track.id, under };
-      warnings.push(`${clip.id} carries duck keys: duck ran again on ${track.id} over ${under.join(", ")} with its defaults, replacing the old duck keys of every clip of that track.`);
+      warnings.push(`${clip.id} carries duck keys: duck ${request.dryRun === true ? "would run" : "ran"} again on ${track.id} over ${under.join(", ")} with its defaults, replacing the old duck keys of every clip of that track.`);
     }
     if (under.length > 0) steps.push({ id: "duck", detail: `run duck again on ${track.id} over ${under.join(", ")}`, skippable: true });
   }
-  // `duck` may be named for a clip with duck keys even when the fit changes nothing: skipping what is not needed is no error.
-  checkSkip(request.skip, [...steps.filter((step) => step.skippable).map((step) => step.id), ...(keyed && !steps.some((step) => step.id === "duck") ? ["duck"] : [])]);
+  // `duck` is always accepted: an agent that passes it every time gets no error when there is nothing to skip.
+  checkSkip(request.skip, [...new Set([...steps.filter((step) => step.skippable).map((step) => step.id), "duck"])]);
 
   const place = (clipPlace: FitPlan["after"]): MusicFitResult["after"] => ({ start: clipPlace.start, in: clipPlace.in, speed: clipPlace.speed, end: round3(clipEnd(clipPlace)) });
   return {
@@ -174,7 +177,8 @@ function voiceTracks(timeline: Timeline, music: string): string[] {
 
 /** Refuse before writing when the clip's new place would overlap another clip of its track (the engine would refuse mid-fit). */
 function checkRoom(trackId: string, clips: readonly AnyClip[], clip: MediaClip, plan: FitPlan, fps: number): void {
-  const frame = (seconds: number) => Math.round(seconds * fps);
+  const grid = new FrameGrid(fps);
+  const frame = (seconds: number) => grid.frame(seconds);
   const [first, last] = [frame(plan.after.start), frame(clipEnd(plan.after))];
   for (const other of clips) {
     if (other.id === clip.id) continue;

@@ -78,7 +78,11 @@ export function planFit(request: FitRequest): FitPlan {
   return request.exact ? exactPlan(request, g, end) : slidePlan(request, g, end);
 }
 
-/** Slide: keep the speed, move the clip; drop the start of the track when it would begin before `from`. */
+/**
+ * Slide: keep the speed, move the clip. Where the clip would begin before `from`, the start of the track is dropped (`in`
+ * later); where it would begin after `from` and the file has music before `in`, that music is brought back (`in` earlier,
+ * down to 0), so a second fit with a later end leaves no gap the file could fill.
+ */
 function slidePlan(request: FitRequest, g: FrameGrid, end: number): FitPlan {
   const { clip, hit } = request;
   const from = g.snap(request.from ?? 0);
@@ -90,17 +94,20 @@ function slidePlan(request: FitRequest, g: FrameGrid, end: number): FitPlan {
     start = from;
     inPoint = g.snap(hit - (end - start) * speed);
     if (inPoint >= hit) throw tooEarly(end, from, request.from !== undefined);
+  } else if (clip.in > 0 && g.frame(start) > g.frame(from)) {
+    inPoint = Math.max(0, g.snap(hit - (end - from) * speed));
+    start = Math.max(from, g.snap(end - (hit - inPoint) / speed));
   }
   const after: FitClip = { start, in: inPoint, speed, out: clip.out };
-  const operations: FitOperation[] = [];
-  if (inPoint !== clip.in) operations.push({ op: "clip.trim", args: { in: inPoint, snap: false } });
-  // A head trim moves the start with the first frame; the move only closes what is left.
-  const afterTrim = inPoint === clip.in ? clip.start : g.snap(clip.start + (inPoint - clip.in) / speed);
-  if (g.frame(afterTrim) !== g.frame(start)) operations.push({ op: "clip.move", args: { start } });
+  const operations = headOperations(clip, after, g);
 
-  const introCut = round(inPoint - clip.in, 3);
-  const silentBefore = introCut === 0 && start - from >= g.step / 2 ? round(start - from, 3) : 0;
+  const introCut = Math.max(0, round(inPoint - clip.in, 3));
+  const introBack = Math.max(0, round(clip.in - inPoint, 3));
+  const silentBefore = inPoint === 0 && start - from >= g.step / 2 ? round(start - from, 3) : 0;
   const warnings: string[] = [];
+  if (introBack > 0) {
+    warnings.push(`The clip played the file from ${secs(clip.in)}; the ${secs(introBack)} before it are back, so the music starts at ${secs(inPoint)} of the file and fills more of the picture before the hit.`);
+  }
   if (introCut > 0) {
     warnings.push(
       `The track is longer than the picture before the hit: its first ${secs(introCut)} are dropped (it starts at ${secs(inPoint)} of the file), which can fall mid-phrase. ` +
@@ -112,8 +119,32 @@ function slidePlan(request: FitRequest, g: FrameGrid, end: number): FitPlan {
   }
   const steps: FitPlan["steps"] = [];
   if (introCut > 0) steps.push({ id: "intro", detail: `drop ${secs(introCut)} of the intro (in ${secs(clip.in)} -> ${secs(inPoint)})`, skippable: false });
+  if (introBack > 0) steps.push({ id: "intro", detail: `bring back ${secs(introBack)} of the intro (in ${secs(clip.in)} -> ${secs(inPoint)})`, skippable: false });
   if (g.frame(start) !== g.frame(clip.start)) steps.push({ id: "place", detail: `start ${secs(clip.start)} -> ${secs(start)}`, skippable: false });
   return finish("slide", request, after, end, operations, steps, warnings, { introCut, silentBefore, speedChange: null });
+}
+
+/**
+ * The trim and move that take `clip` to `after`. A head trim moves the start with the first frame, so the move only closes
+ * what is left; a head trim that brings music back moves the start earlier, so the clip is moved first to stay at 0 or later.
+ */
+function headOperations(clip: FitClip, after: FitClip, g: FrameGrid): FitOperation[] {
+  const operations: FitOperation[] = [];
+  const shift = (after.in - clip.in) / clip.speed;
+  let at = clip.start;
+  if (after.in < clip.in) {
+    const first = g.snap(after.start - shift);
+    if (g.frame(first) !== g.frame(at)) {
+      operations.push({ op: "clip.move", args: { start: first } });
+      at = first;
+    }
+  }
+  if (after.in !== clip.in) {
+    operations.push({ op: "clip.trim", args: { in: after.in, snap: false } });
+    at = g.snap(at + shift);
+  }
+  if (g.frame(at) !== g.frame(after.start)) operations.push({ op: "clip.move", args: { start: after.start } });
+  return operations;
 }
 
 /** Exact: keep the start (`from`, else where the clip starts), change the speed so the hit lands on `end`. */
@@ -129,14 +160,12 @@ function exactPlan(request: FitRequest, g: FrameGrid, end: number): FitPlan {
   const after: FitClip = { start, in: clip.in, speed, out: clip.out };
   const operations: FitOperation[] = [];
   const steps: FitPlan["steps"] = [];
-  if (speed !== clip.speed) {
-    operations.push({ op: "clip.set", args: { speed } });
-    steps.push({ id: "speed", detail: `speed ${clip.speed} -> ${speed} (${percent(speed / clip.speed - 1)})`, skippable: false });
-  }
-  if (g.frame(start) !== g.frame(clip.start)) {
-    operations.push({ op: "clip.move", args: { start } });
-    steps.push({ id: "place", detail: `start ${secs(clip.start)} -> ${secs(start)}`, skippable: false });
-  }
+  const set: FitOperation | null = speed !== clip.speed ? { op: "clip.set", args: { speed } } : null;
+  const move: FitOperation | null = g.frame(start) !== g.frame(clip.start) ? { op: "clip.move", args: { start } } : null;
+  // The first operation leaves the clip half done for a moment: moving earlier first keeps it clear of a neighbour on its right.
+  for (const operation of start < clip.start ? [move, set] : [set, move]) if (operation) operations.push(operation);
+  if (set) steps.push({ id: "speed", detail: `speed ${clip.speed} -> ${speed} (${percent(speed / clip.speed - 1)})`, skippable: false });
+  if (move) steps.push({ id: "place", detail: `start ${secs(clip.start)} -> ${secs(start)}`, skippable: false });
   const warnings =
     speed === clip.speed
       ? []

@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proposal in review mode); only `start`, `in`, `speed` and gain keys are written, so older versions open the
   timeline. Measured on a synthetic drum track: the export's `atempo` plays the material about 21 ms early at a speed
   near 1 (the preview has no such shift) and softens a kick's attack from 3.1 to 5.7 ms; tape-style resampling shows
-  neither (ADR 0037 has the numbers; the 5 ms `fadeIn` is not written yet).
+  neither (ADR 0037 has the numbers, measured on darwin-arm64 only; the 5 ms `fadeIn` is not written yet). A second fit
+  that lands later brings back the intro an earlier fit dropped, as far as the file has it.
 
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in

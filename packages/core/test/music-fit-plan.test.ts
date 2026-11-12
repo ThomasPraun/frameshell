@@ -43,6 +43,34 @@ describe("planFit, sliding", () => {
     expect(plan.steps.map((step) => step.id)).toEqual(["intro"]);
   });
 
+  it("brings the intro back when a later end moves a clip that an earlier fit trimmed", () => {
+    // Fit 1 with end 20 left in 10, start 0; the cut moves to 25.
+    const trimmed = { start: 0, in: 10, out: 40, speed: 1 };
+    const plan = fit({ clip: trimmed, end: 25 });
+    expect(plan.after).toEqual({ start: 0, in: 5, speed: 1, out: 40 });
+    expect(plan.landsAt).toBe(25);
+    expect(plan.introCut).toBe(0);
+    expect(plan.silentBefore).toBe(0);
+    expect(plan.warnings.join(" ")).not.toContain("shorter than the picture");
+    expect(plan.warnings.join(" ")).toContain("are back");
+    expect(plan.steps.map((step) => step.id)).toEqual(["intro"]);
+    // The clip never goes before 0 on the way: move first, then the head trim closes the gap.
+    expect(plan.operations).toEqual([
+      { op: "clip.move", args: { start: 5 } },
+      { op: "clip.trim", args: { in: 5, snap: false } },
+    ]);
+  });
+
+  it("brings back only what the file has, and reports the rest as silence", () => {
+    const plan = fit({ clip: { start: 0, in: 10, out: 40, speed: 1 }, end: 36 });
+    expect(plan.after).toEqual({ start: 6, in: 0, speed: 1, out: 40 });
+    expect(plan.landsAt).toBe(36);
+    expect(plan.silentBefore).toBe(6);
+    expect(plan.introCut).toBe(0);
+    expect(plan.warnings.join(" ")).toContain("never looped or spliced");
+    expect(plan.operations.map((operation) => operation.op)).toEqual(["clip.move", "clip.trim"]);
+  });
+
   it("respects `from` as the earliest start", () => {
     const plan = fit({ end: 40, from: 12 });
     expect(plan.after.start).toBe(12);
@@ -92,7 +120,7 @@ describe("planFit, exact", () => {
     const plan = fit({ exact: true, from: 1, end: 30.5, clip: { ...clip, start: 3 } });
     expect(plan.after.start).toBe(1);
     expect(plan.after.speed).toBeCloseTo(30 / 29.5, 6);
-    expect(plan.operations.map((operation) => operation.op)).toEqual(["clip.set", "clip.move"]);
+    expect(plan.operations.map((operation) => operation.op)).toEqual(["clip.move", "clip.set"]);
     expect(plan.speedChangePercent).toBeCloseTo(1.695, 2);
   });
 
