@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - HyperFrames clips rendered at each format's size, third slice of #469 with the format half of #465 slice 4 (ADR 0027,
-  ADR 0033, epic #451; daemon `clip.renders` `format`, MCP `clip_renders`, protocol 98): in a format of the project
+  ADR 0033, epic #451; daemon `clip.renders` `format`, MCP `clip_renders`, protocol 99): in a format of the project
   whose aspect differs from the composition's (`9x16` of a 16:9 project), the `hyperframes` adapter sets the copied
   composition root's `data-width`/`data-height` to the format's size before rendering, so the motion runtime's
   `stage()` and `pick()` lay a template out for that format instead of the page being letterboxed. Of the same aspect,
