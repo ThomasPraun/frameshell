@@ -161,6 +161,9 @@ import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvide
 import { generateVoiceover } from "./voiceover/generate.js";
 import { type SfxRequest, generateSfx } from "./sound/generate.js";
 import { allWarnings, planSounds, runPlan } from "./sound/place.js";
+import { sectionStarts } from "./sound/music.js";
+import { planMusic, runMusicPlacement } from "./sound/music-place.js";
+import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
 
@@ -526,19 +529,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     });
     return run;
   };
+  /** Record generated take `file` of project `dir` as own work; true when the ledger holds it now. */
+  const creditTake = async (dir: string, file: string) => {
+    // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
+    if (!(await exists(join(dir, CREDITS_FILE)))) return false;
+    const ledger = await readCredits(dir);
+    if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
+    return true;
+  };
   /** One sound effect take of project `dir` (`sound.sfx`): written and imported, or found; its credit recorded when the project keeps a ledger. */
   const makeTake = (dir: string, spec: Pick<SfxRequest, "kind" | "variant" | "seed" | "pitch" | "length">) =>
     generateSfx({
       root: dir,
       ...spec,
       importAssets: (files) => media.import(dir, files, "copy"),
-      credit: async (file) => {
-        // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
-        if (!(await exists(join(dir, CREDITS_FILE)))) return false;
-        const ledger = await readCredits(dir);
-        if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
-        return true;
-      },
+      credit: (file) => creditTake(dir, file),
     });
   /** Aborts provider calls when the daemon stops. */
   const voiceoverAbort = new AbortController();
@@ -1725,6 +1730,86 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           skipped: plan.skipped,
           generated: plan.generated,
           warnings: allWarnings(plan, written.warnings),
+        };
+      } finally {
+        await settle(key, tx);
+      }
+    },
+    "sound.music": async (params, caller) => {
+      const { cwd, timeline } = params;
+      const dir = await root(cwd);
+      const plan = await planMusic(params, {
+        load: async () => loadFor(dir, timeline, caller),
+        duration: async () => (await timelines.show(dir, timeline, await viewOf(dir, caller, undefined))).duration,
+        resolve: (ref, loaded) => resolveTimeRef(ref, { timeline: loaded }),
+        take: (spec) =>
+          serialSound(dir, () => generateMusic({ root: dir, spec, importAssets: (files) => media.import(dir, files, "copy"), credit: (file) => creditTake(dir, file) })),
+        musicUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.musicUnderVoice.value,
+      });
+      const { take, spec, placement } = plan;
+      const facts = {
+        file: take.file,
+        state: take.state,
+        preset: spec.preset,
+        bpm: spec.bpm,
+        meter: spec.meter,
+        bars: take.mark.sections.reduce((sum, section) => sum + section.bars, 0),
+        seed: spec.seed,
+        chords: [...spec.chords],
+        sections: sectionStarts(spec),
+        duration: take.grid.duration,
+        hitAt: take.grid.hitAt,
+        lufs: take.mark.lufs,
+        peakDb: take.mark.peakDb,
+        beats: take.beats,
+        imported: take.imported,
+        credited: take.credited,
+      };
+      if (!placement) return { ...facts, timeline: null, revision: null, tx: null, track: null, clip: null, start: null, gain: null, tempo: null, warnings: plan.warnings };
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: placement.label };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const author = journalAuthorOf(caller);
+      try {
+        // Each step checks the revision its predecessor left: a person's edit in between fails the step.
+        let expected = placement.revision;
+        const written = await runMusicPlacement(placement, take.file, async (step) => {
+          const request = step as OperationRequest;
+          const result = await timelines.apply({
+            root: dir,
+            cwd,
+            timeline,
+            request,
+            author,
+            tx,
+            prepare: async (current) => {
+              if (current.revision !== expected) {
+                throw new RpcError(ErrorCode.StaleRevision, `sound.music: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the track was placed. Check it with timeline show.`, {
+                  op: "sound.music",
+                  timeline,
+                  revision: expected,
+                  current: current.revision,
+                });
+              }
+              return request;
+            },
+          });
+          expected = result.revision;
+          await transactions.applied(key, tx);
+          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
+        });
+        return {
+          ...facts,
+          timeline,
+          revision: written.revision,
+          tx: tx.id,
+          track: written.track,
+          clip: written.clip,
+          start: placement.start,
+          gain: placement.gain,
+          tempo: placement.tempo,
+          warnings: [...new Set([...plan.warnings, ...written.warnings])],
         };
       } finally {
         await settle(key, tx);

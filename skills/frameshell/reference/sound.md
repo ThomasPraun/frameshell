@@ -1,6 +1,6 @@
-# Sound effects
+# Sound effects and music
 
-Short sounds made offline by Frameshell itself (ADR 0038): no network, no third-party samples, no licence to read. Same arguments, same file. Commands assume the session rule of [SKILL.md](../SKILL.md).
+Short sounds and music beds made offline by Frameshell itself (ADR 0038): no network, no third-party samples, no licence to read. Same arguments, same file. Commands assume the session rule of [SKILL.md](../SKILL.md). Music: [below](#music-bed).
 
 ## Make one
 
@@ -34,6 +34,23 @@ One call is one transaction (`Sound: 2 whoosh`): `revert` undoes it, review mode
 - **Gain.** The clip `gain` is minus the style's `sound.sfxUnderVoice` (20 dB by default; see [project-model.md](project-model.md#style)) plus the `--tier`: `primary` 0 (the default for most kinds), `secondary` -4 (shutter), `texture` -8 (tick, typing). `--gain dB` replaces it.
 - **Variants.** Without `--variant` the takes of one kind rotate through 1 to 3 along the timeline and across calls, so the same whoosh is not twice in a row; give `--seed` for another family.
 - **Warnings** (the call still places everything; fix them with `clip move` or `clip remove`, or `revert` and ask again): more than 2 sounds on one frame; two ticks closer than 66 ms or two pops closer than 114 ms; two keys of a typing run closer than 87 ms once rounded to frames (lower `--rate`); one take twice in a row. They count sounds already on the audio tracks.
+
+## Music bed
+
+```sh
+frameshell sound music synthwave --json
+frameshell sound music lofi --bars 16 --at intro-end --sections intro:2,full:6,build:2,drop@reveal,outro:2 --accents logo
+frameshell sound music minimal --bpm 104 --length 30 --chords Dm,Bb,F,C --seed 3 --no-place --json
+```
+
+A track synthesized from a seed: drums, bass, chords, a melody from the minor pentatonic of the first chord. Presets: `synthwave` (118 BPM, Am F C G, saw chords, a kick on every beat), `lofi` (78 BPM, Dm9 G13 Cmaj7 Am7, electric piano, swung hats, vinyl, dark), `minimal` (110 BPM, mallet stabs, plucked bass, metallic hats, no pads). `--bpm` 50 to 180, `--meter` 2 to 7 beats a bar, `--chords` one per bar, repeating. Change `--seed` for another tune with the same settings.
+
+- **Length.** Whole bars: `--bars`, or `--length` seconds (the bars whose end is nearest), else from `--at` to the end of the timeline. The track then ends on a **final hit** (the first chord, a crash and a big kick on the downbeat after the last bar, `hitAt` in the result) and rings 2.5 s. At most 128 bars and 300 s.
+- **Parts.** `--sections` lists `kind[:bars][@time]`: `intro`, `full`, `dark` (stripped: under a voice or a busy picture), `build` (a climbing motif, a clap roll and a riser that ends 75 ms before the next part), `gap` (one hit, then silence, so the next downbeat lands hard), `drop` (everything, with a crash on its first beat), `outro` (half time). `@time` (a marker, seconds) starts the part on the nearest bar: put the drop on the hero reveal, about 30 to 60 % into the film. Without it: intro, full, build and drop (from 8 bars), outro. `--accents` adds a crash and a big kick on the nearest beat (a logo, a call to action).
+- **What lands.** `assets/sound/music-<preset>-<key>.wav` (48 kHz, 24-bit stereo, -14 LUFS, sample peak at most -1 dBFS) and its **exact beat grid** `beats/sound/music-<preset>-<key>.beats.json` (`detector: exact`, confidence 1): never run `beats measure` on it. Placed (unless `--no-place`) in one transaction `Music: …` on the audio track `Music` (made when missing; `Music 2` when that time is taken; `--track` names one) at `--at` (default 0), gain minus the style's `sound.musicUnderVoice` (12 dB; `--gain` replaces it). When the timeline has no `tempo`, it now follows the new clip, so `--at bar:9`, `beat:17` and `--snap-to beat` work at once; an existing tempo is kept with a warning (`tempo set --clip <id>` to switch).
+- **Fit it.** The final hit is a strong onset in the grid: `frameshell music fit <clip> --end end-card` lands it on the end card. Duck it under the voice with `duck`.
+- Credits as for effects: recorded as `own` work when the project keeps `credits.json`. MCP: `sound_music` (`sections` as `[{ kind, bars?, at? }]`).
+- You cannot listen: read `lufs` and `peakDb`, and listen-check with the person before export. Synthesis reads cheap next to a licensed track for premium work: say so and offer one.
 
 ## Taste
 

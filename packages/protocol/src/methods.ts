@@ -33,7 +33,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, MUSIC_BPM_RANGE, MUSIC_CHORD_PATTERN, MUSIC_LIMITS, MUSIC_LUFS, MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_METER_RANGE, MUSIC_PEAK_DBFS, MUSIC_PRESET_DEFAULTS, MUSIC_TAIL_SECONDS, MusicPresetSchema, MusicSectionSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 102;
+export const PROTOCOL_VERSION = 103;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2331,6 +2331,125 @@ export const methods = {
       warnings: z.array(z.string()).describe("Crowded frames, short gaps, a take twice in a row, trimmed heads, and the engine's own warnings."),
     }),
   },
+  "sound.music": {
+    mutating: true,
+    description:
+      "Generate a music bed (ADR 0038): a seeded 16-step sequencer synthesized offline, no network and no third-party samples. " +
+      `Presets: \`synthwave\` (${MUSIC_PRESET_DEFAULTS.synthwave.bpm} BPM, ${MUSIC_PRESET_DEFAULTS.synthwave.chords.join("-")}, saw chords, ` +
+      `four on the floor), \`lofi\` (${MUSIC_PRESET_DEFAULTS.lofi.bpm} BPM, ${MUSIC_PRESET_DEFAULTS.lofi.chords.join("-")}, electric piano, swung ` +
+      `hats, vinyl, dark), \`minimal\` (${MUSIC_PRESET_DEFAULTS.minimal.bpm} BPM, FM mallet stabs, plucked bass, metallic hats, no pads). ` +
+      "The track has whole bars (`bars`, or as many as fit `length` seconds, or with `place` and neither, as many as fit from " +
+      "`at` to the end of the timeline) made of `sections`: `intro`, `full`, `dark` (stripped: pad, sub, soft kick, for under a " +
+      "voice or a dense picture), `build` (a climbing motif, a clap roll and a riser that ends 75 ms before the next part), " +
+      "`gap` (one stop-time hit, then silence so the next downbeat lands hard), `drop` (everything, a crash and a big kick on " +
+      "its first beat), `outro` (half time). Without `sections` it is intro, full, build and drop (from 8 bars), outro. A " +
+      "section's `at` (a time on the timeline) starts it on the nearest bar, so a drop can land on a marker. Every track ends " +
+      "on a final hit, the first chord with a crash and a big kick on the downbeat after its last bar, that rings for " +
+      `${MUSIC_TAIL_SECONDS} s; \`accents\` add a crash and a big kick on the nearest beat (a logo, a call to action). The same ` +
+      "arguments always give the same file. The take is a 48 kHz 24-bit stereo WAV at " +
+      `${MUSIC_LUFS} LUFS with its sample peak at most ${MUSIC_PEAK_DBFS} dBFS, written to \`assets/sound/music-<preset>-<key>.wav\` and imported; ` +
+      "beside it the call writes its exact beat grid `beats/<name>.beats.json` (`detector: \"exact\"`, confidence 1, the " +
+      "downbeat at 0, the final hit and accents as `onsets`), so nothing measures it and `beat:`/`bar:` times, `--snap-to " +
+      "beat` and `music.fit` can use it at once. With `place` (default) the call also puts the take on the timeline in one " +
+      "transaction `Music: …` (one proposal in review mode; `revert` undoes it): a clip starting at `at` (default 0) on the " +
+      "audio track named `Music` (made when absent; `Music 2`… when the time is taken) or on `track`, with `gain` minus the " +
+      "style's `sound.musicUnderVoice` (12 dB by default), and when the timeline has no `tempo` yet, `tempo` set to follow " +
+      "the new clip; an existing tempo is kept, with a warning. `place: false` only writes and imports the take. When the " +
+      "project keeps a `credits.json`, the take is recorded as `own` work. Fails with InvalidParams (no length to go by, " +
+      "bars and sections that disagree, too long) or InvalidOperation (an unknown marker, a `track` that is not an audio " +
+      "track or is taken at that time, a hand-made file in the way of the take).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      preset: MusicPresetSchema.describe("Genre: instruments, groove, default tempo and chords."),
+      bpm: z
+        .number()
+        .min(MUSIC_BPM_RANGE.min)
+        .max(MUSIC_BPM_RANGE.max)
+        .optional()
+        .describe(`Tempo, ${MUSIC_BPM_RANGE.min} to ${MUSIC_BPM_RANGE.max} BPM. Default: the preset's.`),
+      meter: z.int().min(MUSIC_METER_RANGE.min).max(MUSIC_METER_RANGE.max).default(4).describe("Beats per bar. Default 4."),
+      bars: z.int().min(1).max(MUSIC_MAX_BARS).optional().describe("Length in bars, before the final hit and its ring."),
+      length: z
+        .number()
+        .positive()
+        .max(MUSIC_MAX_SECONDS)
+        .optional()
+        .describe("Length in seconds: the track gets the whole bars whose end (the final hit) is nearest to it. Not with `bars`."),
+      sections: z
+        .array(
+          z.strictObject({
+            kind: MusicSectionSchema,
+            bars: z.int().min(1).max(MUSIC_MAX_BARS).optional().describe("Bars of this part. Default: up to the next part's `at`, or to the end for the last."),
+            at: TimeRefParam("Timeline time this part starts at, moved to the nearest bar of the track. Default: right after the part before.").optional(),
+          }),
+        )
+        .min(1)
+        .max(MUSIC_LIMITS.sections)
+        .optional()
+        .describe("The parts in order; the first starts the track. Default: intro, full, build, drop, outro by length."),
+      chords: z
+        .array(z.string().regex(MUSIC_CHORD_PATTERN, "a root (`A`, `C#`, `Bb`) and a quality (`m`, `7`, `maj7`, `m7`, `9`, `m9`, `13`, `sus4`…)"))
+        .min(1)
+        .max(MUSIC_LIMITS.chords)
+        .optional()
+        .describe("One chord per bar, repeating, e.g. `[\"Am\", \"F\", \"C\", \"G\"]`; the melody uses the minor pentatonic of the first. Default: the preset's."),
+      accents: z
+        .array(TimeRefParam("Timeline time of an accent, moved to the nearest beat."))
+        .min(1)
+        .max(MUSIC_LIMITS.accents)
+        .optional()
+        .describe("Times that get a crash and a big kick (a logo, a call to action)."),
+      seed: z.number().int().min(0).max(SFX_SEED_MAX).default(0).describe("Seed of the melody, grooves and noise: change it for another track with the same settings."),
+      place: z.boolean().default(true).describe("Put the take on the timeline (default). False: only write and import it."),
+      at: TimeRefParam("Timeline time the track starts at. Default 0.").default(0),
+      track: z.string().min(1).optional().describe("Audio track for the clip, from `track.list`. Default: the audio track named `Music`, made when absent."),
+      gain: z.number().min(-60).max(12).optional().describe("Clip gain in dB, replacing minus the style's `sound.musicUnderVoice`."),
+    }),
+    result: z.object({
+      file: z.string().describe("The take, project-relative: `assets/sound/music-<preset>-<key>.wav`."),
+      state: z.enum(["generated", "cached"]).describe("`generated`: written now. `cached`: the file already held this exact take."),
+      preset: MusicPresetSchema,
+      bpm: z.number(),
+      meter: z.int(),
+      bars: z.int().describe("Bars before the final hit."),
+      seed: z.int(),
+      chords: z.array(z.string()).describe("The chords played, one per bar, repeating."),
+      sections: z
+        .array(z.object({ kind: MusicSectionSchema, bars: z.int(), start: z.number().describe("Seconds into the take.") }))
+        .describe("The parts as played."),
+      duration: z.number().describe("Seconds of the take, the ring after the final hit included."),
+      hitAt: z.number().describe("Seconds into the take of the final hit: the downbeat after the last bar. `music.fit` lands it on a cut."),
+      lufs: z.number().describe("Integrated loudness, LUFS."),
+      peakDb: z.number().describe("Sample peak, dBFS."),
+      beats: z
+        .object({
+          file: z.string().describe("The beat grid, project-relative: `beats/<name>.beats.json`."),
+          state: z.enum(["written", "kept"]).describe("`kept`: an exact grid for this take was already there (its `edits` too)."),
+          count: z.int().describe("Beats in the grid, the final hit included."),
+        })
+        .describe("The exact beat grid of the take."),
+      imported: z
+        .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
+        .describe("The take when this call wrote it, imported; empty when `cached`. Follow its ingest with `job.list`."),
+      credited: z.boolean().describe("The project's `credits.json` holds an `own` entry for the take. False when the project keeps no ledger."),
+      timeline: z.string().nullable().describe("Timeline id; null with `place: false`."),
+      revision: z.int().nullable().describe("Revision after the change; null with `place: false`."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null with `place: false`."),
+      track: z
+        .object({ id: z.string(), name: z.string().nullable(), created: z.boolean().describe("This call made the track.") })
+        .nullable()
+        .describe("Audio track of the new clip; null with `place: false`."),
+      clip: z.string().nullable().describe("Id of the new clip; null with `place: false`."),
+      start: z.number().nullable().describe("Timeline second the clip starts, on the frame grid."),
+      gain: z.number().nullable().describe("Clip gain, dB."),
+      tempo: z
+        .enum(["set", "kept"])
+        .nullable()
+        .describe("`set`: the timeline's tempo now follows the new clip. `kept`: the timeline already had a tempo, left as it was. Null with `place: false`."),
+      warnings: z.array(z.string()),
+    }),
+  },
   "shoot.status": {
     description:
       "Where a shoot is (ADR 0023): every scene of the shoot script with its state (`none`, `deviations`, `done`), the " +
@@ -4330,6 +4449,8 @@ export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 export type SoundSfxResult = MethodResult<"sound.sfx">;
 /** Result of `sound.place`. */
 export type SoundPlaceResult = MethodResult<"sound.place">;
+/** Result of `sound.music`. */
+export type SoundMusicResult = MethodResult<"sound.music">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;

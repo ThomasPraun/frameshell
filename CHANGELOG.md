@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Music beds made offline, third slice of #463 (ADR 0038, epic #451; daemon `sound.music`, CLI `sound music <preset>`,
+  MCP `sound_music`, protocol 103): a seeded 16-step sequencer synthesizes a track with no network and no samples.
+  Presets `synthwave` (118 BPM, Am F C G, saw chords, four on the floor), `lofi` (78 BPM, Dm9 G13 Cmaj7 Am7, electric
+  piano, swung hats, vinyl) and `minimal` (110 BPM, FM mallet stabs, plucked bass, metallic hats); `--bpm`, `--meter`,
+  `--chords`, `--seed`. Whole bars (`--bars`, `--length`, else to the end of the timeline) made of parts (`--sections
+  kind[:bars][@time]`: intro, full, dark, build with a riser that ends 75 ms before the next part, gap, drop, outro; a
+  part's `@time` starts it on the nearest bar, so the drop can land on a marker), `--accents` (a crash and a big kick on
+  the nearest beat), and a final hit that rings 2.5 s; the bass ducks under the kick, a reverb from a synthetic impulse.
+  The take, `assets/sound/music-<preset>-<key>.wav` (48 kHz 24-bit stereo), is brought to -14 LUFS with its sample peak
+  at -1 dBFS by our own BS.1770 meter and limiter (ffmpeg reads the same loudness), and comes with its exact beat grid in
+  `beats/` (`detector: exact`), so `beat:`/`bar:` times, `--snap-to beat` and `music fit` use it without measuring. It is
+  placed in one transaction (`Music: …`, one proposal in review mode) on the audio track `Music` at `--at`, under the
+  voice by the style's `musicUnderVoice`, and the timeline's tempo follows it when it had none; `--no-place` only writes
+  it. Same arguments, same file; recorded as own work when the project keeps `credits.json`.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
