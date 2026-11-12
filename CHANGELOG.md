@@ -13,13 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ADR 0038; daemon `sound.place`, MCP `sound_place`, protocol 97) places generated sound effects in one transaction
   `Sound: …` (one proposal in review mode, `revert` undoes it whole): on times given as seconds or a marker through the
   shared TimeRef resolver (`hook`, `hook+0.5`), on every edit point of a track (or the numbered ones) and as a run of
-  typing keys (tick or click, at most 10 a second, never closer than 87 ms, rotating takes). The take's `peakAt` lands
+  typing keys (tick or click, at most 10 a second, spaced for 87 ms or more, rotating takes). The take's `peakAt` lands
   on the time plus the offset of its role (click -11 ms, tap -60, knock -40, pop +30, whoosh +37; a riser ends 75 ms
   before), on whole frames, on the audio track `SFX` (made when absent; `SFX 2`, `SFX 3` where sounds overlap). Clip
   gain is `-sound.sfxUnderVoice` of `style.json` plus the tier (primary 0, secondary -4, texture -8 dB). Variants rotate
   so the same whoosh is not twice in a row. It warns, never refuses, about more than 2 sounds on one frame, ticks closer
-  than 66 ms and pops closer than 114 ms, and one take twice in a row; sounds that cannot be clips (shorter than one
-  frame, nothing left after the timeline start) are listed in `skipped`.
+  than 66 ms and pops closer than 114 ms, two typing keys closer than 87 ms once rounded to frames, and one take twice in a row; sounds that cannot be clips (nothing left after the
+  timeline start) are listed in `skipped`.
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset

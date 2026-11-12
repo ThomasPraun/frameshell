@@ -16,6 +16,7 @@ const HALF_FRAME = 0.5 / FPS + 1e-6;
 
 describe("soundWarnings", () => {
   const item = (kind: SoundItem["kind"], at: number, fresh = true, file = `assets/sound/${kind}-${at}.wav`): SoundItem => ({ kind, file, at, fresh });
+  const key = (at: number): SoundItem => ({ ...item("tick", at), from: "typing" });
 
   it("warns about more than two sounds on one frame, and not about two", () => {
     expect(soundWarnings([item("click", 2), item("pop", 2)], FPS)).toEqual([]);
@@ -29,6 +30,18 @@ describe("soundWarnings", () => {
     expect(soundWarnings([item("tick", 1), item("tick", 1.07)], FPS)).toEqual([]);
     expect(soundWarnings([item("pop", 1), item("pop", 1.1)], FPS)[0]).toContain("pops need 114 ms");
     expect(soundWarnings([item("click", 1), item("click", 1.01)], FPS)).toEqual([]);
+  });
+
+  it("warns about two keys of a run closer than the key gap on their anchors, and not about 87 ms or more", () => {
+    // Cues 0.050 and 0.137 round to frames 0 and 2 at 30 fps: 66.7 ms apart, though the run spaced them 87 ms.
+    const closer = soundWarnings([key(0), key(2 / FPS)], FPS);
+    expect(closer).toHaveLength(1);
+    expect(closer[0]).toContain("keys at 0.000 s and 0.067 s are 67 ms apart");
+    expect(soundWarnings([key(0), key(3 / FPS)], FPS)).toEqual([]);
+    // A tick key is held to the key gap, not also to the tick gap.
+    expect(soundWarnings([key(0), key(0.05)], FPS)).toHaveLength(1);
+    // Ticks of a cue, not of a run, only get the tick gap.
+    expect(soundWarnings([item("tick", 0), item("tick", 0.07)], FPS)).toEqual([]);
   });
 
   it("warns about one take twice in a row, only when the later sound is new, and not when another sits between", () => {
@@ -242,10 +255,14 @@ describe("sound.place cuts and typing", () => {
     expect(keys.length).toBeGreaterThanOrEqual(17);
     expect(keys.length).toBeLessThanOrEqual(21);
     expect(keys.every((key) => key.from === "typing" && key.tier === "texture" && key.cue >= 1 && key.cue < 3)).toBe(true);
+    let tight = 0;
     for (let i = 1; i < keys.length; i++) {
       expect(keys[i]!.cue - keys[i - 1]!.cue).toBeGreaterThanOrEqual(SOUND_KEY_GAP_MS / 1000);
       expect(keys[i]!.file).not.toBe(keys[i - 1]!.file);
+      // Whole frames can bring two anchors closer than their cues; the call says so.
+      if ((keys[i]!.anchorAt - keys[i - 1]!.anchorAt) * 1000 < SOUND_KEY_GAP_MS - 0.5) tight += 1;
     }
+    expect(result.warnings.filter((warning) => warning.includes("apart on the frame grid"))).toHaveLength(tight);
     expect(new Set(keys.map((key) => key.file)).size).toBeLessThanOrEqual(6);
     expect(result.warnings.filter((warning) => warning.includes("land on frame"))).toEqual([]);
     expect(result.tracks).toHaveLength(1);
@@ -280,14 +297,32 @@ describe("sound.place refusals", () => {
     expect(result.tracks).toEqual([{ id: audio, name: "Effects", created: false }]);
   }, MEDIA_TIMEOUT);
 
-  it("skips a sound shorter than one frame at a low frame rate instead of failing the call", async () => {
+  const setFps = (fps: number) => {
     const path = join(root, "frameshell.json");
     const config = JSON.parse(readFileSync(path, "utf8")) as { fps: number };
-    config.fps = 24;
+    config.fps = fps;
     writeFileSync(path, JSON.stringify(config));
+  };
+
+  it.each([24, 25])("places a tick and a run of keys at %d fps", async (fps) => {
+    setFps(fps);
+    const result = await place({ cues: [{ at: 2, kind: "tick" }], typing: { from: 8, to: 10.5, rate: 6 } });
+    expect(result.skipped).toEqual([]);
+    expect(result.placed.filter((sound) => sound.kind === "tick").length).toBeGreaterThanOrEqual(10);
+  }, MEDIA_TIMEOUT);
+
+  it("skips a sound shorter than one frame at a very low frame rate instead of failing the call", async () => {
+    setFps(10);
     const result = await place({ cues: [{ at: 2, kind: "tick" }, { at: 4, kind: "click" }] });
     expect(result.placed.map((sound) => sound.kind)).toEqual(["click"]);
-    expect(result.skipped).toEqual([expect.objectContaining({ kind: "tick", reason: expect.stringContaining("shorter than one frame at 24 fps") })]);
+    expect(result.skipped).toEqual([expect.objectContaining({ kind: "tick", reason: expect.stringContaining("shorter than one frame at 10 fps") })]);
+  }, MEDIA_TIMEOUT);
+
+  it("keeps the anchor at the start of the clip when the head with it is cut off, and says so", async () => {
+    const result = await place({ cues: [{ at: 0.02, kind: "click", role: "tap" }] });
+    expect(result.placed[0]).toMatchObject({ start: 0 });
+    expect(result.placed[0]!.anchorAt).toBeGreaterThanOrEqual(0);
+    expect(result.warnings.join("\n")).toContain("loses its anchor");
   }, MEDIA_TIMEOUT);
 });
 

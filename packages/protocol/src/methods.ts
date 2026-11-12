@@ -2238,10 +2238,9 @@ export const methods = {
       `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click and shutter \`click\`, tick \`tap\`, ` +
       "pop and thump `pop`, whoosh `whoosh`, impact `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
       "a frame of where asked, and it plays whole frames (a sound shorter than one frame is skipped, with a reason). " +
-      "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`; `beat:` and `bar:` " +
-      "references where the beat grid supports them), `cuts` (the edit point at the start of every clip after the first of a video " +
+      "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`), `cuts` (the edit point at the start of every clip after the first of a video " +
       "or audio `track`, or only the numbered ones in `which`) and `typing` (a run of keys between `from` and `to`, " +
-      `${SOUND_TYPING_RATE.default} keys a second by default, at most ${SOUND_TYPING_RATE.max}, never closer than ${SOUND_KEY_GAP_MS} ms, with a seeded ±10 % timing jitter ` +
+      `${SOUND_TYPING_RATE.default} keys a second by default, at most ${SOUND_TYPING_RATE.max}, spaced at least ${SOUND_KEY_GAP_MS} ms apart (a warning when whole frames bring two keys closer), with a seeded ±10 % timing jitter ` +
       "and rotating takes). Sounds go on the audio track named `SFX` (made when absent) or on `track`; sounds that overlap in time " +
       "go on further tracks `SFX 2`, `SFX 3`… The clip `gain` (dB) is minus the style's `sound.sfxUnderVoice` (20 by default) " +
       `plus the tier: ${Object.entries(SOUND_TIER_OFFSETS_DB).map(([tier, db]) => `${tier} ${db}`).join(", ")} dB (\`gain\` replaces it). ` +

@@ -22,7 +22,7 @@ frameshell sound sfx riser --length 2.4 --json
 ```sh
 frameshell sound place whoosh --at hook,hook+6 --seed 4
 frameshell sound place click --at 12.4 --role knock
-frameshell sound place whoosh --cuts V1 --which 2,5
+frameshell sound place whoosh --cuts <track-id> --which 2,5
 frameshell sound place tick --typing --from 8 --to 10.5 --rate 7
 ```
 
@@ -30,10 +30,10 @@ One call is one transaction (`Sound: 2 whoosh`): `revert` undoes it, review mode
 
 - **Where.** `--at` takes seconds or a marker, as every time argument (`hook`, `hook+0.5`, several separated by commas); `--cuts <track>` puts one on the start of every clip after the first of that track, or on the numbered ones (`--which 1,3`, counted from 1); `--typing` makes a run of keys (kind `tick` or `click`, up to 10 a second, jittered, rotating takes) between `--from` and `--to`.
 - **Offset.** Every result has **`peakAt`**: the second of the take that must land on the picture (the transient of a hit, the peak of a whoosh, the end of a riser). A sound that builds starts before its cue; its peak, not its start, is on it. The take lands at `cue + offset - peakAt`, the offset by `--role`, in milliseconds (negative = before the picture): tap -60, knock -40, click -11, pop +30, whoosh peak +37, swell peak +42; a riser ends 75 ms before the cue. Without `--role` a kind takes its own (click and shutter `click`, tick `tap`, pop and thump `pop`, whoosh `whoosh`, impact `knock`); `--offset ms` replaces it.
-- **Whole frames.** A clip starts on a frame and plays whole frames, so a sound is within half a frame of where asked (at 30 fps the -11 ms of a click is lost). A sound under one frame long (a tick at 24 fps) or starting before the timeline with nothing left is in `skipped` with the reason, not an error; one that only loses its head is placed with a warning.
+- **Whole frames.** A clip starts on a frame and plays whole frames, so a sound is within half a frame of where asked (at 30 fps the -11 ms of a click is lost). A sound starting before the timeline with nothing left (or under one frame long, below 20 fps) is in `skipped` with the reason, not an error; one that only loses its head is placed with a warning.
 - **Gain.** The clip `gain` is minus the style's `sound.sfxUnderVoice` (20 dB by default; see [project-model.md](project-model.md#style)) plus the `--tier`: `primary` 0 (the default for most kinds), `secondary` -4 (shutter), `texture` -8 (tick, typing). `--gain dB` replaces it.
 - **Variants.** Without `--variant` the takes of one kind rotate through 1 to 3 along the timeline and across calls, so the same whoosh is not twice in a row; give `--seed` for another family.
-- **Warnings** (the call still places everything; fix them with `clip move` or `clip remove`, or `revert` and ask again): more than 2 sounds on one frame; two ticks closer than 66 ms or two pops closer than 114 ms; one take twice in a row. They count sounds already on the audio tracks.
+- **Warnings** (the call still places everything; fix them with `clip move` or `clip remove`, or `revert` and ask again): more than 2 sounds on one frame; two ticks closer than 66 ms or two pops closer than 114 ms; two keys of a typing run closer than 87 ms once rounded to frames (lower `--rate`); one take twice in a row. They count sounds already on the audio tracks.
 
 ## Taste
 

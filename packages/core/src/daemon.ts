@@ -1621,8 +1621,30 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await transactions.touching(key, tx, { root: dir, timeline });
       const author = journalAuthorOf(caller);
       try {
+        // Each step checks the revision its predecessor left: a person's edit in between fails the step instead of putting a clip on lanes fitted for an older timeline.
+        let expected = plan.revision;
         const written = await runPlan(plan, async (step) => {
-          const result = await timelines.apply({ root: dir, cwd, timeline, request: step as OperationRequest, author, tx });
+          const request = step as OperationRequest;
+          const result = await timelines.apply({
+            root: dir,
+            cwd,
+            timeline,
+            request,
+            author,
+            tx,
+            prepare: async (current) => {
+              if (current.revision !== expected) {
+                throw new RpcError(ErrorCode.StaleRevision, `sound.place: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the sounds were placed. Check it with timeline show.`, {
+                  op: "sound.place",
+                  timeline,
+                  revision: expected,
+                  current: current.revision,
+                });
+              }
+              return request;
+            },
+          });
+          expected = result.revision;
           await transactions.applied(key, tx);
           return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
         });

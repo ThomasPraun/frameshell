@@ -64,6 +64,8 @@ export interface SoundItem {
   at: number;
   /** Placed by this call. */
   fresh: boolean;
+  /** Which part of the call asked for it; absent for a sound already on the timeline. */
+  from?: Source;
 }
 
 /** What `planSounds` needs from the daemon. */
@@ -219,7 +221,10 @@ function rotateVariants(wishes: SoundWish[], existing: SoundItem[]): void {
   const next = new Map<SfxKind, number>();
   for (const item of existing) next.set(item.kind, (next.get(item.kind) ?? 0) + 1);
   for (const wish of wishes) {
-    if (wish.variant !== undefined) continue;
+    if (wish.variant !== undefined) {
+      next.set(wish.kind, (next.get(wish.kind) ?? 0) + 1);
+      continue;
+    }
     const n = next.get(wish.kind) ?? 0;
     wish.variant = (n % SFX_VARIANTS) + 1;
     next.set(wish.kind, n + 1);
@@ -285,8 +290,18 @@ export function soundWarnings(items: SoundItem[], fps: number): string[] {
     for (let i = 1; i < same.length; i++) {
       const [a, b] = [same[i - 1]!, same[i]!];
       const ms = (b.at - a.at) * 1000;
+      // Two keys of one run are held to the key gap below.
+      if (a.from === "typing" && b.from === "typing") continue;
       if (ms < gap - 0.5 && (a.fresh || b.fresh)) out.push(`${kind} at ${shown(b.at)} is ${Math.round(ms)} ms after the one at ${shown(a.at)}; ${kind}s need ${gap} ms between them.`);
     }
+  }
+
+  // Whole frames move every key by up to half a frame, so the gap the run was spaced for can shrink by a frame.
+  const keys = sorted.filter((item) => item.from === "typing");
+  for (let i = 1; i < keys.length; i++) {
+    const [a, b] = [keys[i - 1]!, keys[i]!];
+    const ms = (b.at - a.at) * 1000;
+    if (ms < SOUND_KEY_GAP_MS - 0.5) out.push(`keys at ${shown(a.at)} and ${shown(b.at)} are ${Math.round(ms)} ms apart on the frame grid; keys need ${SOUND_KEY_GAP_MS} ms between them: lower \`rate\`.`);
   }
 
   for (let i = 1; i < sorted.length; i++) {
@@ -384,6 +399,7 @@ export async function planSounds(params: PlaceParams, deps: PlanDeps): Promise<S
     }
     if (headFrames > 0) {
       warnings.push(`${wish.kind} at ${wish.cue.toFixed(3)} s starts before the timeline does: ${Math.round((headFrames / fps) * 1000)} ms of its head are cut off.`);
+      if (headFrames / fps > anchor) warnings.push(`${wish.kind} at ${wish.cue.toFixed(3)} s loses its anchor (${Math.round(anchor * 1000)} ms in) with the head: it plays after the cue, from the start of the timeline.`);
     }
     const kept = whole - headFrames;
     // One spare frame after a new clip: the engine measures the file itself, so a rounding difference must not make two clips touch.
@@ -401,12 +417,12 @@ export async function planSounds(params: PlaceParams, deps: PlanDeps): Promise<S
       lane,
       start: grid.seconds(startFrame),
       headIn: grid.seconds(headFrames),
-      anchorAt: Math.round((startFrame / fps + anchor - headFrames / fps) * 1e6) / 1e6,
+      anchorAt: Math.round(Math.max(startFrame / fps, startFrame / fps + anchor - headFrames / fps) * 1e6) / 1e6,
       gain,
     });
   }
 
-  const fresh: SoundItem[] = sounds.map((sound) => ({ kind: sound.wish.kind, file: sound.take.file, at: sound.anchorAt, fresh: true }));
+  const fresh: SoundItem[] = sounds.map((sound) => ({ kind: sound.wish.kind, file: sound.take.file, at: sound.anchorAt, fresh: true, from: sound.wish.from }));
   const existing = await soundsOn(deps.root, timeline);
   warnings.push(...limited(soundWarnings([...existing, ...fresh], fps)));
   return {

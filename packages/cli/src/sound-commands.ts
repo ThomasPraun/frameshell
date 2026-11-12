@@ -23,7 +23,8 @@ export const SOUND_USAGE = `  sound sfx <kind> [--variant n] [--seed n] [--pitch
                [--role r] [--tier t] [--offset ms] [--gain dB] [--variant n] [--seed n] [--pitch x] [--length s]
                [--track id] [--timeline id]
                                Make the sound effect (like sound sfx) and place it on the audio track SFX in one
-                               transaction. Each <t> is seconds or a marker (hook, hook+0.5); --cuts puts one on every
+                               transaction. Each <t> is seconds or a marker (hook, hook+0.5; commas separate the times, so a
+                               label with a comma needs its marker id); --cuts puts one on every
                                edit point of a track (or the numbered ones); --typing a run of keys (tick or click, up
                                to ${SOUND_TYPING_RATE.max} a second). The take's peak lands on the time plus the offset of its role
                                (${SOUND_ROLES.join(", ")}; a riser ends before it); the gain comes from the style by
