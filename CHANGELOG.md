@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, third group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template` also
+  takes `terminal` (a command types out, then tasks spin and tick one by one), `chat-bubble` (a question, typing dots,
+  then the reply), `notification-stack` (cards or chat bubbles drop in and push the older ones down; items are one
+  `|`-separated prop of `Sender: message`), `device-frame` (browser or phone around a screenshot with a slow push, on its
+  own background; a plain skeleton when there is no screenshot), `scene-background` (drifting orbs, a masked 120 px grid,
+  vignette and grain on closed loops, for a track under other clips) and `prompt-bar` (the prompt types, then Run is
+  pressed). No GSAP; each has typed props, takes colours and fonts from `style.json`, lays out per format with `pick()`,
+  uses springs, and passes `hyperframes check --strict`. Typing and task timings speed up to fit a short clip. The
+  real-Chrome test renders them in the four formats. Listed in the plugin skill.
 - Voiceover, slice 3 of #470 (ADR 0034 decisions 17 and 18, epic #451; protocol 103): `voiceover generate` now splits each
   take into phrases and checks it for misreads. Every line reports its `phrases`: the take cut where it falls silent for
   60 ms or more (5 ms RMS, 38 dB under its peak, 20 ms lead and 30 ms tail kept) as ranges of the take in seconds, the

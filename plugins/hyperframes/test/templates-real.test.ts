@@ -125,6 +125,13 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
                 expect(minY, format).toBeGreaterThan(height * 0.03);
                 expect(maxY, format).toBeLessThan(height * 0.97);
               }
+              // Before the first bubble is due (default delay 0.4 s) the chat bubble paints nothing, typing dots included.
+              if (template === "chat-bubble") {
+                const early = await frame(page, 0.2);
+                let stray = 0;
+                for (let p = 3; p < early.length; p += 4) if (early[p]! > 8) stray++;
+                expect(stray, format).toBe(0);
+              }
               await page.close();
             } finally {
               server.close();
