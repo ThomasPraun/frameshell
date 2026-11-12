@@ -26,9 +26,9 @@ import {
   type TransitionContext,
   type TransitionShape,
   clipHandles,
-  coverCrop,
   edgeTransitions,
   fixedPlacement,
+  formatCrop,
   hasPictureKeys,
   hostFades,
   isKeyed,
@@ -42,8 +42,8 @@ import {
   programSound,
   shotLayers,
   showsPicture,
-  scaleCaptions,
   soundSamples,
+  scaledCaptions,
   staticGain,
   subtitleTracks,
   withTrackMutes,
@@ -702,7 +702,7 @@ function layoutTimeline(
   const pictureless = new Set<string>();
   let frames = 0;
   /** Clips of one video or audio track on the frame grid, sorted; the later of two overlapping clips wins. */
-  const placeTrack = (track: ClipTrack): Placed[] => {
+  const placeTrack = (track: ClipTrack, base = false): Placed[] => {
     const placed: Placed[] = [];
     const context = exportTransitionContext(fps, sources);
     const transitions = trackTransitions(track, context);
@@ -763,9 +763,8 @@ function layoutTimeline(
         warnings.push(`Clip ${clip.id} has audio effects that are not baked; its sound was exported without them.`);
       }
       const placement = fixedPlacement(clip);
-      // Renders are made at the format's size; only footage is cut to it.
-      const picture = source.video;
-      const covers = variant?.cover === true && !render && picture !== null && isIdentityPlacement(placement) && !hasPictureKeys(clip);
+      const picture = track.kind === "video" ? source.video : null;
+      const cover = formatCrop(variant, clip, { size: picture, generated: render !== undefined, alpha: picture?.alpha === true, base }, output);
       placed.push({
         clip,
         source,
@@ -779,7 +778,7 @@ function layoutTimeline(
         ...(render ? { hold: true as const } : {}),
         ...(backdrop ? { glass: backdrop } : {}),
         ...(sound !== undefined ? { sound } : {}),
-        ...(covers ? { cover: formatCover(picture, output) } : {}),
+        ...(cover ? { cover } : {}),
         ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
       });
       frames = Math.max(frames, end);
@@ -826,15 +825,15 @@ function layoutTimeline(
       for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound).map((placed) => ({ ...placed, exact: true as const }))));
       continue;
     }
-    const placed = placeTrack(track);
+    // The first picture layer is the base when it is a video track; a program track first leaves the base black.
+    const placed = placeTrack(track, showsPicture(track) && pictures.length === 0);
     if (showsPicture(track)) pictures.push({ program: false, placed });
     audio.push(audible(placed));
   }
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const captionScale = variant?.captionScale ?? 1;
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) => scaleCaptions(track, captionScale));
+  const subtitles = scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), variant);
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -847,7 +846,6 @@ function layoutTimeline(
       );
     }
   }
-  // The first picture layer is the base when it is a video track; a program track first leaves the base black.
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
   // Nothing is below the base track to blur (ADR 0031).
@@ -877,8 +875,6 @@ function layoutTimeline(
       placed.bottom = true;
     }
   }
-  // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
-  for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   /** {@link whole} cut where its wipes end and start (a subject's outgoing one too): a wipe's mask costs per pixel, only the frames it plays over get it. */
@@ -1367,18 +1363,6 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
   side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
   if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
   return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
-}
-
-/**
- * {@link coverCrop} of a whole `source` picture filling `output` (ADR 0027 cover), with even edges and size: what
- * ffmpeg's `crop` keeps of a 4:2:0 picture without `exact`, so the plan states the pixels actually cut.
- */
-function formatCover(source: Size, output: Size): LayerRect {
-  const even = (value: number) => value - (value % 2);
-  const crop = coverCrop({ left: 0, top: 0, width: source.width, height: source.height }, output);
-  const width = Math.max(2, even(crop.width));
-  const height = Math.max(2, even(crop.height));
-  return { left: even(Math.max(0, Math.floor((source.width - width) / 2))), top: even(Math.max(0, Math.floor((source.height - height) / 2))), width, height };
 }
 
 /**

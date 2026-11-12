@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Format switcher in the preview, second slice of #469 (ADR 0027, epic #451): when `frameshell.json` declares two or
+  more `formats`, the transport bar lists them and the preview shows the frame as that format exports it. It uses the
+  rules export uses, now shared helpers in `packages/schema/src/formats.ts` (`formatOf`, `formatCrop`,
+  `scaledCaptions`): untransformed footage and stills cover the frame around the centre, sources with alpha on upper
+  tracks and transformed or keyed clips stay fitted, multicam shots keep their reframed tiles, and captions are 1.3x in
+  vertical formats. Generated clips show their primary render, fitted, until renders per format reach the preview.
+  Handles, Pick, element mode and live pages stay in the primary format. A parity test checks the preview against the
+  export compiler in every format.
 - Motion templates, third group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template` also
   takes `terminal` (a command types out, then tasks spin and tick one by one), `chat-bubble` (a question, typing dots,
   then the reply), `notification-stack` (cards or chat bubbles drop in and push the older ones down; items are one
@@ -439,6 +447,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The preview's 9:16 toggle is gone (#469 slice 2, ADR 0027): its fixed 1080x1920 frame is replaced by the format
+  switcher, which shows only the formats a project declares. A landscape project without `formats` has no 9:16 view any
+  more; `frameshell format add 9x16` gives it one.
 - Review mode holds format changes (#496 slice 2, ADR 0036, protocol 94): while review mode is on, an agent's
   `format add`, `format remove`, `revert` of a format change and `tx abort` of one that reached the file wait in the
   transaction's proposal like timeline changes, instead of being refused. A transaction mixing clips and formats is

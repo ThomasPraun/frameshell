@@ -3049,7 +3049,7 @@ button.track-head:focus-visible {
   color: #f0c068;
 }
 
-/* Frame tools left of the transport buttons: the pick tool and the 9:16 view. */
+/* Frame tools left of the transport buttons: the pick tool and the format switcher. */
 .preview-transport-tools {
   grid-column: 1;
   grid-row: 1;
@@ -3059,16 +3059,16 @@ button.track-head:focus-visible {
   gap: 2px;
 }
 
-.preview-vertical {
-  width: auto;
-  padding: 0 5px;
+.preview-format {
+  max-width: 180px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-.preview-vertical.on {
+/* A format other than the primary: handles and picking are off, so it reads as a mode. */
+.preview-format.on {
   color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .region-toggle.on {
