@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { type ReviewSheet, ReviewTileSchema } from "./review.js";
 
-// `analyze` (#471, epic #451): measure a reference video's grammar (rhythm, colour, loudness, tempo) so an agent makes "like this" from numbers.
+// `analyze` (#471, epic #451): measure a reference video's grammar (rhythm, colour, look, events, loudness, tempo) so an agent makes "like this" from numbers.
 
 /** Folder of analyses, project-relative: regenerable, gitignored with the rest of `.frameshell/`. One subfolder per analysed video. */
 export const ANALYSIS_DIR = ".frameshell/analysis";
@@ -18,6 +18,27 @@ export interface AnalyzeColor {
   hex: string;
   /** Fraction of the sampled pixels that are this colour or a shade merged into it, 0 to 1; a palette is sorted by it. */
   share: number;
+}
+
+/** Columns and rows of the colour grid of a look. */
+export const ANALYZE_GRID = { columns: 8, rows: 6 } as const;
+
+/** How a picture looks, in four figures averaged over its frames. */
+export interface AnalyzeShotLook {
+  /** Mean luma (Rec. 709 weights on the gamma-coded values), 0 black to 1 white. */
+  brightness: number;
+  /** Mean over the frames of the spread (standard deviation) of luma inside a frame, 0 to 0.5. */
+  contrast: number;
+  /** Mean HSV saturation, 0 grey to 1 pure colour. */
+  saturation: number;
+  /** Mean of (red - blue) over 255, -1 blue to 1 red: above 0 the picture leans warm, below it cool. */
+  warmth: number;
+}
+
+/** The look of the whole film: the figures and a coarse colour grid. */
+export interface AnalyzeLook extends AnalyzeShotLook {
+  /** Mean colour of each cell of an {@link ANALYZE_GRID} 8 x 6 grid laid over the picture, `#rrggbb`, row by row from the top left. */
+  grid: string[];
 }
 
 /** One shot of the film. */
@@ -40,6 +61,8 @@ export interface AnalyzeShot {
   image: string;
   /** Dominant colours of the shot, up to 5, biggest first. */
   palette: AnalyzeColor[];
+  /** How the shot looks. `analysis.json` adds `grid` (the 8 x 6 colour grid of the shot) to it. */
+  look: AnalyzeShotLook;
 }
 
 /** How the film is cut. */
@@ -52,6 +75,70 @@ export interface AnalyzeStats {
   medianLength: number;
   shortest: number;
   longest: number;
+}
+
+/** Several big changes of the picture close together. */
+export interface AnalyzeBurst {
+  startFrame: number;
+  /** The frame after the last change of the burst. */
+  endFrame: number;
+  start: number;
+  end: number;
+  /** Big changes inside. */
+  count: number;
+}
+
+/** How the film moves in time. */
+export interface AnalyzeRhythm {
+  /** Standard deviation of the shot lengths over their mean, 3 decimals: 0 is a metronome, above 0.6 the cutting is irregular. */
+  shotLengthCv: number;
+  /** Share of the frames (after the first) in which the picture does not change, 0 to 1. */
+  stillShare: number;
+  /** Longest hold of the picture, seconds. */
+  longestStill: number;
+  /** Big changes of the picture: cuts, flashes, jumps of the layout. */
+  changeCount: number;
+  /** `changeCount` per minute of film, 2 decimals. */
+  changesPerMinute: number;
+  /** Longest stretch between two big changes, or between an end of the film and the nearest one, seconds. */
+  largestGap: number;
+  /** Mean change between consecutive frames, grey levels 0 to 255 on a 64 px wide picture, 2 decimals. */
+  meanActivity: number;
+  /** Stretches with 3 or more big changes within 1.5 s. */
+  bursts: AnalyzeBurst[];
+}
+
+/** The kinds of {@link AnalyzeEvent}. */
+export const ANALYZE_EVENT_KINDS = ["flash", "appear", "disappear", "hold", "hit"] as const;
+
+/** Something that happens in the film, at a frame. */
+export interface AnalyzeEvent {
+  /**
+   * `flash`: the whole picture jumps brighter or darker for at most a quarter of a second. `appear` / `disappear`: part of
+   * the picture gains / loses detail while the rest holds (an element enters or leaves, a caption shows or goes) over at most 2 s.
+   * `hold`: the picture does not change for at least 0.5 s. `hit`: a sudden rise of the sound.
+   */
+  kind: (typeof ANALYZE_EVENT_KINDS)[number];
+  /** First frame (0-based). A `hit` is one frame. */
+  startFrame: number;
+  /** The frame after the last one. */
+  endFrame: number;
+  /** `startFrame` ÷ fps, rounded down to the millisecond. */
+  start: number;
+  /** `endFrame` ÷ fps, rounded down. */
+  end: number;
+  /** `flash`: `up` (brighter) or `down` (darker). */
+  direction?: "up" | "down" | undefined;
+  /** `flash`: change of the mean luma, 0 to 1. `hit`: rise of the sound over the 80 ms before, dB. */
+  amount?: number | undefined;
+  /** `appear` / `disappear`: share of the picture that changed, 0 to 1. */
+  area?: number | undefined;
+  /** `appear` / `disappear`: box around what changed, as fractions of the picture width and height (0 to 1, top left origin). */
+  region?: { x: number; y: number; width: number; height: number } | undefined;
+  /** `hit`: loudest level in the 100 ms after the onset, dBFS. */
+  level?: number | undefined;
+  /** `hit`: seconds from the nearest big change of the picture within 0.2 s to the hit (negative: the hit comes first); null when none is near. */
+  offset?: number | null | undefined;
 }
 
 /** Loudness of the sound by EBU R128. */
@@ -109,6 +196,12 @@ export interface AnalyzeResultShape {
   stats: AnalyzeStats;
   /** Dominant colours of the whole film, up to 5, biggest first. */
   palette: AnalyzeColor[];
+  /** How the whole film looks. */
+  look: AnalyzeLook;
+  /** How the film moves in time. */
+  rhythm: AnalyzeRhythm;
+  /** Flashes, appearing and disappearing elements, holds and sound hits, in time order. */
+  events: AnalyzeEvent[];
   /** Null when the video has no sound. */
   loudness: AnalyzeLoudness | null;
   /** Null when there is no sound, or no steady beat in it (see `warnings`). */
@@ -122,6 +215,13 @@ const ColorSchema = z.object({
   share: z.number().describe("Fraction of the sampled pixels that are this colour or a shade merged into it, 0 to 1; the palette is sorted by it."),
 });
 
+const ShotLookSchema = z.object({
+  brightness: z.number().describe("Mean luma (Rec. 709 weights on the gamma-coded values), 0 black to 1 white."),
+  contrast: z.number().describe("Mean over the frames of the spread (standard deviation) of luma inside a frame, 0 to 0.5: flat grey 0, half black and half white 0.5."),
+  saturation: z.number().describe("Mean HSV saturation of the pixels, 0 grey to 1 pure colour."),
+  warmth: z.number().describe("Mean of (red - blue) over 255, -1 blue to 1 red: above 0 the picture leans warm, below it cool."),
+});
+
 const ShotSchema = z.object({
   index: z.int().describe("1-based, in film order."),
   startFrame: z.int().describe("First frame (0-based) of the shot."),
@@ -132,6 +232,56 @@ const ShotSchema = z.object({
   cutScore: z.number().nullable().describe("Scene score (0 to 1) of the cut that opens the shot: how different its first picture is from the one before. Null for the first shot."),
   image: z.string().describe("Absolute path of a JPEG of the shot's middle frame, at most 640 px on the long side."),
   palette: z.array(ColorSchema).describe("Dominant colours of the shot, up to 5, biggest first."),
+  look: ShotLookSchema.describe("How the shot looks. `analysis.json` adds `grid` (the 8 x 6 colour grid of the shot) to it."),
+});
+
+const LookSchema = z.object({
+  ...ShotLookSchema.shape,
+  grid: z.array(z.string()).describe("Mean colour of each cell of an 8 columns x 6 rows grid laid over the picture, `#rrggbb`, 48 values row by row from the top left."),
+});
+
+const BurstSchema = z.object({
+  startFrame: z.int(),
+  endFrame: z.int().describe("The frame after the last change of the burst."),
+  start: z.number(),
+  end: z.number(),
+  count: z.int().describe("Big changes of the picture inside."),
+});
+
+const RhythmSchema = z.object({
+  shotLengthCv: z.number().describe("Standard deviation of the shot lengths over their mean, 3 decimals: 0 is a metronome, above 0.6 the cutting is irregular."),
+  stillShare: z.number().describe("Share of the frames (after the first) in which the picture does not change (mean change under 0.5 grey levels), 0 to 1."),
+  longestStill: z.number().describe("Longest hold of the picture, seconds."),
+  changeCount: z.int().describe("Big changes of the picture (6 grey levels of mean change between two frames, or a cut): cuts, flashes, jumps of the layout."),
+  changesPerMinute: z.number().describe("`changeCount` per minute of film, 2 decimals."),
+  largestGap: z.number().describe("Longest stretch between two big changes, or between an end of the film and the nearest one, seconds."),
+  meanActivity: z.number().describe("Mean change between consecutive frames, grey levels 0 to 255 on a 64 px wide picture, 2 decimals."),
+  bursts: z.array(BurstSchema).describe("Stretches with 3 or more big changes within 1.5 s: a montage burst, a flurry of effects."),
+});
+
+const EventSchema = z.object({
+  kind: z
+    .enum(ANALYZE_EVENT_KINDS)
+    .describe(
+      "`flash`: the whole picture jumps brighter or darker for at most a quarter of a second. `appear` / `disappear`: part of the picture gains / loses detail while the rest holds (an element enters or leaves, a caption shows or goes), over at most 2 s. `hold`: the picture does not change for at least 0.5 s. `hit`: a sudden rise of the sound (an effect, a beat, a word after a pause).",
+    ),
+  startFrame: z.int().describe("First frame (0-based). A `hit` is one frame."),
+  endFrame: z.int().describe("The frame after the last one."),
+  start: z.number().describe("`startFrame` ÷ fps, rounded down to the millisecond."),
+  end: z.number().describe("`endFrame` ÷ fps, rounded down."),
+  direction: z.enum(["up", "down"]).optional().describe("`flash`: `up` brighter, `down` darker."),
+  amount: z.number().optional().describe("`flash`: change of the mean luma, 0 to 1. `hit`: rise of the sound over the 80 ms before, dB."),
+  area: z.number().optional().describe("`appear` / `disappear`: share of the picture that changed, 0 to 1."),
+  region: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .optional()
+    .describe("`appear` / `disappear`: box around what changed, as fractions of the picture's width and height (0 to 1, origin top left, in steps of one grid cell: 1/8 wide, 1/6 high). Where text or an element shows up."),
+  level: z.number().optional().describe("`hit`: loudest level in the 100 ms after the onset, dBFS."),
+  offset: z
+    .number()
+    .nullable()
+    .optional()
+    .describe("`hit`: seconds from the nearest big change of the picture within 0.2 s to the hit (negative: the hit comes first); null when none is near. A hit on a cut or an element is an effect; one with null is music or speech."),
 });
 
 const StatsSchema = z.object({
@@ -191,6 +341,9 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
   shots: z.array(ShotSchema),
   stats: StatsSchema,
   palette: z.array(ColorSchema).describe("Dominant colours of the whole film, up to 5, biggest first."),
+  look: LookSchema.describe("How the whole film looks: brightness, contrast, saturation, warmth and an 8 x 6 colour grid."),
+  rhythm: RhythmSchema.describe("How the film moves in time: shot-length spread, share of still frames, big changes, bursts."),
+  events: z.array(EventSchema).describe("Flashes, appearing and disappearing elements, holds and sound hits, in time order. A hint to check on the sheets, not a guarantee."),
   loudness: LoudnessSchema.nullable().describe("Null when the video has no sound."),
   tempo: TempoSchema.nullable().describe("Null when there is no sound, or no steady beat in it (see `warnings`)."),
   sheets: z.array(SheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze` events, look and rhythm (#471 slice 2, epic #451; protocol 103): the result and `analysis.json` of `frameshell analyze` gain
+  - `look`, per shot and for the film: brightness, contrast, saturation and warmth (red minus blue), and an 8 x 6 grid of mean colours
+    (the film's in the result, every shot's in `analysis.json`);
+  - `rhythm`: the spread of the shot lengths (`shotLengthCv`), the share of still frames and the longest hold, the big changes of the
+    picture (a cut, a flash or a jump of the layout: 6 grey levels of mean change between two frames) with their count, per minute and
+    the largest gap between them, and `bursts` of 3 or more within 1.5 s, with constants the metrics of `review` (#457) are to share;
+  - `events` in time order: `flash` (the picture jumps brighter or darker for at most 0.25 s), `appear` / `disappear` (part of the
+    picture gains or loses detail while the rest holds, with its `region` on the 8 x 6 grid: where an element or a caption shows up),
+    `hold` (no change for 0.5 s or more) and `hit` (a sudden rise of the sound, with its `offset` to a big change of the picture
+    within 0.2 s, so a sound effect on a cut tells from music or speech).
+  Measured in one extra pass over every frame at 64 px (a 30 s 720p film takes about 6 s in all), in new files of
+  `packages/core/src/analyze/` (`look.ts`, `rhythm.ts`, `events.ts`, `picture.ts`). Events are hints, capped at 300 of a kind, and
+  say so in the skill page `reference-video.md`, which now explains how to read the numbers. Where large text sits is read from
+  `appear` regions; motion curves, sync, ink and diff against an original remain later slices of #471.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading

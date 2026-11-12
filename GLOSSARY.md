@@ -295,7 +295,7 @@ One `review` of a timeline or an exported file: contact, phone, motion-strip and
 _Avoid_: review (alone, it reads as Review mode), audit
 
 **Analysis**:
-One `analyze` of a reference video: its shot table, contact and shots sheets, palette, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
+One `analyze` of a reference video: its shot table, contact and shots sheets, palette, look, rhythm, events, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
 _Avoid_: reference report, scan
 
 ## Video from audio (ADR 0015)
