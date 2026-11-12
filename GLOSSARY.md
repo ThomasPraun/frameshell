@@ -178,6 +178,10 @@ _Avoid_: voice preset, voice polish, mastering
 An asset's sound processed once through one chain of audio effects and cached in `.frameshell/audio-fx/`; preview and export both play it. One bake serves every clip of that asset and chain.
 _Avoid_: render (that is a generated clip's), proxy, sidecar (that is the dry sound)
 
+**Glass** (`backdrop`):
+The picture below a generated clip, blurred, saturated and dimmed wherever the clip's alpha shows, drawn just before the clip; the render itself is unchanged. A style choice (`style.json` `glass`), never a default.
+_Avoid_: frosted glass, backdrop-filter (that is the CSS inside a composition, which blurs nothing in a render), blur effect
+
 ## Transitions and keyframes (ADR 0018, ADR 0030)
 
 **Transition**:

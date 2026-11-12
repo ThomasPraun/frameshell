@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
-import { AUDIO_EFFECT_LIMITS, MAX_AUDIO_EFFECTS } from "./effects.js";
+import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
 import { TakeIdSchema } from "./shoot.js";
 
@@ -244,6 +244,32 @@ export const TimelineClipSchema = z.strictObject({
   duration: z.number().positive().optional().describe("Seconds played. Default: the rest of the nested timeline after `in`."),
 });
 
+/** Backdrop of a generated clip (ADR 0031): what is below it, blurred, saturated and dimmed, wherever the clip shows. */
+export const BackdropSchema = z
+  .strictObject({
+    blur: z
+      .number()
+      .min(BACKDROP_LIMITS.blur.min)
+      .max(BACKDROP_LIMITS.blur.max)
+      .describe(`Gaussian sigma in project pixels, as CSS \`blur()\` and ffmpeg \`gblur\` take it; glass: ${GLASS.blur}.`),
+    saturate: z
+      .number()
+      .min(BACKDROP_LIMITS.saturate.min)
+      .max(BACKDROP_LIMITS.saturate.max)
+      .optional()
+      .describe(`Saturation of the blurred backdrop, as CSS \`saturate()\`: 1 unchanged, 0 grey; glass: ${GLASS.saturate}. Default 1.`),
+    dim: z
+      .number()
+      .min(BACKDROP_LIMITS.dim.min)
+      .max(BACKDROP_LIMITS.dim.max)
+      .optional()
+      .describe(`Dark scrim over the blurred backdrop: 0 none, 1 black; glass: ${GLASS.dim}, up to 0.72 over bright footage. Default 0.`),
+  })
+  .describe(
+    "Glass under a generated clip (ADR 0031): the picture below it blurred, saturated and dimmed where the clip's alpha is above " +
+      "about 3 %, then the clip on top; its render is unchanged. Upper video tracks only: on the bottom track nothing is below.",
+  );
+
 /** Clip rendered by an adapter plugin (`hyperframes`, `remotion`, …); `props` follow the adapter's schema. */
 export const AdapterClipSchema = z.strictObject({
   ...clipBase,
@@ -264,6 +290,7 @@ export const AdapterClipSchema = z.strictObject({
   duration: z.number().positive().describe("Seconds on the timeline."),
   props: z.record(z.string(), z.unknown()).optional().describe("Adapter-specific properties, validated by the adapter."),
   elements: ElementsSchema.optional(),
+  backdrop: BackdropSchema.optional(),
 });
 
 /** Clip of a video or audio track. `type` selects the variant. */
@@ -871,6 +898,8 @@ export type Transform = z.infer<typeof TransformSchema>;
 export type ClipAudio = z.infer<typeof ClipAudioSchema>;
 /** Sound settings of a media clip, audio effects included. */
 export type MediaClipAudio = z.infer<typeof MediaClipAudioSchema>;
+/** Backdrop of a generated clip; see {@link BackdropSchema}. */
+export type Backdrop = z.infer<typeof BackdropSchema>;
 
 /** True for a program track's shot. Adapter `type` is any string, so `clip.type === "shot"` alone does not narrow. */
 export function isShotClip(clip: AnyClip): clip is ShotClip {

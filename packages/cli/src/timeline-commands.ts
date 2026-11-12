@@ -22,7 +22,7 @@ import type {
   TrackSummary,
 } from "@frameshell/protocol";
 import { SECONDS_TEXT } from "@frameshell/protocol";
-import { resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
+import { glassOf, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -70,10 +70,15 @@ mutations print the new revision):
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
+           [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
                                --voice writes the style's voice chain (style.json sound.voice; by default high-pass
                                85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
                                release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
-                               '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background
+                               '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background.
+                               --glass gives a generated clip on an upper track the style's glass backdrop (style.json
+                               glass; by default blur 46 px, saturate 1.45, dim 0.55): what is below the clip is
+                               blurred, saturated and dimmed where the clip shows. Glass is a style choice, never a
+                               default. --backdrop-* set one number each, over --glass (blur = Gaussian sigma in project px)
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -291,6 +296,11 @@ export const TIMELINE_OPTIONS = {
   voice: { type: "boolean" },
   "audio-effects": { type: "string" },
   "clear-audio-effects": { type: "boolean" },
+  glass: { type: "boolean" },
+  "backdrop-blur": { type: "string" },
+  "backdrop-saturate": { type: "string" },
+  "backdrop-dim": { type: "string" },
+  "clear-backdrop": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -376,6 +386,8 @@ export interface TimelineInvocation {
   withCwd: boolean;
   /** `clip set --voice`: `audioEffects` is filled from the project's style (`sound.voice`) before the request. */
   voiceFromStyle?: boolean;
+  /** `clip set --glass`: `backdrop` is filled from the project's style (`glass`) before the request; other `--backdrop-*` win. */
+  glassFromStyle?: boolean;
 }
 
 /** Bad arguments; the message says which and how to fix. Exit code 2. */
@@ -413,6 +425,11 @@ const ALLOWED: Record<string, string[]> = {
     "voice",
     "audio-effects",
     "clear-audio-effects",
+    "glass",
+    "backdrop-blur",
+    "backdrop-saturate",
+    "backdrop-dim",
+    "clear-backdrop",
     "script-ref",
     "clear-script-ref",
   ],
@@ -785,6 +802,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       }
       const effectFlags = [values["voice"] === true, str("audio-effects") !== undefined, values["clear-audio-effects"] === true].filter(Boolean);
       if (effectFlags.length > 1) throw new UsageError("Pass one of --voice, --audio-effects or --clear-audio-effects.");
+      const backdropFlags = (["backdrop-blur", "backdrop-saturate", "backdrop-dim"] as const).filter((flag) => str(flag) !== undefined);
+      if (values["clear-backdrop"] === true && (values["glass"] === true || backdropFlags.length > 0)) {
+        throw new UsageError("Pass --clear-backdrop alone, without --glass or --backdrop-*.");
+      }
+      const backdrop =
+        values["clear-backdrop"] === true
+          ? null
+          : backdropFlags.length > 0
+            ? { blur: num("backdrop-blur"), saturate: num("backdrop-saturate"), dim: num("backdrop-dim") }
+            : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -792,6 +819,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         audioEffects:
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
+        backdrop,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -1014,8 +1042,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   if (params["transform"]) params["transform"] = clean(params["transform"] as Record<string, unknown>);
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
+  if (params["backdrop"]) params["backdrop"] = clean(params["backdrop"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
-  return { kind: "timeline", method, params: clean(params)!, withCwd: true, ...(voiceFromStyle ? { voiceFromStyle } : {}) };
+  const glassFromStyle = method === "clip.set" && values["glass"] === true;
+  return {
+    kind: "timeline",
+    method,
+    params: clean(params)!,
+    withCwd: true,
+    ...(voiceFromStyle ? { voiceFromStyle } : {}),
+    ...(glassFromStyle ? { glassFromStyle } : {}),
+  };
 }
 
 /** Run a parsed timeline command; returns stdout text. `onProgress` gets the progress of long ones (`multicam faces`). */
@@ -1027,9 +1064,11 @@ export async function executeTimeline(
   onProgress?: (progress: Progress) => void,
 ): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
-  if (inv.voiceFromStyle) {
+  if (inv.voiceFromStyle || inv.glassFromStyle) {
     const { style } = await conn.request("style.show", { cwd });
-    params["audioEffects"] = voiceChainOf((style ?? resolveStyle(null)).sound.voice);
+    const resolved = style ?? resolveStyle(null);
+    if (inv.voiceFromStyle) params["audioEffects"] = voiceChainOf(resolved.sound.voice);
+    if (inv.glassFromStyle) params["backdrop"] = { ...glassOf(resolved.glass), ...(params["backdrop"] as object | undefined) };
   }
   // Params are validated by the daemon against the method registry.
   const result = (await conn.request(inv.method, params as never, onProgress ? { onProgress } : {})) as unknown;

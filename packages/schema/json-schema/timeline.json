@@ -1253,6 +1253,34 @@
                             "additionalProperties": false
                           },
                           "description": "Moves and scales of elements inside the composition, by CSS selector (composition CSS px), applied over the source file. E.g. `{\"#title\": {\"y\": -40, \"scale\": 1.2}}`."
+                        },
+                        "backdrop": {
+                          "type": "object",
+                          "properties": {
+                            "blur": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 200,
+                              "description": "Gaussian sigma in project pixels, as CSS `blur()` and ffmpeg `gblur` take it; glass: 46."
+                            },
+                            "saturate": {
+                              "description": "Saturation of the blurred backdrop, as CSS `saturate()`: 1 unchanged, 0 grey; glass: 1.45. Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 4
+                            },
+                            "dim": {
+                              "description": "Dark scrim over the blurred backdrop: 0 none, 1 black; glass: 0.55, up to 0.72 over bright footage. Default 0.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": [
+                            "blur"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Glass under a generated clip (ADR 0031): the picture below it blurred, saturated and dimmed where the clip's alpha is above about 3 %, then the clip on top; its render is unchanged. Upper video tracks only: on the bottom track nothing is below."
                         }
                       },
                       "required": [
