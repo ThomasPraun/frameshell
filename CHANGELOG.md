@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, third group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template` also
+  takes `terminal` (a command types out, then tasks spin and tick one by one), `chat-bubble` (a question, typing dots,
+  then the reply), `notification-stack` (cards or chat bubbles drop in and push the older ones down; items are one
+  `|`-separated prop of `Sender: message`), `device-frame` (browser or phone around a screenshot with a slow push, on its
+  own background; a plain skeleton when there is no screenshot), `scene-background` (drifting orbs, a masked 120 px grid,
+  vignette and grain on closed loops, for a track under other clips) and `prompt-bar` (the prompt types, then Run is
+  pressed). No GSAP; each has typed props, takes colours and fonts from `style.json`, lays out per format with `pick()`,
+  uses springs, and passes `hyperframes check --strict`. Typing and task timings speed up to fit a short clip. The
+  real-Chrome test renders them in the four formats. Listed in the plugin skill.
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
