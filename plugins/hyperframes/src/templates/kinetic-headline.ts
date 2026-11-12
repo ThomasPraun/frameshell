@@ -9,6 +9,7 @@ export const kineticHeadline: Template = {
   id: "kinetic-headline",
   description: "Headline whose words rise through a mask, keyword in the accent colour; transparent over footage",
   defaultDuration: 3,
+  overlay: true,
   variables({ tokens }: TemplateInput): TemplateVariable[] {
     return [
       { id: "headline", type: "string", label: "Headline", default: "Say it with motion", maxLength: 80 },

@@ -145,6 +145,12 @@ People changes are not timeline operations: review mode does not hold them, `his
 | `matte_prepare(asset)` | Matte job (kind `matte`): which pixels of each frame of a video are the person in front, MediaPipe's selfie segmenter on every proxy frame, smoothed and refined, cached per content in `.frameshell/cache/mattes/` as a grayscale video (frame N = proxy frame N). Returns its path; a second call returns it at once. The only tool that downloads the matte model. Same as `frameshell matte`. |
 
 `track_set(track, behind: "<plate>")` puts a video track behind the person in front on a lower video track: export, `frame_capture` and `frames_strip` draw the plate's media clips again above it through their mattes while it shows a clip (not while a shown track between them does), making a missing one first (a render job's `matte` step). The preview does not draw it yet. `behind: null` clears it; removing or moving the plate track clears it too, with a warning.
+## Sound effects (ADR 0038)
+
+| Tool | Does |
+|---|---|
+| `sound_sfx(kind, variant?, seed?, pitch?, length?)` | Synthesize a sound effect offline (`click`, `tick`, `pop`, `whoosh`, `riser`, `thump`, `impact`, `shutter`; `variant` 1 to 3) into `assets/sound/<kind>-<key>.wav` and import it. The same arguments always give the same file (`state: "cached"`, nothing written); `seed` is a family seed, `pitch` multiplies every frequency, `length` is for `whoosh` and `riser`. `peakAt` is the second of the take that must land on the cue; nothing is placed on a timeline. Records the take as `own` work in `credits.json` when the project keeps one (`credited`). Idempotent per `idempotencyKey`. |
+
 ## Beat grid (ADR 0029)
 
 | Tool | Does |

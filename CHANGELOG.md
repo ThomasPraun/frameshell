@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `frameshell analyze <video>` (#471 slice 1, epic #451, decided in #478; daemon `analyze` as a background job of kind `analyze`, MCP `analyze`, protocol 92):
+- `frameshell analyze <video>` (#471 slice 1, epic #451, decided in #478; daemon `analyze` as a background job of kind `analyze`, MCP `analyze`, protocol 93):
   measure a reference video into `.frameshell/analysis/<name>/` (any file; a run of the same name replaces the folder; project
   files untouched). The shot table comes from ffmpeg's scene score on every frame (`--threshold`, default 0.3; hard cuts, a run of
   high scores within 3 frames is one cut) with cuts per minute and the average, median, shortest and longest shot; a contact sheet at
@@ -19,6 +19,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holds the beat lists). Every time is a frame index / fps rounded down to the millisecond. MCP returns the sheets as images. New
   skill page `reference-video.md` (measured, estimated and decision labels; the grammar, never the content). Events, motion curves,
   text placement, look, sync and diff against an original are later slices of #471.
+- `frameshell sound sfx <kind> [--variant n] [--seed n] [--pitch x] [--length s]` (#463 slice 1, ADR 0038; daemon
+  `sound.sfx`, MCP `sound_sfx`, protocol 92) synthesizes a sound effect offline, with no network and no third-party
+  samples: `click`, `tick`, `pop`, `whoosh` (stereo), `riser`, `thump`, `impact` and `shutter`, three variants each, a
+  family `seed` for one timbre across a film and a seeded pitch (0.9 to 1.3) and level (within 1.5 dB) jitter. The same
+  arguments always give the same file: `assets/sound/<kind>-<key>.wav`, 48 kHz 16-bit with the peak near -3 dBFS, imported
+  like a voiceover take and carrying its cache key and `peakAt` (the instant that must land on the picture: the
+  transient of a hit, the peak of a whoosh, the end of a riser) in a RIFF chunk. A take that is current is `cached`, and
+  a file of that name made by hand is never overwritten. When the project already keeps a `credits.json`, the take is
+  recorded there as `own` work. `sound` is a reserved built-in command group. Placing on markers (`sound.place`) and
+  music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
+  taste.
+- Motion templates, second group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template`
+  also takes `lower-third` (card with an accent bar, name and role), `logo-lockup` (logo, name, accent rule, tagline;
+  beside the name on 16:9, stacked on 1:1, 4:5 and 9:16), `checklist` (items separated by `|` spring in, then tick one
+  by one on `tickStart` and `tickGap`), `comparison` (the old option is crossed out, the chosen one springs in on an
+  accent pill), `counter` (counts from `from` to `to`, up or down, in `countTime` seconds, tabular figures, optional
+  glow while it climbs) and `big-word` (one huge word, letters rise through a mask, for a track with `behind` so it
+  sits behind the person, ADR 0032). Each has typed props, takes colours and fonts from `style.json`, lays out
+  per format with `pick()`, uses springs, and passes `hyperframes check --strict`; the ones that can work alone as
+  well as over footage have `bg` and `backdrop` props. The real-Chrome test renders every template in the four
+  formats (inside the frame, same frames cold and after a reseek). Listed in the plugin skill.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to

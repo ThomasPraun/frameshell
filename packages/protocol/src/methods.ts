@@ -31,7 +31,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -67,7 +67,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 92;
+export const PROTOCOL_VERSION = 93;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2070,6 +2070,69 @@ export const methods = {
       warnings: z.array(z.string()).describe("Script problems (budget over a scene's timing, digits without `language`…) and provider notes."),
     }),
   },
+  "sound.sfx": {
+    mutating: true,
+    description:
+      "Generate a sound effect (ADR 0038): synthesized offline from a seed, no network and no third-party samples. Kinds: " +
+      "`click`, `tick`, `pop`, `whoosh` (stereo, swells to a peak at 45 % of its length), `riser` (a build that ends at its " +
+      "peak), `thump`, `impact`, `shutter`; `variant` 1 to 3 is a different recipe of the kind. The same kind, variant, seed " +
+      "(and `pitch`, `length` when given) always give the same file, so a set of sounds made with one `seed` shares a " +
+      "timbre; vary `variant` and `seed` between uses (the same whoosh on every cut is the tell of a bad edit). Without " +
+      "`pitch` the take gets a seeded pitch between 0.9 and 1.3 and a level within 1.5 dB. The take is a 48 kHz 16-bit WAV " +
+      "written to `assets/sound/<kind>-<key>.wav` and imported (ingest queued) with one `asset.import`; the peak sits at " +
+      "-3 dBFS give or take the jitter. A RIFF chunk inside the file holds its cache key and `peakAt`, the second of the " +
+      "take that must land on the picture (the transient of a hit, the peak of a whoosh, the end of a riser): place a " +
+      "take so that `peakAt` falls on the cue plus an offset by role (ms, negative = before the picture: tap -60, knock " +
+      "-40, click -11, pop +30, whoosh peak +37, swell peak +42; a riser ends 75 ms before the hit). A take " +
+      "that is already current is not written again (`cached`); nothing is placed on a timeline. When the project " +
+      "keeps a `credits.json` ledger, the take is recorded in it with licence `own` (`credited`); without a ledger " +
+      "nothing is written there. Fails with InvalidParams (a `length` for a kind that has none, or out of range) or " +
+      "InvalidOperation (a file of that name exists that this method did not write: it is never overwritten).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      kind: SfxKindSchema.describe("What the sound is."),
+      variant: z.number().int().min(1).max(SFX_VARIANTS).default(1).describe(`Recipe of the kind, 1 to ${SFX_VARIANTS}.`),
+      seed: z
+        .number()
+        .int()
+        .min(0)
+        .max(SFX_SEED_MAX)
+        .default(0)
+        .describe("Family seed: the same seed gives the same file and a consistent timbre across kinds. Change it for another take of the same sound."),
+      pitch: z
+        .number()
+        .min(SFX_PITCH_RANGE.min)
+        .max(SFX_PITCH_RANGE.max)
+        .optional()
+        .describe(`Multiplier of every frequency. Default: a seeded value from ${SFX_JITTER.pitch.min} to ${SFX_JITTER.pitch.max}.`),
+      length: z
+        .number()
+        .positive()
+        .optional()
+        .describe(
+          `Seconds, only for ${Object.entries(SFX_LENGTH_RANGE)
+            .map(([kind, range]) => `\`${kind}\` (${range.min} to ${range.max})`)
+            .join(" and ")}; the other kinds have a fixed length. Default: the variant's own.`,
+        ),
+    }),
+    result: z.object({
+      kind: SfxKindSchema,
+      variant: z.number().int(),
+      seed: z.number().int(),
+      pitch: z.number().describe("The pitch multiplier used, jitter included."),
+      file: z.string().describe("The take, project-relative: `assets/sound/<kind>-<key>.wav`."),
+      state: z.enum(["generated", "cached"]).describe("`generated`: written now. `cached`: the file already held this exact take."),
+      duration: z.number().describe("Seconds."),
+      channels: z.number().int().describe("2 for a whoosh, 1 otherwise."),
+      peakAt: z.number().describe("Seconds from the start of the take to the instant that must land on the cue."),
+      peakDb: z.number().describe("Sample peak, dBFS."),
+      rmsDb: z.number().describe("RMS over the whole take, dBFS."),
+      imported: z
+        .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
+        .describe("The take when this call wrote it, imported; empty when `cached`. Follow its ingest with `job.list`."),
+      credited: z.boolean().describe("The project's `credits.json` holds an `own` entry for the take. False when the project keeps no ledger."),
+    }),
+  },
   "shoot.status": {
     description:
       "Where a shoot is (ADR 0023): every scene of the shoot script with its state (`none`, `deviations`, `done`), the " +
@@ -3866,6 +3929,8 @@ export type ShootStatusResult = MethodResult<"shoot.status">;
 export type ScriptCheckResult = MethodResult<"script.check">;
 /** Result of `voiceover.generate`. */
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
+/** Result of `sound.sfx`. */
+export type SoundSfxResult = MethodResult<"sound.sfx">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;

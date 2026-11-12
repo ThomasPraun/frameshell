@@ -42,6 +42,16 @@ _Avoid_: narration script, TTS script
 The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
 _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 
+## Synthesized sound (ADR 0038)
+
+**Sound effect**:
+A short sound generated offline by `sound sfx` from a kind, a variant and a seed: `assets/sound/<kind>-<key>.wav`, carrying the cache key it was made from. Same arguments, same file.
+_Avoid_: SFX file, sample (a sample is one number of the audio), foley
+
+**Anchor** (`peakAt`):
+The instant of a sound effect that must land on the picture it goes with: the transient of a hit, the peak of a whoosh, the end of a riser. Stored in the take's file; placement subtracts it from the cue.
+_Avoid_: peak (alone: loudness), offset
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:
