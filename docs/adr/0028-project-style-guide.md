@@ -47,6 +47,6 @@ Every visual and sound decision of a video (colours, fonts, text sizes, how thin
 ## Consequences
 
 - Later slices: user styles (`configDir/styles/` via `resolveAppDirs()`, `style apply`/`save`), a journaled `style set` with the review-mode stopgap of decision 6, captions taking the style as their base (decision 11, with a preview/export parity test), project fonts (metrics read from the file instead of the `SUBTITLE_FONT` constants), and tokens injected into generated clips the way ADR 0021 injects element CSS, entering the clip key only for adapters that opt in.
-- Until `style set` exists, agents write `style.json` with `file_write` or their file tools, which is not journaled; the skill tells them not to while review mode is on.
+- Until `style set` exists, agents write `style.json` with `file_write` or their file tools, which is not journaled; while review mode is on the daemon refuses an agent's `file_write` of it (ADR 0036 slice 2) and the skill tells them not to write it by hand.
 - A host older than this ADR ignores `style.json`; nothing else reads it.
 - Safe zones other than Instagram's are from editing guides, marked `measured: false`, to be measured before review (#457) fails a video on them.

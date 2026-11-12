@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { ConfigDocSchema, type ProposalConfigChange, ProposalConfigChangeSchema } from "./config.js";
 import { AuthorSchema, TxIdSchema } from "./timeline.js";
 
 /**
  * Review mode (ADR 0019): while a project's switch is on, a timeline change
  * by any author but `ui` waits as a proposal, accepted or rejected whole.
+ * Changes of project config (`formats` of `frameshell.json`, ADR 0036) join it.
  */
 
 /**
@@ -15,9 +17,9 @@ export const ProposalStateSchema = z
   .describe(
     "`building`: its transaction is still open and its author keeps adding operations. `ready`: the transaction closed; " +
       "it waits for the person to accept or reject it. `accepted`: its operations were applied and journaled. " +
-      "`rejected`: the person refused it; nothing was applied. `stale`: the person changed the same clips, tracks or " +
-      "groups meanwhile (or a replay on their edit broke a timeline rule); nothing was applied. `aborted`: its author " +
-      "ran `tx abort` while it was building.",
+      "`rejected`: the person refused it; nothing was applied. `stale`: the person changed the same clips, tracks, " +
+      "groups or formats (`format:<id>`) meanwhile (or a replay on their edit broke a timeline rule); nothing was applied. " +
+      "`aborted`: its author ran `tx abort` while it was building.",
   );
 
 /** See {@link ProposalStateSchema}. */
@@ -29,20 +31,36 @@ export const ProposalOutcomeSchema = z.enum(["accepted", "rejected", "stale", "a
 /** See {@link ProposalOutcomeSchema}. */
 export type ProposalOutcome = z.output<typeof ProposalOutcomeSchema>;
 
-/** The open proposal of a project. */
-export const ProposalSchema = z.object({
+/** See {@link ProposalSchema}. */
+export interface Proposal {
+  tx: string;
+  label: string | null;
+  author: string;
+  state: "building" | "ready";
+  operations: number;
+  timelines: string[];
+  config: ProposalConfigChange[];
+  openedAt: string;
+  ageMs: number;
+}
+
+/**
+ * The open proposal of a project.
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+export const ProposalSchema: z.ZodType<Proposal> = z.object({
   tx: TxIdSchema.describe("Proposal id: the id of the transaction it holds."),
   label: z.string().nullable().describe("Label from `tx begin`; null for automatic grouping. Direct file edits: `Edit timelines/<id>.json`."),
   author: AuthorSchema,
   state: z.enum(["building", "ready"]).describe("`building` while its transaction is open; `ready` once it waits for review."),
-  operations: z.int().describe("Operations it holds, every timeline."),
+  operations: z.int().describe("Operations it holds, every timeline and config document."),
   timelines: z.array(z.string()).describe("Ids of the timelines it changes, in the order it first changed them."),
+  config: z
+    .array(ProposalConfigChangeSchema)
+    .describe("Project-config keys it changes (ADR 0036), e.g. `format:9x16` from null to `{ id, width, height, index }`; empty when none."),
   openedAt: z.string().describe("ISO 8601 time of its first operation."),
   ageMs: z.number().describe("Milliseconds since `openedAt`."),
 });
-
-/** See {@link ProposalSchema}. */
-export type Proposal = z.output<typeof ProposalSchema>;
 
 /** One closed proposal, as `.frameshell/proposals/decisions.jsonl` keeps it. */
 export const ProposalDecisionSchema = z.object({
@@ -51,9 +69,16 @@ export const ProposalDecisionSchema = z.object({
   author: AuthorSchema,
   outcome: ProposalOutcomeSchema,
   timelines: z.array(z.string()).describe("Ids of the timelines it changed."),
+  config: z
+    .array(ConfigDocSchema)
+    .optional()
+    .describe("Project-config documents it changed (ADR 0036); absent when none, and in lines logged before config could be proposed."),
   conflicts: z
     .array(z.string())
-    .describe("`stale`: ids of the clips, tracks or groups both the person and the proposal changed (`order` = track order). Empty otherwise."),
+    .describe(
+      "`stale`: ids of the clips, tracks or groups both the person and the proposal changed (`order` = track order), or config keys " +
+        "(`format:<id>`). Empty otherwise.",
+    ),
   at: z.string().describe("ISO 8601 time of the decision."),
 });
 
@@ -64,7 +89,7 @@ export type ProposalDecision = z.output<typeof ProposalDecisionSchema>;
 export const ReviewStateSchema = z.object({
   enabled: z
     .boolean()
-    .describe("Review mode switch, set by the person in the app. While on, every timeline change not made in the app waits as a proposal."),
+    .describe("Review mode switch, set by the person in the app. While on, every timeline or format change not made in the app waits as a proposal."),
   proposal: ProposalSchema.nullable().describe("The open proposal; null when none. At most one per project."),
   decisions: z.array(ProposalDecisionSchema).describe("Last closed proposals, newest first, at most 10."),
 });

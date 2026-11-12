@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
   ProposalOutcomeSchema,
@@ -67,7 +68,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 93;
+export const PROTOCOL_VERSION = 94;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -606,15 +607,24 @@ const FormatInfoSchema = z.object({
   builtin: z.boolean().describe("A built-in id (`16x9`, `1x1`, `4x5`, `9x16`) with its fixed canvas."),
 });
 
-/** What a `format.add` or `format.remove` changed, and how to undo it. */
-const FormatChangeSchema = z.object({
+/**
+ * What a `format.add` or `format.remove` changed, and how to undo it.
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+const FormatChangeSchema: z.ZodType<FormatChange> = z.object({
   dir: z.string().describe("Project root."),
-  formats: z.array(FormatInfoSchema).describe("The project's formats after the change, primary first."),
+  formats: z
+    .array(FormatInfoSchema)
+    .describe("The project's formats after the change, primary first; in review mode, the proposal's version (the file is unchanged)."),
   op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
   tx: TxIdSchema.describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
   undo: z
     .object({ method: z.enum(["format.add", "format.remove"]), params: z.record(z.string(), z.unknown()) })
     .describe("The call that undoes this change (with `cwd` added), e.g. `format.remove` with `{ id: \"9x16\" }`."),
+  proposal: TxIdSchema.nullable().describe(
+    "Review mode (ADR 0019): the proposal now holding the change, which reaches `frameshell.json` only once the person accepts it " +
+      "(`proposal.wait`). Null: applied at once.",
+  ),
 });
 
 /** One file `render` writes: the export of one format. */
@@ -988,9 +998,10 @@ export const methods = {
     description:
       "List the delivery formats of the enclosing project (ADR 0027), primary first: one edit renders at each size. " +
       "A project without `formats` in `frameshell.json` has one, its `resolution`. `builtins` lists the ids `format.add` " +
-      "takes without a size.",
-    params: z.strictObject({ cwd: CwdParam }),
+      "takes without a size. While a review-mode proposal changes the formats (ADR 0036), `view: \"proposal\"` lists its version.",
+    params: z.strictObject({ cwd: CwdParam, view: ViewParam }),
     result: z.object({
+      ...ViewedShape,
       dir: z.string().describe("Project root."),
       formats: z.array(FormatInfoSchema).describe("Primary first."),
       builtins: z.array(FormatInfoSchema).describe("Built-in formats `16x9`, `1x1`, `4x5`, `9x16` with their canvases."),
@@ -1006,9 +1017,10 @@ export const methods = {
       "with no transform or keys fill the frame (cropped around the centre), generated clips render at the format's size, " +
       "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl` in the " +
       "caller's transaction (ADR 0036): `history` lists it, `revert` with its `op` or `tx` undoes it, and `undo` names the " +
-      "call that reverses it. It applies at once: while review mode is " +
-      "on, only the person in the app may change formats, anyone else gets ProposalState (reason `forbidden`). Fails with " +
-      "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProposalState, ProjectNotFound.",
+      "call that reverses it. While review mode is on (ADR 0019), a change by anyone but the person in the app waits in " +
+      "the transaction's proposal like a timeline change (`proposal` in the result; `frameshell.json` is unchanged until the " +
+      "person accepts it). Fails with InvalidOperation (id taken, size missing or odd, a built-in id with another size, an " +
+      "image project), ProposalPending (another proposal waits: `proposal.wait`), ProposalState, ProjectNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       id: FormatIdSchema,
@@ -1028,8 +1040,8 @@ export const methods = {
       "Remove a delivery format from the enclosing project's `formats` (ADR 0027). The primary format (the first, equal " +
       "to `resolution`) cannot be removed. Removing the last other format leaves `frameshell.json` without `formats`. " +
       "Cached renders of generated clips at its size become unused (`gc` deletes them). Journaled like `format.add`; " +
-      "`revert` or `undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
-      "InvalidOperation (the primary), ProposalState, ProjectNotFound.",
+      "`revert` or `undo` re-adds it at the same position. Held by review mode like `format.add`. Fails with FormatNotFound, " +
+      "InvalidOperation (the primary), ProposalPending, ProposalState, ProjectNotFound.",
     params: z.strictObject({ cwd: CwdParam, id: FormatIdSchema }),
     result: FormatChangeSchema,
   },
@@ -1767,8 +1779,11 @@ export const methods = {
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
       "timeline write by anyone but the app joins a proposal instead; a new timeline file, or one replacing an unreadable " +
-      "file, is kept with the proposal, not in `timelines/`, until the person accepts it. " +
-      "Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
+      "file, is kept with the proposal, not in `timelines/`, until the person accepts it. A `frameshell.json` write that " +
+      "changes `formats` is journaled as a `file.write` config operation (ADR 0036) in the writer's transaction, so `history` " +
+      "lists it and `revert` undoes it; in review mode its formats change waits in the proposal while its other keys are " +
+      "written at once. A `style.json` write by anyone but the app is refused in review mode (ProposalState, reason " +
+      "`forbidden`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
       path: AbsolutePath.describe("Absolute file path inside a project, e.g. `/home/ana/videos/launch/scripts/launch.md`."),
@@ -3237,7 +3252,7 @@ export const methods = {
   "proposal.status": {
     description:
       "Review mode (ADR 0019) of the project: whether the person turned it on, the open proposal (author, label, state, " +
-      "operations, timelines, age) and the last decisions. While review mode is on, your timeline changes do not touch " +
+      "operations, timelines, age) and the last decisions. While review mode is on, your timeline and format changes do not touch " +
       "the file: they wait as one proposal per transaction until the person accepts or rejects it in the app. Your own " +
       "reads show the proposal's version (`view: \"proposal\"`).",
     params: z.strictObject({ cwd: CwdParam }),
@@ -3275,12 +3290,16 @@ export const methods = {
       "What the open review-mode proposal (ADR 0019) changes, per timeline, from the file to the proposal's version: " +
       "each clip it adds, removes, moves (other track or start, same length) or otherwise changes, with its track, " +
       "start and end before and after, in the shape of `history.diff` (the marks the app shows on the timeline). " +
-      "Without `tx` the open proposal; `timelines` is empty and `tx` null when none is open. Fails with ProposalState " +
+      "`config` lists the project-config keys it changes (ADR 0036), e.g. `format:9x16`. " +
+      "Without `tx` the open proposal; `timelines` and `config` are empty and `tx` null when none is open. Fails with ProposalState " +
       "(`decided` or `unknown`) when `tx` is not the open proposal.",
     params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.optional().describe("The proposal's id. Default: the open proposal.") }),
     result: z.object({
       tx: z.string().nullable().describe("The proposal diffed; null when none is open."),
       timelines: z.array(HistoryDiffResultSchema).describe("One per timeline the proposal changes, `target` = its id; in the order it first changed them."),
+      config: z
+        .array(ProposalConfigChangeSchema)
+        .describe("Every config key it changes, with the file's value (`before`) and the proposal's (`after`); null = absent."),
     }),
   },
   "proposal.accept": {
@@ -3288,13 +3307,15 @@ export const methods = {
     internal: true,
     description:
       "Apply the ready proposal `tx` (ADR 0019): its operations are journaled in order under their author, transaction " +
-      "and label, each marked `proposal: <tx>`, on every timeline or none. Only the app (author `ui`) may. Fails with " +
+      "and label, each marked `proposal: <tx>`, on every timeline and config document or none (config is written first). " +
+      "Only the app (author `ui`) may. Fails with " +
       "ProposalState: `forbidden` (not `ui`), `building` (not ready), `decided`/`unknown` (not the open proposal), or " +
       "`stale` (the person's edit overlaps it; it is closed as stale).",
     params: z.strictObject({ cwd: CwdParam, tx: TxIdSchema.describe("The proposal's id.") }),
     result: z.object({
       tx: z.string(),
-      operations: z.array(OperationResultSchema).describe("The journaled operations, in order."),
+      operations: z.array(OperationResultSchema).describe("The journaled timeline operations, in order."),
+      config: z.array(ConfigOperationSchema).describe("The journaled config operations (ADR 0036), in order; empty when none."),
     }),
   },
   "proposal.reject": {
@@ -3842,9 +3863,10 @@ export const notifications = {
       label: z.string().nullable(),
       author: z.string(),
       state: ProposalStateSchema,
-      operations: z.int().describe("Operations it holds, every timeline."),
+      operations: z.int().describe("Operations it holds, every timeline and config document."),
       timelines: z.array(z.string()).describe("Ids of the timelines it changes."),
-      conflicts: z.array(z.string()).describe("`stale`: ids both the person and the proposal changed. Empty otherwise."),
+      config: z.array(ProposalConfigChangeSchema).describe("Project-config keys it changes (ADR 0036); empty when none."),
+      conflicts: z.array(z.string()).describe("`stale`: ids or config keys both the person and the proposal changed. Empty otherwise."),
     }),
   },
   "people.changed": {
@@ -3976,8 +3998,15 @@ export type FrameParams = MethodParams<"frame">;
 export type FrameResult = MethodResult<"frame">;
 /** One format as `format.list` reports it. */
 export type FormatInfo = z.output<typeof FormatInfoSchema>;
-/** Result of `format.add` and `format.remove`. */
-export type FormatChange = z.output<typeof FormatChangeSchema>;
+/** Result of `format.add` and `format.remove`; see {@link FormatChangeSchema}. */
+export interface FormatChange {
+  dir: string;
+  formats: FormatInfo[];
+  op: string;
+  tx: string;
+  undo: { method: "format.add" | "format.remove"; params: Record<string, unknown> };
+  proposal: string | null;
+}
 /** `cover` params. */
 export type CoverParams = MethodParams<"cover">;
 /** Result of `cover`. */

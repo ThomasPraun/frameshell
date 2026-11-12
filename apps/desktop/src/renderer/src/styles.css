@@ -3885,10 +3885,17 @@ button.track-head:focus-visible {
 
 .proposal-who,
 .proposal-count,
+.proposal-config,
 .proposal-ids,
 .proposal-note {
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.proposal-config {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .proposal-ids {

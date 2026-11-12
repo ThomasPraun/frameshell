@@ -1,5 +1,6 @@
 import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   ErrorCode,
   type FileWriteResult,
@@ -57,6 +58,13 @@ export interface ProjectRegistryOptions {
    * `author` is the one given to `writeFile`. Default: schema-validated plain write.
    */
   writeTimeline?: (root: string, id: string, content: string, author: string | undefined) => Promise<unknown>;
+  /**
+   * Takes over {@link ProjectRegistry.writeFile} of `frameshell.json` once its content validated, so a change of
+   * `formats` is journaled (ADR 0036). Default: plain write ({@link ProjectRegistry.writeConfigText}).
+   */
+  writeConfig?: (root: string, content: string, author: string | undefined) => Promise<unknown>;
+  /** Runs before {@link ProjectRegistry.writeFile} writes any other file (`rel` project-relative); throws to refuse the write. */
+  guardWrite?: (root: string, rel: string, author: string | undefined) => Promise<void>;
 }
 
 /** Projects the daemon holds open, keyed by absolute root directory. */
@@ -66,10 +74,14 @@ export class ProjectRegistry {
   readonly #configEdits = new Map<string, Promise<unknown>>();
   readonly #onOpen: (dir: string) => void;
   readonly #writeTimeline: ProjectRegistryOptions["writeTimeline"];
+  readonly #writeConfig: ProjectRegistryOptions["writeConfig"];
+  readonly #guardWrite: ProjectRegistryOptions["guardWrite"];
 
   constructor(options: ProjectRegistryOptions = {}) {
     this.#onOpen = options.onOpen ?? (() => {});
     this.#writeTimeline = options.writeTimeline;
+    this.#writeConfig = options.writeConfig;
+    this.#guardWrite = options.guardWrite;
   }
 
   /**
@@ -190,6 +202,41 @@ export class ProjectRegistry {
     });
   }
 
+  /** Replace `frameshell.json` with `content`, after the edit in progress. Throws `InvalidProjectFile` when it does not validate. */
+  writeConfigText(root: string, content: string): Promise<void> {
+    return this.#editConfig(root, async () => {
+      const configPath = join(root, PROJECT_FILE);
+      const parsed = parseProjectConfig(parseJson(configPath, content));
+      if (!parsed.ok) throw invalid(configPath, parsed.error);
+      await writeTextAtomic(configPath, content);
+    });
+  }
+
+  /**
+   * Write `content` as `frameshell.json` but with the file's current `formats` (ADR 0036: a write whose formats change
+   * waits in a review-mode proposal); nothing when that leaves the file as it is. Throws `InvalidProjectFile` when
+   * the result would not validate (e.g. a new `resolution` the current formats do not start with).
+   */
+  writeConfigKeepingFormats(root: string, content: string): Promise<void> {
+    return this.#editConfig(root, async () => {
+      const configPath = join(root, PROJECT_FILE);
+      const { raw } = await readConfig(root);
+      const next: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(parseJson(configPath, content) as Record<string, unknown>)) {
+        if (key === "formats") continue;
+        next[key] = value;
+        if (key === "resolution" && raw["formats"] !== undefined) next["formats"] = raw["formats"];
+      }
+      if (raw["formats"] !== undefined && !("formats" in next)) next["formats"] = raw["formats"];
+      if (isDeepStrictEqual(next, raw)) return;
+      const parsed = parseProjectConfig(next);
+      if (!parsed.ok) {
+        throw invalid(configPath, `${parsed.error}\nThe formats change waits for review, so the rest is checked against the current formats: change them in a separate write.`);
+      }
+      await writeJsonAtomic(configPath, next);
+    });
+  }
+
   /** Run read-modify-write `edit` of `frameshell.json` after the one in progress for `root`. */
   #editConfig<T>(root: string, edit: () => Promise<T>): Promise<T> {
     const run = (this.#configEdits.get(root) ?? Promise.resolve()).catch(() => {}).then(edit);
@@ -247,8 +294,13 @@ export class ProjectRegistry {
       }
       if (!parsed.ok) throw invalid(target, parsed.error);
     }
+    if (rel === PROJECT_FILE) {
+      await (this.#writeConfig ? this.#writeConfig(root, content, author) : this.writeConfigText(root, content));
+      await this.openEnclosing(root);
+      return { project: root, path: rel };
+    }
+    await this.#guardWrite?.(root, rel, author);
     await writeTextAtomic(realTarget, content);
-    if (rel === PROJECT_FILE) await this.openEnclosing(root);
     return { project: root, path: rel };
   }
 
@@ -295,6 +347,15 @@ const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown
   { match: (rel) => rel === PEOPLE_FILE, parse: parsePeopleFile },
   { match: (rel) => rel === STYLE_FILE, parse: parseStyleFile },
 ];
+
+/** `text` parsed as JSON; `InvalidProjectFile` for `path` when it is not JSON. */
+function parseJson(path: string, text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw invalid(path, (error as Error).message);
+  }
+}
 
 function notInProject(target: string): RpcError {
   return new RpcError(

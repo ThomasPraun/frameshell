@@ -289,6 +289,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Review mode holds format changes (#496 slice 2, ADR 0036, protocol 94): while review mode is on, an agent's
+  `format add`, `format remove`, `revert` of a format change and `tx abort` of one that reached the file wait in the
+  transaction's proposal like timeline changes, instead of being refused. A transaction mixing clips and formats is
+  one proposal, accepted or rejected whole. The person's change of another format rebases the proposal; a change of
+  the same format makes it stale (`conflicts`: `format:<id>`). Accepting journals the format operations, marked with
+  the proposal, before the timeline ones. `format list` shows the author its proposal's version (`--json`: `view`,
+  `proposal`). A `frameshell.json` write that changes `formats` is journaled as a `file.write` config operation that
+  `revert` undoes; in review mode its formats change waits in the proposal and the other keys are written at once.
+  An agent's `style.json` write is refused while review mode is on, until `style set` exists. The app's proposal bar
+  lists the formats a proposal adds or removes (`Formats: + 9x16 (1080x1920)`), and the History list refreshes when a
+  proposal opens or closes. Wire: `format.add`/`format.remove` results gain `proposal`; `format.list` takes `view`;
+  proposals (`proposal.status`, `status`, `proposal.changed`), `proposal.diff` and `proposal.accept` gain `config`;
+  decisions gain `config`.
 - Format changes are history (#496 slice 1, ADR 0036, SPEC decision 41, protocol 89): `format add` and
   `format remove` join your transaction, `frameshell history` lists them in every timeline's history (marked
   `project config`, touched `format:<id>`), and `frameshell revert <op|tx>` and `tx abort` undo them, with the clips

@@ -136,11 +136,12 @@ describe("proposal diff", () => {
           ],
         },
       ],
+      config: [],
     });
     expect(await timelines.proposalDiff(root, "tx_000000a1")).toMatchObject({ tx: "tx_000000a1" });
     await expect(timelines.proposalDiff(root, "tx_000000ff")).rejects.toMatchObject({ data: { reason: "unknown" } });
     await timelines.rejectProposal(root, "tx_000000a1");
-    expect(await timelines.proposalDiff(root)).toEqual({ tx: null, timelines: [] });
+    expect(await timelines.proposalDiff(root)).toEqual({ tx: null, timelines: [], config: [] });
     await expect(timelines.proposalDiff(root, "tx_000000a1")).rejects.toMatchObject({ data: { reason: "decided" } });
   });
 });
