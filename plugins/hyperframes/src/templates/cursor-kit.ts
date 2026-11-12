@@ -45,7 +45,7 @@ export const CURSOR_HTML = `<i id="ripple" class="ripple"></i>
         <div id="cursor"></div>`;
 
 /**
- * Page-script math of the cursor (pure: needs `M` and `unit` only). A cursor
+ * Page-script math of the cursor (pure: needs `M`, `S` and `unit` only). A cursor
  * is a carrier (#466): it travels leg by leg on quadratic arcs whose control
  * point sits 15 % of the leg's length off the chord, eases in and out with a
  * tiny overshoot, and may hesitate near its target. A click scales it to 0.84
@@ -162,8 +162,8 @@ export const CURSOR_SCRIPT = bare(String.raw`
       var START = 0.05;
 
       // Puts the cursor at p, pressed or not; it is fully opaque from the first frame and leaves with the clip.
-      function drawCursor(p, scale, out) {
-        put(cursorEl, { x: p.x, y: p.y, scale: scale, opacity: 1 - out });
+      function drawCursor(p, scale) {
+        put(cursorEl, { x: p.x, y: p.y, scale: scale });
       }
 
       // The ring that spreads from a click at (x, y) at time "at".

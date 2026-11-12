@@ -129,7 +129,7 @@ export const cursorClick: Template = {
         put(toast, { y: (1 - s) * th * 0.7, scale: 0.9 + 0.1 * s, opacity: M.ease("enter", (t - clickAt) / 0.15) });
         put(check, { scale: 0.4 + 0.6 * M.spring("snappy", t - clickAt - 0.08), opacity: M.ease("enter", (t - clickAt - 0.08) / 0.1) });
         drawRipple(t, clickAt, target.x, target.y);
-        drawCursor(trip.at(t), cp, 0);
+        drawCursor(trip.at(t), cp);
       });
     </script>
   </body>

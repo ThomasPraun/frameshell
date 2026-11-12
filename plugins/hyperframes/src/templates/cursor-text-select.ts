@@ -12,6 +12,9 @@ import {
   pageHead,
 } from "./kit.js";
 
+/** The paragraph the template shows by default, and the one it falls back to when the `text` prop has no word left. */
+const DEFAULT_TEXT = "Editing a video should feel like editing a document.";
+
 /**
  * Cursor text select (#466, UI demo): words rise into a paragraph, a cursor
  * presses at the start of a phrase and drags along it (down to the next line
@@ -37,7 +40,7 @@ export const cursorTextSelect: Template = {
   overlay: true,
   variables({ tokens }: TemplateInput): TemplateVariable[] {
     return [
-      { id: "text", type: "string", label: "The paragraph (up to 24 words are shown)", default: "Editing a video should feel like editing a document.", maxLength: 160 },
+      { id: "text", type: "string", label: "The paragraph (up to 24 words are shown)", default: DEFAULT_TEXT, maxLength: 160 },
       { id: "select", type: "string", label: "The phrase the cursor selects, as it is written in the paragraph; if it is not found the last three words are selected", default: "editing a document", maxLength: 80 },
       { id: "action", type: "string", label: "Text of the pill that pops up over the selection; empty for none", default: "Ask the agent", maxLength: 24 },
       hesitateVariable(0.25),
@@ -87,7 +90,8 @@ export const cursorTextSelect: Template = {
       ${CURSOR_MATH}
       ${CURSOR_SCRIPT}
       var L = M.pick({ size: 0.07, w: 0.62 }, { size: 0.066, w: 0.8 }, { size: 0.06, w: 0.86 });
-      var words = String(P.text).split(" ").filter(Boolean).slice(0, 24);
+      var words = String(P.text).split(/\\s+/).filter(Boolean).slice(0, 24);
+      if (!words.length) words = ${JSON.stringify(DEFAULT_TEXT)}.split(" ");
       var chars = words.join(" ").length;
       var blockW = L.w * S.width;
       var px = Math.min(L.size * unit * P.size, Math.sqrt((blockW * 0.5 * S.height) / (Math.max(1, chars) * 0.55 * 1.4)));
@@ -233,7 +237,7 @@ export const cursorTextSelect: Template = {
         put(pill, { y: (1 - s) * pillH * 0.5, scale: 0.85 + 0.15 * s, opacity: M.ease("enter", (t - sc.upAt) / 0.12) });
 
         drawRipple(t, sc.downAt, sc.start.x, sc.start.y);
-        drawCursor(cur, press(t, sc.downAt, sc.upAt), 0);
+        drawCursor(cur, press(t, sc.downAt, sc.upAt));
       });
     </script>
   </body>

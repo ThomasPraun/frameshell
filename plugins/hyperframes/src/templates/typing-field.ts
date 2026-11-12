@@ -94,11 +94,6 @@ export const typingField: Template = {
       ${CURSOR_MATH}
       ${CURSOR_SCRIPT}
 
-      function alpha(hex, a) {
-        var c = rgb(hex);
-        return "rgba(" + c[0] + ", " + c[1] + ", " + c[2] + ", " + a + ")";
-      }
-
       // Layout per format: type size as a fraction of the short side, the field's width as a fraction of the frame width and its centre line. wide, square, tall.
       var L = M.pick({ size: 0.042, w: 0.66, y: 0.46 }, { size: 0.04, w: 0.86, y: 0.44 }, { size: 0.038, w: 0.9, y: 0.42 });
       var line = String(P.text);
@@ -209,7 +204,7 @@ export const typingField: Template = {
 
         if (useCursor) {
           drawRipple(t, clickAt, target.x, target.y);
-          drawCursor(trip.at(t), cp, 0);
+          drawCursor(trip.at(t), cp);
         } else {
           put(rippleEl, { opacity: 0 });
           put(cursorEl, { opacity: 0 });

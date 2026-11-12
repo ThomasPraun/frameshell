@@ -178,7 +178,7 @@ export const cursorDragDrop: Template = {
         put(done, { scale: 0.3 + 0.7 * M.spring("snappy", t - dropAt - 0.05), opacity: M.ease("enter", (t - dropAt - 0.05) / 0.1) });
 
         drawRipple(t, dropAt, drop.x, drop.y);
-        drawCursor(cur, press(t, grabAt, dropAt), 0);
+        drawCursor(cur, press(t, grabAt, dropAt));
       });
     </script>
   </body>

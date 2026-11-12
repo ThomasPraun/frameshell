@@ -93,11 +93,6 @@ export const appWindow: Template = {
       ${CURSOR_MATH}
       ${CURSOR_SCRIPT}
 
-      // Colour with alpha, for hairlines and washes.
-      function alpha(hex, a) {
-        var c = rgb(hex);
-        return "rgba(" + c[0] + ", " + c[1] + ", " + c[2] + ", " + a + ")";
-      }
       var bgfill = document.getElementById("bgfill");
       bgfill.style.background = "radial-gradient(ellipse at 50% 40%, " + mix(P.bg, "#ffffff", 0.09) + " 0%, " + P.bg + " 72%)";
 
@@ -241,7 +236,7 @@ export const appWindow: Template = {
         var cp = press(t, clickAt, clickAt + 0.1);
         if (useCursor) {
           drawRipple(t, clickAt, target.x, target.y);
-          drawCursor(trip.at(t), cp, 0);
+          drawCursor(trip.at(t), cp);
         } else {
           put(rippleEl, { opacity: 0 });
           put(cursorEl, { opacity: 0 });

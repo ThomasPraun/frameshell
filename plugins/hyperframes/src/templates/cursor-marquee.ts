@@ -214,7 +214,7 @@ export const cursorMarquee: Template = {
         put(badge, { y: (1 - b) * bh * 0.7, scale: 0.9 + 0.1 * b, opacity: M.ease("enter", (t - upAt) / 0.15) });
 
         drawRipple(t, downAt, from.x, from.y);
-        drawCursor(cur, press(t, downAt, upAt), 0);
+        drawCursor(cur, press(t, downAt, upAt));
       });
     </script>
   </body>
