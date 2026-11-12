@@ -197,6 +197,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `clip set --voice` (#464, ADR 0031) writes the voice chain of the project's `style.json` (`sound.voice`, ADR 0028)
+  instead of fixed numbers: style seconds become milliseconds, each number is held to the effect's range, and a
+  noise reduction of 0 leaves `denoise` out. Without a `style.json`, or with a style that does not set `sound.voice`,
+  the chain is the same as before. The style's default high-pass is now 85 Hz (was 80), the voice chain's.
 - Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
   `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
   `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.
