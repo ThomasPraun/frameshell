@@ -42,6 +42,14 @@ _Avoid_: narration script, TTS script
 The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
 _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 
+**Phrase**:
+One stretch of a voiceover take between silences of 60 ms or more, as a range of the take in seconds; the cuts of the phrase clips a person corrects by trimming. Derived from the file, never stored.
+_Avoid_: segment, chunk
+
+**Misread**:
+A difference between what a voiceover take was heard to say (through the project's transcription provider) and the line it was asked to read: `missing`, `changed`, `added`, `moved`, `restart` or `pause`; the line is `clean`, `doubtful` (the transcription may have made it) or `misread`.
+_Avoid_: error (too broad), mispronunciation (the check hears words, not sounds)
+
 ## Synthesized sound (ADR 0038)
 
 **Sound effect**:

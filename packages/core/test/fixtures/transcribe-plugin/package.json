@@ -1,0 +1,8 @@
+{
+  "name": "transcribe-plugin",
+  "version": "0.1.0",
+  "description": "Frameshell test plugin: a transcription provider that hears whatever words.json says.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.js"
+}

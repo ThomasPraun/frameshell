@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voiceover, slice 3 of #470 (ADR 0034 decisions 17 and 18, epic #451; protocol 99): `voiceover generate` now splits each
+  take into phrases and checks it for misreads. Every line reports its `phrases`: the take cut where it falls silent for
+  60 ms or more (5 ms RMS, 38 dB under its peak, 20 ms lead and 30 ms tail kept) as ranges of the take in seconds, the
+  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade each edge gets when placed). With
+  `verify` (the default; `--no-verify` skips it) each take is also transcribed by the project's transcription provider
+  and compared with the line's spoken text by the shoot comparison, so spoken numbers and word normalization stay in one
+  place: each line gets a `check` (`clean`, `doubtful` when the transcription may be to blame, `misread`) listing what was
+  missing, changed or added, and the words heard inside each phrase. The check never fails the call and never blocks a
+  paid take: in an untrusted project, without a transcription plugin or when the transcription fails, `verification`
+  says it was skipped and why. Cached lines are checked too. The envelope builder of cut snapping takes an optional hop
+  for the finer RMS.
+
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
