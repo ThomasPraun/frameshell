@@ -10,7 +10,7 @@ export const WINDOW_DOTS_HTML = '<span class="dots"><i></i><i></i><i></i></span>
 
 /**
  * Page-script helpers of the screen-style templates (terminal, prompt bar,
- * notification stack, scene background); needs `COLOR_HELPERS` first.
+ * notification stack, chat bubble, scene background); needs `COLOR_HELPERS` first.
  */
 export const UI_HELPERS = String.raw`
       // Hex colour as rgba(), alpha 0..1.

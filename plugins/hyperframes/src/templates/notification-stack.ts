@@ -107,7 +107,7 @@ export const notificationStack: Template = {
       var L = M.pick({ w: 0.36, fs: 0.032, top: 0.07, right: true }, { w: 0.86, fs: 0.036, top: 0.07, right: false }, { w: 0.9, fs: 0.038, top: 0.07, right: false });
       var chat = P.mode === "chat";
       var entries = parts(P.items, 6).map(function (item) {
-        var at = item.indexOf(":");
+        var at = item.indexOf(": ");
         if (at > 0 && at <= 24) return { who: item.slice(0, at).trim(), body: item.slice(at + 1).trim() };
         return { who: String(P.app), body: item };
       });

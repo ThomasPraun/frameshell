@@ -13,7 +13,8 @@ import { UI_HELPERS } from "./ui-parts.js";
  * Soft gradient orbs drift on closed loops, a grid (120 px at 1080 p) fades
  * out toward the edges under a radial mask and slides one cell over the clip,
  * a vignette darkens the corners and film grain flickers on. Radial gradients
- * only (linear dark gradients band in H.264), no blend modes and no blur.
+ * for the orbs, vignette and mask (smooth dark ramps band in H.264 as linear
+ * ones do; the grid's hard-stop lines do not), no blend modes and no blur.
  * Opaque from the first frame, so it can sit under a cut. Paints its own
  * background.
  */
@@ -80,7 +81,7 @@ export const sceneBackground: Template = {
       var holder = document.getElementById("orbs");
       var diameter = Math.max(unit * L.orb, Math.max(S.width, S.height) * 0.6);
       var orbs = [];
-      for (var i = 0; i < P.orbs; i++) {
+      for (var i = 0; i < Math.round(P.orbs); i++) {
         var el = document.createElement("i");
         el.className = "orb";
         el.style.width = diameter + "px";

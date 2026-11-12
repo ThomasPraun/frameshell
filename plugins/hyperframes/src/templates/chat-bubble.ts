@@ -171,10 +171,12 @@ export const chatBubble: Template = {
         var gone = M.ease("exit", (t - replyAt + 0.1) / 0.1);
         s = M.spring("snappy", t - dotsAt);
         M.write(dots, { scale: Math.max(0.001, pop(s) * (1 - gone)) });
-        paint(dots, P.card, onCard, M.ease("enter", (t - dotsAt) / 0.15) * (1 - gone));
+        var dotsFade = M.ease("enter", (t - dotsAt) / 0.15) * (1 - gone);
+        paint(dots, P.card, onCard, dotsFade);
+        // The dots are children with their own colour: they follow the bubble's fade and stay still before it is due.
         dotList.forEach(function (dot, i) {
-          var wave = Math.max(0, Math.sin((t - dotsAt) * 8 - i * 0.9));
-          M.write(dot, { y: -wave * fs * 0.28, opacity: 0.55 + 0.45 * wave });
+          var wave = t < dotsAt ? 0 : Math.max(0, Math.sin((t - dotsAt) * 8 - i * 0.9));
+          M.write(dot, { y: -wave * fs * 0.28, opacity: (0.55 + 0.45 * wave) * dotsFade });
         });
 
         s = M.spring("default", t - replyAt);
