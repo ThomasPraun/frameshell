@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Words behind the head in the app (#461 slice 4, ADR 0032; no wire change): the header menu of a video track offers
+  "Put behind the person on V1" for each lower video track that holds a media clip, and "Stop going behind the person"
+  while it is behind one (one `track.set`, one undo step). A track behind a plate shows a person icon at the end of its
+  header with the state of the plate's matte: the percentage while it is made, a `!` with the reason when it failed, plain
+  once ready; until then the preview keeps showing the word in front. The skill's reels page gains the recipe for a
+  big word behind the head: 30 to 55 % covered, never over the face, 1.5 to 4 s, no two-person shots, b-roll above the
+  word's track. Strings in English and Spanish; an e2e with the stand-in matte.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
