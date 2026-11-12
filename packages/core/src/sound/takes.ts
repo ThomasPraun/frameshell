@@ -16,7 +16,7 @@ export const SOUND_DIR = "assets/sound";
  * Part of every take key. Bump when a recipe changes in a way that changes the samples: takes are made again under
  * new names, old ones stay as they are.
  */
-export const SFX_KEY_VERSION = 1;
+export const SFX_KEY_VERSION = 2;
 
 /** RIFF chunk id of the take mark. */
 const MARK_CHUNK = "fssd";

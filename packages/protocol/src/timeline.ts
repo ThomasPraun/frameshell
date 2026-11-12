@@ -48,13 +48,17 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
-const TimeRef = (what: string) =>
+export const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
-        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`); the daemon turns it into seconds first, so the history records seconds.",
+        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the timeline's grid counting from 1 (`beat:32`, `bar:8`, " +
+        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; needs `tempo`, refused when the grid is LOW confidence); the daemon turns it into " +
+        "seconds first, so the history records seconds.",
     );
+/** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
+export { TimeRef as TimeRefParam };
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 
 /** What `snapTo` lands on (ADR 0029 decision 6). */

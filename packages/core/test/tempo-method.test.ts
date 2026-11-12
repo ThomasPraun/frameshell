@@ -140,6 +140,31 @@ describe("tempo.show and tempo.set", () => {
     await request("marker.remove", { marker: "nominal" });
     await request("tempo.set", { clip: music });
   });
+
+  it("beat:N and bar:N name grid times on every method with a time (ADR 0029 slice 4), and the journal records seconds", async () => {
+    // The music plays source 0–10 s at timeline 2, so beat 1 is 2.5 s and the bars start at 2.5, 4.5, 6.5, …
+    const bar = (await request("marker.add", { at: "bar:2", label: "verse" })) as { operation: { args: Record<string, unknown> } };
+    expect(bar.operation.args).toEqual({ at: 4.5, label: "verse" });
+    const beat = (await request("marker.add", { at: "beat:3-0.5", label: "lead" })) as { operation: { args: Record<string, unknown> } };
+    expect(beat.operation.args).toMatchObject({ at: 3 });
+    const split = (await request("clip.split", { clip: music, at: "bar:3", snapTo: "beat" })) as { operation: { args: Record<string, unknown>; tx: string } };
+    expect(split.operation.args).toMatchObject({ at: 6.5 });
+    await request("revert", { target: split.operation.tx });
+    await request("marker.remove", { marker: "verse" });
+    await request("marker.remove", { marker: "lead" });
+  });
+
+  it("beat:N refuses a number past the music, a LOW grid and a missing tempo like --snap-to does", async () => {
+    await expect(request("marker.add", { at: "beat:30", label: "late" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("past the end of the grid, which has 19 beats"),
+      data: expect.objectContaining({ reason: "time reference", field: "at", value: "beat:30" }),
+    });
+    await request("tempo.set", { clear: true });
+    await expect(request("marker.add", { at: "bar:2", label: "x" })).rejects.toMatchObject({ message: expect.stringContaining("the timeline has no tempo") });
+    await request("tempo.set", { clip: music });
+    expect(timelineFile().markers ?? []).toEqual([]);
+  });
 });
 
 describe("a beats file edited by hand", () => {
@@ -187,6 +212,10 @@ describe("a beats file edited by hand", () => {
     const low = await show();
     expect(low.grid).toMatchObject({ low: true, confidence: 0.3 });
     await expect(request("marker.add", { at: 3.2, label: "low", snapTo: "beat" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("LOW confidence"),
+    });
+    await expect(request("marker.add", { at: "beat:2", label: "low" })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
       message: expect.stringContaining("LOW confidence"),
     });

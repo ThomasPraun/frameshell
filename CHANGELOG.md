@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Fit music to the cut, second slice of #485 (ADR 0037, epic #451; daemon `music.fit`, CLI `music fit`, MCP `music_fit`,
+  protocol 101): `music fit <clip> --end end-card` back-times a music clip (a media clip of an audio track) so the track's own
+  final hit lands on the cut and it plays unspliced before it, and says where the music then starts. `--end` and
+  `--from` are seconds or a marker (the shared TimeRef resolver). The hit is `--hit` (seconds of the file) or found on
+  the track's energy, the last sharp jump in level near the end of the part the clip plays, with a confidence and the
+  other strong hits; a hit under 0.5 is only suggested. By default the clip slides and keeps its speed (within half a
+  frame); a track longer than the picture before the hit loses its intro (`in` moves later, never before `--from`,
+  default 0), a shorter one starts late, and nothing is looped or spliced. `--exact` keeps the start and changes the
+  speed to land the hit on `--end`, at most 1.7 % of the clip's speed, refusing beyond it with the ends that fit.
+  `--dry-run` changes nothing and lists the steps. A clip with duck keys gets `duck` again in the same transaction
+  (`--skip duck` leaves them), since duck keys sit on the clip's own clock. One transaction (`Music fit: …`, one
+  proposal in review mode); only `start`, `in`, `speed` and gain keys are written, so older versions open the
+  timeline. Measured on a synthetic drum track: the export's `atempo` plays the material about 21 ms early at a speed
+  near 1 (the preview has no such shift) and softens a kick's attack from 3.1 to 5.7 ms; tape-style resampling shows
+  neither (ADR 0037 has the numbers, measured on darwin-arm64 only; the 5 ms `fadeIn` is not written yet). A second fit
+  that lands later brings back the intro an earlier fit dropped, as far as the file has it.
+
+- `frameshell sound place <kind> (--at <t>[,<t>…] | --cuts <track> | --typing --from <t> --to <t>)` (#463 slice 2,
+  ADR 0038; daemon `sound.place`, MCP `sound_place`, protocol 100) places generated sound effects in one transaction
+  `Sound: …` (one proposal in review mode, `revert` undoes it whole): on times given as seconds or a marker through the
+  shared TimeRef resolver (`hook`, `hook+0.5`), on every edit point of a track (or the numbered ones) and as a run of
+  typing keys (tick or click, at most 10 a second, spaced for 87 ms or more, rotating takes). The take's `peakAt` lands
+  on the time plus the offset of its role (click -11 ms, tap -60, knock -40, pop +30, whoosh +37; a riser ends 75 ms
+  before), on whole frames, on the audio track `SFX` (made when absent; `SFX 2`, `SFX 3` where sounds overlap). Clip
+  gain is `-sound.sfxUnderVoice` of `style.json` plus the tier (primary 0, secondary -4, texture -8 dB). Variants rotate
+  so the same whoosh is not twice in a row. It warns, never refuses, about more than 2 sounds on one frame, ticks closer
+  than 66 ms and pops closer than 114 ms, two typing keys closer than 87 ms once rounded to frames, and one take twice in a row; sounds that cannot be clips (nothing left after the
+  timeline start) are listed in `skipped`.
+- Safe-zone sheet of `review`, second slice of #457 (epic #451; `review --platform instagram|tiktok|shorts|youtube`,
+  `--sheets safe`, MCP `review` `platform`, protocol 99): up to 36 frames chosen like the contact sheet with the
+  platform's UI zones shaded red and outlined, drawn from the one table in `@frameshell/schema` (`safe-zones.ts`),
+  scaled to the film's size. A frame where the captions of a subtitle track reach into a zone is marked
+  `!subtitle` (box measured from the bundled face, the track's style and each cue's words), and `review.json`
+  `safeZones` lists, per platform, the zones in the film's pixels and the captions that cross them by track and
+  zone (how many cues, when, how many px deep), at the caption size export draws in that format
+  (`captionScale`, 1.3 in a vertical non-primary format). `--platform` adds the sheet to the default ones; a vertical film
+  whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
+  are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them (`review` and `analyze`). Titles, graphics
+  and faces are not measured yet.
+- `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
+  a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
+  the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
+  optional marker offset: `--at bar:8`, `--from bar:2 --to bar:6`, `--start beat:17-0.1`; `beat:2.5` is halfway between
+  beats 2 and 3. They resolve in the daemon through the same grid as `--snap-to` (no second grid), so a measured grid is
+  the music clip's beats file carried through the clip and a nominal one is built as far as the number reaches, and the
+  history records seconds. They are refused with the same messages as `--snap-to`: no tempo, a music clip with no beats
+  file yet, a LOW confidence grid, and a number past the last beat or bar of a measured grid. Word references
+  (`"this#2"`) are still refused with a pointer.
+- Style changes and user styles, second slice of #468 (ADR 0028, ADR 0036 slice 4, epic #451; daemon `style.set`,
+  `style.apply`, `style.save`, `style.list`, `style.show` `view` and `from.status`, MCP `style_set`, `style_apply`,
+  `style_save`, `style_list`, protocol 98): `frameshell style set <path> <value>` changes one value of `style.json`
+  (JSON or text; `null` removes it) and keeps the rest of the file. `style save <name>` keeps the project's style as a
+  user style in Frameshell's config folder (`styles/<name>.json`); `style apply <name>` copies one into a project value
+  by value and lists what changed (`--replace` overwrites), recording where it came from so `style show` says when the
+  user style changed since; `style apply premium` (any motion personality) sets the personality; `style list` lists
+  them. Every change of `style.json`, by these commands or by `file.write`, is journaled: `history` lists it, `revert`
+  undoes it (reverting the change that created the file removes it), and in review mode it waits in the agent's
+  proposal like a timeline change instead of being refused.
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset
@@ -58,8 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like a voiceover take and carrying its cache key and `peakAt` (the instant that must land on the picture: the
   transient of a hit, the peak of a whoosh, the end of a riser) in a RIFF chunk. A take that is current is `cached`, and
   a file of that name made by hand is never overwritten. When the project already keeps a `credits.json`, the take is
-  recorded there as `own` work. `sound` is a reserved built-in command group. Placing on markers (`sound.place`) and
-  music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
+  recorded there as `own` work. `sound` is a reserved built-in command group. Placing (`sound.place`, see above)
+  and music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
   taste.
 - Motion templates, second group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template`
   also takes `lower-third` (card with an accent bar, name and role), `logo-lockup` (logo, name, accent rule, tagline;
