@@ -21,8 +21,8 @@ const TIE_DB = 0.5;
 const SILENCE_DB = -120;
 
 /**
- * Streaming RMS envelope of interleaved s16le PCM: one dBFS value per
- * {@link ENERGY_HOP_S}, index i covering [i·hop, (i+1)·hop). Channels are
+ * Streaming RMS envelope of interleaved s16le PCM: one dBFS value per hop
+ * ({@link ENERGY_HOP_S} by default), index i covering [i·hop, (i+1)·hop). Channels are
  * power-averaged, so opposite-phase channels do not cancel.
  */
 export class EnvelopeBuilder {
@@ -33,8 +33,9 @@ export class EnvelopeBuilder {
   #count = 0;
   #carry: Uint8Array = new Uint8Array(0);
 
-  constructor(sampleRate: number, channels = 1) {
-    this.#hopFrames = Math.max(1, Math.round(sampleRate * ENERGY_HOP_S));
+  /** `hopSeconds` is the resolution; cut snapping uses the default, the voiceover split a finer one. */
+  constructor(sampleRate: number, channels = 1, hopSeconds = ENERGY_HOP_S) {
+    this.#hopFrames = Math.max(1, Math.round(sampleRate * hopSeconds));
     this.#channels = Math.max(1, channels);
   }
 
@@ -71,9 +72,9 @@ export class EnvelopeBuilder {
   }
 }
 
-/** {@link EnvelopeBuilder} over mono samples already in memory. */
-export function energyEnvelope(samples: Int16Array, sampleRate: number): Float32Array {
-  const builder = new EnvelopeBuilder(sampleRate, 1);
+/** {@link EnvelopeBuilder} over mono samples already in memory; one value per `hopSeconds`. */
+export function energyEnvelope(samples: Int16Array, sampleRate: number, hopSeconds = ENERGY_HOP_S): Float32Array {
+  const builder = new EnvelopeBuilder(sampleRate, 1, hopSeconds);
   builder.push(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
   return builder.finish();
 }

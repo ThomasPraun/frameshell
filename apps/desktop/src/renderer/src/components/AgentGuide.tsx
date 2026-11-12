@@ -24,11 +24,14 @@ function writeHidden(hidden: boolean): void {
 /**
  * How to talk to an agent (#190), above the docked terminals. With no agent in the active terminal: the agents
  * found, each with Start, the others with their official installer typed into the terminal for the user to run,
- * and Claude Desktop (#191). With an agent running: prompt suggestions it types there, unsent.
+ * and Claude Desktop (#191). With an agent running: prompt suggestions it types there, unsent. A video made from
+ * an idea (#472) adds its prompt as the first suggestion and keeps the guide open until it is hidden.
  */
 export function AgentGuide({
   agent,
   compact,
+  idea,
+  onIdeaDone,
   onRun,
   onType,
 }: {
@@ -36,6 +39,10 @@ export function AgentGuide({
   agent: string | null;
   /** The shell is in use: only the way to open the guide shows, until opened. */
   compact: boolean;
+  /** The prompt for the film of the project's idea (#472); null when the project was not made from one, or it was dismissed. */
+  idea: string | null;
+  /** The person hid the guide while an idea was offered: forget the idea, keep the guide's own hidden setting. */
+  onIdeaDone: () => void;
   /** Run `command` in the active terminal (typed, then Enter). */
   onRun: (command: string) => void;
   /** Type `text` at the active terminal's prompt without sending it. */
@@ -61,7 +68,9 @@ export function AgentGuide({
     writeHidden(value);
   };
 
-  if (hidden || (compact && !agent && !opened)) {
+  const dismiss = () => (idea ? onIdeaDone() : hide(true));
+
+  if (!idea && (hidden || (compact && !agent && !opened))) {
     return (
       <div className="agent-guide is-hidden">
         <button className="link" onClick={() => (hidden ? hide(false) : setOpened(true))} data-testid="agent-guide-show">
@@ -76,13 +85,18 @@ export function AgentGuide({
       <div className="agent-guide is-running" role="region" aria-label={t.agents.suggestions} data-testid="agent-guide">
         <span className="agent-guide-label">{t.agents.suggestions}</span>
         <div className="agent-guide-prompts">
+          {idea && (
+            <button className="chip" data-tip={t.agents.suggestionTitle} data-testid="agent-guide-idea" onClick={() => onType(idea)}>
+              {t.agents.idea.chip}
+            </button>
+          )}
           {t.agents.prompts.map((prompt) => (
             <button key={prompt} className="chip" data-tip={t.agents.suggestionTitle} onClick={() => onType(prompt)}>
               {prompt}
             </button>
           ))}
         </div>
-        <button className="link" onClick={() => hide(true)}>
+        <button className="link" onClick={dismiss}>
           {t.agents.hide}
         </button>
       </div>
@@ -95,11 +109,16 @@ export function AgentGuide({
     <section className="agent-guide" aria-label={t.agents.title} data-testid="agent-guide">
       <header className="agent-guide-head">
         <h2>{t.agents.title}</h2>
-        <button className="link" onClick={() => hide(true)}>
+        <button className="link" onClick={dismiss}>
           {t.agents.hide}
         </button>
       </header>
       <p className="agent-guide-lede">{t.agents.lede}</p>
+      {idea && (
+        <p className="agent-guide-hint" role="status">
+          {t.agents.idea.ready}
+        </p>
+      )}
       {found.length > 0 && (
         <ul className="agent-guide-list" aria-label={t.agents.found}>
           {found.map((choice) => (

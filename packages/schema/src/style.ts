@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
-import { AUDIO_EFFECT_LIMITS, type NormalizedAudioEffect } from "./effects.js";
+import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, type NormalizedAudioEffect } from "./effects.js";
 import { EASE_CURVES, SPRING_PRESETS } from "./motion.js";
 import { PLATFORM_IDS } from "./safe-zones.js";
+import type { Backdrop } from "./timeline.js";
 
 /** Canonical `$schema` URL for a project's `style.json`. */
 export const STYLE_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/style.json`;
@@ -150,6 +151,22 @@ export const StyleSoundSchema = z.strictObject({
     .describe("Voice chain defaults; an effect set on a clip overrides them."),
 });
 
+/** Glass cards (ADR 0031): a style choice, never a default (HyperFrames lists glass cards everywhere among AI-looking defaults). */
+export const StyleGlassSchema = z
+  .strictObject({
+    cards: z
+      .boolean()
+      .describe("True: cards over the picture are glass in this style (`clip set --glass` on each). False: solid cards. Default false."),
+    blur: z.number().min(BACKDROP_LIMITS.blur.min).max(BACKDROP_LIMITS.blur.max).describe("Backdrop blur, Gaussian sigma in project pixels."),
+    saturate: z.number().min(BACKDROP_LIMITS.saturate.min).max(BACKDROP_LIMITS.saturate.max).describe("Backdrop saturation, 1 unchanged."),
+    dim: z
+      .number()
+      .min(BACKDROP_LIMITS.dim.min)
+      .max(BACKDROP_LIMITS.dim.max)
+      .describe("Dark scrim over the blurred backdrop, 0 to 1: 0.55, up to 0.72 over bright footage."),
+  })
+  .describe("Glass cards: the backdrop `clip set --glass` copies onto a generated clip.");
+
 /** Every value of a style, all present: defaults and the personality with `style.json` on top. */
 export const StyleValuesSchema = z.strictObject({
   brand: StyleBrandSchema,
@@ -160,6 +177,7 @@ export const StyleValuesSchema = z.strictObject({
     personality: z.enum(MOTION_PERSONALITY_IDS).describe("Motion personality the motion values start from."),
   }),
   sound: StyleSoundSchema,
+  glass: StyleGlassSchema,
   platforms: z
     .array(z.enum(PLATFORM_IDS))
     .describe("Platforms the videos go to, each once; their safe zones are Frameshell's data, named, never copied."),
@@ -221,6 +239,7 @@ export const StyleFileSchema = z.strictObject({
         .optional(),
     })
     .optional(),
+  glass: partial(StyleGlassSchema),
   platforms: StyleValuesSchema.shape.platforms
     .refine((ids) => new Set(ids).size === ids.length, "must name each platform once")
     .optional(),
@@ -309,6 +328,7 @@ export const STYLE_DEFAULTS: Readonly<Omit<StyleValues, "motion">> = {
       compressor: { threshold: -20, ratio: 2.5, attack: 0.008, release: 0.14, makeup: 2 },
     },
   },
+  glass: { cards: false, ...GLASS },
   platforms: [],
   notes: [],
   rules: [],
@@ -372,6 +392,11 @@ export function voiceChainOf(voice: ResolvedStyle["sound"]["voice"]): Normalized
   return chain;
 }
 
+/** The backdrop a style's glass asks for (`glass`), as the explicit numbers `clip set --glass` writes (ADR 0031). */
+export function glassOf(glass: ResolvedStyle["glass"]): Required<Backdrop> {
+  return { blur: glass.blur.value, saturate: glass.saturate.value, dim: glass.dim.value };
+}
+
 /** Zod model of {@link ResolvedStyle}: {@link StyleValuesSchema} with `{ value, source }` at every leaf. */
 export const ResolvedStyleSchema = sourcedSchema(StyleValuesSchema) as unknown as z.ZodType<ResolvedStyle>;
 
@@ -399,6 +424,7 @@ export function resolveStyle(file: StyleFile | null): ResolvedStyle {
       ...overlay(MOTION_PERSONALITIES[personality ?? DEFAULT_MOTION_PERSONALITY], file?.motion, motionSource),
     },
     sound: overlay(STYLE_DEFAULTS.sound, file?.sound, "default"),
+    glass: overlay(STYLE_DEFAULTS.glass, file?.glass, "default"),
     ...overlay({ platforms: STYLE_DEFAULTS.platforms, notes: STYLE_DEFAULTS.notes, rules: STYLE_DEFAULTS.rules, banned: STYLE_DEFAULTS.banned }, file ?? undefined, "default"),
   };
   return resolved as ResolvedStyle;
@@ -414,4 +440,28 @@ function overlay(base: object, given: object | undefined, source: StyleSource): 
       return [key, set === undefined ? { value: structuredClone(value), source } : { value: structuredClone(set), source: "file" }];
     }),
   );
+}
+
+/**
+ * Dotted path of every value `style.json` sets on its own, in schema order (`colors.accent`,
+ * `motion.duration.quick`, `fonts.display`): what `style set` takes and what review mode keys by (ADR 0036
+ * decision 6). A font, a colour, an ease and a list are one value each; `from` is not a path.
+ */
+export const STYLE_PATHS: readonly string[] = leafPaths(resolveStyle(null) as unknown as Record<string, unknown>, []);
+
+/** Folder of the user styles under `configDir` (ADR 0028 decision 1): one `<id>.json` each, in this schema. */
+export const USER_STYLES_DIR = "styles";
+
+/** Id of a user style: its file name without `.json`. Lowercase, so ids never clash on case-insensitive disks. */
+export const UserStyleIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, "must be 1 to 64 lowercase letters, digits, `-` or `_`, starting with a letter or digit")
+  .describe("User style id, e.g. `acme`: lowercase letters, digits, `-`, `_` (at most 64).");
+
+function leafPaths(node: Record<string, unknown>, at: string[]): string[] {
+  return Object.entries(node).flatMap(([key, child]) => {
+    const path = [...at, key];
+    const leaf = typeof child === "object" && child !== null && "value" in child && "source" in child;
+    return leaf ? [path.join(".")] : leafPaths(child as Record<string, unknown>, path);
+  });
 }

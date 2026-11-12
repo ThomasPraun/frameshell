@@ -190,9 +190,12 @@ describe("shot edits", () => {
     expect(transform.message).toMatch(/shots take no `transform`/);
   });
 
-  it("skips audio effects on a shot with a warning, still setting the rest (ADR 0031 decision 5)", async () => {
+  it("skips audio effects and backdrops on a shot with a warning, still setting the rest (ADR 0031 decision 5)", async () => {
     const skipped = await apply(base(), "clip.set", { clip: "c_s1", audioEffects: [{ kind: "highpass" }] });
-    expect(skipped.warnings).toEqual(["c_s1 is a multicam shot: shots take no audio effects in this version; audioEffects skipped."]);
+    expect(skipped.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; audioEffects skipped."]);
+    const glass = await apply(base(), "clip.set", { clip: "c_s1", audioEffects: [{ kind: "highpass" }], backdrop: { blur: 46 } });
+    expect(glass.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; audioEffects and backdrop skipped."]);
+    expect(shots(glass.timeline)[0]).toEqual(shots(base())[0]);
     expect(shots(skipped.timeline)[0]).toEqual(shots(base())[0]);
     const withRef = await apply(base(), "clip.set", { clip: "c_s1", audioEffects: [{ kind: "highpass" }], scriptRef: "scripts/script.md" });
     expect(shots(withRef.timeline)[0]!.scriptRef).toBe("scripts/script.md");

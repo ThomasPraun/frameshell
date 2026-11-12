@@ -114,14 +114,19 @@ export function PreviewPanel({
   const vertical = verticalOn && verticalOffered;
   const shownFrame = vertical ? VERTICAL_FRAME : resolution;
 
-  useEffect(() => {
+  // Layout effects, this one and the program's: the engine gets a new program in the commit that shows its
+  // placeholders, and `data-shown` (program frame on the canvas, absent while a previous program's picture shows) with it.
+  useLayoutEffect(() => {
     const box = frameBox.current!;
     const instance = new PreviewPlayer(
       box,
       project.mediaUrl,
       {
         onTime: (at) => transport.report(at),
-        onShown: (frame) => box.setAttribute("data-shown", String(frame)),
+        onShown: (frame) => {
+          if (frame === null) box.removeAttribute("data-shown");
+          else box.setAttribute("data-shown", String(frame));
+        },
         onError: (message) => setNotice(message),
         onSilent: () => setNotice(t.preview.noAudio),
       },
@@ -142,7 +147,7 @@ export function PreviewPanel({
   const shooting = useShootRecording();
   useEffect(() => player.current?.setMuted(shooting), [shooting, project.mediaUrl]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!program) return;
     player.current?.setProgram(program);
     transport.setProgram(program.frames, program.fps);

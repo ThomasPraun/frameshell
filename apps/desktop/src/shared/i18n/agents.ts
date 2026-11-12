@@ -28,6 +28,19 @@ const en = {
     "Add my logo in a corner",
   ],
   suggestionTitle: "Types it into the agent's prompt; press Enter to send",
+  /** The brief of a video made from an idea (#472), offered above the terminals until used or hidden. */
+  idea: {
+    chip: "Make my film",
+    ready: "Your project is ready, with its formats. Start an agent, then use the suggested prompt for your film.",
+    /** Typed into the agent's prompt, unsent. `length` and `url` are empty when not given. Names no command: the agent finds the tools in the project's skill. */
+    prompt: (name: string, formats: string, length: string, url: string) =>
+      `I want a motion film made from scratch, with no footage. It is called "${name}". Formats: ${formats}.` +
+      (length ? ` Length: ${length.toLowerCase()}.` : "") +
+      (url ? ` Start from this page: ${url}.` : "") +
+      " This Frameshell project is empty and its formats are already set; use the project's Frameshell skill and tools." +
+      " First write three storylines, each in a different world, with a different device and form, and recommend one." +
+      " Wait for my choice before building anything. Then list your assumptions, and put a free alternative next to every paid item (tools, stock, music, voices, fonts).",
+  },
   connectClaude: "Connect Claude Desktop",
   disconnectClaude: "Disconnect Claude Desktop",
   claudeConnected: "Claude Desktop is connected",
@@ -87,6 +100,17 @@ const es: typeof en = {
     "Agrega mi logo en una esquina",
   ],
   suggestionTitle: "Lo escribe en el prompt del agente; presiona Enter para enviarlo",
+  idea: {
+    chip: "Hacer mi película",
+    ready: "Tu proyecto está listo, con sus formatos. Abre un agente y usa el prompt sugerido para tu película.",
+    prompt: (name, formats, length, url) =>
+      `Quiero una película de motion graphics hecha desde cero, sin grabaciones. Se llama "${name}". Formatos: ${formats}.` +
+      (length ? ` Duración: ${length.toLowerCase()}.` : "") +
+      (url ? ` Parte de esta página: ${url}.` : "") +
+      " Este proyecto de Frameshell está vacío y sus formatos ya están definidos; usa la skill y las herramientas de Frameshell del proyecto." +
+      " Primero escribe tres historias, cada una en un mundo distinto, con otro dispositivo y otra forma, y recomienda una." +
+      " Espera mi elección antes de construir nada. Después enumera tus supuestos y pon una alternativa gratuita junto a cada elemento de pago (herramientas, stock, música, voces, tipografías).",
+  },
   connectClaude: "Conectar Claude Desktop",
   disconnectClaude: "Desconectar Claude Desktop",
   claudeConnected: "Claude Desktop está conectado",

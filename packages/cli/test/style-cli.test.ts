@@ -93,3 +93,39 @@ describe("frameshell style show", () => {
     expect(frameshell(["style", "show", "--timeline", "main"]).code).toBe(2);
   });
 });
+
+describe("frameshell style set, save, list and apply", () => {
+  it("sets values as JSON or text, saves a user style and applies it value by value or whole", () => {
+    rmSync(join(project, "style.json"), { force: true });
+    const set = frameshell(["style", "set", "colors.accent", "#ff5500"]);
+    expect(set.code, set.stderr).toBe(0);
+    expect(set.stdout).toMatch(/^Set colors\.accent \(op_[0-9a-f]+\)\.\n {2}colors\.accent: not set -> #ff5500\n {2}undo: frameshell revert op_[0-9a-f]+\n$/);
+    expect(frameshell(["style", "set", "banned", '["emoji in captions"]']).code).toBe(0);
+    const negative = frameshell(["style", "set", "sound.voice.compressor.threshold", "--", "-18"]);
+    expect(negative.code, negative.stderr).toBe(0);
+    const json = JSON.parse(frameshell(["style", "show", "--json"]).stdout);
+    expect(json.style.banned).toEqual({ value: ["emoji in captions"], source: "file" });
+    expect(json.style.sound.voice.compressor.threshold).toEqual({ value: -18, source: "file" });
+
+    const saved = frameshell(["style", "save", "house"]);
+    expect(saved.code, saved.stderr).toBe(0);
+    expect(saved.stdout).toMatch(/^Saved user style house: .*house\.json\n/);
+    expect(frameshell(["style", "save", "house"]).code).toBe(1);
+    expect(frameshell(["style", "save", "house", "--force"]).stdout).toMatch(/^Replaced user style house/);
+    expect(frameshell(["style", "list"]).stdout).toMatch(/^User styles in .*:\n {2}house\nMotion personalities: playful, premium, corporate, energetic, calm\n$/);
+
+    expect(frameshell(["style", "set", "colors.accent", "#000000"]).code).toBe(0);
+    const applied = frameshell(["style", "apply", "house"]);
+    expect(applied.code, applied.stderr).toBe(0);
+    expect(applied.stdout).toMatch(/^ {2}colors\.accent: #000000 -> #ff5500$/m);
+    const replaced = frameshell(["style", "apply", "calm", "--replace"]);
+    expect(replaced.stdout).toMatch(/^Replaced the style with calm/);
+    expect(JSON.parse(frameshell(["style", "show", "--json"]).stdout).style.banned.source).toBe("default");
+
+    const unknown = frameshell(["style", "set", "colors.nope", "#000000"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/No style value at "colors\.nope"/);
+    expect(frameshell(["style", "set", "colors.accent"]).code).toBe(2);
+    expect(frameshell(["style", "apply", "house", "--force"]).code).toBe(2);
+  });
+});

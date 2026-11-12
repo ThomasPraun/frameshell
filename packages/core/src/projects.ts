@@ -63,8 +63,11 @@ export interface ProjectRegistryOptions {
    * `formats` is journaled (ADR 0036). Default: plain write ({@link ProjectRegistry.writeConfigText}).
    */
   writeConfig?: (root: string, content: string, author: string | undefined) => Promise<unknown>;
-  /** Runs before {@link ProjectRegistry.writeFile} writes any other file (`rel` project-relative); throws to refuse the write. */
-  guardWrite?: (root: string, rel: string, author: string | undefined) => Promise<void>;
+  /**
+   * Takes over {@link ProjectRegistry.writeFile} of `style.json` once its content validated, so a changed value is
+   * journaled (ADR 0036). Default: plain write.
+   */
+  writeStyle?: (root: string, content: string, author: string | undefined) => Promise<unknown>;
 }
 
 /** Projects the daemon holds open, keyed by absolute root directory. */
@@ -75,13 +78,13 @@ export class ProjectRegistry {
   readonly #onOpen: (dir: string) => void;
   readonly #writeTimeline: ProjectRegistryOptions["writeTimeline"];
   readonly #writeConfig: ProjectRegistryOptions["writeConfig"];
-  readonly #guardWrite: ProjectRegistryOptions["guardWrite"];
+  readonly #writeStyle: ProjectRegistryOptions["writeStyle"];
 
   constructor(options: ProjectRegistryOptions = {}) {
     this.#onOpen = options.onOpen ?? (() => {});
     this.#writeTimeline = options.writeTimeline;
     this.#writeConfig = options.writeConfig;
-    this.#guardWrite = options.guardWrite;
+    this.#writeStyle = options.writeStyle;
   }
 
   /**
@@ -299,7 +302,10 @@ export class ProjectRegistry {
       await this.openEnclosing(root);
       return { project: root, path: rel };
     }
-    await this.#guardWrite?.(root, rel, author);
+    if (rel === STYLE_FILE && this.#writeStyle) {
+      await this.#writeStyle(root, content, author);
+      return { project: root, path: rel };
+    }
     await writeTextAtomic(realTarget, content);
     return { project: root, path: rel };
   }
