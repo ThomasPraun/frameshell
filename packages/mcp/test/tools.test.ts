@@ -63,8 +63,9 @@ describe("MCP tool catalog", () => {
       additionalProperties: false,
       required: ["from", "to"],
       properties: {
-        from: { type: "number" },
-        to: { type: "number" },
+        // Seconds, or a marker id or label (TimeRef, ADR 0037).
+        from: { anyOf: [{ type: "number" }, { type: "string" }] },
+        to: { anyOf: [{ type: "number" }, { type: "string" }] },
         cwd: { type: "string", description: expect.stringContaining(CWD) },
       },
     });

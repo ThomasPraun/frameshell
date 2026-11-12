@@ -120,11 +120,16 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
 
   const toSay = plans.filter((plan) => plan.state === "generated");
   const cost = await providerCall(provider, null, () => estimate(provider, toSay, voice, options));
-  if (cost && cost.amount > 0 && !request.yes) {
+  // No estimate and no `free: true`: the cost is unknown, which counts as paid.
+  const unknownCost = toSay.length > 0 && !provider.estimate && provider.free !== true;
+  if (!request.yes && ((cost && cost.amount > 0) || unknownCost)) {
     const characters = toSay.reduce((total, plan) => total + plan.line.spoken.length, 0);
+    const count = `${toSay.length} line${toSay.length === 1 ? "" : "s"}`;
     throw new RpcError(
       ErrorCode.ConfirmationRequired,
-      `Generating ${toSay.length} line${toSay.length === 1 ? "" : "s"} with ${provider.id} costs about ${formatCost(cost)}. ` +
+      (cost
+        ? `Generating ${count} with ${provider.id} costs about ${formatCost(cost)}. `
+        : `Generating ${count} with ${provider.id} may cost money: it gives no estimate and does not declare itself free. `) +
         "Ask the person to confirm the cost, then call again with `yes` (CLI `--yes`).",
       { provider: provider.id, voice, lines: toSay.map((plan) => plan.line.id), cost, characters },
     );

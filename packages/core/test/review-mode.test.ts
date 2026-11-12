@@ -147,6 +147,20 @@ describe("review mode on: proposals (#315)", () => {
     expect(stored).toMatchObject({ tx: committed.tx, state: "ready", timelines: [{ timeline: "main", ops: [{ op: "track.set" }, { op: "track.add" }] }] });
   });
 
+  it("resolves a marker name against the proposal's timeline, not the file (ADR 0037)", async () => {
+    const { dir, connect, read } = await setup({ review: true });
+    const agent = await connect("cli/test", "term-1");
+    await agent.request("tx.begin", { label: "Mark the hook" });
+    await agent.request("marker.add", { cwd: dir, at: 2, label: "hook" });
+    await agent.request("marker.add", { cwd: dir, at: "hook+1.5" as never, label: "cta" });
+    expect(JSON.parse(read()).markers ?? []).toEqual([]);
+    const own = await agent.request("timeline.show", { cwd: dir, timeline: "main" });
+    expect(own).toMatchObject({ view: "proposal", markers: [{ label: "hook", at: 2 }, { label: "cta", at: 3.5 }] });
+    const unknown = await rejection(agent.request("marker.add", { cwd: dir, at: "nowhere" as never, label: "x" }));
+    expect(unknown.code).toBe(ErrorCode.InvalidOperation);
+    expect(unknown.message).toContain('neither seconds nor a marker');
+  });
+
   it("refuses a second author, a new transaction and the author's next change once ready; the person still edits", async () => {
     const { dir, connect, ui, t1, t2, read } = await setup({ review: true });
     const agent = await connect("cli/test");

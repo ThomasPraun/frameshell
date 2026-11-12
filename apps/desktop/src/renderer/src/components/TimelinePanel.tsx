@@ -685,7 +685,7 @@ function TimelineCanvas({
     const flight = (inFlight.current ??= { starts: new Map(), pending: 0, until: -1 });
     // On the frame grid, as the daemon stores it: 3-decimal seconds would drift over a long held key.
     for (const edit of edits) {
-      if (edit.op === "clip.move" && edit.args.start !== undefined) flight.starts.set(edit.args.clip, Math.round(edit.args.start * current.fps) / current.fps);
+      if (edit.op === "clip.move" && typeof edit.args.start === "number") flight.starts.set(edit.args.clip, Math.round(edit.args.start * current.fps) / current.fps);
     }
     flight.pending++;
     send(

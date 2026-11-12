@@ -1,14 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { chmod, mkdir, readFile, readdir, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { z } from "zod";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { type CommandRunner, runCommand } from "./command-runner.js";
 import { extractZip, isZip } from "./unzip.js";
@@ -25,18 +24,10 @@ import {
   currentPlatform,
 } from "./manifest.js";
 import { renameRetrying } from "../fs-util.js";
-
-/** Global config file name inside the config dir. */
-export const GLOBAL_CONFIG_FILE = "config.json";
+import { GLOBAL_CONFIG_FILE, readGlobalConfig } from "../global-config.js";
 
 /** Override value meaning "use the pinned download". Anything else is a path. */
 const MANAGED = "managed";
-
-const GlobalConfigSchema = z.strictObject({
-  $schema: z.string().optional(),
-  /** Tool name to `"managed"` or an executable path (relative = against the config dir). */
-  binaries: z.record(z.string(), z.string()).optional(),
-});
 
 /** `binaries` of the project whose overrides apply. */
 export interface ProjectBinaries {
@@ -159,7 +150,7 @@ export class BinaryManager {
     const pinned = await this.#selectBuild(pkg);
     const levels: { source: "project" | "global"; dir: string; binaries: Readonly<Record<string, string>> | undefined }[] = [
       ...(project ? [{ source: "project" as const, dir: project.dir, binaries: project.binaries }] : []),
-      { source: "global", dir: this.#configDir, binaries: (await this.#readGlobalConfig()).binaries },
+      { source: "global", dir: this.#configDir, binaries: (await readGlobalConfig(this.#configDir)).binaries },
     ];
     for (const level of levels) {
       const path = overridePath(pkg, tool, level.dir, level.binaries);
@@ -317,30 +308,6 @@ export class BinaryManager {
       this.#probes.set(key, result);
     }
     return result;
-  }
-
-  async #readGlobalConfig(): Promise<z.output<typeof GlobalConfigSchema>> {
-    const path = join(this.#configDir, GLOBAL_CONFIG_FILE);
-    let text: string;
-    try {
-      text = await readFile(path, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-      throw error;
-    }
-    const invalid = (details: string) =>
-      new RpcError(ErrorCode.InvalidGlobalConfig, `Invalid ${path}:\n${details}`, { path, details });
-    let raw: unknown;
-    try {
-      raw = JSON.parse(text);
-    } catch (error) {
-      throw invalid((error as Error).message);
-    }
-    const parsed = GlobalConfigSchema.safeParse(raw);
-    if (!parsed.success) {
-      throw invalid(parsed.error.issues.map((i) => `${i.path.map(String).join(".")}: ${i.message}`).join("\n"));
-    }
-    return parsed.data;
   }
 
   /**

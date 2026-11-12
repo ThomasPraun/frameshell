@@ -20,7 +20,8 @@ import type {
   TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
-import { VOICE_CHAIN, resolveSubtitleStyle } from "@frameshell/schema";
+import { SECONDS_TEXT } from "@frameshell/protocol";
+import { resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -66,9 +67,9 @@ mutations print the new revision):
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
-                               --voice writes the voice chain as explicit audio effects (high-pass 85 Hz, denoise
-                               floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms release 140 ms
-                               makeup +2 dB); --audio-effects replaces the list, e.g.
+                               --voice writes the style's voice chain (style.json sound.voice; by default high-pass
+                               85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
+                               release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
                                '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
@@ -194,6 +195,11 @@ mutations print the new revision):
   spoken, or the whole line); --keyword-color/--keyword-scale style the word captions set marks; --gap 12-15.5
   hides cues in that range (repeatable). Preview and export look the same.
   Negative values need =, e.g. --gain=-6.
+  Times on the timeline clock (--at, --from, --to of cut, marker, transition, clip split and clip key; --start and
+  --end of clip add, clip move and clip trim) are seconds or a marker id or label, with an optional offset:
+  --at hook, --at hook+0.5, --from intro --to outro-1. The daemon turns the name into seconds before the change
+  runs and the history records seconds. A label that looks like an offset (end-card) is tried whole first.
+  beat: and bar: names are reserved for the beat grid and refused until it exists.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
@@ -327,6 +333,8 @@ export interface TimelineInvocation {
   params: Record<string, unknown>;
   /** False for `tx.*`: session-scoped, no project directory. */
   withCwd: boolean;
+  /** `clip set --voice`: `audioEffects` is filled from the project's style (`sound.voice`) before the request. */
+  voiceFromStyle?: boolean;
 }
 
 /** Bad arguments; the message says which and how to fix. Exit code 2. */
@@ -485,6 +493,13 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return value;
   };
   const str = (flag: string) => values[flag] as string | undefined;
+  /** A time flag: seconds as a number, else the text (a marker id or label, optionally `+s` or `-s`) for the daemon to resolve. */
+  const when = (flag: string): number | string | undefined => {
+    const raw = values[flag];
+    if (raw === undefined) return undefined;
+    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds or a marker id or label, got "${String(raw)}".`);
+    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+  };
   const list = (flag: string): string[] | undefined => {
     const raw = values[flag];
     return raw === undefined ? undefined : ([] as string[]).concat(raw as string | string[]);
@@ -605,7 +620,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         asset: args[1],
         type: str("type"),
         source: str("source"),
-        start: num("start"),
+        start: when("start"),
         in: num("in"),
         out: num("out"),
         duration: num("duration"),
@@ -623,16 +638,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "clip move":
       method = "clip.move";
       if ((tracks?.length ?? 0) > 1) throw new UsageError("--track: clip move takes one track.");
-      Object.assign(params, { clip: args[0], start: num("start"), track: tracks?.[0] });
+      Object.assign(params, { clip: args[0], start: when("start"), track: tracks?.[0] });
       break;
     case "clip trim":
       method = "clip.trim";
-      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: num("start"), end: num("end"), ...snap(), ...ripple() });
+      Object.assign(params, { clip: args[0], in: num("in"), out: num("out"), start: when("start"), end: when("end"), ...snap(), ...ripple() });
       break;
     case "clip split":
       method = "clip.split";
-      if (values["at"] === undefined) throw new UsageError("`frameshell clip split <clip>` needs --at <seconds>.");
-      Object.assign(params, { clip: args[0], at: num("at") });
+      if (values["at"] === undefined) throw new UsageError("`frameshell clip split <clip>` needs --at <seconds|marker>.");
+      Object.assign(params, { clip: args[0], at: when("at") });
       break;
     case "clip remove":
       method = "clip.remove";
@@ -652,7 +667,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, {
         clip: args[0],
         prop: str("prop"),
-        time: num("at"),
+        time: when("at"),
         value: num("value"),
         ease: str("ease"),
         remove: values["remove"] === true ? true : undefined,
@@ -663,20 +678,20 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "transition set":
     case "transition remove": {
       method = command === "transition set" ? "transition.set" : "transition.remove";
-      if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds>, a clip edge.`);
-      Object.assign(params, { at: num("at"), tracks });
+      if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds|marker>, a clip edge.`);
+      Object.assign(params, { at: when("at"), tracks });
       if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
       break;
     }
     case "marker add":
       method = "marker.add";
-      if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds> and --label <label>.");
-      Object.assign(params, { at: num("at"), label: str("label"), color: str("color") });
+      if (values["at"] === undefined || str("label") === undefined) throw new UsageError("`frameshell marker add` needs --at <seconds|marker> and --label <label>.");
+      Object.assign(params, { at: when("at"), label: str("label"), color: str("color") });
       break;
     case "marker set":
       method = "marker.set";
       if (str("color") !== undefined && values["clear-color"] === true) throw new UsageError("Pass --color or --clear-color, not both.");
-      Object.assign(params, { marker: args[0], at: num("at"), label: str("label"), color: values["clear-color"] === true ? null : str("color") });
+      Object.assign(params, { marker: args[0], at: when("at"), label: str("label"), color: values["clear-color"] === true ? null : str("color") });
       break;
     case "marker remove":
       method = "marker.remove";
@@ -702,11 +717,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         audioEffects:
-          values["voice"] === true
-            ? VOICE_CHAIN.map((effect) => ({ ...effect }))
-            : values["clear-audio-effects"] === true
-              ? null
-              : jsonList("audio-effects"),
+          values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -910,13 +921,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     default:
       method = "cut";
       if (values["from"] === undefined || values["to"] === undefined) throw new UsageError("`frameshell cut` needs --from <s> and --to <s>.");
-      Object.assign(params, { from: num("from"), to: num("to"), tracks: args.length > 0 ? args : undefined, ...snap() });
+      Object.assign(params, { from: when("from"), to: when("to"), tracks: args.length > 0 ? args : undefined, ...snap() });
   }
   const clean = (value: Record<string, unknown> | undefined) =>
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   if (params["transform"]) params["transform"] = clean(params["transform"] as Record<string, unknown>);
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
-  return { kind: "timeline", method, params: clean(params)!, withCwd: true };
+  const voiceFromStyle = method === "clip.set" && values["voice"] === true;
+  return { kind: "timeline", method, params: clean(params)!, withCwd: true, ...(voiceFromStyle ? { voiceFromStyle } : {}) };
 }
 
 /** Run a parsed timeline command; returns stdout text. `onProgress` gets the progress of long ones (`multicam faces`). */
@@ -928,6 +940,10 @@ export async function executeTimeline(
   onProgress?: (progress: Progress) => void,
 ): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
+  if (inv.voiceFromStyle) {
+    const { style } = await conn.request("style.show", { cwd });
+    params["audioEffects"] = voiceChainOf((style ?? resolveStyle(null)).sound.voice);
+  }
   // Params are validated by the daemon against the method registry.
   const result = (await conn.request(inv.method, params as never, onProgress ? { onProgress } : {})) as unknown;
   if (inv.method === "timeline.show") {

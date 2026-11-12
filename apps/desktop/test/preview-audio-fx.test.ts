@@ -23,6 +23,7 @@ let sidecar: string;
 
 const asset: AssetInfo = {
   path: "assets/voice.wav",
+  kind: "media",
   hash: `sha256:${"d".repeat(64)}`,
   state: "ready",
   error: null,
