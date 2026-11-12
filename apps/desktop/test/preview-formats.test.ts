@@ -146,8 +146,11 @@ function exported(timeline: Timeline, id: string, frame: number): string[] {
     at: frame / FPS,
     output: "frame.png",
   });
-  const clips = new Map(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [] : track.clips)).map((clip) => [`/abs/${"asset" in clip ? clip.asset : ""}`, clip.id]));
-  clips.set("/abs/gen.webm", "c_gen");
+  const clips = new Map<string, string>([["/abs/gen.webm", "c_gen"]]);
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video") continue;
+    for (const clip of track.clips) if ("asset" in clip) clips.set(`/abs/${clip.asset}`, clip.id);
+  }
   const inputs = plan.args.flatMap((arg, i) => (plan.args[i - 1] === "-i" ? [arg] : []));
   const graph = plan.args[plan.args.indexOf("-filter_complex") + 1]!.split(";");
   return inputs.flatMap((path, n) => {
