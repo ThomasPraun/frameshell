@@ -216,7 +216,10 @@ mutations print the new revision):
   --end of clip add, clip move and clip trim) are seconds or a marker id or label, with an optional offset:
   --at hook, --at hook+0.5, --from intro --to outro-1. The daemon turns the name into seconds before the change
   runs and the history records seconds. A label that looks like an offset (end-card) is tried whole first.
-  beat: and bar: names are reserved and refused until a later slice; use --snap-to beat|bar|marker meanwhile.
+  beat:N and bar:N name a beat or a bar start of the timeline's grid counting from 1, with the same optional
+  offset: --at bar:8, --from bar:2 --to bar:6, --start beat:17-0.1, --at beat:2.5 (halfway between beats 2 and 3).
+  They need a tempo (tempo set) and are refused on a LOW confidence grid or past the end of the grid, like
+  --snap-to beat|bar. word: names are still refused.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
@@ -521,11 +524,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return value;
   };
   const str = (flag: string) => values[flag] as string | undefined;
-  /** A time flag: seconds as a number, else the text (a marker id or label, optionally `+s` or `-s`) for the daemon to resolve. */
+  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N` or `bar:N`, optionally `+s` or `-s`) for the daemon to resolve. */
   const when = (flag: string): number | string | undefined => {
     const raw = values[flag];
     if (raw === undefined) return undefined;
-    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds or a marker id or label, got "${String(raw)}".`);
+    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
     return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
   };
   const list = (flag: string): string[] | undefined => {
@@ -1169,7 +1172,8 @@ function formatHistory(result: HistoryResult): string {
       const target = op.op === "revert" ? ` ${String(op.args["target"])}` : "";
       const touched = op.touched.length > 0 ? `  ${op.touched.join(", ")}` : "";
       // A config operation changes no timeline (ADR 0036): it says which file instead of a revision.
-      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? "project config" : `revision ${op.revision}`})`);
+      const doc = op.doc === "style" ? "style.json" : "project config";
+      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? doc : `revision ${op.revision}`})`);
     }
   }
   return `${lines.join("\n")}\n`;

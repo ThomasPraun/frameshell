@@ -34,7 +34,12 @@ export type JournalEntry = z.output<typeof JournalEntrySchema>;
  */
 export const ConfigJournalEntrySchema = z.object({
   id: OpIdSchema,
-  op: z.string().describe("`format.add`, `format.remove`, `file.write` (a `frameshell.json` write that changed `formats`) or `revert`."),
+  op: z
+    .string()
+    .describe(
+      "`format.add`, `format.remove`, `style.set`, `style.apply`, `file.write` (a `frameshell.json` write that changed " +
+        "`formats`, or a `style.json` write that changed a value) or `revert`.",
+    ),
   args: z.record(z.string(), z.unknown()),
   author: AuthorSchema,
   tx: TxIdSchema,
@@ -47,7 +52,7 @@ export const ConfigJournalEntrySchema = z.object({
   undo: z
     .object({ method: z.string(), params: z.record(z.string(), z.unknown()) })
     .optional()
-    .describe("`format.add`/`format.remove`: the call that undoes it, as the method returned it."),
+    .describe("`format.add`/`format.remove`/`style.set`: the call that undoes it."),
   proposal: TxIdSchema.optional().describe("Set when accepted from a proposal (ADR 0019): the proposal's id."),
 });
 

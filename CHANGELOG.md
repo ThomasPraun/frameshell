@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Safe-zone sheet of `review`, second slice of #457 (epic #451; `review --platform instagram|tiktok|shorts|youtube`,
-  `--sheets safe`, MCP `review` `platform`, protocol 97): up to 36 frames chosen like the contact sheet with the
+  `--sheets safe`, MCP `review` `platform`, protocol 99): up to 36 frames chosen like the contact sheet with the
   platform's UI zones shaded red and outlined, drawn from the one table in `@frameshell/schema` (`safe-zones.ts`),
   scaled to the film's size. A frame where the captions of a subtitle track reach into a zone is marked
   `!subtitle` (box measured from the bundled face, the track's style and each cue's words), and `review.json`
@@ -20,6 +20,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
   are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them (`review` and `analyze`). Titles, graphics
   and faces are not measured yet.
+- `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
+  a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
+  the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
+  optional marker offset: `--at bar:8`, `--from bar:2 --to bar:6`, `--start beat:17-0.1`; `beat:2.5` is halfway between
+  beats 2 and 3. They resolve in the daemon through the same grid as `--snap-to` (no second grid), so a measured grid is
+  the music clip's beats file carried through the clip and a nominal one is built as far as the number reaches, and the
+  history records seconds. They are refused with the same messages as `--snap-to`: no tempo, a music clip with no beats
+  file yet, a LOW confidence grid, and a number past the last beat or bar of a measured grid. Word references
+  (`"this#2"`) are still refused with a pointer.
+- Style changes and user styles, second slice of #468 (ADR 0028, ADR 0036 slice 4, epic #451; daemon `style.set`,
+  `style.apply`, `style.save`, `style.list`, `style.show` `view` and `from.status`, MCP `style_set`, `style_apply`,
+  `style_save`, `style_list`, protocol 98): `frameshell style set <path> <value>` changes one value of `style.json`
+  (JSON or text; `null` removes it) and keeps the rest of the file. `style save <name>` keeps the project's style as a
+  user style in Frameshell's config folder (`styles/<name>.json`); `style apply <name>` copies one into a project value
+  by value and lists what changed (`--replace` overwrites), recording where it came from so `style show` says when the
+  user style changed since; `style apply premium` (any motion personality) sets the personality; `style list` lists
+  them. Every change of `style.json`, by these commands or by `file.write`, is journaled: `history` lists it, `revert`
+  undoes it (reverting the change that created the file removes it), and in review mode it waits in the agent's
+  proposal like a timeline change instead of being refused.
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type AppDirs, type DaemonConnection, ErrorCode, type EventParams, connectToDaemon } from "@frameshell/protocol";
+import { type AppDirs, type DaemonConnection, type EventParams, connectToDaemon } from "@frameshell/protocol";
 import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
@@ -209,13 +209,26 @@ describe("file.write of frameshell.json (ADR 0036 decision 5)", () => {
     expect(journal()).toMatchObject([{ op: "file.write", proposal: proposal.tx }]);
   });
 
-  it("refuses an agent's style.json write in review mode, and takes the person's", async () => {
-    const { dir, ui, agent } = await setup();
+  it("holds a format and a style change of one transaction in one proposal, accepted whole", async () => {
+    const { dir, ui, agent, ids } = await setup();
     const path = join(dir, "style.json");
-    const content = `${JSON.stringify({ schemaVersion: 1 })}\n`;
-    await expect(agent.request("file.write", { path, content })).rejects.toMatchObject({ code: ErrorCode.ProposalState, data: { reason: "forbidden" } });
-    expect(existsSync(path)).toBe(false);
-    await ui().request("file.write", { path, content });
-    expect(readFileSync(path, "utf8")).toBe(content);
+    // A write that changes no style value has nothing to hold.
+    const empty = `${JSON.stringify({ schemaVersion: 1 })}\n`;
+    await agent.request("file.write", { path, content: empty });
+    expect(readFileSync(path, "utf8")).toBe(empty);
+
+    await agent.request("tx.begin", { label: "Vertical, in the house style" });
+    await agent.request("format.add", { cwd: dir, id: "9x16" });
+    await agent.request("style.set", { cwd: dir, path: "platforms", value: ["instagram-reels"] });
+    await agent.request("tx.commit", {});
+    const proposal = (await ui().request("proposal.status", { cwd: dir })).proposal!;
+    expect(proposal.config.map(({ doc, key }) => ({ doc, key }))).toEqual([
+      { doc: "project", key: "format:9x16" },
+      { doc: "style", key: "style:platforms" },
+    ]);
+    expect(readFileSync(path, "utf8")).toBe(empty);
+    await ui().request("proposal.accept", { cwd: dir, tx: proposal.tx });
+    expect(await ids(ui())).toEqual(["16x9", "9x16"]);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ schemaVersion: 1, platforms: ["instagram-reels"] });
   });
 });

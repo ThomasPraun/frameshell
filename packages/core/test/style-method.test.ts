@@ -38,7 +38,15 @@ async function failure(call: Promise<unknown>): Promise<RpcError> {
 describe("style.show", () => {
   it("is null while the project has no style.json", async () => {
     const { dir, app } = await setup();
-    expect(await app.request("style.show", { cwd: join(dir, "timelines") })).toEqual({ dir, path: "style.json", style: null, from: null, safeZones: [] });
+    expect(await app.request("style.show", { cwd: join(dir, "timelines") })).toEqual({
+      dir,
+      path: "style.json",
+      style: null,
+      from: null,
+      safeZones: [],
+      view: "current",
+      proposal: null,
+    });
   });
 
   it("resolves a hand-written file with the source of each value and the safe zones it names", async () => {
@@ -49,7 +57,7 @@ describe("style.show", () => {
       JSON.stringify({ schemaVersion: 1, from: { id: "house", sha256 }, motion: { personality: "calm", stagger: 0.12 }, colors: { accent: "#ff3300" }, platforms: ["youtube-shorts", "instagram-reels"] }),
     );
     const shown = await app.request("style.show", { cwd: dir });
-    expect(shown.from).toEqual({ id: "house", sha256 });
+    expect(shown.from).toEqual({ id: "house", sha256, status: "missing" });
     expect(shown.style?.motion.personality).toEqual({ value: "calm", source: "file" });
     expect(shown.style?.motion.highlight).toEqual({ value: false, source: "personality" });
     expect(shown.style?.motion.stagger).toEqual({ value: 0.12, source: "file" });

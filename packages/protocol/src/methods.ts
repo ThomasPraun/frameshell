@@ -32,7 +32,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -69,7 +69,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 97;
+export const PROTOCOL_VERSION = 99;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -641,6 +641,30 @@ const FormatChangeSchema: z.ZodType<FormatChange> = z.object({
     .describe("The call that undoes this change (with `cwd` added), e.g. `format.remove` with `{ id: \"9x16\" }`."),
   proposal: TxIdSchema.nullable().describe(
     "Review mode (ADR 0019): the proposal now holding the change, which reaches `frameshell.json` only once the person accepts it " +
+      "(`proposal.wait`). Null: applied at once.",
+  ),
+});
+
+/**
+ * What a `style.set` or `style.apply` changed (ADR 0028, ADR 0036).
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+const StyleChangeSchema: z.ZodType<StyleChange> = z.object({
+  dir: z.string().describe("Project root."),
+  path: z.string().describe("The style file, project-relative: `style.json`."),
+  changes: z
+    .array(
+      z.object({
+        path: z.string().describe("Dotted path of the value, e.g. `colors.accent`; `from` for the user style it was copied from."),
+        before: z.unknown().describe("Value in the file before; null when it was not set."),
+        after: z.unknown().describe("Value in the file after; null when it is no longer set."),
+      }),
+    )
+    .describe("Every value that changed, in schema order; empty when the file already held them."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
+  tx: TxIdSchema.describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
+  proposal: TxIdSchema.nullable().describe(
+    "Review mode (ADR 0019): the proposal now holding the change, which reaches `style.json` only once the person accepts it " +
       "(`proposal.wait`). Null: applied at once.",
   ),
 });
@@ -1814,7 +1838,7 @@ export const methods = {
     mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json` and `people.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json`, `people.json` and `style.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
@@ -1822,8 +1846,8 @@ export const methods = {
       "file, is kept with the proposal, not in `timelines/`, until the person accepts it. A `frameshell.json` write that " +
       "changes `formats` is journaled as a `file.write` config operation (ADR 0036) in the writer's transaction, so `history` " +
       "lists it and `revert` undoes it; in review mode its formats change waits in the proposal while its other keys are " +
-      "written at once. A `style.json` write by anyone but the app is refused in review mode (ProposalState, reason " +
-      "`forbidden`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
+      "written at once. A `style.json` write that changes a value is a `file.write` config operation the same way, and in " +
+      "review mode it waits in the proposal whole (prefer `style.set`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
       path: AbsolutePath.describe("Absolute file path inside a project, e.g. `/home/ana/videos/launch/scripts/launch.md`."),
@@ -3418,17 +3442,109 @@ export const methods = {
       "(written in style.json), `personality` (from its motion personality) or `default` (Frameshell's; null = not " +
       "decided, ask the person). `safeZones`: for each platform named, the pixels of a reference frame its app " +
       "covers (`measured: false` = from editing guides). `style` is null when the project has no style.json: none " +
-      "is required. Read-only; nothing renders from it yet. Fails with InvalidProjectFile when the file is invalid.",
-    params: z.strictObject({ cwd: CwdParam }),
+      "is required. `from.status` says whether the user style it was copied from changed since (`style.apply` it " +
+      "again to take the change). While a review-mode proposal changes the style (ADR 0036), `view: \"proposal\"` " +
+      "shows its version. Read-only; nothing renders from it yet. Fails with InvalidProjectFile when the file is invalid.",
+    params: z.strictObject({ cwd: CwdParam, view: ViewParam }),
     result: z.object({
+      ...ViewedShape,
       dir: z.string().describe("Project root."),
       path: z.string().describe("The style file, project-relative: `style.json`."),
       style: ResolvedStyleSchema.nullable().describe("Every value with its source; null when there is no style.json."),
       from: z
-        .object({ id: z.string(), sha256: z.string() })
+        .object({
+          id: z.string(),
+          sha256: z.string(),
+          status: z
+            .enum(["same", "changed", "missing"])
+            .describe("`same`: the user style still holds what was copied. `changed`: edited since. `missing`: no user style with that id on this machine."),
+        })
         .nullable()
         .describe("User style the file was copied from (id, SHA-256 at copy time); null when none."),
       safeZones: z.array(SafeZoneSchema).describe("Safe zone of each platform in `platforms`, in that order; empty when none."),
+    }),
+  },
+  "style.set": {
+    mutating: true,
+    description:
+      "Set one value of the project's style guide (`style.json`, ADR 0028) by its dotted path, e.g. " +
+      "`{ path: \"colors.accent\", value: \"#ff5500\" }`, `{ path: \"motion.personality\", value: \"premium\" }`, " +
+      "`{ path: \"type.hero\", value: 220 }`, `{ path: \"banned\", value: [\"emoji in captions\"] }`. A path names one " +
+      "value: a colour, a number, a font object (`fonts.display`: `{ family, file?, weight?, tracking? }`), an ease (4 " +
+      "numbers) or a whole list; `style.show` lists every path. `value: null` removes it from the file, so the " +
+      "personality's or the default value applies again. Units as `style.show` describes them (seconds, not ms). " +
+      "Creates `style.json` when missing; the rest of the file is kept. Journaled in " +
+      "`.frameshell/history/project.config.jsonl` in the caller's transaction (ADR 0036): `history` lists it, `revert` " +
+      "with its `op` or `tx` undoes it. While review mode is on (ADR 0019), a change by anyone but the person in the app " +
+      "waits in the transaction's proposal (`proposal` in the result). Change the style only with the person's agreement. " +
+      "Fails with InvalidOperation (`reason`: `path` unknown, `value` invalid, with the schema's message), " +
+      "InvalidProjectFile (the file on disk is invalid), ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      path: z.string().min(1).describe("Dotted path of one style value, e.g. `colors.accent`, `motion.duration.quick`, `sound.duck.depth`."),
+      value: z.unknown().describe("New value as JSON (string, number, boolean, list, font object); null removes it from the file."),
+    }),
+    result: StyleChangeSchema,
+  },
+  "style.apply": {
+    mutating: true,
+    description:
+      "Copy a user style (a library in Frameshell's config folder, `style.list`) or a motion personality (`playful`, " +
+      "`premium`, `corporate`, `energetic`, `calm`) into the project's `style.json` (ADR 0028 decision 10). By default " +
+      "it merges value by value: every value the user style sets replaces the project's, the others stay. " +
+      "`replace: true` makes the file exactly the user style. A user style also records `from` (its id and SHA-256), " +
+      "so `style.show` can say when it changed later; nothing is inherited afterwards. A personality sets only " +
+      "`motion.personality` (with `replace`, it is all the file keeps). `changes` reports every value that changed. " +
+      "Journaled and held by review mode like `style.set`; `revert` with its `op` undoes it. Fails with InvalidOperation " +
+      "(`reason` `not found`, with the user styles available in `data.available`), InvalidGlobalConfig (the user style " +
+      "is invalid), InvalidProjectFile, ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      name: UserStyleIdSchema.describe("User style id (`style.list`) or a motion personality id."),
+      replace: z.boolean().optional().describe("Overwrite the project's style with it instead of merging value by value. Default false."),
+    }),
+    result: StyleChangeSchema,
+  },
+  "style.save": {
+    mutating: true,
+    description:
+      "Save the project's `style.json` as user style `name` in Frameshell's config folder (`styles/<name>.json`), so " +
+      "other projects can `style.apply` it. The file is copied as it is, without `from`. Not a project change: not " +
+      "journaled, not held by review mode. An existing user style of that name is kept unless `force: true`. Fails " +
+      "with InvalidOperation (`reason` `no style`: the project has no style.json; `exists`; `personality`: the name is a " +
+      "motion personality's), InvalidProjectFile, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      name: UserStyleIdSchema,
+      force: z.boolean().optional().describe("Overwrite a user style of the same name. Default false."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      id: z.string().describe("User style id."),
+      path: z.string().describe("Absolute path of the user style file."),
+      sha256: z.string().describe("SHA-256 of the user style file as written."),
+      replaced: z.boolean().describe("True when it overwrote a user style of the same name."),
+    }),
+  },
+  "style.list": {
+    description:
+      "The user styles saved on this machine (`style.save`; files `styles/<id>.json` in Frameshell's config folder) " +
+      "and the motion personalities, both names `style.apply` takes. A user style that fails validation is listed " +
+      "with `error` and cannot be applied until fixed.",
+    params: z.strictObject({}),
+    result: z.object({
+      dir: z.string().describe("Absolute folder of the user styles."),
+      styles: z
+        .array(
+          z.object({
+            id: z.string(),
+            sha256: z.string().describe("SHA-256 of the file."),
+            personality: z.string().nullable().describe("Motion personality it picks; null when none."),
+            error: z.string().nullable().describe("Why it is invalid; null when it is valid."),
+          }),
+        )
+        .describe("Sorted by id."),
+      personalities: z.array(z.string()).describe("Motion personality ids."),
     }),
   },
   "people.list": {
@@ -4098,6 +4214,19 @@ export interface FormatChange {
   undo: { method: "format.add" | "format.remove"; params: Record<string, unknown> };
   proposal: string | null;
 }
+/** Result of `style.set` and `style.apply`; see {@link StyleChangeSchema}. */
+export interface StyleChange {
+  dir: string;
+  path: string;
+  changes: { path: string; before: unknown; after: unknown }[];
+  op: string;
+  tx: string;
+  proposal: string | null;
+}
+/** Result of `style.save`. */
+export type StyleSaveResult = MethodResult<"style.save">;
+/** Result of `style.list`. */
+export type StyleListResult = MethodResult<"style.list">;
 /** `cover` params. */
 export type CoverParams = MethodParams<"cover">;
 /** Result of `cover`. */

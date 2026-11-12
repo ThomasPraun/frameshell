@@ -37,7 +37,7 @@ import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseMode
 import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeats } from "./beats-commands.js";
 import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
-import { STYLE_FLAGS, STYLE_USAGE, formatStyle } from "./style-commands.js";
+import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
@@ -254,7 +254,7 @@ type Invocation =
   | { kind: "proposal.status" }
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
-  | { kind: "style.show" }
+  | StyleInvocation
   | ReviewInvocation
   | AnalyzeInvocation
   | PeopleInvocation
@@ -505,6 +505,7 @@ function parseBuiltin(
     restore?: boolean | undefined;
     "no-snap"?: boolean | undefined;
     force?: boolean | undefined;
+    replace?: boolean | undefined;
     dtw?: string | undefined;
     lines?: string | undefined;
     bpm?: string | undefined;
@@ -545,7 +546,7 @@ function parseBuiltin(
   if (command === "shoot") return parseShoot(rest, options);
   if (command === "model") return parseModel(rest, options);
   if (command === "matte") return rest.length === 1 ? { kind: "matte", asset: rest[0]! } : null;
-  if (command === "style") return rest.length === 1 && rest[0] === "show" ? { kind: "style.show" } : null;
+  if (command === "style") return parseStyle(rest, options);
   if (command === "format") return parseFormat(rest, options);
   if (command === "review") return parseReview(rest, options);
   if (command === "analyze") return parseAnalyze(rest, options);
@@ -825,10 +826,12 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return executeReview(conn, inv, cwd, flags.json);
     case "analyze":
       return executeAnalyze(conn, inv, cwd, flags.json);
-    case "style.show": {
-      const result = await conn.request("style.show", { cwd });
-      return flags.json ? json(result) : formatStyle(result);
-    }
+    case "style.show":
+    case "style.set":
+    case "style.apply":
+    case "style.save":
+    case "style.list":
+      return executeStyle(conn, inv, cwd, flags.json);
     case "proposal.status": {
       const result = await conn.request("proposal.status", { cwd });
       return flags.json ? json(result) : formatProposalStatus(result);
