@@ -231,6 +231,7 @@ export {
   type FramePlan,
   type GeneratedSource,
   type LoudnessMeasurement,
+  type MatteSource,
   type RenderInput,
   type RenderPlan,
   type RenderSegment,

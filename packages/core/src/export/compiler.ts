@@ -30,6 +30,7 @@ import {
   isKeyed,
   isIdentityPlacement,
   isProgramSound,
+  isSubjectClip,
   layerRect,
   nestingOf,
   placementOf,
@@ -91,6 +92,15 @@ export interface GeneratedSource {
   height: number;
 }
 
+/** Subject matte of one asset (ADR 0032): a grayscale video on the proxy's frame grid, luma = alpha. */
+export interface MatteSource {
+  /** Absolute file. */
+  path: string;
+  /** Matte size in pixels (the proxy's); scaled to the source picture before it is applied. */
+  width: number;
+  height: number;
+}
+
 /** Inputs of {@link compileRender}. */
 export interface RenderInput {
   timeline: Timeline;
@@ -115,6 +125,11 @@ export interface RenderInput {
    * (ADR 0031): the clip's sound is read from it instead of the asset. A clip whose bake is missing plays dry, with a warning.
    */
   audioFx?: ReadonlyMap<string, string>;
+  /**
+   * Subject matte of every moving-picture asset a subject layer plays (`isSubjectClip`, ADR 0032), by asset path. A
+   * subject clip whose asset has none is left out, with a warning: the tracks behind its plate stay in front.
+   */
+  mattes?: ReadonlyMap<string, MatteSource>;
   /** Target video segment length in seconds. Default {@link DEFAULT_SEGMENT_SECONDS}. */
   segmentSeconds?: number;
   /** Layout of the format rendered (`resolveFormat`, ADR 0027). Absent: the primary format's (letterbox, captions as styled). */
@@ -239,6 +254,8 @@ export interface FrameInput {
   transcripts?: ReadonlyMap<string, Transcript>;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
+  /** See {@link RenderInput.mattes}. */
+  mattes?: ReadonlyMap<string, MatteSource>;
   /** See {@link RenderInput.variant}. */
   variant?: FormatLayout;
   width: number;
@@ -344,6 +361,11 @@ interface Placed {
   shapeOut?: TransitionShape;
   /** Source pixels kept when a clip covers the frame of a non-primary format (ADR 0027; not an upper-track source with alpha): scaled to fill it exactly. */
   cover?: LayerRect;
+  /**
+   * On a subject layer (ADR 0032): the asset's matte, read on the same frames as `source` and multiplied into its
+   * alpha first. Opacity, fades and shapes later multiply alpha too, so the result is ADR 0031's order (shape, then matte).
+   */
+  matte?: ExportSource;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -395,7 +417,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx, input.mattes);
   const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
   const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
   const rate = fpsRational(outFps);
@@ -540,7 +562,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant);
+  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant, undefined, input.mattes);
   const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
@@ -642,6 +664,8 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
  * for the length and play their sound. In a `variant` that covers, media
  * clips that would fill the frame untransformed are cropped to fill it,
  * except sources with alpha on upper tracks: overlays are fitted whole.
+ * A subject clip (ADR 0032) is its plate clip drawn through its asset's
+ * matte, with the plate's dissolve and shapes when the plate is the base.
  */
 function layoutTimeline(
   stored: Timeline,
@@ -652,11 +676,14 @@ function layoutTimeline(
   generated: ReadonlyMap<string, GeneratedSource> = new Map(),
   variant?: FormatLayout,
   audioFx: ReadonlyMap<string, string> = new Map(),
+  mattes: ReadonlyMap<string, MatteSource> = new Map(),
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
   const grid = new FrameGrid(fps);
   const warnings: string[] = [];
+  /** Assets a subject clip plays without a matte, each warned about once. */
+  const unmatted = new Set<string>();
   /** Picture layers in track order (SPEC §5.3: track order is stacking order). */
   const pictures: { program: boolean; placed: Placed[] }[] = [];
   const audio: Placed[][] = [];
@@ -689,6 +716,19 @@ function layoutTimeline(
       const render = clip.asset.startsWith(GENERATED) ? generated.get(clip.id) : undefined;
       const source = render ? generatedSource(render) : sources.get(clip.asset);
       if (!source) throw new Error(`no export source for ${clip.asset}`);
+      const subject = track.kind === "video" && isSubjectClip(listed);
+      const found = subject && source.video && !source.video.still ? mattes.get(clip.asset) : undefined;
+      if (subject && !found) {
+        if (!unmatted.has(clip.asset)) {
+          unmatted.add(clip.asset);
+          warnings.push(
+            `${clip.asset} has no subject matte (${source.video ? (source.video.still ? "a still picture" : "not made") : "no picture"}): ` +
+              `the tracks behind its plate track show in front of it.`,
+          );
+        }
+        continue;
+      }
+      const matte: ExportSource | undefined = found ? { path: found.path, video: { codec: "h264", still: false, width: found.width, height: found.height }, audio: false } : undefined;
       const speed = clip.speed ?? 1;
       const start = grid.frame(clip.start);
       const end = Math.max(start + 1, grid.frame(clip.start + (clip.out - clip.in) / speed));
@@ -717,6 +757,7 @@ function layoutTimeline(
         ...(render ? { hold: true as const } : {}),
         ...(sound !== undefined ? { sound } : {}),
         ...(covers ? { cover: formatCover(picture, output) } : {}),
+        ...(matte ? { matte } : {}),
       });
       frames = Math.max(frames, end);
     }
@@ -797,31 +838,46 @@ function layoutTimeline(
     if (before) before.shapeOut = shape;
   }
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
+  // A subject of a base plate clip (same id) takes that clip's shapes; a plain dissolve crossfades the two subjects.
+  const baseClips = new Map(baseLayer.map((placed) => [placed.clip.id, placed]));
+  for (const placed of upper.flat()) {
+    const plate = placed.matte ? baseClips.get(placed.clip.id) : undefined;
+    if (!plate) continue;
+    if (plate.shapeIn) placed.shapeIn = plate.shapeIn;
+    if (plate.shapeOut) {
+      // The shape uncovers it (pushed out, or wiped off by the inverse mask): it does not fade too.
+      placed.shapeOut = plate.shapeOut;
+      placed.bottom = true;
+    }
+  }
   // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
   for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
+  /** {@link whole} cut where its wipes end and start (a subject's outgoing one too): a wipe's mask costs per pixel, only the frames it plays over get it. */
+  const wipeSplit = (placed: Placed): Span[] => {
+    const { from, to } = whole(placed);
+    const cuts = [
+      ...(placed.shapeIn?.kind === "wipe" ? [placed.start + (placed.lead ?? 0)] : []),
+      ...(placed.shapeOut?.kind === "wipe" && placed.matte ? [placed.end - (placed.trail ?? 0)] : []),
+    ].filter((cut) => cut > from && cut < to);
+    const edges = [from, ...[...new Set(cuts)].sort((a, b) => a - b), to];
+    return edges.slice(1).map((end, index) => ({ placed, from: edges[index]!, to: end }));
+  };
   /** Frames each side of the end of `placed` that a push moves it out over: then it is a layer, not concatenated. */
   const pushedOut = (placed: Placed) => (placed.shapeOut?.kind === "push" ? (placed.trail ?? 0) : 0);
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
   const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !hasPictureKeys(placed.clip);
   const baseLayers = baseLayer.flatMap((placed): Span[] => {
     const lead = placed.lead ?? 0;
-    if (!fills(placed)) {
-      // A wipe's mask costs per pixel: only the frames it plays over get it.
-      if (placed.shapeIn?.kind !== "wipe") return [whole(placed)];
-      return [
-        { placed, from: placed.start - lead, to: placed.start + lead },
-        { placed, from: placed.start + lead, to: placed.end + (placed.trail ?? 0) },
-      ];
-    }
+    if (!fills(placed)) return wipeSplit(placed);
     const pushed = pushedOut(placed);
     return [
       ...(lead > 0 ? [{ placed, from: placed.start - lead, to: placed.start + lead }] : []),
       ...(pushed > 0 ? [{ placed, from: placed.end - pushed, to: placed.end + pushed }] : []),
     ];
   });
-  const overlays = [baseLayers, ...upper.map((layer) => layer.map(whole))].map((layer) => layer.filter(visible)).filter((layer) => layer.length > 0);
+  const overlays = [baseLayers, ...upper.map((layer) => layer.flatMap(wipeSplit))].map((layer) => layer.filter(visible)).filter((layer) => layer.length > 0);
   for (const angle of pictureless) {
     warnings.push(`Multicam angle ${angle} has no picture; its tile stays black.`);
   }
@@ -1049,7 +1105,7 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
     const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
     const chain = [
-      pieceChain(placed, start, end, fps, inputs),
+      placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
@@ -1073,6 +1129,25 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
+}
+
+/**
+ * {@link pieceChain} of a subject piece with `matte` as its alpha (ADR 0032): the matte read on the same frames (it
+ * follows the proxy's grid, so frame n is source second n / fps like `pieceChain` picks), its luma scaled to the
+ * source picture and merged in, multiplied with the source's own alpha when it has one. Pushes the chains of both
+ * inputs to `lines` and returns the start of the piece's chain.
+ */
+function mattedPiece(placed: Placed, matte: ExportSource, start: number, end: number, fps: number, inputs: string[], lines: string[], n: number): string {
+  const { width, height } = placed.source.video!;
+  const plate = pieceChain(placed, start, end, fps, inputs);
+  // `extractplanes` keeps the luma bytes as they are: the matte is full range, a gray conversion would rescale it.
+  lines.push(`${pieceChain({ ...placed, source: matte }, start, end, fps, inputs)},extractplanes=y,scale=${width}:${height}[sm${n}]`);
+  if (!placed.source.video!.alpha) {
+    lines.push(`${plate}[sp${n}]`);
+    return `[sp${n}][sm${n}]alphamerge`;
+  }
+  lines.push(`${plate},format=rgba,split[sp${n}][sk${n}]`, `[sk${n}]alphaextract[sa${n}]`, `[sa${n}][sm${n}]blend=all_mode=multiply[sm${n}x]`);
+  return `[sp${n}][sm${n}x]alphamerge`;
 }
 
 /**
@@ -1166,7 +1241,8 @@ function layerOrigin(placed: Placed, time: string, first: number, last: number, 
 /**
  * What a shaped dissolve (ADR 0030, `shapeAt`) does to a base-track piece on timeline frames [start, end) of a graph
  * starting at frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a
- * wipe's `geq` on the incoming layer, reading the frame time `T` as timeline seconds. Null when neither applies.
+ * wipe's `geq` on the incoming layer (and on a subject's outgoing one), reading the frame time `T` as timeline
+ * seconds. Null when neither applies.
  */
 function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): { x?: string; y?: string; mask?: string } | null {
   const { fps, width, height } = out;
@@ -1181,10 +1257,12 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
       const offsets = shapeOffsets(shape, which, progress(time), width, height);
       if (offsets.x) xs.push(offsets.x);
       if (offsets.y) ys.push(offsets.y);
-    } else if (which === "incoming") {
+    } else if (which === "incoming" || placed.matte) {
       // A keyed layer moves: its corner is an expression of the frame time and the frame's own size.
       const corner = moves(placed) ? layerOrigin(placed, "T", start / fps, (end - 1) / fps, out, ["W", "H"]) : { x: num(rect.left), y: num(rect.top) };
-      mask = wipeAlpha(shape, progress("T"), corner.x, corner.y, width, height);
+      // The base's outgoing clip is covered by the incoming one; a subject's must be uncovered (ADR 0032).
+      const wipe = wipeAlpha(shape, progress("T"), corner.x, corner.y, width, height, which === "outgoing");
+      mask = mask ? `${mask},${wipe}` : wipe;
     }
   };
   side(placed.shapeIn, placed.start, placed.lead ?? 0, "incoming");

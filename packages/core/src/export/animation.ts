@@ -201,19 +201,21 @@ export function shapeOffsets(shape: TransitionShape, side: "incoming" | "outgoin
  * `geq` filter keeping a `wipe`'s incoming layer (RGBA, its top-left corner at `left`, `top` in a `width` x `height`
  * frame: numbers or expressions) only where `shapeAt`'s clip rectangle holds the pixel centre, at shape progress `p`
  * (an expression of the frame time `T`); the alpha it has there is kept. About 34 ms per 1080p frame (ADR 0030).
+ * `outgoing`: the complement, for an outgoing layer that the wipe must uncover (a subject layer, ADR 0032).
  */
-export function wipeAlpha(shape: TransitionShape, p: string, left: string, top: string, width: number, height: number): string {
+export function wipeAlpha(shape: TransitionShape, p: string, left: string, top: string, width: number, height: number, outgoing = false): string {
   const [ux, uy] = shapeStep(shape);
   const x = `X+${left}+0.5`;
   const y = `Y+${top}+0.5`;
   const keep = "alpha(X,Y)";
+  const [low, high] = outgoing ? [keep, "0"] : ["0", keep];
   const alpha =
     ux < 0
-      ? `if(lt(${x},${num(width)}*(1-(${p}))),0,${keep})`
+      ? `if(lt(${x},${num(width)}*(1-(${p}))),${low},${high})`
       : ux > 0
-        ? `if(lt(${x},${num(width)}*(${p})),${keep},0)`
+        ? `if(lt(${x},${num(width)}*(${p})),${high},${low})`
         : uy < 0
-          ? `if(lt(${y},${num(height)}*(1-(${p}))),0,${keep})`
-          : `if(lt(${y},${num(height)}*(${p})),${keep},0)`;
+          ? `if(lt(${y},${num(height)}*(1-(${p}))),${low},${high})`
+          : `if(lt(${y},${num(height)}*(${p})),${high},${low})`;
   return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${alpha}'`;
 }

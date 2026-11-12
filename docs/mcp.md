@@ -141,6 +141,9 @@ People changes are not timeline operations: review mode does not hold them, `his
 | Tool | Does |
 |---|---|
 | `matte_prepare(asset)` | Matte job (kind `matte`): which pixels of each frame of a video are the person in front, MediaPipe's selfie segmenter on every proxy frame, smoothed and refined, cached per content in `.frameshell/cache/mattes/` as a grayscale video (frame N = proxy frame N). Returns its path; a second call returns it at once. The only tool that downloads the matte model. Same as `frameshell matte`. |
+
+`track_set(track, behind: "<plate>")` puts a video track behind the person in front on a lower video track: export, `frame_capture` and `frames_strip` draw the plate's media clips again above it through their mattes, making a missing one first (a render job's `matte` step). The preview does not draw it yet. `behind: null` clears it; removing or moving the plate track clears it too, with a warning.
+
 ## Style (ADR 0028)
 
 Optional `style.json`: the project's style guide as numbers (colours, fonts, type sizes, motion personality and overrides, sound levels under the voice, platforms, rules, banned list).

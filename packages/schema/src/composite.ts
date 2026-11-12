@@ -133,8 +133,8 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * the later ones become layers `T/2`, … above `T/p1`. On an audio track it becomes its angles'
  * sound ({@link programSound}), clips marked {@link isProgramSound} so they keep exact samples.
  *
- * Track mutes are folded into the clips first ({@link withTrackMutes}), at
- * every level. Hidden tracks stay `hidden`, and so do the tracks a hidden
+ * Track mutes are folded into the clips first ({@link withTrackMutes}), then
+ * subject layers are added ({@link withSubjectLayers}), at every level. Hidden tracks stay `hidden`, and so do the tracks a hidden
  * host track's nested clips add; a nested hidden video track goes onto its own
  * hidden track `T/h1`, `T/h2`, … and a nested hidden program track keeps `hidden`.
  *
@@ -143,7 +143,7 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * assumed to be `timelines/<id>.json`.
  */
 export function flattenTimeline(timeline: Timeline, nested: NestedTimelines, fps?: number): Timeline {
-  timeline = withTrackMutes(timeline);
+  timeline = withSubjectLayers(withTrackMutes(timeline));
   const own = timeline.groups ?? [];
   const flat = flattenTracks(timeline.tracks, own, nested, [`timelines/${timeline.id}.json`], fps);
   // Every group of the root stays, shown or not; nested ones only when shown.
@@ -193,7 +193,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       if (!isNestedClip(clip) || stack.includes(clip.source)) continue;
       const found = nested(clip.source);
       if (!found) continue;
-      const inner = withTrackMutes(found);
+      const inner = withSubjectLayers(withTrackMutes(found));
       const flat = flattenTracks(inner.tracks, inner.groups ?? [], nested, [...stack, clip.source], fps);
       inners.set(clip, { flat, duration: durationOf(flat.tracks) });
     }
@@ -852,6 +852,52 @@ export function withTrackMutes(timeline: Timeline): Timeline {
     return { ...group, angles, ...(group.mics ? { mics: group.mics.map(silence) } : {}) };
   });
   return { ...timeline, tracks, ...(groups ? { groups } : {}) };
+}
+
+/**
+ * Mark of a clip that {@link withSubjectLayers} drew again as the subject of its plate. A symbol key, like
+ * {@link isProgramSound}'s: spreads keep it, JSON and Zod never see it.
+ */
+const SUBJECT = Symbol.for("frameshell.subject");
+
+/**
+ * True for a clip of a subject layer ({@link withSubjectLayers}): the plate's media clip, same id and fields,
+ * whose picture export draws through the subject matte of its asset (ADR 0032). It plays no sound. The mark does
+ * not survive JSON or `structuredClone`: flatten in the same place that draws the clip.
+ */
+export function isSubjectClip(clip: Clip): boolean {
+  return (clip as { [SUBJECT]?: true })[SUBJECT] === true;
+}
+
+/**
+ * `timeline` with a subject layer above each shown video track that is `behind` a shown plate (ADR 0032): a video
+ * track `<track>/subject` holding a copy of each media clip of the plate, marked {@link isSubjectClip} and muted.
+ * Drawn through each asset's matte, it puts the person in front of the plate back over the tracks between. A run of
+ * tracks behind the same plate, with only hidden tracks between them, shares one layer above the last. Nested,
+ * timeline and adapter clips of the plate have no matte and are left out. Unchanged when no track is `behind` one.
+ */
+export function withSubjectLayers(timeline: Timeline): Timeline {
+  const { tracks } = timeline;
+  if (!tracks.some((track) => track.kind === "video" && track.behind !== undefined)) return timeline;
+  const plateOf = (index: number): ClipTrack | null => {
+    const track = tracks[index]!;
+    if (track.kind !== "video" || track.behind === undefined || !showsPicture(track)) return null;
+    const plate = tracks.slice(0, index).find((other) => other.id === track.behind);
+    return plate?.kind === "video" && showsPicture(plate) ? plate : null;
+  };
+  const out: Track[] = [];
+  tracks.forEach((track, index) => {
+    out.push(track);
+    const plate = plateOf(index);
+    if (!plate) return;
+    const next = tracks.findIndex((other, at) => at > index && showsPicture(other));
+    if (next !== -1 && plateOf(next) === plate) return;
+    const clips = plate.clips.flatMap((clip): Clip[] =>
+      clip.type === "media" ? [Object.assign({ ...clip, audio: { muted: true } }, { [SUBJECT]: true })] : [],
+    );
+    out.push({ id: `${track.id}/subject`, kind: "video", muted: true, clips });
+  });
+  return { ...timeline, tracks: out };
 }
 
 /** True when `track` shows pictures: a video or program track that is not `hidden`. */

@@ -1254,6 +1254,7 @@ export class TimelineService {
         ...(track.kind === "subtitles" && track.gaps ? { gaps: track.gaps } : {}),
         ...(track.kind !== "subtitles" && track.muted === true ? { muted: true as const } : {}),
         ...(track.kind !== "subtitles" && track.kind !== "audio" && track.hidden === true ? { hidden: true as const } : {}),
+        ...(track.kind === "video" && track.behind !== undefined ? { behind: track.behind } : {}),
         clips,
       });
     }
@@ -1301,6 +1302,7 @@ export class TimelineService {
         ...(track.style ? { style: track.style } : {}),
         ...(track.muted ? { muted: track.muted } : {}),
         ...(track.hidden ? { hidden: track.hidden } : {}),
+        ...(track.behind !== undefined ? { behind: track.behind } : {}),
         clips: track.clips.length,
         end: track.clips.reduce<number | null>((end, clip) => (end === null || clip.end === null ? null : Math.max(end, clip.end)), 0),
       })),

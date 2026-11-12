@@ -306,16 +306,28 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
-    const { name, follows, style, gaps, index, muted, hidden } = args;
-    if (name === undefined && follows === undefined && style === undefined && gaps === undefined && index === undefined && muted === undefined && hidden === undefined) {
+    const { name, follows, style, gaps, index, muted, hidden, behind } = args;
+    if (
+      name === undefined &&
+      follows === undefined &&
+      style === undefined &&
+      gaps === undefined &&
+      index === undefined &&
+      muted === undefined &&
+      hidden === undefined &&
+      behind === undefined
+    ) {
       throw this.invalid("nothing to change.", {
-        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, or for subtitle tracks `follows`, `style` or `gaps`.",
+        hint: "Pass `name` or `index`, `muted` or `hidden` for clip and program tracks, `behind` for video tracks, or for subtitle tracks `follows`, `style` or `gaps`.",
       });
     }
     if (track.kind !== "subtitles") this.refuseSubtitleFields(args);
     if (track.kind === "subtitles" && muted !== undefined) throw this.invalid("subtitle tracks have no sound to mute.", { field: "muted" });
     if ((track.kind === "subtitles" || track.kind === "audio") && hidden !== undefined) {
       throw this.invalid(`${track.kind} tracks have no picture to hide; \`hidden\` is for video and program tracks.`, { field: "hidden" });
+    }
+    if (track.kind !== "video" && behind !== undefined) {
+      throw this.invalid(`${track.kind} tracks cannot go behind a subject; \`behind\` is for video tracks.`, { field: "behind" });
     }
     if (track.kind !== "subtitles") {
       // Stored only while true: an unmuted, shown track looks as it did before the fields existed.
@@ -334,6 +346,7 @@ class Edit {
       this.draft.tracks.splice(this.draft.tracks.indexOf(track), 1);
       this.draft.tracks.splice(index, 0, track);
     }
+    if (track.kind === "video" && behind !== undefined) this.setBehind(track, behind);
     if (track.kind !== "subtitles") return;
     if (follows !== undefined) {
       this.checkFollows(follows);
@@ -366,6 +379,41 @@ class Edit {
     const phrases = [...kept, ...args.phrases];
     if (phrases.length > 0) track.phrases = phrases;
     else delete track.phrases;
+  }
+
+  /** Put video track `track` behind the subject of `plate` (ADR 0032), which must be a video track below it; null clears it. */
+  setBehind(track: ClipTrack, plate: string | null): void {
+    if (plate === null) {
+      delete track.behind;
+      return;
+    }
+    const found = this.track(plate);
+    const lower = this.draft.tracks.slice(0, this.draft.tracks.indexOf(track));
+    const plates = lower.filter((candidate) => candidate.kind === "video").map((candidate) => candidate.id);
+    const valid = { hint: `Video tracks below ${track.id}: ${plates.join(", ") || "none, add one first"}.` };
+    if (found === track) throw this.invalid(`${track.id} cannot go behind its own subject.`, { field: "behind", ...valid });
+    if (found.kind !== "video") {
+      const kind = { audio: "an audio", program: "a program", subtitles: "a subtitle" }[found.kind];
+      throw this.invalid(`the plate must be a video track; ${plate} is ${kind} track.`, { field: "behind", ...valid });
+    }
+    if (!lower.includes(found)) throw this.invalid(`the plate ${plate} is above ${track.id}; it must be lower in the stack.`, { field: "behind", ...valid });
+    track.behind = plate;
+  }
+
+  /**
+   * Clear `behind` where its plate is gone or no longer a video track below (ADR 0032 decision 8: removed or
+   * reordered), with a warning: the operation goes on instead of failing on a flag it did not mean to break.
+   */
+  clearStaleBehind(): void {
+    this.draft.tracks.forEach((track, index) => {
+      if (track.kind !== "video" || track.behind === undefined) return;
+      const plate = track.behind;
+      const found = this.draft.tracks.find((candidate) => candidate.id === plate);
+      if (found?.kind === "video" && this.draft.tracks.indexOf(found) < index) return;
+      delete track.behind;
+      const why = found ? `${plate} is no longer below it` : `${plate} is gone`;
+      this.warnings.push(`track ${track.id} no longer sits behind the subject of ${plate}: ${why}. \`revert\` brings it back.`);
+    });
   }
 
   /** `follows` must name an existing video or audio track. */
@@ -2089,6 +2137,7 @@ class Edit {
 
   /** Check rules on what changed, then build the result. */
   async finish(): Promise<AppliedOperation> {
+    this.clearStaleBehind();
     for (const track of this.draft.tracks) if (track.kind !== "subtitles") sortClips(track);
     if (this.draft.markers) sortMarkers(this.draft.markers);
     if (this.draft.markers?.length === 0) delete this.draft.markers;

@@ -23,9 +23,11 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  isSubjectClip,
   programGroup,
   resolveFormat,
   sameAspect,
+  showsPicture,
 } from "@frameshell/schema";
 import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
@@ -37,6 +39,7 @@ import {
   type ExportSource,
   type GeneratedSource,
   LOUDNESS_STATS_FILE,
+  type MatteSource,
   type RenderPlan,
   compileFrame,
   compileRender,
@@ -191,6 +194,14 @@ export interface ExportServiceOptions {
     needs(timeline: Timeline): { ref: string }[];
     ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<ReadonlyMap<string, string>>;
   };
+  /**
+   * Subject mattes (ADR 0032) of the assets subject layers play. `prepare` runs before any job, since an ingest may
+   * need a slot of the shared queue; the `make` it returns makes the mattes still missing without taking one (a render
+   * job calls it) and returns every matte by asset. Absent: subject layers are left out, with a warning.
+   */
+  mattes?: {
+    prepare(root: string, assets: readonly string[]): Promise<(onProgress?: (fraction: number) => void, signal?: AbortSignal) => Promise<ReadonlyMap<string, MatteSource>>>;
+  };
   /** H.264 encoder for renders that ask for a quality tier: the first that works on this machine. Absent: x264. */
   encoder?(ffmpeg: string): Promise<EncoderName>;
   /** See {@link ExecuteRenderOptions.parallelism}. */
@@ -248,6 +259,9 @@ export class ExportService {
     const layered = generatedClipIds(timeline);
     if (layered.length > 0) await this.#options.clips?.check(root, timeline);
     const sources = await this.#sources(root, timeline);
+    const matted = subjectAssets(timeline, sources);
+    const makeMattes = matted.length > 0 && this.#options.mattes ? await this.#options.mattes.prepare(root, matted) : null;
+    const standInMattes = new Map(makeMattes ? matted.map((asset) => [asset, { path: "", ...pictureSize(sources.get(asset)!) }]) : []);
     const encoder = params.quality ? ((await this.#options.encoder?.(await this.#options.ffmpeg(root))) ?? "libx264") : null;
     const shared = {
       timeline,
@@ -276,7 +290,7 @@ export class ExportService {
       const standIn = this.#options.clips
         ? new Map(layered.map((id) => [id, { path: "", hasAlpha: true, width: format.width, height: format.height }]))
         : new Map<string, GeneratedSource>();
-      const plan = compileRender({ ...input, generated: standIn, audioFx: standInBakes });
+      const plan = compileRender({ ...input, generated: standIn, audioFx: standInBakes, mattes: standInMattes });
       const output = params.formats ? withSuffix(base, format.id) : base;
       // Before formats a configured default preset of another aspect letterboxed the project into its size.
       const overridden =
@@ -307,7 +321,12 @@ export class ExportService {
             ctx.update({ step: "audio-fx", progress: 0 });
             audioFx = await this.#options.audioFx.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), ctx.signal);
           }
-          if (generated.size > 0 || baked.length > 0) final = compileRender({ ...input, generated, audioFx });
+          let mattes: ReadonlyMap<string, MatteSource> = new Map();
+          if (makeMattes) {
+            ctx.update({ step: "matte", progress: 0 });
+            mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
+          }
+          if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
           await executeRender(final, {
             ffmpeg: await this.#options.ffmpeg(root),
             workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),
@@ -479,13 +498,18 @@ export class ExportService {
     const renderSize = shape.primary ? undefined : { width: shape.width, height: shape.height };
     const generated =
       generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, undefined, renderSize) : new Map();
+    const sources = await this.#sources(root, timeline);
+    const matted = subjectAssets(timeline, sources);
+    // Not in a job: the mattes are made here, as a render job would.
+    const mattes = matted.length > 0 && this.#options.mattes ? await (await this.#options.mattes.prepare(root, matted))() : new Map<string, MatteSource>();
     const plan = compileFrame({
       timeline,
       fps,
-      sources: await this.#sources(root, timeline),
+      sources,
       transcripts: await this.#transcripts(root, timeline),
       resolution,
       generated,
+      mattes,
       variant: { cover: shape.cover, captionScale: shape.captionScale },
       width: size.width,
       height: size.height,
@@ -633,6 +657,25 @@ function groupAssets(group: MulticamGroup | null): string[] {
 export function frameFormatOf(path: string): FrameFormat {
   const ext = extname(path).toLowerCase();
   return ext === ".jpg" || ext === ".jpeg" ? "jpg" : ext === ".webp" ? "webp" : "png";
+}
+
+/** Moving-picture assets the shown subject layers of `timeline` (flattened) play: each needs a matte to export (ADR 0032). */
+function subjectAssets(timeline: Timeline, sources: ReadonlyMap<string, ExportSource>): string[] {
+  const found = new Set<string>();
+  for (const track of timeline.tracks) {
+    if (track.kind !== "video" || !showsPicture(track)) continue;
+    for (const clip of track.clips) {
+      if (!isSubjectClip(clip) || !("asset" in clip)) continue;
+      const video = sources.get(clip.asset)?.video;
+      if (video && !video.still) found.add(clip.asset);
+    }
+  }
+  return [...found];
+}
+
+/** Picture size of a source with a picture. */
+function pictureSize(source: ExportSource): Size {
+  return { width: source.video!.width, height: source.video!.height };
 }
 
 /** Ids of the generated (adapter) clips on video tracks: each needs a cached render to export. */

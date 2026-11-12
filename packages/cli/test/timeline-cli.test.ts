@@ -398,6 +398,23 @@ describe("track mute and hide", () => {
     expect(frameshell(["track", "set", "v1", "--muted", "--unmuted", "--timeline", "states"]).code).toBe(2);
     expect(frameshell(["track", "set", "v1", "--hidden", "--shown", "--timeline", "states"]).code).toBe(2);
   });
+
+  it("track set --behind <plate> puts a track behind a lower video track's subject, list and show print it, --behind none clears it", () => {
+    writeFileSync(
+      join(project, "timelines", "behind.json"),
+      JSON.stringify({ schemaVersion: 1, id: "behind", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }, { id: "v2", kind: "video", clips: [] }] }),
+    );
+    const tracks = () => JSON.parse(readFileSync(join(project, "timelines", "behind.json"), "utf8")).tracks;
+    expect(frameshell(["track", "set", "v2", "--behind", "v1", "--timeline", "behind"]).code).toBe(0);
+    expect(tracks()[1]).toEqual({ id: "v2", kind: "video", behind: "v1", clips: [] });
+    expect(frameshell(["track", "list", "--timeline", "behind"]).stdout).toContain("v2  video  0 clip(s), ends 0 s  behind v1");
+    expect(frameshell(["timeline", "show", "--timeline", "behind"]).stdout).toContain("v2  video  behind v1");
+    const above = frameshell(["track", "set", "v1", "--behind", "v2", "--timeline", "behind"]);
+    expect(above.code).toBe(1);
+    expect(above.stderr).toMatch(/v2 is above v1; it must be lower/);
+    expect(frameshell(["track", "set", "v2", "--behind", "none", "--timeline", "behind"]).code).toBe(0);
+    expect(tracks()[1]).toEqual({ id: "v2", kind: "video", clips: [] });
+  });
 });
 
 describe("transitions and keyframes", () => {

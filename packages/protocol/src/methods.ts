@@ -65,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 85;
+export const PROTOCOL_VERSION = 86;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -317,7 +317,7 @@ const JobSchema = z.object({
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
         "order. `render`: clips (waits for generated clips to finish rendering into the cache), audio-fx (bakes clip audio " +
-        "effects not baked yet), video (segments " +
+        "effects not baked yet), matte (makes the subject mattes of the plates of tracks `behind` one that are not made yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
         "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded).",
@@ -2207,8 +2207,14 @@ export const methods = {
       "Example: `{ track: \"t_4d5e6f\", style: { position: \"top\" }, gaps: [{ from: 12, to: 15.5 }] }`. Preview and export use the same style. " +
       "`muted: true` silences a video, audio or program track whatever its clips' own audio; `hidden: true` leaves a video or " +
       "program track's pictures out (the tracks below show through, its sound still plays); false undoes either. " +
+      "`behind: \"<plate track>\"` puts a video track's pictures behind the person in front on a lower video track (ADR 0032): " +
+      "a big word or a logo between the background and the person. Export draws the plate's media clips again above this " +
+      "track through each asset's subject matte (`matte.prepare`), waiting for a matte that is not made yet (about 1.5 min " +
+      "per min of video); the preview does not show it yet. Keep the word 30-55 % covered and never over the face. " +
+      "`behind: null` clears it; removing or moving the plate track so it is no longer below clears it too, with a warning. " +
       "Fails with TrackNotFound or InvalidOperation (style or follows on a clip track, muted on a subtitle track, hidden on an " +
-      "audio or subtitle track, nothing to change).",
+      "audio or subtitle track, behind on a track that is not video, a plate that is not a lower video track, or in an image " +
+      "project, nothing to change).",
     params: operationArgs["track.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
@@ -2467,7 +2473,8 @@ export const methods = {
       "Waits for the asset's ingest when its proxy is not built yet. Takes an estimated 1.5 minutes per minute of 30 fps video " +
       "on an Apple M3 (`progress` notifications carry an ETA). It runs as a background job of kind `matte` (`job.list`), so " +
       "it goes on if the caller disconnects. Known limits: one merged matte for two or more people; thin hair strands " +
-      "and mic stands are often left out. Nothing on a timeline uses a matte yet. " +
+      "and mic stands are often left out. Export and frame captures use it for tracks `behind` a plate (`track.set`) and make " +
+      "it when missing; calling this first lets them start at once. " +
       "Example: `{ asset: \"assets/interview.mp4\" }`. Fails with AssetNotFound, OutsideProject, InvalidOperation " +
       "(reason `not a video`: audio or a still picture; `image project`; `ingest failed`), or the Binary* errors when ffmpeg, " +
       "ONNX Runtime or the model cannot be fetched.",

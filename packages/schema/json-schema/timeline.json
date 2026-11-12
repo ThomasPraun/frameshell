@@ -49,6 +49,11 @@
                 "description": "Video tracks only. True: the track shows no picture in export and preview (the tracks below show through); its sound still plays. Default false.",
                 "type": "boolean"
               },
+              "behind": {
+                "description": "Video tracks only (ADR 0032): id of a video track listed before this one (lower in the stack), the plate. This track's pictures go behind the person in front on the plate: the plate's media clips are drawn again above this track through their subject matte, so a word or a logo sits between the background and the person. Absent: none.",
+                "type": "string",
+                "minLength": 1
+              },
               "clips": {
                 "type": "array",
                 "items": {

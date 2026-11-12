@@ -335,6 +335,8 @@ export {
   programGroup,
   withProgramSound,
   withTrackMutes,
+  withSubjectLayers,
+  isSubjectClip,
   showsPicture,
 } from "./composite.js";
 export {

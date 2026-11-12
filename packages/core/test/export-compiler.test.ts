@@ -898,6 +898,76 @@ describe("audio effects (ADR 0031)", () => {
   });
 });
 
+describe("subject layers (ADR 0032)", () => {
+  const sized = new Map([...sources].map(([asset, source]) => [asset, source.video?.still ? source : { ...source, duration: 20 }]));
+  const matte = { path: "/project/.frameshell/cache/mattes/talk.mp4", width: 960, height: 540 };
+  const talkMatte = () => new Map([["assets/talk.mp4", matte]]);
+  /** Talk on v1, cut, then wiped into a second cut; a word on v2 behind v1's person (unless `plate` is false); music on a1. 6 s. */
+  const behind = (plate = true): Timeline => ({
+    schemaVersion: 1,
+    id: "main",
+    revision: 2,
+    tracks: [
+      {
+        id: "v1",
+        kind: "video",
+        clips: [
+          { id: "c_talk1", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 6.2 },
+          { id: "c_talk2", type: "media", asset: "assets/talk.mp4", start: 3, in: 10, out: 13, dissolve: 1, shape: { kind: "wipe", direction: "left" } },
+        ],
+      },
+      {
+        id: "v2",
+        kind: "video",
+        ...(plate ? { behind: "v1" } : {}),
+        clips: [{ id: "c_word", type: "media", asset: "assets/logo.png", start: 0.5, in: 0, out: 5, transform: { scale: 0.5 } }],
+      },
+      { id: "a1", kind: "audio", clips: [{ id: "c_music", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 6 }] },
+    ],
+  });
+  const flat = (timeline: Timeline) => flattenTimeline(timeline, () => null, 30);
+  const planOf = (timeline: Timeline, mattes: ReadonlyMap<string, typeof matte> = talkMatte()) =>
+    compileRender({ timeline: flat(timeline), fps: 30, preset: youtube1080, loudness: -17, sources: sized, resolution, mattes, segmentSeconds: 2 });
+
+  it("draws the plate's clips again above the track behind it, alpha from the matte on the same frames, wiping with the plate (golden)", () => {
+    const plan = planOf(behind());
+    const frame = compileFrame({ timeline: flat(behind()), fps: 30, sources: sized, resolution, mattes: talkMatte(), width: 1280, height: 720, at: 1, output: "/out/frame.png" });
+    golden("subject-plan", { segments: plan.segments, files: plan.files, warnings: plan.warnings, frame });
+    const first = plan.files["seg-0001.filter"]!;
+    // The matte is cut like its plate clip (same seek, speed, fps and trim), its luma scaled to the source picture.
+    expect(first).toContain(",extractplanes=y,scale=1920:1080[sm1]");
+    expect(first).toContain("[sp1][sm1]alphamerge,scale=1920:1080,setsar=1,format=rgba");
+    const args = plan.segments[0]!.args;
+    expect(args.filter((arg) => arg === matte.path)).toHaveLength(1);
+    expect(args[args.indexOf(matte.path) - 4]).toBe(args[args.lastIndexOf("/project/assets/talk.mp4") - 4]);
+    // The subjects wipe with their plates, on the wipe's frames only: the incoming one's mask, as on the base head, and
+    // its complement on the outgoing one, which the incoming subject does not cover where it has no person.
+    const graphs = Object.values(plan.files).join("\n");
+    const wipe = "1920*(1-(max(0,min(1,(T-2.5)/1))*max(0,min(1,(T-2.5)/1))*(3-2*max(0,min(1,(T-2.5)/1))))))";
+    expect(graphs.split(`if(lt(X+0+0.5,${wipe},0,alpha(X,Y))'`)).toHaveLength(3);
+    expect(graphs.split(`if(lt(X+0+0.5,${wipe},alpha(X,Y),0)'`)).toHaveLength(2);
+    expect(graphs.match(/geq=/g)).toHaveLength(3);
+    // No sound of its own: the mix is the one without the subject layer.
+    expect(plan.audio).toEqual(planOf(behind(false)).audio);
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("leaves a subject clip out with a warning when its asset has no matte, and multiplies a plate's own alpha", () => {
+    const missing = planOf(behind(), new Map());
+    expect(missing.warnings).toEqual(["assets/talk.mp4 has no subject matte (not made): the tracks behind its plate track show in front of it."]);
+    expect(missing.segments).toEqual(planOf(behind(false)).segments);
+
+    const titled: Timeline = {
+      ...behind(),
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_title", type: "media", asset: "assets/title.webm", start: 0, in: 0, out: 1 }] }, behind().tracks[1]!],
+    };
+    const alpha = planOf(titled, new Map([["assets/title.webm", matte]]));
+    expect(alpha.files["seg-0001.filter"]).toContain(
+      ",format=rgba,split[sp1][sk1];\n[sk1]alphaextract[sa1];\n[sa1][sm1]blend=all_mode=multiply[sm1x];\n[sp1][sm1x]alphamerge",
+    );
+  });
+});
+
 function stripEffects(track: Timeline["tracks"][number]): Timeline["tracks"][number] {
   if (track.kind === "subtitles" || track.kind === "program") return track;
   return {
