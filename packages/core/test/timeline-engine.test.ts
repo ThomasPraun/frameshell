@@ -962,6 +962,11 @@ describe("markers (ADR 0029)", () => {
     expect((await apply(t, "marker.add", { at: 4, label: "bar" })).timeline.markers).toHaveLength(4);
   });
 
+  it("a timeline saved with a marker labelled like a grid reference still loads", () => {
+    const loaded = parseTimeline({ ...base(), markers: [{ id: "m_a", at: 1, label: "bar:2" }] });
+    expect(loaded).toMatchObject({ ok: true });
+  });
+
   it("timeline.patch refuses a marker off the frame grid and accepts one on it", async () => {
     const t = await marked();
     const off = await rejection(apply(t, "timeline.patch", { markers: [{ id: "m_a", marker: { id: "m_a", at: 1.015, label: "intro" } }] }));

@@ -228,6 +228,13 @@ describe("beat:N and bar:N", () => {
     expect(await splitAt("beat:2", scored(), vouched)).toBe(0.7);
   });
 
+  it("reads beat:/bar: as the grid even when an older project stored a marker with that label", async () => {
+    const stored: Timeline = { ...nominal, markers: [{ id: "m_s", at: 9, label: "bar:2" }, { id: "m_t", at: 9, label: "beat:3" }] };
+    expect(await splitAt("bar:2", stored)).toBe(2);
+    expect(await splitAt("BAR:2-0.5", stored)).toBe(1.5);
+    expect(await splitAt("m_s", stored)).toBe(9);
+  });
+
   it("carries a measured grid on at its period past the music instead of refusing", async () => {
     expect(await splitAt("beat:40", scored(), beatsFile())).toBe(19.7);
     expect(await splitAt("beat:41", scored(), beatsFile())).toBe(20.2);

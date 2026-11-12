@@ -236,7 +236,7 @@ mutations print the new revision):
   offset: --at bar:8, --from bar:2 --to bar:6, --start beat:17-0.1, --at beat:2.5 (halfway between beats 2 and 3).
   Past the measured part they continue at the tempo. With a pickup, bar:N is not beat:(meter*(N-1)+1). They need
   a tempo (tempo set) and are refused on a LOW confidence grid or with no beats file, like --snap-to beat|bar.
-  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit).|bar. word: names are still refused.
+  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit). word: names are still refused.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a

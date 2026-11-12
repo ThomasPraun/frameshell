@@ -1835,12 +1835,9 @@
               },
               {
                 "pattern": "^(?!m_[0-9a-f]+$)"
-              },
-              {
-                "pattern": "^(?!(?:beat|bar):\\s*[.\\d])"
               }
             ],
-            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters, never shaped like an id (`m_1a2b3c`) or a grid reference (`beat:8`, `bar:2`, any case)."
+            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters, never shaped like an id (`m_1a2b3c`); `marker.add` and `marker.set` also refuse a grid reference (`beat:8`, `bar:2`, any case)."
           },
           "color": {
             "description": "`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour.",

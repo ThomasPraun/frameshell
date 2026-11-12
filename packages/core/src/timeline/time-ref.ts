@@ -1,5 +1,5 @@
 import { ErrorCode, type OperationName, RpcError, SECONDS_TEXT, TIME_REF_FIELDS } from "@frameshell/protocol";
-import { type Timeline, describeMarkers, findMarker } from "@frameshell/schema";
+import { type Timeline, describeMarkers, findMarker, isGridRefLabel } from "@frameshell/schema";
 import type { OperationRequest } from "./engine.js";
 import type { TempoResult, TimelineGrid } from "./tempo.js";
 
@@ -89,10 +89,12 @@ export function resolveTimeRef(ref: number | string, scope: TimeRefScope): numbe
   if (text === "") throw new TimeRefError("A time reference is empty.", "Give seconds, or a marker id or label.");
   if (SECONDS_TEXT.test(text)) return checked(Number(text), text);
 
-  const marker = findMarker(scope.timeline.markers, text);
+  // The grid wins over a marker an older project stored under such a label (new ones are refused on write).
+  const grid = isGridRefLabel(text);
+  const marker = grid ? undefined : findMarker(scope.timeline.markers, text);
   if (marker) return marker.at;
 
-  const offset = /^(.+?)\s*([+-])\s*(\d+(?:\.\d*)?|\.\d+)$/.exec(text);
+  const offset = grid ? null : /^(.+?)\s*([+-])\s*(\d+(?:\.\d*)?|\.\d+)$/.exec(text);
   if (offset) {
     const base = findMarker(scope.timeline.markers, offset[1]!);
     if (base) return checked(base.at + (offset[2] === "-" ? -1 : 1) * Number(offset[3]), text);
