@@ -250,6 +250,12 @@ _Avoid_: suggestion, draft, pending change, changeset
 A proposal the person's own edit made out of date by changing a clip, track or group it also changes; it closes without applying, and its author redoes it.
 _Avoid_: conflicted proposal, expired proposal
 
+## Review sheets (#457)
+
+**Review run**:
+One `review` of a timeline or an exported file: contact, phone, motion-strip and loop-seam sheets in `.frameshell/review/<n>/` with a `review.json` manifest, for an agent to look at a whole film. Not Review mode: nothing waits for anyone and no project file changes.
+_Avoid_: review (alone, it reads as Review mode), audit
+
 ## Video from audio (ADR 0015)
 
 **Scene plan**:

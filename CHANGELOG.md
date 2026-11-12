@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 86): contact sheet, phone sheet
-  (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by grey-frame difference, 12 consecutive frames
+  (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to
   `.frameshell/review/<n>/` with a `review.json` manifest; the last 10 runs are kept and project files are never
   touched. The timeline contact sheet marks clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of

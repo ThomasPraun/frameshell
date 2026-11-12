@@ -1155,7 +1155,7 @@ export const methods = {
       height: z.int(),
       sheets: z.array(ReviewSheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
       peaks: z.array(ReviewPeakSchema).describe("The fastest moments, fastest first (up to 5); empty without the `motion` sheet or when nothing moves."),
-      warnings: z.array(z.string()).describe("What could not be shown (a seam on a film under 12 frames, nothing moving…); empty when none."),
+      warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
     }),
   },
   cover: {

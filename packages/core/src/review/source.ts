@@ -5,6 +5,7 @@ import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { pool } from "../export/service.js";
 import { probeMedia, runTool } from "../media/ffmpeg.js";
 import { readRawFrames } from "../media/raw-frames.js";
+import { frameDifference } from "../multicam/motion.js";
 import { ENERGY_WIDTH, type FrameRange, fileSampleRate, frameTime, tileHeight, timelineSampleStep } from "./plan.js";
 
 // Where the frames of a review come from: an exported file decoded by ffmpeg, or a timeline rendered frame by frame.
@@ -33,20 +34,13 @@ export function captureParallelism(): number {
   return Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2)));
 }
 
-/** Mean absolute difference of two grey frames of equal size, 0 to 255. */
-export function meanAbsDiff(a: Uint8Array, b: Uint8Array): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) sum += Math.abs(a[i]! - b[i]!);
-  return sum / a.length;
-}
-
 /** The series of consecutive frames `grey`, sampled at `times`. */
 async function series(grey: AsyncIterable<Uint8Array>, times: (index: number) => number): Promise<MotionSeries> {
   const out: MotionSeries = { times: [], energy: [] };
   let previous: Uint8Array | undefined;
   for await (const frame of grey) {
     out.times.push(times(out.times.length));
-    out.energy.push(previous ? meanAbsDiff(previous, frame) : 0);
+    out.energy.push(previous ? frameDifference(previous, frame) : 0);
     previous = frame;
   }
   return out;

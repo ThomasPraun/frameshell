@@ -29,26 +29,31 @@ export interface Critical {
 export const MAX_CONTACT_TILES = 120;
 /** Most tiles of the phone sheet in all images. */
 export const MAX_PHONE_TILES = 60;
-/** Tiles per image of the contact sheet and the phone sheet. */
+/** Tiles per image of the contact sheet. */
 export const TILES_PER_CONTACT = 30;
+/** Tiles per image of the phone sheet. */
 export const TILES_PER_PHONE = 15;
-/** Consecutive frames of a motion strip, and of each end of a loop seam. */
+/** Consecutive frames of a motion strip. */
 export const STRIP_FRAMES = 12;
+/** Frames of each end of a loop seam. */
 export const SEAM_FRAMES = 6;
 /** Seconds between the grid frames of the contact sheet unless the caller says. */
 export const DEFAULT_EVERY_S = 0.5;
 /** A grid frame this close (seconds) to a critical one is left out: they would show the same picture. */
 const GRID_CLEARANCE_S = 0.2;
-/** Peaks of motion reported, how far apart they are (seconds), and the weakest that counts (grey levels, 0 to 255). */
+/** Peaks of motion reported. */
 export const PEAKS = 5;
+/** Least seconds between two reported peaks. */
 export const PEAK_GAP_S = 0.5;
+/** Weakest motion that counts as a peak (grey levels, 0 to 255). */
 export const MIN_PEAK_ENERGY = 0.5;
 /** Strips written: the fastest moments. */
 export const STRIPS = 2;
 /** Width the grey frames of the motion measure are scaled to. */
 export const ENERGY_WIDTH = 320;
-/** Most samples the motion of a timeline is measured on (each is a frame render), of a file. */
+/** Most samples the motion of a timeline is measured on (each is a frame render). */
 export const MAX_TIMELINE_SAMPLES = 90;
+/** Most samples the motion of a file is measured on. */
 export const MAX_FILE_SAMPLES = 3000;
 /** Samples per second of the motion measure of a file, at most. */
 export const FILE_SAMPLE_HZ = 15;
@@ -122,7 +127,7 @@ export function phonePicks(fps: number, range: FrameRange, cap = MAX_PHONE_TILES
   return picks;
 }
 
-/** The last {@link SEAM_FRAMES} and the first {@link SEAM_FRAMES} frames of the range (fewer on a film under 12 frames); null under 2 frames. */
+/** The last {@link SEAM_FRAMES} and the first {@link SEAM_FRAMES} frames of the range (fewer, down to 1 each, on a film from 2 to 11 frames, without a warning); null under 2 frames. */
 export function seamPicks(range: FrameRange): FramePick[] | null {
   const frames = range.end - range.first;
   if (frames < 2) return null;
