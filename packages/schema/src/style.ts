@@ -441,3 +441,27 @@ function overlay(base: object, given: object | undefined, source: StyleSource): 
     }),
   );
 }
+
+/**
+ * Dotted path of every value `style.json` sets on its own, in schema order (`colors.accent`,
+ * `motion.duration.quick`, `fonts.display`): what `style set` takes and what review mode keys by (ADR 0036
+ * decision 6). A font, a colour, an ease and a list are one value each; `from` is not a path.
+ */
+export const STYLE_PATHS: readonly string[] = leafPaths(resolveStyle(null) as unknown as Record<string, unknown>, []);
+
+/** Folder of the user styles under `configDir` (ADR 0028 decision 1): one `<id>.json` each, in this schema. */
+export const USER_STYLES_DIR = "styles";
+
+/** Id of a user style: its file name without `.json`. Lowercase, so ids never clash on case-insensitive disks. */
+export const UserStyleIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, "must be 1 to 64 lowercase letters, digits, `-` or `_`, starting with a letter or digit")
+  .describe("User style id, e.g. `acme`: lowercase letters, digits, `-`, `_` (at most 64).");
+
+function leafPaths(node: Record<string, unknown>, at: string[]): string[] {
+  return Object.entries(node).flatMap(([key, child]) => {
+    const path = [...at, key];
+    const leaf = typeof child === "object" && child !== null && "value" in child && "source" in child;
+    return leaf ? [path.join(".")] : leafPaths(child as Record<string, unknown>, path);
+  });
+}

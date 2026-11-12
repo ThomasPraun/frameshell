@@ -80,3 +80,45 @@ describe("frameshell sound sfx", () => {
     expect(result.stderr).toContain("fixed length");
   });
 });
+
+describe("frameshell sound place", () => {
+  it("places a sound on a marker and on seconds, and prints where each peak falls", () => {
+    expect(frameshell(["marker", "add", "--at", "4", "--label", "hook"]).code).toBe(0);
+    const result = frameshell(["sound", "place", "click", "--at", "hook,hook+1.5", "--seed", "9"]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trimEnd().split("\n");
+    expect(lines[0]).toMatch(/^c_\w+ {2}t_\w+ {2}click {2}start \d\.\d{3} s, peak -11 ms from 4\.000 s \(at 4\.000 s\), gain -20 dB {2}assets\/sound\/click-[0-9a-f]{8}\.wav$/);
+    expect(lines[1]).toContain("peak -11 ms from 5.500 s");
+    expect(result.stdout).toContain("new audio track");
+    expect(result.stdout).toMatch(/transaction tx_\w+/);
+  });
+
+  it("places a run of keys as JSON, and fails with the daemon's message for an unknown track", () => {
+    const keys = JSON.parse(frameshell(["sound", "place", "tick", "--typing", "--from", "10", "--to", "11", "--rate", "6", "--json"]).stdout) as { placed: { from: string; tier: string }[] };
+    expect(keys.placed.length).toBeGreaterThanOrEqual(5);
+    expect(keys.placed.every((sound) => sound.from === "typing" && sound.tier === "texture")).toBe(true);
+    const cuts = frameshell(["sound", "place", "whoosh", "--cuts", "t_none"]);
+    expect(cuts.code).toBe(1);
+    expect(cuts.stderr).toContain('no track "t_none"');
+  });
+
+  it("rejects a call that does not say where, or says it twice, and bad values", () => {
+    expect(frameshell(["sound", "place", "click"])).toMatchObject({ code: 2, stderr: expect.stringContaining("needs one of --at") });
+    expect(frameshell(["sound", "place", "click", "--at", "1", "--cuts", "v1"]).code).toBe(2);
+    expect(frameshell(["sound", "place", "click", "--at", "1", "--role", "boom"])).toMatchObject({ code: 2, stderr: expect.stringContaining("--role: expected tap, knock") });
+    expect(frameshell(["sound", "place", "click", "--at", "1", "--tier", "loud"]).code).toBe(2);
+    expect(frameshell(["sound", "place", "click", "--at", "1", "--offset", "5000"]).code).toBe(2);
+    expect(frameshell(["sound", "place", "whoosh", "--typing", "--from", "1", "--to", "2"])).toMatchObject({ code: 2, stderr: expect.stringContaining("use the kind tick or click") });
+    expect(frameshell(["sound", "place", "tick", "--typing", "--from", "1"]).code).toBe(2);
+    expect(frameshell(["sound", "place", "tick", "--at", "1", "--rate", "5"]).code).toBe(2);
+    expect(frameshell(["sound", "place", "tick", "--at", "1", "--which", "1"]).code).toBe(2);
+    expect(frameshell(["sound", "place", "click", "--at", "1", "--lines", "a"]).code).toBe(2);
+  });
+
+  it("fails with the daemon's message for an unknown marker", () => {
+    const result = frameshell(["sound", "place", "click", "--at", "nowhere"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("cues[0].at");
+  });
+});

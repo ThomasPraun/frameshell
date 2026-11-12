@@ -20,6 +20,7 @@ import {
   type FormatSource,
   type MulticamGroup,
   type ResolvedFormat,
+  type ResolvedSubtitleTrack,
   type Size,
   type Timeline,
   type Transcript,
@@ -27,6 +28,7 @@ import {
   programGroup,
   resolveFormat,
   sameAspect,
+  scaleCaptions,
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
@@ -388,14 +390,20 @@ export class ExportService {
   }
 
   /**
-   * Timeline seconds where the subtitle cues of `loaded` start, over every subtitle track (what `review` marks on
-   * its contact sheet); `loaded`: see {@link ExportService.frame}.
+   * Every subtitle track of `loaded` with its style and cues (frames at the track's `fps`), as export burns them
+   * (what `review` marks and measures on its sheets), at the size of project format `projectFormat` (the primary
+   * when absent; an unknown one counts as the primary, `frame` refuses it); `loaded`: see {@link ExportService.frame}.
    */
-  async subtitleCueStarts(root: string, loaded: { timeline: Timeline; fps: number }): Promise<number[]> {
+  async resolvedSubtitles(
+    root: string,
+    loaded: { timeline: Timeline; fps: number },
+    projectFormat?: string,
+  ): Promise<ResolvedSubtitleTrack[]> {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
-    const tracks = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
-    return tracks.flatMap((track) => track.cues.map((cue) => cue.start / fps));
+    const config = (await readEnclosingProject(root))?.config;
+    const captionScale = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format.captionScale ?? 1;
+    return subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) => scaleCaptions(track, captionScale));
   }
 
   /**
