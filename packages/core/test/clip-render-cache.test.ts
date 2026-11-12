@@ -35,16 +35,16 @@ async function addCard(name: string, start: number, extra: Record<string, unknow
   return result.changes.added[0]!;
 }
 
-async function renders(): Promise<Map<string, ClipRenderInfo>> {
-  const { clips } = await conn.request("clip.renders", { cwd: project, timeline: "main" });
+async function renders(format?: string): Promise<Map<string, ClipRenderInfo>> {
+  const { clips } = await conn.request("clip.renders", { cwd: project, timeline: "main", ...(format ? { format } : {}) });
   return new Map(clips.map((clip) => [clip.clip, clip]));
 }
 
-/** Poll `clip.renders` until `check` holds for clip `id`; returns that state. */
-async function until(id: string, check: (info: ClipRenderInfo) => boolean): Promise<ClipRenderInfo> {
+/** Poll `clip.renders` (in `format`) until `check` holds for clip `id`; returns that state. */
+async function until(id: string, check: (info: ClipRenderInfo) => boolean, format?: string): Promise<ClipRenderInfo> {
   let last: ClipRenderInfo | undefined;
   for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
-    last = (await renders()).get(id);
+    last = (await renders(format)).get(id);
     if (last && check(last)) return last;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -208,6 +208,32 @@ describe("clip render cache", () => {
       expect(jobEvents.some((event) => event.id === job.id && event.step === "clips")).toBe(true);
       expect(existsSync(output)).toBe(true);
       expect(tallKeys().size).toBeGreaterThan(0);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "renders another format only when asked: clip.renders with `format` reports and queues it, background renders stay primary",
+    async () => {
+      const tall = await renders("tall");
+      expect([...tall.values()].every((info) => info.state === "ready" && info.width === 36 && info.height === 64)).toBe(true);
+      expect([...tall.values()].every((info) => tallKeys().has(info.key!))).toBe(true);
+
+      const before = { primary: (await renders()).get(red)!.key, tall: tall.get(red)!.key, cached: tallKeys().size };
+      await conn.request("clip.set", { cwd: project, clip: red, props: { label: "Vertical" } });
+      await until(red, (info) => info.state === "ready" && info.key !== before.primary);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(tallKeys().size).toBe(before.cached);
+
+      const asked = await until(red, (info) => info.state === "ready" && info.key !== before.tall, "tall");
+      expect(asked).toMatchObject({ width: 36, height: 64 });
+      expect(tallKeys().has(asked.key!)).toBe(true);
+      // The primary format by id is the same as no format.
+      const primary = (await conn.request("format.list", { cwd: project })).formats[0]!.id;
+      expect((await renders(primary)).get(red)!.key).toBe((await renders()).get(red)!.key);
+      await expect(conn.request("clip.renders", { cwd: project, timeline: "main", format: "nope" })).rejects.toMatchObject({
+        code: ErrorCode.FormatNotFound,
+      });
     },
     TIMEOUT,
   );

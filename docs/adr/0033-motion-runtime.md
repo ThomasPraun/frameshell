@@ -45,18 +45,25 @@ Motion clips whose picture is a pure function of time ([#465](https://github.com
 
 - **Scaffold.** `frameshell hyperframes new <name> --template <id> [--duration s]` (plugin only, no core or protocol change) writes `index.html` and a copy of `frameshell-motion.js` (frozen per clip). Without `--template` the CSS scaffold is unchanged. The first set is `kinetic-headline` and `end-card` (#466 T1); the second group adds `lower-third`, `logo-lockup`, `checklist` (ticks on a beat set by props), `comparison`, `counter` (count up or down in about a second, optional glow) and `big-word` (for a track with `behind`, ADR 0032). All are in `plugins/hyperframes/src/templates/`, one file each, listed in `TEMPLATES`; a template says whether it is an `overlay` (transparent by default) and the ones meant to work alone as well as over footage carry `bg` and `backdrop` props. Glass cards belong to #462.
 - **Typed props.** A template declares its props as HyperFrames composition variables: numbers with `min` and `max`, `#rrggbb` colours, an image path inside the composition directory, enums. The runtime's `props()` resolves them against `getVariables()` and clamps or falls back to the default, so a wrong `clip set --props` never breaks the picture.
-- **Layout per format.** The runtime reads the root's `data-width` and `data-height` (`stage()`), classes the frame by aspect ratio (wide above 1.2, tall below 0.9, else square: 4:5 is tall) and `pick(wide, square, tall)` chooses. A template sizes text as a fraction of the short side and places it with fractions of the frame, so the four built-in formats read correctly (checked in managed Chrome at 16:9, 1:1, 4:5 and 9:16). The scaffold is written at the project resolution; per-format render sizes stay slice 4.
+- **Layout per format.** The runtime reads the root's `data-width` and `data-height` (`stage()`), classes the frame by aspect ratio (wide above 1.2, tall below 0.9, else square: 4:5 is tall) and `pick(wide, square, tall)` chooses. A template sizes text as a fraction of the short side and places it with fractions of the frame, so the four built-in formats read correctly (checked in managed Chrome at 16:9, 1:1, 4:5 and 9:16). The scaffold is written at the project resolution; per-format render sizes came with slice 4 (below).
 - **Brand tokens at scaffold time.** The plugin reads `style.json` leniently (colours `bg`, `ink`, `ink2`, `accent`, `card`; fonts `display` and `ui`; brand `product`, `cta`, `url`) and writes them as the defaults of the props. It does not import the schema package, since a plugin ships only its own files, and core owns validation. A style font file under `assets/fonts/` is copied into the composition and declared with `@font-face`. Later edits of `style.json` do not reach a scaffolded composition; that is the injection of slice 4. The personality's spring does not feed templates yet: they use the presets by role.
 - **`update`.** `frameshell hyperframes update [<composition>] [--dry-run] [--force]` replaces a frozen copy whose header names an older version. An edited copy of the same version, a newer one or a file without the Frameshell header is kept unless `--force`.
 - **Runtime 0.2.0.** Adds `pick`, `stage`, `props`, `resolveProps` and `formatClass`. `bind` also writes `window.__timelines ??= {}` literally, because `@hyperframes/lint` looks for that text in a composition's scripts (`missing_timeline_registry`); templates pass `hyperframes check --strict` clean.
 - **Structure.** A template's wrapper is not a timed element (no `data-start`), so the linter does not ask for sub-compositions; the root carries the duration.
+
+### Settled in slice 4 (format half, with #469 slice 3)
+
+- **Format injection is the root's size.** A render for a format of another aspect than the composition gets that size as the copied entry's root `data-width` / `data-height` (ADR 0027 decision 8), so `stage()` returns it and `pick()` chooses by it. No variable or global carries the format: the runtime has one source of the frame, the root, in renders and live pages alike. The runtime is unchanged (0.2.0), so frozen copies need no `update`.
+- **Measured** (ADR 0027 Evidence): `lower-third` and `end-card` scaffolded at 16:9 and rendered at 9:16 and 1:1 give the frames of the same template scaffolded at that size, 0/255 apart, with `@hyperframes/producer` 0.9.30.
+- **Live preview** still shows the composition at its own size: `LiveContext` carries the project resolution, and the preview has no format switcher yet (ADR 0027 slice 2).
+- Style tokens into compositions stay open: the other half of slice 4.
 
 ### Slices
 
 1. Spike, pure math in `packages/schema`, `packages/motion` with `bind` and `write`, the bundle in the plugin, and an opt-in real render test (12 probes cold vs reseek, element CSS on a sprung element).
 2. Templates, `hyperframes new --template`, and `update` (done: two templates of the #466 first set; the rest of that set follows as more template files).
 3. Core determinism verify.
-4. Format injection and style tokens into compositions.
+4. Format injection (done with #469 slice 3) and style tokens into compositions.
 
 ## Consequences
 
