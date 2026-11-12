@@ -252,7 +252,7 @@ const RhythmSchema = z.object({
   shotLengthCv: z.number().describe("Standard deviation of the shot lengths over their mean, 3 decimals: 0 is a metronome, above 0.6 the cutting is irregular."),
   stillShare: z.number().describe("Share of the frames (after the first) in which the picture does not change (mean change under 0.5 grey levels), 0 to 1."),
   longestStill: z.number().describe("Longest hold of the picture, seconds."),
-  changeCount: z.int().describe("Big changes of the picture (6 grey levels of mean change between two frames, or a cut): cuts, flashes, jumps of the layout."),
+  changeCount: z.int().describe("Big changes of the picture (a frame 4 times the change around it or 15 % of the grey range, or a cut): cuts, flashes, jumps of the layout."),
   changesPerMinute: z.number().describe("`changeCount` per minute of film, 2 decimals."),
   largestGap: z.number().describe("Longest stretch between two big changes, or between an end of the film and the nearest one, seconds."),
   meanActivity: z.number().describe("Mean change between consecutive frames, grey levels 0 to 255 on a 64 px wide picture, 2 decimals."),

@@ -4,6 +4,7 @@ import { CELLS, type PictureSeries, cellStats } from "./events.js";
 import { type LookBuilder, frameLook, luma } from "./look.js";
 
 // One pass over every frame of the film, small: the look of each shot, and the series rhythm and events are found on.
+// After HyperFrames' `measure` (Apache-2.0), ported per #478.
 
 /** Longest side of the frames the picture is measured on, px: area-averaged, so a thin caption still moves a cell. */
 export const PICTURE_LONG_SIDE = 64;
@@ -40,7 +41,8 @@ export interface PictureRead {
 }
 
 /**
- * Every frame of the film (at its own rate, none dropped or repeated) through ffmpeg at {@link PICTURE_LONG_SIDE}: feeds the
+ * Every frame of the film at its constant rate `film.fps` (a variable-rate file is resampled: ffmpeg's `fps` filter repeats
+ * or drops frames, so its holds read longer than they are) through ffmpeg at {@link PICTURE_LONG_SIDE}: feeds the
  * look builders and returns the brightness, activity and cell series. Stops at {@link MAX_PICTURE_S}.
  */
 export async function readPicture(request: PictureRequest): Promise<PictureRead> {

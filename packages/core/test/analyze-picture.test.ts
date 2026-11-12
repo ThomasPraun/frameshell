@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CELLS, cellStats, elementEvents, flashes, hitEvents, holds, soundHits } from "../src/analyze/events.js";
 import { LOOK_COLUMNS, LOOK_ROWS, LookBuilder, cellOf, frameLook } from "../src/analyze/look.js";
+import { slidingMedians } from "../src/analyze/median.js";
 import { pictureSize } from "../src/analyze/picture.js";
 import { bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "../src/analyze/rhythm.js";
 import { shotLocator } from "../src/analyze/shots.js";
@@ -97,15 +98,26 @@ describe("rhythm", () => {
     expect(stillRuns(activity, 5)).toEqual([{ startFrame: 6, endFrame: 11 }]);
   });
 
-  it("bigChanges takes peaks at or above 6 grey levels, once per run, and every cut", () => {
+  it("bigChanges takes frames 4x their surroundings (at least 1 level) or 15 % of the grey range, once per run, and every cut", () => {
     const activity = new Array<number>(100).fill(0.1);
     activity[10] = 20;
     activity[11] = 30;
-    activity[40] = 5.9;
-    activity[60] = 6;
-    const changes = bigChanges(activity, [11, 80]);
-    expect(changes.map((change) => change.frame)).toEqual([11, 60, 80]);
-    expect(changes.map((change) => change.score)).toEqual([30, 6, 0.1]);
+    activity[40] = 0.9;
+    activity[60] = 1;
+    // A busy stretch: 3x its surroundings is not big, 4x is.
+    for (let i = 85; i < 100; i++) activity[i] = 5;
+    activity[90] = 15;
+    activity[95] = 21;
+    const changes = bigChanges(activity, [11, 80], 10);
+    expect(changes.map((change) => change.frame)).toEqual([11, 60, 80, 95]);
+    expect(changes.map((change) => change.score)).toEqual([30, 1, 0.1, 21]);
+  });
+
+  it("bigChanges needs 15 % of the grey range where the picture always moves", () => {
+    const activity = new Array<number>(100).fill(12);
+    activity[30] = 38;
+    activity[50] = 38.25;
+    expect(bigChanges(activity, [], 10).map((change) => change.frame)).toEqual([50]);
   });
 
   it("bursts need 3 big changes within 1.5 s and join overlapping ones", () => {
@@ -122,7 +134,8 @@ describe("rhythm", () => {
     // 10 s at 10 fps: still except big changes at frames 20, 50 and 55, 60.
     const activity = new Array<number>(100).fill(0);
     for (const frame of [20, 50, 55, 60]) activity[frame] = 40;
-    const rhythm = rhythmOf(activity, 10, [20, 30, 50], [20, 50]);
+    const { rhythm, changes } = rhythmOf(activity, 10, [20, 30, 50], [20, 50]);
+    expect(changes.map((change) => change.frame)).toEqual([20, 50, 55, 60]);
     expect(rhythm.shotLengthCv).toBeCloseTo(0.374, 3);
     expect(rhythm.changeCount).toBe(4);
     expect(rhythm.changesPerMinute).toBe(24);
@@ -255,13 +268,30 @@ describe("sound hits", () => {
   it("places a hit on a frame and measures its offset to the nearest big change within 0.2 s", () => {
     const hits = [{ time: 2.01, rise: 40, level: -12 }, { time: 5, rise: 30, level: -20 }, { time: 7.0, rise: 30, level: -20 }];
     // 30 fps: frame 60 is 2.0 s; 150 is 5.0 s; 205 is 6.833 s, 0.167 s before the third hit.
-    const events = hitEvents(hits, [60, 205], 30);
+    const events = hitEvents(hits, [60, 205], 30, 300);
     expect(events).toEqual([
       { kind: "hit", startFrame: 60, endFrame: 61, start: 2, end: 2.033, amount: 40, level: -12, offset: 0 },
       { kind: "hit", startFrame: 150, endFrame: 151, start: 5, end: 5.033, amount: 30, level: -20, offset: null },
       { kind: "hit", startFrame: 210, endFrame: 211, start: 7, end: 7.033, amount: 30, level: -20, offset: 0.167 },
     ]);
     // The hit before the change has a negative offset.
-    expect(hitEvents([{ time: 1.9, rise: 30, level: -20 }], [60], 30)[0]!.offset).toBe(-0.1);
+    expect(hitEvents([{ time: 1.9, rise: 30, level: -20 }], [60], 30, 300)[0]!.offset).toBe(-0.1);
+  });
+
+  it("leaves out a hit past the last frame of the picture", () => {
+    expect(hitEvents([{ time: 9.99, rise: 30, level: -20 }, { time: 10, rise: 30, level: -20 }], [], 30, 300).map((event) => event.startFrame)).toEqual([299]);
+  });
+});
+
+describe("slidingMedians", () => {
+  it("matches the median of each clipped window", () => {
+    const values = Array.from({ length: 60 }, (_, i) => (i * 37) % 11 + (i % 3) * 0.5);
+    for (const half of [1, 4, 100]) {
+      const expected = values.map((_, i) => {
+        const window = values.slice(Math.max(0, i - half), i + half + 1).sort((a, b) => a - b);
+        return window[Math.floor(window.length / 2)]!;
+      });
+      expect(Array.from(slidingMedians(values, half))).toEqual(expected);
+    }
   });
 });

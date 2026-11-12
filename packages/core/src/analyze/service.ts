@@ -19,7 +19,7 @@ import { measureLoudness } from "./loudness.js";
 import { type Look, LookBuilder } from "./look.js";
 import { PALETTE_SIZE, PaletteBuilder } from "./palette.js";
 import { MAX_PICTURE_S, readPicture } from "./picture.js";
-import { bigChanges, rhythmOf } from "./rhythm.js";
+import { rhythmOf } from "./rhythm.js";
 import { sceneScores } from "./scene.js";
 import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
 
@@ -133,8 +133,7 @@ export class AnalyzeService {
     if (series.frames < 1) throw new RpcError(ErrorCode.InvalidOperation, `analyze: ffmpeg decoded no picture from ${request.file}.`, { op: "analyze", field: "file" });
     if (truncated) warnings.push(`look, rhythm and events: measured on the first ${MAX_PICTURE_S / 60} minutes of the film.`);
     const cutFrames = cuts.map((cut) => cut.frame);
-    const rhythm = rhythmOf(series.activity, fps, shots.map((shot) => shot.endFrame - shot.startFrame), cutFrames);
-    const changes = bigChanges(series.activity, cutFrames);
+    const { rhythm, changes } = rhythmOf(series.activity, fps, shots.map((shot) => shot.endFrame - shot.startFrame), cutFrames);
     const events: AnalyzeEvent[] = [...flashes(series.brightness, fps), ...holds(series.activity, fps), ...elementEvents(series, cutFrames, fps)];
 
     let loudness: AnalyzeResultShape["loudness"] = null;
@@ -147,7 +146,7 @@ export class AnalyzeService {
       const soundScratch = join(root, ".frameshell", "cache", "analyze", randomBytes(6).toString("hex"));
       try {
         const sound = await decodeSound(ffmpeg, request.file, soundScratch, warnings, signal);
-        events.push(...hitEvents(soundHits(energyEnvelope(pcm16(sound.data), sound.rate), ENERGY_HOP_S), changes.map((change) => change.frame), fps));
+        events.push(...hitEvents(soundHits(energyEnvelope(pcm16(sound.data), sound.rate), ENERGY_HOP_S), changes.map((change) => change.frame), fps, series.frames));
         tempo = await this.#tempo(root, request.file, sound, warnings, signal, (fraction) => hooks.progress?.(0.55 + 0.1 * fraction));
       } finally {
         await rm(soundScratch, { recursive: true, force: true });
@@ -172,6 +171,8 @@ export class AnalyzeService {
       await rm(scratch, { recursive: true, force: true });
     }
 
+    const unmeasured = looks.filter((builder) => builder.frames === 0).length;
+    if (unmeasured > 0) warnings.push(`look: ${unmeasured} shot${unmeasured === 1 ? "" : "s"} had no frame read (past the end of the picture pass) and carry the look of the nearest earlier shot, not their own.`);
     const lookOf = (builder: LookBuilder, shot: number) => builder.look() ?? fallbackLook(looks, shot, overallLook);
     const wholeLook = overallLook.look()!; // The picture pass read at least one frame.
     const result: AnalyzeResultShape = {

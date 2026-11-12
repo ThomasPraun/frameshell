@@ -1,10 +1,11 @@
 import type { AnalyzeEvent } from "@frameshell/protocol";
 import { LOOK_COLUMNS, LOOK_ROWS, cellOf } from "./look.js";
+import { slidingMedians } from "./median.js";
 import { stillRuns } from "./rhythm.js";
 import { frameAt, frameStart } from "./shots.js";
 
 // What happens in a film, moment by moment: flashes, elements that appear or disappear, holds and hits of the sound.
-// Pure: `picture.ts` measures the per-frame series, `service.ts` decodes the sound.
+// Pure: `picture.ts` measures the per-frame series, `service.ts` decodes the sound. After HyperFrames' `measure` (Apache-2.0), ported per #478.
 
 /** Cells of the grid the picture is split in. */
 export const CELLS = LOOK_COLUMNS * LOOK_ROWS;
@@ -83,11 +84,6 @@ function span(kind: AnalyzeEvent["kind"], startFrame: number, endFrame: number, 
   return { kind, startFrame, endFrame, start: frameStart(startFrame, fps), end: frameStart(endFrame, fps) };
 }
 
-function median(values: number[]): number {
-  values.sort((a, b) => a - b);
-  return values[Math.floor(values.length / 2)]!;
-}
-
 /**
  * Flashes: runs of frames whose mean luma is at least {@link FLASH_RISE} above (or below) the median of the frames
  * around them, lasting at most {@link FLASH_MAX_S}. The median ignores a flash and follows a new shot, so a cut to a
@@ -104,12 +100,11 @@ export function flashes(brightness: ArrayLike<number>, fps: number): AnalyzeEven
     if (first >= 0 && end - first <= longest) events.push({ ...span("flash", first, end, fps), direction: sign > 0 ? "up" : "down", amount: round(peak, 3) });
     first = -1;
   };
+  const around = slidingMedians(brightness, half);
   for (let i = 0; i <= brightness.length; i++) {
     let jump = 0;
     if (i < brightness.length) {
-      const around: number[] = [];
-      for (let j = Math.max(0, i - half); j <= Math.min(brightness.length - 1, i + half); j++) around.push(brightness[j]!);
-      const delta = brightness[i]! - median(around);
+      const delta = brightness[i]! - around[i]!;
       if (Math.abs(delta) >= FLASH_RISE) jump = delta;
     }
     const direction = Math.sign(jump);
@@ -134,6 +129,8 @@ export function holds(activity: ArrayLike<number>, fps: number): AnalyzeEvent[] 
  * some cell of the grid moves by {@link MOVING_CELL_LEVEL} or more. When the cells that differ before and after it are
  * under {@link EPISODE_MAX_AREA} of the picture, and the episode holds no cut and lasts no longer than {@link EPISODE_MAX_S}, it is an element
  * that came (the area gained detail) or went (it lost detail). Anything else is a cut, a transition or the camera moving.
+ * Moving cells are counted over the whole picture, so a subject that keeps moving (a talking head) holds one episode open
+ * past {@link EPISODE_MAX_S}: elements that come and go over it are not found.
  */
 export function elementEvents(series: Pick<PictureSeries, "frames" | "cellLuma" | "cellDetail">, cutFrames: readonly number[], fps: number): AnalyzeEvent[] {
   const { frames, cellLuma, cellDetail } = series;
@@ -229,16 +226,20 @@ export function soundHits(db: ArrayLike<number>, hopSeconds = 0.01): SoundHit[] 
   return hits;
 }
 
-/** The hits as film events at `fps`: placed on a frame, and with the offset to the nearest big change of the picture within {@link HIT_SYNC_S}. */
-export function hitEvents(hits: readonly SoundHit[], changeFrames: readonly number[], fps: number): AnalyzeEvent[] {
-  return hits.map((hit) => {
+/**
+ * The hits as film events at `fps`: placed on a frame, and with the offset to the nearest big change of the picture within
+ * {@link HIT_SYNC_S}. A hit past the last of the film's `frames` (the sound outlasts the picture) is left out.
+ */
+export function hitEvents(hits: readonly SoundHit[], changeFrames: readonly number[], fps: number, frames: number): AnalyzeEvent[] {
+  return hits.flatMap((hit) => {
     const frame = frameAt(hit.time, fps);
+    if (frame >= frames) return [];
     const start = frameStart(frame, fps);
     let offset: number | null = null;
     for (const change of changeFrames) {
       const gap = start - frameStart(change, fps);
       if (Math.abs(gap) <= HIT_SYNC_S && (offset === null || Math.abs(gap) < Math.abs(offset))) offset = gap;
     }
-    return { ...span("hit", frame, frame + 1, fps), amount: hit.rise, level: hit.level, offset: offset === null ? null : round(offset, 3) };
+    return [{ ...span("hit", frame, frame + 1, fps), amount: hit.rise, level: hit.level, offset: offset === null ? null : round(offset, 3) }];
   });
 }

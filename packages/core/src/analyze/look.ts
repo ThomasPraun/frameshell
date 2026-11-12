@@ -1,23 +1,15 @@
+import { ANALYZE_GRID, type AnalyzeLook } from "@frameshell/protocol";
+
 // Look of a film's pictures: brightness, contrast, saturation, warmth and a coarse colour grid. Pure: `picture.ts` feeds it RGB frames.
+// After HyperFrames' `measure` (Apache-2.0), ported per #478.
 
 /** Columns of the colour grid, whatever the shape of the picture. */
-export const LOOK_COLUMNS = 8;
+export const LOOK_COLUMNS = ANALYZE_GRID.columns;
 /** Rows of the colour grid. */
-export const LOOK_ROWS = 6;
+export const LOOK_ROWS = ANALYZE_GRID.rows;
 
-/** The look of some frames: every figure is the mean over the frames. */
-export interface Look {
-  /** Mean luma (Rec. 709 weights on the gamma-coded values), 0 black to 1 white. */
-  brightness: number;
-  /** Mean over the frames of the spread (standard deviation) of luma inside a frame, 0 to 0.5: flat grey is 0, half black and half white is 0.5. */
-  contrast: number;
-  /** Mean HSV saturation of the pixels, 0 grey to 1 pure colour. */
-  saturation: number;
-  /** Mean of (red - blue) over 255, -1 blue to 1 red: above 0 the picture leans warm, below it cool. */
-  warmth: number;
-  /** Mean colour of each cell of a {@link LOOK_COLUMNS} x {@link LOOK_ROWS} grid laid over the picture, `#rrggbb`, row by row from the top left. */
-  grid: string[];
-}
+/** The look of some frames, every figure the mean over the frames: the wire type, as `analyze` returns it. */
+export type Look = AnalyzeLook;
 
 /** What one frame comes to before it is averaged: also the brightness the events measure flashes on. */
 export interface FrameLook {

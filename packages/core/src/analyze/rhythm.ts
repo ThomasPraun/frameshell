@@ -1,46 +1,33 @@
+import type { AnalyzeBurst, AnalyzeRhythm } from "@frameshell/protocol";
+import { slidingMedians } from "./median.js";
 import { type Cut, MIN_CUT_GAP_FRAMES, detectCuts, frameStart } from "./shots.js";
 
 // Rhythm of a film: how steady its shots are, how much of it holds still and where changes pile up. Pure: `picture.ts`
-// measures `activity`. The metrics of `review` (#457) for a film of ours are to use these constants, so both share one scale.
+// measures `activity`. After HyperFrames' `measure` (Apache-2.0), ported per #478. A big change is #457's visual event
+// (4x its surroundings, or 15 % mean grey change), so the metrics of `review` for a film of ours share this scale.
 
 /** Grey levels (0 to 255, on a 64 px wide picture) of mean change between two frames under which a frame counts as still. */
 export const STILL_LEVEL = 0.5;
-/** Grey levels of mean change between two frames from which the picture made a big change: a cut, a flash or a layout that jumps. */
-export const BIG_CHANGE_LEVEL = 6;
+/** Share of the grey range (255) a frame's mean change must reach to be a big change by itself: #457's 15 %, about 38 levels. */
+export const BIG_CHANGE_SHARE = 0.15;
+/** Grey levels of mean change between two frames from which the picture made a big change whatever is around it. */
+export const BIG_CHANGE_LEVEL = 255 * BIG_CHANGE_SHARE;
+/** Times the median change of the frames around it a frame's change must reach to be a big change: #457's 4x. */
+export const BIG_CHANGE_RATIO = 4;
+/** Grey levels below which a change is never big, so noise in a still picture is not 4x of nothing: #457's floor for visual events. */
+export const BIG_CHANGE_FLOOR = 1;
+/** Seconds on each side of a frame whose changes are its surroundings. #457 does not say; half a second spans a gesture, not a shot. */
+export const BIG_CHANGE_SURROUND_S = 0.5;
 /** Big changes in {@link BURST_WINDOW_S} that make a burst. */
 export const BURST_CHANGES = 3;
 /** Seconds in which {@link BURST_CHANGES} big changes make a burst. */
 export const BURST_WINDOW_S = 1.5;
 
-/** Several big changes close together. */
-export interface Burst {
-  startFrame: number;
-  /** The frame after the last change of the burst. */
-  endFrame: number;
-  start: number;
-  end: number;
-  /** Big changes inside. */
-  count: number;
-}
+/** Several big changes close together: the wire type, as `analyze` returns it. */
+export type Burst = AnalyzeBurst;
 
-/** How the film moves in time. */
-export interface Rhythm {
-  /** Spread of the shot lengths: their standard deviation over their mean, 3 decimals. 0 is a metronome; above 0.6 the cutting is irregular. */
-  shotLengthCv: number;
-  /** Share of the frames (after the first) that are still: 0 to 1, 3 decimals. */
-  stillShare: number;
-  /** Longest hold of the picture, seconds. */
-  longestStill: number;
-  /** Big changes: cuts, flashes, jumps of the layout. */
-  changeCount: number;
-  /** `changeCount` per minute of film, 2 decimals. */
-  changesPerMinute: number;
-  /** Longest stretch between two big changes (or the film's ends), seconds. */
-  largestGap: number;
-  /** Mean change between frames, grey levels, 2 decimals. */
-  meanActivity: number;
-  bursts: Burst[];
-}
+/** How the film moves in time: the wire type, as `analyze` returns it. */
+export type Rhythm = AnalyzeRhythm;
 
 /** Population standard deviation over the mean of `lengths`; 0 for one value or none. */
 export function lengthCv(lengths: readonly number[]): number {
@@ -52,12 +39,19 @@ export function lengthCv(lengths: readonly number[]): number {
 }
 
 /**
- * Frames where the picture made a big change: peaks of `activity` at or above {@link BIG_CHANGE_LEVEL} (a run within
- * {@link MIN_CUT_GAP_FRAMES} frames counts once, as its strongest) and every one of `cutFrames`, which always count.
+ * Frames where the picture made a big change: a frame whose `activity` is at least {@link BIG_CHANGE_LEVEL}, or at least
+ * {@link BIG_CHANGE_FLOOR} and {@link BIG_CHANGE_RATIO} times the median of the frames within {@link BIG_CHANGE_SURROUND_S}
+ * of it (a run within {@link MIN_CUT_GAP_FRAMES} frames counts once, as its strongest), and every one of `cutFrames`,
+ * which always count.
  */
-export function bigChanges(activity: ArrayLike<number>, cutFrames: readonly number[]): Cut[] {
-  const scores = Array.from({ length: activity.length }, (_, frame) => ({ frame, score: activity[frame]! }));
-  const out = detectCuts(scores, BIG_CHANGE_LEVEL);
+export function bigChanges(activity: ArrayLike<number>, cutFrames: readonly number[], fps: number): Cut[] {
+  const around = slidingMedians(activity, Math.max(1, Math.round(BIG_CHANGE_SURROUND_S * fps)));
+  const candidates: Cut[] = [];
+  for (let frame = 1; frame < activity.length; frame++) {
+    const score = activity[frame]!;
+    if (score >= BIG_CHANGE_LEVEL || (score >= BIG_CHANGE_FLOOR && score >= BIG_CHANGE_RATIO * around[frame]!)) candidates.push({ frame, score });
+  }
+  const out = detectCuts(candidates, 0);
   for (const frame of cutFrames) {
     if (frame <= 0 || frame >= activity.length) continue;
     if (!out.some((change) => Math.abs(change.frame - frame) < MIN_CUT_GAP_FRAMES)) out.push({ frame, score: activity[frame]! });
@@ -102,9 +96,9 @@ export function bursts(changes: readonly Cut[], fps: number): Burst[] {
 
 /**
  * The rhythm of a film at `fps` from `activity[i]` (mean grey change between frame `i - 1` and frame `i`, 0 for the
- * first), the lengths in frames of its shots and the frames its shots start at.
+ * first), the lengths in frames of its shots and the frames its shots start at; with the big changes it counted.
  */
-export function rhythmOf(activity: ArrayLike<number>, fps: number, shotLengths: readonly number[], cutFrames: readonly number[]): Rhythm {
+export function rhythmOf(activity: ArrayLike<number>, fps: number, shotLengths: readonly number[], cutFrames: readonly number[]): { rhythm: Rhythm; changes: Cut[] } {
   const frames = activity.length;
   let still = 0;
   let total = 0;
@@ -113,12 +107,12 @@ export function rhythmOf(activity: ArrayLike<number>, fps: number, shotLengths: 
     total += activity[i]!;
   }
   const longest = stillRuns(activity, 1).reduce((most, run) => Math.max(most, run.endFrame - run.startFrame), 0);
-  const changes = bigChanges(activity, cutFrames);
+  const changes = bigChanges(activity, cutFrames, fps);
   const marks = [0, ...changes.map((change) => change.frame), frames];
   let gap = 0;
   for (let i = 1; i < marks.length; i++) gap = Math.max(gap, marks[i]! - marks[i - 1]!);
   const minutes = frames / fps / 60;
-  return {
+  const rhythm: Rhythm = {
     shotLengthCv: lengthCv(shotLengths),
     stillShare: frames > 1 ? Math.round((still / (frames - 1)) * 1000) / 1000 : 0,
     longestStill: frameStart(longest, fps),
@@ -128,4 +122,5 @@ export function rhythmOf(activity: ArrayLike<number>, fps: number, shotLengths: 
     meanActivity: frames > 1 ? Math.round((total / (frames - 1)) * 100) / 100 : 0,
     bursts: bursts(changes, fps),
   };
+  return { rhythm, changes };
 }
