@@ -680,8 +680,14 @@ class Edit {
     const { track, clip } = this.clip(args.clip);
     const rippled = this.rippleScope(args, track);
     const before = { start: clip.start, end: args.ripple === true ? (await this.span(clip)).end : 0 };
+    const dip = isShotClip(clip) ? null : await this.dipKeys(clip);
     await this.trimEdges(clip, args);
     if (args.ripple === true) await this.rippleTrim(clip, before, rippled);
+    // A dip cut lives at the clip's end (ADR 0030): it moves with a trimmed tail.
+    if (dip && !isShotClip(clip)) {
+      this.dropDip(clip, dip);
+      if (!(await this.writeDip(clip))) this.warnings.push(`${clip.id} is one frame long now: its dip cut is gone.`);
+    }
   }
 
   /**
@@ -853,6 +859,7 @@ class Edit {
     }
     const right = structuredClone(clip);
     right.id = this.newId("c");
+    await this.dropTailDip(clip);
     this.trimTail(clip, at);
     this.trimHead(right, at);
     this.dropCutEdgeFields(clip, "tail");
@@ -1042,6 +1049,7 @@ class Edit {
           this.warnInsideGenerated(clip);
           const right = structuredClone(clip);
           right.id = this.newId("c");
+          await this.dropTailDip(clip);
           this.trimTail(clip, from);
           this.trimHead(right, to);
           this.dropCutEdgeFields(clip, "tail");
@@ -1050,6 +1058,7 @@ class Edit {
           for (const part of [clip, right]) if (!this.isEmpty(part)) kept.push(part);
         } else if (S < F) {
           this.warnInsideGenerated(clip);
+          await this.dropTailDip(clip);
           this.trimTail(clip, from);
           this.dropCutEdgeFields(clip, "tail");
           if (!this.isEmpty(clip)) kept.push(clip);
@@ -1181,6 +1190,7 @@ class Edit {
     }
     const skipped: string[] = [];
     let applied = false;
+    let dipped: Clip | undefined;
     await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
       if (shaped && notBottom(track)) {
         skipped.push(track.id);
@@ -1198,6 +1208,7 @@ class Edit {
       for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
       if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
+      if (outgoing && track === bottom) dipped = outgoing;
       if (incoming && outgoing) {
         if (kind === "fade") {
           if (outgoingHalf > 0) outgoing.fadeOut = g.seconds(outgoingHalf);
@@ -1219,6 +1230,8 @@ class Edit {
     if (!applied) {
       throw this.invalid(`${article(kind)} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
     }
+    // Replaces a dip cut there too (ADR 0030 decision 4): its keys would darken under the new transition.
+    if (dipped) await this.clearDip(dipped);
     if (skipped.length > 0) {
       this.warnings.push(
         `skipped ${listed(skipped)}: ${article(kind)} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
@@ -1270,16 +1283,59 @@ class Edit {
     for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
     if (incoming) clearIncoming(incoming);
     delete outgoing.fadeOut;
-    const { lane, from, last } = await this.dipLane(outgoing);
-    if (from === last) throw this.invalid(`${outgoing.id} is one frame long: too short to darken before the cut.`, { field: "at" });
-    const level = placementAt(outgoing, g.seconds(from)).opacity;
-    const kept = lane.filter((key) => key.at < this.keyAt(outgoing, from) - this.halfFrame(outgoing) || key.at > this.keyAt(outgoing, last) + this.halfFrame(outgoing));
-    const dip: ClipKey[] = [
-      { at: this.keyAt(outgoing, from), value: round4(level) },
-      { at: this.keyAt(outgoing, last), value: round4(level * (1 - DIP_DEPTH)) },
-    ];
-    outgoing.keys = { ...outgoing.keys, opacity: [...kept, ...dip].sort((a, b) => a.at - b.at) as [ClipKey, ...ClipKey[]] };
+    if (!(await this.writeDip(outgoing))) throw this.invalid(`${outgoing.id} is one frame long: too short to darken before the cut.`, { field: "at" });
     await this.warnVariety(bottom);
+  }
+
+  /**
+   * Writes a dip cut's two `opacity` keys at `clip`'s current end, replacing keys between them: its level at the first
+   * darkened frame, then {@link DIP_DEPTH} less at its last frame. False when the clip is one frame long (nothing written).
+   */
+  async writeDip(clip: Clip): Promise<boolean> {
+    const g = this.grid;
+    const { lane, from, last } = await this.dipLane(clip);
+    if (from === last) return false;
+    const level = placementAt(clip, g.seconds(from)).opacity;
+    const half = this.halfFrame(clip);
+    const kept = lane.filter((key) => key.at < this.keyAt(clip, from) - half || key.at > this.keyAt(clip, last) + half);
+    const dip: ClipKey[] = [
+      { at: this.keyAt(clip, from), value: round4(level) },
+      { at: this.keyAt(clip, last), value: round4(level * (1 - DIP_DEPTH)) },
+    ];
+    clip.keys = { ...clip.keys, opacity: [...kept, ...dip].sort((a, b) => a.at - b.at) as [ClipKey, ...ClipKey[]] };
+    return true;
+  }
+
+  /** Removes the dip cut keys at indexes `dip` ({@link Edit.dipKeys}) from `clip`, dropping empty key lanes. */
+  dropDip(clip: Clip, dip: readonly [number, number]): void {
+    const lane = clip.keys!.opacity!.filter((_, index) => !dip.includes(index));
+    const keys: ClipKeys = { ...clip.keys };
+    if (lane.length > 0) keys.opacity = lane as [ClipKey, ...ClipKey[]];
+    else delete keys.opacity;
+    if (Object.keys(keys).length === 0) delete clip.keys;
+    else clip.keys = keys;
+  }
+
+  /** Removes the dip cut at `clip`'s end, if it has one; true when it did. */
+  async clearDip(clip: Clip): Promise<boolean> {
+    const dip = await this.dipKeys(clip);
+    if (dip) this.dropDip(clip, dip);
+    return dip !== null;
+  }
+
+  /**
+   * Before a split or cut gives `clip` a new tail: removes the dip cut at its old end. A right part cloned before keeps
+   * it, at the same source seconds; the left part's new tail is no cut.
+   */
+  async dropTailDip(clip: AnyClip): Promise<void> {
+    if (!isShotClip(clip)) await this.clearDip(clip);
+  }
+
+  /** True when `clip` has `opacity` keys on the frames a dip cut keys (its last {@link DIP_FRAMES} + 1). */
+  async endKeys(clip: Clip): Promise<boolean> {
+    const { lane, from } = await this.dipLane(clip);
+    const start = this.keyAt(clip, from) - this.halfFrame(clip);
+    return lane.some((key) => key.at >= start);
   }
 
   /** Clip-clock second of timeline frame `frame` of `clip`, rounded as `clip.key` rounds a key's `at`. */
@@ -1358,17 +1414,13 @@ class Edit {
       if (outgoing && track === bottom) dipped = outgoing;
     });
     // A dip cut is keys on the clip ending at the cut (ADR 0030 decision 5): they go with it.
-    const dip = dipped ? await this.dipKeys(dipped) : null;
-    if (dipped && dip) {
-      const lane = dipped.keys!.opacity!.filter((_, index) => !dip.includes(index));
-      const keys: ClipKeys = { ...dipped.keys };
-      if (lane.length > 0) keys.opacity = lane as [ClipKey, ...ClipKey[]];
-      else delete keys.opacity;
-      if (Object.keys(keys).length === 0) delete dipped.keys;
-      else dipped.keys = keys;
-      cleared = true;
-    }
-    if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
+    if (dipped && (await this.clearDip(dipped))) cleared = true;
+    if (!cleared && dipped && (await this.endKeys(dipped))) {
+      this.warnings.push(
+        `no transition at ${at} s; the opacity keys at the end of ${dipped.id} are no dip cut (edited after it, or set by hand) and stay: ` +
+          "change them with `clip.key`.",
+      );
+    } else if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
   }
 
   async clipKey(args: OperationArgs<"clip.key">): Promise<void> {

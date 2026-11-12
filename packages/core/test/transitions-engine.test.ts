@@ -477,6 +477,42 @@ describe("dip cut (ADR 0030 decision 5)", () => {
     expect(warnings).toEqual(["a dip cut leaves sound as it is: t_a not changed."]);
   });
 
+  it("is replaced by another transition set at the same edge", async () => {
+    const dipped = (await apply(butted(), "transition.set", { at: 4, kind: "dip-cut" })).timeline;
+    for (const kind of ["dissolve", "fade", "wipe", "iris"]) {
+      const { timeline } = await apply(dipped, "transition.set", { at: 4, kind });
+      expect(clip(timeline, "v1"), kind).not.toHaveProperty("keys");
+    }
+  });
+
+  it("moves with the clip's end on a trim and stays with the right part of a split", async () => {
+    const alone: Timeline = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video", clips: [media("v1", 0, 2, 6)] }] };
+    const dipped = (await apply(alone, "transition.set", { at: 4, kind: "dip-cut" })).timeline;
+    const longer = (await apply(dipped, "clip.trim", { clip: "v1", end: 5, snap: false })).timeline;
+    expect(opacity(longer, "v1")).toEqual([{ at: 6.867, value: 1 }, { at: 6.967, value: 0.6 }]);
+    const shorter = (await apply(dipped, "clip.trim", { clip: "v1", end: 3, snap: false })).timeline;
+    expect(opacity(shorter, "v1")).toEqual([{ at: 4.867, value: 1 }, { at: 4.967, value: 0.6 }]);
+    const split = await apply(dipped, "clip.split", { clip: "v1", at: 2 });
+    const parts = (split.timeline.tracks[0] as ClipTrack).clips;
+    expect(parts[0]).not.toHaveProperty("keys");
+    expect(parts[1]!.keys?.opacity).toEqual([{ at: 5.867, value: 1 }, { at: 5.967, value: 0.6 }]);
+  });
+
+  it("revert restores the opacity keys the clip had before", async () => {
+    const keyed = (await apply(butted(), "clip.key", { clip: "v1", prop: "opacity", time: 3.9, value: 0.5 })).timeline;
+    const dipped = await apply(keyed, "transition.set", { at: 4, kind: "dip-cut" });
+    expect(opacity(dipped.timeline, "v1")).not.toEqual(opacity(keyed, "v1"));
+    expect(applyPatch(dipped.timeline, dipped.inverse.args).tracks).toEqual(keyed.tracks);
+  });
+
+  it("transition.remove leaves dip keys edited by hand and says so", async () => {
+    const dipped = (await apply(butted(), "transition.set", { at: 4, kind: "dip-cut" })).timeline;
+    const edited = (await apply(dipped, "clip.key", { clip: "v1", prop: "opacity", time: 3.967, value: 0.2 })).timeline;
+    const removed = await apply(edited, "transition.remove", { at: 4 });
+    expect(opacity(removed.timeline, "v1")).toEqual(opacity(edited, "v1"));
+    expect(removed.warnings).toEqual([expect.stringContaining("the opacity keys at the end of v1 are no dip cut")]);
+  });
+
   it("counts as its own kind for the variety warnings, not a hard cut", async () => {
     const assets = ["assets/talk.mp4", "assets/tight.mp4"];
     const clips = Array.from({ length: 4 }, (_, i) => media(`v${i + 1}`, i, 1, 2, assets[i % 2]));

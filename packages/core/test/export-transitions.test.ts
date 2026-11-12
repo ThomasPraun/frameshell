@@ -16,7 +16,7 @@ import {
   placementAt,
   shapeAt,
 } from "@frameshell/schema";
-import { type ExportSource, compileRender, executeRender } from "../src/index.js";
+import { type ExportSource, applyOperation, compileRender, executeRender } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 import { frameLuma } from "./media-fixtures.js";
 import { mediaTools, run, runBuffer } from "./media-tools.js";
@@ -408,6 +408,39 @@ describe("export transitions and keys (real ffmpeg)", () => {
       for (const t of [0.4, 0.5, 0.55, 1.7, 1.8, 1.9]) {
         const weight = hostFades(tone).reduce((w, host) => w * fadeWeight(host, host.start, host.end, t, true), 1);
         expect(Math.abs(amplitude(samples, t, 440) / full - weight), `440 Hz at ${t}`).toBeLessThan(0.05);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "darkens a dip cut's outgoing clip over black on the bottom track, then cuts hard (ADR 0030)",
+    async () => {
+      const before = timelineOf([
+        { id: "v1", kind: "video", clips: [media("a", "assets/counter.mp4", 0, 1, 2), media("b", "assets/counter.mp4", 1, 5, 6)] },
+      ]);
+      const { timeline } = await applyOperation(
+        before,
+        { op: "transition.set", args: { at: 1, kind: "dip-cut", duration: 0.5 } },
+        {
+          fps: 30,
+          source: async () => ({ duration: 20, video: true, audio: true }),
+          nestedDuration: async () => 0,
+          clipTypes: async () => new Map(),
+          newId: (prefix) => `${prefix}_1`,
+        },
+      );
+      const sources = new Map([["assets/counter.mp4", counter]]);
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution });
+      const output = join(dir, "dip-cut.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-dip-cut"), output });
+      const shown = await frameLuma(output);
+      const level = (frame: number) => levels[frame % LEVELS]!;
+      // Frames 26-29 go from full to 60 % over black (full-range luma 0); frame 30 is b at full.
+      for (const n of [20, 26, 27, 28, 29, 30, 31]) {
+        const opacity = n <= 26 || n >= 30 ? 1 : 1 - (0.4 * (n - 26)) / 3;
+        const expected = level(n < 30 ? 30 + n : 120 + n) * opacity;
+        expect(Math.abs(shown[n]! - expected), `frame ${n}: ${shown[n]} vs ${expected}`).toBeLessThan(2.5);
       }
     },
     MEDIA_TIMEOUT,
