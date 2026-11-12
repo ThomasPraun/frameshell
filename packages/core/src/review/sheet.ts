@@ -28,7 +28,17 @@ export interface SheetOptions {
   tile: { width: number; height: number };
   /** Absolute scratch folder, created and removed here. */
   scratch: string;
+  /** Zones to shade red on every tile, as fractions (0 to 1) of the frame's height (top, bottom) or width (left, right). */
+  shade?: ShadeFractions;
   signal?: AbortSignal;
+}
+
+/** How much of each edge of a frame is shaded; see {@link SheetOptions.shade}. */
+export interface ShadeFractions {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
 }
 
 /** Size of the image {@link writeSheet} wrote. */
@@ -59,7 +69,7 @@ export async function writeSheet(ffmpeg: string, tiles: readonly SheetTile[], op
       [
         ...["-hide_banner", "-loglevel", "error", "-nostdin", "-y"],
         ...["-framerate", "1", "-i", "t%04d.png"],
-        ...["-vf", `scale=${tile.width}:${tile.height}:flags=area,ass=filename=labels.ass:fontsdir=${FONTS_DIR},tile=${columns}x${rows}:padding=${SHEET_GAP}:margin=${SHEET_GAP}:color=0x202020`],
+        ...["-vf", `scale=${tile.width}:${tile.height}:flags=area${shadeFilters(tile, options.shade)},ass=filename=labels.ass:fontsdir=${FONTS_DIR},tile=${columns}x${rows}:padding=${SHEET_GAP}:margin=${SHEET_GAP}:color=0x202020`],
         ...["-frames:v", "1", out],
       ],
       { cwd: scratch, ...(options.signal ? { signal: options.signal } : {}) },
@@ -70,9 +80,30 @@ export async function writeSheet(ffmpeg: string, tiles: readonly SheetTile[], op
   return { width: columns * (tile.width + SHEET_GAP) + SHEET_GAP, height: rows * (tile.height + SHEET_GAP) + SHEET_GAP, columns, rows };
 }
 
+/** `drawbox` filters (each led by a comma) that shade the zones of `shade` red and outline their inner edge; none without `shade`. */
+export function shadeFilters(tile: { width: number; height: number }, shade: ShadeFractions | undefined): string {
+  if (!shade) return "";
+  const { width, height } = tile;
+  const top = Math.round(shade.top * height);
+  const bottom = Math.round(shade.bottom * height);
+  const left = Math.round(shade.left * width);
+  const right = Math.round(shade.right * width);
+  const zones = [
+    { size: top, x: 0, y: 0, w: width, h: top },
+    { size: bottom, x: 0, y: height - bottom, w: width, h: bottom },
+    { size: left, x: 0, y: 0, w: left, h: height },
+    { size: right, x: width - right, y: 0, w: right, h: height },
+  ];
+  return zones
+    .filter(({ size }) => size > 0)
+    .map(({ x, y, w, h }) => `,drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=red@0.3:t=fill,drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=red@0.9:t=2`)
+    .join("");
+}
+
 /** ASS script showing label `i` during second `i` of the tile sequence, which `-framerate 1` plays one frame per second. */
 function labelScript(tiles: readonly SheetTile[], tile: { width: number; height: number }): string {
-  const size = Math.max(10, Math.round(tile.height * 0.075));
+  // Also bounded by the width: a narrow tall tile of a vertical film would otherwise clip a flagged label.
+  const size = Math.max(10, Math.round(Math.min(tile.height * 0.075, tile.width * 0.06)));
   const style = [
     "Style: label",
     SUBTITLE_FONT.family,

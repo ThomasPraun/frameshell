@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Safe-zone sheet of `review`, second slice of #457 (epic #451; `review --platform instagram|tiktok|shorts|youtube`,
+  `--sheets safe`, MCP `review` `platform`, protocol 99): up to 36 frames chosen like the contact sheet with the
+  platform's UI zones shaded red and outlined, drawn from the one table in `@frameshell/schema` (`safe-zones.ts`),
+  scaled to the film's size. A frame where the captions of a subtitle track reach into a zone is marked
+  `!subtitle` (box measured from the bundled face, the track's style and each cue's words), and `review.json`
+  `safeZones` lists, per platform, the zones in the film's pixels and the captions that cross them by track and
+  zone (how many cues, when, how many px deep), at the caption size export draws in that format
+  (`captionScale`, 1.3 in a vertical non-primary format). `--platform` adds the sheet to the default ones; a vertical film
+  whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
+  are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them (`review` and `analyze`). Titles, graphics
+  and faces are not measured yet.
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
