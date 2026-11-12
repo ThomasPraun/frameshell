@@ -17,6 +17,7 @@ import {
   type ProjectKind,
   createProjectConfig,
   createTimeline,
+  parseBeatsFile,
   parsePeopleFile,
   parseProjectConfig,
   parseStyleFile,
@@ -290,6 +291,7 @@ const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown
   { match: (rel) => rel === PROJECT_FILE, parse: parseProjectConfig },
   { match: (rel) => /^timelines\/[^/]+\.json$/.test(rel), parse: parseTimeline },
   { match: (rel) => /^transcripts\/.+\.words\.json$/.test(rel), parse: parseTranscript },
+  { match: (rel) => /^beats\/.+\.beats\.json$/.test(rel), parse: parseBeatsFile },
   { match: (rel) => rel === PEOPLE_FILE, parse: parsePeopleFile },
   { match: (rel) => rel === STYLE_FILE, parse: parseStyleFile },
 ];

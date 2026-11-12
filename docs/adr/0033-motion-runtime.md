@@ -41,10 +41,20 @@ Motion clips whose picture is a pure function of time ([#465](https://github.com
 - **Packaging.** `pnpm gen:motion` bundles `packages/motion` (with `@frameshell/schema/motion`) into `plugins/hyperframes/src/motion-runtime.ts` as a string, so the plugin's own files carry it (ADR 0008). A test fails when the bundle drifts from its sources.
 - **Format injection.** `pick()` per format follows the formats ADR (0027), which owns the meaning of `RenderContext` width and height.
 
+### Settled in slice 2
+
+- **Scaffold.** `frameshell hyperframes new <name> --template <id> [--duration s]` (plugin only, no core or protocol change) writes `index.html` and a copy of `frameshell-motion.js` (frozen per clip). Without `--template` the CSS scaffold is unchanged. The first set is `kinetic-headline` and `end-card` (#466 T1), in `plugins/hyperframes/src/templates/`, one file each, listed in `TEMPLATES`.
+- **Typed props.** A template declares its props as HyperFrames composition variables: numbers with `min` and `max`, `#rrggbb` colours, an image path inside the composition directory, enums. The runtime's `props()` resolves them against `getVariables()` and clamps or falls back to the default, so a wrong `clip set --props` never breaks the picture.
+- **Layout per format.** The runtime reads the root's `data-width` and `data-height` (`stage()`), classes the frame by aspect ratio (wide above 1.2, tall below 0.9, else square: 4:5 is tall) and `pick(wide, square, tall)` chooses. A template sizes text as a fraction of the short side and places it with fractions of the frame, so the four built-in formats read correctly (checked in managed Chrome at 16:9, 1:1, 4:5 and 9:16). The scaffold is written at the project resolution; per-format render sizes stay slice 4.
+- **Brand tokens at scaffold time.** The plugin reads `style.json` leniently (colours `bg`, `ink`, `ink2`, `accent`, `card`; fonts `display` and `ui`; brand `product`, `cta`, `url`) and writes them as the defaults of the props. It does not import the schema package, since a plugin ships only its own files, and core owns validation. A style font file under `assets/fonts/` is copied into the composition and declared with `@font-face`. Later edits of `style.json` do not reach a scaffolded composition; that is the injection of slice 4. The personality's spring does not feed templates yet: they use the presets by role.
+- **`update`.** `frameshell hyperframes update [<composition>] [--dry-run] [--force]` replaces a frozen copy whose header names an older version. An edited copy of the same version, a newer one or a file without the Frameshell header is kept unless `--force`.
+- **Runtime 0.2.0.** Adds `pick`, `stage`, `props`, `resolveProps` and `formatClass`. `bind` also writes `window.__timelines ??= {}` literally, because `@hyperframes/lint` looks for that text in a composition's scripts (`missing_timeline_registry`); templates pass `hyperframes check --strict` clean.
+- **Structure.** A template's wrapper is not a timed element (no `data-start`), so the linter does not ask for sub-compositions; the root carries the duration.
+
 ### Slices
 
 1. Spike, pure math in `packages/schema`, `packages/motion` with `bind` and `write`, the bundle in the plugin, and an opt-in real render test (12 probes cold vs reseek, element CSS on a sprung element).
-2. Templates, `hyperframes new --template`, and `update`.
+2. Templates, `hyperframes new --template`, and `update` (done: two templates of the #466 first set; the rest of that set follows as more template files).
 3. Core determinism verify.
 4. Format injection and style tokens into compositions.
 
@@ -52,7 +62,7 @@ Motion clips whose picture is a pure function of time ([#465](https://github.com
 
 - **Unchanged:** schema files and JSON Schema (motion clips are `type: hyperframes`), protocol (no `PROTOCOL_VERSION` bump in slice 1), plugin API (`apiVersion` "1"), cache layout (the runtime copy is an ordinary input file).
 - **Coupling to HyperFrames internals.** The binding relies on the `__timelines` duck typing (`play`, `pause`, `seek`) and on `hf-seek`. `plugins/hyperframes/test/motion-real.test.ts` must pass on every HyperFrames bump; a break freezes motion compositions on frame 0.
-- **Slow fixes.** A frozen runtime copy fixes an old clip only through `update` (slice 2).
-- **Authoring rules for the skill (slice 2):** no CSS transitions, timers, `requestAnimationFrame`, `Date` or unseeded random; no `will-change`, `translate3d` or 3D transforms; never the `translate`, `scale` or `rotate` properties; fonts and images ready before frame 0.
+- **Slow fixes.** A frozen runtime copy fixes an old clip only through `update`.
+- **Authoring rules (in the plugin skill since slice 2):** no CSS transitions, timers, `requestAnimationFrame`, `Date` or unseeded random; no `will-change`, `translate3d` or 3D transforms; never the `translate`, `scale` or `rotate` properties; fonts and images ready before frame 0.
 - **Personalities.** The springs in `MOTION_PERSONALITIES` (ADR 0028) point at `SPRING_PRESETS` and its eases at `EASE_CURVES`, so the numbers have one source. `energetic` (response 0.22, damping 0.45) has no preset and stays inline.
 - **Unblocks** #466 (templates), #453 (motion-film playbook), the `pick` part of #469, #458 (beats as runtime input) and #468 (tokens read by templates).

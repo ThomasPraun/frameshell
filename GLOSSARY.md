@@ -190,6 +190,14 @@ _Avoid_: tail, overlap, pre-roll
 A named point on a timeline's clock (`markers` in the timeline file: id, `at`, label, optional colour, ADR 0029): a hook, a beat to land on, a note. It moves with the material when a `cut` of every track ripples it and is deleted when the cut removes the moment it names. Paints and plays nothing.
 _Avoid_: cue (a shoot script's `[LABEL: …]`), keyframe, chapter
 
+**Beat grid**:
+The beats of one music asset, measured by `beats.measure` into `beats/<name>.beats.json` (tempo, beat times in source seconds, which beat starts a bar, a confidence), with the person's corrections (`edits`: half or double time, bar start, offset) applied on top. LOW confidence means it may be double time or a bar off. A generated track writes its own exact grid.
+_Avoid_: click track, tempo map, markers (a marker is a named point, not a beat)
+
+**Downbeat**:
+The first beat of a bar. The detector takes it from the phase with most low-band energy; `edits.downbeat` overrides it.
+_Avoid_: bar line, one
+
 **Keyframe**:
 A value of one clip property (`x`, `y`, `scale`, `opacity`, `gain`) at a time on the clip's own clock (the seconds `in` counts), stored in the clip's `keys`; between keyframes the value follows the ease, outside them it holds. "Key" for short.
 _Avoid_: automation point, marker
@@ -221,6 +229,10 @@ _Avoid_: master, main format, default format
 **Cover**:
 How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
 _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
+
+**Config operation** (ADR 0036):
+One journaled change of project config (a format added or removed, a `revert` of one), as keyed before/after values in `.frameshell/history/project.config.jsonl`; it belongs to a transaction like a timeline operation and is listed in every timeline's history.
+_Avoid_: config edit, settings change
 
 ## Photo segmentation (ADR 0022)
 

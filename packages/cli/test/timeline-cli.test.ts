@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -241,10 +241,14 @@ describe("frameshell timeline editing", () => {
   it("exits 2 with a precise message on bad arguments", () => {
     const noAt = frameshell(["clip", "split", "c_x"]);
     expect(noAt.code).toBe(2);
-    expect(noAt.stderr).toMatch(/needs --at <seconds>/);
-    const notNumber = frameshell(["clip", "move", "c_x", "--start", "soon"]);
+    expect(noAt.stderr).toMatch(/needs --at <seconds\|marker>/);
+    const notNumber = frameshell(["clip", "trim", "c_x", "--in", "soon"]);
     expect(notNumber.code).toBe(2);
-    expect(notNumber.stderr).toMatch(/--start: expected a number, got "soon"/);
+    expect(notNumber.stderr).toMatch(/--in: expected a number, got "soon"/);
+    // Timeline times take marker names (TimeRef, ADR 0037): "soon" reaches the daemon, which knows no such marker.
+    const notMarker = frameshell(["clip", "move", "c_x", "--start", "soon"]);
+    expect(notMarker.code).toBe(1);
+    expect(notMarker.stderr).toMatch(/clip\.move: start: "soon" is neither seconds nor a marker/);
     const wrongFlag = frameshell(["track", "list", "--force"]);
     expect(wrongFlag.code).toBe(2);
     expect(wrongFlag.stderr).toMatch(/does not take --force/);
@@ -453,6 +457,23 @@ describe("audio effects (ADR 0031)", () => {
     expect(frameshell(["clip", "set", clip, "--clear-audio-effects"]).code).toBe(0);
     expect(audio()).toEqual({ gain: -2 });
 
+    // The project's style.json (sound.voice) gives the chain; a number it leaves out stays the default.
+    const stylePath = join(project, "style.json");
+    writeFileSync(stylePath, JSON.stringify({ schemaVersion: 1, sound: { voice: { highpass: 100, compressor: { ratio: 3, attack: 0.012 } } } }));
+    try {
+      expect(frameshell(["clip", "set", clip, "--voice"]).code).toBe(0);
+      expect(audio().effects).toEqual([
+        { kind: "highpass", frequency: 100 },
+        { kind: "denoise", floor: -30, reduction: 8 },
+        { kind: "compressor", threshold: -20, ratio: 3, attack: 12, release: 140, makeup: 2 },
+      ]);
+      writeFileSync(stylePath, "{ not json");
+      expect(frameshell(["clip", "set", clip, "--voice"]).code).toBe(1);
+    } finally {
+      rmSync(stylePath, { force: true });
+    }
+    expect(frameshell(["clip", "set", clip, "--clear-audio-effects"]).code).toBe(0);
+
     expect(frameshell(["clip", "set", clip, "--voice", "--clear-audio-effects"]).stderr).toMatch(/one of --voice, --audio-effects or --clear-audio-effects/);
     expect(frameshell(["clip", "set", clip, "--audio-effects", '{"kind":"highpass"}']).stderr).toMatch(/expected a JSON array/);
     expect(frameshell(["clip", "set", clip, "--audio-effects", '[{"kind":"highpass","frequency":2}]']).code).not.toBe(0);
@@ -513,9 +534,40 @@ describe("markers (ADR 0029)", () => {
     expect(frameshell(["marker", "remove", hook, ...on]).code).toBe(0);
     expect(frameshell(["marker", "list", ...on]).stdout).toMatch(/has no markers/);
 
-    expect(frameshell(["marker", "add", "--label", "x", ...on]).stderr).toMatch(/needs --at <seconds> and --label <label>/);
+    expect(frameshell(["marker", "add", "--label", "x", ...on]).stderr).toMatch(/needs --at <seconds\|marker> and --label <label>/);
     expect(frameshell(["marker", "set", "x", "--color", "red", "--clear-color", ...on]).code).toBe(2);
     expect(frameshell(["marker", "remove", ...on]).code).toBe(2);
     expect(frameshell(["marker", "set", "nope", "--at", "1", ...on]).stderr).toMatch(/no marker "nope"/);
+  });
+
+  it("time flags take a marker id or label with an optional offset (TimeRef, ADR 0037)", () => {
+    writeFileSync(
+      join(project, "timelines", "named.json"),
+      JSON.stringify({ schemaVersion: 1, id: "named", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }] }),
+    );
+    const on = ["--timeline", "named"];
+    const list = () => json<{ markers: { id: string; at: number; label: string }[] }>(["marker", "list", ...on]).markers;
+    expect(frameshell(["clip", "add", "v1", "assets/take.mp4", "--start", "0", ...on]).code).toBe(0);
+    expect(frameshell(["marker", "add", "--at", "1", "--label", "hook", ...on]).code).toBe(0);
+
+    const cta = frameshell(["marker", "add", "--at", "hook+0.5", "--label", "cta", ...on]);
+    expect(cta.code).toBe(0);
+    expect(list().map((marker) => [marker.label, marker.at])).toEqual([
+      ["hook", 1],
+      ["cta", 1.5],
+    ]);
+
+    const cut = frameshell(["cut", "--from", "hook", "--to", "hook+0.3", "--no-snap", ...on]);
+    expect(cut.code).toBe(0);
+    expect(list().map((marker) => [marker.label, marker.at])).toEqual([
+      ["hook", 1],
+      ["cta", 1.2],
+    ]);
+
+    const unknown = frameshell(["cut", "--from", "drop", "--to", "3", ...on]);
+    expect(unknown.code).not.toBe(0);
+    expect(unknown.stderr).toMatch(/cut: from: "drop" is neither seconds nor a marker of timeline named/);
+    expect(frameshell(["cut", "--from", "hook", "--to", "beat:4", ...on]).stderr).toMatch(/needs the beat grid/);
+    expect(frameshell(["clip", "split", "c_x", "--at", "", ...on]).code).toBe(2);
   });
 });

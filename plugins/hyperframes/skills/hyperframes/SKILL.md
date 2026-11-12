@@ -9,7 +9,7 @@ A `hyperframes` clip is an HTML page rendered headlessly to VP9 WebM with alpha,
 
 ## Steps
 
-1. Scaffold: `frameshell hyperframes new <name> [--duration <s>]` writes `compositions/hyperframes/<name>/index.html` at the project resolution. Edit that file.
+1. Scaffold: `frameshell hyperframes new <name> [--template <id>] [--duration <s>]` writes `compositions/hyperframes/<name>/index.html` at the project resolution. Edit that file. For titles, headlines and end cards start from a template (see [Motion templates](#motion-templates)); the plain scaffold is a CSS-animated card.
 2. Check it: `frameshell hyperframes check [<composition>]` (see [Check](#check)). Run it after every edit of a composition and before you wait for a render: a lint error found here costs a second, the same mistake found by a failed render costs minutes.
 3. Add the clip on a video track above the footage:
    `frameshell clip add <track> --type hyperframes --source compositions/hyperframes/<name>/index.html --start <s> --duration <s> [--props '{"title":"Launch"}']`
@@ -17,6 +17,34 @@ A `hyperframes` clip is an HTML page rendered headlessly to VP9 WebM with alpha,
 5. Check the result with `frame_capture` / `frameshell frame --at <s>` at a time the clip covers.
 
 Done = `check` passes, every hyperframes clip is `ready` and a captured frame shows it where intended.
+
+## Motion templates
+
+`frameshell hyperframes new <name> --template <id>` scaffolds a motion composition: a page painted by the Frameshell motion runtime (springs, role eases, stagger), a pure function of time, so render, live preview, Pick and element mode agree. The command prints the props, their ranges and what it took from `style.json`.
+
+| Template | What it is |
+|---|---|
+| `kinetic-headline` | Words rise one by one through a mask, the keyword in the accent colour, a slow push while it holds; transparent, for use over footage. Props `headline`, `keyword`, `ink`, `accent`, `size` (0.5 to 1.6), `shade` (0 to 0.8), `drift` (0 to 6 %), `align` |
+| `end-card` | Logo, name, call to action and address on a solid radial background; never static (slow push, underline re-lights every `beat` seconds). Props `title`, `cta`, `url`, `logo` (an image path inside the composition directory), `bg`, `ink`, `accent`, `push` (0 to 0.2), `beat` (0.5 to 4 s) |
+
+- **Props are typed.** Change them with `frameshell clip set <clip> --props '{"headline":"Ship it","keyword":"Ship"}'`: a client revision is one `clip set`, never an edit of the HTML. A number outside its range is clamped, a bad colour or enum value falls back to the default, so a wrong prop never breaks the picture. Use `#rrggbb` colours.
+- **Brand tokens.** When `style.json` exists the template takes colours (`colors.bg`, `ink`, `accent`), fonts (`fonts.display`, `ui`; a font file under `assets/fonts/` is copied into the composition and declared with `@font-face`) and `brand.product`, `brand.cta`, `brand.url` as the defaults of its props, at scaffold time. Later edits of `style.json` do not reach a scaffolded composition: change the props, or scaffold again. Without a style the template keeps placeholder defaults: ask the person for real ones.
+- **Layout per format.** The layout reads the composition's `data-width` / `data-height` through `M.pick(wide, square, tall)`, so one composition lays out for 16:9, 1:1, 4:5 and 9:16; the scaffold uses the project resolution.
+- **Frozen runtime.** The scaffold copies `frameshell-motion.js` into the composition directory, so a plugin upgrade never changes an existing clip's pixels. `frameshell hyperframes update [<composition>] [--dry-run] [--force]` refreshes older copies on request (clips that use one render again); an edited, newer or foreign copy is kept unless `--force`.
+- Edit the generated `index.html` for anything props cannot say; keep the rules below.
+
+## Motion compositions (written by hand)
+
+A composition that calls `FrameshellMotion.bind("<composition id>", paint)` has no GSAP timeline: the page is painted at time `t` by `paint(t)`, and every frame must depend on `t` alone.
+
+- Load `<script src="frameshell-motion.js"></script>` in the head and call `bind` synchronously from the composition's script. The root must not carry `data-no-timeline`.
+- `M.write(element, { x, y, rotate, scale, scaleX, scaleY, opacity })` is the only way to move an element: it writes a 2D `transform` and `opacity`. Spring and ease the numbers: `M.spring("heavy" | "default" | "snappy" | "playful", t - start, from, to)`, `M.ease("enter" | "snap" | "pop" | "camera" | "exit" | "progress", fraction)`, `M.stagger(i, n, M.STAGGER_STEPS.words)`, `M.track(...)` for values that retarget.
+- Presets by role: snappy for buttons and pills, default for cards and camera, heavy for big type and logos, playful for mascots only. Position and size may overshoot; opacity and colour never spring.
+- `M.props()` returns the clip's props as typed values from `data-composition-variables`; declare number props with `min` and `max` and colour props as `#rrggbb`.
+- Never use CSS `transition` or animation, timers, `requestAnimationFrame`, `Date` or `Math.random` (seeded noise only), and no `will-change`, `translate3d` or any 3D transform. Never set the `translate`, `scale` or `rotate` CSS properties: element adjustments (the Elements inspector) own them and compose with the runtime's `transform`.
+- Fonts and images ship inside the composition directory and are known before frame 0; a fallback font is a bug. Do not measure text in script (`getBoundingClientRect` lies under a scaled ancestor): lay out with CSS.
+- Holds never stop: give a held graphic a slow drift or push of a few percent. Prefer solid or radial backgrounds over long dark linear gradients (they band in H.264), and accents at 15 % opacity or more.
+- Frameshell templates carry no GSAP. For a composition you write for the person you may still use GSAP under the rules below.
 
 ## Check
 

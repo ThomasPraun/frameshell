@@ -55,6 +55,8 @@ const VERBS: Record<string, string> = {
   "marker.set": t.history.verbs.changeMarker,
   "marker.remove": t.history.verbs.removeMarker,
   "timeline.patch": t.history.verbs.directEdit,
+  "format.add": t.history.verbs.addFormat,
+  "format.remove": t.history.verbs.removeFormat,
 };
 
 /** One operation in words: its verb, `Revert <target>` for reverts. */
@@ -96,6 +98,11 @@ export function abortedTransactions(transactions: readonly HistoryTransaction[])
     if (tx.operations.some((op) => op.op === "revert" && op.args["target"] === tx.tx)) aborted.add(tx.tx);
   }
   return aborted;
+}
+
+/** Whether `tx` changed project config (ADR 0036): any of its operations names a config `doc`. */
+export function changesConfig(tx: HistoryTransaction): boolean {
+  return tx.operations.some((op) => op.doc !== undefined);
 }
 
 /** A history row: one run of a transaction, keyed uniquely (a transaction interleaved with others' operations shows as several runs). */

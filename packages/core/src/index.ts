@@ -6,7 +6,20 @@ export {
   startDaemon,
 } from "./daemon.js";
 export { PROJECT_FILE } from "./projects.js";
-export { FORMAT_JOURNAL, type FormatJournalEntry, FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound } from "./formats.js";
+export { FormatService, type FormatServiceOptions, builtinFormatInfos, formatInfos, formatNotFound, projectConfigDocument } from "./formats.js";
+export {
+  CONFIG_JOURNAL,
+  type ConfigDocument,
+  ConfigJournal,
+  type ConfigJournalOptions,
+  type ConfigRecord,
+  type ConfigRevertPlan,
+  configOperation,
+  readConfigJournal,
+} from "./config/journal.js";
+export { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
+export { FORMAT_RULES, type FormatKeyValue, formatState, formatsFromState } from "./config/project-doc.js";
+export { CONFIG_DOC_NAMES, planConfigRevert } from "./config/revert.js";
 export {
   type FaceScans,
   type NameWrites,
@@ -158,11 +171,11 @@ export {
   BinaryManager,
   type BinaryManagerOptions,
   type EnsureOptions,
-  GLOBAL_CONFIG_FILE,
   type InstallProgress,
   type ModelLocation,
   type ProjectBinaries,
 } from "./binaries/manager.js";
+export { GLOBAL_CONFIG_FILE, type GlobalConfig, type SpeechCommandConfig, readGlobalConfig } from "./global-config.js";
 export { type CommandRunner, runCommand } from "./binaries/command-runner.js";
 export { type TarEntry, packTar } from "./binaries/reproducible-tar.js";
 export {
@@ -278,6 +291,33 @@ export {
   snapToPause,
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
+export {
+  ANALYSIS_RATE as BEAT_ANALYSIS_RATE,
+  BEAT_DETECTOR,
+  type BeatAnalysis,
+  type BeatOptions,
+  MAX_BEAT_AUDIO_S,
+  NoBeatsError,
+  type Signal as BeatSignal,
+  analysePcm,
+  detectBeats,
+  onsetEnvelope,
+  prepareSignal,
+} from "./media/beats.js";
+export {
+  BEATS_CACHE_DIR,
+  BEATS_DIR,
+  BeatsStore,
+  type BeatsStoreOptions,
+  type MeasuredBeats,
+  beatsCacheKey,
+  beatsPathsFor,
+  classifyBeatsCache,
+  formatBeatsFile,
+  ownBeatsFile,
+  readBeatsFile,
+  resolveBeatsFile,
+} from "./media/beats-store.js";
 export {
   AUDIO_FX_DIR,
   AUDIO_FX_VERSION,
@@ -441,6 +481,7 @@ export {
   correlateProfiles,
   planSync,
 } from "./multicam/sync.js";
+export { COMMAND_SPEECH_PROVIDER, commandSpeechProvider, readCommandSpeechProvider } from "./voiceover/command.js";
 export { STAND_IN_SPEECH_PROVIDER, standInSpeechProvider } from "./voiceover/stand-in.js";
 export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
 export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";

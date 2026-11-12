@@ -881,7 +881,8 @@ code {
   color: var(--text-faint);
 }
 
-.history-aborted {
+.history-aborted,
+.history-config {
   flex: none;
   padding: 0 4px;
   border: 1px solid var(--line);

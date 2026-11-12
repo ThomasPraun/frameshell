@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   abortedTransactions,
   authorOf,
+  changesConfig,
   historySelection,
   newestFirst,
   transactionTitle,
@@ -97,5 +98,15 @@ describe("abortedTransactions", () => {
     ];
     expect(abortedTransactions(transactions)).toEqual(new Set(["tx_abort"]));
     expect(abortedTransactions([])).toEqual(new Set());
+  });
+});
+
+describe("changesConfig", () => {
+  it("marks a transaction with a project-config operation, titled by its verb", () => {
+    const format = { ...op("op_5", "format.add", { id: "9x16" }), doc: "project" as const, touched: ["format:9x16"] };
+    const mixed: HistoryTransaction = { ...tx("tx_mixed", null, [op("op_6", "clip.move")]), operations: [op("op_6", "clip.move"), format] };
+    expect(changesConfig(mixed)).toBe(true);
+    expect(changesConfig(tx("tx_clip", null, [op("op_7", "clip.move")]))).toBe(false);
+    expect(transactionTitle(mixed)).toBe("Move, add format");
   });
 });

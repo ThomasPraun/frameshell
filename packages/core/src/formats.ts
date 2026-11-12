@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-import { join } from "node:path";
 import { ErrorCode, type FormatChange, type FormatInfo, RpcError } from "@frameshell/protocol";
 import {
   BUILTIN_FORMATS,
@@ -9,35 +7,36 @@ import {
   primaryFormatId,
   projectFormats,
 } from "@frameshell/schema";
-import { appendJsonLine, readJsonLines } from "./fs-util.js";
+import type { ConfigDocument, ConfigJournal } from "./config/journal.js";
+import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
+import type { TxRef } from "./timeline/service.js";
 
-/**
- * Journal of `frameshell.json` format edits (ADR 0027): one JSON line per change with the list before and
- * after. Timeline ids hold no `.`, so it never collides with a timeline journal in the same folder.
- */
-export const FORMAT_JOURNAL = ".frameshell/history/project.config.jsonl";
-
-/** One line of {@link FORMAT_JOURNAL}. `before`/`after` null: `frameshell.json` had no `formats`. */
-export interface FormatJournalEntry {
-  id: string;
-  op: "format.add" | "format.remove";
-  args: Record<string, unknown>;
-  author: string;
-  at: string;
-  before: FormatEntry[] | null;
-  after: FormatEntry[] | null;
-  /** The call that undoes this change, as `format.add`/`format.remove` returned it. */
-  undo: FormatChange["undo"];
-}
-
-/** What {@link FormatService} needs from the project registry. */
+/** What {@link FormatService} needs: the project config and the journal its changes go through. */
 export interface FormatServiceOptions {
   /** Validated `frameshell.json` of the project rooted at `root`. */
   readConfig(root: string): Promise<FormatSource>;
+  /** Journal with the `project` document ({@link projectConfigDocument}). */
+  journal: ConfigJournal;
+}
+
+/**
+ * The `project` config document (ADR 0036) over `formats` of `frameshell.json`. Writing back the one format a
+ * project without `formats` has removes `formats`, so the file stays as it was.
+ */
+export function projectConfigDocument(options: {
+  readConfig(root: string): Promise<FormatSource>;
   /** Replace `formats` (null removes it), keeping every other key; see `ProjectRegistry.writeFormats`. */
   writeFormats(root: string, formats: FormatEntry[] | null): Promise<unknown>;
-  /** Clock for journal times. Default `new Date()`. */
-  now?: () => Date;
+}): ConfigDocument {
+  return {
+    rules: FORMAT_RULES,
+    read: async (root) => formatState((await options.readConfig(root)).formats),
+    write: async (root, state) => {
+      const config = await options.readConfig(root);
+      const list = formatsFromState(projectFormats(config)[0]!, state);
+      await options.writeFormats(root, isDefault(list, config) ? null : list);
+    },
+  };
 }
 
 /** Formats of a project as the wire reports them, primary first. */
@@ -48,15 +47,6 @@ export function formatInfos(config: FormatSource): FormatInfo[] {
 /** Built-in formats with their canvases. */
 export function builtinFormatInfos(): FormatInfo[] {
   return BUILTIN_FORMAT_IDS.map((id) => info({ id, ...BUILTIN_FORMATS[id]! }, false));
-}
-
-/** The {@link FORMAT_JOURNAL} line with id `op` in the project rooted at `root`, or null. */
-export async function findFormatChange(root: string, op: string): Promise<FormatJournalEntry | null> {
-  for (const value of await readJsonLines(join(root, ...FORMAT_JOURNAL.split("/")))) {
-    const entry = value as Partial<FormatJournalEntry> | null;
-    if (entry?.id === op && entry.undo) return entry as FormatJournalEntry;
-  }
-  return null;
 }
 
 /** `FormatNotFound` for `id`, listing the project's formats. */
@@ -71,21 +61,24 @@ export function formatNotFound(id: string, config: FormatSource): RpcError {
 }
 
 /**
- * `format.add` / `format.remove` (ADR 0027 decision 11): edits `formats` in `frameshell.json`, one change at a
- * time per project, each journaled with the call that undoes it.
+ * `format.add` / `format.remove` (ADR 0027 decision 11): edits `formats` in `frameshell.json` through the config
+ * journal (ADR 0036), one change at a time per project, each in the caller's transaction with the call that undoes it.
  */
 export class FormatService {
   readonly #options: FormatServiceOptions;
-  /** Per root: the change in progress, so two edits never read the same file state. */
-  readonly #queues = new Map<string, Promise<unknown>>();
 
   constructor(options: FormatServiceOptions) {
     this.#options = options;
   }
 
   /** Add format `id` (a built-in, or a custom one with an even size) at `index` (default last; 0 is the primary's). */
-  add(root: string, params: { id: string; width?: number | undefined; height?: number | undefined; index?: number | undefined }, author: string): Promise<FormatChange> {
-    return this.#serial(root, async () => {
+  add(
+    root: string,
+    params: { id: string; width?: number | undefined; height?: number | undefined; index?: number | undefined },
+    author: string,
+    tx: TxRef,
+  ): Promise<FormatChange> {
+    return this.#options.journal.serial(root, async () => {
       const config = await this.#options.readConfig(root);
       const refuse = (reason: string, message: string, field?: string) =>
         new RpcError(ErrorCode.InvalidOperation, message, { op: "format.add", reason, ...(field ? { field } : {}) });
@@ -101,13 +94,13 @@ export class FormatService {
       const added: FormatEntry = { id: params.id, ...size };
       const next = [...current.slice(0, at), added, ...current.slice(at)];
       const args = Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
-      return this.#commit(root, config, next, { op: "format.add", args, author }, { method: "format.remove", params: { id: params.id } });
+      return this.#commit(root, config, next, { op: "format.add", args, author, tx }, { method: "format.remove", params: { id: params.id } });
     });
   }
 
   /** Remove format `id`; the primary stays. Back to one format, `formats` leaves `frameshell.json` when that one is the default. */
-  remove(root: string, id: string, author: string): Promise<FormatChange> {
-    return this.#serial(root, async () => {
+  remove(root: string, id: string, author: string, tx: TxRef): Promise<FormatChange> {
+    return this.#options.journal.serial(root, async () => {
       const config = await this.#options.readConfig(root);
       const current = projectFormats(config);
       const index = current.findIndex((format) => format.id === id);
@@ -122,7 +115,7 @@ export class FormatService {
       const removed = current[index]!;
       const next = current.filter((format) => format.id !== id);
       const undo = { method: "format.add" as const, params: { id, width: removed.width, height: removed.height, index } };
-      return this.#commit(root, config, next, { op: "format.remove", args: { id }, author }, undo);
+      return this.#commit(root, config, next, { op: "format.remove", args: { id }, author, tx }, undo);
     });
   }
 
@@ -130,29 +123,11 @@ export class FormatService {
     root: string,
     config: FormatSource,
     next: FormatEntry[],
-    entry: Pick<FormatJournalEntry, "op" | "args" | "author">,
+    record: { op: string; args: Record<string, unknown>; author: string; tx: TxRef },
     undo: FormatChange["undo"],
   ): Promise<FormatChange> {
-    const written = isDefault(next, config) ? null : next;
-    const id = `op_${randomBytes(4).toString("hex")}`;
-    const line: FormatJournalEntry = {
-      id,
-      ...entry,
-      at: (this.#options.now?.() ?? new Date()).toISOString(),
-      before: config.formats ? [...config.formats] : null,
-      after: written,
-      undo,
-    };
-    // Journal first: a change never reaches frameshell.json without its line.
-    await appendJsonLine(join(root, ...FORMAT_JOURNAL.split("/")), line);
-    await this.#options.writeFormats(root, written);
-    return { dir: root, formats: formatInfos({ ...config, formats: written ?? undefined }), op: id, undo };
-  }
-
-  #serial<T>(root: string, work: () => Promise<T>): Promise<T> {
-    const run = (this.#queues.get(root) ?? Promise.resolve()).catch(() => {}).then(work);
-    this.#queues.set(root, run);
-    return run;
+    const entry = await this.#options.journal.commit(root, "project", { ...record, undo }, formatState(config.formats), formatState(next));
+    return { dir: root, formats: formatInfos({ ...config, formats: next }), op: entry.id, tx: entry.tx, undo };
   }
 }
 

@@ -7,7 +7,7 @@
   "description": "HyperFrames HTML compositions as timeline clips, rendered headlessly to VP9 WebM with alpha (ADR 0002).",
   "contributes": {
     "clipTypes": ["hyperframes"],
-    "commands": ["hyperframes new", "hyperframes check"],
+    "commands": ["hyperframes new", "hyperframes check", "hyperframes update"],
     "skills": ["skills/hyperframes/SKILL.md"]
   }
 }

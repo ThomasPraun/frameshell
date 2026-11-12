@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 86): contact sheet, phone sheet
+- `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to
   `.frameshell/review/<n>/` with a `review.json` manifest; the last 10 runs are kept and project files are never
@@ -18,6 +18,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ffmpeg (file); sampling and tiling live in one shared module for `analyze` (#471). MCP returns the sheets as
   images. The critique loop in the skill calls `review` instead of hand-built ffmpeg sheets. Metrics, safe-zone
   sheets and `--platform` are later slices.
+- Times as names, first slice of #485 (ADR 0037, amends ADR 0029 decision 7; protocol 88): the time arguments
+  `transition set|remove --at`, `clip key --at`, `clip split --at`, `cut --from/--to`, `clip move --start`,
+  `clip trim --start/--end`, `clip add --start` and `marker add|set --at` (and the matching MCP and daemon params)
+  take seconds or a marker id or label with an optional offset: `--at hook`, `--at hook+0.5`, `--from intro --to
+  outro-1`. One shared resolver in core (`resolveTimeRefs`) turns the name into seconds in the daemon before the
+  operation runs, against the timeline as it is then (a marker added earlier in the same transaction counts, and in
+  review mode the proposal's timeline), so the history records seconds and a revert never depends on a marker staying
+  put. A label is tried whole first (`end-card` is not `end` minus `card`); an unknown name fails and lists the
+  markers. Plain decimals are seconds (`0x10` and `1e2` are not); a marker whose label is a plain number (`10`) is
+  reached by its id, since `--at 10` means seconds. `beat:`, `bar:` and `word:` are reserved and refused until the
+  beat grid and word references exist. `music fit` itself is a later slice.
+- Beat grid, slice 2 of #458 (ADR 0029): `frameshell beats measure <asset> [--bpm n] [--reset-edits]` and `beats show
+  <asset>` (daemon `beats.measure` and `beats.show`, MCP `beats_measure` and `beats_show`, protocol 87) measure the beats
+  of a music file locally, with no download and no model, and write `beats/<name>.beats.json`: tempo, every beat in
+  source seconds (each snapped to a measured hit within 8 ms), which beat starts a bar, the strong hits, a confidence and
+  the largest gap to the hits (under 15 ms on clean click tracks). Calm music, which gets a double-time grid, is flagged
+  LOW with the other tempi to try; a track decoded without a finished ingest is capped LOW too. `--bpm` says the tempo you
+  expect so a 60 BPM song stays 60. Human corrections go in the file's `edits` (`tempo` double or half, `downbeat`,
+  `offset`), are validated by `file.write` and kept when you measure again. It runs as a `beats` job in a worker thread
+  (about 5 s for 3 minutes); the onset envelope is cached in `.frameshell/beats/` and swept by `gc`, which never touches
+  `beats/`. The file's `detector` also admits `exact` for generated music that knows its beats. Nothing on a timeline
+  reads a grid yet (the grid in the app, `tempo.clip` and `--snap-to` are slice 3). The FFT of multicam sync is now one
+  shared module used by the detector too.
+- SVG and font files in `assets/` are non-media assets (#520, split from #467). `.svg`, `.ttf`, `.otf`, `.woff` and `.woff2`
+  were queued for media ingest and failed (fonts in `assets/fonts/` included); now ingest only hashes them: no probe,
+  no proxy or other derived media, no ffmpeg, no failed job. `asset.list` (and `asset.changed`) report a new `kind`
+  (`media`, `svg` or `font`) and `state` `ready` once hashed. `clip.add` and other edits that take a media asset
+  refuse them with `not media` instead of an ffprobe error. Protocol 86.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench
@@ -45,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retried request with the same idempotency key never charges twice. No voice ships yet: a test-only stand-in
   (`FRAMESHELL_SPEECH_STAND_IN=1`) says words as tones. New error codes `SpeechProviderNotFound`, `SpeechFailed`,
   `ConfirmationRequired`; `plugin list` shows speech providers.
+- Voiceover, slice 2 of #470 (ADR 0034): the machine-level `command` speech provider. Set `speech.command` in the global
+  `config.json` (`run`: the TTS program and its arguments with `{voice}`, `{language}`, `{out}`; optional `voices`,
+  `defaultVoice`, `version`, `timeoutSeconds`) and `frameshell voiceover generate --provider command` says each line
+  with it: the text goes to stdin, the WAV comes from `{out}` or stdout. It is free, works in untrusted projects, and
+  is read from the global config only: a `speech` key in `frameshell.json` is refused. A voice or language starting
+  with `-` is never passed to the program. The global config now has one reader shared with binary overrides.
+- Speech providers: a provider without `estimate()` counts as paid at an unknown cost (`ConfirmationRequired` with
+  `cost: null`) unless it declares `free: true` on the contract. The stand-in and `command` declare it.
 - Video subject matte, slice 1 of #461 (ADR 0032): `matte.prepare` (protocol 84), CLI `frameshell matte <asset>`
   and MCP `matte_prepare` compute which pixels of each frame of a video are the person in front, locally on CPU:
   MediaPipe's selfie segmenter (Apache-2.0, 0.46 MB, downloaded on first use; pinned in the binaries manifest) on
@@ -198,9 +234,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `opacity` so element adjustments still apply. `pnpm gen:motion` bundles it into `@frameshell/hyperframes`
   (`motion-runtime.ts`); compositions do not use it until templates land (slice 2). Spike:
   `docs/research/motion-runtime.md`.
+- Motion templates, slice 2 of #465 and first set of #466 (ADR 0033): `frameshell hyperframes new <name> --template
+  <kinetic-headline|end-card>` scaffolds a composition painted by the motion runtime, with `frameshell-motion.js`
+  copied next to it (frozen per clip). The kinetic headline (words rise through a mask, keyword in the accent colour,
+  transparent over footage) and the end card (logo, name, call to action, address on a solid background, never
+  static) declare typed props (number with min and max, colour, image path, enum), lay out per format with
+  `pick(wide, square, tall)` (16:9, 1:1, 4:5, 9:16) and take colours, fonts and brand texts from `style.json` as the
+  defaults when it exists. `frameshell hyperframes update [<composition>] [--dry-run] [--force]` refreshes older
+  frozen runtime copies on request. Runtime 0.2.0 adds `pick`, `stage`, `props` (props clamped and typed) and
+  registers `window.__timelines` where the HyperFrames linter looks for it, so `hyperframes check` passes. The skill
+  gains the motion-composition authoring rules. No GSAP in templates. `@frameshell/hyperframes` 0.5.0 gains the
+  `hyperframes update` command.
 
 ### Changed
 
+- Format changes are history (#496 slice 1, ADR 0036, SPEC decision 41, protocol 89): `format add` and
+  `format remove` join your transaction, `frameshell history` lists them in every timeline's history (marked
+  `project config`, touched `format:<id>`), and `frameshell revert <op|tx>` and `tx abort` undo them, with the clips
+  of a mixed transaction. A later change of the same format conflicts like a clip; a hand edit of `formats` in
+  `frameshell.json` refuses the revert like a hand edit of a timeline. `revert` no longer refuses format changes
+  (InvalidOperation reason `format change` is gone). `.frameshell/history/project.config.jsonl` lines are keyed
+  operations now (`doc`, `patch`, `tx`, hash chain); older lines are read as they are. While review mode is on, an
+  agent still cannot change or revert formats. Wire: `format.add`/`format.remove` results carry `tx`, `history`
+  operations `doc`, `revert` and `tx.abort` results `config`. The History panel marks such transactions `project`.
+  A transaction that changed several timelines reverts one `--timeline` at a time, its format changes with the
+  first; naming a timeline it never changed fails with HistoryNotFound naming the ones it did (`data.timelines`).
+- `clip set --voice` (#464, ADR 0031) writes the voice chain of the project's `style.json` (`sound.voice`, ADR 0028)
+  instead of fixed numbers: style seconds become milliseconds, each number is held to the effect's range, and a
+  noise reduction of 0 leaves `denoise` out. Without a `style.json`, or with a style that does not set `sound.voice`,
+  the chain is the same as before. The style's default high-pass is now 85 Hz (was 80), the voice chain's.
 - Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
   `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
   `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.

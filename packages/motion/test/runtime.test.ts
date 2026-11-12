@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { MOTION_RUNTIME } from "../../../plugins/hyperframes/src/motion-runtime.js";
-import { bind, write } from "../src/index.js";
+import { bind, formatClass, pick, props, resolveProps, stage, write } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
@@ -30,7 +30,7 @@ function fakePage(duration = "4") {
 }
 
 afterEach(() => {
-  for (const key of ["__timelines", "addEventListener", "document"]) delete (globalThis as Record<string, unknown>)[key];
+  for (const key of ["__timelines", "addEventListener", "document", "__hyperframes"]) delete (globalThis as Record<string, unknown>)[key];
 });
 
 describe("bind", () => {
@@ -86,6 +86,93 @@ describe("write", () => {
   });
 });
 
+/** A page with one composition root of the given frame and the variables HyperFrames would hand over. */
+function sizedPage(width: number, height: number, variables?: { declared?: unknown; given?: Record<string, unknown> }) {
+  const attrs: Record<string, string> = { "data-composition-id": "t", "data-width": String(width), "data-height": String(height), "data-duration": "3" };
+  Object.assign(globalThis, {
+    document: {
+      documentElement: { getAttribute: () => (variables?.declared === undefined ? null : JSON.stringify(variables.declared)) },
+      querySelector: () => ({ getAttribute: (name: string) => attrs[name] ?? null }),
+    },
+    __hyperframes: { getVariables: () => variables?.given ?? {} },
+  });
+}
+
+describe("formats and stage", () => {
+  it("classes the four built-in formats and the edges between them", () => {
+    expect(formatClass(1920, 1080)).toBe("wide");
+    expect(formatClass(1080, 1080)).toBe("square");
+    expect(formatClass(1080, 1350)).toBe("tall");
+    expect(formatClass(1080, 1920)).toBe("tall");
+    expect(formatClass(1440, 1080)).toBe("wide");
+    expect(formatClass(1000, 1000)).toBe("square");
+  });
+
+  it("reads the frame and length from the composition root, and picks per format", () => {
+    sizedPage(1080, 1920);
+    expect(stage()).toEqual({ width: 1080, height: 1920, duration: 3, format: "tall" });
+    expect(pick("wide", "square", "tall")).toBe("tall");
+    sizedPage(1920, 1080);
+    expect(pick("wide", "square", "tall")).toBe("wide");
+    sizedPage(1080, 1080);
+    expect(pick({ n: 1 }, { n: 2 }, { n: 3 })).toEqual({ n: 2 });
+  });
+
+  it("refuses a page with no sized root", () => {
+    Object.assign(globalThis, { document: { querySelector: () => null } });
+    expect(() => stage()).toThrow(/data-width/);
+  });
+});
+
+describe("props", () => {
+  const declared = [
+    { id: "title", type: "string", default: "Hi", maxLength: 5 },
+    { id: "size", type: "number", default: 1, min: 0.5, max: 2 },
+    { id: "ink", type: "color", default: "#ffffff" },
+    { id: "logo", type: "image", default: "" },
+    { id: "align", type: "enum", default: "auto", options: [{ value: "auto" }, { value: "left" }] },
+    { id: "on", type: "boolean", default: true },
+  ];
+
+  it("keeps values that fit their type and clamps numbers to min and max", () => {
+    expect(resolveProps(declared, { title: "Hello world", size: 9, ink: "#ff0000", logo: "logo.png", align: "left", on: false })).toEqual({
+      title: "Hello",
+      size: 2,
+      ink: "#ff0000",
+      logo: "logo.png",
+      align: "left",
+      on: false,
+    });
+    expect(resolveProps(declared, { size: -3 })["size"]).toBe(0.5);
+  });
+
+  it("falls back to the default for a value of the wrong type", () => {
+    expect(resolveProps(declared, { title: 4, size: "big", ink: "red", logo: 7, align: "up", on: "yes" })).toEqual({
+      title: "Hi",
+      size: 1,
+      ink: "#ffffff",
+      logo: "",
+      align: "auto",
+      on: true,
+    });
+    expect(resolveProps(declared, { size: Number.NaN })["size"]).toBe(1);
+  });
+
+  it("reads an image given as { url }", () => {
+    expect(resolveProps(declared, { logo: { url: "a.png" } })["logo"]).toBe("a.png");
+  });
+
+  it("props() resolves the page's declarations against getVariables()", () => {
+    sizedPage(1920, 1080, { declared, given: { size: 5, title: "Yo" } });
+    expect(props()).toMatchObject({ size: 2, title: "Yo", ink: "#ffffff" });
+  });
+
+  it("props() refuses declarations that are not an array", () => {
+    sizedPage(1920, 1080, { declared: { title: "x" } });
+    expect(() => props()).toThrow(/array/);
+  });
+});
+
 describe("motion runtime bundle", () => {
   it("is current (run `pnpm gen:motion` after editing packages/motion or packages/schema/src/motion.ts)", async () => {
     const script = fileURLToPath(new URL("../scripts/build-runtime.mjs", import.meta.url));
@@ -106,7 +193,7 @@ describe("motion runtime bundle", () => {
     const scope: Record<string, unknown> = {};
     new Function("self", `${MOTION_RUNTIME}\nself.FrameshellMotion = FrameshellMotion;`)(scope);
     const motion = scope["FrameshellMotion"] as Record<string, unknown>;
-    for (const name of ["bind", "write", "spring", "springStep", "settle", "track", "ease", "stagger", "durationFromDistance", "SPRING_PRESETS", "version"]) {
+    for (const name of ["bind", "write", "spring", "springStep", "settle", "track", "ease", "stagger", "durationFromDistance", "SPRING_PRESETS", "version", "pick", "stage", "props", "formatClass", "resolveProps"]) {
       expect(motion[name], name).toBeDefined();
     }
     expect((motion["spring"] as (p: string, t: number) => number)("heavy", 10)).toBeCloseTo(1, 9);

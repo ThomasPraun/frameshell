@@ -33,6 +33,7 @@ import { CREDITS_FLAGS, CREDITS_USAGE, type CreditsInvocation, PROVENANCE_FLAGS,
 import { PEOPLE_FLAGS, PEOPLE_USAGE, type PeopleInvocation, executePeople, parsePeople } from "./people-commands.js";
 import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoot } from "./shoot-commands.js";
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
+import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeats } from "./beats-commands.js";
 import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, formatStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
@@ -129,7 +130,7 @@ ${REVIEW_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${STYLE_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
+${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${BEATS_USAGE}${STYLE_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
                                and print its path: a grayscale video in .frameshell/cache/mattes/, white = the
                                person. Once per file content; estimated 1.5 min per minute of video. First run
                                downloads 0.5 MB (plus ONNX Runtime, 33 MB, if face detection never ran)
@@ -160,13 +161,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "inspect", "script", "proposal", "people", "shoot", "voiceover", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "inspect", "script", "proposal", "people", "shoot", "voiceover", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "bpm", "reset-edits"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -194,6 +195,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   ...SHOOT_FLAGS,
   ...MODEL_FLAGS,
   ...VOICEOVER_FLAGS,
+  ...BEATS_FLAGS,
   matte: [],
   ...STYLE_FLAGS,
   ...FORMAT_FLAGS,
@@ -254,6 +256,7 @@ type Invocation =
   | ShootInvocation
   | ModelInvocation
   | VoiceoverInvocation
+  | BeatsInvocation
   | { kind: "matte"; asset: string }
   | FormatInvocation
   | { kind: "skill.update"; force: boolean }
@@ -332,6 +335,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           restore: { type: "boolean", default: false },
           dtw: { type: "string" },
           lines: { type: "string" },
+          bpm: { type: "string" },
+          "reset-edits": { type: "boolean", default: false },
           // A switch on `clip set` (voice chain), a voice id on `voiceover generate`.
           voice: { type: firstWord === "voiceover" ? "string" : "boolean" },
           yes: { type: "boolean", default: false },
@@ -418,7 +423,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "style" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "beats" || command === "style" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -491,6 +496,8 @@ function parseBuiltin(
     force?: boolean | undefined;
     dtw?: string | undefined;
     lines?: string | undefined;
+    bpm?: string | undefined;
+    "reset-edits"?: boolean | undefined;
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
     formats?: string | undefined;
@@ -515,6 +522,7 @@ function parseBuiltin(
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "voiceover") return parseVoiceover(rest, options);
+  if (command === "beats") return parseBeats(rest, options);
   if (command === "people") return parsePeople(rest, options);
   if (command === "credits") return parseCredits(rest, options);
   if (command === "shoot") return parseShoot(rest, options);
@@ -840,6 +848,9 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         settleTrust: () => settleTrust(conn, flags, io),
         progress: flags.json ? undefined : progressPrinter(io),
       });
+    case "beats.measure":
+    case "beats.show":
+      return executeBeats(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
     case "voiceover.generate":
       await settleTrust(conn, flags, io);
       return executeVoiceover(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));

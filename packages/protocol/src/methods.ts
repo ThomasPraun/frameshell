@@ -7,7 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
-import { HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
+import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
   ProposalOutcomeSchema,
   ProposalSchema,
@@ -30,7 +30,7 @@ import {
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { ReviewPeakSchema, ReviewSheetKindSchema, ReviewSheetSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -66,7 +66,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 86;
+export const PROTOCOL_VERSION = 90;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -222,10 +222,10 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "beats", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
-        "older recipe or fps). `energy`: cut-snapping envelope. `audio`: WAV extracted for transcription. `audio-fx`: baked " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
         "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
@@ -236,6 +236,24 @@ const GcEntrySchema = z.object({
         "another model, fps or matte version). `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
+});
+
+const BeatsSummarySchema = z.object({
+  asset: z.string().describe("Project-relative asset path."),
+  file: z.string().describe("Project-relative beats file, e.g. `beats/theme.beats.json`."),
+  hash: z.string().describe("`sha256:<hex>` of the asset's content the grid was measured from."),
+  detector: z.string().describe("`onset-flux@1`, or `exact` for a grid a generator wrote."),
+  bpm: z.number().describe("Beats per minute, `edits.tempo` applied."),
+  meter: z.int().describe("Beats per bar."),
+  confidence: z.number().min(0).max(1).describe("0..1; under 0.5 the grid may be wrong."),
+  low: z.boolean().describe("True when the grid is low confidence and no human `edit` vouches for it: do not trust or snap to it without a look."),
+  residualMs: z.number().nullable().describe("Largest gap between the straight grid and the hits it matched, ms; null for an exact grid."),
+  sampleRate: z.int().nullable().describe("Sample rate of the analysed audio; 16000 means the fallback decode (low confidence)."),
+  alternatives: z
+    .array(z.object({ tempo: z.enum(["double", "half"]), bpm: z.number() }))
+    .describe("Other tempi to try when `low`, best supported first; set one as `edits.tempo`. Empty otherwise."),
+  beatCount: z.int().describe("Number of beats in the grid."),
+  onsetCount: z.int().describe("Number of strong hits measured."),
 });
 
 const GcSkipSchema = z.object({
@@ -282,7 +300,7 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte", "beats"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`audio-fx`: bake one asset through a clip's audio effects into `.frameshell/audio-fx/` (ADR 0031). " +
@@ -291,7 +309,8 @@ const JobSchema = z.object({
         "`faces`: find faces in a multicam group's angles and write reframe keys (`multicam.faces`). " +
         "`people`: find, follow and embed the faces of video assets (`people.scan`). " +
         "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
-        "`matte`: compute the subject matte of one video asset (`matte.prepare`).",
+        "`matte`: compute the subject matte of one video asset (`matte.prepare`). " +
+        "`beats`: measure the beat grid of one music asset (`beats.measure`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -299,7 +318,7 @@ const JobSchema = z.object({
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
         "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
-        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`.",
+        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`, the music for `beats`.",
     ),
   output: z
     .string()
@@ -313,7 +332,7 @@ const JobSchema = z.object({
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
@@ -321,7 +340,7 @@ const JobSchema = z.object({
         "effects not baked yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded).",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -415,10 +434,19 @@ const ProbeSchema = z.object({
 
 const AssetSchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."),
+  kind: z
+    .enum(["media", "svg", "font"])
+    .describe(
+      "`media`: video, audio or image that can be placed as a clip; ingest builds the derived files below. `svg` (`.svg`) and `font` " +
+        "(`.ttf`, `.otf`, `.woff`, `.woff2`): not media. Ingest only hashes them, every field below stays null, and `clip.add` refuses them.",
+    ),
   hash: z.string().nullable().describe("Content hash `sha256:<hex>`; null until hashed. Transcripts carry it as `assetHash`."),
   state: z
     .enum(["pending", "processing", "ready", "failed"])
-    .describe("`ready`: every output below exists for the current content. `pending`: not ingested yet."),
+    .describe(
+      "`ready`: every output below exists for the current content (for `svg` and `font`: the content is hashed). " +
+        "`pending`: not ingested yet.",
+    ),
   error: z.string().nullable().describe("Why the last ingest failed; null otherwise."),
   media: ProbeSchema.nullable().describe("ffprobe summary; null until probed."),
   proxy: z
@@ -580,7 +608,8 @@ const FormatInfoSchema = z.object({
 const FormatChangeSchema = z.object({
   dir: z.string().describe("Project root."),
   formats: z.array(FormatInfoSchema).describe("The project's formats after the change, primary first."),
-  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
+  tx: TxIdSchema.describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
   undo: z
     .object({ method: z.enum(["format.add", "format.remove"]), params: z.record(z.string(), z.unknown()) })
     .describe("The call that undoes this change (with `cwd` added), e.g. `format.remove` with `{ id: \"9x16\" }`."),
@@ -973,8 +1002,9 @@ export const methods = {
       "1920x1080, `1x1` 1080x1080, `4x5` 1080x1350, `9x16` 1080x1920) take no size; a custom id needs `width` and `height` " +
       "(even), e.g. `{ id: \"web-1600x900\", width: 1600, height: 900 }`. In a format other than the primary, media clips " +
       "with no transform or keys fill the frame (cropped around the centre), generated clips render at the format's size, " +
-      "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl`; `undo` " +
-      "names the call that reverses it (`revert` takes timeline operations only). It applies at once: while review mode is " +
+      "vertical captions are 1.3x larger. The change is journaled in `.frameshell/history/project.config.jsonl` in the " +
+      "caller's transaction (ADR 0036): `history` lists it, `revert` with its `op` or `tx` undoes it, and `undo` names the " +
+      "call that reverses it. It applies at once: while review mode is " +
       "on, only the person in the app may change formats, anyone else gets ProposalState (reason `forbidden`). Fails with " +
       "InvalidOperation (id taken, size missing or odd, a built-in id with another size, an image project), ProposalState, ProjectNotFound.",
     params: z.strictObject({
@@ -996,7 +1026,7 @@ export const methods = {
       "Remove a delivery format from the enclosing project's `formats` (ADR 0027). The primary format (the first, equal " +
       "to `resolution`) cannot be removed. Removing the last other format leaves `frameshell.json` without `formats`. " +
       "Cached renders of generated clips at its size become unused (`gc` deletes them). Journaled like `format.add`; " +
-      "`undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
+      "`revert` or `undo` re-adds it at the same position. Refused in review mode like `format.add`. Fails with FormatNotFound, " +
       "InvalidOperation (the primary), ProposalState, ProjectNotFound.",
     params: z.strictObject({ cwd: CwdParam, id: FormatIdSchema }),
     result: FormatChangeSchema,
@@ -1709,7 +1739,7 @@ export const methods = {
     mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json` and `people.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json` and `people.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
@@ -1954,12 +1984,13 @@ export const methods = {
       "`<scene slug>-<n>` (`hook-1`). Each take is cached by its spoken text, provider (and its version), voice and " +
       "language: a line whose take is current is not generated again (`cached`), and one whose text moved to another " +
       "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Nothing is placed on a " +
-      "timeline. A paid provider (its cost estimate is above 0) generates nothing without `yes: true` and fails with " +
-      "ConfirmationRequired, whose data carries the cost: show it to the person and pass `yes` only after they " +
-      "confirm it, never on your own. A second charge is prevented by the takes marked on disk and one run at a time per " +
+      "timeline. A paid provider (its cost estimate is above 0, or it gives no estimate and does not declare itself " +
+      "free) generates nothing without `yes: true` and fails with ConfirmationRequired, whose data carries the cost " +
+      "(`null` when unknown): show it to the person and pass `yes` only after they confirm it, never on your own. The " +
+      "provider `command` is the TTS program the person set up on this machine (global `config.json` only); it is free. A second charge is prevented by the takes marked on disk and one run at a time per " +
       "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
       "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
-      "SpeechProviderNotFound (data lists the providers there are), ProjectNotTrusted (a plugin provider in an untrusted " +
+      "SpeechProviderNotFound (data lists the providers there are; `command` is missing until set up on the machine), ProjectNotTrusted (a plugin provider in an untrusted " +
       "project), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
       "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +
       "SpeechFailed (the provider failed; takes finished before it are kept, imported and reused by the next call).",
@@ -2546,6 +2577,59 @@ export const methods = {
       seconds: z.number().describe("Seconds it took to compute (when it was computed, for a cached one)."),
     }),
   },
+  "beats.measure": {
+    mutating: true,
+    description:
+      "Measure the beat grid of a music asset (ADR 0029) and write `beats/<asset minus extension>.beats.json` " +
+      "(`beats/<asset>.beats.json`, extension kept, when another asset with the same base name owns the first name): the " +
+      "tempo, every beat in source-asset seconds, which beat starts a bar, the strong hits (onsets), a confidence and the " +
+      "largest gap between the straight grid and a hit it matched (`residualMs`, under 15 on a clean track). Locally, no " +
+      "download: an onset envelope (spectral flux) of the asset's PCM sidecar, a tempo from its autocorrelation, one straight " +
+      "period fitted through the hits, each beat snapped to a hit within 8 ms, the bar start taken from the low band. " +
+      "The grid stands where there is rhythm (from the first matched hit to the last). Calm or sparse music gets a double-time " +
+      "grid: that shows as `low: true` (confidence under 0.5); `alternatives` then lists the other tempi, best supported first, and " +
+      "you or the person pick one with `edits.tempo` (`double` or `half`) in the file; a low grid is never snapped to. " +
+      "Pass `bpm` when you know the tempo: the grid is the octave nearest to it (a 60 BPM song stays 60, not 120). " +
+      "Audio comes from the asset's PCM sidecar; without a finished ingest the asset is decoded at 16 kHz and the result is " +
+      "capped at low confidence. Human `edits` (tempo, downbeat, offset; see `beats.show`) are kept across a new " +
+      "measure unless `resetEdits` or the asset content changed since. Runs as a background job of kind `beats` (`job.list`) in a worker thread; the onset " +
+      "envelope is cached by content in `.frameshell/beats/` (swept by `gc`), so measuring again with another `bpm` takes " +
+      "about a second; a 3-minute track takes about 5 seconds the first time. Not for speech or long recordings: tracks over 10 " +
+      "minutes are refused. Example: `{ asset: \"assets/music/theme.mp3\", bpm: 120 }`. Fails with AssetNotFound, " +
+      "OutsideProject, InvalidOperation (reason `no audio`, `too long`, `no beats`: silence or no rhythm, or `name taken`), " +
+      "InvalidProjectFile (the existing beats file is broken: fix or delete it), or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Music file inside the project, absolute or relative to `cwd`, e.g. `assets/music/theme.mp3`."),
+      bpm: z.number().min(20).max(400).optional().describe("Tempo you expect, in BPM; the measured tempo is moved by octaves toward it. Default: the detector's choice, 70-170 BPM."),
+      resetEdits: z.boolean().default(false).describe("Drop the human `edits` of the previous file instead of keeping them. Default false."),
+    }),
+    result: BeatsSummarySchema.extend({
+      cached: z.boolean().describe("True when the cached onset envelope was reused and only the grid was worked out again."),
+      keptEdits: z.boolean().describe("True when human `edits` of the previous file were carried over (they are dropped when the asset content changed since)."),
+      seconds: z.number().describe("Seconds it took."),
+    }),
+  },
+  "beats.show": {
+    description:
+      "The beat grid of a music asset (ADR 0029): what `beats.measure` wrote to `beats/<asset>.beats.json`, with the human " +
+      "`edits` applied, in source-asset seconds. `beats` are the beat times, `downbeats` the ones that start a bar; the `edits` " +
+      "(`tempo`: `double` or `half`, `downbeat`: index of the first bar start, `offset`: seconds) are in the file, which you " +
+      "change with `file.write` (the content is validated). `low` means the grid may be double time or a bar off: look at " +
+      "`alternatives`, tell the person, and do not cut to it without their say. `current: false` means the asset changed " +
+      "since: measure again. Pure read; no audio is analysed. Example: `{ asset: \"assets/music/theme.mp3\" }`. " +
+      "Fails with AssetNotFound, OutsideProject, InvalidOperation (reason `not measured`: run `beats.measure`), InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      asset: z.string().min(1).describe("Music file inside the project, absolute or relative to `cwd`."),
+    }),
+    result: BeatsSummarySchema.extend({
+      current: z.boolean().describe("True when the asset's content is the one that was measured."),
+      edits: BeatsEditsSchema.describe("Human corrections in the file; empty when none."),
+      beats: z.array(z.number()).describe("Beat times in source-asset seconds, `edits` applied, increasing."),
+      downbeats: z.array(z.number()).describe("The beats that start a bar, source-asset seconds."),
+    }),
+  },
   "image.cutout": {
     mutating: true,
     description:
@@ -2971,11 +3055,14 @@ export const methods = {
       "is undone and it fails with RevertConflict listing each conflicting timeline in `timelines` (transaction stays " +
       "open). In review mode, a proposal still building from it is dropped: nothing of it reached the file. Operations " +
       "that did reach the file (applied before review mode was turned on) are not undone at once: the undo waits for " +
-      "review as a new proposal (`proposal`, labelled `Abort \"<label>\"`); call `proposal.wait`. Fails with " +
+      "review as a new proposal (`proposal`, labelled `Abort \"<label>\"`); call `proposal.wait`. Its project-config " +
+      "changes (`format.add`/`format.remove`, ADR 0036) are undone too, checked before anything is undone; while review " +
+      "mode is on only the person may abort a transaction that changed config (ProposalState `forbidden`). Fails with " +
       "TransactionState when none is open, ProposalPending when another proposal waits (transaction stays open).",
     params: z.strictObject({}),
     result: TransactionInfoSchema.extend({
       reverted: z.array(OperationResultSchema).describe("One `revert` operation per timeline the transaction changed and this undid."),
+      config: z.array(ConfigOperationSchema).describe("One config `revert` operation per config document it changed and this undid (ADR 0036)."),
       proposal: z
         .object({ tx: z.string(), state: ProposalStateSchema })
         .nullable()
@@ -2985,9 +3072,11 @@ export const methods = {
   history: {
     description:
       "List a timeline's journaled operations grouped by transaction, oldest first: op, args, author (`ui`, " +
-      "`cli:<session>`, `agent:<label>:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Pass `since` with your last transaction id " +
+      "`cli:<session>`, `agent:<label>:<session>`, `file`, `plugin:<name>`), revisions and touched ids. Project-config " +
+      "operations (`format.add`/`format.remove`, ADR 0036) are listed in every timeline's history, in their transaction, " +
+      "with `doc` set and their keys (e.g. `format:9x16`) as `touched`. Pass `since` with your last transaction id " +
       "to see only what happened after it, e.g. what the human changed in the app. Fails with HistoryNotFound when " +
-      "`since` is not in this timeline's journal.",
+      "`since` is in neither this timeline's journal nor the config journal.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -3000,8 +3089,9 @@ export const methods = {
       "What a transaction (`tx_…`) or a single operation (`op_…`) did to a timeline's clips: each clip it added, removed, " +
       "moved (other track or start, same length) or otherwise changed (trim, speed, gain, props), with its track, start " +
       "and end right before and right after the target. Later operations do not change the answer. Use it to see what " +
-      "a transaction from `history` changed before you `revert` it. Fails with HistoryNotFound when the id is not in " +
-      "the timeline's journal, HistoryUnavailable when the file changed outside the journal after the target.",
+      "a transaction from `history` changed before you `revert` it. A target only in the project-config journal " +
+      "(`format.add`/`format.remove`, ADR 0036) changed no clips: `clips` is empty. Fails with HistoryNotFound when the " +
+      "id is in neither journal, or changed only other timelines (`data.timelines` names them), HistoryUnavailable when the file changed outside the journal after the target.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -3016,15 +3106,24 @@ export const methods = {
       "newest first, as a new `revert` operation (history stays append-only; reverting a revert redoes). Refused with " +
       "RevertConflict listing the later operations that changed the same tracks or clips: revert those first, newest " +
       "first. Also refused, with empty `conflicts`, when the file changed outside the journal after the target (e.g. " +
-      "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. Fails with " +
-      "HistoryNotFound when the id is not in the timeline's journal, InvalidOperation (reason `format change`) for the `op` " +
-      "of a `format.add`/`format.remove`: run its `undo` call instead.",
+      "edited while the daemon was not running): the journal cannot undo what it did not record, so edit forward. " +
+      "Project-config operations (`format.add`/`format.remove`, ADR 0036) revert too: by their `op`, or with the `tx` " +
+      "that holds them, which undoes its timeline and config operations together; a later change of the same format " +
+      "conflicts like a clip (`ids` holds keys such as `format:9x16`), and a hand edit of `formats` in `frameshell.json` " +
+      "refuses like a hand edit of the timeline. When only config was reverted, `operation` is the config `revert` with " +
+      "an empty inverse and `revision` is unchanged; `config` lists the config `revert` operations. While review mode " +
+      "is on, only the person may revert config (ProposalState `forbidden` for others). A transaction that changed " +
+      "several timelines reverts one timeline per call: its config goes with the first, later calls skip it. Fails " +
+      "with HistoryNotFound when the id is in neither the timeline's journal nor the config journal, or changed only " +
+      "other timelines (`data.timelines` names them: pass one as `timeline`).",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to undo."),
     }),
-    result: OperationResultSchema,
+    result: OperationResultSchema.extend({
+      config: z.array(ConfigOperationSchema).describe("Config `revert` operations it journaled (ADR 0036); empty when the target held none."),
+    }),
   },
   "review.set": {
     mutating: true,

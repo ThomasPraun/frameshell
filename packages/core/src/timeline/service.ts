@@ -30,8 +30,10 @@ import {
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
 import { type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { readConfigJournal } from "../config/journal.js";
 import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
+import { nonMediaError } from "../media/kind.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
 import { type ClipChange, type PlacedClip, planDiff } from "../history/diff.js";
@@ -68,6 +70,7 @@ import {
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, isEmptyPatch, sortMarkers } from "./patch.js";
+import { resolveTimeRefs } from "./time-ref.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -312,7 +315,7 @@ export class TimelineService {
       if (route) {
         try {
           const result = await this.#propose(root, id, route, call, async (base, _current, fps, settings) => {
-            const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(base) } : call);
+            const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(base) } : call, base);
             const applied = await applyOperation(base, request, this.#context(root, id, fps, request.op, settings));
             return { applied, op: request.op, args: request.args as Record<string, unknown>, warnings };
           });
@@ -323,7 +326,7 @@ export class TimelineService {
         }
       }
       const { timeline, fps, ...settings } = await this.#current(root, id);
-      const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call);
+      const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call, timeline);
       const context = this.#context(root, id, fps, request.op, settings);
       const applied = await applyOperation(timeline, request, context);
       const result = await this.#record(call, timeline, applied, request.op, request.args, warnings);
@@ -569,21 +572,25 @@ export class TimelineService {
    * journaled after its decision. Throws HistoryNotFound for an unknown `since`.
    */
   async history(root: string, id: string, options: { since?: string | undefined }): Promise<HistoryResult> {
-    await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
+    const { timeline } = await this.load(root, id); // TimelineNotFound for a typo, not an empty history.
     const entries = await readJournal(root, id);
+    // Project-config operations (ADR 0036) show in every timeline's history.
+    const config = await readConfigJournal(root);
     const decisions = (await readDecisions(await this.#realRoot(root))).filter((decision) => decision.timelines.includes(id));
     const { since } = options;
-    if (since !== undefined && !entries.some((entry) => entry.tx === since)) {
+    const sinceAt = [...entries, ...config].filter((entry) => entry.tx === since).map((entry) => entry.at);
+    if (since !== undefined && sinceAt.length === 0) {
       const decided = decisions.findLastIndex((decision) => decision.tx === since);
       if (decided !== -1) {
         const after = decisions[decided]!.at;
-        const view = historyView(entries.filter((entry) => entry.at > after), id);
+        const later = { entries: config.filter((entry) => entry.at > after), revision: timeline.revision };
+        const view = historyView(entries.filter((entry) => entry.at > after), id, undefined, later);
         return { ...view, since, proposals: decisions.slice(decided) };
       }
     }
-    const view = historyView(entries, id, since);
+    const view = historyView(entries, id, since, { entries: config, revision: timeline.revision });
     if (since === undefined) return { ...view, proposals: decisions };
-    const from = entries.findLast((entry) => entry.tx === since)!.at;
+    const from = sinceAt.sort().at(-1)!;
     return { ...view, proposals: decisions.filter((decision) => decision.tx === since || decision.at >= from) };
   }
 
@@ -1315,6 +1322,8 @@ export class TimelineService {
     return {
       fps,
       source: async (asset) => {
+        const refused = nonMediaError(asset, { op, field: "asset" });
+        if (refused) throw refused;
         let probe: MediaProbe;
         try {
           probe = await this.#options.probe(root, asset);
@@ -1991,9 +2000,11 @@ export async function readTimelineFile(root: string, rel: string): Promise<Timel
  * Project-relative `asset`/`source` args, so the record and the file never
  * hold caller-specific paths. A relative path is tried against `cwd` first,
  * then the project root; a bare timeline id (`intro`) means `timelines/intro.json`.
+ * Time references (marker names, ADR 0037) become seconds against `timeline`, the state the operation applies to.
  */
-function normalizeArgs(call: TimelineCall): OperationRequest {
-  const { request, root, cwd } = call;
+function normalizeArgs(call: TimelineCall, timeline: Timeline): OperationRequest {
+  const { root, cwd } = call;
+  const request = resolveTimeRefs(call.request, timeline);
   if (request.op !== "clip.add") return request;
   const args = { ...request.args };
   if (args.asset !== undefined) args.asset = projectPath(root, cwd, args.asset, "asset");
