@@ -18,6 +18,7 @@ import type { JobQueue } from "../jobs/queue.js";
 import { readEnclosingProject } from "../projects.js";
 import { probeMedia } from "./ffmpeg.js";
 import { type MediaTools, ingestAsset } from "./ingest.js";
+import { assetKindOf, nonMediaError } from "./kind.js";
 import { DERIVED_DIRS, MediaStore, classifyDerived, hashFile } from "./store.js";
 import { ENERGY_DIR, classifyEnergy, energyCacheKey } from "./energy-store.js";
 import { renameRetrying } from "../fs-util.js";
@@ -244,6 +245,8 @@ export class MediaService {
    * `InvalidOperation` (reason `ingest failed`) with the ingest's error, `AssetNotFound` when `rel` is gone.
    */
   async ingested(root: string, rel: string): Promise<{ hash: string; media: MediaProbe; proxy: string | null }> {
+    const refused = nonMediaError(rel);
+    if (refused) throw refused;
     const { store } = this.#attached(root);
     for (let attempt = 0; ; attempt++) {
       if (!(await stat(store.abs(rel)).catch(() => null))?.isFile()) {
@@ -287,6 +290,8 @@ export class MediaService {
    * when ffprobe cannot read it.
    */
   async probe(root: string, rel: string): Promise<MediaProbe> {
+    const refused = nonMediaError(rel);
+    if (refused) throw refused;
     const { store } = this.#attached(root);
     const current = await stat(store.abs(rel)).catch(() => null);
     if (!current?.isFile()) {
@@ -446,6 +451,8 @@ export class MediaService {
     if (tried && tried.size === current.size && tried.mtimeMs === current.mtimeMs) return;
     const fps = (await readEnclosingProject(root))?.config.fps ?? 30;
     const hash = await attached.store.knownHash(rel);
+    // Not media: the hash is all ingest makes.
+    if (hash && assetKindOf(rel) !== "media") return;
     if (hash && (await attached.store.manifest(attached.store.key(hash, fps)))) return;
     this.#enqueue(root, rel);
   }
@@ -538,11 +545,15 @@ export class MediaService {
 async function describeAsset(store: MediaStore, rel: string, jobs: JobInfo[], fps: number): Promise<AssetInfo> {
   const last = jobs.filter((job) => job.kind === "ingest" && job.asset === rel).at(-1);
   const hash = await store.knownHash(rel);
-  const manifest = hash ? await store.manifest(store.key(hash, fps)) : null;
+  const kind = assetKindOf(rel);
+  const manifest = hash && kind === "media" ? await store.manifest(store.key(hash, fps)) : null;
   const active = last?.state === "queued" || last?.state === "running";
-  const state: AssetInfo["state"] = active ? "processing" : manifest ? "ready" : last?.state === "failed" ? "failed" : "pending";
+  // SVG and font files have no outputs: hashed is done.
+  const built = kind === "media" ? manifest !== null : hash !== null;
+  const state: AssetInfo["state"] = active ? "processing" : built ? "ready" : last?.state === "failed" ? "failed" : "pending";
   return {
     path: rel,
+    kind,
     hash,
     state,
     error: state === "failed" ? (last?.error ?? null) : null,
