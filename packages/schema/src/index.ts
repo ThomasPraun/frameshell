@@ -241,6 +241,7 @@ export {
 } from "./plugin.js";
 export {
   BEATS_SCHEMA_URL,
+  BeatsEditsSchema,
   BeatsFileSchema,
   EXACT_DETECTOR,
   LOW_BEAT_CONFIDENCE,

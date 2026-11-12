@@ -209,7 +209,7 @@ export class BeatsStore {
   }
 }
 
-/** A beats file for a freshly measured grid, carrying the human `edits` of `previous` unless `keepEdits` is false. */
+/** A beats file for a freshly measured grid, carrying the human `edits` of `previous` unless `keepEdits` is false or the asset content changed since (edits fit the old audio). */
 export function beatsFileOf(options: {
   asset: string;
   measured: MeasuredBeats;
@@ -231,7 +231,7 @@ export function beatsFileOf(options: {
     confidence: analysis.confidence,
     residualMs: analysis.residualMs,
     ...(analysis.alternatives.length > 0 ? { alternatives: analysis.alternatives } : {}),
-    edits: keepEdits && previous ? previous.edits : {},
+    edits: keepEdits && previous && previous.assetHash === measured.hash ? previous.edits : {},
     beats: analysis.beats,
     onsets: analysis.onsets,
   };

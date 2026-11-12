@@ -11,7 +11,7 @@ export const EXACT_DETECTOR = "exact";
 export const LOW_BEAT_CONFIDENCE = 0.5;
 
 /** A grid someone corrected by hand. Applied on top of the measured `beats` by {@link effectiveBeatGrid}. */
-const BeatsEditsSchema = z.strictObject({
+export const BeatsEditsSchema = z.strictObject({
   tempo: z
     .enum(["double", "half"])
     .optional()
@@ -98,7 +98,9 @@ export interface BeatGrid {
 /**
  * The grid to use: `file.beats` with the human `edits` applied (tempo, then offset, then downbeat), so
  * nothing downstream re-implements them. Half time keeps every other beat; double time adds the midpoint of
- * each pair (none after the last beat).
+ * each pair (none after the last beat). A negative offset drops the beats that land before 0 and moves the
+ * measured downbeat by that many, so bar starts stay on the same musical beats. Half time with an odd measured
+ * `downbeat` puts the bar start on the kept beat before it (half a beat early): set `edits.downbeat` to fix.
  */
 export function effectiveBeatGrid(file: Pick<BeatsFile, "bpm" | "meter" | "downbeat" | "beats" | "edits">): BeatGrid {
   const { edits } = file;
@@ -114,7 +116,13 @@ export function effectiveBeatGrid(file: Pick<BeatsFile, "bpm" | "meter" | "downb
     bpm /= 2;
     downbeat = Math.floor(downbeat / 2);
   }
-  if (edits.offset) beats = beats.map((time) => time + edits.offset!).filter((time) => time >= 0);
+  if (edits.offset) {
+    const shifted = beats.map((time) => time + edits.offset!);
+    const kept = shifted.filter((time) => time >= 0);
+    const dropped = shifted.length - kept.length;
+    beats = kept;
+    downbeat = (((downbeat - dropped) % file.meter) + file.meter) % file.meter;
+  }
   if (edits.downbeat !== undefined) downbeat = edits.downbeat;
   const round = (time: number) => Math.round(time * 10_000) / 10_000;
   beats = beats.map(round);

@@ -134,6 +134,9 @@ describe("beats files", () => {
     expect(kept.edits).toEqual({ tempo: "half", offset: 0.01 });
     expect(reset.edits).toEqual({});
     expect(effectiveBeatGrid(kept).bpm).toBeCloseTo(60, 0);
+    // Edits made for other audio content are not carried onto a re-encoded or replaced track.
+    const replaced = beatsFileOf({ asset: "assets/loop.wav", measured, previous: { ...edited, assetHash: `sha256:${"ef".repeat(32)}` }, keepEdits: true });
+    expect(replaced.edits).toEqual({});
   });
 });
 

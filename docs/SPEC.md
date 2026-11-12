@@ -484,7 +484,6 @@ Optional (ADR 0029). One file per music asset, named like transcripts (`beats/<p
   "downbeat": 2,
   "confidence": 0.93,
   "residualMs": 4.2,
-  "alternatives": [{ "tempo": "half", "bpm": 60 }],
   "edits": { "tempo": "half", "downbeat": 1, "offset": 0.012 },
   "beats": [0.2, 0.7, 1.2],
   "onsets": [0.2, 0.46, 0.7]

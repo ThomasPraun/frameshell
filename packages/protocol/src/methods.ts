@@ -29,7 +29,7 @@ import {
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -235,12 +235,6 @@ const GcEntrySchema = z.object({
         "another model, fps or matte version). `temp`: leftover of an interrupted job or transcription.",
     ),
   bytes: z.int().describe("Size on disk; a directory counts its files."),
-});
-
-const BeatsEditsResultSchema = z.object({
-  tempo: z.enum(["double", "half"]).optional(),
-  downbeat: z.int().optional(),
-  offset: z.number().optional(),
 });
 
 const BeatsSummarySchema = z.object({
@@ -2532,7 +2526,7 @@ export const methods = {
       "Pass `bpm` when you know the tempo: the grid is the octave nearest to it (a 60 BPM song stays 60, not 120). " +
       "Audio comes from the asset's PCM sidecar; without a finished ingest the asset is decoded at 16 kHz and the result is " +
       "capped at low confidence. Human `edits` (tempo, downbeat, offset; see `beats.show`) are kept across a new " +
-      "measure unless `resetEdits`. Runs as a background job of kind `beats` (`job.list`) in a worker thread; the onset " +
+      "measure unless `resetEdits` or the asset content changed since. Runs as a background job of kind `beats` (`job.list`) in a worker thread; the onset " +
       "envelope is cached by content in `.frameshell/beats/` (swept by `gc`), so measuring again with another `bpm` takes " +
       "about a second; a 3-minute track takes about 5 seconds the first time. Not for speech or long recordings: tracks over 10 " +
       "minutes are refused. Example: `{ asset: \"assets/music/theme.mp3\", bpm: 120 }`. Fails with AssetNotFound, " +
@@ -2546,7 +2540,7 @@ export const methods = {
     }),
     result: BeatsSummarySchema.extend({
       cached: z.boolean().describe("True when the cached onset envelope was reused and only the grid was worked out again."),
-      keptEdits: z.boolean().describe("True when human `edits` of the previous file were carried over."),
+      keptEdits: z.boolean().describe("True when human `edits` of the previous file were carried over (they are dropped when the asset content changed since)."),
       seconds: z.number().describe("Seconds it took."),
     }),
   },
@@ -2565,7 +2559,7 @@ export const methods = {
     }),
     result: BeatsSummarySchema.extend({
       current: z.boolean().describe("True when the asset's content is the one that was measured."),
-      edits: BeatsEditsResultSchema.describe("Human corrections in the file; empty when none."),
+      edits: BeatsEditsSchema.describe("Human corrections in the file; empty when none."),
       beats: z.array(z.number()).describe("Beat times in source-asset seconds, `edits` applied, increasing."),
       downbeats: z.array(z.number()).describe("The beats that start a bar, source-asset seconds."),
     }),

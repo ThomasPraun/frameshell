@@ -2100,7 +2100,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         return {
           ...summarizeBeats(file, target.rel).summary,
           cached: measured.cached,
-          keptEdits: !resetEdits && target.previous !== null && Object.keys(target.previous.edits).length > 0,
+          keptEdits: Object.keys(file.edits).length > 0,
           seconds: Math.round((Date.now() - started) / 100) / 10,
         };
       });

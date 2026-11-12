@@ -71,6 +71,15 @@ describe("effectiveBeatGrid", () => {
     expect(nudged.downbeat).toBe(3);
     expect(nudged.downbeats).toEqual([nudged.beats[3]!]);
   });
+
+  it("keeps bar starts on the same musical beats when a negative offset drops beats before 0", () => {
+    const fromZero = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
+    const nudged = grid({ offset: -0.01 }, { beats: fromZero, downbeat: 0 });
+    // Beat 0 falls before 0 and goes; the old beats 4 and 8 still start bars, the old beat 0 is gone.
+    expect(nudged.beats[0]).toBe(0.49);
+    expect(nudged.downbeat).toBe(3);
+    expect(nudged.downbeats).toEqual([2 - 0.01, 4 - 0.01].map((t) => Math.round(t * 10_000) / 10_000));
+  });
 });
 
 describe("isLowConfidence", () => {
