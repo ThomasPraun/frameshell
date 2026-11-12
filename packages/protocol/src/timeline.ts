@@ -55,6 +55,8 @@ const TimeRef = (what: string) =>
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
         "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`); the daemon turns it into seconds first, so the history records seconds.",
     );
+/** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
+export { TimeRef as TimeRefParam };
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 
 /** What `snapTo` lands on (ADR 0029 decision 6). */

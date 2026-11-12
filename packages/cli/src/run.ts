@@ -170,7 +170,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "reset-edits", "variant", "seed", "pitch", "length"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -346,6 +346,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           seed: { type: "string" },
           pitch: { type: "string" },
           length: { type: "string" },
+          role: { type: "string" },
+          tier: { type: "string" },
+          cuts: { type: "string" },
+          which: { type: "string" },
+          typing: { type: "boolean", default: false },
+          rate: { type: "string" },
           "reset-edits": { type: "boolean", default: false },
           // A switch on `clip set` (voice chain), a voice id on `voiceover generate`.
           voice: { type: firstWord === "voiceover" ? "string" : "boolean" },
@@ -511,6 +517,17 @@ function parseBuiltin(
     seed?: string | undefined;
     pitch?: string | undefined;
     length?: string | undefined;
+    role?: string | undefined;
+    tier?: string | undefined;
+    cuts?: string | undefined;
+    which?: string | undefined;
+    typing?: boolean | undefined;
+    rate?: string | undefined;
+    from?: string | undefined;
+    to?: string | undefined;
+    offset?: string | undefined;
+    gain?: string | undefined;
+    track?: string | string[] | undefined;
     "reset-edits"?: boolean | undefined;
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
@@ -868,6 +885,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         progress: flags.json ? undefined : progressPrinter(io),
       });
     case "sound.sfx":
+    case "sound.place":
       return executeSound(conn, inv, cwd, flags.json);
     case "beats.measure":
     case "beats.show":

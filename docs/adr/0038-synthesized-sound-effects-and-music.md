@@ -4,7 +4,7 @@ status: accepted
 
 # Synthesized sound effects and music: a seeded synth in core, marked takes in assets/sound/, placement by anchor on time references
 
-#463 (epic #451) asks for offline, seeded sound effects (click, tick, pop, whoosh, riser, thump, impact, shutter) and music (tempo, chords, sections, genre presets), written as WAV files under new names, placed on markers or events, the same file for the same seed, with loudness in range per kind. The ticket text proposed an official plugin `@frameshell/sound`. The owner decided on 2026-11-11: option A, every recommendation of the proposed decision accepted (the eight points below). It ships in slices; **slice 1, the sound effects and `sound.sfx`, is what is built so far.**
+#463 (epic #451) asks for offline, seeded sound effects (click, tick, pop, whoosh, riser, thump, impact, shutter) and music (tempo, chords, sections, genre presets), written as WAV files under new names, placed on markers or events, the same file for the same seed, with loudness in range per kind. The ticket text proposed an official plugin `@frameshell/sound`. The owner decided on 2026-11-11: option A, every recommendation of the proposed decision accepted (the eight points below). It ships in slices; **slices 1 (the sound effects, `sound.sfx`) and 2 (`sound.place`) are built so far.**
 
 ## Context (verified)
 
@@ -31,7 +31,7 @@ Gain: clip `gain` relative to the voice from `style.sound.sfxUnderVoice` and `mu
 ## Slices
 
 1. **Sound effects:** `SFX_KINDS` and the role table in `packages/schema/src/sound.ts`, the synth, `sound.sfx`, CLI `frameshell sound sfx`, MCP `sound_sfx`, protocol bump. Built, see below.
-2. `sound.place` on TimeRef cues (the shared resolver of ADR 0037), with gain from the style and the warnings of decision 5; skill reference of the placement grammar.
+2. **Placement:** `sound.place` on TimeRef cues (the shared resolver of ADR 0037), on the cuts of a track and on typing runs, with gain from the style and the warnings of decision 5; CLI `sound place`, MCP `sound_place`, skill reference of the placement grammar. Built, see below.
 3. Music: a seeded 16-step sequencer (synthwave, lo-fi, minimal), sections, sidechain, `sound.music`, the exact beats file.
 4. Credits integration for music takes and the remaining docs.
 5. Later: the CC0 set, more kinds, an audition page.
@@ -47,6 +47,20 @@ Gain: clip `gain` relative to the voice from `style.sound.sfxUnderVoice` and `mu
 - **Shared code.** `wavBytes` in `transcripts/window.ts` writes any channel count at 16 or 24 bits; `pcmWavBytes` calls it with the same bytes as before, so voiceover and transcription windows are unchanged. The rule that a file without our chunk is never overwritten is the voiceover rule, copied in shape because the two marks differ.
 - **Registry type size.** `TimelinePatchSchema` is typed by name (`z.ZodType<TimelinePatch>`): it is the inverse of every operation result, so its structure was written out in dozens of methods and the `methods` registry hit TS7056 with one more entry.
 - Protocol 92.
+
+## Slice 2 as built
+
+- **Method.** `sound.place { timeline = main, cues?, cuts?, typing?, track? }`, mutating; at least one of `cues`, `cuts`, `typing`. It makes every take like `sound.sfx` (the same code, cached when current, serialised with other sound work of the project), then writes **one transaction** `Sound: 2 whoosh, 3 click` made of at most one `track.add` per audio track it needs and a `clip.add` per sound. In review mode that is one proposal (ADR 0019); `revert` undoes it whole, the new track included. Planning (`planSounds`) is separate from the writes (`runPlan`) and touches no timeline file; the daemon opens the transaction only when there is a sound to write.
+- **Where.** A *cue* is `{ at, kind, … }` with `at` a TimeRef resolved by the shared resolver of ADR 0037 against the timeline as the caller sees it (so `beat:` and `bar:` work the day that resolver builds them; this code parses nothing). `cuts` is the start of every clip after the first of a video, audio or program track, or the numbered ones in `which`. `typing` is a run of keys between `from` and `to`: `tick` (default) or `click`, 8 keys a second by default, at most 10, each interval jittered by ±10 % from a seed (so two keys are never closer than 90 ms, above the 87 ms of the key gap), the takes rotating through 3 variants and 2 seeds so one never repeats the one before it. At most 200 sounds per call; the whole call is refused before any file is written when a time, track or cut number is wrong.
+- **Offset.** A sound lands at `cue + offset - anchor`, the offset from `SOUND_ROLE_OFFSETS` by `role`, or `offset` (ms) when given. A kind has a default role: `click` and `shutter` click, `tick` tap, `pop` and `thump` pop, `whoosh` whoosh, `impact` knock; a riser has none and ends 75 ms before the cue. The result reports the offset used.
+- **Whole frames.** A clip starts on a frame and the engine keeps whole frames of a file (it cuts the source at the last frame boundary). So a sound lands within half a frame of where asked (the -11 ms of a click is lost at 30 fps, and 60 ms becomes 2 frames), a riser loses its last partial frame (its anchor is planned at the end of the last whole frame), and a sound shorter than one frame (a 35 ms tick at 24 fps) cannot be a clip: it is listed in `skipped` with the reason, never a failure of the call. A sound whose start would fall before the timeline is cut at its head (`in`) with a warning, or skipped when nothing would be left.
+- **Tracks.** The sounds go on the audio track named `SFX` (made when absent) or on `track`. Clips on one track cannot overlap and the sounds of a whoosh and a click do, so a sound that does not fit goes on `SFX 2`, `SFX 3` and so on (found by name, else made); each new clip keeps a spare frame from its neighbour. Only the tracks the call used are listed.
+- **Gain.** Clip `gain` = `-style.sound.sfxUnderVoice` plus the tier in `SOUND_TIER_OFFSETS_DB` (primary 0, secondary -4, texture -8 dB), or `gain` when given. The voice is the reference by convention: takes peak at -3 dBFS, and nothing measures the voice (per-asset loudness is ADR 0037 slice 3). A kind has a default tier: tick texture, shutter secondary, the rest primary; a typing run is texture. The linear gains of the ticket body (0.7 to 0.9, 0.45 to 0.6, 0.3 to 0.4) are superseded by this decision comment's dB tiers.
+- **Variants.** A sound without `variant` rotates through 1 to 3 along the timeline, starting after the sounds of that kind already on the audio tracks, so the same whoosh is not twice in a row, within a call or across calls.
+- **Warnings** (never refusals, decision 5), computed over the new sounds and those already on audio tracks (read from the `fssd` mark of each take): more than 2 anchors on one frame (`SOUND_MAX_PER_FRAME`); two ticks closer than 66 ms or two pops closer than 114 ms (`SOUND_MIN_GAP_MS`; the 87 ms of keys is kept by the typing run itself, `SOUND_KEY_GAP_MS`); one take twice in a row in time order. Only warnings that involve a new sound are shown, the first 6 and then a count. The same function (`soundWarnings`) is what #457 can lint with.
+- **Credits** are the slice 1 path: each take is recorded as `own` when the project keeps a ledger.
+- **Stale.** The times are read before the takes are made and the timeline is read again after: a changed revision fails with `StaleRevision` and places nothing (the takes stay, they are cached).
+- Protocol 97.
 
 ## Considered options
 
