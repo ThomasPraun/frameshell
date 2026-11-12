@@ -1,6 +1,6 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
 import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, MatteStateInfo, TimelineView } from "@frameshell/protocol";
-import type { Angle, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
+import type { Angle, Backdrop, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
 import {
   type HostFade,
   type LayerRect,
@@ -27,7 +27,7 @@ import {
   staticGain,
   subjectOf,
 } from "@frameshell/schema/composite";
-import { audioEffectsOf, bakeRef } from "@frameshell/schema/effects";
+import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
 import { type ClipEdges, type FrameRect, type ShapePart, type TransitionContext, clipLength, edgeTransitions, shapeAt } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
@@ -112,6 +112,8 @@ export type VideoSpan =
       motion?: SpanMotion;
       /** True: render frame `in` shows throughout, a dissolve handle held past the clip's first or last frame (ADR 0018). */
       hold?: true;
+      /** The clip's backdrop on an upper track (ADR 0031): what is below is blurred where it shows, as export draws it. */
+      glass?: Backdrop;
     }
   | {
       /** One angle of a multicam shot (ADR 0016): its proxy, cut into the shot's tile ({@link angleLayer}). */
@@ -426,11 +428,15 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     };
 
     if (track.kind === "video" && showsPicture(track)) {
+      const bottom = layers.length === 0;
       const pictures = kept.map(({ clip, start, end }) => {
         const info = "asset" in clip ? assets.get(clip.asset) : undefined;
-        return subjectOf(clip) ? subjectPicture(clip, info, start, end, fps, options.mattes) : pictureOf(clip, info, start, end, fps, options.renders);
+        if (subjectOf(clip)) return subjectPicture(clip, info, start, end, fps, options.mattes);
+        const picture = pictureOf(clip, info, start, end, fps, options.renders);
+        // Nothing is below the bottom track to blur, as in export.
+        const glass = bottom ? null : backdropOf(clip);
+        return glass && picture?.kind === "generated" ? { ...picture, glass } : picture;
       });
-      const bottom = layers.length === 0;
       if (bottom) baseTrack = track.id;
       // A subject takes the shapes of its plate clip when the plate is the bottom track, as export draws it.
       const plate = kept.map(({ clip }) => subjectOf(clip)?.plate).find((id) => id !== undefined);

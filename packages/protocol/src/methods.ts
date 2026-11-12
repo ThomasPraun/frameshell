@@ -69,7 +69,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 96;
+export const PROTOCOL_VERSION = 97;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2964,7 +2964,7 @@ export const methods = {
     mutating: true,
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioEffects` (media; replaces the effect list, " +
-      "`null` clears; see below), `transform` (merged field by field), " +
+      "`null` clears; see below), `backdrop` (generated clips; see below), `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
       "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
       "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
@@ -2974,6 +2974,11 @@ export const methods = {
       "`[{ kind: \"highpass\", frequency: 85 }, { kind: \"denoise\", floor: -30, reduction: 8 }, { kind: \"compressor\", threshold: -20, ratio: 2.5, " +
       "attack: 8, release: 140, makeup: 2 }]`. The asset is baked once per chain in the background; export waits for it, the preview plays " +
       "dry until it is ready. Energy snapping and transcription keep the dry sound. Integrated loudness stays the export's (`export.loudness`). " +
+      "`backdrop` (ADR 0031) makes a generated clip glass: export and preview blur (`blur`, Gaussian sigma in project px), saturate " +
+      "(`saturate`, 1 unchanged) and dim (`dim`, 0 to 1) the picture below the clip wherever the clip's alpha shows, then draw the clip; " +
+      "its render does not change. Merged field by field, `null` clears. Glass is a style choice, never a default: use it when the " +
+      "style's `glass.cards` is true, with the style's `glass` numbers (`style_show`), else only when asked. On the bottom video track " +
+      "nothing is below: stored with a warning, not drawn. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

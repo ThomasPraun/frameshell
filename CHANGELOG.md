@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 97): a generated clip on an upper
+  video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
+  and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
+  and wiping with the clip, then draw the clip; its render does not change. `frameshell clip set <clip> --glass` copies
+  the new `style.json` `glass` numbers (default blur 46, saturate 1.45, dim 0.55) onto the clip; `--backdrop-blur`,
+  `--backdrop-saturate`, `--backdrop-dim` set one number, `--clear-backdrop` removes it (daemon and MCP `clip.set`
+  `backdrop`). `glass.cards` (default false) says whether the style uses glass cards at all: glass is never a default.
+  The clip inspector has a Glass switch with Blur, Saturate and Dim fields. On the bottom picture track the backdrop is
+  kept with a warning and not drawn. Timelines without backdrops export exactly as before. In the preview one glass
+  card costs about 4 ms per frame at a 1920x1080 canvas on an Apple M3. Older Frameshell versions reject a timeline or
+  `style.json` that carries the new fields.
+
 - Beat grid on the timeline, third slice of #458 (ADR 0029, epic #451; daemon `tempo.set`, `tempo.show`, `timeline.show`
   `grid`, MCP `tempo_set`, `tempo_show`, event `beats.changed`, protocol 96): a timeline names the grid it follows in
   its optional `tempo`. `tempo set --clip <music clip>` carries the measured grid in the beats file of that clip's asset
