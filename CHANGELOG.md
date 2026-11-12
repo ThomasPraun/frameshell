@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SVG and font files in `assets/` are non-media assets (#520, split from #467). `.svg`, `.ttf`, `.otf`, `.woff` and `.woff2`
+  were queued for media ingest and failed (fonts in `assets/fonts/` included); now ingest only hashes them: no probe,
+  no proxy or other derived media, no ffmpeg, no failed job. `asset.list` (and `asset.changed`) report a new `kind`
+  (`media`, `svg` or `font`) and `state` `ready` once hashed. `clip.add` and other edits that take a media asset
+  refuse them with `not media` instead of an ffprobe error. Protocol 86.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench

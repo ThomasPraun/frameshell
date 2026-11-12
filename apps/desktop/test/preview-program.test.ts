@@ -28,6 +28,7 @@ function asset(path: string, overrides: Partial<AssetInfo> = {}): AssetInfo {
   const key = path.replace(/\W/g, "");
   return {
     path,
+    kind: "media",
     hash: `sha256:${key}`,
     state: "ready",
     error: null,
