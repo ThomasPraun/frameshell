@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 103;
+export const PROTOCOL_VERSION = 104;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1533,8 +1533,14 @@ export const methods = {
       "uses changes; unchanged clips reuse the cache. Use it after `clip.add` of a generated clip to learn when its " +
       "render is ready (`state: \"ready\"`), or follow `job.progress` events of kind `clip`. `render` waits for " +
       "pending clip renders itself. A `failed` clip carries the adapter's `error`: fix the composition, then check " +
-      "again. Fails with TimelineNotFound or InvalidProjectFile.",
-    params: z.strictObject({ cwd: CwdParam, timeline: TimelineIdSchema }),
+      "again. Background renders cover only the primary format; `format` reports the renders at another format's " +
+      "size and queues the missing ones (`render --formats` and `frame` in that format make them too). Fails with " +
+      "TimelineNotFound, FormatNotFound or InvalidProjectFile.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      format: FormatIdSchema.optional().describe("Format of the project (`format.list`), e.g. `9x16`. Default: the primary format."),
+    }),
     result: z.object({
       timeline: z.string(),
       revision: z.int().describe("Timeline revision the states refer to."),

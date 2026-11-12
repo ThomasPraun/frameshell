@@ -108,7 +108,7 @@ import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
-import { FormatService, builtinFormatInfos, formatInfos, projectConfigDocument } from "./formats.js";
+import { FormatService, builtinFormatInfos, formatInfos, formatNotFound, projectConfigDocument } from "./formats.js";
 import { ConfigJournal, readConfigJournal } from "./config/journal.js";
 import { applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
 import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
@@ -1527,7 +1527,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const bytes = removed.reduce((sum, entry) => sum + entry.bytes, 0);
       return { dir, dryRun, removed, bytes, forgotten: derived.forgotten, skipped };
     },
-    "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
+    "clip.renders": async ({ cwd, timeline, format }) => {
+      const dir = await root(cwd);
+      if (format === undefined) return clips.status(clipRoot(dir), timeline);
+      const config = await readProjectConfig(dir);
+      const found = projectFormats(config).find((entry) => entry.id === format);
+      if (!found) throw formatNotFound(format, config);
+      return clips.status(clipRoot(dir), timeline, { width: found.width, height: found.height });
+    },
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
