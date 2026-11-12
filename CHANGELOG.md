@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SVG and font files in `assets/` are non-media assets (#520, split from #467). `.svg`, `.ttf`, `.otf`, `.woff` and `.woff2`
+  were queued for media ingest and failed (fonts in `assets/fonts/` included); now ingest only hashes them: no probe,
+  no proxy or other derived media, no ffmpeg, no failed job. `asset.list` (and `asset.changed`) report a new `kind`
+  (`media`, `svg` or `font`) and `state` `ready` once hashed. `clip.add` and other edits that take a media asset
+  refuse them with `not media` instead of an ffprobe error. Protocol 86.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench
@@ -200,6 +205,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `clip set --voice` (#464, ADR 0031) writes the voice chain of the project's `style.json` (`sound.voice`, ADR 0028)
+  instead of fixed numbers: style seconds become milliseconds, each number is held to the effect's range, and a
+  noise reduction of 0 leaves `denoise` out. Without a `style.json`, or with a style that does not set `sound.voice`,
+  the chain is the same as before. The style's default high-pass is now 85 Hz (was 80), the voice chain's.
 - Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
   `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
   `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.

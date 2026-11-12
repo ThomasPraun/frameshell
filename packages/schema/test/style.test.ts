@@ -10,8 +10,10 @@ import {
   SafeZoneSchema,
   StyleMotionValuesSchema,
   StyleValuesSchema,
+  VOICE_CHAIN,
   parseStyleFile,
   resolveStyle,
+  voiceChainOf,
   type StyleFile,
 } from "../src/index.js";
 
@@ -130,5 +132,28 @@ describe("safe zones", () => {
   it("marks only the Instagram numbers as measured", () => {
     expect(PLATFORM_IDS.filter((id) => SAFE_ZONES[id].measured)).toEqual(["instagram-reels"]);
     expect(SAFE_ZONES["instagram-reels"]).toMatchObject({ width: 1080, height: 1920, top: 220, right: 140, bottom: 380 });
+  });
+});
+
+describe("voiceChainOf (#464)", () => {
+  it("gives the voice chain for the default style, so --voice is unchanged without a style", () => {
+    expect(voiceChainOf(resolveStyle(null).sound.voice)).toEqual(VOICE_CHAIN);
+    expect(voiceChainOf(resolveStyle(parse({})).sound.voice)).toEqual(VOICE_CHAIN);
+  });
+
+  it("takes the style's numbers, seconds as milliseconds, and keeps the rest at the default", () => {
+    const style = parse({ sound: { voice: { highpass: 100, compressor: { ratio: 3, attack: 0.012, release: 0.2 } } } });
+    expect(voiceChainOf(resolveStyle(style).sound.voice)).toEqual([
+      { kind: "highpass", frequency: 100 },
+      { kind: "denoise", floor: -30, reduction: 8 },
+      { kind: "compressor", threshold: -20, ratio: 3, attack: 12, release: 200, makeup: 2 },
+    ]);
+  });
+
+  it("leaves denoise out at a reduction of 0 and holds every number to the effect's range", () => {
+    const style = parse({ sound: { voice: { highpass: 20, denoise: { reduction: 0 }, compressor: { attack: 0, release: 0.001 } } } });
+    const chain = voiceChainOf(resolveStyle(style).sound.voice);
+    expect(chain.map((effect) => effect.kind)).toEqual(["highpass", "compressor"]);
+    expect(chain[1]).toMatchObject({ attack: 0.01, release: 1 });
   });
 });

@@ -65,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 85;
+export const PROTOCOL_VERSION = 86;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -414,10 +414,19 @@ const ProbeSchema = z.object({
 
 const AssetSchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."),
+  kind: z
+    .enum(["media", "svg", "font"])
+    .describe(
+      "`media`: video, audio or image that can be placed as a clip; ingest builds the derived files below. `svg` (`.svg`) and `font` " +
+        "(`.ttf`, `.otf`, `.woff`, `.woff2`): not media. Ingest only hashes them, every field below stays null, and `clip.add` refuses them.",
+    ),
   hash: z.string().nullable().describe("Content hash `sha256:<hex>`; null until hashed. Transcripts carry it as `assetHash`."),
   state: z
     .enum(["pending", "processing", "ready", "failed"])
-    .describe("`ready`: every output below exists for the current content. `pending`: not ingested yet."),
+    .describe(
+      "`ready`: every output below exists for the current content (for `svg` and `font`: the content is hashed). " +
+        "`pending`: not ingested yet.",
+    ),
   error: z.string().nullable().describe("Why the last ingest failed; null otherwise."),
   media: ProbeSchema.nullable().describe("ffprobe summary; null until probed."),
   proxy: z
