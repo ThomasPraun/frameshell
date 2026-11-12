@@ -521,7 +521,7 @@ describe("new timeline files and aborted transactions (#328)", () => {
     const other = join(dir, "timelines", "other.json");
     expect((await rejection(agent.request("file.write", { path: other, content }))).code).toBe(ErrorCode.ProposalPending);
 
-    expect(await ui().request("proposal.accept", { cwd: dir, tx: proposal!.tx })).toEqual({ tx: proposal!.tx, operations: [] });
+    expect(await ui().request("proposal.accept", { cwd: dir, tx: proposal!.tx })).toEqual({ tx: proposal!.tx, operations: [], config: [] });
     expect(readFileSync(extra, "utf8")).toBe(content);
     expect(names(await ui().request("timeline.show", { cwd: dir, timeline: "extra" }))).toEqual(["Extra"]);
     expect(existsSync(join(dir, ".frameshell", "proposals", `${proposal!.tx}.json`))).toBe(false);

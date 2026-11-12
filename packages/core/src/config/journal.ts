@@ -85,6 +85,8 @@ export interface ConfigDocument {
   read(root: string): Promise<ConfigState>;
   /** Write keyed state `state`, keeping everything else in the file. Throws when the result would not validate. */
   write(root: string, state: ConfigState): Promise<void>;
+  /** Keys of `state` that break the document's rules in the project now (a proposal replayed on the person's edit); empty when none. */
+  check?(root: string, state: ConfigState): Promise<string[]>;
 }
 
 /** What a config operation records besides its patch. */
@@ -93,8 +95,42 @@ export interface ConfigRecord {
   args: Record<string, unknown>;
   author: string;
   tx: TxRef;
-  undo?: ConfigJournalEntry["undo"];
+  undo?: ConfigJournalEntry["undo"] | undefined;
+  /** Op id to journal it under: the proposed operation's, once accepted (ADR 0019). Default: a new one. */
+  id?: string | undefined;
+  /** The proposal it was accepted from. */
+  proposal?: string | undefined;
 }
+
+/** One change of a config document, made on the keyed state it applies to; see {@link ConfigChanger}. */
+export interface ConfigEdit {
+  op: string;
+  args: Record<string, unknown>;
+  undo?: ConfigJournalEntry["undo"] | undefined;
+  /** The document's keyed state after the change. */
+  after: ConfigState;
+}
+
+/** Where a config change went: journaled and written (`proposal` null), or held by review mode's open proposal. */
+export interface ConfigChanged {
+  operation: ConfigOperation;
+  /** The document's keyed state after it: the file's, or the proposal's version. */
+  state: ConfigState;
+  /** Id of the proposal holding it; null when it was applied. */
+  proposal: string | null;
+}
+
+/**
+ * Make one change of config document `doc` of project `root` by `who` (ADR 0036): `make` gets the state it applies
+ * to (`base`: the open proposal's version in review mode, else the file's) and the file's (`current`). Applied at
+ * once, or held by review mode (ADR 0019); see `TimelineService.changeConfig`. Callers hold `ConfigJournal.serial(root)`.
+ */
+export type ConfigChanger = (
+  root: string,
+  doc: ConfigDoc,
+  who: { author: string; tx: TxRef },
+  make: (base: ConfigState, current: ConfigState) => Promise<ConfigEdit>,
+) => Promise<ConfigChanged>;
 
 /** A planned revert of one document: its state now and the state to write. */
 export interface ConfigRevertPlan {
@@ -140,11 +176,31 @@ export class ConfigJournal {
     return this.#docs[doc].read(root);
   }
 
-  /** Journal the change of `doc` from `before` to `after`, then write it. Journal first: no change reaches the file without its line. */
-  async commit(root: string, doc: ConfigDoc, record: ConfigRecord, before: ConfigState, after: ConfigState): Promise<ConfigJournalEntry> {
-    const { tx, undo, ...rest } = record;
+  /** Keys of `state` that would break `doc`'s rules in project `root`; empty when it can be written. */
+  check(root: string, doc: ConfigDoc, state: ConfigState): Promise<string[]> {
+    return this.#docs[doc].check?.(root, state) ?? Promise.resolve([]);
+  }
+
+  /** How `doc`'s keys compare and are written. */
+  rules(doc: ConfigDoc): ConfigRules {
+    return this.#docs[doc].rules;
+  }
+
+  /**
+   * Journal the change of `doc` from `before` to `after`, then write it (`write` instead of the document's own
+   * writer, for a caller that writes the whole file). Journal first: no change reaches the file without its line.
+   */
+  async commit(
+    root: string,
+    doc: ConfigDoc,
+    record: ConfigRecord,
+    before: ConfigState,
+    after: ConfigState,
+    write?: () => Promise<void>,
+  ): Promise<ConfigJournalEntry> {
+    const { tx, undo, id, proposal, ...rest } = record;
     const entry: ConfigJournalEntry = {
-      id: `op_${randomBytes(4).toString("hex")}`,
+      id: id ?? `op_${randomBytes(4).toString("hex")}`,
       ...rest,
       tx: tx.id,
       txLabel: tx.label,
@@ -154,9 +210,10 @@ export class ConfigJournal {
       hashBefore: configHash(before),
       hash: configHash(after),
       ...(undo ? { undo } : {}),
+      ...(proposal ? { proposal } : {}),
     };
     await appendJsonLine(join(root, ...CONFIG_JOURNAL.split("/")), entry);
-    await this.#docs[doc].write(root, after);
+    await (write ? write() : this.#docs[doc].write(root, after));
     return entry;
   }
 
@@ -176,14 +233,5 @@ export class ConfigJournal {
       plans.push({ doc, current, restored: planConfigRevert(current, lines, target, doc, this.#docs[doc].rules) });
     }
     return plans;
-  }
-
-  /** Journal and write `plans` as one `revert` of `target` each, in `tx`. */
-  async commitRevert(root: string, plans: readonly ConfigRevertPlan[], call: { author: string; tx: TxRef; target: string }): Promise<ConfigJournalEntry[]> {
-    const written: ConfigJournalEntry[] = [];
-    for (const { doc, current, restored } of plans) {
-      written.push(await this.commit(root, doc, { op: "revert", args: { target: call.target }, author: call.author, tx: call.tx }, current, restored));
-    }
-    return written;
   }
 }

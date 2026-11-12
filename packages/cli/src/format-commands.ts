@@ -78,5 +78,12 @@ function line(format: FormatInfo): string {
 
 /** What changed, the formats now, and the command that undoes it. */
 function changed(what: string, result: FormatChange): string {
-  return `${what} (${result.op}). Formats: ${result.formats.map((format) => format.id).join(", ")}\n  undo: ${formatUndoCommand(result.undo)}\n`;
+  const formats = result.formats.map((format) => format.id).join(", ");
+  if (result.proposal) {
+    return (
+      `${what} in proposal ${result.proposal} (${result.op}): review mode is on, so frameshell.json is unchanged until the person accepts it. ` +
+      `Formats once accepted: ${formats}\n  next: frameshell proposal wait\n`
+    );
+  }
+  return `${what} (${result.op}). Formats: ${formats}\n  undo: ${formatUndoCommand(result.undo)}\n`;
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { authorOf } from "../history/model.js";
 import { t } from "../i18n.js";
-import { type ReviewSide, barOf, whoOf } from "../review/model.js";
+import { type ConfigLine, type ReviewSide, barOf, configLines, whoOf } from "../review/model.js";
 import { decide, dismissStaleNotice, showSide, useReview } from "../review/store.js";
 
 /**
@@ -40,6 +40,7 @@ export function ProposalBar() {
         {bar.kind === "building" ? t.review.building(whoOf(proposal.author)) : t.review.ready(whoOf(proposal.author))}
       </span>
       <span className="proposal-count">{t.review.operations(proposal.operations)}</span>
+      <ConfigList lines={configLines(proposal)} />
       <SideToggle side={side} />
       {failure && (
         <span className="proposal-failure" role="alert">
@@ -55,6 +56,19 @@ export function ProposalBar() {
         </button>
       </span>
     </div>
+  );
+}
+
+/** The project formats the proposal changes (ADR 0036), as text: nothing shows them visually yet. */
+function ConfigList({ lines }: { lines: ConfigLine[] }) {
+  if (lines.length === 0) return null;
+  const text = lines.map((line) =>
+    line.kind === "added" ? t.review.formatAdded(line.id, line.size) : line.kind === "removed" ? t.review.formatRemoved(line.id) : t.review.formatResized(line.id, line.from, line.to),
+  );
+  return (
+    <span className="proposal-config" data-tip={t.review.formatsHint}>
+      {t.review.formats(text.join(", "))}
+    </span>
   );
 }
 

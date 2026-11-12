@@ -14,6 +14,7 @@ import {
   PROPOSAL_WAIT_MAX_S,
   type PluginInfo,
   type Proposal,
+  type ProposalConfigChange,
   type Progress,
   type ReviewState,
   RpcError,
@@ -1276,7 +1277,21 @@ function plural(count: number, noun: string): string {
 function formatProposal(proposal: Proposal): string {
   const label = proposal.label ? ` "${proposal.label}"` : "";
   const what = proposal.state === "building" ? "building (its transaction is open)" : "ready, waiting for the person's review";
-  return `${proposal.tx}${label} by ${proposal.author} · ${what} · ${plural(proposal.operations, "operation")} on ${proposal.timelines.join(", ")} · open ${duration(proposal.ageMs)}`;
+  const changes = [...proposal.timelines, ...(proposal.config.length > 0 ? [`formats (${proposal.config.map(configChangeText).join(", ")})`] : [])];
+  return `${proposal.tx}${label} by ${proposal.author} · ${what} · ${plural(proposal.operations, "operation")} on ${changes.join(", ")} · open ${duration(proposal.ageMs)}`;
+}
+
+/** One config key a proposal changes (ADR 0036), e.g. `+ 9x16 1080x1920`, `- 1x1`. */
+function configChangeText(change: ProposalConfigChange): string {
+  const format = /^format:(.+)$/.exec(change.key)?.[1];
+  const size = (value: unknown) => {
+    const { width, height } = value as { width: number; height: number };
+    return `${width}x${height}`;
+  };
+  if (format === undefined) return `${change.key}: ${JSON.stringify(change.before)} -> ${JSON.stringify(change.after)}`;
+  if (change.before === null) return `+ ${format} ${size(change.after)}`;
+  if (change.after === null) return `- ${format}`;
+  return `${format} ${size(change.before)} -> ${size(change.after)}`;
 }
 
 /** Review mode line of `status` and `proposal status`. */
@@ -1300,7 +1315,7 @@ function formatProposalStatus(result: MethodResult<"proposal.status">): string {
 const WAIT_NEXT: Record<MethodResult<"proposal.wait">["outcome"], string> = {
   accepted: "The person accepted it: its changes are in the timeline. Continue.",
   rejected: "The person rejected it: nothing was applied. Ask what to change, or adjust.",
-  stale: "The person changed the same clips meanwhile: nothing was applied. Read the timeline again and redo the change.",
+  stale: "The person changed the same clips or formats meanwhile: nothing was applied. Read the timeline (or `format list`) again and redo the change.",
   aborted: "Its transaction was aborted: nothing was applied.",
   pending: "Still waiting for the person. Run `frameshell proposal wait` again.",
   none: "No proposal is open and none was decided yet. Nothing to wait for.",
@@ -1313,7 +1328,7 @@ function formatProposalWait(result: MethodResult<"proposal.wait">): string {
 }
 
 function formatProposalDiff(result: MethodResult<"proposal.diff">): string {
-  if (result.tx === null || result.timelines.length === 0) return "No proposal is open.\n";
+  if (result.tx === null || result.timelines.length + result.config.length === 0) return "No proposal is open.\n";
   const place = (at: { track: string; start: number; end: number | null } | null) => (at ? `${at.track} ${at.start}–${at.end ?? "?"} s` : "");
   const lines = [`Proposal ${result.tx}:`];
   for (const timeline of result.timelines) {
@@ -1322,6 +1337,10 @@ function formatProposalDiff(result: MethodResult<"proposal.diff">): string {
       const move = clip.before && clip.after ? `${place(clip.before)} -> ${place(clip.after)}` : place(clip.before ?? clip.after);
       lines.push(`  ${clip.change.padEnd(7)} ${clip.clip}  ${move}`);
     }
+  }
+  if (result.config.length > 0) {
+    lines.push(`Formats (frameshell.json) · ${plural(result.config.length, "change")}`);
+    for (const change of result.config) lines.push(`  ${configChangeText(change)}`);
   }
   return `${lines.join("\n")}\n`;
 }
