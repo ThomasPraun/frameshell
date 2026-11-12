@@ -1,12 +1,18 @@
+import { bigWord } from "./big-word.js";
+import { checklist } from "./checklist.js";
+import { comparison } from "./comparison.js";
+import { counter } from "./counter.js";
 import { endCard } from "./end-card.js";
 import type { Template } from "./kit.js";
 import { kineticHeadline } from "./kinetic-headline.js";
+import { logoLockup } from "./logo-lockup.js";
+import { lowerThird } from "./lower-third.js";
 
 export { type FontSetup, type Template, type TemplateInput, type TemplateVariable, fontSetup } from "./kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
-/** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466 first set). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard];
+/** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {

@@ -7,7 +7,7 @@ import {
   primaryFormatId,
   projectFormats,
 } from "@frameshell/schema";
-import type { ConfigDocument, ConfigJournal } from "./config/journal.js";
+import type { ConfigChanger, ConfigDocument, ConfigJournal } from "./config/journal.js";
 import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
 import type { TxRef } from "./timeline/service.js";
 
@@ -15,8 +15,10 @@ import type { TxRef } from "./timeline/service.js";
 export interface FormatServiceOptions {
   /** Validated `frameshell.json` of the project rooted at `root`. */
   readConfig(root: string): Promise<FormatSource>;
-  /** Journal with the `project` document ({@link projectConfigDocument}). */
+  /** Journal with the `project` document ({@link projectConfigDocument}): one change at a time per project. */
   journal: ConfigJournal;
+  /** Applies a change, or holds it in review mode (`TimelineService.changeConfig`). */
+  change: ConfigChanger;
 }
 
 /**
@@ -35,6 +37,11 @@ export function projectConfigDocument(options: {
       const config = await options.readConfig(root);
       const list = formatsFromState(projectFormats(config)[0]!, state);
       await options.writeFormats(root, isDefault(list, config) ? null : list);
+    },
+    // Keys alone cannot repeat an id; only a format named like a new primary (the resolution changed) can clash.
+    check: async (root, state) => {
+      const primary = projectFormats(await options.readConfig(root))[0]!;
+      return Object.keys(state).filter((key) => key === `format:${primary.id}`);
     },
   };
 }
@@ -63,6 +70,7 @@ export function formatNotFound(id: string, config: FormatSource): RpcError {
 /**
  * `format.add` / `format.remove` (ADR 0027 decision 11): edits `formats` in `frameshell.json` through the config
  * journal (ADR 0036), one change at a time per project, each in the caller's transaction with the call that undoes it.
+ * In review mode (ADR 0019) it is made on the open proposal's formats and waits there.
  */
 export class FormatService {
   readonly #options: FormatServiceOptions;
@@ -85,16 +93,17 @@ export class FormatService {
       if (config.kind === "image") {
         throw refuse("image project", "Image projects have one frame (ADR 0017): they take no formats. Export a picture with `frameshell frame`.");
       }
-      const current = projectFormats(config);
-      if (current.some((format) => format.id === params.id)) {
-        throw refuse("exists", `The project already has format ${params.id}. List them: \`frameshell format list\`.`, "id");
-      }
       const size = sizeFor(params, refuse);
-      const at = Math.min(Math.max(1, params.index ?? current.length), current.length);
-      const added: FormatEntry = { id: params.id, ...size };
-      const next = [...current.slice(0, at), added, ...current.slice(at)];
       const args = Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
-      return this.#commit(root, config, next, { op: "format.add", args, author, tx }, { method: "format.remove", params: { id: params.id } });
+      return this.#change(root, config, { author, tx }, (current) => {
+        if (current.some((format) => format.id === params.id)) {
+          throw refuse("exists", `The project already has format ${params.id}. List them: \`frameshell format list\`.`, "id");
+        }
+        const at = Math.min(Math.max(1, params.index ?? current.length), current.length);
+        const added: FormatEntry = { id: params.id, ...size };
+        const next = [...current.slice(0, at), added, ...current.slice(at)];
+        return { op: "format.add", args, undo: { method: "format.remove", params: { id: params.id } }, next };
+      });
     });
   }
 
@@ -102,32 +111,39 @@ export class FormatService {
   remove(root: string, id: string, author: string, tx: TxRef): Promise<FormatChange> {
     return this.#options.journal.serial(root, async () => {
       const config = await this.#options.readConfig(root);
-      const current = projectFormats(config);
-      const index = current.findIndex((format) => format.id === id);
-      if (index === -1) throw formatNotFound(id, config);
-      if (index === 0) {
-        throw new RpcError(
-          ErrorCode.InvalidOperation,
-          `Format ${id} is the primary one: it equals the project resolution and always stays. Remove the others instead.`,
-          { op: "format.remove", reason: "primary", field: "id" },
-        );
-      }
-      const removed = current[index]!;
-      const next = current.filter((format) => format.id !== id);
-      const undo = { method: "format.add" as const, params: { id, width: removed.width, height: removed.height, index } };
-      return this.#commit(root, config, next, { op: "format.remove", args: { id }, author, tx }, undo);
+      return this.#change(root, config, { author, tx }, (current) => {
+        const index = current.findIndex((format) => format.id === id);
+        if (index === -1) throw formatNotFound(id, { ...config, formats: current });
+        if (index === 0) {
+          throw new RpcError(
+            ErrorCode.InvalidOperation,
+            `Format ${id} is the primary one: it equals the project resolution and always stays. Remove the others instead.`,
+            { op: "format.remove", reason: "primary", field: "id" },
+          );
+        }
+        const removed = current[index]!;
+        const next = current.filter((format) => format.id !== id);
+        return { op: "format.remove", args: { id }, undo: { method: "format.add", params: { id, width: removed.width, height: removed.height, index } }, next };
+      });
     });
   }
 
-  async #commit(
+  /** Run `edit` on the formats the change applies to (the open proposal's in review mode) and journal or propose it. */
+  async #change(
     root: string,
     config: FormatSource,
-    next: FormatEntry[],
-    record: { op: string; args: Record<string, unknown>; author: string; tx: TxRef },
-    undo: FormatChange["undo"],
+    who: { author: string; tx: TxRef },
+    edit: (current: FormatEntry[]) => { op: string; args: Record<string, unknown>; undo: FormatChange["undo"]; next: FormatEntry[] },
   ): Promise<FormatChange> {
-    const entry = await this.#options.journal.commit(root, "project", { ...record, undo }, formatState(config.formats), formatState(next));
-    return { dir: root, formats: formatInfos({ ...config, formats: next }), op: entry.id, tx: entry.tx, undo };
+    const primary = projectFormats(config)[0]!;
+    let undo!: FormatChange["undo"];
+    const changed = await this.#options.change(root, "project", who, async (base) => {
+      const made = edit(formatsFromState(primary, base));
+      undo = made.undo;
+      return { op: made.op, args: made.args, undo, after: formatState(made.next) };
+    });
+    const formats = formatsFromState(primary, changed.state);
+    return { dir: root, formats: formatInfos({ ...config, formats }), op: changed.operation.id, tx: changed.operation.tx, undo, proposal: changed.proposal };
   }
 }
 

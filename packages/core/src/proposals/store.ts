@@ -2,6 +2,10 @@ import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AuthorSchema,
+  type ConfigDoc,
+  ConfigDocSchema,
+  type ConfigPatchEntry,
+  ConfigPatchEntrySchema,
   type GcEntry,
   OpIdSchema,
   type ProposalDecision,
@@ -14,6 +18,7 @@ import {
 import { type Timeline, parseTimeline } from "@frameshell/schema";
 import { z } from "zod";
 import { appendJsonLine, readJsonIfExists, readJsonLines, writeJsonAtomic } from "../fs-util.js";
+import type { ConfigState } from "../config/patch.js";
 import { sweep } from "../gc.js";
 
 /**
@@ -61,6 +66,29 @@ export interface ProposedFile {
   text: string;
 }
 
+/** One project-config operation of a proposal (ADR 0036): what the config journal will hold once accepted. */
+export interface ProposedConfigOp {
+  id: string;
+  op: string;
+  args: Record<string, unknown>;
+  /** Keys it changes, from the proposal's version before it to after it; `after` values are replayed on rebase and accept. */
+  patch: ConfigPatchEntry[];
+  /** `format.add`/`format.remove`: the call that undoes it. */
+  undo?: { method: string; params: Record<string, unknown> } | undefined;
+  /** ISO 8601 time the operation was proposed. */
+  at: string;
+}
+
+/** What a proposal does to one project-config document (ADR 0036). */
+export interface ProposalConfigPart {
+  doc: ConfigDoc;
+  /** Keyed state of the document the operations apply to (the file, as of the last rebase). */
+  base: ConfigState;
+  /** `base` with every operation applied. Not stored. */
+  shadow: ConfigState;
+  ops: ProposedConfigOp[];
+}
+
 /** The open proposal of a project. */
 export interface OpenProposal {
   tx: string;
@@ -73,6 +101,8 @@ export interface OpenProposal {
   edit?: { timeline: string; text: string } | undefined;
   /** Timelines it creates (or replaces while unreadable); never also in `parts`. */
   files?: ProposedFile[] | undefined;
+  /** Project-config documents it changes, at most one part each. */
+  config?: ProposalConfigPart[] | undefined;
 }
 
 const ProposedOpSchema = z.object({
@@ -81,6 +111,15 @@ const ProposedOpSchema = z.object({
   args: z.record(z.string(), z.unknown()),
   patch: TimelinePatchSchema,
   inverse: z.object({ op: z.literal("timeline.patch"), args: TimelinePatchSchema }),
+  at: z.string(),
+});
+
+const ProposedConfigOpSchema = z.object({
+  id: OpIdSchema,
+  op: z.string(),
+  args: z.record(z.string(), z.unknown()),
+  patch: z.array(ConfigPatchEntrySchema),
+  undo: z.object({ method: z.string(), params: z.record(z.string(), z.unknown()) }).optional(),
   at: z.string(),
 });
 
@@ -96,10 +135,14 @@ const ProposalFileSchema = z.object({
   timelines: z.array(z.object({ timeline: z.string(), base: z.unknown(), ops: z.array(ProposedOpSchema) })),
   edit: z.object({ timeline: z.string(), text: z.string() }).optional(),
   files: z.array(z.object({ timeline: z.string(), text: z.string() })).optional(),
+  config: z.array(z.object({ doc: ConfigDocSchema, base: z.record(z.string(), z.unknown()), ops: z.array(ProposedConfigOpSchema) })).optional(),
 });
 
 /** A proposal file read back: an open proposal without shadows. */
-export type StoredProposal = Omit<OpenProposal, "parts"> & { parts: Omit<ProposalPart, "shadow">[] };
+export type StoredProposal = Omit<OpenProposal, "parts" | "config"> & {
+  parts: Omit<ProposalPart, "shadow">[];
+  config?: Omit<ProposalConfigPart, "shadow">[] | undefined;
+};
 
 function proposalPath(root: string, tx: string): string {
   return join(root, ...PROPOSALS_DIR.split("/"), `${tx}.json`);
@@ -126,6 +169,7 @@ export async function saveProposal(
     timelines: proposal.parts.map(({ timeline, base, ops }) => ({ timeline, base, ops })),
     ...(proposal.edit ? { edit: proposal.edit } : {}),
     ...(proposal.files?.length ? { files: proposal.files } : {}),
+    ...(proposal.config?.length ? { config: proposal.config.map(({ doc, base, ops }) => ({ doc, base: { ...base }, ops })) } : {}),
   };
   await writeJsonAtomic(proposalPath(root, proposal.tx), file);
 }
@@ -149,7 +193,7 @@ export async function loadOpenProposals(root: string): Promise<StoredProposal[]>
     }
     const parsed = ProposalFileSchema.safeParse(value);
     if (!parsed.success) continue;
-    const { state, timelines, edit, files, tx, label, author, openedAt } = parsed.data;
+    const { state, timelines, edit, files, config, tx, label, author, openedAt } = parsed.data;
     if (state !== "building" && state !== "ready") continue;
     const parts: StoredProposal["parts"] = [];
     for (const part of timelines) {
@@ -158,7 +202,7 @@ export async function loadOpenProposals(root: string): Promise<StoredProposal[]>
       parts.push({ timeline: part.timeline, base: base.value, ops: part.ops });
     }
     if (parts.length !== timelines.length) continue;
-    found.push({ tx, label, author, state, openedAt, parts, ...(edit ? { edit } : {}), ...(files ? { files } : {}) });
+    found.push({ tx, label, author, state, openedAt, parts, ...(edit ? { edit } : {}), ...(files ? { files } : {}), ...(config ? { config } : {}) });
   }
   return found.sort((a, b) => (a.openedAt < b.openedAt ? -1 : a.openedAt > b.openedAt ? 1 : 0));
 }

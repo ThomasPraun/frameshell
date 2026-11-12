@@ -6,6 +6,7 @@ import {
   ErrorCode,
   type EventName,
   type EventParams,
+  type AnalyzeResult,
   type FrameResult,
   type Progress,
   type ReviewResult,
@@ -64,7 +65,7 @@ const INSTRUCTIONS =
   "start/end/at/from/to, source seconds for in/out), snapped to the frame grid. Read the timeline (resource " +
   "`frameshell://timelines/main` or `timeline_show`) before editing and use the ids it returns. Every mutating tool " +
   "returns the new `revision` and `operation.tx`; `revert` with that tx id undoes your change, `tx_begin`/`tx_commit` " +
-  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets). `history` with `since` " +
+  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets); measure a reference video with `analyze` (shots, palette, loudness, tempo). `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
   "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +
@@ -204,7 +205,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     if (tool.name === "frame_capture") return capture(await link.get(), args);
     if (tool.name === "frames_strip") return strip(await link.get(), args);
     const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
-    if (tool.method === "review") return reviewed(result as ReviewResult);
+    if (tool.method === "review" || tool.method === "analyze") return withSheets(result as ReviewResult | AnalyzeResult);
     if (tool.method === "transcribe" || tool.method === "transcribe.speakers") {
       const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
       // Speakers rewrite an existing transcript: its resource changed, the list did not.
@@ -322,10 +323,10 @@ async function capture(conn: DaemonConnection, args: Record<string, unknown>): P
 }
 
 /**
- * `review`: the sheets as images (the first {@link REVIEW_MAX_IMAGES}), then the run's facts with each sheet's tiles
- * reduced to their labels, which name the frame and why it is there.
+ * `review` and `analyze`: the sheets as images (the first {@link REVIEW_MAX_IMAGES}), then the run's facts with each sheet's
+ * tiles reduced to their labels, which name the frame and why it is there.
  */
-async function reviewed(result: ReviewResult): Promise<CallToolResult> {
+async function withSheets(result: ReviewResult | AnalyzeResult): Promise<CallToolResult> {
   const content: CallToolResult["content"] = [];
   for (const sheet of result.sheets.slice(0, REVIEW_MAX_IMAGES)) {
     const image = pngForModel(await readFile(sheet.path), REVIEW_MAX_SIDE, REVIEW_MAX_SIDE);

@@ -20,7 +20,7 @@ import { DERIVED_DIRS, type Manifest, type MediaStore } from "./store.js";
 
 type IngestStep = Exclude<
   JobStep,
-  "clips" | "audio-fx" | "video" | "mux" | "render" | "faces" | "people" | "transcribe" | "matte" | "beats"
+  "clips" | "audio-fx" | "video" | "mux" | "render" | "faces" | "people" | "transcribe" | "matte" | "beats" | "analyze"
 >;
 
 /** Resolved executables. */
