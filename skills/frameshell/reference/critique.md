@@ -4,18 +4,27 @@ Look at what you built before the person does. A reel or a motion film is judged
 
 ## 1. Make the evidence
 
-Judge the **export**, never the project files or your memory of the code. Render a draft (`frameshell render --preset <preset> --quality draft --out exports/draft.mp4 --json`; a project with several formats: `--formats <id,id>` without `--preset`, and one set of sheets per file), then build the sheets with the managed ffmpeg (`$FRAMESHELL_FFMPEG` in an app terminal) into a `review/` folder at the project root:
+Judge the **export**, never the project files or your memory of the code. Render a draft (`frameshell render --preset <preset> --quality draft --out exports/draft.mp4 --json`; a project with several formats: `--formats <id,id>` without `--preset`, and one set of sheets per file), then make the sheets of the file people will get with `review` (MCP `review`, which returns the images):
 
 ```sh
-# whole film at 2 fps (pick fps and tile so every frame fits; several sheets for long films)
-"$FRAMESHELL_FFMPEG" -i exports/draft.mp4 -vf "fps=2,scale=270:-1,tile=6x5" -frames:v 1 review/contact.png
-# phone test: how it reads 360 px wide
-"$FRAMESHELL_FFMPEG" -i exports/draft.mp4 -vf "fps=1,scale=360:-1,tile=5x3" -frames:v 1 review/phone.png
+frameshell review --file exports/draft.mp4 --json
+```
+
+It writes `.frameshell/review/<n>/` (the last 10 runs are kept; project files are never touched) and prints each sheet's path, size and tile times; open the PNGs with your image tool. Every tile is labelled with its time in the file:
+
+- `contact*.png`: a frame every 0.5 s (`--every` changes it), 30 to a sheet, several sheets for a long film. Review the timeline itself (no `--file`) and the sheet also marks clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a keyed clip (`1.50 cut`), which the file cannot tell.
+- `phone*.png`: one frame per second at 360 px wide: how it reads on a phone.
+- `motion-1.png`, `motion-2.png`: the two fastest moments (`peaks` in `--json` give their time and how much of the picture moved) as 12 consecutive frames: pops, overlaps and blank frames only show in consecutive frames.
+- `seam.png`: the last 6 and the first 6 frames: does the loop jump.
+
+`--range 5,12` limits the sheets to those seconds; `--sheets phone,seam` writes only those. For a project with several formats review each format's file. Then the numbers that are not pictures:
+
+```sh
 # loudness and true peak of the file people will hear
 "$FRAMESHELL_FFMPEG" -i exports/draft.mp4 -af ebur128=peak=true -f null - 2>&1 | tail -12
 ```
 
-- **Fast moments:** `frames_strip` (MCP) over the 0.5 s around each fast move, entrance and cut, with about 12 tiles: pops, overlaps and blank frames only show up in consecutive frames.
+- **A moment `review` did not pick:** `frameshell review --range <a,b> --sheets motion`, or `frames_strip` (MCP) over the 0.5 s around an entrance or a cut with about 12 tiles.
 - **Critical stills:** `frameshell frame --at <s> --out <file.png>` at frame 0, every graphic's entrance, each zoom peak, and the end card.
 - **Words:** `frameshell transcribe --verify exports/draft.mp4 --json` when speech was cut.
 - **Thumbnail:** a `warning:` from `render` that frame 0 is black is a hook problem; `frameshell cover --text <word> --json` reports whether the cover word reads at 180 px.

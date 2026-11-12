@@ -128,11 +128,11 @@ export function assCentiseconds(frame: number, fps: number): number {
 }
 
 function dialogue(layer: number, from: number, to: number, style: string, text: string, fps: number): string {
-  return `Dialogue: ${layer},${time(assCentiseconds(from, fps))},${time(assCentiseconds(to, fps))},${style},,0,0,0,,${text}`;
+  return `Dialogue: ${layer},${assTime(assCentiseconds(from, fps))},${assTime(assCentiseconds(to, fps))},${style},,0,0,0,,${text}`;
 }
 
-/** `H:MM:SS.cc`. */
-function time(centiseconds: number): string {
+/** `H:MM:SS.cc` for a count of centiseconds. */
+export function assTime(centiseconds: number): string {
   const cs = centiseconds % 100;
   const total = Math.floor(centiseconds / 100);
   const pad = (value: number) => String(value).padStart(2, "0");

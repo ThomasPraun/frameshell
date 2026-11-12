@@ -11,6 +11,7 @@ export * from "./agents.js";
 export * from "./targets.js";
 export * from "./ui.js";
 export * from "./probe.js";
+export * from "./review.js";
 export { formatUndoCommand } from "./formats.js";
 export { assertSocketPathFits, resolveSocketPath } from "./socket-path.js";
 export { type AppDirs, resolveAppDirs } from "./app-dirs.js";

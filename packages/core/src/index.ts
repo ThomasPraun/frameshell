@@ -444,3 +444,5 @@ export {
 export { STAND_IN_SPEECH_PROVIDER, standInSpeechProvider } from "./voiceover/stand-in.js";
 export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
 export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";
+export { REVIEW_DIR, type ReviewRequest, ReviewService, type ReviewServiceOptions } from "./review/service.js";
+export { type SheetOptions, type SheetSize, type SheetTile, writeSheet } from "./review/sheet.js";

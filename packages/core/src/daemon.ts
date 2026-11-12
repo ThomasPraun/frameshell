@@ -136,6 +136,7 @@ import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { generateVoiceover } from "./voiceover/generate.js";
+import { ReviewService } from "./review/service.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -498,6 +499,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     audioFx,
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
+  });
+  const reviews = new ReviewService({
+    timelines,
+    exports,
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -989,6 +996,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, loaded)) };
+    },
+    review: async ({ cwd, timeline, file, from, to, sheets, every, projectFormat, view }, caller) => {
+      const dir = await root(cwd);
+      return reviews.run(dir, {
+        timeline,
+        ...(file ? { file: resolve(cwd, file) } : {}),
+        from,
+        to,
+        sheets,
+        every,
+        projectFormat,
+        view: await viewOf(dir, caller, view),
+      });
     },
     cover: async ({ cwd, timeline, view, ...choice }, caller) => {
       const dir = await root(cwd);
