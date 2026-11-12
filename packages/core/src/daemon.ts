@@ -1609,8 +1609,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       );
       return checkScript(dir, cwd, file, names);
     },
-    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes }, _caller, request) => {
+    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes, verify }, _caller, request) => {
       const dir = await root(cwd);
+      // The misread check goes through the project's own transcription provider, like `transcribe`.
+      const config = await readProjectConfig(dir);
+      const transcriptionId = config.transcription?.provider ?? "whisper-cpp";
+      const verifyServices = verify
+        ? {
+            providerId: transcriptionId,
+            provider: () => plugins.transcriptionProvider(dir, transcriptionId),
+            model: config.transcription?.model ?? (await models.defaultFor(transcriptionId)),
+            language: config.transcription?.language ?? null,
+            tools: transcriberTools({ dir, binaries: config.binaries }),
+            extractAudio: options.extractAudio,
+          }
+        : null;
       // Built in: the daemon's own list, then this machine's `command` provider (global config only, ADR 0034).
       const command = await readCommandSpeechProvider(dirs.configDir);
       const builtIn = new Map([...(options.speechProviders ?? []), ...(command ? [command] : [])].map((speech) => [speech.id, speech] as const));
@@ -1628,7 +1641,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       };
       const work = () =>
-        generateVoiceover({
+        transcribing(dir, () => generateVoiceover({
           root: dir,
           cwd,
           script,
@@ -1636,6 +1649,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           ...(provider ? { provider } : {}),
           ...(voice ? { voice } : {}),
           yes,
+          verify: verifyServices,
           speechProvider,
           speechProviders: async () => [
             ...builtIn.keys(),
@@ -1651,7 +1665,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             }
           },
           signal: voiceoverAbort.signal,
-        });
+        }));
       // One run per project at a time: two runs over one script would write the same takes.
       const key = canonicalPathSync(dir);
       const run = (voiceoverRuns.get(key) ?? Promise.resolve()).then(work);

@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 102;
+export const PROTOCOL_VERSION = 103;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2134,8 +2134,14 @@ export const methods = {
       "`en`, numbers with digits are spelled out for the voice and kept as digits in `display`. Line ids are " +
       "`<scene slug>-<n>` (`hook-1`). Each take is cached by its spoken text, provider (and its version), voice and " +
       "language: a line whose take is current is not generated again (`cached`), and one whose text moved to another " +
-      "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Nothing is placed on a " +
-      "timeline. A paid provider (its cost estimate is above 0, or it gives no estimate and does not declare itself " +
+      "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Each line also reports " +
+      "its `phrases`: where the take falls silent for 60 ms or more (5 ms RMS, 38 dB under its peak), as ranges of the " +
+      "take in seconds, the cuts of phrase clips (`clip add --in from --out to`); `phraseFade` is the fade of 12 ms each phrase edge " +
+      "gets when placed. A person corrects the phrases by trimming the clips. With `verify` (default) each line's take is also " +
+      "transcribed by the project's transcription provider and compared with the line's spoken text: `check` lists the " +
+      "misreads, and `verification` says whether that ran. It is skipped, never a failure, when the project is not " +
+      "trusted, has no transcription plugin or the transcription fails; the takes stay as they are. Nothing is placed " +
+      "on a timeline. A paid provider (its cost estimate is above 0, or it gives no estimate and does not declare itself " +
       "free) generates nothing without `yes: true` and fails with ConfirmationRequired, whose data carries the cost " +
       "(`null` when unknown): show it to the person and pass `yes` only after they confirm it, never on your own. The " +
       "provider `command` is the TTS program the person set up on this machine (global `config.json` only); it is free. A second charge is prevented by the takes marked on disk and one run at a time per " +
@@ -2170,6 +2176,13 @@ export const methods = {
         .boolean()
         .default(false)
         .describe("The person confirmed the cost of a paid provider. Never set it without their explicit confirmation."),
+      verify: z
+        .boolean()
+        .default(true)
+        .describe(
+          "Transcribe each line's take with the project's transcription provider and compare it with the line (the misread " +
+            "check). Takes a moment per line and may download the transcription model on first use; `false` skips it.",
+        ),
     }),
     result: z.object({
       script: z.string().describe("Script file, project-relative and `/`-separated."),
@@ -2185,9 +2198,49 @@ export const methods = {
               .describe("`generated`: the provider said it now. `cached`: the file already held this take. `copied`: taken from the file of another line id with the same take."),
             duration: z.number().describe("Seconds of the take after trimming."),
             trimmed: z.object({ head: z.number(), tail: z.number() }).describe("Seconds of silence removed from the start and the end; 0 for `cached` and `copied`."),
+            phrases: z
+              .array(
+                z.object({
+                  from: z.number().describe("Start, seconds of the take."),
+                  to: z.number().describe("End, seconds of the take."),
+                  heard: z.string().nullable().describe("The words heard in this range; null when the line was not checked."),
+                }),
+              )
+              .describe("The take split at its silences, in order (at least one): the ranges of the phrase clips."),
+            check: z
+              .object({
+                status: z
+                  .enum(["clean", "doubtful", "misread"])
+                  .describe("`clean`: heard as written. `doubtful`: only differences the transcription may have made (numbers, close spellings, a respelled name). `misread`: the voice said something else."),
+                heard: z.string().describe("Everything heard in the take."),
+                misreads: z
+                  .array(
+                    z.object({
+                      kind: z.enum(["missing", "changed", "added", "moved", "restart", "pause"]).describe("`missing`: not said. `changed`: said as other words. `added`: extra words. `moved`/`restart`: words repeated or out of place. `pause`: a silence of 1.5 s or more inside the line."),
+                      expected: z.string().describe("What the spoken text has there."),
+                      heard: z.string().describe("What was heard there; empty for `missing`."),
+                      at: z.object({ start: z.number(), end: z.number() }).nullable().describe("Seconds of the take; null when nothing was heard."),
+                      maybeTranscription: z.boolean().describe("The difference may be the transcription's, not the voice's."),
+                    }),
+                  )
+                  .describe("Every difference, in order; empty when `clean`."),
+              })
+              .nullable()
+              .describe("The misread check of this line; null when it did not run (see `verification`)."),
           }),
         )
         .describe("The lines asked for, in script order."),
+      phraseFade: z.number().describe("Seconds of fade at each edge of a phrase clip (12 ms)."),
+      verification: z
+        .object({
+          status: z.enum(["checked", "skipped"]).describe("`skipped`: the misread check did not run; `reason` says why."),
+          provider: z.string().nullable().describe("Transcription provider asked; null when not asked."),
+          model: z.string().nullable().describe("Model it used, when known."),
+          reason: z.string().nullable().describe("Why it was skipped (`verify: false`, an untrusted project, no transcription plugin, a failed transcription); null when checked."),
+          misread: z.number().int().describe("Lines whose `check` is `misread`."),
+          doubtful: z.number().int().describe("Lines whose `check` is `doubtful`."),
+        })
+        .describe("Whether the misread check ran. In an untrusted project it is skipped: the takes are generated and left unchecked."),
       imported: z
         .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
         .describe("Takes this call wrote (`generated`, `copied`), imported together; follow their ingest with `job.list`."),

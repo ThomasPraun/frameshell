@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Daemon, standInSpeechProvider, startDaemon, takeMarkOf } from "../src/index.js";
+import { type Daemon, PHRASE_FADE_S, standInSpeechProvider, startDaemon, takeMarkOf } from "../src/index.js";
+import { pcmWavBytes } from "../src/transcripts/window.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 import { installLocalPlugin } from "./plugin-fixture.js";
@@ -13,6 +15,7 @@ import { installLocalPlugin } from "./plugin-fixture.js";
 // (counted) as the built-in speech provider and a paid provider from a plugin.
 
 const SPEECH_PLUGIN = fileURLToPath(new URL("./fixtures/speech-plugin/", import.meta.url));
+const TRANSCRIBE_PLUGIN = fileURLToPath(new URL("./fixtures/transcribe-plugin/", import.meta.url));
 
 const script = (lines: string[], frontmatter: string[] = ["provider: stand-in"]) =>
   ["---", "title: Launch", "voiceover: true", "language: es", ...frontmatter, "---", ...lines].join("\n");
@@ -228,4 +231,138 @@ describe("voiceover.generate with a provider that fails outside synthesis", () =
       await local.close();
     }
   });
+});
+
+describe("voiceover.generate phrases and misread check", () => {
+  /** The stand-in says each word as 0.3 s of tone with 0.1 s of silence after it, so each word is a phrase. */
+  const word = (text: string, start: number) => ({ text, start, end: start + 0.3 });
+  const HOOK_HEARD = [word("Son", 0.02), word("23", 0.42), word("pestañas.", 0.82)];
+  const FIX_HEARD = [word("Frameshell", 0.02), word("las", 0.42), word("cierra.", 0.82)];
+
+  const pluginDir = () => join(root, ".frameshell", "plugins", "node_modules", "transcribe-plugin");
+  const heard = (...lists: unknown[]) => writeFileSync(join(pluginDir(), "words.json"), JSON.stringify(lists));
+  const calls = () => {
+    const file = join(pluginDir(), "calls.txt");
+    return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n") : [];
+  };
+  const withTranscriber = async (trust: boolean, client: DaemonConnection = conn) => {
+    installLocalPlugin(root, TRANSCRIBE_PLUGIN, "transcribe-plugin");
+    const configPath = join(root, "frameshell.json");
+    writeFileSync(configPath, JSON.stringify({ ...JSON.parse(readFileSync(configPath, "utf8")), transcription: { provider: "fake-heard" } }));
+    if (trust) await client.request("project.trust", { cwd: root, decision: "trust" });
+  };
+
+  it("splits every take at its silences and reports the ranges with the fade", async () => {
+    const result = await generate({ verify: false });
+    expect(result.phraseFade).toBe(PHRASE_FADE_S);
+    const hook = result.lines[0]!;
+    expect(hook.phrases).toHaveLength(3);
+    expect(hook.phrases[0]).toEqual({ from: 0, to: expect.closeTo(0.35, 2), heard: null });
+    expect(hook.phrases[2]!.to).toBeLessThanOrEqual(hook.duration);
+    expect(result.lines[1]!.phrases).toHaveLength(4);
+    // Cached lines report their phrases too, from the file.
+    const again = await generate({ verify: false });
+    expect(again.lines.map((line) => line.state)).toEqual(["cached", "cached"]);
+    expect(again.lines[0]!.phrases).toEqual(hook.phrases);
+  });
+
+  it("says verification was skipped in a project it cannot load a transcription plugin for", async () => {
+    const result = await generate();
+    expect(result.lines.map((line) => line.check)).toEqual([null, null]);
+    expect(result.verification).toMatchObject({ status: "skipped", provider: "whisper-cpp", misread: 0, doubtful: 0 });
+    expect(result.verification.reason).toMatch(/^Verification skipped: /);
+    // The takes are there all the same.
+    expect(statSync(take("hook-1")).isFile()).toBe(true);
+    expect(result.imported).toHaveLength(2);
+  });
+
+  it("is skipped, not failed, in an untrusted project that has a transcription plugin", async () => {
+    await withTranscriber(false);
+    const result = await generate();
+    expect(result.verification).toMatchObject({ status: "skipped", provider: "fake-heard" });
+    expect(result.verification.reason).toContain("not trusted");
+    expect(calls()).toEqual([]);
+    expect(result.lines).toHaveLength(2);
+  });
+
+  it("round-trips each take through the project's transcription provider and reports the misreads", async () => {
+    await withTranscriber(true);
+    heard(HOOK_HEARD, [word("Frameshell", 0.02), word("las", 0.42), word("abre.", 0.82)]);
+    const result = await generate();
+    expect(result.verification).toEqual({ status: "checked", provider: "fake-heard", model: "fake-model", reason: null, misread: 1, doubtful: 0 });
+    expect(result.lines[0]!.check).toEqual({ status: "clean", heard: "Son 23 pestañas.", misreads: [] });
+    // Phrases carry the words heard inside them.
+    expect(result.lines[0]!.phrases.map((phrase) => phrase.heard)).toEqual(["Son", "23", "pestañas."]);
+    expect(result.lines[1]!.check).toMatchObject({
+      status: "misread",
+      misreads: [expect.objectContaining({ kind: "changed", expected: "cierra.", heard: "abre." })],
+    });
+    // The voice's language reaches the provider as the base code; the takes are 16 kHz and go straight in.
+    expect(calls()).toEqual(['16000 {"language":"es"}', '16000 {"language":"es"}']);
+  });
+
+  it("checks cached takes again, without saying anything", async () => {
+    await withTranscriber(true);
+    heard(HOOK_HEARD, FIX_HEARD);
+    await generate();
+    const before = said.length;
+    heard([word("23", 0.42), word("pestañas.", 0.82)], FIX_HEARD);
+    const again = await generate();
+    expect(said).toHaveLength(before);
+    expect(again.lines.map((line) => [line.state, line.check?.status])).toEqual([
+      ["cached", "doubtful"],
+      ["cached", "clean"],
+    ]);
+    expect(again.verification).toMatchObject({ status: "checked", misread: 0, doubtful: 1 });
+  });
+
+  it("skips the check with `verify: false`, never calling the provider", async () => {
+    await withTranscriber(true);
+    const result = await generate({ verify: false });
+    expect(result.verification).toEqual({ status: "skipped", provider: null, model: null, reason: "Verification was not asked for (`verify: false`).", misread: 0, doubtful: 0 });
+    expect(calls()).toEqual([]);
+  });
+
+  it("keeps the takes and reports a failed transcription as a skipped check", async () => {
+    await withTranscriber(true);
+    writeFileSync(join(pluginDir(), "words.json"), "{ not json");
+    const result = await generate();
+    expect(result.verification).toMatchObject({ status: "skipped", reason: expect.stringContaining("Verification stopped at line hook-1") });
+    expect(result.lines).toHaveLength(2);
+    expect(statSync(take("fix-1")).isFile()).toBe(true);
+  });
+
+  it("hands a take that is not 16 kHz to ffmpeg first", async () => {
+    const lowRate: SpeechProvider = {
+      ...standInSpeechProvider(),
+      id: "low-rate",
+      async synthesize(_text, _voice, _options, context) {
+        const samples = new Int16Array(24_000 * 2);
+        for (let i = 6000; i < 18_000; i++) samples[i] = Math.round(0.4 * 32767 * Math.sin((2 * Math.PI * 300 * i) / 24_000));
+        const file = join(context.outDir, "take.wav");
+        await writeFile(file, pcmWavBytes({ sampleRate: 24_000, samples }));
+        return { file };
+      },
+    };
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [lowRate],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const client = await connectToDaemon(local.socketPath, { client: "test" });
+    try {
+      await withTranscriber(true, client);
+      heard([word("Hola", 0.1)]);
+      writeFileSync(join(root, "scripts", "vo.md"), script(["## Hook", "Hola."], ["provider: low-rate"]));
+      const result = await client.request("voiceover.generate", { cwd: root, script: "scripts/vo.md" });
+      expect(result.verification).toMatchObject({ status: "checked", misread: 0 });
+      expect(result.lines[0]!.check?.status).toBe("clean");
+      expect(calls()).toEqual(['16000 {"language":"es"}']);
+    } finally {
+      client.close();
+      await local.close();
+    }
+  }, 60_000);
 });
