@@ -32,7 +32,7 @@ import {
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
-import { type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { type BeatsFile, type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
 import {
   type ConfigChanged,
   type ConfigEdit,
@@ -84,7 +84,8 @@ import {
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, isEmptyPatch, sortMarkers } from "./patch.js";
-import { resolveTimeRefs } from "./time-ref.js";
+import { tempoGrid } from "./tempo.js";
+import { type GridLoader, resolveTimeRefs } from "./time-ref.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -122,6 +123,11 @@ export interface TimelineServiceOptions {
    * review-mode proposals like timeline ones. Required for config changes; without it none is made.
    */
   config?: ConfigJournal;
+  /**
+   * Beats file of a project-relative asset, or null when it has none; throws `InvalidProjectFile` for a broken one.
+   * Read by `beat:N` and `bar:N` time references (ADR 0029 slice 4). Default: no asset has one.
+   */
+  beatsOf?: (root: string, asset: string) => Promise<BeatsFile | null>;
 }
 
 /** One step of a proposal (ADR 0019), as reported to {@link TimelineServiceOptions.onProposal}. */
@@ -340,7 +346,7 @@ export class TimelineService {
       if (route) {
         try {
           const result = await this.#propose(root, id, route, call, async (base, _current, fps, settings) => {
-            const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(base) } : call, base);
+            const request = await this.#normalize(call.prepare ? { ...call, request: await call.prepare(base) } : call, base, fps);
             const applied = await applyOperation(base, request, this.#context(root, id, fps, request.op, settings));
             return { applied, op: request.op, args: request.args as Record<string, unknown>, warnings };
           });
@@ -351,7 +357,7 @@ export class TimelineService {
         }
       }
       const { timeline, fps, ...settings } = await this.#current(root, id);
-      const request = normalizeArgs(call.prepare ? { ...call, request: await call.prepare(timeline) } : call, timeline);
+      const request = await this.#normalize(call.prepare ? { ...call, request: await call.prepare(timeline) } : call, timeline, fps);
       const context = this.#context(root, id, fps, request.op, settings);
       const applied = await applyOperation(timeline, request, context);
       const result = await this.#record(call, timeline, applied, request.op, request.args, warnings);
@@ -1570,6 +1576,14 @@ export class TimelineService {
     };
   }
 
+  /** {@link normalizeArgs} with the beat grid of `timeline` (its tempo and the beats files of the project) as the source of `beat:`/`bar:`. */
+  #normalize(call: TimelineCall, timeline: Timeline, fps: number): Promise<OperationRequest> {
+    const beatsOf = this.#options.beatsOf;
+    const loadGrid: GridLoader = (horizon) =>
+      tempoGrid({ fps, timeline, horizon, beatsOf: async (asset) => (beatsOf ? beatsOf(call.root, asset) : null) });
+    return normalizeArgs(call, timeline, loadGrid);
+  }
+
   #context(root: string, id: string, fps: number, op: string, settings: EditSettings = {}): EditContext {
     const grid = new FrameGrid(fps);
     const newId = this.#options.newId ?? ((prefix: IdPrefix) => `${prefix}_${randomBytes(3).toString("hex")}`);
@@ -2308,11 +2322,12 @@ export async function readTimelineFile(root: string, rel: string): Promise<Timel
  * Project-relative `asset`/`source` args, so the record and the file never
  * hold caller-specific paths. A relative path is tried against `cwd` first,
  * then the project root; a bare timeline id (`intro`) means `timelines/intro.json`.
- * Time references (marker names, ADR 0037) become seconds against `timeline`, the state the operation applies to.
+ * Time references (marker names, ADR 0037; `beat:N` and `bar:N`, ADR 0029 slice 4) become seconds against
+ * `timeline`, the state the operation applies to; `loadGrid` reads its beat grid.
  */
-function normalizeArgs(call: TimelineCall, timeline: Timeline): OperationRequest {
+async function normalizeArgs(call: TimelineCall, timeline: Timeline, loadGrid: GridLoader): Promise<OperationRequest> {
   const { root, cwd } = call;
-  const request = resolveTimeRefs(call.request, timeline);
+  const request = await resolveTimeRefs(call.request, timeline, loadGrid);
   if (request.op !== "clip.add") return request;
   const args = { ...request.args };
   if (args.asset !== undefined) args.asset = projectPath(root, cwd, args.asset, "asset");

@@ -53,7 +53,9 @@ const TimeRef = (what: string) =>
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
-        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`); the daemon turns it into seconds first, so the history records seconds.",
+        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the timeline's grid counting from 1 (`beat:32`, `bar:8`, " +
+        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; needs `tempo`, refused when the grid is LOW confidence); the daemon turns it into " +
+        "seconds first, so the history records seconds.",
     );
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 

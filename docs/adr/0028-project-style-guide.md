@@ -52,7 +52,7 @@ Every visual and sound decision of a video (colours, fonts, text sizes, how thin
 - **`style.apply <name|personality> [replace]`** (decision 10): a user style merges value by value over the project's values (`replace`: the file becomes exactly the user style) and records `from: { id, sha256 }` of the file's bytes; a personality sets only `motion.personality` (with `replace`, all the file keeps). The result lists every changed value in schema order. An invalid user style is InvalidGlobalConfig; an unknown name is InvalidOperation `not found` with the available ids.
 - **`style.show`** gains `view` (an open proposal's version, ADR 0036 decision 4) and `from.status`: `same`, `changed` (the user style was edited since: apply it again to take the edit) or `missing`.
 - **`file.write` of `style.json`** (ADR 0036 decision 5) is a `file.write` config operation when it changes a value, written as given at once or held whole by review mode; one that changes no value, or replaces an invalid file, is written at once. The review-mode refusal of slice 1 is gone.
-- Wire: `PROTOCOL_VERSION` 97; `ConfigDocSchema` gains `style`.
+- Wire: `PROTOCOL_VERSION` 98; `ConfigDocSchema` gains `style`.
 
 ## Consequences
 
