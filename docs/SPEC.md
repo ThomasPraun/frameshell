@@ -70,7 +70,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 31 | Asset provenance | **Optional `credits.json`** at the project root: per outside asset the source URL, licence, author, title and content hash, written by `import --source-url --licence --author` or `credits set`. `credits` judges every placed asset and **fails when one is unverified** (no entry, no licence, a licence that needs credit without an author, changed content); the credit text for the video description is built from the ledger (ADR 0026) | An agent that forgets where a file came from cannot ship it unnoticed; CC BY credits stay correct because the line is derived, not typed | A field per asset in the timeline, `assets/CREDITS.json` (ingested as media), a stored pass/fail |
 | 32 | Formats | **One edit, several formats**: `frameshell.json` `formats` (primary first, equal to `resolution`; built-in `16x9`, `1x1`, `4x5`, `9x16`, custom ids allowed). In a non-primary format untransformed footage covers the frame (crop around the centre; sources with alpha on upper tracks are fitted whole), generated clips render at its size, vertical captions are 1.3x; one pure `resolveFormat` feeds export, `frame` and the preview; the format owns the frame, a preset its codec; sparse per-format overrides later, never of timing or audio (ADR 0027) | Cuts, captions and audio stay one source of truth; the multicam `reframe` model (intent in data, layout per output) already works | A timeline per format nesting the edit (cannot re-block footage), forked timelines (drift), automatic layout only (no per-format handle) |
 | 33 | Style guide | **Optional `style.json`** at the project root: brand, colours (hex), fonts (project files under `assets/fonts/` or bundled OFL faces), type sizes, a **motion personality** (playful, premium, corporate, energetic, calm) with field-by-field overrides, sound levels relative to the voice and voice-chain defaults, platforms by name, notes, rules and a banned list. Every value resolves with its source (file, personality, default). User styles are copied in, never inherited; safe zones are core data per platform, named not copied (ADR 0028) | Values are numbers agents and checks can read; a project renders the same on any machine; the loudness target stays `export.loudness` | Live inheritance from a user style, prose notes, a JSON + Markdown pair, safe zones per style |
-| 34 | Markers and beats | **Timeline markers** (`markers`: id, `at`, label unique ignoring case, colour) that ripple with `cut` like clip starts and are deleted inside a cut range; a **beat grid measured per music asset** in a versioned `beats/<stem>.beats.json` with human corrections, mapped to the timeline through one chosen music clip (`tempo.clip`, nominal `bpm` fallback); energy snapping stays first, beats and markers are opt-in snap targets; names as times through one TimeRef contract (ADR 0029; slice 1, markers, built) | Moments get names the person and the agent share; a grid that belongs to the music follows it through moves, trims and speed changes, like words follow their clips | One grid in the timeline file, beats stored as markers, markers fixed on timeline seconds, a learned detector first |
+| 34 | Markers and beats | **Timeline markers** (`markers`: id, `at`, label unique ignoring case, colour) that ripple with `cut` like clip starts and are deleted inside a cut range; a **beat grid measured per music asset** in a versioned `beats/<stem>.beats.json` with human corrections, mapped to the timeline through one chosen music clip (`tempo.clip`, nominal `bpm` fallback); energy snapping stays first, beats and markers are opt-in snap targets; names as times through one TimeRef contract (ADR 0029; slices 1, markers, and 2, the beat detector with `beats.measure` and `beats.show`, built) | Moments get names the person and the agent share; a grid that belongs to the music follows it through moves, trims and speed changes, like words follow their clips | One grid in the timeline file, beats stored as markers, markers fixed on timeline seconds, a learned detector first |
 | 35 | Shaped transitions | **A shape on the dissolve**: optional clip `shape` (`wipe`, `push`; iris, zoom, slats and grid later) qualifies the incoming clip's `dissolve`, chosen by cause; one pure `shapeAt` gives offsets and frame rectangles to export (`overlay` expressions, a `geq` alpha step) and preview (Canvas 2D clip paths); a shape with no handle holds the edge frame instead of dipping; `transition.set` warns on three of a kind in a row or more than a third hard cuts (ADR 0030) | Every ADR 0018 rule (edge ownership, handles, `edgeTransitions`, equal-power sound, patches) comes free; no WebGL, no new binary; a timeline without `shape` exports byte for byte as before | Recipes on keys only (2 of 6 kinds), ffmpeg `xfade` (no origin, second path to keep in parity), a WebGL shader catalogue with headless Chrome export |
 | 36 | Effects on clips | **Typed, optional effect fields per kind**, one evaluator each (ADR 0031): `audio.effects` on media clips (`highpass`, `denoise`, `compressor`; `clip set --voice` writes the voice chain), baked once per asset and chain into `.frameshell/audio-fx/` and read by both preview and export; later a compositor `backdrop` blur under generated layers and a per-clip `grade` as one 3D table. Shots and angles take none in v1 | Parity by construction (same baked samples, same table); flat fields an agent writes by hand and timelines without them unchanged; clip render caches untouched | One ordered effect stack per clip with a registry, two-stage renders for glass, export-only filters, baking every effect into proxies |
 | 37 | Subject matte | **Text and graphics behind the person**: a video track flagged `behind: <plateTrackId>` is turned on read into a synthetic subject layer (one pure rewrite in `composite.ts`, inside `flattenTimeline`) cut out by a **matte**, a grayscale video made once per asset content by MediaPipe's selfie segmenter (Apache-2.0) on the managed ONNX Runtime Web, smoothed over time and refined by a guided filter, cached in `.frameshell/cache/mattes/` (ADR 0032) | Plate edits never desync the subject; one rewrite feeds preview and export; the matte is regenerable derived media, never project data | A duplicate clip with a matte field, a baked VP9-alpha asset in `assets/`, MODNet (50× slower), u2net_human_seg (unlicensed weights), RVM (GPL-3.0) |
@@ -225,6 +225,7 @@ my-video/
 ├── transcripts/
 │   └── raw-01.words.json      # word-level transcript per asset
 ├── director.json              # optional: multicam director rules on top of a template (ADR 0016)
+├── beats/<stem>.beats.json    # optional: beat grid of a music asset, with human corrections (ADR 0029; versioned, never swept)
 ├── people.json                # optional: who is who across transcripts, angles and faces (ADR 0020)
 ├── credits.json               # optional: source, licence and author of third-party assets (ADR 0026)
 ├── style.json                 # optional: style guide (colours, fonts, type, motion, sound, platforms, rules; ADR 0028)
@@ -233,6 +234,7 @@ my-video/
     ├── cache/clips/           # rendered generated clips (regenerable)
     ├── cache/mattes/          # subject mattes per asset content, model and fps (ADR 0032; regenerable)
     ├── proxies/               # CFR preview proxies (regenerable)
+    ├── beats/                 # onset envelopes of the beat detector (ADR 0029; regenerable)
     ├── audio-fx/              # clip audio effects baked per asset and chain (ADR 0031; regenerable)
     ├── waveforms/, thumbs/    # regenerable
     ├── history/               # local operation journal + head snapshot per timeline (not shared; loss = loss of undo only)
@@ -466,6 +468,34 @@ Optional (ADR 0028). Without it, nothing changes. Nothing renders from it yet: a
 - Safe zones are not in the style: `packages/schema/src/safe-zones.ts` holds one per platform (pixels of a reference frame the platform's app covers, `measured` or from guides); styles, formats and review name the platform.
 - `style.show` resolves it; `file.write` refuses an invalid file. A journaled `style.set`, user styles in `configDir/styles/` (copied in with `from`) and captions, fonts and generated clips taking the style come later (ADR 0028).
 
+### 5.9 Beat grid (`beats/*.beats.json`)
+
+Optional (ADR 0029). One file per music asset, named like transcripts (`beats/<path under assets/ minus extension>.beats.json`, the extension kept when a same-name sibling owns the first name). Written by `beats.measure`, or by a generator that knows its beats with `"detector": "exact"`; versioned with the project. Without it, nothing changes: nothing on a timeline reads a grid yet.
+
+```json
+{
+  "schemaVersion": 1,
+  "asset": "assets/music/theme.mp3",
+  "assetHash": "sha256:…",
+  "detector": "onset-flux@1",
+  "sampleRate": 48000,
+  "bpm": 120,
+  "meter": 4,
+  "downbeat": 2,
+  "confidence": 0.93,
+  "residualMs": 4.2,
+  "edits": { "tempo": "half", "downbeat": 1, "offset": 0.012 },
+  "beats": [0.2, 0.7, 1.2],
+  "onsets": [0.2, 0.46, 0.7]
+}
+```
+
+- Times are source-asset seconds (the clock `in` and `out` count). `beats` is strictly increasing, from the first matched hit to the last, each beat snapped to a measured hit within 8 ms (else on the fitted straight grid, each computed from its index and rounded once). `onsets` are the strong hits (peaks above 0.12 of the strongest), where a sound effect lands within 40 ms.
+- `bpm`, `meter`, `downbeat` (index among `beats` of the first beat that starts a bar), `confidence` (0..1) and `residualMs` (largest gap between the grid and a hit it matched) describe the measured grid; `edits` are the human's: `tempo` `double` (a beat halfway between each pair) or `half` (every other beat), `downbeat` (index among the effective beats), `offset` (seconds). `effectiveBeatGrid` (`packages/schema`) applies them in that order; nothing else re-implements them.
+- Confidence under 0.5 is LOW (calm music gets a double-time grid; a downbeat can be half a bar off): `alternatives` lists the other tempi, best supported first, and snapping to beats (ADR 0029 slice 3) never uses a LOW grid unless an `edit` vouches for it. A grid from the 16 kHz fallback decode (no finished ingest) is capped at 0.45; `sampleRate` says which audio was analysed.
+- A beat grid without music yet (a nominal `bpm` and `offset`) is `nominalBeatFrame`: the frame of beat i is `round(fps · 60 · i / bpm + offset · fps)`, never an added rounded step (that drifts 2 frames in 32 beats at 128 BPM and 30 fps).
+- `file.write` refuses an invalid file; a hand edit of `edits` takes effect on the next `beats.show`. `.frameshell/beats/` holds only the onset envelope (`<hash>-b1-<rate>.f32`), swept by `gc` once no asset has that content; `gc` never touches `beats/`.
+
 ---
 
 ## 6. Core behaviours
@@ -536,6 +566,7 @@ frameshell transition set --at <s> [--kind dissolve|fade|wipe|push] [--direction
 frameshell transition remove --at <s> [--track <id>…]
 frameshell marker add --at <s> --label <l> [--color c]   # named point on the timeline clock; ripples with cut (ADR 0029)
 frameshell marker set <marker> [--at s] [--label l] [--color c | --clear-color] | remove <marker> | list   # <marker>: id or label
+frameshell beats measure <asset> [--bpm n] [--reset-edits] | show <asset>   # beat grid of a music asset into beats/<stem>.beats.json (ADR 0029); LOW confidence is flagged
 frameshell clip key <clip> --prop x|y|scale|opacity|gain --time <s> [--value v] [--ease linear|in|out|in-out] [--remove] | --clear   # keyframe at a timeline second
 frameshell cut [--track <id>…] --from <s> --to <s> [--no-snap] [--snap-window <s>]  # ripple cut; default: all video and audio tracks; edges snap to pauses (ADR 0003), window >= 0.5 s, default from editing.snapWindow
 frameshell timeline show [--json]             # compact dump for agents

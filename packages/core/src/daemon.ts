@@ -51,12 +51,13 @@ import { CreditsService } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import { ExportService } from "./export/service.js";
 import { EventHub, type EventSink } from "./events.js";
-import { canonicalPath, canonicalPathSync, exists } from "./fs-util.js";
+import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
+import { BeatsStore, beatsFileOf, formatBeatsFile, ownBeatsFile, resolveBeatsFile, summarizeBeats } from "./media/beats-store.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { MediaService } from "./media/service.js";
 import { AudioFxService } from "./media/audio-fx.js";
@@ -366,6 +367,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return binaries.ensure("ffmpeg", project ? { dir: project.dir, binaries: project.config.binaries } : undefined);
   };
   const energy = new EnergyStore({
+    derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
+    ffmpeg: projectFfmpeg,
+    extractAudio: options.extractAudio,
+  });
+  const beats = new BeatsStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
     ffmpeg: projectFfmpeg,
     extractAudio: options.extractAudio,
@@ -2074,6 +2080,50 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         );
         return describe(info, false);
       });
+    },
+    "beats.measure": async ({ cwd, asset, bpm, resetEdits }, _caller, request) => {
+      const dir = await root(cwd);
+      const { rel } = await resolveAsset(dir, resolve(cwd, asset));
+      const probe = await media.probe(dir, rel);
+      if (!probe.audio) {
+        throw new RpcError(ErrorCode.InvalidOperation, `beats.measure: ${rel} has no audio to measure.`, { op: "beats.measure", reason: "no audio", field: "asset" });
+      }
+      return inJob({ kind: "beats", project: dir, asset: rel }, async (ctx) => {
+        ctx.update({ step: "beats", progress: 0 });
+        // The caller may be gone (the job outlives it): its progress is then dropped.
+        try {
+          request.progress({ message: `Measuring the beats of ${rel}`, stage: "beats", values: { asset: rel } });
+        } catch {
+          // Connection closed.
+        }
+        const started = Date.now();
+        // Named before the work: a broken or foreign file fails now, not after a minute of analysis.
+        const target = await resolveBeatsFile(dir, rel);
+        const measured = await beats.measure(dir, rel, { hint: bpm, signal: ctx.signal, onProgress: (progress) => ctx.update({ progress }) });
+        const file = beatsFileOf({ asset: rel, measured, previous: target.previous, keepEdits: !resetEdits });
+        await writeTextAtomic(target.path, formatBeatsFile(file));
+        return {
+          ...summarizeBeats(file, target.rel).summary,
+          cached: measured.cached,
+          keptEdits: Object.keys(file.edits).length > 0,
+          seconds: Math.round((Date.now() - started) / 100) / 10,
+        };
+      });
+    },
+    "beats.show": async ({ cwd, asset }) => {
+      const dir = await root(cwd);
+      const { rel } = await resolveAsset(dir, resolve(cwd, asset));
+      const found = await ownBeatsFile(dir, rel);
+      if (!found) {
+        throw new RpcError(ErrorCode.InvalidOperation, `beats.show: ${rel} has no beat grid yet. Run \`beats.measure\` (CLI: frameshell beats measure ${rel}).`, {
+          op: "beats.show",
+          reason: "not measured",
+          field: "asset",
+        });
+      }
+      const { grid, summary } = summarizeBeats(found.file, found.rel);
+      const { hash } = await media.derivedAudio(dir, rel);
+      return { ...summary, current: hash === found.file.assetHash, edits: found.file.edits, beats: grid.beats, downbeats: grid.downbeats };
     },
     "people.ranges": async ({ cwd, person, kind, timeline }, caller) => {
       const dir = await root(cwd);

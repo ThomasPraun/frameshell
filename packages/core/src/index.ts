@@ -279,6 +279,33 @@ export {
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
 export {
+  ANALYSIS_RATE as BEAT_ANALYSIS_RATE,
+  BEAT_DETECTOR,
+  type BeatAnalysis,
+  type BeatOptions,
+  MAX_BEAT_AUDIO_S,
+  NoBeatsError,
+  type Signal as BeatSignal,
+  analysePcm,
+  detectBeats,
+  onsetEnvelope,
+  prepareSignal,
+} from "./media/beats.js";
+export {
+  BEATS_CACHE_DIR,
+  BEATS_DIR,
+  BeatsStore,
+  type BeatsStoreOptions,
+  type MeasuredBeats,
+  beatsCacheKey,
+  beatsPathsFor,
+  classifyBeatsCache,
+  formatBeatsFile,
+  ownBeatsFile,
+  readBeatsFile,
+  resolveBeatsFile,
+} from "./media/beats-store.js";
+export {
   AUDIO_FX_DIR,
   AUDIO_FX_VERSION,
   type AudioBakeNeed,
