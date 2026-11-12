@@ -48,7 +48,7 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
-const TimeRef = (what: string) =>
+export const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(

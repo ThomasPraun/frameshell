@@ -151,6 +151,12 @@ People changes are not timeline operations: review mode does not hold them, `his
 |---|---|
 | `sound_sfx(kind, variant?, seed?, pitch?, length?)` | Synthesize a sound effect offline (`click`, `tick`, `pop`, `whoosh`, `riser`, `thump`, `impact`, `shutter`; `variant` 1 to 3) into `assets/sound/<kind>-<key>.wav` and import it. The same arguments always give the same file (`state: "cached"`, nothing written); `seed` is a family seed, `pitch` multiplies every frequency, `length` is for `whoosh` and `riser`. `peakAt` is the second of the take that must land on the cue; nothing is placed on a timeline. Records the take as `own` work in `credits.json` when the project keeps one (`credited`). Idempotent per `idempotencyKey`. |
 
+## Music on the cut (ADR 0037)
+
+| Tool | Does |
+|---|---|
+| `music_fit(timeline?, clip, end, from?, hit?, exact?, dryRun?, skip?)` | Fit a music clip (a media clip of an audio track) so the track's own final hit lands on `end` (seconds, or a marker id or label) and it plays unspliced before it. The hit is `hit` (source seconds) or the last sharp jump in level near the end of the part the clip plays, with a `confidence` and the other `candidates`. Slides the clip at its speed (the intro is dropped before `from`, default 0; a track too short starts late, never looped); `exact` keeps the start and changes the speed by at most 1.7 % to land the hit exactly (a doubtful hit never does). `dryRun` returns the plan and its `steps`. A clip with duck keys gets duck again in the same transaction (`skip: ["duck"]` leaves them). One transaction `Music fit: …` (one proposal in review mode). |
+
 ## Beat grid (ADR 0029)
 
 | Tool | Does |

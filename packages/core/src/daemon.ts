@@ -25,6 +25,7 @@ import {
   type TimelineViewName,
   assertSocketPathFits,
   isMethodName,
+  methods,
   parseRequest,
   readMessages,
   resolveAppDirs,
@@ -61,6 +62,7 @@ import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
+import { musicFitLabel, planMusicFit } from "./music/run.js";
 import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
 import { BeatsStore, beatsFileOf, formatBeatsFile, ownBeatsFile, resolveBeatsFile, summarizeBeats } from "./media/beats-store.js";
 import { EnergyStore } from "./media/energy-store.js";
@@ -771,6 +773,25 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     await transactions.applied(key, tx);
     await settle(key, tx);
     return result;
+  };
+  /**
+   * The `prepare` of a `track.duck` operation: it measures the speech of the `under` tracks against the timeline the
+   * operation applies to, so a voice edited or a proposal rebased meanwhile is heard as it is then. `heard()` gives
+   * what was found, after the operation ran.
+   */
+  const duckPlanner = (dir: string, { under, depth, attackMs, releaseMs, threshold, gap }: Omit<ValidatedParams<"track.duck">, "cwd" | "timeline" | "track">) => {
+    const attack = attackMs / 1000;
+    const release = releaseMs / 1000;
+    let stretches: Span[] = [];
+    let warnings: string[] = [];
+    const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+      const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
+      stretches = speechStretches(heard.runs, { gap, attack, release });
+      warnings = heard.warnings;
+      const curve = dipCurve(stretches, { depth, attack, release });
+      return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
+    };
+    return { prepare, heard: () => ({ stretches, warnings }) };
   };
   /** `multicam.create`: measure (or take the known offsets of) the files, then add the group, its program track and first shot. */
   const createGroup = async (
@@ -1670,26 +1691,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           throw invalid(`${id} is a ${voice.kind} track; \`under\` takes video and audio tracks (a multicam program track has no sound of its own).`, "under");
         }
       }
-      const attack = attackMs / 1000;
-      const release = releaseMs / 1000;
-      let stretches: Span[] = [];
-      let heardWarnings: string[] = [];
-      // Measured against the timeline the operation applies to: a voice edited or a proposal rebased meanwhile is heard as it is then.
-      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
-        const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
-        stretches = speechStretches(heard.runs, { gap, attack, release });
-        heardWarnings = heard.warnings;
-        const curve = dipCurve(stretches, { depth, attack, release });
-        return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
-      };
-      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, prepare);
+      const ducking = duckPlanner(dir, { under, depth, attackMs, releaseMs, threshold, gap });
+      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, ducking.prepare);
+      const heard = ducking.heard();
       return {
         ...result,
         track,
         under,
-        stretches: stretches.length,
-        speechSeconds: Math.round(stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
-        warnings: [...result.warnings, ...heardWarnings],
+        stretches: heard.stretches.length,
+        speechSeconds: Math.round(heard.stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
+        warnings: [...result.warnings, ...heard.warnings],
       };
     },
     cut: (params, caller) => operate("cut", params, caller),
@@ -1737,6 +1748,56 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         await settle(key, tx);
       }
       return { timeline, revision, dryRun, applied: true, tx: tx.id, ...plan, warnings: [...warnings] };
+    },
+    "music.fit": async ({ cwd, timeline, clip, end, from, hit, exact, dryRun, skip }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip }, {
+        profile: (asset) => energy.profile(dir, asset),
+        // A grid of other content (the file was replaced) places nothing.
+        onsets: async (asset) => {
+          const file = await beatsOf(dir, asset);
+          return file?.assetHash === (await media.derivedAudio(dir, asset)).hash ? (file.onsets ?? null) : null;
+        },
+      });
+      if (dryRun || operations.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...report };
+      // The plan can take seconds (first energy profile): a clip moved meanwhile would be fitted from stale times.
+      const fresh = (await loadFor(dir, timeline, caller)).timeline.revision;
+      if (fresh !== loaded.revision) {
+        throw new RpcError(ErrorCode.StaleRevision, `music.fit: timeline ${timeline} changed from revision ${loaded.revision} to ${fresh} while the fit was planned. Nothing was changed; run it again.`, {
+          op: "music.fit",
+          timeline,
+          revision: loaded.revision,
+          current: fresh,
+        });
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: musicFitLabel(report) };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const warnings = new Set(report.warnings);
+      let revision = loaded.revision;
+      try {
+        const write = async (request: OperationRequest, prepare?: (current: Timeline) => Promise<OperationRequest>) => {
+          const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx, ...(prepare ? { prepare } : {}) });
+          await transactions.applied(key, tx);
+          revision = result.revision;
+          for (const warning of result.warnings) warnings.add(warning);
+        };
+        for (const { clip: id, ...operation } of operations) await write({ op: operation.op, args: { clip: id, ...operation.args } } as OperationRequest);
+        if (duckAgain) {
+          // Defaults of the method, and the voice tracks it found: the first duck's own parameters are not stored.
+          const defaults = methods["track.duck"].params.parse({ cwd, timeline, track: duckAgain.track, under: duckAgain.under });
+          const ducking = duckPlanner(dir, defaults);
+          await write({ op: "track.duck", args: { track: duckAgain.track, curve: [{ time: 0, dip: 0 }] } } as OperationRequest, (current) =>
+            ducking.prepare(current, { op: "track.duck", args: { track: duckAgain.track, curve: [{ time: 0, dip: 0 }] } } as OperationRequest),
+          );
+          for (const warning of ducking.heard().warnings) warnings.add(warning);
+        }
+      } finally {
+        await settle(key, tx);
+      }
+      return { timeline, revision, dryRun, applied: true, tx: tx.id, ...report, warnings: [...warnings] };
     },
     "multicam.create": (params, caller) => createGroup(params, caller),
     "multicam.gallery": async ({ cwd, timeline, asset, names, name, at, group: into, mic }, caller) => {

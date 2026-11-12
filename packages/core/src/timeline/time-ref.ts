@@ -96,20 +96,28 @@ export function resolveTimeRefs(request: WireRequestLike, timeline: Pick<Timelin
   for (const field of fields) {
     const value = args[field];
     if (typeof value !== "string") continue;
-    try {
-      (resolved ??= { ...args })[field] = resolveTimeRef(value, { timeline });
-    } catch (error) {
-      if (!(error instanceof TimeRefError)) throw error;
-      throw new RpcError(ErrorCode.InvalidOperation, `${request.op}: ${field}: ${error.message}`, {
-        op: request.op,
-        field,
-        reason: "time reference",
-        value,
-        ...(error.hint ? { hint: error.hint } : {}),
-      });
-    }
+    (resolved ??= { ...args })[field] = resolveTimeRefArg(request.op, field, value, timeline);
   }
   return resolved ? ({ op: request.op, args: resolved } as OperationRequest) : (request as OperationRequest);
+}
+
+/**
+ * {@link resolveTimeRef} for argument `field` of method or operation `op`: a failure is an `RpcError` InvalidOperation that
+ * names both, with the reason `time reference`. For methods that take a time of their own (`music.fit` `end`).
+ */
+export function resolveTimeRefArg(op: string, field: string, value: number | string, timeline: Pick<Timeline, "id" | "markers">): number {
+  try {
+    return resolveTimeRef(value, { timeline });
+  } catch (error) {
+    if (!(error instanceof TimeRefError)) throw error;
+    throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${field}: ${error.message}`, {
+      op,
+      field,
+      reason: "time reference",
+      value,
+      ...(error.hint ? { hint: error.hint } : {}),
+    });
+  }
 }
 
 /** An operation request whose time arguments may still be names: what a caller sends before {@link resolveTimeRefs}. */
