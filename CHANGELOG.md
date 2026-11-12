@@ -239,7 +239,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Format changes are history (#496 slice 1, ADR 0036, SPEC decision 43, protocol 89): `format add` and
+- Format changes are history (#496 slice 1, ADR 0036, SPEC decision 41, protocol 89): `format add` and
   `format remove` join your transaction, `frameshell history` lists them in every timeline's history (marked
   `project config`, touched `format:<id>`), and `frameshell revert <op|tx>` and `tx abort` undo them, with the clips
   of a mixed transaction. A later change of the same format conflicts like a clip; a hand edit of `formats` in
