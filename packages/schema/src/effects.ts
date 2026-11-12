@@ -1,6 +1,7 @@
-// Audio effects of media clips (ADR 0031): one normalized chain, read by the bake key, the bake filter
-// (core) and the preview's bake lookup. No Zod here: the preview engine worker imports this file.
-import type { AudioEffect, MediaClip } from "./timeline.js";
+// Effects of clips (ADR 0031). Audio: one normalized chain, read by the bake key, the bake filter (core) and the
+// preview's bake lookup. Backdrop: one layer description, read by the export graph and the preview engine.
+// No Zod here: the preview engine worker imports this file.
+import type { AudioEffect, Backdrop, MediaClip } from "./timeline.js";
 
 /** Kinds of {@link AudioEffect}, in no particular order: a clip's list order is the processing order. */
 export const AUDIO_EFFECT_KINDS = ["highpass", "denoise", "compressor"] as const;
@@ -90,4 +91,76 @@ export function audioEffectsOf(clip: { type: string; audio?: unknown }): readonl
  */
 export function bakeRef(asset: string, effects: readonly AudioEffect[]): string {
   return `${asset}\n${audioEffectsKey(effects)}`;
+}
+
+/** Range of each {@link Backdrop} number; `saturate` and `dim` default to no change. */
+export const BACKDROP_LIMITS = {
+  blur: { min: 0, max: 200 },
+  saturate: { min: 0, max: 4, default: 1 },
+  dim: { min: 0, max: 1, default: 0 },
+} as const;
+
+/**
+ * Glass of the motion kit (#462): backdrop blur 46 px, saturate 1.45, a dark scrim of 0.55 (0.72 over bright
+ * footage). The default of the style's `glass`; never applied to a clip unless asked (`clip set --glass`).
+ */
+export const GLASS: Readonly<{ blur: number; saturate: number; dim: number }> = { blur: 46, saturate: 1.45, dim: 0.55 };
+
+/**
+ * Alpha (0 to 255) above which a clip's pixel gets the backdrop (ADR 0031 decision 2): a pane of glass at 15 % alpha
+ * blurs as much as an opaque one. Soft shadows above it are blurred under too.
+ */
+export const BACKDROP_ALPHA_THRESHOLD = 8;
+
+/** A clip's backdrop as export and the preview draw it at one output size. */
+export interface BackdropLayer {
+  /** Gaussian sigma in output pixels: `blur` scaled by the output's short side over the project's. */
+  sigma: number;
+  /** Saturation factor (CSS `saturate()`). */
+  saturate: number;
+  /** Black scrim alpha over the blurred backdrop, 0 to 1. */
+  dim: number;
+  /** See {@link BACKDROP_ALPHA_THRESHOLD}. */
+  threshold: number;
+}
+
+/** The backdrop of an adapter clip; null for other clips and clips without one. */
+export function backdropOf(clip: { type: string; backdrop?: unknown }): Backdrop | null {
+  if (clip.type === "media" || clip.type === "timeline" || clip.type === "shot") return null;
+  return (clip as { backdrop?: Backdrop }).backdrop ?? null;
+}
+
+/**
+ * {@link BackdropLayer} of `backdrop` drawn at `output` size in a project of `project` size: the blur is in project
+ * pixels, so it scales with the short side (a vertical format of a landscape project keeps its sigma).
+ */
+export function backdropLayer(backdrop: Backdrop, output: Size, project: Size): BackdropLayer {
+  const scale = Math.min(output.width, output.height) / Math.min(project.width, project.height);
+  return {
+    sigma: Math.round(backdrop.blur * scale * 1000) / 1000,
+    saturate: backdrop.saturate ?? BACKDROP_LIMITS.saturate.default,
+    dim: backdrop.dim ?? BACKDROP_LIMITS.dim.default,
+    threshold: BACKDROP_ALPHA_THRESHOLD,
+  };
+}
+
+/**
+ * Row-major 3 x 3 RGB matrix of the backdrop's colour step: the CSS `saturate()` matrix (Filter Effects 1, on
+ * gamma-encoded RGB as Chromium's canvas applies it), then the scrim as a factor of `1 - dim` (black at `dim` alpha).
+ */
+export function backdropMatrix(layer: Pick<BackdropLayer, "saturate" | "dim">): number[] {
+  const s = layer.saturate;
+  const keep = 1 - layer.dim;
+  // prettier-ignore
+  const matrix = [
+    0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s,
+    0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s,
+    0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s,
+  ];
+  return matrix.map((value) => Math.round(value * keep * 1e6) / 1e6);
+}
+
+interface Size {
+  width: number;
+  height: number;
 }

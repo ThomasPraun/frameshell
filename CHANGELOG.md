@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
+  video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
+  and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
+  and wiping with the clip, then draw the clip; its render does not change. `frameshell clip set <clip> --glass` copies
+  the new `style.json` `glass` numbers (default blur 46, saturate 1.45, dim 0.55) onto the clip; `--backdrop-blur`,
+  `--backdrop-saturate`, `--backdrop-dim` set one number, `--clear-backdrop` removes it (daemon and MCP `clip.set`
+  `backdrop`). `glass.cards` (default false) says whether the style uses glass cards at all: glass is never a default.
+  The clip inspector has a Glass switch with Blur, Saturate and Dim fields. On the bottom picture track the backdrop is
+  kept with a warning and not drawn. Timelines without backdrops export exactly as before. In the preview one glass
+  card costs about 4 ms per frame at a 1920x1080 canvas on an Apple M3. Older Frameshell versions reject a timeline or
+  `style.json` that carries the new fields.
 - Fit music to the cut, second slice of #485 (ADR 0037, epic #451; daemon `music.fit`, CLI `music fit`, MCP `music_fit`,
   protocol 101): `music fit <clip> --end end-card` back-times a music clip (a media clip of an audio track) so the track's own
   final hit lands on the cut and it plays unspliced before it, and says where the music then starts. `--end` and
@@ -129,6 +140,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per format with `pick()`, uses springs, and passes `hyperframes check --strict`; the ones that can work alone as
   well as over footage have `bg` and `backdrop` props. The real-Chrome test renders every template in the four
   formats (inside the frame, same frames cold and after a reseek). Listed in the plugin skill.
+- Motion templates, UI demo group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template` also
+  takes `cursor-click` (a cursor arrives on an arc, hesitates, clicks a button; the confirmation springs in on the
+  click's frame), `cursor-drag-drop` (a cursor carries a card into a drop zone that answers on the release),
+  `cursor-marquee` (a selection rectangle over a grid of tiles, each lighting up as it is reached, a count on release),
+  `cursor-text-select` (a cursor drags along a phrase of a paragraph, over line breaks too, the highlight following it,
+  an action pill on release; word boxes are read from layout), `app-window` (a CRM, spreadsheet or inbox window: a
+  cursor clicks a row, its highlight sweeps in and the rest dims on that frame; own solid background; `cursor` off
+  clicks at `selectAt`) and `typing-field` (a prompt bar types with an uneven seeded rhythm and a blinking caret, a cursor
+  presses Run, a progress line fills, a result appears). The cursor is a carrier: 4 to 7 % of the short side
+  (`cursorSize`), outside the frame at the start so it never fades in, arcs with a 15 % bow and a tiny overshoot,
+  optional `hesitate`, a click of 0.84 in 0.1 s and back in 0.22 s, and a drift after the last beat. Each has typed
+  props, takes colours and fonts from `style.json`, lays out per format with `pick()` and passes
+  `hyperframes check --strict`; the real-Chrome test renders all of them in the four formats. Scales within 0.6 % of 1
+  are written as exactly 1 because Chrome kept an earlier raster for them (same time, a pixel off by seek order).
+  Listed in the plugin skill.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to

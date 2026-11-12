@@ -64,6 +64,7 @@ export {
   ClipAudioSchema,
   MediaClipAudioSchema,
   AudioEffectSchema,
+  BackdropSchema,
   MARKER_COLORS,
   MARKER_LABEL_MAX,
   MarkerIdSchema,
@@ -109,6 +110,7 @@ export {
   type ClipAudio,
   type MediaClipAudio,
   type AudioEffect,
+  type Backdrop,
   type CaptionPhrase,
   type CaptionGap,
   type SubtitleEntry,
@@ -179,6 +181,7 @@ export {
   StyleFontsSchema,
   StyleTypeSchema,
   StyleSoundSchema,
+  StyleGlassSchema,
   ResolvedStyleSchema,
   type MotionPersonalityId,
   type StyleFile,
@@ -192,6 +195,7 @@ export {
   parseStyleFile,
   resolveStyle,
   voiceChainOf,
+  glassOf,
 } from "./style.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {
@@ -212,12 +216,19 @@ export { type PaintChange, paintStretches } from "./painted.js";
 export {
   AUDIO_EFFECT_KINDS,
   AUDIO_EFFECT_LIMITS,
+  BACKDROP_ALPHA_THRESHOLD,
+  BACKDROP_LIMITS,
+  GLASS,
   MAX_AUDIO_EFFECTS,
   VOICE_CHAIN,
+  type BackdropLayer,
   type EffectParamLimit,
   type NormalizedAudioEffect,
   audioEffectsKey,
   audioEffectsOf,
+  backdropLayer,
+  backdropMatrix,
+  backdropOf,
   bakeRef,
   normalizeAudioEffects,
 } from "./effects.js";

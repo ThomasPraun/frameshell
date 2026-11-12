@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AnyClipSchema,
   AudioEffectSchema,
+  BackdropSchema,
   DirectorRulesSchema,
   ElementAdjustSchema,
   MAX_SNAP_WINDOW_S,
@@ -364,6 +365,14 @@ export const operationArgs = {
         "`media` only (ADR 0031): replaces the clip's audio effect list, applied in order; `null` clears it. Kinds: `highpass { frequency }` (Hz), " +
           "`denoise { floor, reduction }` (dB), `compressor { threshold, ratio, attack, release, makeup }` (dB, ratio, ms, ms, dB); omitted numbers " +
           "take the voice chain's. Shots are skipped with a warning.",
+      ),
+    backdrop: BackdropSchema.partial()
+      .nullable()
+      .optional()
+      .describe(
+        "Generated (adapter) clips on an upper video track only (ADR 0031): glass under the clip, merged field by field into its " +
+          "backdrop (`blur` needed once); `null` clears it. Glass of the motion kit: `{ blur: 46, saturate: 1.45, dim: 0.55 }`. Shots are " +
+          "skipped with a warning.",
       ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
