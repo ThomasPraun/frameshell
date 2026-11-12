@@ -2,10 +2,10 @@ import {
   ErrorCode,
   type OperationName,
   type OperationResult,
+  type ResolvedOperationArgs,
   RpcError,
   type SnapReport,
   type TimelinePatch,
-  type operationArgs,
 } from "@frameshell/protocol";
 import { basename } from "node:path/posix";
 import {
@@ -41,6 +41,8 @@ import {
   gainAt,
   isShotClip,
   markerLabelKey,
+  findMarker,
+  describeMarkers,
   keyedValueAt,
   paintStretches,
   placementAt,
@@ -53,7 +55,6 @@ import {
   showsPicture,
   splitScriptRef,
 } from "@frameshell/schema";
-import type { z } from "zod";
 import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
@@ -148,8 +149,8 @@ export interface EditContext {
 /** Prefix of a core-generated id: `c` clip, `t` track, `g` multicam group, `m` marker. */
 export type IdPrefix = "c" | "t" | "g" | "m";
 
-/** Args of a public operation after param validation. */
-export type OperationArgs<K extends OperationName> = z.output<(typeof operationArgs)[K]>;
+/** Args of a public operation after param validation and time resolution: time references are seconds (`resolveTimeRefs`). */
+export type OperationArgs<K extends OperationName> = ResolvedOperationArgs<K>;
 
 /** Any operation the engine applies: a public verb, or a patch (inverses, reverts). */
 export type OperationRequest =
@@ -2053,10 +2054,9 @@ class Edit {
 
   /** The draft's marker with id `ref`, else with label `ref` ignoring case; InvalidOperation listing the markers when none. */
   marker(ref: string): Marker {
-    const markers = this.draft.markers ?? [];
-    const found = markers.find((marker) => marker.id === ref) ?? markers.find((marker) => markerLabelKey(marker.label) === markerLabelKey(ref));
+    const found = findMarker(this.draft.markers, ref);
     if (found) return found;
-    const known = markers.map((marker) => `${marker.id} "${marker.label}" at ${marker.at}`).join(", ");
+    const known = describeMarkers(this.draft.markers);
     throw this.invalid(`no marker "${ref}" in timeline ${this.draft.id}.`, {
       field: "marker",
       hint: known ? `Markers: ${known}.` : "It has no markers: add one with `marker.add`.",

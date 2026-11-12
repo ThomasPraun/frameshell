@@ -143,7 +143,14 @@ describe("frameshell render and frame", () => {
 
       const removed = frameshell(["format", "remove", "9x16", "--json"]);
       expect(removed.code, removed.stderr).toBe(0);
+      const { op } = JSON.parse(removed.stdout) as { op: string };
       expect(JSON.parse(removed.stdout)).toMatchObject({ undo: { method: "format.add", params: { id: "9x16", index: 1 } } });
+      expect(frameshell(["history"]).stdout).toContain(`  ${op}  format.remove  format:9x16  (project config)\n`);
+      const reverted = frameshell(["revert", op]);
+      expect(reverted.code, reverted.stderr).toBe(0);
+      expect(reverted.stdout).toMatch(/^ {2}project config: op op_[0-9a-f]{8} · format:9x16\nrevision \d+ \(timeline unchanged\) · tx tx_[0-9a-f]{8}\n$/);
+      expect(frameshell(["format", "list"]).stdout).toContain("9x16  1080x1920\n");
+      expect(frameshell(["format", "remove", "9x16"]).code).toBe(0);
     },
     120_000,
   );

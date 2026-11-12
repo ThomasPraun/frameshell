@@ -36,6 +36,21 @@ import { AGENT_LABEL_PATTERN } from "./agents.js";
  */
 
 const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Seconds; snapped to the project frame grid, 3 decimals.`);
+
+/**
+ * A time on the timeline clock the daemon resolves before the operation runs: seconds, or a name from the timeline
+ * (ADR 0029 decision 7, ADR 0037). Fields that take one are listed in {@link TIME_REF_FIELDS}.
+ */
+/** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
+export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+const TimeRef = (what: string) =>
+  z
+    .union([z.number().nonnegative(), z.string().min(1)])
+    .describe(
+      `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
+        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`); the daemon turns it into seconds first, so the history records seconds.",
+    );
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 const TrackRef = z.string().min(1).describe("Track id from `track.list`, e.g. `t_4d5e6f`.");
 const CropSide = z.number().min(0).lt(1).optional();
@@ -240,7 +255,7 @@ export const operationArgs = {
       .min(1)
       .optional()
       .describe("`timeline`: timeline file, e.g. `timelines/intro.json` (required). Adapter types: composition entry file."),
-    start: Seconds("Timeline time of the first frame. Default: right after the track's last clip.").optional(),
+    start: TimeRef("Timeline time of the first frame. Default: right after the track's last clip.").optional(),
     in: Seconds("Source time of the first frame. Default 0.").optional(),
     out: Seconds("`media`: source time just after the last frame. Default: end of the asset.").optional(),
     duration: z
@@ -281,15 +296,15 @@ export const operationArgs = {
   }),
   "clip.move": z.strictObject({
     clip: ClipRef,
-    start: Seconds("New timeline time of the first frame. Default: unchanged.").optional(),
+    start: TimeRef("New timeline time of the first frame. Default: unchanged.").optional(),
     track: TrackRef.optional().describe("Track to move the clip to (same kind). Default: unchanged."),
   }),
   "clip.trim": z.strictObject({
     clip: ClipRef,
     in: Seconds("New source time of the first frame (head trim); frames that stay keep their timeline position.").optional(),
     out: Seconds("New source time just after the last frame (tail trim).").optional(),
-    start: Seconds("Head trim by timeline time: the clip's new left edge. Alternative to `in`.").optional(),
-    end: Seconds("Tail trim by timeline time: the clip's new right edge. Alternative to `out`.").optional(),
+    start: TimeRef("Head trim by timeline time: the clip's new left edge. Alternative to `in`.").optional(),
+    end: TimeRef("Tail trim by timeline time: the clip's new right edge. Alternative to `out`.").optional(),
     ...snapArgs,
     snapBounds: snapBoundsArg,
     ripple: rippleArg(
@@ -300,7 +315,7 @@ export const operationArgs = {
   }),
   "clip.split": z.strictObject({
     clip: ClipRef,
-    at: Seconds("Timeline time to split at; strictly inside the clip. The left part keeps the id."),
+    at: TimeRef("Timeline time to split at; strictly inside the clip. The left part keeps the id."),
   }),
   "clip.remove": z.strictObject({ clip: ClipRef }),
   "clip.set": z.strictObject({
@@ -331,8 +346,8 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
   }),
   cut: z.strictObject({
-    from: Seconds("Start of the timeline range to remove."),
-    to: Seconds("End of the range; greater than `from`."),
+    from: TimeRef("Start of the timeline range to remove."),
+    to: TimeRef("End of the range; greater than `from`."),
     tracks: z
       .array(TrackRef)
       .min(1)
@@ -341,7 +356,7 @@ export const operationArgs = {
     ...snapArgs,
   }),
   "transition.set": z.strictObject({
-    at: Seconds("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
+    at: TimeRef("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
     kind: z
       .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS])
       .default("dissolve")
@@ -366,7 +381,7 @@ export const operationArgs = {
       .describe("Tracks to change. Default: every video and audio track that has an edge at `at`, like `cut`."),
   }),
   "transition.remove": z.strictObject({
-    at: Seconds("Timeline time of the clip edge to clear."),
+    at: TimeRef("Timeline time of the clip edge to clear."),
     tracks: z.array(TrackRef).min(1).optional().describe("Tracks to change. Default: every video and audio track that has an edge at `at`."),
   }),
   "clip.key": z.strictObject({
@@ -374,7 +389,7 @@ export const operationArgs = {
     prop: z
       .enum(["x", "y", "scale", "opacity", "gain"])
       .describe("Property to animate: `x`, `y` (project pixels), `scale` (factor), `opacity` (0 to 1) or `gain` (dB). Audio tracks take only `gain`."),
-    time: Seconds("Timeline time of the key, inside the clip. Give it unless `clear`.").optional(),
+    time: TimeRef("Timeline time of the key, inside the clip. Give it unless `clear`.").optional(),
     value: z.number().optional().describe("Value at `time`. Default: the value playing there now."),
     ease: z.enum(KEY_EASES).optional().describe("How the value moves from this key to the next: `linear` (default), `in`, `out` or `in-out`."),
     remove: z.boolean().optional().describe("True removes the key at `time` (the one in that frame) instead of setting one."),
@@ -599,13 +614,13 @@ export const operationArgs = {
     keep: z.array(z.string().min(1)).describe("Shot ids left exactly as they are: the shots a person chose."),
   }),
   "marker.add": z.strictObject({
-    at: Seconds("Timeline second of the marker."),
+    at: TimeRef("Timeline second of the marker."),
     label: MarkerLabel,
     color: MarkerColor.optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Default: none (the app's accent colour)."),
   }),
   "marker.set": z.strictObject({
     marker: MarkerRef,
-    at: Seconds("New timeline second (absolute, not a nudge).").optional(),
+    at: TimeRef("New timeline second (absolute, not a nudge).").optional(),
     label: MarkerLabel.optional().describe("New label; unique in the timeline ignoring case."),
     color: MarkerColor.nullable().optional().describe("New colour; null clears it (the app's accent colour)."),
   }),
@@ -616,6 +631,33 @@ export const operationArgs = {
 
 /** Name of a public timeline operation. */
 export type OperationName = keyof typeof operationArgs;
+
+/**
+ * The args of each operation that take a time reference (seconds or a name, see `TimeRef` above), the one place
+ * that lists them. `resolveTimeRefs` (core) turns them into seconds before the engine runs; the engine's types
+ * ({@link ResolvedOperationArgs}) see numbers. Another time argument joins the contract by joining this table.
+ */
+export const TIME_REF_FIELDS = {
+  "clip.add": ["start"],
+  "clip.move": ["start"],
+  "clip.trim": ["start", "end"],
+  "clip.split": ["at"],
+  cut: ["from", "to"],
+  "transition.set": ["at"],
+  "transition.remove": ["at"],
+  "clip.key": ["time"],
+  "marker.add": ["at"],
+  "marker.set": ["at"],
+} as const satisfies { [K in OperationName]?: readonly (keyof z.output<(typeof operationArgs)[K]> & string)[] };
+
+/** Args of operation `K` once its time references are seconds, as the engine takes them. */
+export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typeof TIME_REF_FIELDS
+  ? {
+      [P in keyof z.output<(typeof operationArgs)[K]>]: P extends (typeof TIME_REF_FIELDS)[K][number]
+        ? Exclude<z.output<(typeof operationArgs)[K]>[P], string>
+        : z.output<(typeof operationArgs)[K]>[P];
+    }
+  : z.output<(typeof operationArgs)[K]>;
 
 /**
  * Change that restores or replaces parts of a timeline. Every operation's
@@ -1022,8 +1064,26 @@ const TrackBehindViewSchema = z
   .optional()
   .describe("Video tracks: the lower video track (plate) whose person in front this track sits behind (`track.set` `behind`, ADR 0032); absent otherwise.");
 
-/** Compact track summary of `track.list`. */
-export const TrackSummarySchema = z.object({
+/** See {@link TrackSummarySchema}. */
+export type TrackSummary = {
+  id: string;
+  kind: "video" | "audio" | "program" | "subtitles";
+  name: string | null;
+  follows: string | null;
+  group?: string | undefined;
+  style?: { preset?: string | undefined; position?: "top" | "center" | "bottom" | undefined; speakerNames?: boolean | undefined; [key: string]: unknown } | undefined;
+  muted?: true | undefined;
+  hidden?: true | undefined;
+  behind?: string | undefined;
+  clips: number;
+  end: number | null;
+};
+
+/**
+ * Compact track summary of `track.list`.
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+export const TrackSummarySchema: z.ZodType<TrackSummary> = z.object({
   id: z.string(),
   kind: TrackKindSchema,
   name: z.string().nullable(),
@@ -1073,8 +1133,6 @@ export const TimelineViewSchema = z.object({
 
 /** See {@link TimelineViewSchema}. */
 export type TimelineView = z.output<typeof TimelineViewSchema>;
-/** See {@link TrackSummarySchema}. */
-export type TrackSummary = z.output<typeof TrackSummarySchema>;
 /** See {@link TimelineProblemSchema}. */
 export type TimelineProblem = z.output<typeof TimelineProblemSchema>;
 

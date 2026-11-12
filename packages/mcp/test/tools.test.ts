@@ -63,8 +63,9 @@ describe("MCP tool catalog", () => {
       additionalProperties: false,
       required: ["from", "to"],
       properties: {
-        from: { type: "number" },
-        to: { type: "number" },
+        // Seconds, or a marker id or label (TimeRef, ADR 0037).
+        from: { anyOf: [{ type: "number" }, { type: "string" }] },
+        to: { anyOf: [{ type: "number" }, { type: "string" }] },
         cwd: { type: "string", description: expect.stringContaining(CWD) },
       },
     });
@@ -109,6 +110,13 @@ describe("MCP tool catalog", () => {
       required: ["from", "to"],
       properties: { count: { type: "integer", minimum: 2, maximum: 16 } },
     });
+  });
+
+  it("says the review tool returns the sheets as images", async () => {
+    const { tools } = await (await connect()).listTools();
+    const review = tools.find((tool) => tool.name === "review")!;
+    expect(review.description).toMatch(/Returns the sheets as images/);
+    expect(review.inputSchema.required).toBeUndefined();
   });
 
   it("reports an unreachable daemon as an actionable tool error, not a protocol error", async () => {

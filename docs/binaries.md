@@ -47,6 +47,7 @@ Set `binaries` in `frameshell.json` (project) or in `<configDir>/config.json` (g
 - The value is `"managed"` or a path. Relative paths resolve against the project root (project config) or the config directory (global config).
 - Precedence: project, then global, then managed. `"managed"` in the project cancels a global override.
 - Overriding one tool of a package also takes its siblings from the same directory (`ffprobe` next to `ffmpeg`), unless the sibling has its own entry.
+- The global config also holds `speech.command`, the TTS program of the `command` voiceover provider (ADR 0034). It is accepted from this file only; `frameshell.json` has no such key.
 
 ## ffmpeg and ffprobe
 

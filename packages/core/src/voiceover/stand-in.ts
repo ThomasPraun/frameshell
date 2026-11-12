@@ -24,6 +24,7 @@ const VOICES: Readonly<Record<string, number>> = { tone: 440, low: 220 };
 export function standInSpeechProvider(): SpeechProvider {
   return {
     id: STAND_IN_SPEECH_PROVIDER,
+    free: true,
     defaultVoice: "tone",
     voices: () => Object.keys(VOICES).map((id) => ({ id, label: `Stand-in ${VOICES[id]} Hz tone` })),
     async synthesize(text, voice, _options, context) {

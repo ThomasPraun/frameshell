@@ -7,6 +7,7 @@ frameshell.json          project config
 timelines/main.json      the exported sequence (others: nested timelines)
 assets/                  footage, images, audio, fonts, generated media
 transcripts/*.words.json word-level transcript per asset
+beats/*.beats.json       optional: beat grid of a music asset (see Beat grid)
 credits.json            optional: source, licence and author of third-party assets (see credits.md)
 scripts/*.md             Markdown scripts
 compositions/            HyperFrames HTML compositions, the Remotion project (compositions/remotion/)
@@ -42,6 +43,16 @@ exports/                 render output
 - `speakers` (after `transcribe --speakers`): `[{ id: "s1", name: "Ana" }]`; each word then has a `speaker` id. Rename a person by changing `name`, never the `id`.
 - `assetHash`: the transcript is stale when the asset changes; re-run `transcribe`.
 - `provider`, `model` (id), and `modelHash` (`sha256:<hex>`) when the model was a file registered on the machine that transcribed it.
+
+## Beat grid
+
+`beats/<asset minus extension>.beats.json` (extension kept when two assets share a base name), written by `frameshell beats measure <asset>` or, for generated music, by the generator with `"detector": "exact"`. Times are source seconds of the music file. Versioned with the project; `gc` never touches it.
+
+- `bpm`, `meter` (beats per bar, 4), `downbeat` (index in `beats` of the first beat that starts a bar), `beats` (increasing, each snapped to a measured hit within 8 ms), `onsets` (strong hits), `confidence` (0..1), `residualMs` (largest gap between the grid and the hits it matched; under 15 on a clean track), `sampleRate` (16000 = decoded without a finished ingest, confidence capped at 0.45).
+- **LOW confidence** (under 0.5, `low: true`): calm or sparse music gets a double-time grid, a bar can start half a bar off, a tracker lags an attack by tens of ms. Tell the person, offer the tempi in `alternatives` (best supported first), and do not cut to the grid until they pick one. A person or you vouch for it by setting `edits`.
+- `edits` (validated by `file.write`): `tempo` `"double"` (a beat halfway between each pair) or `"half"` (every other beat), `downbeat` (index among the effective beats of the first bar start), `offset` (seconds added to every beat). `beats show` applies them; `beats measure` keeps them unless `--reset-edits`. Correct a grid by adding to `edits`; leave `beats` as measured.
+- A grid before music exists is just arithmetic: beat `i` is at frame `round(fps · 60 · i / bpm + offset · fps)`, computed from `i` and rounded once. Never add a rounded beat length, it drifts 2 frames in 32 beats at 128 BPM and 30 fps.
+- `assetHash`: stale when the asset changes (`beats show` says `current: false`).
 
 ## Scripts
 

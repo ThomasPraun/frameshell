@@ -26,6 +26,67 @@ export const JournalEntrySchema = OperationRecordSchema.extend({
 /** See {@link JournalEntrySchema}. */
 export type JournalEntry = z.output<typeof JournalEntrySchema>;
 
+/** Project-config document a config operation changes (ADR 0036). `project`: `formats` of `frameshell.json`. */
+export const ConfigDocSchema = z.enum(["project"]).describe("Config document changed: `project` = `formats` of `frameshell.json`.");
+
+/** See {@link ConfigDocSchema}. */
+export type ConfigDoc = z.output<typeof ConfigDocSchema>;
+
+/**
+ * One key a config operation changed (ADR 0036). Keys: `format:<id>`, value `{ id, width, height, index }`
+ * (`index` = position, 1 = right after the primary, which is never a key). `null`: absent.
+ */
+export const ConfigPatchEntrySchema = z.object({
+  key: z.string().describe("Entity key, e.g. `format:9x16`."),
+  before: z.unknown().describe("Value before the operation; null when the key was absent."),
+  after: z.unknown().describe("Value after the operation; null when it was removed."),
+});
+
+/** See {@link ConfigPatchEntrySchema}. */
+export type ConfigPatchEntry = z.output<typeof ConfigPatchEntrySchema>;
+
+/**
+ * One line of `.frameshell/history/project.config.jsonl` (ADR 0036): a keyed change of a project-config
+ * document, in the transaction it ran in. Undo = write each key's `before` back. `hashBefore`/`hash` chain the
+ * document's keyed state like a timeline journal; a break means an edit outside the journal.
+ */
+export const ConfigJournalEntrySchema = z.object({
+  id: OpIdSchema,
+  op: z.string().describe("`format.add`, `format.remove` or `revert`."),
+  args: z.record(z.string(), z.unknown()),
+  author: AuthorSchema,
+  tx: TxIdSchema,
+  txLabel: z.string().nullable(),
+  at: z.string().describe("ISO 8601 time the operation was applied."),
+  doc: ConfigDocSchema,
+  patch: z.array(ConfigPatchEntrySchema).describe("Every key whose value changed."),
+  hashBefore: z.string().describe("Hash of the document's keyed state the operation was applied to."),
+  hash: z.string().describe("Hash of the keyed state it wrote."),
+  undo: z
+    .object({ method: z.string(), params: z.record(z.string(), z.unknown()) })
+    .optional()
+    .describe("`format.add`/`format.remove`: the call that undoes it, as the method returned it."),
+  proposal: TxIdSchema.optional().describe("Set when accepted from a proposal (ADR 0019): the proposal's id."),
+});
+
+/** See {@link ConfigJournalEntrySchema}. */
+export type ConfigJournalEntry = z.output<typeof ConfigJournalEntrySchema>;
+
+/** A config operation as `revert` and `tx.abort` report it. */
+export const ConfigOperationSchema = z.object({
+  id: OpIdSchema,
+  op: z.string(),
+  args: z.record(z.string(), z.unknown()),
+  author: AuthorSchema,
+  tx: TxIdSchema,
+  at: z.string(),
+  doc: ConfigDocSchema,
+  touched: z.array(z.string()).describe("Keys it changed, e.g. `format:9x16`."),
+});
+
+/** See {@link ConfigOperationSchema}. */
+export type ConfigOperation = z.output<typeof ConfigOperationSchema>;
+
 /** One operation as `history` lists it: the journal line without its inverse, plus the ids it touched. */
 export const HistoryOperationSchema = z.object({
   id: OpIdSchema,
@@ -35,7 +96,13 @@ export const HistoryOperationSchema = z.object({
   at: z.string(),
   revisionBefore: z.int(),
   revision: z.int(),
-  touched: z.array(z.string()).describe("Ids of the multicam groups, tracks and clips this operation changed."),
+  touched: z
+    .array(z.string())
+    .describe("Ids of the multicam groups, tracks and clips this operation changed; for a config operation its keys, e.g. `format:9x16`."),
+  doc: ConfigDocSchema.optional().describe(
+    "Set on a project-config operation (ADR 0036), which changes no timeline: listed in every timeline's history, " +
+      "`revisionBefore` = `revision` = the timeline's revision at the time.",
+  ),
 });
 
 /** Consecutive-in-time operations of one transaction, oldest first. */
@@ -102,7 +169,7 @@ export const RevertConflictSchema = z.object({
   op: z.string(),
   author: AuthorSchema,
   tx: TxIdSchema,
-  ids: z.array(z.string()).describe("Track and clip ids both operations changed."),
+  ids: z.array(z.string()).describe("Track and clip ids both operations changed; config keys (e.g. `format:9x16`) for a config revert."),
 });
 
 /** See {@link RevertConflictSchema}. */

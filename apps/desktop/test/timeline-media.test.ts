@@ -8,6 +8,7 @@ import { MediaCache } from "../src/renderer/src/timeline/media.js";
 function asset(path: string, ready: boolean): AssetInfo {
   return {
     path,
+    kind: "media",
     hash: ready ? "sha256:ab" : null,
     state: ready ? "ready" : "processing",
     error: null,

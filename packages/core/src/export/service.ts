@@ -28,6 +28,7 @@ import {
   resolveFormat,
   sameAspect,
   showsPicture,
+  subtitleTracks,
 } from "@frameshell/schema";
 import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
@@ -384,6 +385,17 @@ export class ExportService {
     loaded?: { timeline: Timeline; fps: number },
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
     return this.#capture(root, params, await this.#resolved(root, params.timeline, loaded));
+  }
+
+  /**
+   * Timeline seconds where the subtitle cues of `loaded` start, over every subtitle track (what `review` marks on
+   * its contact sheet); `loaded`: see {@link ExportService.frame}.
+   */
+  async subtitleCueStarts(root: string, loaded: { timeline: Timeline; fps: number }): Promise<number[]> {
+    const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
+    const transcripts = await this.#transcripts(root, timeline);
+    const tracks = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
+    return tracks.flatMap((track) => track.cues.map((cue) => cue.start / fps));
   }
 
   /**
@@ -750,7 +762,7 @@ async function writeFiles(dir: string, files: Record<string, string>): Promise<v
 }
 
 /** Run `work` on every item, at most `limit` at once. Rejects with the first failure, after in-flight work settles. */
-async function pool<T>(items: readonly T[], limit: number, work: (item: T, index: number) => Promise<void>): Promise<void> {
+export async function pool<T>(items: readonly T[], limit: number, work: (item: T, index: number) => Promise<void>): Promise<void> {
   let next = 0;
   let failure: { error: unknown } | undefined;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {

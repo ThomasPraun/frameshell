@@ -71,6 +71,8 @@ export {
   type Marker,
   type MarkerColor,
   markerLabelKey,
+  findMarker,
+  describeMarkers,
   type Timeline,
   type Track,
   type ClipTrack,
@@ -180,6 +182,7 @@ export {
   type ResolvedStyle,
   parseStyleFile,
   resolveStyle,
+  voiceChainOf,
 } from "./style.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {
@@ -239,6 +242,19 @@ export {
   type ExportPreset,
   parseExportPreset,
 } from "./plugin.js";
+export {
+  BEATS_SCHEMA_URL,
+  BeatsEditsSchema,
+  BeatsFileSchema,
+  EXACT_DETECTOR,
+  LOW_BEAT_CONFIDENCE,
+  type BeatGrid,
+  type BeatsFile,
+  effectiveBeatGrid,
+  isLowConfidence,
+  nominalBeatFrame,
+  parseBeatsFile,
+} from "./beats.js";
 export {
   TRANSCRIPT_SCHEMA_URL,
   TranscriptSchema,
