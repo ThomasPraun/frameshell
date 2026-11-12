@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Beat grid, slice 2 of #458 (ADR 0029): `frameshell beats measure <asset> [--bpm n] [--reset-edits]` and `beats show
+  <asset>` (daemon `beats.measure` and `beats.show`, MCP `beats_measure` and `beats_show`, protocol 87) measure the beats
+  of a music file locally, with no download and no model, and write `beats/<name>.beats.json`: tempo, every beat in
+  source seconds (each snapped to a measured hit within 8 ms), which beat starts a bar, the strong hits, a confidence and
+  the largest gap to the hits (under 15 ms on clean click tracks). Calm music, which gets a double-time grid, is flagged
+  LOW with the other tempi to try; a track decoded without a finished ingest is capped LOW too. `--bpm` says the tempo you
+  expect so a 60 BPM song stays 60. Human corrections go in the file's `edits` (`tempo` double or half, `downbeat`,
+  `offset`), are validated by `file.write` and kept when you measure again. It runs as a `beats` job in a worker thread
+  (about 5 s for 3 minutes); the onset envelope is cached in `.frameshell/beats/` and swept by `gc`, which never touches
+  `beats/`. The file's `detector` also admits `exact` for generated music that knows its beats. Nothing on a timeline
+  reads a grid yet (the grid in the app, `tempo.clip` and `--snap-to` are slice 3). The FFT of multicam sync is now one
+  shared module used by the detector too.
 - SVG and font files in `assets/` are non-media assets (#520, split from #467). `.svg`, `.ttf`, `.otf`, `.woff` and `.woff2`
   were queued for media ingest and failed (fonts in `assets/fonts/` included); now ingest only hashes them: no probe,
   no proxy or other derived media, no ffmpeg, no failed job. `asset.list` (and `asset.changed`) report a new `kind`
@@ -41,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retried request with the same idempotency key never charges twice. No voice ships yet: a test-only stand-in
   (`FRAMESHELL_SPEECH_STAND_IN=1`) says words as tones. New error codes `SpeechProviderNotFound`, `SpeechFailed`,
   `ConfirmationRequired`; `plugin list` shows speech providers.
+- Voiceover, slice 2 of #470 (ADR 0034): the machine-level `command` speech provider. Set `speech.command` in the global
+  `config.json` (`run`: the TTS program and its arguments with `{voice}`, `{language}`, `{out}`; optional `voices`,
+  `defaultVoice`, `version`, `timeoutSeconds`) and `frameshell voiceover generate --provider command` says each line
+  with it: the text goes to stdin, the WAV comes from `{out}` or stdout. It is free, works in untrusted projects, and
+  is read from the global config only: a `speech` key in `frameshell.json` is refused. A voice or language starting
+  with `-` is never passed to the program. The global config now has one reader shared with binary overrides.
+- Speech providers: a provider without `estimate()` counts as paid at an unknown cost (`ConfirmationRequired` with
+  `cost: null`) unless it declares `free: true` on the contract. The stand-in and `command` declare it.
 - Video subject matte, slice 1 of #461 (ADR 0032): `matte.prepare` (protocol 84), CLI `frameshell matte <asset>`
   and MCP `matte_prepare` compute which pixels of each frame of a video are the person in front, locally on CPU:
   MediaPipe's selfie segmenter (Apache-2.0, 0.46 MB, downloaded on first use; pinned in the binaries manifest) on

@@ -20,6 +20,7 @@ import { probeMedia } from "./ffmpeg.js";
 import { type MediaTools, ingestAsset } from "./ingest.js";
 import { assetKindOf, nonMediaError } from "./kind.js";
 import { DERIVED_DIRS, MediaStore, classifyDerived, hashFile } from "./store.js";
+import { BEATS_CACHE_DIR, beatsCacheKey, classifyBeatsCache } from "./beats-store.js";
 import { ENERGY_DIR, classifyEnergy, energyCacheKey } from "./energy-store.js";
 import { renameRetrying } from "../fs-util.js";
 import { CONTEXT_DIR, CONTEXT_MAX_AGE_MS, classifyContext } from "../context.js";
@@ -317,7 +318,7 @@ export class MediaService {
 
   /**
    * Delete derived media (proxies, sidecars, manifests, waveforms,
-   * thumbnails, energy envelopes, face scans, subject mattes, transcription WAVs) of content no file of the project has now,
+   * thumbnails, energy envelopes, beat onset envelopes, face scans, subject mattes, transcription WAVs) of content no file of the project has now,
    * keyed by the media index at the current fps and recipe. The files are
    * every one under `assets/` plus every other path the index holds (a
    * deleted asset's entry is dropped). Never touches `assets/`. A key whose
@@ -353,6 +354,7 @@ export class MediaService {
     }
     const mediaKeys = new Set([...hashes].map((hash) => store.key(hash, fps)));
     const energyKeys = new Set([...hashes].map(energyCacheKey));
+    const beatsKeys = new Set([...hashes].map(beatsCacheKey));
     const peopleKeys = new Set([...hashes].map(faceScanKey));
     const matteKeys = new Set([...hashes].map((hash) => matteKey(hash, this.#matteModel, fps)));
     const common = {
@@ -376,6 +378,8 @@ export class MediaService {
     }
     removed.push(
       ...(await sweep({ ...common, dir: ENERGY_DIR, classify: classifyEnergy, keep: (key) => unknown > 0 || energyKeys.has(key) })),
+      // Only the onset envelopes under .frameshell/: the beat grids in `beats/` are project files and never swept.
+      ...(await sweep({ ...common, dir: BEATS_CACHE_DIR, classify: classifyBeatsCache, keep: (key) => unknown > 0 || beatsKeys.has(key) })),
       ...(await sweep({ ...common, dir: PEOPLE_DIR, classify: classifyFaceScan, keep: (key) => unknown > 0 || peopleKeys.has(key) })),
       ...(await sweep({ ...common, dir: MATTES_DIR, classify: classifyMatte, keep: (key) => unknown > 0 || matteKeys.has(key) })),
       // "Chat about this" captures: by age only, never by key.

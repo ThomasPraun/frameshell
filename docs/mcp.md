@@ -141,6 +141,13 @@ People changes are not timeline operations: review mode does not hold them, `his
 | Tool | Does |
 |---|---|
 | `matte_prepare(asset)` | Matte job (kind `matte`): which pixels of each frame of a video are the person in front, MediaPipe's selfie segmenter on every proxy frame, smoothed and refined, cached per content in `.frameshell/cache/mattes/` as a grayscale video (frame N = proxy frame N). Returns its path; a second call returns it at once. The only tool that downloads the matte model. Same as `frameshell matte`. |
+## Beat grid (ADR 0029)
+
+| Tool | Does |
+|---|---|
+| `beats_measure(asset, bpm?, resetEdits?)` | Beat grid job (kind `beats`): the tempo, every beat in source seconds, which beat starts a bar and a confidence of a music file, measured locally in a worker thread and written to `beats/<name>.beats.json`. `bpm`: the tempo you expect (the grid is the nearest octave). `low: true` in the result means it may be double time or a bar off; `alternatives` lists the other tempi. Keeps the person's `edits` unless `resetEdits`. Idempotent per `idempotencyKey`. |
+| `beats_show(asset)` | The grid with the file's `edits` applied (`beats`, `downbeats`, `current`). Correct a grid by writing `edits` (`tempo`, `downbeat`, `offset`) into the file with `file_write`; it is validated. |
+
 ## Style (ADR 0028)
 
 Optional `style.json`: the project's style guide as numbers (colours, fonts, type sizes, motion personality and overrides, sound levels under the voice, platforms, rules, banned list).
