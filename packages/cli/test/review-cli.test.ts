@@ -84,7 +84,23 @@ describe("frameshell review", () => {
     120_000,
   );
 
+  it(
+    "draws the zones of --platform (an alias works) and prints them",
+    () => {
+      const result = frameshell(["review", "--platform", "instagram", "--sheets", "safe", "--range", "0,0.5"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("safe-instagram-reels.png");
+      // The test project is 16:9: the vertical platform's numbers are scaled per axis, with a warning.
+      expect(result.stdout).toContain("Safe zones instagram-reels (measured): top 124, right 249, bottom 214, left 0 px");
+      expect(result.stdout).toContain("warning: safe: instagram-reels is a vertical platform and the film is not");
+      const json = JSON.parse(frameshell(["review", "--platform", "shorts", "--sheets", "safe", "--range", "0,0.5", "--json"]).stdout) as { safeZones: { platform: string }[] };
+      expect(json.safeZones.map((zone) => zone.platform)).toEqual(["youtube-shorts"]);
+    },
+    120_000,
+  );
+
   it("rejects a bad range, sheet or flag before talking to the daemon", () => {
+    expect(frameshell(["review", "--platform", "myspace"]).stderr).toContain("--platform takes instagram-reels, tiktok, youtube-shorts, youtube");
     expect(frameshell(["review", "--range", "5"]).stderr).toContain("--range takes two seconds");
     expect(frameshell(["review", "--range", "5,2"]).code).toBe(2);
     expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("unknown: poster");

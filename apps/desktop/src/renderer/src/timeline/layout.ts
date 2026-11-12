@@ -1,6 +1,7 @@
 // Timeline panel geometry: pure, DOM-free, so it is unit tested and shared by paint and hit testing.
 import type { TimelineView } from "@frameshell/protocol";
 import {
+  type Backdrop,
   type Clip,
   type ElementAdjust,
   type MarkerColor,
@@ -91,6 +92,8 @@ export interface ClipBox {
   keys: Partial<Record<KeyProp, KeyBox[]>>;
   /** Stored `elements` of a generated clip (ADR 0021), by CSS selector; empty without any. */
   elements: Readonly<Record<string, ElementAdjust>>;
+  /** Stored `backdrop` of a generated clip (ADR 0031); null without one. */
+  backdrop: Backdrop | null;
 }
 
 /** One angle a shot shows. */
@@ -381,6 +384,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     marks,
     keys: keyBoxes(fields["keys"]),
     elements: elementsOf(fields["elements"]),
+    backdrop: kind === "generated" && typeof fields["backdrop"] === "object" && fields["backdrop"] !== null ? (fields["backdrop"] as Backdrop) : null,
   };
 }
 

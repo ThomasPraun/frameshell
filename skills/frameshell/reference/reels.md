@@ -35,7 +35,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 ## Layout rules (1080×1920)
 
-- **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. Check each graphic in a frame, not in its file.
+- **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. `frameshell review --platform <instagram|tiktok|shorts>` draws the zones over the frames and flags captions that cross them ([critique.md](critique.md)); check each graphic in a frame, not in its file.
 - **Face first:** nothing covers the face or chin, also at the deepest zoom: cards start below the chin at the zoom they appear in.
 - **One idea on screen:** when a graphic says what the caption says, the caption is noise; leave the caption and drop the graphic, or move the graphic to a moment the caption does not cover.
 - **Text:** no caption on screen under 0.4 s; type at least 28 px at 1080 wide; one display face and one text face; one accent colour, on the key word only.
@@ -55,7 +55,7 @@ A big word between the background and the person, so they stand in front of it. 
 
 - **A note is a rule for the whole video**, not one moment: "it covers my chin" means check every graphic at its deepest zoom; "the effects are loud" means lower all of them.
 - **Redo only what they name:** "redo 0:04 to 0:07" changes that range and leaves the rest exactly as it was.
-- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake.
+- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` with `frameshell style set` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake, and `style save <name>` keeps it for their next project.
 
 ## Before you hand it over
 

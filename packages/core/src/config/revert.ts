@@ -8,7 +8,10 @@ import { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, conf
  */
 
 /** Words naming config document `doc` in messages. */
-export const CONFIG_DOC_NAMES: Record<ConfigDoc, string> = { project: "the formats of frameshell.json" };
+export const CONFIG_DOC_NAMES: Record<ConfigDoc, string> = { project: "the formats of frameshell.json", style: "style.json" };
+
+/** The command that changes config document `doc` forward. */
+const FORWARD: Record<ConfigDoc, string> = { project: "frameshell format add|remove", style: "frameshell style set" };
 
 /**
  * `current` with the target's operations undone. `entries` are `doc`'s journal lines, oldest first; `target` is
@@ -33,7 +36,7 @@ export function planConfigRevert(
     throw new RpcError(
       ErrorCode.RevertConflict,
       `Cannot revert ${target}: ${CONFIG_DOC_NAMES[doc]} changed outside the journal ${gap}. The journal cannot undo an ` +
-        "edit it did not record, and reverting would overwrite it. Change it forward instead (`frameshell format add|remove`).",
+        `edit it did not record, and reverting would overwrite it. Change it forward instead (\`${FORWARD[doc]}\`).`,
       { target, doc, conflicts: [], hint: "Change it forward; the journal cannot undo changes it did not record." },
     );
   }

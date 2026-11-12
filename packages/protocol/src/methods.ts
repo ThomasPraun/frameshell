@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { MusicFitResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -32,7 +33,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -45,11 +46,13 @@ import {
   OpIdSchema,
   OperationResultSchema,
   RejectionRecordSchema,
+  TimeRefParam,
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineRejectionSchema,
   TempoGridSchema,
   TimelineViewSchema,
+  TimeRef,
   TrackDuckResultSchema,
   TrackSummarySchema,
   TxIdSchema,
@@ -69,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 97;
+export const PROTOCOL_VERSION = 102;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -645,6 +648,30 @@ const FormatChangeSchema: z.ZodType<FormatChange> = z.object({
   ),
 });
 
+/**
+ * What a `style.set` or `style.apply` changed (ADR 0028, ADR 0036).
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+const StyleChangeSchema: z.ZodType<StyleChange> = z.object({
+  dir: z.string().describe("Project root."),
+  path: z.string().describe("The style file, project-relative: `style.json`."),
+  changes: z
+    .array(
+      z.object({
+        path: z.string().describe("Dotted path of the value, e.g. `colors.accent`; `from` for the user style it was copied from."),
+        before: z.unknown().describe("Value in the file before; null when it was not set."),
+        after: z.unknown().describe("Value in the file after; null when it is no longer set."),
+      }),
+    )
+    .describe("Every value that changed, in schema order; empty when the file already held them."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
+  tx: TxIdSchema.describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
+  proposal: TxIdSchema.nullable().describe(
+    "Review mode (ADR 0019): the proposal now holding the change, which reaches `style.json` only once the person accepts it " +
+      "(`proposal.wait`). Null: applied at once.",
+  ),
+});
+
 /** One file `render` writes: the export of one format. */
 const RenderOutputSchema = z.object({
   format: z.string().describe("Format id rendered, e.g. `9x16`."),
@@ -696,6 +723,52 @@ const UncertainWordSchema = VerifiedWordSchema.extend({
         "re-transcribing the audio around it): a transcription miss, not a cut; check by ear, never trim for it.",
     ),
   heardAs: z.string().nullable().describe("What was heard in the word's slot for `garbled`; null otherwise."),
+});
+
+/** Fields every sound of `sound.place` takes, whichever way its time is given (ADR 0038). */
+const soundFields = {
+  role: SoundRoleSchema.optional().describe("What the sound does to the picture; it picks the offset against the cue. Default: by kind."),
+  tier: SoundTierSchema.optional().describe("`primary` (carries the picture), `secondary`, `texture` (background); it picks the gain. Default: by kind."),
+  seed: z.number().int().min(0).max(SFX_SEED_MAX).default(0).describe("Family seed, as in `sound.sfx`: one seed per film keeps one timbre."),
+  pitch: z.number().min(SFX_PITCH_RANGE.min).max(SFX_PITCH_RANGE.max).optional().describe("Multiplier of every frequency, as in `sound.sfx`."),
+  offset: z.number().min(-1000).max(1000).optional().describe("Milliseconds from the cue to the take's anchor, replacing the role's offset (negative = before the picture)."),
+  gain: z.number().min(-60).max(12).optional().describe("Clip gain in dB, replacing the one from the style and the tier."),
+};
+
+/** The fields of a sound that has a kind of its own. */
+const soundKindFields = {
+  kind: SfxKindSchema.describe("What the sound is, as in `sound.sfx`."),
+  variant: z.number().int().min(1).max(SFX_VARIANTS).optional().describe(`Recipe of the kind, 1 to ${SFX_VARIANTS}. Default: rotates through them along the timeline.`),
+  length: z.number().positive().optional().describe("Seconds, for `whoosh` and `riser` only, as in `sound.sfx`."),
+};
+
+/** One sound of `sound.place` `cues`. */
+const SoundCueSchema = z.strictObject({
+  at: TimeRefParam("Timeline time of the picture event the sound belongs to."),
+  ...soundKindFields,
+  ...soundFields,
+});
+
+/** `cuts` of `sound.place`. */
+const SoundCutsSchema = z.strictObject({
+  track: z.string().min(1).describe("Video or audio track whose cuts (the start of every clip after the first) get a sound, from `track.list`."),
+  which: z.array(z.int().min(1)).min(1).optional().describe("Only these cuts, counted from 1 in time order. Default: every cut."),
+  ...soundKindFields,
+  ...soundFields,
+});
+
+/** `typing` of `sound.place`. */
+const SoundTypingSchema = z.strictObject({
+  from: TimeRefParam("Timeline time of the first key."),
+  to: TimeRefParam("Timeline time the run ends; no key at or after it. After `from`."),
+  rate: z
+    .number()
+    .positive()
+    .max(SOUND_TYPING_RATE.max)
+    .default(SOUND_TYPING_RATE.default)
+    .describe(`Keys per second, at most ${SOUND_TYPING_RATE.max}. Default ${SOUND_TYPING_RATE.default}.`),
+  kind: z.enum(["tick", "click"]).default("tick").describe("`tick` (default) or `click`."),
+  ...soundFields,
 });
 
 /**
@@ -1171,12 +1244,15 @@ export const methods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default all): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
       "frames each: pops, overlaps and blank frames only show there) and `seam` (the last 6 and the first 6 frames, to " +
-      "judge a loop). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
+      "judge a loop). `safe` (with `platform`, or the platforms the style guide names on a vertical film): up to 36 frames chosen like the " +
+      "contact sheet with the platform's UI zones (`style.show` safeZones, one source in `@frameshell/schema`) shaded red; a frame where the captions of a " +
+      "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
+      "can measure; a file has none). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
       "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). The MCP tool returns the sheets as images. " +
@@ -1195,7 +1271,12 @@ export const methods = {
         ),
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
-      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default all four."),
+      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default contact, phone, motion and seam, plus safe when a platform is given or the style guide names platforms on a vertical film."),
+      platform: SafeZoneSchema.shape.platform
+        .optional()
+        .describe(
+          "Platform whose UI zones the `safe` sheet draws (instagram-reels, tiktok, youtube-shorts, youtube); adds `safe` to the default sheets. Default: the platforms of the style guide, when `sheets` names `safe` or the film is vertical.",
+        ),
       every: z
         .number()
         .positive()
@@ -1806,7 +1887,7 @@ export const methods = {
     mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json` and `people.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json`, `people.json` and `style.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
@@ -1814,8 +1895,8 @@ export const methods = {
       "file, is kept with the proposal, not in `timelines/`, until the person accepts it. A `frameshell.json` write that " +
       "changes `formats` is journaled as a `file.write` config operation (ADR 0036) in the writer's transaction, so `history` " +
       "lists it and `revert` undoes it; in review mode its formats change waits in the proposal while its other keys are " +
-      "written at once. A `style.json` write by anyone but the app is refused in review mode (ProposalState, reason " +
-      "`forbidden`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
+      "written at once. A `style.json` write that changes a value is a `file.write` config operation the same way, and in " +
+      "review mode it waits in the proposal whole (prefer `style.set`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
       path: AbsolutePath.describe("Absolute file path inside a project, e.g. `/home/ana/videos/launch/scripts/launch.md`."),
@@ -2178,6 +2259,76 @@ export const methods = {
         .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
         .describe("The take when this call wrote it, imported; empty when `cached`. Follow its ingest with `job.list`."),
       credited: z.boolean().describe("The project's `credits.json` holds an `own` entry for the take. False when the project keeps no ledger."),
+    }),
+  },
+  "sound.place": {
+    mutating: true,
+    description:
+      "Place generated sound effects (ADR 0038) on a timeline, in one transaction `Sound: …` (one proposal in review mode; " +
+      "`revert` undoes it whole). Each sound is made like `sound.sfx` (reused when the same take exists, else written to " +
+      "`assets/sound/` and imported) and put on an audio track so that the instant of the take that must meet the picture " +
+      "(`peakAt`: the transient of a hit, the peak of a whoosh, the end of a riser) falls on its cue plus an offset by role " +
+      `(ms, negative = before the picture: ${Object.entries(SOUND_ROLE_OFFSETS).map(([role, ms]) => `${role} ${ms}`).join(", ")}; ` +
+      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click and shutter \`click\`, tick \`tap\`, ` +
+      "pop and thump `pop`, whoosh `whoosh`, impact `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
+      "a frame of where asked, and it plays whole frames (a sound shorter than one frame is skipped, with a reason). " +
+      "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`), `cuts` (the edit point at the start of every clip after the first of a video " +
+      "or audio `track`, or only the numbered ones in `which`) and `typing` (a run of keys between `from` and `to`, " +
+      `${SOUND_TYPING_RATE.default} keys a second by default, at most ${SOUND_TYPING_RATE.max}, spaced at least ${SOUND_KEY_GAP_MS} ms apart (a warning when whole frames bring two keys closer), with a seeded ±10 % timing jitter ` +
+      "and rotating takes). Sounds go on the audio track named `SFX` (made when absent) or on `track`; sounds that overlap in time " +
+      "go on further tracks `SFX 2`, `SFX 3`… The clip `gain` (dB) is minus the style's `sound.sfxUnderVoice` (20 by default) " +
+      `plus the tier: ${Object.entries(SOUND_TIER_OFFSETS_DB).map(([tier, db]) => `${tier} ${db}`).join(", ")} dB (\`gain\` replaces it). ` +
+      "Without `variant` the takes of one kind rotate through variants 1 to 3 along the timeline, so the same whoosh is never twice in a row. " +
+      "Taste is a warning, never a refusal: the call warns (`warnings`) when more than " +
+      `${SOUND_MAX_PER_FRAME} sounds land on one frame, when two sounds of one kind are closer than their minimum gap ` +
+      `(${Object.entries(SOUND_MIN_GAP_MS).map(([kind, ms]) => `${kind} ${ms} ms`).join(", ")}) and when one take plays twice in a row, counting sounds already on the timeline. ` +
+      "Example: `{ cues: [{ at: \"hook\", kind: \"whoosh\" }, { at: 6.2, kind: \"click\", seed: 3 }] }`. " +
+      `At most ${SOUND_MAX_PLACEMENTS} sounds per call. Fails with InvalidParams (nothing to place), InvalidOperation (an unknown ` +
+      "marker, a `track` that is not an audio track, a hand-made file in the way of a take) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      cues: z.array(SoundCueSchema).min(1).optional().describe("Sounds at given times; each is one sound."),
+      cuts: SoundCutsSchema.optional().describe("Sounds on the edit points of a track."),
+      typing: SoundTypingSchema.optional().describe("A run of key sounds between two times."),
+      track: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Audio track for the sounds, from `track.list`. Default: the audio track named `SFX`, made when absent."),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline id."),
+      revision: z.int().describe("Revision after the last change; the one before the call when nothing was placed."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null when nothing was placed."),
+      tracks: z
+        .array(z.object({ id: z.string(), name: z.string().nullable(), created: z.boolean().describe("This call made the track.") }))
+        .describe("The audio tracks the sounds went on, first lane first."),
+      placed: z
+        .array(
+          z.object({
+            clip: z.string().describe("Id of the new clip."),
+            track: z.string(),
+            file: z.string().describe("The take, project-relative: `assets/sound/<kind>-<key>.wav`."),
+            state: z.enum(["generated", "cached"]).describe("`generated`: this call wrote the take. `cached`: it already existed."),
+            kind: SfxKindSchema,
+            role: SoundRoleSchema.nullable().describe("Role whose offset applied; null for a riser's own rule or an `offset` given."),
+            tier: SoundTierSchema,
+            from: z.enum(["cue", "cut", "typing"]).describe("Which part of the call asked for it."),
+            cue: z.number().describe("Timeline second the sound belongs to."),
+            offset: z.number().describe("Milliseconds from the cue to the take's anchor that were used."),
+            start: z.number().describe("Timeline second the clip starts, on the frame grid."),
+            in: z.number().describe("Source seconds cut off the head of the take; above 0 only when it would start before the timeline does."),
+            anchorAt: z.number().describe("Timeline second where the take's anchor falls after rounding to frames."),
+            gain: z.number().describe("Clip gain, dB."),
+          }),
+        )
+        .describe("The clips made, in time order."),
+      skipped: z
+        .array(z.object({ cue: z.number(), kind: SfxKindSchema, reason: z.string() }))
+        .describe("Sounds asked for and not placed, with why (shorter than one frame, would start before the timeline)."),
+      generated: z.int().describe("Takes this call wrote (the others were reused)."),
+      warnings: z.array(z.string()).describe("Crowded frames, short gaps, a take twice in a row, trimmed heads, and the engine's own warnings."),
     }),
   },
   "shoot.status": {
@@ -2964,7 +3115,7 @@ export const methods = {
     mutating: true,
     description:
       "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioEffects` (media; replaces the effect list, " +
-      "`null` clears; see below), `transform` (merged field by field), " +
+      "`null` clears; see below), `backdrop` (generated clips; see below), `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
       "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
       "the field clears all; the composition file stays untouched), `scriptRef` (script scene `ref` from `script.outline`, or the script path " +
@@ -2974,6 +3125,11 @@ export const methods = {
       "`[{ kind: \"highpass\", frequency: 85 }, { kind: \"denoise\", floor: -30, reduction: 8 }, { kind: \"compressor\", threshold: -20, ratio: 2.5, " +
       "attack: 8, release: 140, makeup: 2 }]`. The asset is baked once per chain in the background; export waits for it, the preview plays " +
       "dry until it is ready. Energy snapping and transcription keep the dry sound. Integrated loudness stays the export's (`export.loudness`). " +
+      "`backdrop` (ADR 0031) makes a generated clip glass: export and preview blur (`blur`, Gaussian sigma in project px), saturate " +
+      "(`saturate`, 1 unchanged) and dim (`dim`, 0 to 1) the picture below the clip wherever the clip's alpha shows, then draw the clip; " +
+      "its render does not change. Merged field by field, `null` clears. Glass is a style choice, never a default: use it when the " +
+      "style's `glass.cards` is true, with the style's `glass` numbers (`style_show`), else only when asked. On the bottom video track " +
+      "nothing is below: stored with a warning, not drawn. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -3178,6 +3334,50 @@ export const methods = {
       skip: z.array(z.string().min(1)).optional().describe("Candidate ids (`p1`, `r2`…) from a dry run to leave out."),
     }),
     result: CleanupResultSchema,
+  },
+  "music.fit": {
+    mutating: true,
+    description:
+      "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
+      "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
+      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
+      "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
+      "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +
+      "where the clip plays the file from later than 0 and the start lands after `from`, the intro comes back as far as the file has it; " +
+      "where the file is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
+      "or spliced. `exact: true` keeps the start (the clip's own, or `from`) and changes the speed so the hit lands exactly on " +
+      "`end`: at most ±1.7 % of the clip's speed (export keeps the pitch with atempo; the preview still shifts it a little until " +
+      "its stretch lands); beyond that it refuses and says which `end` would fit, or to drop `exact`. A detected hit under " +
+      "confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
+      "If the clip carries duck keys (`track.duck`), they sit on the clip's clock and would no longer match the voice: duck runs " +
+      "again in the same transaction over the other video and audio tracks with its defaults (`skip: [\"duck\"]` leaves them and " +
+      "says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
+      "(`revert` undoes it whole; with review mode on it is one proposal). Example: `{ clip: \"c_1a2b3c\", end: \"end-card\" }`. " +
+      "Fails with InvalidOperation (not a music clip of an audio track, `end` not after `from`, a `hit` outside the played part, " +
+      "no hit found, more than ±1.7 % needed, low confidence with `exact`, the new place overlaps another clip), " +
+      "TimelineNotFound, ClipNotFound or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Music clip: a media clip of an audio track, id from `timeline.show`, e.g. `c_1a2b3c`."),
+      end: TimeRef("Timeline time the final hit lands on, e.g. the cut into the end card."),
+      from: TimeRef(
+        "Earliest timeline time the music may start (default 0). With `exact`, where it starts (default: where the clip starts now).",
+      ).optional(),
+      hit: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Source seconds of the music file where the final hit begins. Default: found on the track's energy (see `hit.candidates` of a dry run)."),
+      exact: z
+        .boolean()
+        .default(false)
+        .describe("Keep the start and land the hit exactly on `end` with a small change of speed (at most ±1.7 %). Default false: slide the clip, keep its speed."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; only `duck` can be."),
+    }),
+    result: MusicFitResultSchema,
   },
   "tx.begin": {
     mutating: true,
@@ -3410,17 +3610,109 @@ export const methods = {
       "(written in style.json), `personality` (from its motion personality) or `default` (Frameshell's; null = not " +
       "decided, ask the person). `safeZones`: for each platform named, the pixels of a reference frame its app " +
       "covers (`measured: false` = from editing guides). `style` is null when the project has no style.json: none " +
-      "is required. Read-only; nothing renders from it yet. Fails with InvalidProjectFile when the file is invalid.",
-    params: z.strictObject({ cwd: CwdParam }),
+      "is required. `from.status` says whether the user style it was copied from changed since (`style.apply` it " +
+      "again to take the change). While a review-mode proposal changes the style (ADR 0036), `view: \"proposal\"` " +
+      "shows its version. Read-only; nothing renders from it yet. Fails with InvalidProjectFile when the file is invalid.",
+    params: z.strictObject({ cwd: CwdParam, view: ViewParam }),
     result: z.object({
+      ...ViewedShape,
       dir: z.string().describe("Project root."),
       path: z.string().describe("The style file, project-relative: `style.json`."),
       style: ResolvedStyleSchema.nullable().describe("Every value with its source; null when there is no style.json."),
       from: z
-        .object({ id: z.string(), sha256: z.string() })
+        .object({
+          id: z.string(),
+          sha256: z.string(),
+          status: z
+            .enum(["same", "changed", "missing"])
+            .describe("`same`: the user style still holds what was copied. `changed`: edited since. `missing`: no user style with that id on this machine."),
+        })
         .nullable()
         .describe("User style the file was copied from (id, SHA-256 at copy time); null when none."),
       safeZones: z.array(SafeZoneSchema).describe("Safe zone of each platform in `platforms`, in that order; empty when none."),
+    }),
+  },
+  "style.set": {
+    mutating: true,
+    description:
+      "Set one value of the project's style guide (`style.json`, ADR 0028) by its dotted path, e.g. " +
+      "`{ path: \"colors.accent\", value: \"#ff5500\" }`, `{ path: \"motion.personality\", value: \"premium\" }`, " +
+      "`{ path: \"type.hero\", value: 220 }`, `{ path: \"banned\", value: [\"emoji in captions\"] }`. A path names one " +
+      "value: a colour, a number, a font object (`fonts.display`: `{ family, file?, weight?, tracking? }`), an ease (4 " +
+      "numbers) or a whole list; `style.show` lists every path. `value: null` removes it from the file, so the " +
+      "personality's or the default value applies again. Units as `style.show` describes them (seconds, not ms). " +
+      "Creates `style.json` when missing; the rest of the file is kept. Journaled in " +
+      "`.frameshell/history/project.config.jsonl` in the caller's transaction (ADR 0036): `history` lists it, `revert` " +
+      "with its `op` or `tx` undoes it. While review mode is on (ADR 0019), a change by anyone but the person in the app " +
+      "waits in the transaction's proposal (`proposal` in the result). Change the style only with the person's agreement. " +
+      "Fails with InvalidOperation (`reason`: `path` unknown, `value` invalid, with the schema's message), " +
+      "InvalidProjectFile (the file on disk is invalid), ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      path: z.string().min(1).describe("Dotted path of one style value, e.g. `colors.accent`, `motion.duration.quick`, `sound.duck.depth`."),
+      value: z.unknown().describe("New value as JSON (string, number, boolean, list, font object); null removes it from the file."),
+    }),
+    result: StyleChangeSchema,
+  },
+  "style.apply": {
+    mutating: true,
+    description:
+      "Copy a user style (a library in Frameshell's config folder, `style.list`) or a motion personality (`playful`, " +
+      "`premium`, `corporate`, `energetic`, `calm`) into the project's `style.json` (ADR 0028 decision 10). By default " +
+      "it merges value by value: every value the user style sets replaces the project's, the others stay. " +
+      "`replace: true` makes the file exactly the user style. A user style also records `from` (its id and SHA-256), " +
+      "so `style.show` can say when it changed later; nothing is inherited afterwards. A personality sets only " +
+      "`motion.personality` (with `replace`, it is all the file keeps). `changes` reports every value that changed. " +
+      "Journaled and held by review mode like `style.set`; `revert` with its `op` undoes it. Fails with InvalidOperation " +
+      "(`reason` `not found`, with the user styles available in `data.available`), InvalidGlobalConfig (the user style " +
+      "is invalid), InvalidProjectFile, ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      name: UserStyleIdSchema.describe("User style id (`style.list`) or a motion personality id."),
+      replace: z.boolean().optional().describe("Overwrite the project's style with it instead of merging value by value. Default false."),
+    }),
+    result: StyleChangeSchema,
+  },
+  "style.save": {
+    mutating: true,
+    description:
+      "Save the project's `style.json` as user style `name` in Frameshell's config folder (`styles/<name>.json`), so " +
+      "other projects can `style.apply` it. The file is copied as it is, without `from`. Not a project change: not " +
+      "journaled, not held by review mode. An existing user style of that name is kept unless `force: true`. Fails " +
+      "with InvalidOperation (`reason` `no style`: the project has no style.json; `exists`; `personality`: the name is a " +
+      "motion personality's), InvalidProjectFile, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      name: UserStyleIdSchema,
+      force: z.boolean().optional().describe("Overwrite a user style of the same name. Default false."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      id: z.string().describe("User style id."),
+      path: z.string().describe("Absolute path of the user style file."),
+      sha256: z.string().describe("SHA-256 of the user style file as written."),
+      replaced: z.boolean().describe("True when it overwrote a user style of the same name."),
+    }),
+  },
+  "style.list": {
+    description:
+      "The user styles saved on this machine (`style.save`; files `styles/<id>.json` in Frameshell's config folder) " +
+      "and the motion personalities, both names `style.apply` takes. A user style that fails validation is listed " +
+      "with `error` and cannot be applied until fixed.",
+    params: z.strictObject({}),
+    result: z.object({
+      dir: z.string().describe("Absolute folder of the user styles."),
+      styles: z
+        .array(
+          z.object({
+            id: z.string(),
+            sha256: z.string().describe("SHA-256 of the file."),
+            personality: z.string().nullable().describe("Motion personality it picks; null when none."),
+            error: z.string().nullable().describe("Why it is invalid; null when it is valid."),
+          }),
+        )
+        .describe("Sorted by id."),
+      personalities: z.array(z.string()).describe("Motion personality ids."),
     }),
   },
   "people.list": {
@@ -4036,6 +4328,8 @@ export type ScriptCheckResult = MethodResult<"script.check">;
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 /** Result of `sound.sfx`. */
 export type SoundSfxResult = MethodResult<"sound.sfx">;
+/** Result of `sound.place`. */
+export type SoundPlaceResult = MethodResult<"sound.place">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -4090,6 +4384,19 @@ export interface FormatChange {
   undo: { method: "format.add" | "format.remove"; params: Record<string, unknown> };
   proposal: string | null;
 }
+/** Result of `style.set` and `style.apply`; see {@link StyleChangeSchema}. */
+export interface StyleChange {
+  dir: string;
+  path: string;
+  changes: { path: string; before: unknown; after: unknown }[];
+  op: string;
+  tx: string;
+  proposal: string | null;
+}
+/** Result of `style.save`. */
+export type StyleSaveResult = MethodResult<"style.save">;
+/** Result of `style.list`. */
+export type StyleListResult = MethodResult<"style.list">;
 /** `cover` params. */
 export type CoverParams = MethodParams<"cover">;
 /** Result of `cover`. */

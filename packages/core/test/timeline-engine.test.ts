@@ -441,6 +441,27 @@ describe("clip.move, trim, split, remove, set", () => {
     expect(outOfRange.code).toBe(ErrorCode.InvalidParams);
   });
 
+  it("merges a generated clip's backdrop field by field, clears it, warns on the bottom track, refuses other clips (ADR 0031)", async () => {
+    const twoTracks = (await apply(await withClip(), "track.add", { kind: "video" }, context({ newId: () => "t_v2" }))).timeline;
+    const card = (await apply(twoTracks, "clip.add", { track: "t_v2", type: "hyperframes", duration: 2, start: 10, props: { title: "A" } })).timeline;
+    const glass = await apply(card, "clip.set", { clip: "c_0002", backdrop: { blur: 46, saturate: 1.45, dim: 0.55 } });
+    expect(clipsOf(glass.timeline, "t_v2")[0]).toMatchObject({ backdrop: { blur: 46, saturate: 1.45, dim: 0.55 } });
+    expect(glass.warnings).toEqual([]);
+    expect(parseTimeline(glass.timeline).ok).toBe(true);
+    const darker = (await apply(glass.timeline, "clip.set", { clip: "c_0002", backdrop: { dim: 0.72 } })).timeline;
+    expect(clipsOf(darker, "t_v2")[0]).toMatchObject({ backdrop: { blur: 46, saturate: 1.45, dim: 0.72 } });
+    const cleared = (await apply(darker, "clip.set", { clip: "c_0002", backdrop: null })).timeline;
+    expect(clipsOf(cleared, "t_v2")[0]).not.toHaveProperty("backdrop");
+
+    expect((await rejection(apply(card, "clip.set", { clip: "c_0002", backdrop: { dim: 0.5 } }))).message).toMatch(/no backdrop yet: give `blur`/);
+    expect((await rejection(apply(card, "clip.set", { clip: "c_0001", backdrop: { blur: 10 } }))).message).toMatch(/only generated clips take `backdrop`/);
+    expect((await rejection(apply(card, "clip.set", { clip: "c_0002", backdrop: { blur: 10, dim: 2 } }))).code).toBe(ErrorCode.InvalidParams);
+    const bottom = (await apply(base(), "clip.add", { track: "t_v", type: "hyperframes", duration: 2, props: { title: "A" } })).timeline;
+    const stored = await apply(bottom, "clip.set", { clip: "c_0001", backdrop: { blur: 20 } });
+    expect(clipsOf(stored.timeline, "t_v")[0]).toMatchObject({ backdrop: { blur: 20 } });
+    expect(stored.warnings[0]).toMatch(/bottom picture track t_v: nothing is below it/);
+  });
+
   it("removes a clip and reports missing clip ids with where to find ids", async () => {
     const { timeline } = await apply(await withClip(), "clip.remove", { clip: "c_0001" });
     expect(clipsOf(timeline, "t_v")).toEqual([]);

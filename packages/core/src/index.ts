@@ -20,6 +20,8 @@ export {
 export { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
 export { FORMAT_RULES, type FormatKeyValue, formatState, formatsFromState } from "./config/project-doc.js";
 export { CONFIG_DOC_NAMES, planConfigRevert } from "./config/revert.js";
+export { STYLE_KEY, checkedStyleState, styleConfigDocument, stylePathOf, styleState, styleWritten } from "./style/doc.js";
+export { StyleService, type StyleServiceOptions } from "./style/service.js";
 export {
   type FaceScans,
   type NameWrites,
@@ -498,6 +500,7 @@ export { DEFAULT_CUT_THRESHOLD, type Cut, type Shot, type ShotStats, detectCuts,
 export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palette.js";
 export { type LoudnessReading, measureLoudness, parseLoudness } from "./analyze/loudness.js";
 export { type SfxRender, type SfxSpec, synthesizeSfx } from "./sound/sfx.js";
+export { SFX_TRACK_NAME, type SoundItem, type SoundWish, soundWarnings } from "./sound/place.js";
 export { SFX_KEY_VERSION, SOUND_DIR, type SoundMark, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";
 export { REVIEW_DIR, type ReviewRequest, ReviewService, type ReviewServiceOptions } from "./review/service.js";
 export { type SheetOptions, type SheetSize, type SheetTile, writeSheet } from "./review/sheet.js";

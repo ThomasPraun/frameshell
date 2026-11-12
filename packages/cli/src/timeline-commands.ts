@@ -11,6 +11,7 @@ import type {
   MulticamFacesResult,
   MulticamGalleryResult,
   MulticamTurnsResult,
+  MusicFitResult,
   MethodName,
   MethodResult,
   OperationResult,
@@ -21,7 +22,7 @@ import type {
   TrackSummary,
 } from "@frameshell/protocol";
 import { SECONDS_TEXT } from "@frameshell/protocol";
-import { resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
+import { glassOf, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -69,10 +70,15 @@ mutations print the new revision):
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
+           [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
                                --voice writes the style's voice chain (style.json sound.voice; by default high-pass
                                85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
                                release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
-                               '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background
+                               '[{"kind":"highpass","frequency":90}]'. Media clips only; baked in the background.
+                               --glass gives a generated clip on an upper track the style's glass backdrop (style.json
+                               glass; by default blur 46 px, saturate 1.45, dim 0.55): what is below the clip is
+                               blurred, saturated and dimmed where the clip shows. Glass is a style choice, never a
+                               default. --backdrop-* set one number each, over --glass (blur = Gaussian sigma in project px)
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -196,6 +202,19 @@ mutations print the new revision):
                                reason, confidence) and changes nothing; run again without it, --skip dropping the
                                ids to leave. One transaction (\`revert\` it); candidates under --min-confidence
                                (default 0.5) are not proposed. Needs a transcript of the speech
+  music fit <clip> --end <time> [--from <time>] [--hit s] [--exact] [--skip duck] [--dry-run]
+                               Fit a music clip (a media clip of an audio track) to the cut: back-time it so the
+                               track's own final hit lands on --end (seconds, or a marker id or label such as
+                               end-card) and it plays unspliced before it; prints where the music then starts.
+                               The hit is found on the track's energy (--hit s: source seconds of the file) and
+                               reported with a confidence and the other strong hits. The clip slides, keeping its
+                               speed: when that would start it before --from (default 0) the intro is dropped, when the
+                               track is shorter than the picture the music starts late (never looped or spliced).
+                               --exact keeps the start (the clip's, or --from) and changes the speed so the hit lands
+                               on --end: at most 1.7 %, refused beyond it with the ends that fit; a doubtful hit
+                               never does. --dry-run changes nothing. If the clip carries duck keys, duck runs again
+                               in the same transaction over the other tracks (--skip duck leaves them). One transaction
+                               (revert it)
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -234,7 +253,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "transition", "marker", "tempo", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -277,6 +296,11 @@ export const TIMELINE_OPTIONS = {
   voice: { type: "boolean" },
   "audio-effects": { type: "string" },
   "clear-audio-effects": { type: "boolean" },
+  glass: { type: "boolean" },
+  "backdrop-blur": { type: "string" },
+  "backdrop-saturate": { type: "string" },
+  "backdrop-dim": { type: "string" },
+  "clear-backdrop": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -347,6 +371,8 @@ export const TIMELINE_OPTIONS = {
   "min-confidence": { type: "string" },
   skip: { type: "string", multiple: true },
   "dry-run": { type: "boolean" },
+  hit: { type: "string" },
+  exact: { type: "boolean" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -360,6 +386,8 @@ export interface TimelineInvocation {
   withCwd: boolean;
   /** `clip set --voice`: `audioEffects` is filled from the project's style (`sound.voice`) before the request. */
   voiceFromStyle?: boolean;
+  /** `clip set --glass`: `backdrop` is filled from the project's style (`glass`) before the request; other `--backdrop-*` win. */
+  glassFromStyle?: boolean;
 }
 
 /** Bad arguments; the message says which and how to fix. Exit code 2. */
@@ -397,6 +425,11 @@ const ALLOWED: Record<string, string[]> = {
     "voice",
     "audio-effects",
     "clear-audio-effects",
+    "glass",
+    "backdrop-blur",
+    "backdrop-saturate",
+    "backdrop-dim",
+    "clear-backdrop",
     "script-ref",
     "clear-script-ref",
   ],
@@ -424,6 +457,7 @@ const ALLOWED: Record<string, string[]> = {
   "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
   cut: ["from", "to", "no-snap", "snap-window", "snap-to"],
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
+  "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -471,6 +505,7 @@ const ARITY: Record<string, [number, number]> = {
   "duck ": [1, 1],
   cut: [0, Number.POSITIVE_INFINITY],
   cleanup: [0, 0],
+  "music fit": [1, 1],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -767,6 +802,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       }
       const effectFlags = [values["voice"] === true, str("audio-effects") !== undefined, values["clear-audio-effects"] === true].filter(Boolean);
       if (effectFlags.length > 1) throw new UsageError("Pass one of --voice, --audio-effects or --clear-audio-effects.");
+      const backdropFlags = (["backdrop-blur", "backdrop-saturate", "backdrop-dim"] as const).filter((flag) => str(flag) !== undefined);
+      if (values["clear-backdrop"] === true && (values["glass"] === true || backdropFlags.length > 0)) {
+        throw new UsageError("Pass --clear-backdrop alone, without --glass or --backdrop-*.");
+      }
+      const backdrop =
+        values["clear-backdrop"] === true
+          ? null
+          : backdropFlags.length > 0
+            ? { blur: num("backdrop-blur"), saturate: num("backdrop-saturate"), dim: num("backdrop-dim") }
+            : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -774,6 +819,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         audioEffects:
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
+        backdrop,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -966,6 +1012,19 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music fit":
+      method = "music.fit";
+      if (values["end"] === undefined) throw new UsageError("`frameshell music fit <clip>` needs --end <time>: seconds, or a marker id or label.");
+      Object.assign(params, {
+        clip: args[0],
+        end: when("end"),
+        from: when("from"),
+        hit: num("hit"),
+        exact: values["exact"] === true ? true : undefined,
+        skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -983,8 +1042,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     value && Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
   if (params["transform"]) params["transform"] = clean(params["transform"] as Record<string, unknown>);
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
+  if (params["backdrop"]) params["backdrop"] = clean(params["backdrop"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
-  return { kind: "timeline", method, params: clean(params)!, withCwd: true, ...(voiceFromStyle ? { voiceFromStyle } : {}) };
+  const glassFromStyle = method === "clip.set" && values["glass"] === true;
+  return {
+    kind: "timeline",
+    method,
+    params: clean(params)!,
+    withCwd: true,
+    ...(voiceFromStyle ? { voiceFromStyle } : {}),
+    ...(glassFromStyle ? { glassFromStyle } : {}),
+  };
 }
 
 /** Run a parsed timeline command; returns stdout text. `onProgress` gets the progress of long ones (`multicam faces`). */
@@ -996,9 +1064,11 @@ export async function executeTimeline(
   onProgress?: (progress: Progress) => void,
 ): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
-  if (inv.voiceFromStyle) {
+  if (inv.voiceFromStyle || inv.glassFromStyle) {
     const { style } = await conn.request("style.show", { cwd });
-    params["audioEffects"] = voiceChainOf((style ?? resolveStyle(null)).sound.voice);
+    const resolved = style ?? resolveStyle(null);
+    if (inv.voiceFromStyle) params["audioEffects"] = voiceChainOf(resolved.sound.voice);
+    if (inv.glassFromStyle) params["backdrop"] = { ...glassOf(resolved.glass), ...(params["backdrop"] as object | undefined) };
   }
   // Params are validated by the daemon against the method registry.
   const result = (await conn.request(inv.method, params as never, onProgress ? { onProgress } : {})) as unknown;
@@ -1036,6 +1106,7 @@ export async function executeTimeline(
     return timelineReverted ? `${formatOperation(reverted)}${lines}` : `${lines}revision ${reverted.revision} (timeline unchanged) · tx ${reverted.operation.tx}\n`;
   }
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
+  if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -1056,6 +1127,27 @@ function formatCaptions(result: CaptionsSetResult): string {
   for (const cue of result.cues) lines.push(`  ${cue.start}–${cue.end} s  ${cue.text}${cue.entry === "none" ? "" : `  [${cue.entry}]`}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n${formatOperation(result)}`;
+}
+
+function formatMusicFit(result: MusicFitResult): string {
+  const s = (value: number) => `${value.toFixed(2)} s`;
+  const { hit, before, after } = result;
+  const lines = [`Music fit of ${result.clip} (${result.asset}) on ${result.track} · ${result.mode}${result.dryRun ? " · dry run" : ""}`];
+  const how = hit.source === "given" ? "given" : `found, confidence ${Math.round(hit.confidence * 100)} %, +${hit.rise} dB`;
+  lines.push(`  final hit at ${s(hit.at)} of the file (${how}) lands on ${s(result.landsAt)} (asked ${s(result.end)}, ${result.offsetMs >= 0 ? "+" : ""}${result.offsetMs} ms)`);
+  lines.push(`  music starts at ${s(after.start)}, plays to ${s(after.end)}; ${s(result.tail)} after the hit`);
+  lines.push(`  was start ${s(before.start)}, in ${s(before.in)}, speed ${before.speed}; now start ${s(after.start)}, in ${s(after.in)}, speed ${after.speed}`);
+  if (result.speedChangePercent !== null) lines.push(`  speed ${result.speedChangePercent >= 0 ? "+" : ""}${result.speedChangePercent} %`);
+  if (result.introCut > 0) lines.push(`  intro dropped: ${s(result.introCut)}`);
+  if (result.silentBefore > 0) lines.push(`  nothing plays in the first ${s(result.silentBefore)}: the track is shorter than the picture before the hit`);
+  if (result.steps.length > 0) {
+    lines.push("Steps:");
+    for (const step of result.steps) lines.push(`  ${step.id.padEnd(6)}${step.detail}${step.skippable ? `  (--skip ${step.id})` : ""}`);
+  }
+  if (hit.candidates.length > 1) lines.push(`Other strong hits (--hit): ${hit.candidates.slice(0, -1).map((candidate) => s(candidate.at)).join(", ")}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx}`);
+  return `${lines.join("\n")}\n`;
 }
 
 function formatCleanup(result: CleanupResult): string {
@@ -1172,7 +1264,8 @@ function formatHistory(result: HistoryResult): string {
       const target = op.op === "revert" ? ` ${String(op.args["target"])}` : "";
       const touched = op.touched.length > 0 ? `  ${op.touched.join(", ")}` : "";
       // A config operation changes no timeline (ADR 0036): it says which file instead of a revision.
-      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? "project config" : `revision ${op.revision}`})`);
+      const doc = op.doc === "style" ? "style.json" : "project config";
+      lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? doc : `revision ${op.revision}`})`);
     }
   }
   return `${lines.join("\n")}\n`;

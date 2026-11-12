@@ -55,3 +55,60 @@ export const SOUND_ROLE_OFFSETS: Readonly<Record<SoundRole, number>> = {
 
 /** How long before the hit a riser's last sample falls, in milliseconds. */
 export const SOUND_RISER_END_BEFORE_MS = 75;
+
+/** Zod model of a {@link SoundRole}. */
+export const SoundRoleSchema = z.enum(SOUND_ROLES);
+
+/** How much a placed sound matters to the picture; it sets the clip gain under the voice. */
+export const SOUND_TIERS = ["primary", "secondary", "texture"] as const;
+
+/** One of {@link SOUND_TIERS}. */
+export type SoundTier = (typeof SOUND_TIERS)[number];
+
+/** Zod model of a {@link SoundTier}. */
+export const SoundTierSchema = z.enum(SOUND_TIERS);
+
+/**
+ * dB added to the clip gain per tier, on top of `-style.sound.sfxUnderVoice` (ADR 0038, gain): the sounds that carry
+ * the picture sit at the style's level under the voice, the rest 4 and 8 dB below it.
+ */
+export const SOUND_TIER_OFFSETS_DB: Readonly<Record<SoundTier, number>> = { primary: 0, secondary: -4, texture: -8 };
+
+/** Role a kind takes when the caller names none; null = the riser, which has its own rule ({@link SOUND_RISER_END_BEFORE_MS}). */
+export const SOUND_DEFAULT_ROLES: Readonly<Record<SfxKind, SoundRole | null>> = {
+  click: "click",
+  tick: "tap",
+  pop: "pop",
+  whoosh: "whoosh",
+  riser: null,
+  thump: "pop",
+  impact: "knock",
+  shutter: "click",
+};
+
+/** Tier a kind takes when the caller names none: ticks are texture, a shutter supports, everything else carries the picture. */
+export const SOUND_DEFAULT_TIERS: Readonly<Record<SfxKind, SoundTier>> = {
+  click: "primary",
+  tick: "texture",
+  pop: "primary",
+  whoosh: "primary",
+  riser: "primary",
+  thump: "primary",
+  impact: "primary",
+  shutter: "secondary",
+};
+
+/** Fewest milliseconds between the anchors of two sounds of one kind before a warning (owner's numbers: ticks 66, pops 114). */
+export const SOUND_MIN_GAP_MS: Readonly<Partial<Record<SfxKind, number>>> = { tick: 66, pop: 114 };
+
+/** Fewest milliseconds between two keys of a typing run (owner's number: keys 87); the run's rate is capped to keep it. */
+export const SOUND_KEY_GAP_MS = 87;
+
+/** Keys per second of a typing run: the default and the most (a 10 % timing jitter on 10 keys/s stays above {@link SOUND_KEY_GAP_MS}). */
+export const SOUND_TYPING_RATE = { default: 8, max: 10 } as const;
+
+/** Most sounds whose anchors may fall on one frame before a warning. */
+export const SOUND_MAX_PER_FRAME = 2;
+
+/** Most sounds one `sound.place` call places. */
+export const SOUND_MAX_PLACEMENTS = 200;

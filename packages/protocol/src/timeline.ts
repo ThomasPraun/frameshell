@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AnyClipSchema,
   AudioEffectSchema,
+  BackdropSchema,
   DirectorRulesSchema,
   ElementAdjustSchema,
   MAX_SNAP_WINDOW_S,
@@ -48,7 +49,7 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
-const TimeRef = (what: string) =>
+export const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(
@@ -57,6 +58,8 @@ const TimeRef = (what: string) =>
         "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; needs `tempo`, refused when the grid is LOW confidence); the daemon turns it into " +
         "seconds first, so the history records seconds.",
     );
+/** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
+export { TimeRef as TimeRefParam };
 const ClipRef = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`.");
 
 /** What `snapTo` lands on (ADR 0029 decision 6). */
@@ -362,6 +365,14 @@ export const operationArgs = {
         "`media` only (ADR 0031): replaces the clip's audio effect list, applied in order; `null` clears it. Kinds: `highpass { frequency }` (Hz), " +
           "`denoise { floor, reduction }` (dB), `compressor { threshold, ratio, attack, release, makeup }` (dB, ratio, ms, ms, dB); omitted numbers " +
           "take the voice chain's. Shots are skipped with a warning.",
+      ),
+    backdrop: BackdropSchema.partial()
+      .nullable()
+      .optional()
+      .describe(
+        "Generated (adapter) clips on an upper video track only (ADR 0031): glass under the clip, merged field by field into its " +
+          "backdrop (`blur` needed once); `null` clears it. Glass of the motion kit: `{ blur: 46, saturate: 1.45, dim: 0.55 }`. Shots are " +
+          "skipped with a warning.",
       ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
