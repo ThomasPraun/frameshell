@@ -289,7 +289,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Review mode holds format changes (#496 slice 2, ADR 0036, protocol 92): while review mode is on, an agent's
+- Review mode holds format changes (#496 slice 2, ADR 0036, protocol 94): while review mode is on, an agent's
   `format add`, `format remove`, `revert` of a format change and `tx abort` of one that reached the file wait in the
   transaction's proposal like timeline changes, instead of being refused. A transaction mixing clips and formats is
   one proposal, accepted or rejected whole. The person's change of another format rebases the proposal; a change of
