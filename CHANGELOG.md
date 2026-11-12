@@ -423,6 +423,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Timeline files: a clip's `shape` without a `dissolve`, or on an audio track, is rejected. Files without `shape`
   are unchanged and export byte for byte as before; hosts older than this release reject files that carry `shape`.
 
+### Fixed
+
+- Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports
+  the previous picture as the new one's frame while the engine still decodes it (#551).
+
 ## [0.18.0] - 2026-11-07
 
 ### Added
