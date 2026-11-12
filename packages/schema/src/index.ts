@@ -180,6 +180,7 @@ export {
   type ResolvedStyle,
   parseStyleFile,
   resolveStyle,
+  voiceChainOf,
 } from "./style.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {

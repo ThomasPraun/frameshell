@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Beat grid, slice 2 of #458 (ADR 0029): `frameshell beats measure <asset> [--bpm n] [--reset-edits]` and `beats show
-  <asset>` (daemon `beats.measure` and `beats.show`, MCP `beats_measure` and `beats_show`, protocol 86) measure the beats
+  <asset>` (daemon `beats.measure` and `beats.show`, MCP `beats_measure` and `beats_show`, protocol 87) measure the beats
   of a music file locally, with no download and no model, and write `beats/<name>.beats.json`: tempo, every beat in
   source seconds (each snapped to a measured hit within 8 ms), which beat starts a bar, the strong hits, a confidence and
   the largest gap to the hits (under 15 ms on clean click tracks). Calm music, which gets a double-time grid, is flagged
@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `beats/`. The file's `detector` also admits `exact` for generated music that knows its beats. Nothing on a timeline
   reads a grid yet (the grid in the app, `tempo.clip` and `--snap-to` are slice 3). The FFT of multicam sync is now one
   shared module used by the detector too.
+- SVG and font files in `assets/` are non-media assets (#520, split from #467). `.svg`, `.ttf`, `.otf`, `.woff` and `.woff2`
+  were queued for media ingest and failed (fonts in `assets/fonts/` included); now ingest only hashes them: no probe,
+  no proxy or other derived media, no ffmpeg, no failed job. `asset.list` (and `asset.changed`) report a new `kind`
+  (`media`, `svg` or `font`) and `state` `ready` once hashed. `clip.add` and other edits that take a media asset
+  refuse them with `not media` instead of an ffprobe error. Protocol 86.
 - Blender clips (#482, ADR 0035), first slice: the official `@frameshell/blender` plugin renders a frame range of a
   `.blend` in the project with your own Blender (4.5 LTS or any 5.x, never downloaded) to VP9 WebM with alpha, as a
   `blender` clip. `source` is the `.blend`; `props` take `scene`, `camera` and `quality` (`draft`: EEVEE or Workbench
@@ -48,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retried request with the same idempotency key never charges twice. No voice ships yet: a test-only stand-in
   (`FRAMESHELL_SPEECH_STAND_IN=1`) says words as tones. New error codes `SpeechProviderNotFound`, `SpeechFailed`,
   `ConfirmationRequired`; `plugin list` shows speech providers.
+- Voiceover, slice 2 of #470 (ADR 0034): the machine-level `command` speech provider. Set `speech.command` in the global
+  `config.json` (`run`: the TTS program and its arguments with `{voice}`, `{language}`, `{out}`; optional `voices`,
+  `defaultVoice`, `version`, `timeoutSeconds`) and `frameshell voiceover generate --provider command` says each line
+  with it: the text goes to stdin, the WAV comes from `{out}` or stdout. It is free, works in untrusted projects, and
+  is read from the global config only: a `speech` key in `frameshell.json` is refused. A voice or language starting
+  with `-` is never passed to the program. The global config now has one reader shared with binary overrides.
+- Speech providers: a provider without `estimate()` counts as paid at an unknown cost (`ConfirmationRequired` with
+  `cost: null`) unless it declares `free: true` on the contract. The stand-in and `command` declare it.
 - Video subject matte, slice 1 of #461 (ADR 0032): `matte.prepare` (protocol 84), CLI `frameshell matte <asset>`
   and MCP `matte_prepare` compute which pixels of each frame of a video are the person in front, locally on CPU:
   MediaPipe's selfie segmenter (Apache-2.0, 0.46 MB, downloaded on first use; pinned in the binaries manifest) on
@@ -204,6 +217,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `clip set --voice` (#464, ADR 0031) writes the voice chain of the project's `style.json` (`sound.voice`, ADR 0028)
+  instead of fixed numbers: style seconds become milliseconds, each number is held to the effect's range, and a
+  noise reduction of 0 leaves `denoise` out. Without a `style.json`, or with a style that does not set `sound.voice`,
+  the chain is the same as before. The style's default high-pass is now 85 Hz (was 80), the voice chain's.
 - Agent skill: the reels playbook and the critique loop use the commands of this release: `style show` at intake,
   `clip reframe`, `format add` and `render --formats`, `clip set --voice`, `cleanup`, markers for the graphics plan,
   `push`/`wipe` transitions, `duck`, `render --quality draft|final`, `--cover-frame` and `cover`.

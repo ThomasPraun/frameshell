@@ -136,6 +136,7 @@ import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
+import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { generateVoiceover } from "./voiceover/generate.js";
 
 /** Package version reported in the handshake. */
@@ -1226,15 +1227,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes }, _caller, request) => {
       const dir = await root(cwd);
-      const builtIn = new Map((options.speechProviders ?? []).map((speech) => [speech.id, speech] as const));
+      // Built in: the daemon's own list, then this machine's `command` provider (global config only, ADR 0034).
+      const command = await readCommandSpeechProvider(dirs.configDir);
+      const builtIn = new Map([...(options.speechProviders ?? []), ...(command ? [command] : [])].map((speech) => [speech.id, speech] as const));
       const speechProvider = async (id: string): Promise<SpeechProvider> => {
         const own = builtIn.get(id);
         if (own) return own;
         try {
           return await plugins.speechProvider(dir, id);
         } catch (error) {
-          if (!(error instanceof RpcError) || error.code !== ErrorCode.SpeechProviderNotFound || builtIn.size === 0) throw error;
+          if (!(error instanceof RpcError) || error.code !== ErrorCode.SpeechProviderNotFound) throw error;
           const available = [...builtIn.keys(), ...((error.data as { available?: string[] } | undefined)?.available ?? [])];
+          if (id === COMMAND_SPEECH_PROVIDER) throw commandNotConfigured(dirs.configDir, available);
+          if (builtIn.size === 0) throw error;
           throw new RpcError(ErrorCode.SpeechProviderNotFound, `${error.message} Built in: ${[...builtIn.keys()].join(", ")}.`, { provider: id, available });
         }
       };

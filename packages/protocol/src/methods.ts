@@ -65,7 +65,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 86;
+export const PROTOCOL_VERSION = 87;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -433,10 +433,19 @@ const ProbeSchema = z.object({
 
 const AssetSchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."),
+  kind: z
+    .enum(["media", "svg", "font"])
+    .describe(
+      "`media`: video, audio or image that can be placed as a clip; ingest builds the derived files below. `svg` (`.svg`) and `font` " +
+        "(`.ttf`, `.otf`, `.woff`, `.woff2`): not media. Ingest only hashes them, every field below stays null, and `clip.add` refuses them.",
+    ),
   hash: z.string().nullable().describe("Content hash `sha256:<hex>`; null until hashed. Transcripts carry it as `assetHash`."),
   state: z
     .enum(["pending", "processing", "ready", "failed"])
-    .describe("`ready`: every output below exists for the current content. `pending`: not ingested yet."),
+    .describe(
+      "`ready`: every output below exists for the current content (for `svg` and `font`: the content is hashed). " +
+        "`pending`: not ingested yet.",
+    ),
   error: z.string().nullable().describe("Why the last ingest failed; null otherwise."),
   media: ProbeSchema.nullable().describe("ffprobe summary; null until probed."),
   proxy: z
@@ -1919,12 +1928,13 @@ export const methods = {
       "`<scene slug>-<n>` (`hook-1`). Each take is cached by its spoken text, provider (and its version), voice and " +
       "language: a line whose take is current is not generated again (`cached`), and one whose text moved to another " +
       "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Nothing is placed on a " +
-      "timeline. A paid provider (its cost estimate is above 0) generates nothing without `yes: true` and fails with " +
-      "ConfirmationRequired, whose data carries the cost: show it to the person and pass `yes` only after they " +
-      "confirm it, never on your own. A second charge is prevented by the takes marked on disk and one run at a time per " +
+      "timeline. A paid provider (its cost estimate is above 0, or it gives no estimate and does not declare itself " +
+      "free) generates nothing without `yes: true` and fails with ConfirmationRequired, whose data carries the cost " +
+      "(`null` when unknown): show it to the person and pass `yes` only after they confirm it, never on your own. The " +
+      "provider `command` is the TTS program the person set up on this machine (global `config.json` only); it is free. A second charge is prevented by the takes marked on disk and one run at a time per " +
       "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
       "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
-      "SpeechProviderNotFound (data lists the providers there are), ProjectNotTrusted (a plugin provider in an untrusted " +
+      "SpeechProviderNotFound (data lists the providers there are; `command` is missing until set up on the machine), ProjectNotTrusted (a plugin provider in an untrusted " +
       "project), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
       "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +
       "SpeechFailed (the provider failed; takes finished before it are kept, imported and reused by the next call).",

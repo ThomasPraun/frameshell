@@ -4,6 +4,7 @@ import type { JobStep } from "@frameshell/protocol";
 import { renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import type { JobContext } from "../jobs/queue.js";
 import { ToolError, probeSource, runTool } from "./ffmpeg.js";
+import { assetKindOf } from "./kind.js";
 import {
   PEAKS_PER_SECOND,
   RECIPE_VERSION,
@@ -65,6 +66,11 @@ export async function ingestAsset(options: IngestOptions): Promise<void> {
 
   report("hash");
   const hash = await store.hash(rel, (fraction) => report("hash", fraction), signal);
+  // SVG and fonts are not media: the hash (now in the index) is all there is to build.
+  if (assetKindOf(rel) !== "media") {
+    ctx.update({ cached: false });
+    return;
+  }
   const key = store.key(hash, fps);
   if (await store.manifest(key)) {
     ctx.update({ cached: true });
