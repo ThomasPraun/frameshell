@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New video from an idea, wave 4 of #451 (#472; desktop only, no wire change): the Welcome screen has "New video from an
+  idea..." next to "New from video, audio or image...". The form asks the name, the formats (any of 16:9, 9:16, 1:1 and
+  4:5), a rough length and an optional web page, and makes an empty project in the videos folder (or the folder picked).
+  The first format of that list sets the project's size and each other one is added with `format.add` through the daemon,
+  so it is journaled like any format change (ADR 0027, 0036). The agent guide then keeps itself open with "Make my
+  film": a prompt typed unsent at the agent's prompt that asks for three storylines (a different world, device and form
+  each) with a recommendation, then the assumptions with a free alternative beside every paid item. It names no
+  command, so it holds until the motion film playbook (#453) lands. Strings in English and Spanish.
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the

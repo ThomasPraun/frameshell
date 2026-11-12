@@ -263,7 +263,8 @@ code {
   color: var(--text-muted);
 }
 
-.welcome-field input {
+.welcome-field input,
+.welcome-field select {
   font: inherit;
   color: var(--text);
   background: var(--bg-panel);
@@ -272,7 +273,8 @@ code {
   padding: 6px 9px;
 }
 
-.welcome-field input:focus-visible {
+.welcome-field input:focus-visible,
+.welcome-field select:focus-visible {
   outline: none;
   border-color: var(--accent);
 }
@@ -323,6 +325,10 @@ code {
 
 .welcome-mode input {
   accent-color: var(--accent);
+}
+
+.welcome-field .welcome-hint {
+  font-size: 12px;
 }
 
 .welcome-check {
