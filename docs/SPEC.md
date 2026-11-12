@@ -490,6 +490,8 @@ Every change, whether from the UI, the CLI or a direct file edit, becomes an **o
 
 Watcher detects new or changed files under `assets/`. The job queue then probes them (ffprobe), creates CFR proxies, a PCM audio sidecar, waveforms and thumbnails. Proxy recipe (ADR 0001): H.264, CFR, fixed GOP 15, **no B-frames** (decode order = display order), faststart, reduced resolution. A source with alpha (VP9/VP8 `alpha_mode=1`, or an alpha pixel format such as ProRes 4444 or QuickTime Animation) gets a VP9 WebM proxy with its alpha plane instead (#90, ADR 0001 addendum), on the same frame grid and GOP, which the preview decodes like a clip render (ADR 0002). The sidecar is s16le 48 kHz PCM (~165 MiB per 30 min mono); both are regenerable. Transcription is explicit (`frameshell transcribe`), never automatic, because of its cost.
 
+`.svg` and font files (`.ttf`, `.otf`, `.woff`, `.woff2`) in `assets/` are not media: ingest only hashes them (no probe, no derived media, no ffmpeg), `asset.list` reports them with `kind` `svg` or `font` and `state` `ready` once hashed, and `clip.add` refuses them as media clips (`InvalidOperation`, reason `not media`). Kind is decided by extension, case-insensitively.
+
 ### 6.4 Direct file edits and conflicts
 
 The watcher sees a timeline file change that the daemon did not write:

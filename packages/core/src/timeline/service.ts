@@ -32,6 +32,7 @@ import type { ClipAdapter } from "@frameshell/plugin-api";
 import { type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
 import { canonicalPath, exists, writeTextAtomic } from "../fs-util.js";
 import { ToolError } from "../media/ffmpeg.js";
+import { nonMediaError } from "../media/kind.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
 import { type ClipChange, type PlacedClip, planDiff } from "../history/diff.js";
@@ -1315,6 +1316,8 @@ export class TimelineService {
     return {
       fps,
       source: async (asset) => {
+        const refused = nonMediaError(asset, { op, field: "asset" });
+        if (refused) throw refused;
         let probe: MediaProbe;
         try {
           probe = await this.#options.probe(root, asset);
