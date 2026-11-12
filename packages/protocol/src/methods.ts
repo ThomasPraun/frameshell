@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { MusicFitResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -51,6 +52,7 @@ import {
   TimelineRejectionSchema,
   TempoGridSchema,
   TimelineViewSchema,
+  TimeRef,
   TrackDuckResultSchema,
   TrackSummarySchema,
   TxIdSchema,
@@ -70,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 100;
+export const PROTOCOL_VERSION = 101;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3327,6 +3329,50 @@ export const methods = {
       skip: z.array(z.string().min(1)).optional().describe("Candidate ids (`p1`, `r2`…) from a dry run to leave out."),
     }),
     result: CleanupResultSchema,
+  },
+  "music.fit": {
+    mutating: true,
+    description:
+      "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
+      "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
+      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
+      "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
+      "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +
+      "where the clip plays the file from later than 0 and the start lands after `from`, the intro comes back as far as the file has it; " +
+      "where the file is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
+      "or spliced. `exact: true` keeps the start (the clip's own, or `from`) and changes the speed so the hit lands exactly on " +
+      "`end`: at most ±1.7 % of the clip's speed (export keeps the pitch with atempo; the preview still shifts it a little until " +
+      "its stretch lands); beyond that it refuses and says which `end` would fit, or to drop `exact`. A detected hit under " +
+      "confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
+      "If the clip carries duck keys (`track.duck`), they sit on the clip's clock and would no longer match the voice: duck runs " +
+      "again in the same transaction over the other video and audio tracks with its defaults (`skip: [\"duck\"]` leaves them and " +
+      "says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
+      "(`revert` undoes it whole; with review mode on it is one proposal). Example: `{ clip: \"c_1a2b3c\", end: \"end-card\" }`. " +
+      "Fails with InvalidOperation (not a music clip of an audio track, `end` not after `from`, a `hit` outside the played part, " +
+      "no hit found, more than ±1.7 % needed, low confidence with `exact`, the new place overlaps another clip), " +
+      "TimelineNotFound, ClipNotFound or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Music clip: a media clip of an audio track, id from `timeline.show`, e.g. `c_1a2b3c`."),
+      end: TimeRef("Timeline time the final hit lands on, e.g. the cut into the end card."),
+      from: TimeRef(
+        "Earliest timeline time the music may start (default 0). With `exact`, where it starts (default: where the clip starts now).",
+      ).optional(),
+      hit: z
+        .number()
+        .positive()
+        .optional()
+        .describe("Source seconds of the music file where the final hit begins. Default: found on the track's energy (see `hit.candidates` of a dry run)."),
+      exact: z
+        .boolean()
+        .default(false)
+        .describe("Keep the start and land the hit exactly on `end` with a small change of speed (at most ±1.7 %). Default false: slide the clip, keep its speed."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; only `duck` can be."),
+    }),
+    result: MusicFitResultSchema,
   },
   "tx.begin": {
     mutating: true,

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Fit music to the cut, second slice of #485 (ADR 0037, epic #451; daemon `music.fit`, CLI `music fit`, MCP `music_fit`,
+  protocol 101): `music fit <clip> --end end-card` back-times a music clip (a media clip of an audio track) so the track's own
+  final hit lands on the cut and it plays unspliced before it, and says where the music then starts. `--end` and
+  `--from` are seconds or a marker (the shared TimeRef resolver). The hit is `--hit` (seconds of the file) or found on
+  the track's energy, the last sharp jump in level near the end of the part the clip plays, with a confidence and the
+  other strong hits; a hit under 0.5 is only suggested. By default the clip slides and keeps its speed (within half a
+  frame); a track longer than the picture before the hit loses its intro (`in` moves later, never before `--from`,
+  default 0), a shorter one starts late, and nothing is looped or spliced. `--exact` keeps the start and changes the
+  speed to land the hit on `--end`, at most 1.7 % of the clip's speed, refusing beyond it with the ends that fit.
+  `--dry-run` changes nothing and lists the steps. A clip with duck keys gets `duck` again in the same transaction
+  (`--skip duck` leaves them), since duck keys sit on the clip's own clock. One transaction (`Music fit: …`, one
+  proposal in review mode); only `start`, `in`, `speed` and gain keys are written, so older versions open the
+  timeline. Measured on a synthetic drum track: the export's `atempo` plays the material about 21 ms early at a speed
+  near 1 (the preview has no such shift) and softens a kick's attack from 3.1 to 5.7 ms; tape-style resampling shows
+  neither (ADR 0037 has the numbers, measured on darwin-arm64 only; the 5 ms `fadeIn` is not written yet). A second fit
+  that lands later brings back the intro an earlier fit dropped, as far as the file has it.
+
 - `frameshell sound place <kind> (--at <t>[,<t>…] | --cuts <track> | --typing --from <t> --to <t>)` (#463 slice 2,
   ADR 0038; daemon `sound.place`, MCP `sound_place`, protocol 100) places generated sound effects in one transaction
   `Sound: …` (one proposal in review mode, `revert` undoes it whole): on times given as seconds or a marker through the
