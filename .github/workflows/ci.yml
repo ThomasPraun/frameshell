@@ -10,13 +10,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # What this change can break (scripts/test-scope.mjs). Pushes to main always run everything.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      unit: ${{ steps.scope.outputs.unit }}
+      filter: ${{ steps.scope.outputs.filter }}
+      e2e: ${{ steps.scope.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull_request checkout is the merge commit; its first parent is the base tip.
+          fetch-depth: 2
+      - id: scope
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node scripts/test-scope.mjs --github HEAD^1 HEAD
+          else
+            printf 'unit=all\nfilter=\ne2e=true\n' | tee -a "$GITHUB_OUTPUT"
+          fi
+
   test:
-    name: ${{ matrix.os }}
+    name: test ${{ matrix.os }} ${{ matrix.shard }}/2
+    needs: scope
+    if: needs.scope.outputs.unit != 'none'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       # Version comes from package.json "packageManager".
@@ -31,41 +54,68 @@ jobs:
         with:
           path: .cache/test-binaries
           key: test-binaries-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/core/src/binaries/manifest.ts') }}
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
-      - run: pnpm build
+      # Checks split across shards so both finish at about the same time.
+      - if: matrix.shard == 1
+        run: pnpm typecheck
+      - if: matrix.shard == 1
+        run: pnpm lint
+      - run: pnpm test ${{ needs.scope.outputs.filter }} --shard=${{ matrix.shard }}/2 --passWithNoTests
+      - if: matrix.shard == 2
+        run: pnpm build
       # Official plugins as npm would publish them (release.yml publishes them): pack, check the tarballs, npm publish --dry-run.
       - name: Plugin npm packages (dry run)
-        if: runner.os == 'Linux'
+        if: matrix.shard == 2 && runner.os == 'Linux'
         run: node scripts/plugins-npm.mjs dry-run
 
+  # The required checks are named after the OS; this reports the shards under those names.
+  unit:
+    name: ${{ matrix.os }}
+    needs: [scope, test]
+    if: always()
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - run: |
+          [ "${{ needs.scope.result }}" = success ] || { echo "scope: ${{ needs.scope.result }}"; exit 1; }
+          case "${{ needs.test.result }}" in success|skipped) ;; *) echo "test shards: ${{ needs.test.result }}"; exit 1 ;; esac
+
   # Drives the built Electron app: real daemon, real login shell, real pty.
+  # Skipped per step, not per job: a skipped matrix job reports its name unexpanded, so the required check never arrives.
   e2e:
     name: e2e ${{ matrix.os }}
+    needs: scope
     runs-on: ${{ matrix.os }}
+    env:
+      RUN_E2E: ${{ needs.scope.outputs.e2e }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        if: env.RUN_E2E == 'true'
       - uses: pnpm/action-setup@v4
+        if: env.RUN_E2E == 'true'
       - uses: actions/setup-node@v4
+        if: env.RUN_E2E == 'true'
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: env.RUN_E2E == 'true'
       # Pinned ffmpeg for the preview e2e test's synthetic media and ingest; re-downloaded only when the pins change.
       - uses: actions/cache@v4
+        if: env.RUN_E2E == 'true'
         with:
           path: .cache/test-binaries
           key: test-binaries-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/core/src/binaries/manifest.ts') }}
       - name: Smoke test (xvfb)
-        if: runner.os == 'Linux'
+        if: env.RUN_E2E == 'true' && runner.os == 'Linux'
         run: xvfb-run -a pnpm test:e2e
       - name: Smoke test
-        if: runner.os != 'Linux'
+        if: env.RUN_E2E == 'true' && runner.os != 'Linux'
         run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

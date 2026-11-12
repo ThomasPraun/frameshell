@@ -29,6 +29,7 @@ import {
   writeMessage,
 } from "@frameshell/protocol";
 import {
+  CREDITS_FILE,
   type CaptionPhrase,
   type MulticamGroup,
   type ProgramTrack,
@@ -48,7 +49,7 @@ import {
 } from "@frameshell/schema";
 import { parseCaptionText, readCaptionFile, resolveCaptions } from "./timeline/captions.js";
 import { runDoctor } from "./binaries/doctor.js";
-import { CreditsService } from "./credits/service.js";
+import { CreditsService, readCredits } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import type { MatteSource } from "./export/compiler.js";
 import { ExportService } from "./export/service.js";
@@ -145,7 +146,9 @@ import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { generateVoiceover } from "./voiceover/generate.js";
+import { generateSfx } from "./sound/generate.js";
 import { ReviewService } from "./review/service.js";
+import { AnalyzeService } from "./analyze/service.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -453,6 +456,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Running `voiceover.generate` calls, by canonical project root: one at a time per project. */
   const voiceoverRuns = new Map<string, Promise<void>>();
+  /** Running `sound.sfx` calls, by canonical project root: one at a time per project, so two calls never write one take. */
+  const soundRuns = new Map<string, Promise<void>>();
   /** Aborts provider calls when the daemon stops. */
   const voiceoverAbort = new AbortController();
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
@@ -592,6 +597,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     exports,
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+  });
+  const analyses = new AnalyzeService({
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+    beats,
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -1198,6 +1208,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         view: await viewOf(dir, caller, view),
       });
     },
+    analyze: async ({ cwd, file, name, threshold }, _caller, request) => {
+      const dir = await root(cwd);
+      const path = resolve(cwd, file);
+      const inside = relative(dir, path);
+      const input = (inside === "" || inside.startsWith("..") || isAbsolute(inside) ? path : inside).split(sep).join("/");
+      return inJob({ kind: "analyze", project: dir, asset: input }, async (ctx) => {
+        ctx.update({ step: "analyze", progress: 0 });
+        return analyses.run(
+          dir,
+          { file: path, name, threshold },
+          {
+            signal: ctx.signal,
+            progress: (progress) => ctx.update({ progress }),
+            // The caller may be gone (the job outlives it): its progress is then dropped.
+            stage: (message) => {
+              try {
+                request.progress({ message, stage: "analyze", values: { file: input } });
+              } catch {
+                // Connection closed.
+              }
+            },
+          },
+        );
+      });
+    },
     cover: async ({ cwd, timeline, view, ...choice }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
@@ -1479,6 +1514,37 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       voiceoverRuns.set(key, settled);
       void settled.then(() => {
         if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
+      });
+      return run;
+    },
+    "sound.sfx": async ({ cwd, kind, variant, seed, pitch, length }) => {
+      const dir = await root(cwd);
+      const work = () =>
+        generateSfx({
+          root: dir,
+          kind,
+          variant,
+          seed,
+          pitch,
+          length,
+          importAssets: (files) => media.import(dir, files, "copy"),
+          credit: async (file) => {
+            // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
+            if (!(await exists(join(dir, CREDITS_FILE)))) return false;
+            const ledger = await readCredits(dir);
+            if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
+            return true;
+          },
+        });
+      const key = canonicalPathSync(dir);
+      const run = (soundRuns.get(key) ?? Promise.resolve()).then(work);
+      const settled = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      soundRuns.set(key, settled);
+      void settled.then(() => {
+        if (soundRuns.get(key) === settled) soundRuns.delete(key);
       });
       return run;
     },

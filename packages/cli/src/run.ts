@@ -36,8 +36,10 @@ import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoo
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
 import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeats } from "./beats-commands.js";
 import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
+import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, formatStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
+import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
@@ -120,7 +122,7 @@ ${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--fo
                                180 px wide (warns when the word is too long). --text alone picks the frame
                                where the word is first spoken; --at picks the frame; neither: the first
                                picture. Default file: exports/<timeline>-cover.png
-${REVIEW_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
+${REVIEW_USAGE}${ANALYZE_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [--segment]
                                What a point of the frame shows: the clips under it (topmost first) and, in a
                                generated clip, the element painting it (selector, text, box, styles). --point
                                takes fractions of the frame (0.71,0.14), --px project pixels (1363,151). --segment: on a photo
@@ -131,7 +133,7 @@ ${REVIEW_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [--timeline id] [
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${BEATS_USAGE}${STYLE_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
+${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${SOUND_USAGE}${BEATS_USAGE}${STYLE_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
                                and print its path: a grayscale video in .frameshell/cache/mattes/, white = the
                                person. Once per file content; estimated 1.5 min per minute of video. First run
                                downloads 0.5 MB (plus ONNX Runtime, 33 MB, if face detection never ran)
@@ -162,13 +164,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "inspect", "script", "proposal", "people", "shoot", "voiceover", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "bpm", "reset-edits"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "every", "bpm", "reset-edits", "variant", "seed", "pitch", "length"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -186,6 +188,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   ...REVIEW_FLAGS,
+  ...ANALYZE_FLAGS,
   inspect: ["at", "point", "px", "timeline", "segment"],
   "script outline": [],
   "script check": [],
@@ -196,6 +199,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   ...SHOOT_FLAGS,
   ...MODEL_FLAGS,
   ...VOICEOVER_FLAGS,
+  ...SOUND_FLAGS,
   ...BEATS_FLAGS,
   matte: [],
   ...STYLE_FLAGS,
@@ -252,11 +256,13 @@ type Invocation =
   | { kind: "proposal.diff"; tx?: string }
   | { kind: "style.show" }
   | ReviewInvocation
+  | AnalyzeInvocation
   | PeopleInvocation
   | CreditsInvocation
   | ShootInvocation
   | ModelInvocation
   | VoiceoverInvocation
+  | SoundInvocation
   | BeatsInvocation
   | { kind: "matte"; asset: string }
   | FormatInvocation
@@ -337,6 +343,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           dtw: { type: "string" },
           lines: { type: "string" },
           bpm: { type: "string" },
+          variant: { type: "string" },
+          seed: { type: "string" },
+          pitch: { type: "string" },
+          length: { type: "string" },
           "reset-edits": { type: "boolean", default: false },
           // A switch on `clip set` (voice chain), a voice id on `voiceover generate`.
           voice: { type: firstWord === "voiceover" ? "string" : "boolean" },
@@ -424,7 +434,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "beats" || command === "style" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -498,6 +508,10 @@ function parseBuiltin(
     dtw?: string | undefined;
     lines?: string | undefined;
     bpm?: string | undefined;
+    variant?: string | undefined;
+    seed?: string | undefined;
+    pitch?: string | undefined;
+    length?: string | undefined;
     "reset-edits"?: boolean | undefined;
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
@@ -519,10 +533,12 @@ function parseBuiltin(
     range?: string | undefined;
     sheets?: string | undefined;
     every?: string | undefined;
+    threshold?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
   if (command === "voiceover") return parseVoiceover(rest, options);
+  if (command === "sound") return parseSound(rest, options);
   if (command === "beats") return parseBeats(rest, options);
   if (command === "people") return parsePeople(rest, options);
   if (command === "credits") return parseCredits(rest, options);
@@ -532,6 +548,7 @@ function parseBuiltin(
   if (command === "style") return rest.length === 1 && rest[0] === "show" ? { kind: "style.show" } : null;
   if (command === "format") return parseFormat(rest, options);
   if (command === "review") return parseReview(rest, options);
+  if (command === "analyze") return parseAnalyze(rest, options);
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
   if (command === "inspect") {
     if (rest.length > 0) return null;
@@ -806,6 +823,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "review":
       return executeReview(conn, inv, cwd, flags.json);
+    case "analyze":
+      return executeAnalyze(conn, inv, cwd, flags.json);
     case "style.show": {
       const result = await conn.request("style.show", { cwd });
       return flags.json ? json(result) : formatStyle(result);
@@ -849,6 +868,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         settleTrust: () => settleTrust(conn, flags, io),
         progress: flags.json ? undefined : progressPrinter(io),
       });
+    case "sound.sfx":
+      return executeSound(conn, inv, cwd, flags.json);
     case "beats.measure":
     case "beats.show":
       return executeBeats(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));

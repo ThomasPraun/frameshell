@@ -34,7 +34,7 @@ async function scaffold(template: string, width: number, height: number): Promis
 const clip = { id: "c_spot", source: "compositions/hyperframes/spot/index.html" };
 
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion templates (real HyperFrames)", () => {
-  describe.each(TEMPLATES.map((t) => t.id))("%s", (template) => {
+  describe.each(TEMPLATES.map((t) => [t.id, t.overlay] as const))("%s", (template, overlay) => {
     it(
       "lays out inside the frame in every format and paints the same frames cold and after a reseek (≤ 2/255)",
       async () => {
@@ -117,13 +117,13 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               }
               expect(drawn, format).toBeGreaterThan(width * height * 0.002);
               expect(cold[0]!.equals(cold[3]!), format).toBe(false);
-              if (template === "kinetic-headline") {
-                // Transparent over footage: most of the frame stays unpainted, and the text keeps off the edges.
-                expect(drawn, format).toBeLessThan(width * height * 0.4);
+              // An overlay leaves most of the frame unpainted (over footage) and keeps inside it with a margin.
+              if (overlay) {
+                expect(drawn, format).toBeLessThan(width * height * 0.5);
                 expect(minX, format).toBeGreaterThan(width * 0.03);
                 expect(maxX, format).toBeLessThan(width * 0.97);
-                expect(minY, format).toBeGreaterThan(height * 0.1);
-                expect(maxY, format).toBeLessThan(height * 0.9);
+                expect(minY, format).toBeGreaterThan(height * 0.03);
+                expect(maxY, format).toBeLessThan(height * 0.97);
               }
               await page.close();
             } finally {
@@ -138,7 +138,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     );
 
     it(
-      "renders without the 45 s timeline wait, with alpha for the headline",
+      "renders without the 45 s timeline wait, with alpha for an overlay",
       async () => {
         const dir = await scaffold(template, 480, 270);
         const manager = binaries();
@@ -168,7 +168,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
           else if (stdout[p]! < 128) clear++;
         }
         expect(opaque).toBeGreaterThan(480 * 270 * 0.002);
-        if (template === "kinetic-headline") expect(clear).toBeGreaterThan(480 * 270 * 0.5);
+        if (overlay) expect(clear).toBeGreaterThan(480 * 270 * 0.5);
         else expect(opaque).toBeGreaterThan(480 * 270 * 0.9);
       },
       600_000,

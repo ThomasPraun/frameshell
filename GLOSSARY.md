@@ -42,6 +42,16 @@ _Avoid_: narration script, TTS script
 The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
 _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 
+## Synthesized sound (ADR 0038)
+
+**Sound effect**:
+A short sound generated offline by `sound sfx` from a kind, a variant and a seed: `assets/sound/<kind>-<key>.wav`, carrying the cache key it was made from. Same arguments, same file.
+_Avoid_: SFX file, sample (a sample is one number of the audio), foley
+
+**Anchor** (`peakAt`):
+The instant of a sound effect that must land on the picture it goes with: the transient of a hit, the peak of a whoosh, the end of a riser. Stored in the take's file; placement subtracts it from the cue.
+_Avoid_: peak (alone: loudness), offset
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:
@@ -267,6 +277,10 @@ _Avoid_: conflicted proposal, expired proposal
 **Review run**:
 One `review` of a timeline or an exported file: contact, phone, motion-strip and loop-seam sheets in `.frameshell/review/<n>/` with a `review.json` manifest, for an agent to look at a whole film. Not Review mode: nothing waits for anyone and no project file changes.
 _Avoid_: review (alone, it reads as Review mode), audit
+
+**Analysis**:
+One `analyze` of a reference video: its shot table, contact and shots sheets, palette, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
+_Avoid_: reference report, scan
 
 ## Video from audio (ADR 0015)
 

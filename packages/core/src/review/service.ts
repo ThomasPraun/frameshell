@@ -13,7 +13,6 @@ import {
   type TimelineViewName,
 } from "@frameshell/protocol";
 import type { ExportService } from "../export/service.js";
-import { pool } from "../export/service.js";
 import type { TimelineService } from "../timeline/service.js";
 import {
   type Critical,
@@ -25,15 +24,12 @@ import {
   phonePicks,
   seamPicks,
   sheetLayout,
-  splitImages,
   stripPicks,
   STRIPS,
-  tileHeight,
-  tileLabel,
   timelineCritical,
 } from "./plan.js";
-import { writeSheet } from "./sheet.js";
-import { type FilmSource, captureParallelism, fileSource, timelineSource } from "./source.js";
+import { Frames, writeSheetImages } from "./images.js";
+import { type FilmSource, fileSource, timelineSource } from "./source.js";
 
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
@@ -99,38 +95,21 @@ export class ReviewService {
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
       const write = async (kind: ReviewSheetKind, picks: readonly FramePick[], stem: string, numbered = false): Promise<string[]> => {
-        const layout = sheetLayout(kind, aspect);
-        const tile = { width: layout.tileWidth, height: tileHeight(layout.tileWidth, aspect) };
-        const images = splitImages(picks, layout.perImage);
-        await frames.ensure(picks.map((pick) => pick.frame), signal);
-        const paths: string[] = [];
-        for (const [i, part] of images.entries()) {
-          const path = join(dir, images.length === 1 && !numbered ? `${stem}.png` : `${stem}-${i + 1}.png`);
-          const size = await writeSheet(
-            ffmpeg,
-            part.map((pick) => ({ path: frames.path(pick.frame), label: tileLabel(frameTime(pick.frame, source.fps), pick.tag) })),
-            { out: path, columns: layout.columns, tile, scratch: join(scratch, `sheet-${stem}-${i}`), ...(signal ? { signal } : {}) },
-          );
-          sheets.push({
-            kind,
-            path,
-            width: size.width,
-            height: size.height,
-            columns: size.columns,
-            rows: size.rows,
-            tile,
-            tiles: part.map((pick, t) => ({
-              at: frameTime(pick.frame, source.fps),
-              frame: pick.frame,
-              tag: pick.tag,
-              label: tileLabel(frameTime(pick.frame, source.fps), pick.tag),
-              row: Math.floor(t / size.columns),
-              column: t % size.columns,
-            })),
-          });
-          paths.push(path);
-        }
-        return paths;
+        const images = await writeSheetImages({
+          ffmpeg,
+          fps: source.fps,
+          aspect,
+          frames,
+          layout: sheetLayout(kind, aspect),
+          picks,
+          dir,
+          stem,
+          numbered,
+          scratch,
+          signal,
+        });
+        sheets.push(...images.map((image) => ({ kind, ...image })));
+        return images.map((image) => image.path);
       };
 
       for (const kind of kinds) {
@@ -245,31 +224,4 @@ export class ReviewService {
 async function numbered(base: string): Promise<number[]> {
   const entries = await readdir(base, { withFileTypes: true }).catch(() => []);
   return entries.filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name)).map((entry) => Number(entry.name));
-}
-
-/** Frames of a source captured once into `dir`, whichever sheet asks for them. */
-class Frames {
-  readonly #have = new Set<number>();
-  readonly #source: FilmSource;
-  readonly #dir: string;
-
-  constructor(source: FilmSource, dir: string) {
-    this.#source = source;
-    this.#dir = dir;
-  }
-
-  path(frame: number): string {
-    return join(this.#dir, `f${String(frame).padStart(7, "0")}.png`);
-  }
-
-  /** Capture the frames not captured yet, a few at a time. */
-  async ensure(frames: readonly number[], signal?: AbortSignal): Promise<void> {
-    await mkdir(this.#dir, { recursive: true });
-    const missing = [...new Set(frames)].filter((frame) => !this.#have.has(frame));
-    await pool(missing, captureParallelism(), async (frame) => {
-      signal?.throwIfAborted();
-      await this.#source.capture(frame, this.path(frame));
-      this.#have.add(frame);
-    });
-  }
 }

@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["packages/*/test/**/*.test.ts", "plugins/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "plugins/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts", "scripts/*.test.mjs"],
     // Installs the pinned ffmpeg once for media tests (tens of MB), kept under .cache/.
     globalSetup: ["./vitest.global-setup.ts"],
     // The CLI names an agent among its parent processes (ADR 0025): tests run from an agent's shell must not be one.
