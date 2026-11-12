@@ -17,6 +17,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   film": a prompt typed unsent at the agent's prompt that asks for three storylines (a different world, device and form
   each) with a recommendation, then the assumptions with a free alternative beside every paid item. It names no
   command, so it holds until the motion film playbook (#453) lands. Strings in English and Spanish.
+- Words behind the head in the app (#461 slice 4, ADR 0032; no wire change): the header menu of a video track offers
+  "Put behind the person on V1" for each lower video track that holds a media clip, and "Stop going behind the person"
+  while it is behind one (one `track.set`, one undo step). A track behind a plate shows a person icon at the end of its
+  header with the state of the plate's matte: the percentage while it is made, a `!` with the reason when it failed, plain
+  once ready; until then the preview keeps showing the word in front. The skill's reels page gains the recipe for a
+  big word behind the head: 30 to 55 % covered, never over the face, 1.5 to 4 s, no two-person shots, b-roll above the
+  word's track. Strings in English and Spanish; an e2e with the stand-in matte.
+- Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
+  video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
+  and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
+  and wiping with the clip, then draw the clip; its render does not change. `frameshell clip set <clip> --glass` copies
+  the new `style.json` `glass` numbers (default blur 46, saturate 1.45, dim 0.55) onto the clip; `--backdrop-blur`,
+  `--backdrop-saturate`, `--backdrop-dim` set one number, `--clear-backdrop` removes it (daemon and MCP `clip.set`
+  `backdrop`). `glass.cards` (default false) says whether the style uses glass cards at all: glass is never a default.
+  The clip inspector has a Glass switch with Blur, Saturate and Dim fields. On the bottom picture track the backdrop is
+  kept with a warning and not drawn. Timelines without backdrops export exactly as before. In the preview one glass
+  card costs about 4 ms per frame at a 1920x1080 canvas on an Apple M3. Older Frameshell versions reject a timeline or
+  `style.json` that carries the new fields.
+- Fit music to the cut, second slice of #485 (ADR 0037, epic #451; daemon `music.fit`, CLI `music fit`, MCP `music_fit`,
+  protocol 101): `music fit <clip> --end end-card` back-times a music clip (a media clip of an audio track) so the track's own
+  final hit lands on the cut and it plays unspliced before it, and says where the music then starts. `--end` and
+  `--from` are seconds or a marker (the shared TimeRef resolver). The hit is `--hit` (seconds of the file) or found on
+  the track's energy, the last sharp jump in level near the end of the part the clip plays, with a confidence and the
+  other strong hits; a hit under 0.5 is only suggested. By default the clip slides and keeps its speed (within half a
+  frame); a track longer than the picture before the hit loses its intro (`in` moves later, never before `--from`,
+  default 0), a shorter one starts late, and nothing is looped or spliced. `--exact` keeps the start and changes the
+  speed to land the hit on `--end`, at most 1.7 % of the clip's speed, refusing beyond it with the ends that fit.
+  `--dry-run` changes nothing and lists the steps. A clip with duck keys gets `duck` again in the same transaction
+  (`--skip duck` leaves them), since duck keys sit on the clip's own clock. One transaction (`Music fit: …`, one
+  proposal in review mode); only `start`, `in`, `speed` and gain keys are written, so older versions open the
+  timeline. Measured on a synthetic drum track: the export's `atempo` plays the material about 21 ms early at a speed
+  near 1 (the preview has no such shift) and softens a kick's attack from 3.1 to 5.7 ms; tape-style resampling shows
+  neither (ADR 0037 has the numbers, measured on darwin-arm64 only; the 5 ms `fadeIn` is not written yet). A second fit
+  that lands later brings back the intro an earlier fit dropped, as far as the file has it.
+
+- `frameshell sound place <kind> (--at <t>[,<t>…] | --cuts <track> | --typing --from <t> --to <t>)` (#463 slice 2,
+  ADR 0038; daemon `sound.place`, MCP `sound_place`, protocol 100) places generated sound effects in one transaction
+  `Sound: …` (one proposal in review mode, `revert` undoes it whole): on times given as seconds or a marker through the
+  shared TimeRef resolver (`hook`, `hook+0.5`), on every edit point of a track (or the numbered ones) and as a run of
+  typing keys (tick or click, at most 10 a second, spaced for 87 ms or more, rotating takes). The take's `peakAt` lands
+  on the time plus the offset of its role (click -11 ms, tap -60, knock -40, pop +30, whoosh +37; a riser ends 75 ms
+  before), on whole frames, on the audio track `SFX` (made when absent; `SFX 2`, `SFX 3` where sounds overlap). Clip
+  gain is `-sound.sfxUnderVoice` of `style.json` plus the tier (primary 0, secondary -4, texture -8 dB). Variants rotate
+  so the same whoosh is not twice in a row. It warns, never refuses, about more than 2 sounds on one frame, ticks closer
+  than 66 ms and pops closer than 114 ms, two typing keys closer than 87 ms once rounded to frames, and one take twice in a row; sounds that cannot be clips (nothing left after the
+  timeline start) are listed in `skipped`.
+- Safe-zone sheet of `review`, second slice of #457 (epic #451; `review --platform instagram|tiktok|shorts|youtube`,
+  `--sheets safe`, MCP `review` `platform`, protocol 99): up to 36 frames chosen like the contact sheet with the
+  platform's UI zones shaded red and outlined, drawn from the one table in `@frameshell/schema` (`safe-zones.ts`),
+  scaled to the film's size. A frame where the captions of a subtitle track reach into a zone is marked
+  `!subtitle` (box measured from the bundled face, the track's style and each cue's words), and `review.json`
+  `safeZones` lists, per platform, the zones in the film's pixels and the captions that cross them by track and
+  zone (how many cues, when, how many px deep), at the caption size export draws in that format
+  (`captionScale`, 1.3 in a vertical non-primary format). `--platform` adds the sheet to the default ones; a vertical film
+  whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
+  are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them (`review` and `analyze`). Titles, graphics
+  and faces are not measured yet.
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the
@@ -85,8 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like a voiceover take and carrying its cache key and `peakAt` (the instant that must land on the picture: the
   transient of a hit, the peak of a whoosh, the end of a riser) in a RIFF chunk. A take that is current is `cached`, and
   a file of that name made by hand is never overwritten. When the project already keeps a `credits.json`, the take is
-  recorded there as `own` work. `sound` is a reserved built-in command group. Placing on markers (`sound.place`) and
-  music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
+  recorded there as `own` work. `sound` is a reserved built-in command group. Placing (`sound.place`, see above)
+  and music come in later slices; the skill has a reference (`reference/sound.md`) with the role offsets and the placement
   taste.
 - Motion templates, second group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template`
   also takes `lower-third` (card with an accent bar, name and role), `logo-lockup` (logo, name, accent rule, tagline;
@@ -98,6 +155,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per format with `pick()`, uses springs, and passes `hyperframes check --strict`; the ones that can work alone as
   well as over footage have `bg` and `backdrop` props. The real-Chrome test renders every template in the four
   formats (inside the frame, same frames cold and after a reseek). Listed in the plugin skill.
+- Motion templates, UI demo group of #466 (ADR 0033, part of #451): `frameshell hyperframes new <name> --template` also
+  takes `cursor-click` (a cursor arrives on an arc, hesitates, clicks a button; the confirmation springs in on the
+  click's frame), `cursor-drag-drop` (a cursor carries a card into a drop zone that answers on the release),
+  `cursor-marquee` (a selection rectangle over a grid of tiles, each lighting up as it is reached, a count on release),
+  `cursor-text-select` (a cursor drags along a phrase of a paragraph, over line breaks too, the highlight following it,
+  an action pill on release; word boxes are read from layout), `app-window` (a CRM, spreadsheet or inbox window: a
+  cursor clicks a row, its highlight sweeps in and the rest dims on that frame; own solid background; `cursor` off
+  clicks at `selectAt`) and `typing-field` (a prompt bar types with an uneven seeded rhythm and a blinking caret, a cursor
+  presses Run, a progress line fills, a result appears). The cursor is a carrier: 4 to 7 % of the short side
+  (`cursorSize`), outside the frame at the start so it never fades in, arcs with a 15 % bow and a tiny overshoot,
+  optional `hesitate`, a click of 0.84 in 0.1 s and back in 0.22 s, and a drift after the last beat. Each has typed
+  props, takes colours and fonts from `style.json`, lays out per format with `pick()` and passes
+  `hyperframes check --strict`; the real-Chrome test renders all of them in the four formats. Scales within 0.6 % of 1
+  are written as exactly 1 because Chrome kept an earlier raster for them (same time, a pixel off by seek order).
+  Listed in the plugin skill.
 - `frameshell review` (#457 slice a, epic #451; daemon `review`, MCP `review`, protocol 90): contact sheet, phone sheet
   (360 px tiles, 1 fps), fast-motion strips (the two fastest moments by difference of sampled grey frames, 12 consecutive frames
   each) and a loop seam sheet (last 6 and first 6 frames) of a timeline or of an exported file (`--file`), written to
@@ -391,6 +463,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so two at once no longer lose one of them.
 - Timeline files: a clip's `shape` without a `dissolve`, or on an audio track, is rejected. Files without `shape`
   are unchanged and export byte for byte as before; hosts older than this release reject files that carry `shape`.
+
+### Fixed
+
+- Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports
+  the previous picture as the new one's frame while the engine still decodes it (#551).
 
 ## [0.18.0] - 2026-11-07
 

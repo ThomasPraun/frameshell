@@ -26,6 +26,7 @@ import {
   type TimelineViewName,
   assertSocketPathFits,
   isMethodName,
+  methods,
   parseRequest,
   readMessages,
   resolveAppDirs,
@@ -49,6 +50,7 @@ import {
   parseStyleFile,
   parseTimeline,
   projectFormats,
+  resolveStyle,
   subtitleTracks,
   subtitleWords,
 } from "@frameshell/schema";
@@ -64,6 +66,7 @@ import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
+import { musicFitLabel, planMusicFit } from "./music/run.js";
 import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
 import { BeatsStore, beatsFileOf, formatBeatsFile, ownBeatsFile, resolveBeatsFile, summarizeBeats } from "./media/beats-store.js";
 import { EnergyStore } from "./media/energy-store.js";
@@ -132,6 +135,7 @@ import {
   writeSessionTranscripts,
 } from "./shoot/session.js";
 import { outlineScript } from "./scripts/outline.js";
+import { readStyleFile } from "./style/read.js";
 import { styleConfigDocument, styleState } from "./style/doc.js";
 import { StyleService } from "./style/service.js";
 import type { OperationRequest } from "./timeline/engine.js";
@@ -140,6 +144,7 @@ import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
+import { resolveTimeRef } from "./timeline/time-ref.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -154,7 +159,8 @@ import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { generateVoiceover } from "./voiceover/generate.js";
-import { generateSfx } from "./sound/generate.js";
+import { type SfxRequest, generateSfx } from "./sound/generate.js";
+import { allWarnings, planSounds, runPlan } from "./sound/place.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
 
@@ -506,6 +512,34 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const voiceoverRuns = new Map<string, Promise<void>>();
   /** Running `sound.sfx` calls, by canonical project root: one at a time per project, so two calls never write one take. */
   const soundRuns = new Map<string, Promise<void>>();
+  /** Run sound work of project `dir` after the sound work already running there: takes are written one at a time. */
+  const serialSound = <T>(dir: string, work: () => Promise<T>): Promise<T> => {
+    const key = canonicalPathSync(dir);
+    const run = (soundRuns.get(key) ?? Promise.resolve()).then(work);
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    soundRuns.set(key, settled);
+    void settled.then(() => {
+      if (soundRuns.get(key) === settled) soundRuns.delete(key);
+    });
+    return run;
+  };
+  /** One sound effect take of project `dir` (`sound.sfx`): written and imported, or found; its credit recorded when the project keeps a ledger. */
+  const makeTake = (dir: string, spec: Pick<SfxRequest, "kind" | "variant" | "seed" | "pitch" | "length">) =>
+    generateSfx({
+      root: dir,
+      ...spec,
+      importAssets: (files) => media.import(dir, files, "copy"),
+      credit: async (file) => {
+        // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
+        if (!(await exists(join(dir, CREDITS_FILE)))) return false;
+        const ledger = await readCredits(dir);
+        if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
+        return true;
+      },
+    });
   /** Aborts provider calls when the daemon stops. */
   const voiceoverAbort = new AbortController();
   /** Transcriptions of takes recorded in the app, by `<root>\0<take>`: `shoot.session.end` waits for them. */
@@ -646,6 +680,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const reviews = new ReviewService({
     timelines,
     exports,
+    platforms: async (dir) => {
+      const shown = await timelines.viewConfig(dir, "style", "current");
+      return (await styles.show(dir, shown.state)).style?.platforms.value ?? [];
+    },
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
   });
@@ -811,6 +849,25 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     await transactions.applied(key, tx);
     await settle(key, tx);
     return result;
+  };
+  /**
+   * The `prepare` of a `track.duck` operation: it measures the speech of the `under` tracks against the timeline the
+   * operation applies to, so a voice edited or a proposal rebased meanwhile is heard as it is then. `heard()` gives
+   * what was found, after the operation ran.
+   */
+  const duckPlanner = (dir: string, { under, depth, attackMs, releaseMs, threshold, gap }: Omit<ValidatedParams<"track.duck">, "cwd" | "timeline" | "track">) => {
+    const attack = attackMs / 1000;
+    const release = releaseMs / 1000;
+    let stretches: Span[] = [];
+    let warnings: string[] = [];
+    const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
+      const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
+      stretches = speechStretches(heard.runs, { gap, attack, release });
+      warnings = heard.warnings;
+      const curve = dipCurve(stretches, { depth, attack, release });
+      return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
+    };
+    return { prepare, heard: () => ({ stretches, warnings }) };
   };
   /** `multicam.create`: measure (or take the known offsets of) the files, then add the group, its program track and first shot. */
   const createGroup = async (
@@ -1285,7 +1342,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, loaded)) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, every, projectFormat, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, view }, caller) => {
       const dir = await root(cwd);
       return reviews.run(dir, {
         timeline,
@@ -1293,6 +1350,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         from,
         to,
         sheets,
+        platform,
         every,
         projectFormat,
         view: await viewOf(dir, caller, view),
@@ -1609,34 +1667,68 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "sound.sfx": async ({ cwd, kind, variant, seed, pitch, length }) => {
       const dir = await root(cwd);
-      const work = () =>
-        generateSfx({
-          root: dir,
-          kind,
-          variant,
-          seed,
-          pitch,
-          length,
-          importAssets: (files) => media.import(dir, files, "copy"),
-          credit: async (file) => {
-            // Only a project that already keeps a ledger: a project of its own footage gets no export warnings from it (ADR 0038).
-            if (!(await exists(join(dir, CREDITS_FILE)))) return false;
-            const ledger = await readCredits(dir);
-            if (!ledger.assets.some((entry) => entry.asset === file)) await credits.record(dir, [file], { licence: "own", author: "Frameshell sound synth" });
-            return true;
-          },
-        });
-      const key = canonicalPathSync(dir);
-      const run = (soundRuns.get(key) ?? Promise.resolve()).then(work);
-      const settled = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      soundRuns.set(key, settled);
-      void settled.then(() => {
-        if (soundRuns.get(key) === settled) soundRuns.delete(key);
+      return serialSound(dir, () => makeTake(dir, { kind, variant, seed, pitch, length }));
+    },
+    "sound.place": async (params, caller) => {
+      const { cwd, timeline } = params;
+      const dir = await root(cwd);
+      const plan = await planSounds(params, {
+        root: dir,
+        timeline,
+        load: async () => loadFor(dir, timeline, caller),
+        resolve: (ref, loaded) => resolveTimeRef(ref, { timeline: loaded }),
+        take: (spec) => serialSound(dir, () => makeTake(dir, spec)),
+        sfxUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.sfxUnderVoice.value,
       });
-      return run;
+      if (plan.sounds.length === 0) {
+        return { timeline, revision: plan.revision, tx: null, tracks: [], placed: [], skipped: plan.skipped, generated: plan.generated, warnings: plan.warnings };
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: plan.label };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const author = journalAuthorOf(caller);
+      try {
+        // Each step checks the revision its predecessor left: a person's edit in between fails the step instead of putting a clip on lanes fitted for an older timeline.
+        let expected = plan.revision;
+        const written = await runPlan(plan, async (step) => {
+          const request = step as OperationRequest;
+          const result = await timelines.apply({
+            root: dir,
+            cwd,
+            timeline,
+            request,
+            author,
+            tx,
+            prepare: async (current) => {
+              if (current.revision !== expected) {
+                throw new RpcError(ErrorCode.StaleRevision, `sound.place: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the sounds were placed. Check it with timeline show.`, {
+                  op: "sound.place",
+                  timeline,
+                  revision: expected,
+                  current: current.revision,
+                });
+              }
+              return request;
+            },
+          });
+          expected = result.revision;
+          await transactions.applied(key, tx);
+          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
+        });
+        return {
+          timeline,
+          revision: written.revision,
+          tx: tx.id,
+          tracks: written.tracks,
+          placed: written.placed,
+          skipped: plan.skipped,
+          generated: plan.generated,
+          warnings: allWarnings(plan, written.warnings),
+        };
+      } finally {
+        await settle(key, tx);
+      }
     },
     "timeline.show": async ({ cwd, timeline, view, grid }, caller) => {
       const dir = await root(cwd);
@@ -1711,26 +1803,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           throw invalid(`${id} is a ${voice.kind} track; \`under\` takes video and audio tracks (a multicam program track has no sound of its own).`, "under");
         }
       }
-      const attack = attackMs / 1000;
-      const release = releaseMs / 1000;
-      let stretches: Span[] = [];
-      let heardWarnings: string[] = [];
-      // Measured against the timeline the operation applies to: a voice edited or a proposal rebased meanwhile is heard as it is then.
-      const prepare = async (current: Timeline, request: OperationRequest): Promise<OperationRequest> => {
-        const heard = await voiceRuns(current, under, { threshold, profile: (asset) => energy.profile(dir, asset) });
-        stretches = speechStretches(heard.runs, { gap, attack, release });
-        heardWarnings = heard.warnings;
-        const curve = dipCurve(stretches, { depth, attack, release });
-        return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
-      };
-      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, prepare);
+      const ducking = duckPlanner(dir, { under, depth, attackMs, releaseMs, threshold, gap });
+      const result = await operate("track.duck", { cwd, timeline, track, curve: [{ time: 0, dip: 0 }] }, caller, undefined, ducking.prepare);
+      const heard = ducking.heard();
       return {
         ...result,
         track,
         under,
-        stretches: stretches.length,
-        speechSeconds: Math.round(stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
-        warnings: [...result.warnings, ...heardWarnings],
+        stretches: heard.stretches.length,
+        speechSeconds: Math.round(heard.stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
+        warnings: [...result.warnings, ...heard.warnings],
       };
     },
     cut: (params, caller) => operate("cut", params, caller),
@@ -1778,6 +1860,56 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         await settle(key, tx);
       }
       return { timeline, revision, dryRun, applied: true, tx: tx.id, ...plan, warnings: [...warnings] };
+    },
+    "music.fit": async ({ cwd, timeline, clip, end, from, hit, exact, dryRun, skip }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
+        profile: (asset) => energy.profile(dir, asset),
+        // A grid of other content (the file was replaced) places nothing.
+        onsets: async (asset) => {
+          const file = await beatsOf(dir, asset);
+          return file?.assetHash === (await media.derivedAudio(dir, asset)).hash ? (file.onsets ?? null) : null;
+        },
+      });
+      if (dryRun || operations.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...report };
+      // The plan can take seconds (first energy profile): a clip moved meanwhile would be fitted from stale times.
+      const fresh = (await loadFor(dir, timeline, caller)).timeline.revision;
+      if (fresh !== loaded.revision) {
+        throw new RpcError(ErrorCode.StaleRevision, `music.fit: timeline ${timeline} changed from revision ${loaded.revision} to ${fresh} while the fit was planned. Nothing was changed; run it again.`, {
+          op: "music.fit",
+          timeline,
+          revision: loaded.revision,
+          current: fresh,
+        });
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: musicFitLabel(report) };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const warnings = new Set(report.warnings);
+      let revision = loaded.revision;
+      try {
+        const write = async (request: OperationRequest, prepare?: (current: Timeline) => Promise<OperationRequest>) => {
+          const result = await timelines.apply({ root: dir, cwd, timeline, request, author: journalAuthorOf(caller), tx, ...(prepare ? { prepare } : {}) });
+          await transactions.applied(key, tx);
+          revision = result.revision;
+          for (const warning of result.warnings) warnings.add(warning);
+        };
+        for (const { clip: id, ...operation } of operations) await write({ op: operation.op, args: { clip: id, ...operation.args } } as OperationRequest);
+        if (duckAgain) {
+          // Defaults of the method, and the voice tracks it found: the first duck's own parameters are not stored.
+          const defaults = methods["track.duck"].params.parse({ cwd, timeline, track: duckAgain.track, under: duckAgain.under });
+          const ducking = duckPlanner(dir, defaults);
+          await write({ op: "track.duck", args: { track: duckAgain.track, curve: [{ time: 0, dip: 0 }] } } as OperationRequest, (current) =>
+            ducking.prepare(current, { op: "track.duck", args: { track: duckAgain.track, curve: [{ time: 0, dip: 0 }] } } as OperationRequest),
+          );
+          for (const warning of ducking.heard().warnings) warnings.add(warning);
+        }
+      } finally {
+        await settle(key, tx);
+      }
+      return { timeline, revision, dryRun, applied: true, tx: tx.id, ...report, warnings: [...warnings] };
     },
     "multicam.create": (params, caller) => createGroup(params, caller),
     "multicam.gallery": async ({ cwd, timeline, asset, names, name, at, group: into, mic }, caller) => {
