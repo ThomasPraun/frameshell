@@ -8,6 +8,7 @@ import {
   SHOT_LOW_CONFIDENCE,
   type TransitionShape,
 } from "@frameshell/schema";
+import { audioEffectsOf, normalizeAudioEffects, type NormalizedAudioEffect } from "@frameshell/schema/effects";
 import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
@@ -74,6 +75,8 @@ export interface ClipBox {
   gain: number;
   /** `audio.muted`. */
   muted: boolean;
+  /** Stored `audio.effects` of a media clip (ADR 0031) with every number filled, in processing order; empty without any. */
+  audioEffects: NormalizedAudioEffect[];
   /** Stored `transform` with defaults filled; null when the clip has none. */
   transform: { x: number; y: number; scale: number; opacity: number } | null;
   /** Shots: what they show; null for other clips. */
@@ -157,6 +160,8 @@ export interface TrackRow {
   muted: boolean;
   /** The track shows no picture (`track.set` `hidden`); its sound still plays. */
   hidden: boolean;
+  /** Video tracks: id of the plate this track sits behind the person of (`track.set` `behind`, ADR 0032); null otherwise. */
+  behind: string | null;
   /** Program tracks: the group's angles in group order (what the number keys pick); empty otherwise. */
   angles: ShotAngle[];
   /** Top edge in content px (ruler included). */
@@ -300,6 +305,7 @@ export function layoutTimeline(
       group: track.kind === "program" ? (track.group ?? null) : null,
       muted: track.muted === true,
       hidden: track.hidden === true,
+      behind: track.kind === "video" ? (track.behind ?? null) : null,
       angles,
       top,
       height,
@@ -372,6 +378,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     problem: clip.end === null ? (problem ?? t.timeline.lengthUnknown) : null,
     gain: typeof audio.gain === "number" ? audio.gain : 0,
     muted: audio.muted === true,
+    audioEffects: normalizeAudioEffects(audioEffectsOf(clip) ?? []),
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
     shot,
     dissolve: stored("dissolve"),

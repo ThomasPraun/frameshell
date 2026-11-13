@@ -28,6 +28,7 @@ import {
   subjectOf,
 } from "@frameshell/schema/composite";
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
+import { type FormatLayout, formatCrop } from "@frameshell/schema/formats";
 import {
   type ClipEdges,
   type FrameRect,
@@ -84,6 +85,8 @@ export type VideoSpan =
        * picture's alpha. The span draws only the person, over the tracks behind the plate.
        */
       matte?: string;
+      /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
+      cover?: LayerRect;
     }
   | {
       kind: "still";
@@ -98,6 +101,8 @@ export type VideoSpan =
       placement: Placement;
       /** Keys and edge transitions (ADR 0018); absent: `placement` holds for every frame. */
       motion?: SpanMotion;
+      /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
+      cover?: LayerRect;
     }
   | {
       /**
@@ -390,6 +395,11 @@ export interface ProgramOptions {
    * through them; one whose matte is absent shows a {@link PlaceholderReason} `matte` note instead.
    */
   mattes?: ReadonlyMap<string, string>;
+  /**
+   * The project format shown (ADR 0027, `formatOf`): in one that covers, footage and stills get the `cover` crop export
+   * cuts (`formatCrop`). Generated clips stay fitted until renders per format reach the preview. Absent: the primary.
+   */
+  format?: FormatLayout & Size;
 }
 
 /** The ready entries of a `matte.status` list, by asset: {@link ProgramOptions.mattes}. */
@@ -468,11 +478,11 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       const bottom = layers.length === 0;
       const pictures = kept.map(({ clip, start, end }) => {
         const info = "asset" in clip ? assets.get(clip.asset) : undefined;
-        if (subjectOf(clip)) return subjectPicture(clip, info, start, end, fps, options.mattes);
-        const picture = pictureOf(clip, info, start, end, fps, options.renders);
+        const picture = subjectOf(clip) ? subjectPicture(clip, info, start, end, fps, options.mattes) : pictureOf(clip, info, start, end, fps, options.renders);
         // Nothing is below the bottom track to blur, as in export.
-        const glass = bottom ? null : backdropOf(clip);
-        return glass && picture?.kind === "generated" ? { ...picture, glass } : picture;
+        const glass = bottom || subjectOf(clip) ? null : backdropOf(clip);
+        const glazed = glass && picture?.kind === "generated" ? { ...picture, glass } : picture;
+        return options.format ? covered(glazed, clip, info, bottom, options.format) : glazed;
       });
       if (bottom) baseTrack = track.id;
       // A subject takes the shapes of its plate clip when the plate is the bottom track, as export draws it.
@@ -1066,6 +1076,13 @@ function subjectPicture(
   if (matte === undefined) return { kind: "placeholder", clip: clip.id, start, end, reason: "matte", type: clip.type };
   const picture = pictureOf(clip, info, start, end, fps, undefined);
   return picture?.kind === "media" ? { ...picture, matte } : null;
+}
+
+/** `picture` with the source pixels it keeps to cover `format`'s frame, as export cuts them (`formatCrop`). */
+function covered(picture: PlacedSpan | PlaceholderSpan | null, clip: Clip, info: AssetInfo | undefined, base: boolean, format: FormatLayout & Size) {
+  if (picture?.kind !== "media" && picture?.kind !== "still") return picture;
+  const crop = formatCrop(format, clip, { size: picture.size, generated: false, alpha: info?.media?.video?.alpha === true, base }, format);
+  return crop ? { ...picture, cover: crop } : picture;
 }
 
 function generatedOf(clip: Clip, start: number, end: number, fps: number, info: ClipRenderInfo | undefined): PlacedSpan {

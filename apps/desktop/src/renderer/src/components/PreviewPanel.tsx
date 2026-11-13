@@ -1,5 +1,6 @@
 import type { ElementAdjust } from "@frameshell/schema";
 import type { Placement, Size } from "@frameshell/schema/composite";
+import { type FormatLayout, type ResolvedFormat, scaledCaptions } from "@frameshell/schema/formats";
 import { type CSSProperties, type MouseEvent, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
@@ -12,7 +13,7 @@ import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type PlaceholderSpan, type Program, placeholdersAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, layersAt, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
-import { useProgram, useProjectKind, useResolution } from "../preview/useProgram.js";
+import { useProgram, useProjectFormats, useProjectKind, useResolution } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { drawSubtitleLines, subtitleLines } from "../subtitles/model.js";
 import { useSubtitleFont, useSubtitles } from "../subtitles/useSubtitles.js";
@@ -35,8 +36,6 @@ import { useShootRecording } from "../shoot/recorder.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
-/** Frame of the `vertical-1080x1920` export preset, which the 9:16 view shows. */
-const VERTICAL_FRAME = { width: 1080, height: 1920 };
 /** A clip without element adjustments. */
 const NO_ELEMENTS: Readonly<Record<string, ElementAdjust>> = {};
 /** Longest an element drag's page waits for the new render or live page before it goes anyway (ADR 0021), ms. */
@@ -68,9 +67,12 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * when it is the topmost picture and its adapter supports it (ADR 0010).
  * Double-clicking a generated clip enters its elements (ADR 0021,
  * {@link ElementLayer}); Escape leaves, as do playing and selecting another clip.
- * The 9:16 button shows the frame as a 9:16 export cuts it (multicam shots
- * reframed, other clips fitted as export fits them); handles, picking and
- * live pages stay in the project frame, so they are off there.
+ * With more than one format in `frameshell.json` (ADR 0027), the format
+ * switcher shows the frame as that format exports it: untransformed footage
+ * cut to cover it, overlays with alpha fitted, multicam shots reframed,
+ * vertical captions larger; generated clips stay fitted until renders per
+ * format reach the preview. Handles, picking and live pages stay in the
+ * primary format, so they are off in the others.
  * The header's button moves the panel to its own window and back
  * (ADR 0012); F, pressed in the window it shows in, toggles full screen.
  * The playback keys work from every window of the project.
@@ -86,10 +88,15 @@ export function PreviewPanel({
   /** Move the panel to its own window, or back when `detached`. */
   onDetach: () => void;
 }) {
-  const program = useProgram();
   const resolution = useResolution();
   // An image project (ADR 0017) is its first frame: no playhead, no playback, an image export.
   const still = useProjectKind() === "image";
+  const formats = useProjectFormats();
+  const [formatId, setFormatId] = useState<string | null>(null);
+  /** The format shown: the one picked while the project still has it, else the primary. */
+  const shown = formats.find((format) => format.id === formatId) ?? formats[0]!;
+  const variant = !shown.primary;
+  const program = useProgram(variant ? shown : undefined);
   const stillRef = useRef(still);
   stillRef.current = still;
   const { time, playing, frames, fps } = useTransport();
@@ -108,11 +115,7 @@ export function PreviewPanel({
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const [liveClip, setLiveClip] = useState<LiveShown | null>(null);
   const mode = useElementMode();
-  const [verticalOn, setVerticalOn] = useState(false);
-  /** Offered for frames wider than tall: a portrait project already is 9:16 or close to it. */
-  const verticalOffered = resolution.width > resolution.height && !still;
-  const vertical = verticalOn && verticalOffered;
-  const shownFrame = vertical ? VERTICAL_FRAME : resolution;
+  const shownFrame = variant ? shown : resolution;
 
   // Layout effects, this one and the program's: the engine gets a new program in the commit that shows its
   // placeholders, and `data-shown` (program frame on the canvas, absent while a previous program's picture shows) with it.
@@ -205,14 +208,14 @@ export function PreviewPanel({
 
   const frame = Math.min(Math.floor(time * fps + 1e-6), Math.max(0, frames - 1));
   const empty = program !== null && program.frames === 0;
-  const live = useMemo(() => (program && !vertical ? liveTarget(program, frame) : null), [program, frame, vertical]);
+  const live = useMemo(() => (program && !variant ? liveTarget(program, frame) : null), [program, frame, variant]);
 
   // Element mode belongs to one paused frame of the project frame, and to the selected clip.
   const { clips: selectedClips } = useSelection();
   const editing = mode.clip !== null && selectedClips.length === 1 && selectedClips[0] === mode.clip;
   useEffect(() => {
-    if (mode.clip && (playing || vertical || pickTool || !editing)) elementMode.leave();
-  }, [mode.clip, playing, vertical, pickTool, editing]);
+    if (mode.clip && (playing || variant || pickTool || !editing)) elementMode.leave();
+  }, [mode.clip, playing, variant, pickTool, editing]);
   useEffect(() => () => elementMode.leave(), [project.mediaUrl]);
   // An element drag's page shows instead of the clip's render until the new render or live page is there.
   useEffect(() => {
@@ -262,7 +265,8 @@ export function PreviewPanel({
           style={{ "--frame-aspect": aspect } as CSSProperties}
           data-testid="preview-frame"
           data-playing={playing || undefined}
-          data-vertical={vertical || undefined}
+          data-format={shown.id}
+          data-variant={variant || undefined}
           role="img"
           aria-label={empty ? t.preview.emptyMonitor : still ? t.preview.pictureMonitor : t.preview.monitorAt(formatTimecode(time, fps))}
           onContextMenu={(event) => {
@@ -293,12 +297,12 @@ export function PreviewPanel({
           />
           {program && <RenderSlates program={program} frame={frame} live={mode.held?.clip ?? liveClip?.clip ?? null} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
-          <SubtitleOverlay size={canvasSize} frame={frame} />
-          {program && !playing && !vertical && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
-          {program && editing && view && !playing && !vertical && !pickTool && (
+          <SubtitleOverlay size={canvasSize} frame={frame} format={shown} />
+          {program && !playing && !variant && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
+          {program && editing && view && !playing && !variant && !pickTool && (
             <ElementLayer program={program} frame={frame} timeline={view.timeline} clip={mode.clip!} elements={elements} onNotice={setNotice} />
           )}
-          <PickLayer active={pickTool && !empty && !vertical} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} photos={still} />
+          <PickLayer active={pickTool && !empty && !variant} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} photos={still} />
         </div>
       </div>
       <Inspector />
@@ -307,12 +311,13 @@ export function PreviewPanel({
         playing={playing}
         disabled={frames === 0}
         notice={notice}
-        pickTool={pickTool && !vertical}
+        pickTool={pickTool && !variant}
         onPickTool={togglePick}
-        vertical={verticalOffered ? vertical : null}
-        onVertical={() => {
+        formats={still ? [] : formats}
+        format={shown.id}
+        onFormat={(id) => {
           setPickTool(false);
-          setVerticalOn((on) => !on);
+          setFormatId(id);
         }}
       />
     </div>
@@ -368,8 +373,9 @@ function Inspector() {
  * canvas the size of the player's, with the bundled face export burns with.
  * `data-frame` names the frame drawn once the face is loaded (tests wait on it).
  */
-function SubtitleOverlay({ size, frame }: { size: Size; frame: number }) {
-  const { tracks } = useSubtitles();
+function SubtitleOverlay({ size, frame, format }: { size: Size; frame: number; format: FormatLayout }) {
+  const { tracks: stored } = useSubtitles();
+  const tracks = useMemo(() => scaledCaptions(stored, format), [stored, format]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const ready = useSubtitleFont(canvas);
   useLayoutEffect(() => {
@@ -585,8 +591,9 @@ function TransportBar({
   notice,
   pickTool,
   onPickTool,
-  vertical,
-  onVertical,
+  formats,
+  format,
+  onFormat,
 }: {
   /** An image project: the tools stay, the playback buttons go. */
   still: boolean;
@@ -595,10 +602,13 @@ function TransportBar({
   notice: string | null;
   pickTool: boolean;
   onPickTool: () => void;
-  /** 9:16 view on; null when not offered. */
-  vertical: boolean | null;
-  onVertical: () => void;
+  /** Project formats, primary first; the switcher shows with two or more. */
+  formats: readonly ResolvedFormat[];
+  /** Id of the format shown. */
+  format: string;
+  onFormat: (id: string) => void;
 }) {
+  const primary = formats[0]?.id === format || formats.length === 0;
   return (
     <div className="preview-transport" role="toolbar" aria-label={t.preview.transport}>
       <div className="preview-transport-tools">
@@ -607,7 +617,7 @@ function TransportBar({
           aria-label={t.preview.pick}
           aria-pressed={pickTool}
           data-tip={t.preview.pickHint}
-          disabled={disabled || vertical === true}
+          disabled={disabled || !primary}
           onClick={onPickTool}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -615,16 +625,21 @@ function TransportBar({
             <path d="M8 6v4M6 8h4" fill="none" stroke="currentColor" strokeWidth="1.2" />
           </svg>
         </button>
-        {vertical !== null && (
-          <button
-            className={`icon-button preview-vertical${vertical ? " on" : ""}`}
-            aria-pressed={vertical}
-            data-tip={t.preview.verticalFrameHint}
-            data-testid="preview-vertical"
-            onClick={onVertical}
+        {formats.length > 1 && (
+          <select
+            className={`clip-field-select preview-format${primary ? "" : " on"}`}
+            aria-label={t.preview.format}
+            data-tip={t.preview.formatHint}
+            data-testid="preview-format"
+            value={format}
+            onChange={(event) => onFormat(event.target.value)}
           >
-            {t.preview.verticalFrame}
-          </button>
+            {formats.map(({ id, width, height }) => (
+              <option key={id} value={id}>
+                {t.preview.formatOption(id, width, height)}
+              </option>
+            ))}
+          </select>
         )}
       </div>
       {!still && (

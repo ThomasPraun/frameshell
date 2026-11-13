@@ -18,12 +18,12 @@ It writes `.frameshell/review/<n>/` (the last 10 runs are kept; project files ar
 - `seam.png`: the last 6 and the first 6 frames: does the loop jump.
 - `safe-<platform>.png` (a vertical film, `--platform instagram|tiktok|shorts|youtube`): up to 36 frames with the platform's UI zones shaded red. A caption that reaches into a zone is marked `!subtitle` on its tile and listed in `safeZones[].flags` (`--json`) by track and zone with how many px it reaches in. Captions are the only text review measures: look for titles, graphics and faces in the shaded bands yourself, on the tiles. A file has the zones but no flags. A vertical film whose `style.json` names platforms gets this sheet without `--platform`; `--sheets safe` alone uses those platforms too.
 
-`--range 5,12` limits the sheets to those seconds; `--sheets phone,seam` writes only those; `--platform tiktok` adds the safe-zone sheet to the default ones. For a project with several formats review each format's file. Then the numbers that are not pictures:
+`--range 5,12` limits the sheets to those seconds; `--sheets phone,seam` writes only those; `--platform tiktok` adds the safe-zone sheet to the default ones. For a project with several formats review each format's file. Then the numbers that are not pictures. `review` writes them too, to `metrics.json` (`metrics` in `--json` and over MCP), unless `--sheets` leaves `metrics` out:
 
-```sh
-# loudness and true peak of the file people will hear
-"$FRAMESHELL_FFMPEG" -i exports/draft.mp4 -af ebur128=peak=true -f null - 2>&1 | tail -12
-```
+- `picture`: `longestStatic` (nothing changes), `largestGap` between visual events, `blank` stretches, `firstFrameEmpty` (frame 0 is the thumbnail). Measured on grey frames, a file at up to 15 samples a second and a timeline at most 90 over the range, so a flash shorter than the `spacing` can be missed.
+- `subtitles.shortCues` (timeline): cues on screen for less than their words take to read (0.4 s for one or two words, else 0.75 x (0.5 + 0.3 s per word)).
+- `loudness` (a `--file` only, after the AAC encode, which moves the peak): `integrated` LUFS, `range` LU, `truePeak` dBTP and `phoneBand`, the 200 Hz to 6 kHz band a phone plays. A timeline has no loudness: render a draft and review the file.
+- `craft`: each warning names its check (`static` over 3 s, `frame-0`, `blank`, `reading`, `peak` above -1 dBTP, `phone-band` 6 LU under the mix, `silent` over 15 s). They are warnings, not failures: fix them or say why the film wants them. Sync of sounds to picture and the loop seam jump are not measured yet.
 
 - **A moment `review` did not pick:** `frameshell review --range <a,b> --sheets motion`, or `frames_strip` (MCP) over the 0.5 s around an entrance or a cut with about 12 tiles.
 - **Critical stills:** `frameshell frame --at <s> --out <file.png>` at frame 0, every graphic's entrance, each zoom peak, and the end card.
@@ -36,7 +36,7 @@ It writes `.frameshell/review/<n>/` (the last 10 runs are kept; project files ar
 The critic did not build the video. With subagents, start one and give it only the brief (or the person's request), the plan or shot list, the sheets, the stills and the numbers, never the code. Without subagents, do it yourself in the critic's voice: evidence first, no defending the work.
 
 - **Describe before judging:** one sentence per contact-sheet frame, naming every object on it. An object that needs explaining is a problem in itself.
-- **Measured beats seen:** vision judges layout and look well and fine motion and timing poorly. Timing, loudness and sync come from numbers (frame times, `ebur128`, word times); say which findings were measured and which only looked at ("sound measured, not heard": you cannot listen).
+- **Measured beats seen:** vision judges layout and look well and fine motion and timing poorly. Timing, loudness and sync come from numbers (frame times, `review` metrics, word times); say which findings were measured and which only looked at ("sound measured, not heard": you cannot listen).
 - **Unverified is not a pass:** a check you could not run is reported as not run.
 
 ## 3. Score or compare

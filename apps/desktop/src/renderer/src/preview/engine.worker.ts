@@ -2,7 +2,7 @@
 // video layer into an OffscreenCanvas on the audio clock, and feeds program audio from PCM sidecars to the one
 // AudioWorklet mixer. Runs in a Worker: main-thread (React) stalls must not freeze the picture.
 import type { Backdrop } from "@frameshell/schema";
-import { IDENTITY_PLACEMENT, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
+import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
 import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
@@ -119,6 +119,15 @@ function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | nu
     return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: span.hold ? 0 : 1 } };
   }
   return null;
+}
+
+/** A covering span's crop (source pixels of its probed `size`) in the pixels of its decoded `image`: a proxy is smaller. */
+function coverPixels(span: { cover?: LayerRect; size: Size | null }, image: Size): { cover?: LayerRect } {
+  if (!span.cover || !span.size) return {};
+  const fx = image.width / span.size.width;
+  const fy = image.height / span.size.height;
+  const { left, top, width, height } = span.cover;
+  return { cover: { left: left * fx, top: top * fy, width: width * fx, height: height * fy } };
 }
 
 /**
@@ -448,6 +457,8 @@ interface Part {
   frame: number;
   /** Offset, frame rectangle and circle of a shaped dissolve it plays in (ADR 0030); null outside one. */
   shape?: PartShape | null;
+  /** Pixels of `image` that fill the whole frame (a covering span, ADR 0027); absent: placed by `layerRect`. */
+  cover?: LayerRect;
   /** A generated clip's backdrop (ADR 0031): laid on what is drawn so far before the picture. */
   glass?: Backdrop;
 }
@@ -696,7 +707,8 @@ class Engine implements LayerHost {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape });
+          const cover = coverPixels(span, { width: still.bitmap.width, height: still.bitmap.height });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -711,8 +723,9 @@ class Engine implements LayerHost {
           // Shots fill opaque tiles: an angle's alpha plane is not used.
           parts.push({ layer: pipeline.layer, image: frame, alpha: null, size: decoded, placement: IDENTITY_PLACEMENT, angle: span, frame: want });
         } else {
+          const cover = coverPixels(span, decoded);
           const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...glass });
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -753,9 +766,9 @@ class Engine implements LayerHost {
   }
 
   /**
-   * Black, then every part bottom first at its `layerRect`, or a shot's angle
-   * cut into its tile (`shotLayers` at the canvas size); export places layers
-   * the same way.
+   * Black, then every part bottom first at its `layerRect`, its cover crop over
+   * the whole frame (another format, ADR 0027), or a shot's angle cut into its
+   * tile (`shotLayers` at the canvas size); export places layers the same way.
    */
   #composite(parts: readonly Part[]): void {
     const context = this.#context;
@@ -781,7 +794,8 @@ class Engine implements LayerHost {
         continue;
       }
       if (part.placement.opacity <= 0) continue;
-      const placed = layerRect(part.size, output, project, part.placement);
+      const { cover } = part;
+      const placed = cover ? { left: 0, top: 0, width: output.width, height: output.height } : layerRect(part.size, output, project, part.placement);
       // A shaped dissolve (ADR 0030) moves the picture and cuts it to a frame rectangle or an iris's circle; its own
       // alpha still applies.
       const shaped = part.shape ? shapedRect(part.shape, placed, output) : null;
@@ -809,8 +823,14 @@ class Engine implements LayerHost {
       }
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
-        const masked = this.#masker.apply(part.image, part.alpha, rect.width, rect.height);
-        context.drawImage(masked, 0, 0, masked.width, masked.height, rect.left, rect.top, rect.width, rect.height);
+        // Covering: masked at the picture's own size, so the crop reads the same pixels as without alpha.
+        const masked = cover
+          ? this.#masker.apply(part.image, part.alpha, part.image.displayWidth, part.image.displayHeight)
+          : this.#masker.apply(part.image, part.alpha, rect.width, rect.height);
+        const from = cover ?? { left: 0, top: 0, width: masked.width, height: masked.height };
+        context.drawImage(masked, from.left, from.top, from.width, from.height, rect.left, rect.top, rect.width, rect.height);
+      } else if (cover) {
+        context.drawImage(part.image, cover.left, cover.top, cover.width, cover.height, rect.left, rect.top, rect.width, rect.height);
       } else {
         context.drawImage(part.image, rect.left, rect.top, rect.width, rect.height);
       }
