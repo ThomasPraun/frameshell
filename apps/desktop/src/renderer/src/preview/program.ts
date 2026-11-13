@@ -2,11 +2,13 @@
 import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, MatteStateInfo, TimelineView } from "@frameshell/protocol";
 import type { Angle, Backdrop, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
 import {
+  type AudioFades,
   type HostFade,
   type LayerRect,
   type NestedTimelines,
   type Placement,
   type Size,
+  audioFades,
   dissolveProgress,
   dissolveWeights,
   fadeWeight,
@@ -220,6 +222,8 @@ export interface SpanMotion extends EdgeWeights {
 export interface AudioEnvelope extends EdgeWeights {
   /** The clip when it has `gain` keys (`gainAt`). */
   keyed?: Clip;
+  /** Its sample-accurate `audio` fades, in program samples (`audioFadeGain`). */
+  fades?: AudioFades;
   /** Program samples per second. */
   rate: number;
 }
@@ -527,7 +531,8 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
       const first = head > 0 ? sample(start - head) : Math.max(cursor, planned);
       const until = sample(tail > 0 ? next!.start + tail : end);
       if (until <= first) return;
-      const envelope = envelopeOf(clip, edgeWeightsOf(clip, edges.get(clip.id), dissolveHalf(index), next && tail > 0 ? { at: next.clip.start, half: dissolveHalf(index + 1) } : undefined, context), rate);
+      const weights = edgeWeightsOf(clip, edges.get(clip.id), dissolveHalf(index), next && tail > 0 ? { at: next.clip.start, half: dissolveHalf(index + 1) } : undefined, context);
+      const envelope = envelopeOf(clip, weights, rate, audioFades(clip.audio, planned, sample(end), rate, { in: head > 0, out: tail > 0 }));
       const span: AudioSpan = {
         clip: clip.id,
         start: first,
@@ -946,11 +951,11 @@ function withMotion(picture: PlacedSpan, clip: Clip, weights: EdgeWeights, track
   return { ...picture, motion: { ...weights, track, ...(keyed ? { keyed: clip } : {}) } };
 }
 
-/** The {@link AudioEnvelope} of `clip`'s sound: its `gain` keys and edge transitions; null without either. */
-function envelopeOf(clip: Clip, weights: EdgeWeights, rate: number): AudioEnvelope | null {
+/** The {@link AudioEnvelope} of `clip`'s sound: its `gain` keys, edge transitions and audio `fades`; null without any. */
+function envelopeOf(clip: Clip, weights: EdgeWeights, rate: number, fades: AudioFades | null = null): AudioEnvelope | null {
   const keyed = isKeyed(clip, "gain");
-  if (!keyed && !hasEdges(weights)) return null;
-  return { ...weights, ...(keyed ? { keyed: clip } : {}), rate };
+  if (!keyed && !hasEdges(weights) && !fades) return null;
+  return { ...weights, ...(keyed ? { keyed: clip } : {}), ...(fades ? { fades } : {}), rate };
 }
 
 /**

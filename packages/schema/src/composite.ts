@@ -401,6 +401,13 @@ function window(part: Clip, { from, to, duration, host, playback }: Window): Pic
   }
   if (part.start < from) delete placed.fadeIn;
   if (end > to) delete placed.fadeOut;
+  if ("asset" in placed && placed.audio && (part.start < from || end > to)) {
+    // Copied: `placed.audio` is still the part's own object.
+    const audio = { ...placed.audio };
+    if (part.start < from) delete audio.fadeInMs;
+    if (end > to) delete audio.fadeOutMs;
+    placed.audio = audio;
+  }
   const nesting = nestingOf(part);
   const shift = host.start - from;
   const hosts = (nesting?.hosts ?? []).map((inner) => ({ ...inner, id: `${host.id}/${inner.id}`, start: inner.start + shift, end: inner.end + shift }));
@@ -1185,4 +1192,45 @@ export function dissolveWeights(f: number, kind: "bottom" | "upper" | "sound"): 
   const w = clamp01(f);
   if (kind === "sound") return { incoming: soundCurve(w), outgoing: soundCurve(1 - w) };
   return { incoming: w, outgoing: kind === "bottom" ? 1 : 1 - w };
+}
+
+/**
+ * A clip's sample-accurate sound fades (`audio.fadeInMs`, `audio.fadeOutMs`), in samples of one rate: the clip's
+ * sound plays samples `[start, end)` of the timeline, ramping in over the first `fadeIn` and out over the last `fadeOut`.
+ */
+export interface AudioFades {
+  start: number;
+  end: number;
+  fadeIn: number;
+  fadeOut: number;
+}
+
+/**
+ * The {@link AudioFades} of a clip whose sound plays timeline samples `[start, end)` at `rate`; null without any.
+ * Each fade is whole samples of its milliseconds, at most half the clip. An edge a dissolve crossfades
+ * (`crossfaded.in`, `crossfaded.out`) takes none: the crossfade already ramps it.
+ */
+export function audioFades(
+  audio: { fadeInMs?: number | undefined; fadeOutMs?: number | undefined } | undefined,
+  start: number,
+  end: number,
+  rate: number,
+  crossfaded: { in: boolean; out: boolean } = { in: false, out: false },
+): AudioFades | null {
+  const half = Math.floor((end - start) / 2);
+  const samples = (ms: number | undefined, skip: boolean) => (skip || ms === undefined || ms <= 0 ? 0 : Math.min(half, Math.round((ms * rate) / 1000)));
+  const fadeIn = samples(audio?.fadeInMs, crossfaded.in);
+  const fadeOut = samples(audio?.fadeOutMs, crossfaded.out);
+  return fadeIn > 0 || fadeOut > 0 ? { start, end, fadeIn, fadeOut } : null;
+}
+
+/**
+ * Factor 0 to 1 of `fades` at timeline sample `sample`: {@link soundCurve} of the samples into the fade in, times that
+ * of the samples left before `end` over the fade out. Sample for sample what export's `afade` (`curve=qsin`, `ss`/`ns`
+ * in samples) multiplies in, so preview and export ramp alike.
+ */
+export function audioFadeGain(fades: AudioFades, sample: number): number {
+  const fadeIn = fades.fadeIn > 0 ? soundCurve((sample - fades.start) / fades.fadeIn) : 1;
+  const fadeOut = fades.fadeOut > 0 ? soundCurve((fades.end - sample) / fades.fadeOut) : 1;
+  return fadeIn * fadeOut;
 }

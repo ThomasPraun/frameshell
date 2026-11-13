@@ -20,6 +20,7 @@ import {
   type Timeline,
   type Transcript,
   audioEffectsOf,
+  audioFades,
   backdropLayer,
   backdropMatrix,
   backdropOf,
@@ -1691,24 +1692,34 @@ function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<Render
 /**
  * Equal-power ramps of `placed`'s sound, in samples from its item's first sample `first` (`fadeWeight` and
  * `dissolveWeights` with `sound`): the incoming crossfade over its dissolve, its fades, the outgoing
- * crossfade under the next clip's dissolve, and the fades of the nested clips it plays inside (`hostFades`); those
- * that began before the item come back as `fade` instead. `at` puts a timeline frame on the sample grid.
+ * crossfade under the next clip's dissolve, its sample-accurate `audio` fades, and the fades of the nested clips it
+ * plays inside (`hostFades`); those that began before the item come back as `fade` instead. `at` puts a timeline frame
+ * on the sample grid.
  */
 function soundRamps(placed: Placed, first: number, fps: number, at: (frame: number) => number, rate: number): { ramps: Ramp[]; fade?: string } {
   const ramps: Ramp[] = [];
   // Host fades that began before the item: `afade` cannot start before its input, so they become a `volume` factor of `t`.
   const factors: string[] = [];
-  const add = (type: Ramp["type"], from: number, to: number) => {
+  /** Ramp over timeline samples `[from, to)`. */
+  const addSamples = (type: Ramp["type"], from: number, to: number) => {
     // An item clamped later by the one before it (hand-edited overlap) starts its ramp where it starts.
-    const start = Math.max(first, at(from));
-    if (at(to) > start) ramps.push({ type, start: start - first, length: at(to) - start });
+    const start = Math.max(first, from);
+    if (to > start) ramps.push({ type, start: start - first, length: to - start });
   };
+  /** Ramp over timeline frames `[from, to)`. */
+  const add = (type: Ramp["type"], from: number, to: number) => addSamples(type, at(from), at(to));
   const lead = placed.lead ?? 0;
   const trail = placed.trail ?? 0;
   add("in", placed.start - lead, placed.start + lead);
   add("in", placed.start, placed.start + Math.round((placed.edges?.fadeIn ?? 0) * fps));
   add("out", placed.end - Math.round((placed.edges?.fadeOut ?? 0) * fps), placed.end);
   add("out", placed.end - trail, placed.end + trail);
+  // Sample-accurate fades (`audio.fadeInMs`/`fadeOutMs`): `audioFadeGain` is the preview's twin of these two ramps.
+  const fades = placed.exact ? null : audioFades(placed.clip.audio, at(placed.start), at(placed.end), rate, { in: lead > 0, out: trail > 0 });
+  if (fades) {
+    addSamples("in", fades.start, fades.start + fades.fadeIn);
+    addSamples("out", fades.end - fades.fadeOut, fades.end);
+  }
   const quarter = num(Math.PI / 2);
   const addHost = (type: Ramp["type"], from: number, to: number) => {
     if (at(to) <= at(from) || at(from) >= first) return add(type, from, to);

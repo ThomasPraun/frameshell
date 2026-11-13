@@ -13,6 +13,7 @@ import type {
   MulticamGalleryResult,
   MulticamTurnsResult,
   MusicCandidatesResult,
+  MusicShapeResult,
   MusicFitResult,
   MethodName,
   MethodResult,
@@ -52,8 +53,8 @@ mutations print the new revision):
                                track's other phrases (alone: clears them)
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
-           [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
-           [--ripple [--ripple-track <track>…]] [--snap] [--snap-window s]
+           [--gain dB] [--muted] [--audio-fade-in ms] [--audio-fade-out ms] [--x px] [--y px] [--scale k]
+           [--opacity 0-1] [--script-ref ref] [--ripple [--ripple-track <track>…]] [--snap] [--snap-window s]
   clip move <clip> [--start s] [--track <track>]
   clip trim <clip> [--in s | --start s] [--out s | --end s] [--ripple [--ripple-track <track>…]]
            [--no-snap] [--snap-window s]
@@ -83,8 +84,8 @@ mutations print the new revision):
                                the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
                                naming the worst frame, pixel and element. Also warns when every probe is the same
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
-  clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
-           [--opacity 0-1] [--props json] [--elements json | --clear-elements]
+  clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
+           [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
@@ -93,6 +94,8 @@ mutations print the new revision):
                                that format only, where its automatic layout is wrong: placement, a generated clip's
                                props and elements, --hidden (no picture there, its sound still plays); --reset
                                first drops what that format had. Timing and sound are every format's
+                               --audio-fade-in/--audio-fade-out ms: equal-power sound ramps at a media clip's
+                               start/end, sample-accurate (not whole frames), e.g. 12 to de-click a cut; 0 removes
                                --voice writes the style's voice chain (style.json sound.voice; by default high-pass
                                85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
                                release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
@@ -256,6 +259,14 @@ mutations print the new revision):
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
                                Choose with track set <track> --unmuted, then track remove <others> --force. One
                                transaction (revert it)
+  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s] [--clear] [--dry-run]
+                               Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
+                               (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,
+                               complete --lead s (0.4) before it, held --hold s (0.3) after, back over --release s (0.6);
+                               from --ending it fades out over --fade s (2.5; a short one with --ending bar:N stops on a
+                               bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
+                               keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
+                               fit re-runs it when it moves the clip. --dry-run prints the dip curve. One transaction
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -324,6 +335,8 @@ export const TIMELINE_OPTIONS = {
   duration: { type: "string" },
   speed: { type: "string" },
   gain: { type: "string" },
+  "audio-fade-in": { type: "string" },
+  "audio-fade-out": { type: "string" },
   muted: { type: "boolean" },
   unmuted: { type: "boolean" },
   hidden: { type: "boolean" },
@@ -417,6 +430,11 @@ export const TIMELINE_OPTIONS = {
   skip: { type: "string", multiple: true },
   "dry-run": { type: "boolean" },
   hit: { type: "string" },
+  drop: { type: "string", multiple: true },
+  ending: { type: "string" },
+  lead: { type: "string" },
+  hold: { type: "string" },
+  fade: { type: "string" },
   exact: { type: "boolean" },
   level: { type: "string" },
   loudness: { type: "string" },
@@ -452,7 +470,7 @@ const ALLOWED: Record<string, string[]> = {
   "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind", "format", "reset"],
   "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
-  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
+  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "audio-fade-in", "audio-fade-out", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
   "clip move": ["start", "track", "snap-to"],
   "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window", "snap-to"],
   "clip split": ["at", "snap-to"],
@@ -465,6 +483,8 @@ const ALLOWED: Record<string, string[]> = {
     "gain",
     "muted",
     "unmuted",
+    "audio-fade-in",
+    "audio-fade-out",
     "x",
     "y",
     "scale",
@@ -513,6 +533,7 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
+  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "clear", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -563,6 +584,7 @@ const ARITY: Record<string, [number, number]> = {
   cleanup: [0, 0],
   "music fit": [1, 1],
   "music candidates": [2, 7],
+  "music shape": [1, 1],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -631,6 +653,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     const raw = values[flag];
     if (raw === undefined) return undefined;
     if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
+    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+  };
+  /** One time given as text: seconds as a number, else the name for the daemon to resolve. */
+  const whenOf = (raw: string, flag: string): number | string => {
+    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
     return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
   };
   const list = (flag: string): string[] | undefined => {
@@ -776,6 +803,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         speed: num("speed"),
         gain: num("gain"),
         muted: values["muted"] === true ? true : undefined,
+        audioFadeInMs: num("audio-fade-in"),
+        audioFadeOutMs: num("audio-fade-out"),
         transform: transform(),
         props: json("props"),
         scriptRef: str("script-ref"),
@@ -894,6 +923,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         speed: num("speed"),
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+        audioFadeInMs: num("audio-fade-in"),
+        audioFadeOutMs: num("audio-fade-out"),
         audioEffects:
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         backdrop,
@@ -1124,6 +1155,21 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music shape":
+      method = "music.shape";
+      Object.assign(params, {
+        clip: args[0],
+        drop: list("drop")?.map((raw) => whenOf(raw, "drop")),
+        ending: when("ending"),
+        lead: num("lead"),
+        depth: num("depth"),
+        hold: num("hold"),
+        release: num("release"),
+        fade: num("fade"),
+        clear: values["clear"] === true ? true : undefined,
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -1209,6 +1255,7 @@ export async function executeTimeline(
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
+  if (inv.method === "music.shape") return formatMusicShape(result as MusicShapeResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -1273,6 +1320,22 @@ function formatMusicFit(result: MusicFitResult): string {
   if (hit.candidates.length > 1) lines.push(`Other strong hits (--hit): ${hit.candidates.slice(0, -1).map((candidate) => s(candidate.at)).join(", ")}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicShape(result: MusicShapeResult): string {
+  const s = (value: number) => `${value.toFixed(2)} s`;
+  const lines = [`Music shape of ${result.clip} (${result.asset}) on ${result.track}${result.dryRun ? " · dry run" : ""}`];
+  if (result.cleared) lines.push("  music keys removed");
+  else if (result.settings) {
+    const { settings } = result;
+    for (const at of result.drops) lines.push(`  steps down ${settings.depth} dB, complete ${s(settings.lead)} before the hit at ${s(at)}, stays down to ${s(at + settings.hold)}, back over ${s(settings.release)}`);
+    if (result.ending !== null) lines.push(`  fades out from ${s(result.ending)} over ${s(settings.fade)}`);
+  }
+  if (result.dryRun && result.curve.length > 0) lines.push(`  dip curve: ${result.curve.map((point) => `${point.time} s ${point.dip} dB`).join(", ")}`);
+  for (const step of result.steps) lines.push(`  ${step.id.padEnd(6)}${step.detail}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }
 

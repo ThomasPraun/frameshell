@@ -1,10 +1,12 @@
 import { ErrorCode, MUSIC_FIT_MIN_CONFIDENCE, type MusicFitResult, RpcError } from "@frameshell/protocol";
-import { type AnyClip, type ClipTrack, type DuckSettings, type MediaClip, type Timeline, clipLength } from "@frameshell/schema";
+import { type AnyClip, type ClipTrack, type DuckSettings, type MediaClip, type ShapeSettings, type Timeline, clipLength } from "@frameshell/schema";
+import type { DipPoint } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";
+import { shapeCurve } from "./shape.js";
 
 /** What `music.fit` needs from the project. */
 export interface MusicFitDeps {
@@ -38,6 +40,11 @@ export interface MusicFitPlan extends Omit<MusicFitResult, "timeline" | "revisio
    * apply). Null when no duck runs.
    */
   duckAgain: { track: string; under: string[]; settings: DuckSettings | null } | null;
+  /**
+   * Music shape to run again in the same transaction, before the duck: the clip's `music` keys sit on its own clock and the
+   * hits they stepped down for are on the picture. `curve` is the stored shaping at the clip's new length. Null when none runs.
+   */
+  shapeAgain: { clip: string; curve: DipPoint[]; settings: ShapeSettings } | null;
 }
 
 const BINARY_ERRORS: readonly number[] = [ErrorCode.BinaryUnavailable, ErrorCode.BinaryNotFound, ErrorCode.BinaryInstallFailed, ErrorCode.BinaryChecksumMismatch];
@@ -101,29 +108,34 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
   const changes = plan.operations.length > 0;
   let duck: MusicFitResult["duck"] = null;
   let duckAgain: MusicFitPlan["duckAgain"] = null;
+  let shapeAgain: MusicFitPlan["shapeAgain"] = null;
   const steps = [...plan.steps];
   if (keyed && changes) {
-    const stored = clip.audio?.duck && storedUnder(timeline, track.id, clip.audio.duck).length > 0 ? clip.audio.duck : null;
-    const under = stored ? storedUnder(timeline, track.id, stored) : voiceTracks(timeline, track.id);
-    const parameters = stored ? "stored" : "defaults";
-    const skipped = request.skip?.includes("duck") === true;
-    if (under.length === 0) {
-      duck = { under, rerun: false, parameters };
-      warnings.push(`${clip.id} carries duck keys, which no longer line up with the voice, and there is no other video or audio track to listen to: run \`duck\` again by hand.`);
-    } else if (skipped) {
-      duck = { under, rerun: false, parameters };
-      warnings.push(`${clip.id} carries duck keys, which no longer line up with the voice (skipped): run \`duck ${track.id} --under ${under.join(" --under ")}\` again.`);
-    } else {
-      duck = { under, rerun: true, parameters };
-      duckAgain = { track: track.id, under, settings: stored };
-      warnings.push(
-        `${clip.id} carries duck keys: duck ${request.dryRun === true ? "would run" : "ran"} again on ${track.id} over ${under.join(", ")} with ${stored ? "the parameters of its last run" : "its defaults (the clip has none stored)"}, replacing the old duck keys of every clip of that track.`,
-      );
-    }
-    if (under.length > 0) steps.push({ id: "duck", detail: `run duck again on ${track.id} over ${under.join(", ")}`, skippable: true });
+    const rerun = planDuckAgain(timeline, track.id, clip, { skipped: request.skip?.includes("duck") === true, dryRun: request.dryRun === true });
+    duck = rerun.duck;
+    duckAgain = rerun.duckAgain;
+    warnings.push(rerun.warning);
+    if (rerun.duck.under.length > 0) steps.push({ id: "duck", detail: `run duck again on ${track.id} over ${rerun.duck.under.join(", ")}`, skippable: true });
   }
-  // `duck` is always accepted: an agent that passes it every time gets no error when there is nothing to skip.
-  checkSkip(request.skip, [...new Set([...steps.filter((step) => step.skippable).map((step) => step.id), "duck"])]);
+  const shaped = clip.keys?.gain?.some((key) => key.auto === "music" || key.baseAuto === "music") === true;
+  if (shaped && changes) {
+    const settings = clip.audio?.shape;
+    const length = round3(clipEnd(plan.after));
+    if (!settings) {
+      warnings.push(`${clip.id} carries music keys (\`music shape\`) with no settings stored: they no longer line up with the picture; run \`music shape\` again.`);
+    } else if (request.skip?.includes("shape") === true) {
+      warnings.push(`${clip.id} carries music keys, which no longer line up with the picture (skipped): run \`music shape\` again.`);
+    } else if (keyed && duck?.rerun !== true) {
+      // Shaping again drops the duck keys: without the duck to put them back, the keys stay as they are.
+      warnings.push(`${clip.id} carries music keys, which no longer line up with the picture: not run again, since the duck keys could not be put back. Run \`music shape\` and \`duck\` again.`);
+    } else {
+      shapeAgain = { clip: clip.id, curve: shapeCurve(settings, length), settings };
+      warnings.push(`${clip.id} carries music keys: music shape ${request.dryRun === true ? "would run" : "ran"} again with the settings of its last run, at the same times of the picture.`);
+      steps.push({ id: "shape", detail: `run music shape again on ${clip.id} (hits at ${(settings.drops ?? []).join(", ") || "none"}${settings.ending === undefined ? "" : `, ending ${settings.ending} s`})`, skippable: true });
+    }
+  }
+  // `duck` and `shape` are always accepted: an agent that passes them every time gets no error when there is nothing to skip.
+  checkSkip(request.skip, [...new Set([...steps.filter((step) => step.skippable).map((step) => step.id), "duck", "shape"])]);
 
   const place = (clipPlace: FitPlan["after"]): MusicFitResult["after"] => ({ start: clipPlace.start, in: clipPlace.in, speed: clipPlace.speed, end: round3(clipEnd(clipPlace)) });
   return {
@@ -146,6 +158,7 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
     warnings,
     operations: plan.operations.map((operation) => ({ ...operation, clip: clip.id }) as MusicFitPlan["operations"][number]),
     duckAgain,
+    shapeAgain,
   };
 }
 
@@ -154,7 +167,9 @@ export function musicFitLabel(plan: Pick<MusicFitPlan, "clip" | "landsAt" | "mod
   return `Music fit: ${plan.clip} lands its last hit on ${plan.landsAt} s${plan.mode === "exact" ? " (varispeed)" : ""}`;
 }
 
-function findMusicClip(timeline: Timeline, id: string): { track: ClipTrack; clip: MediaClip } {
+/** The media clip `id` of an audio track of `timeline`: the music `op` works on. Throws ClipNotFound, or InvalidOperation for anything else. */
+export function findMusicClip(timeline: Timeline, id: string, op = "music.fit"): { track: ClipTrack; clip: MediaClip } {
+  const invalid = (message: string, data: Record<string, unknown>) => new RpcError(ErrorCode.InvalidOperation, `${op}: ${message}`, { op, ...data });
   for (const track of timeline.tracks) {
     if (track.kind === "subtitles") continue;
     const clip = (track.clips as readonly AnyClip[]).find((candidate) => candidate.id === id);
@@ -174,7 +189,42 @@ function findMusicClip(timeline: Timeline, id: string): { track: ClipTrack; clip
     }
     return { track, clip };
   }
-  throw new RpcError(ErrorCode.ClipNotFound, `music.fit: no clip "${id}" in timeline ${timeline.id}. List clip ids with \`frameshell timeline show\`.`, { clip: id });
+  throw new RpcError(ErrorCode.ClipNotFound, `${op}: no clip "${id}" in timeline ${timeline.id}. List clip ids with \`frameshell timeline show\`.`, { clip: id });
+}
+
+/**
+ * Whether duck runs again over a music clip that carries duck keys, and over which tracks: the tracks of the duck that wrote
+ * them (`audio.duck`) that still exist, else every other video or audio track that plays and is not ducked itself.
+ * `warning` says what happens.
+ */
+export function planDuckAgain(
+  timeline: Timeline,
+  trackId: string,
+  clip: MediaClip,
+  options: { skipped: boolean; dryRun: boolean },
+): { duck: NonNullable<MusicFitResult["duck"]>; duckAgain: MusicFitPlan["duckAgain"]; warning: string } {
+  const stored = clip.audio?.duck && storedUnder(timeline, trackId, clip.audio.duck).length > 0 ? clip.audio.duck : null;
+  const under = stored ? storedUnder(timeline, trackId, stored) : voiceTracks(timeline, trackId);
+  const parameters = stored ? "stored" : "defaults";
+  if (under.length === 0) {
+    return {
+      duck: { under, rerun: false, parameters },
+      duckAgain: null,
+      warning: `${clip.id} carries duck keys, which no longer line up with the voice, and there is no other video or audio track to listen to: run \`duck\` again by hand.`,
+    };
+  }
+  if (options.skipped) {
+    return {
+      duck: { under, rerun: false, parameters },
+      duckAgain: null,
+      warning: `${clip.id} carries duck keys, which no longer line up with the voice (skipped): run \`duck ${trackId} --under ${under.join(" --under ")}\` again.`,
+    };
+  }
+  return {
+    duck: { under, rerun: true, parameters },
+    duckAgain: { track: trackId, under, settings: stored },
+    warning: `${clip.id} carries duck keys: duck ${options.dryRun ? "would run" : "ran"} again on ${trackId} over ${under.join(", ")} with ${stored ? "the parameters of its last run" : "its defaults (the clip has none stored)"}, replacing the old duck keys of every clip of that track.`,
+  };
 }
 
 /** Tracks duck listens to when a fit runs it again: video and audio tracks that play, other than the music's and any other ducked one. */

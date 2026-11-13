@@ -17,6 +17,7 @@ frameshell transition remove --at 12.5
 - A dissolve is centered on the cut and borrows source before the incoming clip's `in` and after the outgoing clip's `out`. With little to borrow it shortens, or plays as a dip; nothing fails, and `warnings` says what plays. Read them: trim the neighbours less, or ask for a shorter `--duration`.
 - A later `clip move`, `cut` or `clip trim` that leaves a dissolve without a clip before it adds a warning (it plays as a fade in until the clips butt again).
 - `clip split` gives the left part the dissolve and fade in, the right part the fade out; the new cut has none.
+- A fade is whole frames (33 ms at 30 fps). For a shorter sound ramp, such as a 12 ms de-click on a cut inside a take, use `clip set <clip> --audio-fade-in 12 --audio-fade-out 12` (milliseconds, media clips, sound only): sample-accurate in export and preview, at most half the clip, none at an edge a dissolve crossfades. It multiplies with a fade; `0` removes it; `clip split` drops it at the new cut.
 
 ## Shaped transitions: pick by cause
 

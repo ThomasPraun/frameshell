@@ -441,6 +441,34 @@ describe("clip.move, trim, split, remove, set", () => {
     expect(outOfRange.code).toBe(ErrorCode.InvalidParams);
   });
 
+  it("sets and removes a media clip's audio fades in ms; the inverse restores them; a split drops them at the new cut (#585)", async () => {
+    const before = await withClip({ gain: -2 });
+    const set = await apply(before, "clip.set", { clip: "c_0001", audioFadeInMs: 12, audioFadeOutMs: 12.5 });
+    expect(clipsOf(set.timeline, "t_v")[0]!.audio).toEqual({ gain: -2, fadeInMs: 12, fadeOutMs: 12.5 });
+    expect(parseTimeline(set.timeline).ok).toBe(true);
+    const undone = (await applyOperation(set.timeline, set.inverse, context())).timeline;
+    expect(clipsOf(undone, "t_v")[0]!.audio).toEqual({ gain: -2 });
+
+    const split = (await apply(set.timeline, "clip.split", { clip: "c_0001", at: 12 })).timeline;
+    expect(clipsOf(split, "t_v").map((clip) => clip.audio)).toEqual([
+      { gain: -2, fadeInMs: 12 },
+      { gain: -2, fadeOutMs: 12.5 },
+    ]);
+    const removed = (await apply(set.timeline, "clip.set", { clip: "c_0001", audioFadeInMs: 0 })).timeline;
+    expect(clipsOf(removed, "t_v")[0]!.audio).toEqual({ gain: -2, fadeOutMs: 12.5 });
+    const bare = (await apply(await withClip(), "clip.set", { clip: "c_0001", audioFadeOutMs: 5 })).timeline;
+    expect(clipsOf((await apply(bare, "clip.set", { clip: "c_0001", audioFadeOutMs: 0 })).timeline, "t_v")[0]).not.toHaveProperty("audio");
+
+    const added = (await apply(base(), "clip.add", { track: "t_a", asset: "assets/music.wav", out: 2, audioFadeInMs: 12, audioFadeOutMs: 12 })).timeline;
+    expect(clipsOf(added, "t_a")[0]!.audio).toEqual({ fadeInMs: 12, fadeOutMs: 12 });
+
+    const nested = (await apply(base(), "clip.add", { track: "t_v", type: "timeline", source: "timelines/intro.json" })).timeline;
+    expect((await rejection(apply(nested, "clip.set", { clip: "c_0001", audioFadeInMs: 12 }))).message).toMatch(/only media clips take audio fades/);
+    const card = rejection(apply(base(), "clip.add", { track: "t_v", type: "hyperframes", duration: 2, audioFadeInMs: 12 }));
+    expect((await card).message).toMatch(/take no `audioFadeInMs`/);
+    expect((await rejection(apply(before, "clip.set", { clip: "c_0001", audioFadeInMs: -1 }))).code).toBe(ErrorCode.InvalidParams);
+  });
+
   it("merges a generated clip's backdrop field by field, clears it, warns on the bottom track, refuses other clips (ADR 0031)", async () => {
     const twoTracks = (await apply(await withClip(), "track.add", { kind: "video" }, context({ newId: () => "t_v2" }))).timeline;
     const card = (await apply(twoTracks, "clip.add", { track: "t_v2", type: "hyperframes", duration: 2, start: 10, props: { title: "A" } })).timeline;
