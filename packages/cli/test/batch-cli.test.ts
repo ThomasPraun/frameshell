@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,5 +98,33 @@ describe("frameshell batch", () => {
       expect(manifest.entries.map((entry) => entry.status)).toEqual(["done", "done"]);
     },
     120_000,
+  );
+
+  it(
+    "re-renders the row whose file is gone, skips the rest, and takes --rows, --failed and --force",
+    async () => {
+      writeBatch([{ id: "a" }, { id: "b", shot: "assets/long.mp4" }]);
+      const out = join(project, "exports", "launch");
+      expect(frameshell(["batch", "launch.batch.json", "--force"]).code).toBe(0);
+      rmSync(join(out, "b.mp4"));
+      const result = frameshell(["batch", "launch.batch.json"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toBe(`Rendered ${join(out, "b.mp4")}\nManifest: ${join(out, "manifest.json")}\n`);
+      expect(result.stderr).toContain("skipped (done, files in place; --force renders them again): a");
+      expect(existsSync(join(out, "b.mp4"))).toBe(true);
+
+      const nothing = frameshell(["batch", "launch.batch.json", "--failed"]);
+      expect(nothing.code, nothing.stderr).toBe(0);
+      expect(nothing.stderr).toContain("nothing to render");
+      expect(nothing.stdout).toBe(`Manifest: ${join(out, "manifest.json")}\n`);
+
+      const forced = frameshell(["batch", "launch.batch.json", "--rows", "a..a", "--force", "--dry-run"]);
+      expect(forced.stdout).toContain(`  a [16x9] -> ${join(out, "a.mp4")}`);
+      expect(forced.stdout).not.toContain("b.mp4");
+      const unknown = frameshell(["batch", "launch.batch.json", "--rows", "zz"]);
+      expect(unknown.code).toBe(1);
+      expect(unknown.stderr).toContain("Row zz");
+    },
+    180_000,
   );
 });

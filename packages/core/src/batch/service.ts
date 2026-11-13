@@ -1,11 +1,12 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { type BatchEntry, type BatchManifest, type BatchRenderResult, ErrorCode, type JobInfo, RpcError } from "@frameshell/protocol";
+import { type BatchEntry, type BatchManifest, BatchManifestSchema, type BatchRenderResult, ErrorCode, type JobInfo, RpcError } from "@frameshell/protocol";
 import { type BatchFile, type Timeline, parseBatchFile } from "@frameshell/schema";
 import type { PlannedRender, RenderRequest } from "../export/service.js";
-import { canonicalPathSync, writeJsonAtomic } from "../fs-util.js";
+import { canonicalPathSync, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { JobChange, JobQueue } from "../jobs/queue.js";
 import type { AppliedOperation, OperationRequest, SourceInfo } from "../timeline/engine.js";
+import { chooseRows, notDone, settled } from "./select.js";
 import { rowError, rowVariant } from "./variant.js";
 
 /** Options for {@link BatchService}. */
@@ -32,6 +33,12 @@ export interface BatchRequest {
   out?: string | undefined;
   /** Instead of the file's `formats`. */
   formats?: readonly string[] | undefined;
+  /** Row ids or `first..last` ranges to render; default every row. See {@link chooseRows}. */
+  rows?: readonly string[] | undefined;
+  /** Only rows whose manifest entries are not all `done`; needs the manifest of this batch file. */
+  failed: boolean;
+  /** Render chosen rows although every entry is `done` and its file exists. */
+  force: boolean;
   dryRun: boolean;
 }
 
@@ -48,6 +55,10 @@ interface PlannedRow {
  * ordinary `render` jobs: the next row queues from the job watcher when the last job of the row before ends, so
  * the queue is never idle in between (gc and the daemon's idle exit see it busy). `<out>/manifest.json` follows
  * every job state change.
+ *
+ * A re-run (`rows`, `failed`, `force`) reads the manifest the earlier run left: only the chosen rows are planned and
+ * rendered, the others keep their entries, and a chosen row whose renders are all done with the files in place is
+ * skipped unless forced. Entries a stopped daemon left `queued` or `running` count as `canceled`.
  */
 export class BatchService {
   readonly #options: BatchServiceOptions;
@@ -63,6 +74,11 @@ export class BatchService {
     const path = resolve(cwd, request.file);
     const file = await readBatchFile(path);
     const out = request.out ?? join(root, "exports", batchName(path));
+    const manifest = join(out, "manifest.json");
+    const earlier = await readManifest(manifest, path, request.failed);
+    const ids = file.rows.map((row) => row.id);
+    let chosen = chooseRows(ids, request.rows);
+    if (request.failed) chosen = chosen.filter((id) => notDone(earlier, id));
     const loaded = await this.#options.loadTimeline(root, file.template);
     const formats = request.formats ?? file.formats;
     const context = {
@@ -72,9 +88,15 @@ export class BatchService {
       hasTranscript: (asset: string) => this.#options.hasTranscript(root, asset),
     };
     const rows: PlannedRow[] = [];
+    const skipped: string[] = [];
+    let first: PlannedRender["result"] | undefined;
+    // Entries of rows this call does not render stay as the earlier run left them.
+    const rendering = new Set<string>();
+    const kept = (): BatchEntry[] => earlier.filter((entry) => !rendering.has(entry.row) && ids.includes(entry.row)).map(settled);
     // Format ids may hold `-`, so row `a` in format `web-1x1` and row `a-web` in `1x1` both write `a-web-1x1.mp4`.
     const outputs = new Map<string, string>();
-    for (const row of file.rows) {
+    for (const entry of earlier) if (!chosen.includes(entry.row)) outputs.set(entry.output, entry.row);
+    for (const row of file.rows.filter((row) => chosen.includes(row.id))) {
       const variant = await rowVariant(loaded.timeline, file, row, context);
       let planned: PlannedRender;
       try {
@@ -87,6 +109,7 @@ export class BatchService {
         if (!(error instanceof RpcError) || (error.data as { row?: unknown } | undefined)?.row !== undefined) throw error;
         throw new RpcError(error.code, `Row ${row.id}: ${error.message}`, { ...(error.data as Record<string, unknown> | undefined), row: row.id });
       }
+      first ??= planned.result;
       const entries = planned.result.renders.map((render) => ({
         row: row.id,
         format: render.format,
@@ -110,13 +133,18 @@ export class BatchService {
         }
         outputs.set(entry.output, row.id);
       }
+      if (!request.force && (await rendered(earlier, row.id, entries))) {
+        skipped.push(row.id);
+        continue;
+      }
+      rendering.add(row.id);
       rows.push({ id: row.id, planned, entries });
     }
-    const first = rows[0]!.planned.result;
-    const base = { dir: root, file: path, template: file.template, out, preset: first.preset, quality: first.quality };
-    if (request.dryRun) return { ...base, manifest: null, dryRun: true, entries: rows.flatMap((row) => row.entries), jobs: [] };
+    const base = { dir: root, file: path, template: file.template, out, preset: first?.preset ?? null, quality: first?.quality ?? null, skipped };
+    const merged = (): BatchEntry[] => orderEntries(ids, [...kept(), ...rows.flatMap((row) => row.entries)]);
+    if (request.dryRun) return { ...base, manifest: null, dryRun: true, entries: merged(), jobs: [] };
+    if (rows.length === 0) return { ...base, manifest: earlier.length > 0 ? manifest : null, dryRun: false, entries: merged(), jobs: [] };
 
-    const manifest = join(out, "manifest.json");
     // Keyed on the folder once it exists, so two spellings of it (a symlink, macOS `/tmp`) share one key.
     await mkdir(out, { recursive: true });
     const key = canonicalPathSync(out);
@@ -127,7 +155,7 @@ export class BatchService {
         { op: "batch.render", reason: "batch running", field: "out" },
       );
     }
-    const run = new BatchRun(root, { batch: path, template: file.template, out, manifest }, rows, this.#options.jobs);
+    const run = new BatchRun(root, { batch: path, template: file.template, out, manifest }, rows, kept(), ids, this.#options.jobs);
     this.#runs.set(key, run);
     try {
       // Before any job: an out folder that cannot be written fails the call, and the manifest exists once it returns.
@@ -155,6 +183,10 @@ class BatchRun {
   readonly ended: Promise<void>;
   readonly #where: { batch: string; template: string; out: string; manifest: string };
   readonly #rows: PlannedRow[];
+  /** Entries of the rows this run does not render, as the manifest of the run before left them. */
+  readonly #kept: BatchEntry[];
+  /** Row ids in the batch file's order. */
+  readonly #order: readonly string[];
   readonly #jobs: JobQueue;
   readonly #byJob = new Map<string, BatchEntry>();
   readonly #startedAt = new Date().toISOString();
@@ -169,11 +201,15 @@ class BatchRun {
     root: string,
     where: { batch: string; template: string; out: string; manifest: string },
     rows: PlannedRow[],
+    kept: BatchEntry[],
+    order: readonly string[],
     jobs: JobQueue,
   ) {
     this.root = root;
     this.#where = where;
     this.#rows = rows;
+    this.#kept = kept;
+    this.#order = order;
     this.#jobs = jobs;
     this.ended = new Promise((resolve) => (this.#resolveEnded = resolve));
   }
@@ -195,7 +231,7 @@ class BatchRun {
       state: this.#finishedAt ? "done" : "running",
       startedAt: this.#startedAt,
       finishedAt: this.#finishedAt,
-      entries: this.#rows.flatMap((row) => row.entries.map((entry) => ({ ...entry, warnings: [...entry.warnings] }))),
+      entries: orderEntries(this.#order, [...this.#kept, ...this.#rows.flatMap((row) => row.entries)]).map((entry) => ({ ...entry, warnings: [...entry.warnings] })),
     };
   }
 
@@ -246,6 +282,58 @@ class BatchRun {
       if (this.#finishedAt) this.#resolveEnded();
     })();
   }
+}
+
+/** `entries` by the batch file's row order, then the order they came in (format order within a row). */
+function orderEntries(ids: readonly string[], entries: readonly BatchEntry[]): BatchEntry[] {
+  const at = new Map(ids.map((id, index) => [id, index]));
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => at.get(a.entry.row)! - at.get(b.entry.row)! || a.index - b.index)
+    .map(({ entry }) => entry);
+}
+
+/**
+ * The entries a manifest left in `path` for the batch file `batch`; none when there is no manifest, it is not valid or
+ * it is another batch file's (its rows say nothing about this one). `failed` needs it, so it throws then.
+ */
+async function readManifest(path: string, batch: string, failed: boolean): Promise<BatchEntry[]> {
+  const needed = (reason: string, why: string) =>
+    new RpcError(ErrorCode.InvalidOperation, `\`failed\` re-runs the rows a manifest lists as not done, but ${why}. Render the batch once, or name the rows with \`rows\`.`, {
+      op: "batch.render",
+      reason,
+      field: "failed",
+      manifest: path,
+    });
+  let json: unknown;
+  try {
+    json = await readJsonIfExists(path);
+  } catch {
+    json = null;
+  }
+  if (json === undefined) {
+    if (failed) throw needed("no manifest", `there is no ${path}`);
+    return [];
+  }
+  const parsed = BatchManifestSchema.safeParse(json);
+  if (!parsed.success) {
+    if (failed) throw needed("manifest unreadable", `${path} is not a valid manifest`);
+    return [];
+  }
+  if (canonicalPathSync(parsed.data.batch) !== canonicalPathSync(batch)) {
+    if (failed) throw needed("manifest of another batch", `${path} belongs to ${parsed.data.batch}`);
+    return [];
+  }
+  return parsed.data.entries;
+}
+
+/** True when every planned entry has a `done` entry for the same output in `earlier` and the file is still there. */
+async function rendered(earlier: readonly BatchEntry[], row: string, planned: readonly BatchEntry[]): Promise<boolean> {
+  for (const entry of planned) {
+    const was = earlier.find((other) => other.row === row && other.output === entry.output);
+    if (was?.status !== "done" || !(await exists(entry.output))) return false;
+  }
+  return true;
 }
 
 /** True for an entry whose job ended. */

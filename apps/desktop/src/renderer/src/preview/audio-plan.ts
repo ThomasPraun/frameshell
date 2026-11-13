@@ -1,5 +1,5 @@
 // Program audio spans to sidecar reads and output samples. Pure: the engine worker does the I/O.
-import { gainAt } from "@frameshell/schema/composite";
+import { audioFadeGain, gainAt } from "@frameshell/schema/composite";
 import { type AudioSpan, edgeWeight } from "./program.js";
 
 /** Program samples `[from, to)` of one span. */
@@ -68,14 +68,14 @@ export function renderRead(read: AudioRead, pcm: Int16Array, first: number): Flo
 
 /**
  * Linear gain of `span` at program sample `sample` (ADR 0018): its clip's
- * `gainAt` (else `gain`) times its equal-power fades and crossfades.
+ * `gainAt` (else `gain`) times its equal-power fades and crossfades and its sample-accurate audio fades.
  */
 export function envelopeGain(span: AudioSpan, sample: number): number {
   const { envelope } = span;
   if (!envelope) return span.gain;
   const t = sample / envelope.rate;
   const gain = envelope.keyed ? 10 ** (gainAt(envelope.keyed, t) / 20) : span.gain;
-  return gain * edgeWeight(envelope, t, "sound");
+  return gain * edgeWeight(envelope, t, "sound") * (envelope.fades ? audioFadeGain(envelope.fades, sample) : 1);
 }
 
 /** Sidecar position (fractional frames) of program sample `sample`. */

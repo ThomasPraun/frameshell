@@ -133,3 +133,46 @@ describe("frameshell music candidates", () => {
     ]);
   }, 120_000);
 });
+
+describe("frameshell music shape", () => {
+  it("parses its flags into music.shape params, times as seconds or names", () => {
+    expect(
+      parseTimelineCommand(["music", "shape", "c_m"], { drop: ["slam", "12.5", "bar:9"], ending: "end-card", lead: "0.5", depth: "6", hold: "0.2", release: "0.8", fade: "3", "dry-run": true }),
+    ).toMatchObject({
+      method: "music.shape",
+      params: { clip: "c_m", drop: ["slam", 12.5, "bar:9"], ending: "end-card", lead: 0.5, depth: 6, hold: 0.2, release: 0.8, fade: 3, dryRun: true },
+    });
+    expect(parseTimelineCommand(["music", "shape", "c_m"], { clear: true })!.params).toEqual({ clip: "c_m", clear: true });
+    expect(() => parseTimelineCommand(["music", "shape"], { drop: ["3"] })).toThrow(/takes 1 argument/);
+    expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["3"], exact: true })).toThrow(/does not take --exact/);
+    expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["3"], depth: "deep" })).toThrow(/expected a number/);
+  });
+
+  it("plans, applies, runs again over its own keys and clears them", () => {
+    const shown = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout) as { tracks: { name?: string; clips: { id: string }[] }[] };
+    const clip = shown.tracks.find((track) => track.name === "Music 1")!.clips[0]!.id;
+    expect(frameshell(["marker", "add", "--at", "5", "--label", "slam"]).code).toBe(0);
+    const dry = frameshell(["music", "shape", clip, "--drop", "slam", "--drop", "6", "--ending", "end-card", "--dry-run"]);
+    expect(dry.stderr).toBe("");
+    expect(dry.code).toBe(0);
+    expect(dry.stdout).toContain("dry run");
+    expect(dry.stdout).toContain("steps down 9 dB");
+    expect(dry.stdout).toContain("dip curve:");
+
+    const applied = frameshell(["music", "shape", clip, "--drop", "6", "--ending", "9", "--fade", "1"]);
+    expect(applied.code).toBe(0);
+    expect(applied.stdout).toMatch(/fades out from 9\.00 s over 1\.00 s/);
+    expect(applied.stdout).toMatch(/tx tx_[0-9a-f]{8}/);
+    const keys = (JSON.parse(frameshell(["timeline", "show", "--json"]).stdout) as { tracks: { clips: { id: string; keys?: { gain?: { auto?: string }[] } }[] }[] }).tracks
+      .flatMap((track) => track.clips)
+      .find((c) => c.id === clip)!.keys?.gain;
+    expect(keys?.every((key) => key.auto === "music")).toBe(true);
+
+    const refused = frameshell(["music", "shape", clip]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("nothing to shape");
+    const cleared = frameshell(["music", "shape", clip, "--clear"]);
+    expect(cleared.code).toBe(0);
+    expect(cleared.stdout).toContain("music keys removed");
+  }, 120_000);
+});

@@ -179,7 +179,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "rows", "failed", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -374,6 +374,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           voice: { type: firstWord === "voiceover" ? "string" : "boolean" },
           yes: { type: "boolean", default: false },
           formats: { type: "string" },
+          rows: { type: "string" },
+          failed: { type: "boolean", default: false },
           size: { type: "string" },
           "source-url": { type: "string" },
           licence: { type: "string" },
@@ -561,6 +563,8 @@ function parseBuiltin(
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
     formats?: string | undefined;
+    rows?: string | undefined;
+    failed: boolean;
     size?: string | undefined;
     index?: string | undefined;
     "source-url"?: string | undefined;
@@ -1002,7 +1006,15 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "batch": {
       // Plugin presets and adapter props schemas load only for trusted projects.
       await settleTrust(conn, flags, io);
-      const params = { cwd, file: resolve(cwd, inv.file), ...(inv.out ? { out: resolve(cwd, inv.out) } : {}), ...(inv.formats ? { formats: inv.formats } : {}) };
+      const params = {
+        cwd,
+        file: resolve(cwd, inv.file),
+        ...(inv.out ? { out: resolve(cwd, inv.out) } : {}),
+        ...(inv.formats ? { formats: inv.formats } : {}),
+        ...(inv.rows ? { rows: inv.rows } : {}),
+        ...(inv.failed ? { failed: true } : {}),
+        ...(inv.force ? { force: true } : {}),
+      };
       if (inv.dryRun) {
         const result = await conn.request("batch.render", { ...params, dryRun: true });
         return flags.json ? json(result) : describeBatch(result);
@@ -1010,7 +1022,9 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const follower = await followJobs(conn, cwd);
       const result = await conn.request("batch.render", { ...params, dryRun: false });
       if (!flags.json) io.stderr(describeBatch(result));
-      const rows = new Map(result.entries.map((entry) => [entry.output, entry]));
+      // Only the renders this call queued; rows it left alone keep their earlier entries.
+      const queued = result.entries.filter((entry) => entry.status === "queued" || entry.status === "running");
+      const rows = new Map(queued.map((entry) => [entry.output, entry]));
       const last = new Map<string, string>();
       const finished = await follower.waitOutputs([...rows.keys()], (job) => {
         if (flags.json) return;
@@ -1018,12 +1032,14 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         if (last.get(job.id) !== line) io.stderr(`${line}\n`);
         last.set(job.id, line);
       });
+      const rendered = new Set(rows.keys());
       const entries = result.entries.map((entry) => {
         const job = finished.get(entry.output);
         return job ? { ...entry, job: job.id, status: job.state, error: job.error, startedAt: job.startedAt, finishedAt: job.finishedAt, duration: seconds(job) } : entry;
       });
-      if (entries.some((entry) => entry.status !== "done")) outcome.code = 1;
-      return flags.json ? json({ ...result, entries }) : `${batchOutcome(entries)}Manifest: ${result.manifest}\n`;
+      const ran = entries.filter((entry) => rendered.has(entry.output));
+      if (ran.some((entry) => entry.status !== "done")) outcome.code = 1;
+      return flags.json ? json({ ...result, entries }) : `${batchOutcome(ran)}${result.manifest ? `Manifest: ${result.manifest}\n` : ""}`;
     }
     case "cover": {
       const { kind: _kind, out, ...params } = inv;

@@ -12,11 +12,14 @@ import {
   type Transcript,
   type TransitionShape,
   VOICE_CHAIN,
+  audioFadeGain,
+  audioFades,
   bakeRef,
   flattenTimeline,
   resolveFormat,
 } from "@frameshell/schema";
 import {
+  type AudioItem,
   BUILTIN_PRESETS,
   type ExportSource,
   assCentiseconds,
@@ -1053,6 +1056,77 @@ describe("formats (ADR 0027)", () => {
     // Rendered at the format's size: fitted as it is, never cropped.
     expect(plan.files["seg-0001.filter"]).toContain("scale=1080:1920,setsar=1,format=rgba");
     expect(plan.files["seg-0001.filter"]).not.toMatch(/crop=[^,]*,scale=1080:1920,setsar=1,format=rgba/);
+  });
+});
+
+describe("sample-accurate audio fades (#585)", () => {
+  const fps = 30;
+  const sized = new Map([...sources].map(([asset, source]) => [asset, source.video?.still ? source : { ...source, duration: 20 }]));
+  const fades = { fadeInMs: 12, fadeOutMs: 12 };
+  // p1 → p2 crossfade (no audio fade at that cut), p3 one frame long (fades clamp to half of it), p4 also fades in from black.
+  const phrases: MediaClip[] = [
+    { id: "p1", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 1, audio: fades },
+    { id: "p2", type: "media", asset: "assets/music.wav", start: 1, in: 2, out: 3, dissolve: 0.2, audio: { ...fades, gain: -6 } },
+    { id: "p3", type: "media", asset: "assets/music.wav", start: 4, in: 5, out: 5.033, audio: { fadeInMs: 40, fadeOutMs: 40 } },
+    { id: "p4", type: "media", asset: "assets/music.wav", start: 5, in: 6, out: 7, fadeIn: 0.5, audio: { fadeInMs: 12 } },
+  ];
+  const voice: Timeline = { schemaVersion: 1, id: "main", revision: 3, tracks: [{ id: "a1", kind: "audio", clips: phrases }] };
+  const plan = compileRender({ timeline: voice, fps, preset: youtube1080, loudness: -17, sources: sized, resolution, segmentSeconds: 4 });
+  const { sampleRate } = plan.audio;
+  const at = (seconds: number) => Math.round((Math.round(seconds * fps) / fps) * sampleRate);
+  /** Each clip item with its first timeline sample, from every lane (p2 dissolves in on a lane of its own). */
+  const items: { item: Extract<AudioItem, { kind: "clip" }>; first: number }[] = [];
+  for (const lane of plan.audio.tracks) {
+    let cursor = 0;
+    for (const item of lane) {
+      if (item.kind === "clip") items.push({ item, first: cursor });
+      cursor += item.samples;
+    }
+  }
+  const ramps = (id: string) => items.find(({ item }) => item.clip === id)!.item.ramps ?? [];
+  /** Product of `afade` ramps (`curve=qsin`) at an item's output sample `n`, as af_afade computes it. */
+  const afades = (list: readonly { type: string; start: number; length: number }[], n: number) =>
+    list.reduce((p, ramp) => {
+      const index = ramp.type === "in" ? n - ramp.start : ramp.start + ramp.length - n;
+      return p * Math.sin((Math.min(1, Math.max(0, index / ramp.length)) * Math.PI) / 2);
+    }, 1);
+
+  it("writes 12 ms fades as afade sample counts, none at a crossfaded cut, at most half a one-frame clip (golden)", () => {
+    golden("audio-fades-plan", { audio: plan.audio, mix: mixStep(plan) });
+    // 12 ms at 48 kHz = 576 samples. p1 ends into p2's crossfade and p2 starts in it: no 576 ramp at that cut.
+    expect(ramps("p1").filter((ramp) => ramp.length === 576)).toEqual([{ type: "in", start: 0, length: 576 }]);
+    expect(ramps("p2").filter((ramp) => ramp.length === 576)).toEqual([{ type: "out", start: items.find(({ item }) => item.clip === "p2")!.item.samples - 576, length: 576 }]);
+    // p3: one frame (1600 samples); 40 ms would be 1920, so each fade takes 800.
+    expect(ramps("p3")).toEqual([
+      { type: "in", start: 0, length: 800 },
+      { type: "out", start: 800, length: 800 },
+    ]);
+    // p4: its 0.5 s fade from black and its 12 ms fade, multiplied.
+    expect(ramps("p4")).toEqual([
+      { type: "in", start: 0, length: 24_000 },
+      { type: "in", start: 0, length: 576 },
+    ]);
+  });
+
+  it("ramps every sample of the audio fades exactly as audioFadeGain, the preview's evaluator", () => {
+    let checked = 0;
+    for (const { item, first } of items) {
+      const clip = phrases.find((p) => p.id === item.clip)!;
+      const shared = audioFades(clip.audio, at(clip.start), at(clip.start + (clip.out - clip.in)), sampleRate, { in: clip.id === "p2", out: clip.id === "p1" });
+      // Only the audio fades (40 ms or less): frame fades and crossfades are ADR 0018's, checked elsewhere.
+      const own = (item.ramps ?? []).filter((ramp) => ramp.length <= Math.round(0.04 * sampleRate));
+      for (let n = 0; n < item.samples; n++) {
+        expect(afades(own, n), `${item.clip} sample ${n}`).toBeCloseTo(shared ? audioFadeGain(shared, first + n) : 1, 12);
+        checked++;
+      }
+    }
+    expect(checked).toBe(items.reduce((sum, { item }) => sum + item.samples, 0));
+  });
+
+  it("leaves a clip without audio fades as it was", () => {
+    const plain: Timeline = { ...voice, tracks: [{ id: "a1", kind: "audio", clips: phrases.map(({ audio: _audio, ...clip }) => clip) }] };
+    const without = compileRender({ timeline: plain, fps, preset: youtube1080, loudness: -17, sources: sized, resolution, segmentSeconds: 4 });
+    expect(without.audio.tracks[0]!.find((item) => item.kind === "clip" && item.clip === "p3")).not.toHaveProperty("ramps");
   });
 });
 

@@ -496,6 +496,18 @@ describe("audio effects (ADR 0031)", () => {
     expect(frameshell(["clip", "set", clip, "--audio-effects", '[{"kind":"highpass","frequency":2}]']).code).not.toBe(0);
   });
 
+  it("clip add and clip set --audio-fade-in/--audio-fade-out set a media clip's audio fades in ms; 0 removes one (#585)", () => {
+    const track = json<{ changes: { added: string[] } }>(["track", "add", "audio", "--name", "Phrases"]).changes.added[0]!;
+    const added = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "40", "--in", "0", "--out", "1", "--audio-fade-in", "12"]);
+    const clip = added.changes.added[0]!;
+    const audio = () => onDisk().tracks.find((t: { id: string }) => t.id === track).clips[0].audio;
+    expect(audio()).toEqual({ fadeInMs: 12 });
+    expect(frameshell(["clip", "set", clip, "--audio-fade-out", "12.5", "--audio-fade-in", "0"]).code).toBe(0);
+    expect(audio()).toEqual({ fadeOutMs: 12.5 });
+    expect(frameshell(["clip", "set", clip, "--audio-fade-out", "-3"]).code).not.toBe(0);
+    expect(frameshell(["clip", "move", clip, "--audio-fade-in", "12"]).code).toBe(2);
+  });
+
   it("the daemon bakes a clip's chain in the background for the preview, and gc sweeps it once no clip plays it", async () => {
     const track = json<{ changes: { added: string[] } }>(["track", "add", "audio", "--name", "Baked"]).changes.added[0]!;
     const clip = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "40", "--in", "0", "--out", "1"]).changes.added[0]!;

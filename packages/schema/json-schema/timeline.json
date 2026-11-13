@@ -171,6 +171,58 @@
                               ],
                               "additionalProperties": false
                             },
+                            "shape": {
+                              "description": "Set by `music.shape` on a clip that carries its `auto: \"music\"` keys: what it was asked, so the same shaping can run again after `music.fit` moves the clip. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "drops": {
+                                  "description": "Timeline seconds of the hits the music stepped down before.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "lead": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds before a hit that the step down is complete."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the music stepped down by."
+                                },
+                                "hold": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds after a hit that the music stayed down."
+                                },
+                                "release": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds the level took to come back."
+                                },
+                                "ending": {
+                                  "description": "Timeline second the music's closing fade began.",
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "fade": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds of the closing fade."
+                                }
+                              },
+                              "required": [
+                                "lead",
+                                "depth",
+                                "hold",
+                                "release",
+                                "fade"
+                              ],
+                              "additionalProperties": false
+                            },
                             "effects": {
                               "description": "Audio effects applied in order (at most 8), e.g. the voice chain highpass, denoise, compressor. Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
                               "minItems": 1,
@@ -270,6 +322,16 @@
                                   }
                                 ]
                               }
+                            },
+                            "fadeInMs": {
+                              "description": "Milliseconds: equal-power sound ramp from silence at the clip's start, sample-accurate (not snapped to frames), e.g. 12 to de-click a phrase. At most half the clip; none where a dissolve crossfades the edge. Multiplies with `fadeIn`.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "fadeOutMs": {
+                              "description": "Milliseconds: the same ramp to silence at the clip's end. At most half the clip; none under a crossfade. Multiplies with `fadeOut`.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
                             }
                           },
                           "additionalProperties": false
@@ -376,13 +438,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -418,13 +488,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -461,13 +539,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -505,13 +591,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -547,13 +641,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -634,13 +736,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -676,13 +786,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -719,13 +837,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -763,13 +889,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -974,6 +1108,58 @@
                                 "gap"
                               ],
                               "additionalProperties": false
+                            },
+                            "shape": {
+                              "description": "Set by `music.shape` on a clip that carries its `auto: \"music\"` keys: what it was asked, so the same shaping can run again after `music.fit` moves the clip. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "drops": {
+                                  "description": "Timeline seconds of the hits the music stepped down before.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "lead": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds before a hit that the step down is complete."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the music stepped down by."
+                                },
+                                "hold": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds after a hit that the music stayed down."
+                                },
+                                "release": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds the level took to come back."
+                                },
+                                "ending": {
+                                  "description": "Timeline second the music's closing fade began.",
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "fade": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds of the closing fade."
+                                }
+                              },
+                              "required": [
+                                "lead",
+                                "depth",
+                                "hold",
+                                "release",
+                                "fade"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -1080,13 +1266,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1122,13 +1316,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1165,13 +1367,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1209,13 +1419,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1251,13 +1469,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1338,13 +1564,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -1380,13 +1614,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -1423,13 +1665,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -1467,13 +1717,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -1671,6 +1929,58 @@
                                 "gap"
                               ],
                               "additionalProperties": false
+                            },
+                            "shape": {
+                              "description": "Set by `music.shape` on a clip that carries its `auto: \"music\"` keys: what it was asked, so the same shaping can run again after `music.fit` moves the clip. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "drops": {
+                                  "description": "Timeline seconds of the hits the music stepped down before.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "lead": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds before a hit that the step down is complete."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the music stepped down by."
+                                },
+                                "hold": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds after a hit that the music stayed down."
+                                },
+                                "release": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds the level took to come back."
+                                },
+                                "ending": {
+                                  "description": "Timeline second the music's closing fade began.",
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "fade": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Seconds of the closing fade."
+                                }
+                              },
+                              "required": [
+                                "lead",
+                                "depth",
+                                "hold",
+                                "release",
+                                "fade"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -1777,13 +2087,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1819,13 +2137,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1862,13 +2188,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1906,13 +2240,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -1948,13 +2290,21 @@
                                     ]
                                   },
                                   "auto": {
-                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                    "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                     "type": "string",
-                                    "const": "duck"
+                                    "enum": [
+                                      "duck",
+                                      "music"
+                                    ]
                                   },
                                   "base": {
                                     "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                     "type": "number"
+                                  },
+                                  "baseAuto": {
+                                    "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                    "type": "string",
+                                    "const": "music"
                                   }
                                 },
                                 "required": [
@@ -2035,13 +2385,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -2077,13 +2435,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -2120,13 +2486,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -2164,13 +2538,21 @@
                                           ]
                                         },
                                         "auto": {
-                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
                                           "type": "string",
-                                          "const": "duck"
+                                          "enum": [
+                                            "duck",
+                                            "music"
+                                          ]
                                         },
                                         "base": {
                                           "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
                                           "type": "number"
+                                        },
+                                        "baseAuto": {
+                                          "description": "Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again.",
+                                          "type": "string",
+                                          "const": "music"
                                         }
                                       },
                                       "required": [
@@ -2858,6 +3240,58 @@
                         "gap"
                       ],
                       "additionalProperties": false
+                    },
+                    "shape": {
+                      "description": "Set by `music.shape` on a clip that carries its `auto: \"music\"` keys: what it was asked, so the same shaping can run again after `music.fit` moves the clip. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "drops": {
+                          "description": "Timeline seconds of the hits the music stepped down before.",
+                          "type": "array",
+                          "items": {
+                            "type": "number",
+                            "minimum": 0
+                          }
+                        },
+                        "lead": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds before a hit that the step down is complete."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the music stepped down by."
+                        },
+                        "hold": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds after a hit that the music stayed down."
+                        },
+                        "release": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds the level took to come back."
+                        },
+                        "ending": {
+                          "description": "Timeline second the music's closing fade began.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "fade": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds of the closing fade."
+                        }
+                      },
+                      "required": [
+                        "lead",
+                        "depth",
+                        "hold",
+                        "release",
+                        "fade"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -2981,6 +3415,58 @@
                         "releaseMs",
                         "threshold",
                         "gap"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "shape": {
+                      "description": "Set by `music.shape` on a clip that carries its `auto: \"music\"` keys: what it was asked, so the same shaping can run again after `music.fit` moves the clip. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "drops": {
+                          "description": "Timeline seconds of the hits the music stepped down before.",
+                          "type": "array",
+                          "items": {
+                            "type": "number",
+                            "minimum": 0
+                          }
+                        },
+                        "lead": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds before a hit that the step down is complete."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the music stepped down by."
+                        },
+                        "hold": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds after a hit that the music stayed down."
+                        },
+                        "release": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds the level took to come back."
+                        },
+                        "ending": {
+                          "description": "Timeline second the music's closing fade began.",
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "fade": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Seconds of the closing fade."
+                        }
+                      },
+                      "required": [
+                        "lead",
+                        "depth",
+                        "hold",
+                        "release",
+                        "fade"
                       ],
                       "additionalProperties": false
                     }

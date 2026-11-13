@@ -6,6 +6,7 @@ import {
   DirectorRulesSchema,
   DuckSettingsSchema,
   ElementAdjustSchema,
+  ShapeSettingsSchema,
   FormatIdSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
@@ -133,6 +134,18 @@ const rippleTracksArg = z
       "Default: every video, audio and program track. Leave out a track whose later clips would leave a gap (black, silence) " +
       "behind them, e.g. footage or music under a restored voice line; that track keeps its timing.",
   );
+
+/** `audioFadeInMs`/`audioFadeOutMs` args of `clip.add` and `clip.set`: a media clip's `audio.fadeInMs`/`fadeOutMs`. */
+const audioFadeArg = (edge: "start" | "end") =>
+  z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      `\`media\` only: milliseconds of an equal-power sound ramp ${edge === "start" ? "from silence at the clip's start" : "to silence at the clip's end"}, ` +
+        "sample-accurate (not whole frames, unlike `transition.set` fades), e.g. 12 so a cut edge never clicks. At most half the clip; " +
+        "none under a crossfade. 0 removes it.",
+    );
 
 /** Source-seconds range a snapped edge must stay in. */
 const SnapRangeSchema = z
@@ -319,6 +332,8 @@ export const operationArgs = {
     transform: TransformSchema.optional(),
     gain: z.number().optional().describe("Audio gain in dB, e.g. -18. Default 0."),
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
+    audioFadeInMs: audioFadeArg("start"),
+    audioFadeOutMs: audioFadeArg("end"),
     scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
     take: TakeIdSchema.optional().describe("Shoot take the clip comes from (`k_…`), as `shoot.assemble` sets it; leave it out otherwise."),
     shot: z
@@ -374,6 +389,8 @@ export const operationArgs = {
     speed: z.number().positive().optional().describe("`media` only: playback rate; the start stays, the end moves."),
     gain: z.number().optional().describe("Audio gain in dB."),
     muted: z.boolean().optional(),
+    audioFadeInMs: audioFadeArg("start"),
+    audioFadeOutMs: audioFadeArg("end"),
     audioEffects: z
       .array(AudioEffectSchema)
       .min(1)
@@ -405,7 +422,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
     format: formatArg(
       "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
-        "(`speed`, `gain`, `muted`, `audioEffects`) and `backdrop`, `scriptRef` are shared by every format and refused with it.",
+        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `scriptRef` are shared by every format and refused with it.",
     ),
     hidden: z
       .boolean()
@@ -498,6 +515,24 @@ export const operationArgs = {
     settings: DuckSettingsSchema.optional().describe(
       "What the method was asked, kept in `audio.duck` of each clip that gets duck keys so a later run (`music.fit` moving a ducked clip) " +
         "dips the same way; a clip with no duck keys after the run loses it.",
+    ),
+  }),
+  "music.shape": z.strictObject({
+    clip: ClipRef.describe("Music clip: a media clip of an audio track."),
+    curve: z
+      .array(
+        z.strictObject({
+          time: Seconds("Timeline time of the point."),
+          dip: z.number().nonnegative().describe("dB the clip sits below its own level at `time`: 0 = full level."),
+        }),
+      )
+      .describe(
+        "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last; empty clears the clip's `music` keys. " +
+          "The `music.shape` method computes it from the hits and the ending and passes it here.",
+      ),
+    settings: ShapeSettingsSchema.optional().describe(
+      "What the method was asked, kept in `audio.shape` of the clip so `music.fit` can run the same shaping again after it moves the clip; " +
+        "a clip with no `music` keys after the run loses it.",
     ),
   }),
   "multicam.create": z.strictObject({
