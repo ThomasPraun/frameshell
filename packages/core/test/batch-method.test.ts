@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type BatchManifest, type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
@@ -150,6 +150,56 @@ describe("batch.render", () => {
       expect(Number((probe["format"] as { duration: string }).duration)).toBeCloseTo(1, 0);
       expect(readFileSync(join(project, "timelines", "main.json"), "utf8")).toBe(timelineBytes);
       expect(readdirSync(join(project, "timelines"))).toEqual(["main.json"]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "re-runs only the rows that are not done, named by id or range, or forced",
+    async () => {
+      writeBatch("again", { quality: "draft", rows: [{ id: "a" }, { id: "b", title: "Dos" }, { id: "c", title: "Tres" }] });
+      const rerun = (more: Record<string, unknown>) => conn.request("batch.render", { cwd: project, file: "again.batch.json", ...more });
+      const out = join(project, "exports", "again");
+      const manifestPath = join(out, "manifest.json");
+      await rerun({});
+      const first = await ended(manifestPath);
+      expect(first.entries.map((entry) => entry.status)).toEqual(["done", "done", "done"]);
+      const stamp = (row: string) => statSync(join(out, `${row}.mp4`)).mtimeMs;
+      const before = { a: stamp("a"), b: stamp("b"), c: stamp("c") };
+
+      // A lost file and a failed entry: both re-render, the done and present row stays.
+      rmSync(join(out, "b.mp4"));
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({ ...first, entries: first.entries.map((entry) => (entry.row === "c" ? { ...entry, status: "failed", error: "encoder crashed", job: null } : entry)) }),
+      );
+      const failedPlan = await rerun({ failed: true, dryRun: true });
+      expect(failedPlan.entries.map((entry) => [entry.row, entry.status])).toEqual([
+        ["a", "done"],
+        ["b", "done"],
+        ["c", "planned"],
+      ]);
+      const result = await rerun({});
+      expect(result.skipped).toEqual(["a"]);
+      expect(result.jobs.map((job) => job.output)).toEqual([join(out, "b.mp4")]);
+      const second = await ended(manifestPath);
+      expect(second.entries.map((entry) => [entry.row, entry.status, entry.error])).toEqual([
+        ["a", "done", null],
+        ["b", "done", null],
+        ["c", "done", null],
+      ]);
+      expect(stamp("a")).toBe(before.a);
+      expect(stamp("b")).toBeGreaterThan(before.b);
+      expect(stamp("c")).toBeGreaterThan(before.c);
+
+      // Nothing to do without force; named rows and force render again, and rows outside `rows` keep their entries.
+      expect(await rerun({ failed: true })).toMatchObject({ jobs: [], skipped: [] });
+      expect(await rerun({ rows: ["a..b"] })).toMatchObject({ jobs: [], skipped: ["a", "b"] });
+      await rerun({ rows: ["b"], force: true });
+      const third = await ended(manifestPath);
+      expect(third.entries.map((entry) => entry.status)).toEqual(["done", "done", "done"]);
+      expect(stamp("a")).toBe(before.a);
+      await expect(rerun({ rows: ["nope"] })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation, data: { row: "nope", reason: "unknown row" } });
     },
     TIMEOUT,
   );

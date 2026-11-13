@@ -1,7 +1,7 @@
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ErrorCode, type RenderResult } from "@frameshell/protocol";
+import { type BatchManifest, ErrorCode, type RenderResult } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
 import { BatchService } from "../src/batch/service.js";
 import { rowVariant } from "../src/batch/variant.js";
@@ -21,9 +21,13 @@ const template: Timeline = {
 } as unknown as Timeline;
 
 let queue: JobQueue;
-const finishers: (() => void)[] = [];
+/** Stems of every row planned, in order. */
+const planned: string[] = [];
+/** Ends the oldest running render job: ok, or failed when given an error. */
+const finishers: ((error?: Error) => void)[] = [];
 
 afterEach(async () => {
+  planned.length = 0;
   finishers.splice(0).forEach((finish) => finish());
   await queue?.close();
 });
@@ -39,6 +43,7 @@ function service(options: { transcribed?: readonly string[] } = {}): BatchServic
     source: async () => ({ duration: 5, video: false, audio: true }),
     hasTranscript: async (_root, asset) => (options.transcribed ?? ["assets/vo-es.wav", "assets/vo-fr.wav"]).includes(asset),
     planRender: async (root: string, params: RenderRequest): Promise<PlannedRender> => {
+      planned.push(params.stem ?? "");
       const renders = (params.formats ?? ["1x1"]).map((format) => ({
         format,
         output: params.formats ? `${params.stem}-${format}.mp4` : `${params.stem}.mp4`,
@@ -58,7 +63,14 @@ function service(options: { transcribed?: readonly string[] } = {}): BatchServic
                 project: root,
                 asset: "timelines/main.json",
                 output: render.output,
-                run: () => new Promise<void>((resolve) => finishers.push(resolve)),
+                run: () =>
+                  new Promise<void>((resolve, reject) =>
+                    finishers.push((error) => {
+                      if (error) return reject(error);
+                      writeFileSync(render.output, "video");
+                      resolve();
+                    }),
+                  ),
               }),
             })),
           }) as unknown as RenderResult,
@@ -84,7 +96,7 @@ describe("BatchService", () => {
   it("refuses a voice swap under a following subtitle track when the new asset has no transcript", async () => {
     const root = tempDir();
     const file = batchFile(root, { rows: [{ id: "es", voice: "assets/vo-es.wav" }, { id: "de", voice: "assets/vo-de.wav" }] });
-    await expect(service().render(root, root, { file, dryRun: true })).rejects.toMatchObject({
+    await expect(service().render(root, root, { file, failed: false, force: false, dryRun: true })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
       message: expect.stringContaining("subtitle track t_s follows track t_a, but assets/vo-de.wav has no transcript"),
       data: { op: "batch.render", row: "de", slot: "voice", reason: "no transcript", asset: "assets/vo-de.wav" },
@@ -110,7 +122,7 @@ describe("BatchService", () => {
     const root = tempDir();
     const file = batchFile(root, { rows: [{ id: "a" }, { id: "a-web" }] });
     // Row `a` in format `web-1x1` and row `a-web` in `1x1` both write `a-web-1x1.mp4`.
-    await expect(service().render(root, root, { file, formats: ["web-1x1", "1x1"], dryRun: true })).rejects.toMatchObject({
+    await expect(service().render(root, root, { file, formats: ["web-1x1", "1x1"], failed: false, force: false, dryRun: true })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
       data: { op: "batch.render", row: "a-web", reason: "output clash", output: join(root, "exports", "launch", "a-web-1x1.mp4"), other: "a" },
     });
@@ -124,10 +136,10 @@ describe("BatchService", () => {
     mkdirSync(out);
     const link = join(root, "link");
     symlinkSync(out, link);
-    const result = await batches.render(root, root, { file, out, dryRun: false });
+    const result = await batches.render(root, root, { file, out, failed: false, force: false, dryRun: false });
     expect(result.jobs).toHaveLength(1);
     expect(batches.active(root)).toBe(true);
-    await expect(batches.render(root, root, { file, out: link, dryRun: false })).rejects.toMatchObject({
+    await expect(batches.render(root, root, { file, out: link, failed: false, force: false, dryRun: false })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
       data: { reason: "batch running", field: "out" },
     });
@@ -139,5 +151,182 @@ describe("BatchService", () => {
     expect(batches.active(root)).toBe(true);
     finishers.shift()!();
     await until(() => !batches.active(root));
+  });
+
+  describe("re-runs", () => {
+    const ids = ["a", "b", "c", "d"];
+    const rows = ids.map((id) => ({ id }));
+
+    const manifestOf = (out: string): BatchManifest => JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as BatchManifest;
+    const states = (out: string) => manifestOf(out).entries.map((entry) => `${entry.row}:${entry.status}`);
+    const label = (entries: readonly { row: string; status: string }[]) => entries.map((entry) => `${entry.row}:${entry.status}`);
+    async function finishNext(error?: Error): Promise<void> {
+      await until(() => finishers.length > 0);
+      finishers.shift()!(error);
+    }
+    async function manifestDone(out: string): Promise<BatchManifest> {
+      await until(() => {
+        try {
+          return manifestOf(out).state === "done";
+        } catch {
+          return false;
+        }
+      });
+      return manifestOf(out);
+    }
+    const request = (file: string, more: Record<string, unknown> = {}) => ({ file, failed: false, force: false, dryRun: false, ...more });
+    /** A first run of all four rows where `b` fails. */
+    async function firstRun(batches: BatchService, root: string, file: string): Promise<string> {
+      const out = join(root, "exports", "launch");
+      await batches.render(root, root, request(file));
+      await finishNext();
+      await finishNext(new Error("encoder crashed"));
+      await finishNext();
+      await finishNext();
+      await manifestDone(out);
+      return out;
+    }
+    /** A manifest entry as a run of the daemon would leave it. */
+    const entry = (out: string, row: string, status: string) => ({
+      row,
+      format: "1x1",
+      output: join(out, `${row}.mp4`),
+      status,
+      job: `j_${row}`,
+      error: null,
+      startedAt: status === "queued" ? null : "2026-11-13T10:00:00.000Z",
+      finishedAt: status === "done" ? "2026-11-13T10:00:05.000Z" : null,
+      duration: status === "done" ? 5 : null,
+      warnings: [],
+    });
+    const writeManifest = (out: string, batch: string, entries: unknown[], state = "running") => {
+      mkdirSync(out, { recursive: true });
+      writeFileSync(
+        join(out, "manifest.json"),
+        JSON.stringify({ batch, template: "main", out, state, startedAt: "2026-11-13T10:00:00.000Z", finishedAt: state === "done" ? "2026-11-13T10:01:00.000Z" : null, entries }),
+      );
+    };
+
+    it("renders only the rows named, as ids or a range in file order, and refuses a row the file lacks", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows });
+      const batches = service();
+      const plan = await batches.render(root, root, request(file, { rows: ["d", "b..c"], dryRun: true }));
+      expect(label(plan.entries)).toEqual(["b:planned", "c:planned", "d:planned"]);
+      expect(planned.map((stem) => stem.slice(-1))).toEqual(["b", "c", "d"]);
+      await expect(batches.render(root, root, request(file, { rows: ["a", "zz"], dryRun: true }))).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        data: { op: "batch.render", row: "zz", reason: "unknown row", field: "rows" },
+      });
+      await expect(batches.render(root, root, request(file, { rows: ["c..a"], dryRun: true }))).rejects.toMatchObject({
+        data: { reason: "range order", spec: "c..a" },
+      });
+      await expect(batches.render(root, root, request(file, { rows: ["a..b..c"], dryRun: true }))).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+    });
+
+    it("re-runs only the failed row and keeps the others' entries and files", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows });
+      const batches = service();
+      const out = await firstRun(batches, root, file);
+      expect(states(out)).toEqual(["a:done", "b:failed", "c:done", "d:done"]);
+      expect(manifestOf(out).entries[1]!.error).toContain("encoder crashed");
+      planned.length = 0;
+
+      const dry = await batches.render(root, root, request(file, { failed: true, dryRun: true }));
+      expect(label(dry.entries)).toEqual(["a:done", "b:planned", "c:done", "d:done"]);
+      expect(dry.skipped).toEqual([]);
+
+      const again = await batches.render(root, root, request(file, { failed: true }));
+      expect(again.jobs.map((job) => job.output)).toEqual([join(out, "b.mp4")]);
+      expect(label(again.entries)).toEqual(["a:done", "b:running", "c:done", "d:done"]);
+      // Only the failed row is planned (and rendered): the others are neither re-validated nor queued.
+      expect(planned.map((stem) => stem.slice(-1))).toEqual(["b", "b"]);
+      await finishNext();
+      const manifest = await manifestDone(out);
+      expect(manifest.entries.map((e) => `${e.row}:${e.status}:${e.error}`)).toEqual(["a:done:null", "b:done:null", "c:done:null", "d:done:null"]);
+
+      const none = await batches.render(root, root, request(file, { failed: true }));
+      expect(none).toMatchObject({ jobs: [], skipped: [] });
+      expect(none.entries.every((e) => e.status === "done")).toBe(true);
+      expect(batches.active(root)).toBe(false);
+    });
+
+    it("skips rows that are done with their files in place unless forced, and renders one whose file is gone", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows });
+      const batches = service();
+      const out = await firstRun(batches, root, file);
+      // b failed: a plain re-run renders just b; a, c and d are done and in place.
+      const rerun = await batches.render(root, root, request(file));
+      expect(rerun.skipped).toEqual(["a", "c", "d"]);
+      expect(rerun.jobs.map((job) => job.output)).toEqual([join(out, "b.mp4")]);
+      await finishNext();
+      await manifestDone(out);
+
+      expect(await batches.render(root, root, request(file))).toMatchObject({ jobs: [], skipped: ids });
+      expect(await batches.render(root, root, request(file, { rows: ["c"] }))).toMatchObject({ jobs: [], skipped: ["c"] });
+
+      rmSync(join(out, "c.mp4"));
+      const lost = await batches.render(root, root, request(file));
+      expect(lost.skipped).toEqual(["a", "b", "d"]);
+      expect(lost.jobs.map((job) => job.output)).toEqual([join(out, "c.mp4")]);
+      await finishNext();
+      await manifestDone(out);
+
+      const forced = await batches.render(root, root, request(file, { rows: ["a", "d"], force: true }));
+      expect(forced.skipped).toEqual([]);
+      expect(forced.jobs.map((job) => job.output)).toEqual([join(out, "a.mp4")]);
+      await finishNext();
+      await finishNext();
+      const manifest = await manifestDone(out);
+      expect(manifest.entries.map((e) => e.status)).toEqual(["done", "done", "done", "done"]);
+    });
+
+    it("counts rows a stopped daemon left queued or running as failed, and settles the ones it leaves alone", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows });
+      const out = join(root, "exports", "launch");
+      mkdirSync(out, { recursive: true });
+      writeFileSync(join(out, "a.mp4"), "video");
+      writeManifest(out, file, [entry(out, "a", "done"), entry(out, "b", "running"), entry(out, "c", "queued")]);
+      const batches = service();
+      // d has no entry, so it is not done either, but it lies outside `rows`.
+      const only = await batches.render(root, root, request(file, { failed: true, rows: ["a..c"] }));
+      expect(only.jobs.map((job) => job.output)).toEqual([join(out, "b.mp4")]);
+      expect(label(only.entries)).toEqual(["a:done", "b:running", "c:queued"]);
+      await finishNext();
+      await finishNext();
+      expect((await manifestDone(out)).entries.map((e) => e.status)).toEqual(["done", "done", "done"]);
+
+      writeManifest(out, file, [entry(out, "a", "done"), entry(out, "b", "running"), entry(out, "c", "queued")]);
+      const b = await batches.render(root, root, request(file, { rows: ["b"] }));
+      // Nothing runs c any more, so the manifest no longer says queued.
+      expect(label(b.entries)).toEqual(["a:done", "b:running", "c:canceled"]);
+      expect(b.entries[2]!.error).toContain("daemon stopped");
+      await finishNext();
+      await manifestDone(out);
+    });
+
+    it("needs the manifest of this batch file for failed, and ignores another batch's otherwise", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows });
+      const out = join(root, "exports", "launch");
+      const batches = service();
+      await expect(batches.render(root, root, request(file, { failed: true }))).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        data: { op: "batch.render", reason: "no manifest", field: "failed" },
+      });
+      mkdirSync(out, { recursive: true });
+      writeFileSync(join(out, "a.mp4"), "video");
+      writeManifest(out, join(root, "other.batch.json"), [entry(out, "a", "done")], "done");
+      await expect(batches.render(root, root, request(file, { failed: true }))).rejects.toMatchObject({ data: { reason: "manifest of another batch" } });
+      // The other batch's done entry for `a` says nothing about this batch: `a` renders.
+      const plain = await batches.render(root, root, request(file, { dryRun: true }));
+      expect(plain.skipped).toEqual([]);
+      expect(label(plain.entries)).toEqual(["a:planned", "b:planned", "c:planned", "d:planned"]);
+      writeFileSync(join(out, "manifest.json"), "{ not json");
+      await expect(batches.render(root, root, request(file, { failed: true }))).rejects.toMatchObject({ data: { reason: "manifest unreadable" } });
+    });
   });
 });

@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 118;
+export const PROTOCOL_VERSION = 120;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1264,7 +1264,14 @@ export const methods = {
       "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover: swap in takes " +
       "that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
       "unknown clip, props the adapter refuses, an asset too short or without the stream or transcript; a batch already " +
-      "running into the same `out`), InvalidProjectFile (the batch file), and what `render` fails with, its data naming the `row`.",
+      "running into the same `out`; a name in `rows` the file lacks; `failed` without a manifest of this batch file), " +
+      "InvalidProjectFile (the batch file), and what `render` fails with, its data naming the `row`. Re-run: `rows` " +
+      "(row ids, or `first..last` for the rows from one to the other in file order) renders only those rows, `failed` " +
+      "only rows with an entry in the manifest that is not `done` (failed, canceled, or left `queued`/`running` when " +
+      "the daemon stopped) or no entry yet; both together = the failed ones among `rows`. Only the chosen rows are " +
+      "validated, so a bad row elsewhere does not block them; the other rows keep their manifest entries. A chosen row " +
+      "whose entries are all `done` with the files still there is skipped (listed in `skipped`) unless `force`: edit " +
+      "a row, then pass `force` or its id in `rows` with `force`.",
     params: z.strictObject({
       cwd: CwdParam,
       file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
@@ -1274,7 +1281,17 @@ export const methods = {
         .min(1)
         .optional()
         .describe("Format ids to render each row in, instead of the batch file's `formats`; each must be in `format.list`."),
-      dryRun: z.boolean().default(false).describe("Validate every row × format and return the plan; nothing is rendered or written."),
+      rows: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("Render only these rows: row ids, or `first..last` for the rows from `first` to `last` in the file's order (ids never hold `.`). Default every row."),
+      failed: z
+        .boolean()
+        .default(false)
+        .describe("Only rows whose manifest entries are not all `done` (failed, canceled, left queued or running by a stopped daemon) or that have none; needs `<out>/manifest.json` of this batch file."),
+      force: z.boolean().default(false).describe("Render chosen rows again although every entry is `done` and its file exists; without it they are skipped."),
+      dryRun: z.boolean().default(false).describe("Validate every chosen row × format and return the plan; nothing is rendered or written."),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),
@@ -1283,9 +1300,12 @@ export const methods = {
       out: z.string().describe("Absolute output folder."),
       manifest: z.string().nullable().describe("Absolute path of `manifest.json`; null in a dry run."),
       dryRun: z.boolean(),
-      preset: z.string().describe("Preset id every row renders with."),
-      quality: QualityTierSchema.extract(["draft", "final"]).nullable().describe("Tier asked for; null = the preset as written."),
-      entries: z.array(BatchEntrySchema).describe("Every row × format, row order then format order: the manifest as written now."),
+      preset: z.string().nullable().describe("Preset id every row renders with; null when no row was chosen."),
+      quality: QualityTierSchema.extract(["draft", "final"]).nullable().describe("Tier asked for; null = the preset as written, or no row chosen."),
+      entries: z
+        .array(BatchEntrySchema)
+        .describe("Every row × format, row order then format order: the manifest as written now. Rows not rendered by this call keep their earlier entries; `queued` ones are what it renders."),
+      skipped: z.array(z.string()).describe("Chosen rows left alone because every entry is `done` and its file exists (pass `force`); empty when none."),
       jobs: z.array(JobSchema).describe("Render jobs queued by this call: the first row's. Later rows queue as the one before ends."),
     }),
   },
@@ -2293,12 +2313,15 @@ export const methods = {
       "trusted, has no transcription plugin or the transcription fails; the takes stay as they are. Nothing is placed " +
       "on a timeline. A paid provider (its cost estimate is above 0, or it gives no estimate and does not declare itself " +
       "free) generates nothing without `yes: true` and fails with ConfirmationRequired, whose data carries the cost " +
-      "(`null` when unknown): show it to the person and pass `yes` only after they confirm it, never on your own. The " +
+      "(`null` when unknown) and a `confirmation` token of what was priced (provider, voice, the lines to say and the cost): show it to the person and pass `yes` only after they confirm it, never on your own. " +
+      "A client that showed the person the cost passes the token back as `confirmation`: when the lines or the cost changed since " +
+      "(the script was edited, a take appeared, the provider's price moved) a paid run fails with ConfirmationStale, " +
+      "carrying the current ask, and generates nothing; ask the person again. The " +
       "provider `command` is the TTS program the person set up on this machine (global `config.json` only); it is free. A second charge is prevented by the takes marked on disk and one run at a time per " +
       "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
       "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
       "SpeechProviderNotFound (data lists the providers there are; `command` is missing until set up on the machine), ProjectNotTrusted (a plugin provider in an untrusted " +
-      "project), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
+      "project), ConfirmationStale (`confirmation` no longer matches the run), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
       "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +
       "SpeechFailed (the provider failed; takes finished before it are kept, imported and reused by the next call).",
     params: z.strictObject({
@@ -2326,6 +2349,14 @@ export const methods = {
         .boolean()
         .default(false)
         .describe("The person confirmed the cost of a paid provider. Never set it without their explicit confirmation."),
+      confirmation: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "The `confirmation` token of the ConfirmationRequired the person saw. A paid run whose lines or cost no longer match it " +
+            "fails with ConfirmationStale instead of charging more than was confirmed. Without it `yes` confirms whatever the run costs.",
+        ),
       verify: z
         .boolean()
         .default(true)
@@ -5192,10 +5223,15 @@ export const ErrorCode = {
   /** data: `{ provider, line, details, written: string[] }`: the provider failed on line `line`; `written` lists the takes kept. */
   SpeechFailed: -32047,
   /**
-   * data: `{ provider, voice, lines: string[], cost: { amount, currency }, characters }`: a paid generation waits for the
-   * person to confirm its cost; call again with `yes` (CLI `--yes`) only once they did.
+   * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`: a paid generation
+   * waits for the person to confirm its cost; call again with `yes` (CLI `--yes`) and the `confirmation` token only once they did.
    */
   ConfirmationRequired: -32048,
+  /**
+   * data: same as `ConfirmationRequired` (the current ask, with its new `confirmation`) plus `hint`: the call carried the
+   * `confirmation` of an earlier ask, but the lines to say or their cost changed since, so nothing was generated.
+   */
+  ConfirmationStale: -32049,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

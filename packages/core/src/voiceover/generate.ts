@@ -1,6 +1,7 @@
 // `voiceover.generate` (ADR 0034): script → lines → cache check by take key → cost check → provider → trim →
 // marked WAV in assets/voiceover/<script slug>/ → one asset import → phrases and misread check of every line.
 // The provider only turns text into audio.
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
@@ -33,6 +34,11 @@ export interface VoiceoverRequest {
   voice?: string;
   /** The person confirmed the cost of a paid provider. */
   yes: boolean;
+  /**
+   * The `confirmation` token the person's confirmed ask carried. A paid run whose token differs fails with
+   * `ConfirmationStale`; absent, `yes` confirms whatever the run costs (CLI, agents).
+   */
+  confirmation?: string;
   /** The misread check; null = the call said `verify: false`. */
   verify: VerifyServices | null;
   /** Provider by id: built-in or from a loaded plugin. Throws `SpeechProviderNotFound` or `ProjectNotTrusted`. */
@@ -127,17 +133,30 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   const cost = await providerCall(provider, null, () => estimate(provider, toSay, voice, options));
   // No estimate and no `free: true`: the cost is unknown, which counts as paid.
   const unknownCost = toSay.length > 0 && !provider.estimate && provider.free !== true;
-  if (!request.yes && ((cost && cost.amount > 0) || unknownCost)) {
+  const paid = (cost !== null && cost.amount > 0) || unknownCost;
+  if (paid) {
+    const confirmation = confirmationOf(provider.id, voice, toSay, cost);
     const characters = toSay.reduce((total, plan) => total + plan.line.spoken.length, 0);
     const count = `${toSay.length} line${toSay.length === 1 ? "" : "s"}`;
-    throw new RpcError(
-      ErrorCode.ConfirmationRequired,
-      (cost
-        ? `Generating ${count} with ${provider.id} costs about ${formatCost(cost)}. `
-        : `Generating ${count} with ${provider.id} may cost money: it gives no estimate and does not declare itself free. `) +
-        "Ask the person to confirm the cost, then call again with `yes` (CLI `--yes`).",
-      { provider: provider.id, voice, lines: toSay.map((plan) => plan.line.id), cost, characters },
-    );
+    const ask = { provider: provider.id, voice, lines: toSay.map((plan) => plan.line.id), cost, characters, confirmation };
+    const priced = cost
+      ? `Generating ${count} with ${provider.id} costs about ${formatCost(cost)}. `
+      : `Generating ${count} with ${provider.id} may cost money: it gives no estimate and does not declare itself free. `;
+    if (!request.yes) {
+      throw new RpcError(
+        ErrorCode.ConfirmationRequired,
+        priced + "Ask the person to confirm the cost, then call again with `yes` and this `confirmation` (CLI `--yes`).",
+        ask,
+      );
+    }
+    if (request.confirmation !== undefined && request.confirmation !== confirmation) {
+      const hint = "Show the person the new cost and ask again; pass the new `confirmation` with `yes`.";
+      throw new RpcError(
+        ErrorCode.ConfirmationStale,
+        `The lines or the cost changed since the person confirmed: nothing was generated. ${priced}${hint}`,
+        { ...ask, hint },
+      );
+    }
   }
 
   const results = new Map<string, PartialLine>();
@@ -255,6 +274,12 @@ async function checkTakes(
     progress: request.progress,
     signal: request.signal,
   });
+}
+
+/** Digest of what a paid run would do and cost: provider, voice, each line to say with its take key (text, provider version, voice, language) and the estimate. */
+function confirmationOf(provider: string, voice: string, toSay: readonly Plan[], cost: { amount: number; currency: string } | null): string {
+  const priced = JSON.stringify([provider, voice, toSay.map((plan) => [plan.line.id, plan.key]), cost ? [cost.amount, cost.currency] : null]);
+  return createHash("sha256").update(priced).digest("hex").slice(0, 32);
 }
 
 /** Summed estimate of the lines to say; null when the provider gives none (free). */
