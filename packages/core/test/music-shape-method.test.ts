@@ -82,6 +82,7 @@ describe("music.shape", () => {
       const result = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"], ending: "end-card", dryRun: true });
       expect(result).toMatchObject({ dryRun: true, applied: false, tx: null, revision: before, clip, track: musicTrack, cleared: false, drops: [5], ending: 11, duck: null });
       expect(result.settings).toEqual({ drops: [5], ending: 11, lead: 0.4, depth: 9, hold: 0.3, release: 0.6, fade: 2.5 });
+      expect(result.steps.map((step) => step.id)).toEqual(["fade", "shape"]);
       expect(result.curve[0]).toEqual({ time: 4.54, dip: 0 });
       expect(result.curve.find((point) => point.time === 4.6)).toEqual({ time: 4.6, dip: 9 });
       expect(await revision()).toBe(before);
@@ -95,8 +96,9 @@ describe("music.shape", () => {
       const before = await revision();
       const result = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"], ending: "end-card", fade: 2 });
       expect(result).toMatchObject({ applied: true, dryRun: false });
-      expect(await txOps(result.tx!)).toEqual(["music.shape"]);
+      expect(await txOps(result.tx!)).toEqual(["clip.set", "music.shape"]);
       const shaped = await clipOf(clip);
+      expect(shaped.audio?.fadeInMs).toBe(5);
       expect(shaped.keys?.gain?.every((key) => key.auto === "music")).toBe(true);
       expect(gainAt(shaped, 3)).toBe(0);
       expect(gainAt(shaped, 4.8)).toBe(-9);
@@ -107,6 +109,24 @@ describe("music.shape", () => {
       await conn.request("revert", { cwd: project, target: result.tx! });
       expect((await clipOf(clip)).keys).toBeUndefined();
       expect(await revision()).toBeGreaterThan(before);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "keeps a fade in set by hand, and writes none on clear",
+    async () => {
+      await conn.request("clip.set", { cwd: project, clip, audioFadeInMs: 20 });
+      const dry = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"], dryRun: true });
+      expect(dry.steps.map((step) => step.id)).toEqual(["shape"]);
+      const result = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"] });
+      expect(await txOps(result.tx!)).toEqual(["music.shape"]);
+      expect((await clipOf(clip)).audio?.fadeInMs).toBe(20);
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, clear: true });
+      await conn.request("clip.set", { cwd: project, clip, audioFadeInMs: 0 });
+      const cleared = await conn.request("music.shape", { cwd: project, timeline: "main", clip, clear: true, dryRun: true });
+      expect(cleared.steps.map((step) => step.id)).toEqual(["shape"]);
+      expect((await clipOf(clip)).audio?.fadeInMs).toBeUndefined();
     },
     MEDIA_TIMEOUT,
   );

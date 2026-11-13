@@ -35,7 +35,8 @@ export interface FitRequest {
 export type FitOperation =
   | { op: "clip.trim"; args: { in: number; snap: false } }
   | { op: "clip.move"; args: { start: number } }
-  | { op: "clip.set"; args: { speed: number } };
+  | { op: "clip.set"; args: { speed: number } }
+  | { op: "clip.set"; args: { audioFadeInMs: number } };
 
 /** The fit: the clip as it ends up, the operations that get it there and what to tell the person. */
 export interface FitPlan
