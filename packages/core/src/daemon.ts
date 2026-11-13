@@ -119,7 +119,7 @@ import { fileUses } from "./file-uses.js";
 import { FormatService, builtinFormatInfos, formatInfos, formatNotFound, projectConfigDocument } from "./formats.js";
 import { ConfigJournal, readConfigJournal } from "./config/journal.js";
 import { applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
-import { ConfigWatcher, DirectConfigEdits } from "./config/direct-edits.js";
+import { CONFIG_FILES, ConfigWatcher, DirectConfigEdits } from "./config/direct-edits.js";
 import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
 import { configReverted } from "./config/revert.js";
 import { PROJECT_FILE, ProjectRegistry, readEnclosingProject } from "./projects.js";
@@ -1250,6 +1250,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
    * In review mode both wait in one proposal (ADR 0019).
    */
   const revertConfig = async (dir: string, cwd: string, timeline: string, target: string, caller: Caller): Promise<MethodResult<"revert">> => {
+    // A hand edit the watcher has not reported yet is journaled first, so the outcome never depends on its timing.
+    for (const doc of Object.keys(CONFIG_FILES) as ConfigDoc[]) await directConfigEdits.reconcile(dir, doc);
     const inTimeline = (await readJournal(dir, timeline)).some((entry) => entry.id === target || entry.tx === target);
     if (!inTimeline) {
       const holding = await timelinesHolding(dir, target);
