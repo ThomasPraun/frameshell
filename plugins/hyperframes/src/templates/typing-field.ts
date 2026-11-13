@@ -11,13 +11,16 @@ import {
   fontSetup,
   pageHead,
 } from "./kit.js";
+import { TYPING_MATH } from "./typing-kit.js";
 
 /**
  * Typing field (#466, UI demo): a prompt bar that types a line (an uneven,
  * seeded rhythm, a caret that blinks when it rests), then a cursor presses its
  * Run button; on that same frame the button presses, a progress line fills and
  * the result appears when it ends. With the cursor off the press happens by
- * itself after the line is typed. Transparent unless `backdrop` is raised.
+ * itself after the line is typed. A line too long for the clip is typed faster
+ * (up to 9 times) and its progress line shortened, so the result always shows
+ * (timing guard). Transparent unless `backdrop` is raised.
  */
 export const typingField: Template = {
   id: "typing-field",
@@ -92,6 +95,7 @@ export const typingField: Template = {
       ${COLOR_HELPERS}
       ${BACKDROP_SETUP}
       ${CURSOR_MATH}
+      ${TYPING_MATH}
       ${CURSOR_SCRIPT}
 
       // Layout per format: type size as a fraction of the short side, the field's width as a fraction of the frame width and its centre line. wide, square, tall.
@@ -143,17 +147,7 @@ export const typingField: Template = {
       doneCheck.style.background = P.accent;
       doneCheck.firstChild.style.borderColor = onColor(P.accent);
 
-      // Typing rhythm: each character takes 1/speed seconds, stretched or squeezed by 30 % with a fixed pseudo-random wobble, so the same text always types the same way.
       var chars = Array.from(line);
-      var when = [];
-      var clock = P.typeAt;
-      chars.forEach(function (ch, k) {
-        when.push(clock);
-        var wobble = Math.sin((k + 1) * 12.9898) * 43758.5453;
-        clock += (1 / P.speed) * (0.7 + 0.6 * (wobble - Math.floor(wobble))) * (ch === " " ? 1.4 : 1);
-      });
-      var typedEnd = clock;
-
       var useCursor = P.cursor === "on";
       var target = { x: fx + gx + gw * 0.58, y: fy + (fh - gh) / 2 + gh * 0.6 };
       var rest = inFrame({ x: target.x + 0.06 * unit, y: dy + dh + 0.08 * unit }, 0.05);
@@ -162,12 +156,19 @@ export const typingField: Template = {
         { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
       ];
       var drift = { x: 0.004 * unit, y: 0.003 * unit };
-      // The cursor leaves the frame's edge so that it arrives just after the last character.
-      var travel = journey(FROM, stops, 0, drift).legs[0].arrive;
-      var trip = journey(FROM, stops, Math.max(START, typedEnd + 0.15 - travel), drift);
-      // The press is the one moment the button, the progress line and the result hang on.
-      var clickAt = useCursor ? trip.legs[0].arrive + 0.04 : typedEnd + 0.4;
-      var finishAt = clickAt + P.runTime;
+      // The cursor leaves the frame's edge so that it arrives just after the last character. The press is the one moment the button, the progress line and the result hang on.
+      var made = fitFirst(typingTries(P.runTime), function (k, run) {
+        var typing = rhythm(chars, P.typeAt, P.speed * k);
+        var travel = journey(FROM, stops, 0, drift).legs[0].arrive;
+        var trip = journey(FROM, stops, Math.max(START, typing.end + 0.15 - travel), drift);
+        var clickAt = useCursor ? trip.legs[0].arrive + 0.04 : typing.end + 0.4;
+        return { when: typing.when, trip: trip, clickAt: clickAt, run: run, ready: clickAt + run };
+      }, latest(0.4));
+      var when = made.when;
+      var trip = made.trip;
+      var clickAt = made.clickAt;
+      var runTime = made.run;
+      var finishAt = made.ready;
 
       var world = document.getElementById("world");
       var D = S.duration;
@@ -197,7 +198,7 @@ export const typingField: Template = {
         var cp = press(t, clickAt, clickAt + 0.1);
         var hover = useCursor ? M.ease("enter", (t - (trip.legs[0].arrive - 0.2)) / 0.25) : 0;
         put(go, { scale: (1 + 0.04 * hover) * (1 - 0.375 * (1 - cp)) });
-        put(progress, { scaleX: M.ease("progress", (t - clickAt) / P.runTime), opacity: t < clickAt ? 0 : 1 - M.ease("enter", (t - finishAt) / 0.25) });
+        put(progress, { scaleX: M.ease("progress", (t - clickAt) / runTime), opacity: t < clickAt ? 0 : 1 - M.ease("enter", (t - finishAt) / 0.25) });
         var r = M.spring("default", t - finishAt);
         put(done, { y: (1 - r) * dh * 0.7, scale: 0.9 + 0.1 * r, opacity: M.ease("enter", (t - finishAt) / 0.15) });
         put(doneCheck, { scale: 0.4 + 0.6 * M.spring("snappy", t - finishAt - 0.08), opacity: M.ease("enter", (t - finishAt - 0.08) / 0.1) });

@@ -66,6 +66,21 @@ export function shotsOf(cuts: readonly Cut[], frames: number): Shot[] {
   }));
 }
 
+/** A function giving the 0-based position in `shots` of the shot a frame belongs to (the last one for a frame past the end). */
+export function shotLocator(shots: readonly Pick<Shot, "startFrame">[]): (frame: number) => number {
+  const starts = shots.map((shot) => shot.startFrame);
+  return (frame) => {
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (starts[mid]! <= frame) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  };
+}
+
 /** The frame that stands for a shot: its middle, which a transition at either end does not touch. */
 export function shotMiddle(shot: Pick<Shot, "startFrame" | "endFrame">): number {
   return Math.floor((shot.startFrame + shot.endFrame - 1) / 2);

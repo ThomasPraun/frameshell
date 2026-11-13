@@ -102,6 +102,28 @@ describe("analyze method", () => {
     for (const color of result.palette) expect(color.share).toBeCloseTo(1 / 3, 1);
   });
 
+  it("reads the look and the rhythm of three still colours", () => {
+    expect(result.shots.map((shot) => shot.look)).toEqual([
+      { brightness: 0, contrast: 0, saturation: 0, warmth: 0 },
+      // White is 235 of 255 in video levels converted back, a little short of 1.
+      expect.objectContaining({ contrast: 0, saturation: 0, warmth: 0 }),
+      expect.objectContaining({ contrast: 0, saturation: 0 }),
+    ]);
+    expect(result.shots[1]!.look.brightness).toBeGreaterThan(0.97);
+    expect(result.shots[2]!.look.brightness).toBeGreaterThan(0.45);
+    expect(result.shots[2]!.look.brightness).toBeLessThan(0.55);
+    expect(result.look.brightness).toBeGreaterThan(0.45);
+    expect(result.look.brightness).toBeLessThan(0.52);
+    expect(result.look.grid).toHaveLength(48);
+    // Every cell is black, white or gray: the grid of a film is the mean over its frames, here a third of each.
+    for (const hex of result.look.grid) expect(isGray(hex, 128, 6)).toBe(true);
+    expect(result.rhythm).toMatchObject({ shotLengthCv: 0, changeCount: 2, changesPerMinute: 10, longestStill: 4, largestGap: 4, bursts: [] });
+    // Two frames of 359 move: the cuts.
+    expect(result.rhythm.stillShare).toBeGreaterThan(0.99);
+    expect(result.events.filter((event) => event.kind === "hold").map((event) => [event.startFrame, event.endFrame])).toEqual([[0, 120], [120, 240], [240, 360]]);
+    expect(result.events.filter((event) => event.kind === "flash" || event.kind === "appear" || event.kind === "disappear")).toEqual([]);
+  });
+
   it("measures the loudness by EBU R128 and the tempo of the clicks", () => {
     expect(result.loudness).not.toBeNull();
     expect(result.loudness!.integrated).toBeLessThan(-5);
@@ -135,10 +157,17 @@ describe("analyze method", () => {
   });
 
   it("writes analysis.json with the result and the beat lists", () => {
-    const manifest = JSON.parse(readFileSync(join(result.dir, "analysis.json"), "utf8")) as Record<string, unknown> & { tempo: { beats: number[]; downbeats: number[]; beatCount: number } };
-    const { tempo, ...rest } = manifest;
-    const { tempo: shown, ...expected } = result;
+    const manifest = JSON.parse(readFileSync(join(result.dir, "analysis.json"), "utf8")) as Record<string, unknown> & {
+      tempo: { beats: number[]; downbeats: number[]; beatCount: number };
+      shots: { look: { grid: string[] } }[];
+    };
+    const { tempo, shots, ...rest } = manifest;
+    const { tempo: shown, shots: shownShots, ...expected } = result;
     expect(rest).toEqual(expected);
+    // The shots carry their colour grid in the file only.
+    expect(shots.map(({ look: { grid: _grid, ...look } }) => look)).toEqual(shownShots.map((shot) => shot.look));
+    expect(shots.map((shot) => shot.look.grid)).toHaveLength(3);
+    for (const shot of shots) expect(shot.look.grid).toHaveLength(48);
     expect(tempo.beats).toHaveLength(shown!.beatCount);
     expect(tempo.downbeats).toHaveLength(shown!.downbeatCount);
     expect(tempo.beats[0]!).toBeCloseTo(0.2, 1);
@@ -175,7 +204,7 @@ describe("analyze method", () => {
     async () => {
       const mute = await conn.request("analyze", { cwd: project, file: join(footage, "mute.mp4"), name: "mute" });
       expect(mute).toMatchObject({ loudness: null, tempo: null, stats: { shotCount: 3 } });
-      expect(mute.warnings).toEqual(["audio: the video has no sound, so there is no loudness or tempo."]);
+      expect(mute.warnings).toEqual(["audio: the video has no sound, so there is no loudness, tempo or hits."]);
       const manifest = JSON.parse(readFileSync(join(mute.dir, "analysis.json"), "utf8")) as { tempo: unknown };
       expect(manifest.tempo).toBeNull();
     },

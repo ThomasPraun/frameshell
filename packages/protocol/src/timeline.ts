@@ -4,6 +4,7 @@ import {
   AudioEffectSchema,
   BackdropSchema,
   DirectorRulesSchema,
+  DuckSettingsSchema,
   ElementAdjustSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
@@ -30,6 +31,7 @@ import {
   TransformSchema,
   TRANSITION_DIRECTIONS,
   TRANSITION_SHAPE_KINDS,
+  FrameRectSchema,
 } from "@frameshell/schema";
 import { AGENT_LABEL_PATTERN } from "./agents.js";
 
@@ -54,8 +56,8 @@ export const TimeRef = (what: string) =>
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
-        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the timeline's grid counting from 1 (`beat:32`, `bar:8`, " +
-        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; needs `tempo`, refused when the grid is LOW confidence); the daemon turns it into " +
+        "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the music counting from 1 from the music file's first measured beat or downbeat (not the clip's `in`; `beat:32`, `bar:8`, " +
+        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; with a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; needs `tempo`, refused when the grid is LOW confidence; past the measured part it extends at the tempo); the daemon turns it into " +
         "seconds first, so the history records seconds.",
     );
 /** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
@@ -401,13 +403,14 @@ export const operationArgs = {
     snapTo: snapToArg,
     at: TimeRef("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
     kind: z
-      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS])
+      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS, "dip-cut"])
       .default("dissolve")
       .describe(
         "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
           "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the " +
-          "outgoing one out. `wipe` and `push` play on the bottom video track only; sound crossfades as for a dissolve. " +
-          "A clip edge with nothing butted fades in or out for any kind.",
+          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `wipe`, `push` and `iris` play on the " +
+          "bottom video track only; sound crossfades as for a dissolve. A clip edge with nothing butted fades in or out for these kinds. " +
+          "`dip-cut`: a hard cut, the outgoing bottom-track clip darkened 40 % over its last 3 frames (opacity keys); sound is not touched.",
       ),
     direction: z
       .enum(TRANSITION_DIRECTIONS)
@@ -416,7 +419,15 @@ export const operationArgs = {
         "`wipe` and `push` only: the way the incoming picture travels. `left` (default: it enters from the right edge), `right`, " +
           "`up` (enters from the bottom) or `down`.",
       ),
-    duration: z.number().positive().default(0.5).describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so)."),
+    origin: FrameRectSchema.optional().describe(
+      "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1; take it from " +
+        "`inspect.point`: `frameBox`, or `box` divided by the project size). The circle grows from its centre. Default: the frame's centre.",
+    ),
+    duration: z
+      .number()
+      .positive()
+      .default(0.5)
+      .describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so). A `dip-cut` is always 3 frames."),
     tracks: z
       .array(TrackRef)
       .min(1)
@@ -454,6 +465,10 @@ export const operationArgs = {
         "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last. " +
           "The `track.duck` method measures it from the speech tracks and passes it here.",
       ),
+    settings: DuckSettingsSchema.optional().describe(
+      "What the method was asked, kept in `audio.duck` of each clip that gets duck keys so a later run (`music.fit` moving a ducked clip) " +
+        "dips the same way; a clip with no duck keys after the run loses it.",
+    ),
   }),
   "multicam.create": z.strictObject({
     angles: z
@@ -1055,6 +1070,23 @@ export const TrackDuckResultSchema = OperationResultSchema.extend({
   under: z.array(z.string()).describe("Tracks listened to for speech."),
   stretches: z.int().describe("Stretches of speech found, after merging those closer than `gap`."),
   speechSeconds: z.number().describe("Total seconds of those stretches."),
+  level: z
+    .object({
+      under: z.number().describe("dB under the voice that was asked (`level`)."),
+      voice: z.number().describe("Loudness of the voice, LUFS: the integrated loudness of each voice file plus its gain, averaged by the time it plays."),
+      target: z.number().describe("Loudness the music was set to, LUFS (`voice - under`)."),
+      clips: z
+        .array(
+          z.object({
+            clip: z.string(),
+            loudness: z.number().describe("Integrated loudness of the clip's file, LUFS."),
+            gain: z.number().describe("Static gain written to the clip, dB (`target - loudness`, 0.1 dB steps)."),
+          }),
+        )
+        .describe("Clips of the track whose gain was set."),
+    })
+    .nullable()
+    .describe("Set when `level` was asked: how the music's static gain was chosen; null otherwise."),
 });
 
 /** See {@link TrackDuckResultSchema}. */
@@ -1202,6 +1234,8 @@ export interface TempoGrid {
   low: boolean;
   beats: number[];
   bars: number[];
+  beatBase: number;
+  barBase: number;
 }
 
 /** A beat grid on the timeline clock, as `tempo.show` and `timeline.show` (`grid: true`) report it (ADR 0029). */
@@ -1215,6 +1249,8 @@ export const TempoGridSchema: z.ZodType<TempoGrid> = z.object({
   low: z.boolean().describe("True when the measured grid is LOW confidence and no `edits` vouch for it: `snapTo` refuses it."),
   beats: z.array(z.number()).describe("Timeline seconds of every beat, increasing, on the frame grid."),
   bars: z.array(z.number()).describe("Timeline seconds of the beats that start a bar."),
+  beatBase: z.int().describe("Beats of the music file before `beats[0]`: `beats[i]` is `beat:(beatBase + i + 1)`, because `beat:N` counts from the file's first measured beat, not from the clip's `in`."),
+  barBase: z.int().describe("Bar starts of the music file before `bars[0]`: `bars[i]` is `bar:(barBase + i + 1)`."),
 });
 
 
