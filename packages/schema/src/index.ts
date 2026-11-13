@@ -63,6 +63,8 @@ export {
   TRANSITION_DIRECTIONS,
   TransitionShapeSchema,
   ClipKeysSchema,
+  DuckSettingsSchema,
+  type DuckSettings,
   PaintedTurnSchema,
   TransformSchema,
   ClipAudioSchema,

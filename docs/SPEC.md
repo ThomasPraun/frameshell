@@ -605,6 +605,7 @@ frameshell style list                         # user styles on this machine, mot
 frameshell voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes] [--no-verify]   # one take per line into assets/voiceover/, cached, trimmed, imported, phrases + misread check; paid providers need --yes (ADR 0034)
 frameshell sound sfx <kind> [--variant n] [--seed n] [--pitch x] [--length s]   # synthesized sound effect into assets/sound/, same arguments = same file; prints peakAt (ADR 0038)
 frameshell music fit <clip> --end <time> [--from <time>] [--hit s] [--exact] [--skip duck] [--dry-run]   # back-time a music clip so its final hit lands on the cut (ADR 0037)
+frameshell music candidates <asset> <asset>… [--end <time>] [--from <time>] [--loudness LUFS] [--dry-run]   # 2-7 candidate tracks at one loudness, muted but the first (ADR 0037)
 frameshell sound place <kind> (--at <t>[,<t>…] | --cuts <track> [--which 1,3] | --typing --from <t> --to <t> [--rate n]) [--role r] [--tier t] [--offset ms] [--gain dB] [--track id]   # sounds on cues, cuts or a typing run, one transaction (ADR 0038)
 
 frameshell tx begin "<label>" | commit | abort

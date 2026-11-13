@@ -8,7 +8,7 @@ import {
   CleanupResultSchema,
 } from "./cleanup.js";
 import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
-import { MusicFitResultSchema } from "./music.js";
+import { MUSIC_CANDIDATES_MAX, MusicCandidatesResultSchema, MusicFitResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 109;
+export const PROTOCOL_VERSION = 110;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -229,10 +229,10 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "beats", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "loudness", "beats", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
-        "older recipe or fps). `energy`: cut-snapping envelope. `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `loudness`: EBU R128 reading of an asset in `.frameshell/loudness/` (content no asset has now). `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
         "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
@@ -3380,7 +3380,11 @@ export const methods = {
       "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
       "is not heard (a warning says so), nor are multicam angles and mics: a program track in `under` is refused. A voice file " +
       "that cannot be decoded is named in the warnings. A hand key where someone speaks is dipped too and its level comes back on the next run. " +
-      "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8 }`. Fails with InvalidOperation (`track` is not an audio " +
+      "`level` first sets each clip's static gain (`audio.gain`) so the music's integrated loudness (EBU R128, measured once per file and cached) " +
+      "sits `level` dB under the voice's: the voice is every clip of the `under` tracks, its file's loudness plus its gain, averaged by the time it plays " +
+      "(about 12 dB under is a start; the style's `sound.musicUnderVoice`); a clip with gain keys of its own is left alone and named in the warnings. " +
+      "The depth, attack, release, threshold, gap and `level` are kept in `audio.duck` of each clip that gets duck keys, so `music.fit` runs the same duck again after it moves one. " +
+      "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8, level: 12 }`. Fails with InvalidOperation (`track` is not an audio " +
       "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -3392,6 +3396,12 @@ export const methods = {
       releaseMs: z.number().min(1).max(10000).default(450).describe("Milliseconds the level takes to come back after the voice stops. Default 450."),
       threshold: z.number().min(-90).max(0).default(-38).describe("dBFS above which sound counts as speech. Default -38."),
       gap: z.number().min(0).max(30).default(0.6).describe("Seconds: speech stretches closer than this merge, so the music does not pump between words. Default 0.6."),
+      level: z
+        .number()
+        .min(0)
+        .max(40)
+        .optional()
+        .describe("dB the music's integrated loudness sits under the voice's: sets the static gain of each clip of `track` first. Default: the gains stay as they are."),
     }),
     result: TrackDuckResultSchema,
   },
@@ -3565,6 +3575,43 @@ export const methods = {
       skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; only `duck` can be."),
     }),
     result: MusicFitResultSchema,
+  },
+  "music.candidates": {
+    mutating: true,
+    description:
+      "Place 2 to 7 candidate music tracks under the same picture at the same loudness, so the person picks by ear (ADR 0037). Each file " +
+      "in `assets` goes on its own new audio track `Music 1` to `Music n`, all muted but the first, with a static clip gain that brings its " +
+      "EBU R128 integrated loudness (measured over the whole file, once per file, cached by content) to one target: `loudness` (LUFS) when " +
+      "given, else the quietest file's own, so no candidate is made louder than it is (a warning says when a gain would push a peak over " +
+      "-1 dBTP). The clip starts at `from` (default 0) and plays the whole file. With `end` (seconds, a marker id or label) each is fitted " +
+      "like `music.fit` slides it: its own final hit (found on its energy) lands on `end`, the intro dropped where the file is longer than " +
+      "the picture before it and the music starting late where it is shorter (never looped), and the candidates are ranked: files that " +
+      "cover the picture first, then by how sure the final hit is, ties in the order given. Without `end` the order given is the rank. " +
+      "A file that cannot be placed (silent, no sound, no final hit, undecodable) is listed in `skipped` and the rest go on. `dryRun: true` " +
+      "changes nothing and returns the plan. One transaction labelled `Music candidates: …` (`revert` undoes it whole; with review mode on it is " +
+      "one proposal). To choose: `track.set` `muted: false` on the winner and `track.remove` with `force` on the others, then `music.fit` " +
+      "the clip that stays. Example: `{ assets: [\"assets/music/a.wav\", \"assets/music/b.wav\", \"assets/music/c.wav\"], end: \"end-card\" }`. " +
+      "Fails with InvalidOperation (fewer than 2 or more than 7 files, a file twice, none placeable, `end` not after `from`), AssetNotFound, " +
+      "TimelineNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      assets: z
+        .array(z.string().min(1))
+        .min(2)
+        .max(MUSIC_CANDIDATES_MAX)
+        .describe("Music files inside the project, absolute or relative to `cwd`, e.g. `assets/music/theme.mp3`; 2 to 7, in the order of your preference."),
+      end: TimeRef("Timeline time every final hit lands on, e.g. the cut into the end card.").optional(),
+      from: TimeRef("Timeline time the music may start from (default 0).").optional(),
+      loudness: z
+        .number()
+        .min(-70)
+        .max(0)
+        .optional()
+        .describe("LUFS to bring every candidate to. Default: the quietest candidate's own loudness."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+    }),
+    result: MusicCandidatesResultSchema,
   },
   "tx.begin": {
     mutating: true,

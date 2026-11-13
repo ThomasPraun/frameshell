@@ -56,10 +56,30 @@ export const TransformSchema = z
   })
   .describe("Overlay placement (video tracks only).");
 
+/**
+ * What the `track.duck` that wrote a clip's `auto: "duck"` keys was asked (ADR 0037 slice 3): kept on the clip so a later
+ * run of it (`music.fit` moving the clip) dips the same way over the same tracks. Not applied by itself: the keys are the duck.
+ */
+export const DuckSettingsSchema = z.strictObject({
+  under: z.array(Id).min(1).describe("Ids of the video or audio tracks whose speech the music dipped under."),
+  depth: z.number().positive().describe("dB the clip dips below its level while someone speaks."),
+  attackMs: z.number().positive().describe("Milliseconds the dip takes to reach full depth."),
+  releaseMs: z.number().positive().describe("Milliseconds the level takes to come back after the voice stops."),
+  threshold: z.number().describe("dBFS above which sound counted as speech."),
+  gap: z.number().nonnegative().describe("Seconds under which two stretches of speech merged."),
+  level: z.number().nonnegative().optional().describe("`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked."),
+});
+
+/** See {@link DuckSettingsSchema}. */
+export type DuckSettings = z.output<typeof DuckSettingsSchema>;
+
 /** Clip audio settings. */
 export const ClipAudioSchema = z.strictObject({
   gain: z.number().optional().describe("Gain in dB; 0 = unchanged, negative = quieter. Default 0."),
   muted: z.boolean().optional().describe("Default false."),
+  duck: DuckSettingsSchema.optional().describe(
+    "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+  ),
 });
 
 const effectParam = (limit: { min: number; max: number; default: number }, what: string) =>

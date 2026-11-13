@@ -12,6 +12,7 @@ import type {
   MulticamFacesResult,
   MulticamGalleryResult,
   MulticamTurnsResult,
+  MusicCandidatesResult,
   MusicFitResult,
   MethodName,
   MethodResult,
@@ -164,7 +165,7 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
-  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s]
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB]
                                Music under a voice: writes gain keys on the clips of audio track <track> that dip
                                while someone speaks on the --under tracks (video or audio; speech = sound above
                                --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
@@ -172,7 +173,11 @@ mutations print the new revision):
                                gone --release ms after it ends (default 450). The keys are the clip's level minus
                                the dip, marked as the duck's: run it again after an edit and they are replaced, keys
                                you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
-                               like any gain key; a key you set is a level, not a dip. Revert undoes it
+                               like any gain key; a key you set is a level, not a dip. --level dB first sets the
+                               static gain of each clip so the music's loudness (EBU R128, measured once per file
+                               and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
+                               keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
+                               music fit runs the same duck again after it moves one. Revert undoes it
   transition set --at s [--kind dissolve|fade|wipe|push] [--direction left|right|up|down] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
@@ -223,8 +228,18 @@ mutations print the new revision):
                                --exact keeps the start (the clip's, or --from) and changes the speed so the hit lands
                                on --end: at most 1.7 %, refused beyond it with the ends that fit; a doubtful hit
                                never does. --dry-run changes nothing. If the clip carries duck keys, duck runs again
-                               in the same transaction over the other tracks (--skip duck leaves them). One transaction
-                               (revert it)
+                               in the same transaction over the other tracks with the settings the duck was run with
+                               (--skip duck leaves them). One transaction (revert it)
+  music candidates <asset> <asset>… [--end <time>] [--from <time>] [--loudness LUFS] [--dry-run]
+                               Put 2 to 7 candidate tracks under the same picture to pick by ear: each file on its own
+                               new audio track Music 1..n, all muted but the first, at one loudness (EBU R128 over the
+                               whole file, measured once and cached): --loudness LUFS, default the quietest file's own,
+                               so none is made louder than it is. They start at --from (default 0) and play whole;
+                               with --end each is fitted like music fit slides a clip (its own final hit lands on
+                               --end) and they are ranked: files that cover the picture first, then by how sure the
+                               hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
+                               Choose with track set <track> --unmuted, then track remove <others> --force. One
+                               transaction (revert it)
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -385,6 +400,8 @@ export const TIMELINE_OPTIONS = {
   "dry-run": { type: "boolean" },
   hit: { type: "string" },
   exact: { type: "boolean" },
+  level: { type: "string" },
+  loudness: { type: "string" },
   probes: { type: "string" },
   tolerance: { type: "string" },
 } as const;
@@ -469,10 +486,11 @@ const ALLOWED: Record<string, string[]> = {
   "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
-  "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
+  "duck ": ["under", "depth", "attack", "release", "threshold", "gap", "level"],
   cut: ["from", "to", "no-snap", "snap-window", "snap-to"],
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
+  "music candidates": ["end", "from", "loudness", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -522,6 +540,7 @@ const ARITY: Record<string, [number, number]> = {
   cut: [0, Number.POSITIVE_INFINITY],
   cleanup: [0, 0],
   "music fit": [1, 1],
+  "music candidates": [2, 7],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -1021,6 +1040,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         releaseMs: num("release"),
         threshold: num("threshold"),
         gap: duckGap(),
+        level: num("level"),
       });
       break;
     }
@@ -1047,6 +1067,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         hit: num("hit"),
         exact: values["exact"] === true ? true : undefined,
         skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
+    case "music candidates":
+      method = "music.candidates";
+      Object.assign(params, {
+        assets: args,
+        end: when("end"),
+        from: when("from"),
+        loudness: num("loudness"),
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
@@ -1134,6 +1164,7 @@ export async function executeTimeline(
   }
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
+  if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -1201,6 +1232,26 @@ function formatMusicFit(result: MusicFitResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatMusicCandidates(result: MusicCandidatesResult): string {
+  const s = (value: number) => `${value.toFixed(2)} s`;
+  const db = (value: number) => `${value > 0 ? "+" : ""}${value} dB`;
+  const lines = [`Music candidates · ${result.candidates.length} track${result.candidates.length === 1 ? "" : "s"} at ${result.loudness.target} LUFS (${result.loudness.source === "given" ? "asked" : "the quietest file's own"})${result.dryRun ? " · dry run" : ""}`];
+  for (const c of result.candidates) {
+    const where = c.track ? `${c.name} (${c.track}, clip ${c.clip})` : c.name;
+    lines.push(`  ${c.rank}. ${c.asset}  ${where}${c.muted ? "" : "  unmuted"}`);
+    const fit = c.hit && c.landsAt !== null ? `, final hit ${c.hit.source === "given" ? "" : `${Math.round(c.hit.confidence * 100)} % sure `}lands on ${s(c.landsAt)}` : "";
+    lines.push(`     ${c.loudness} LUFS, gain ${db(c.gain)}; plays ${s(c.place.start)}–${s(c.place.end)} from ${s(c.place.in)} of the file${fit}`);
+    if (c.introCut > 0) lines.push(`     intro dropped: ${s(c.introCut)}`);
+    if (c.silentBefore > 0) lines.push(`     nothing plays in the first ${s(c.silentBefore)}: the file is shorter than the picture before the hit`);
+    for (const warning of c.warnings) lines.push(`     warning: ${warning}`);
+  }
+  for (const skip of result.skipped) lines.push(`Left out ${skip.asset}: ${skip.reason}`);
+  lines.push(`Ranking: ${result.ranking}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
+}
+
 function formatCleanup(result: CleanupResult): string {
   const time = (value: number) => value.toFixed(2);
   const lines = [`Cleanup of ${result.timeline} · ${result.words} words looked at · ${result.candidates.length} candidate${result.candidates.length === 1 ? "" : "s"}`];
@@ -1256,7 +1307,10 @@ function formatClipReframe(result: ClipReframeResult): string {
 function formatTrackDuck(result: TrackDuckResult): string {
   const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
   const written = result.changes.updated.length;
-  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${formatOperation(result)}`;
+  const level = result.level
+    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
+    : "";
+  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${level}${formatOperation(result)}`;
 }
 
 function formatMulticamFaces(result: MulticamFacesResult): string {
