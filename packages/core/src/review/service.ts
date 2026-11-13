@@ -1,25 +1,32 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ErrorCode,
   REVIEW_KEEP,
   REVIEW_SHEETS,
+  type ReviewDelivery,
   type ReviewLoudness,
   type ReviewMetrics,
   type ReviewOutput,
   type ReviewPeak,
   type ReviewResult,
   type ReviewSafeZone,
+  type ReviewSeam,
   type ReviewSheet,
   type ReviewSheetKind,
+  type ReviewSync,
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type FormatEntry, type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES } from "@frameshell/schema";
+import { type FormatEntry, type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type Timeline } from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
+import { generatedClips } from "../clips/renderer.js";
+import type { GeneratedSource } from "../export/compiler.js";
 import { captionFontMetrics } from "../export/font-metrics.js";
-import type { ExportService } from "../export/service.js";
+import type { ExportService, LoadedTimeline } from "../export/service.js";
+import { probeMedia } from "../media/ffmpeg.js";
+import type { ScannedAsset } from "../people/face-clusters.js";
 import type { TimelineService } from "../timeline/service.js";
 import {
   type Critical,
@@ -37,14 +44,26 @@ import {
   timelineCritical,
 } from "./plan.js";
 import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
-import { reviewMetrics } from "./metrics.js";
-import { crossingAt, cueCrossings, filmInsets, safeFlags, sameOrientation } from "./safe.js";
+import { deliveryChecks } from "./delivery.js";
+import { seamOf, seamVerdict } from "./loop.js";
+import { reviewMetrics, visualEvents } from "./metrics.js";
+import { fileOnsets, takeOnsets } from "./onsets.js";
+import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
+import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt } from "./safe.js";
 import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
+import { syncMetrics } from "./sync.js";
+
+/** A timeline flattened for a format, as `ExportService.resolvedTimeline` gives it. */
+type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
 
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
   timelines: Pick<TimelineService, "viewTimeline" | "show">;
-  exports: Pick<ExportService, "frame" | "resolvedSubtitles">;
+  exports: Pick<ExportService, "frame" | "resolvedSubtitles" | "resolvedTimeline" | "planRender" | "presets">;
+  /** Renders of the generated clips of a flattened timeline by clip id, at `size` when given (`ClipRenderer.ensure`); absent: graphics are not placed against safe zones. */
+  generated?(root: string, timeline: Timeline, size?: { width: number; height: number }): Promise<ReadonlyMap<string, GeneratedSource>>;
+  /** The cached face scans of the project's videos (`people scan`); absent: faces are not placed against safe zones. */
+  faceScans?(root: string): Promise<readonly ScannedAsset[]>;
   /** Platforms the project's style guide names (`style.json`); empty when there is none. */
   platforms(root: string): Promise<readonly PlatformId[]>;
   /** Absolute ffmpeg and ffprobe for the project rooted at `root`. */
@@ -69,6 +88,10 @@ export interface ReviewRequest {
   view: TimelineViewName;
   /** The project's format list as `view` shows it, when a proposal changes it (ADR 0036); absent: the file's. */
   formats?: readonly FormatEntry[] | undefined;
+  /** With `file`: the export preset the file was made with; the file is then checked against the export plan of `timeline` (in `projectFormat`) with it. */
+  preset?: string | undefined;
+  /** The film is meant to repeat: a seam that holds a frame or jumps is a craft warning. */
+  loop?: boolean | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
@@ -92,7 +115,7 @@ export class ReviewService {
     await mkdir(scratch, { recursive: true });
     try {
       const ffmpeg = await this.#options.ffmpeg(root);
-      const { source, critical, subtitles, viewed, warnings } = await this.#open(root, request, ffmpeg, scratch);
+      const { source, critical, subtitles, viewed, loaded, warnings } = await this.#open(root, request, ffmpeg, scratch);
       const range = frameRange(source.frames, source.fps, request.from, request.to);
       if (!range) {
         const last = frameTime(source.frames - 1, source.fps);
@@ -114,6 +137,9 @@ export class ReviewService {
       /** The motion of the range, measured once for the `motion` sheet and the metrics. */
       const motion = async () => (measured ??= await source.motion(range, join(scratch, "motion"), signal));
       const safeZones: ReviewSafeZone[] = [];
+      /** The timeline flattened for the format, resolved once for the safe-zone boxes and the sync. */
+      let flattened: Promise<Flat> | undefined;
+      const flat = (): Promise<Flat> => (flattened ??= this.#options.exports.resolvedTimeline(root, loaded!, request.projectFormat));
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
       const write = async (
@@ -149,13 +175,16 @@ export class ReviewService {
           const picks = contactPicks(source.fps, range, critical, request.every, MAX_SAFE_TILES);
           // Every track of a project takes the one caption face of its style.
           const metrics = subtitles[0] ? await captionFontMetrics(root, subtitles[0].style.font) : null;
+          const boxes = loaded ? await this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, signal) : [];
           for (const platform of safePlatforms) {
             const zone = SAFE_ZONES[platform];
             const insets = filmInsets(zone, frame);
-            const crossing = metrics ? cueCrossings(subtitles, insets, frame, metrics).filter((cue) => cue.end > range.first && cue.start < range.end) : [];
+            const crossing = [...(metrics ? cueCrossings(subtitles, insets, frame, metrics) : []), ...boxCrossings(boxes, insets, frame, source.fps)].filter(
+              (cue) => cue.end > range.first && cue.start < range.end,
+            );
             const paths = await write("safe", picks, `safe-${platform}`, false, {
               shade: { top: insets.top / frame.height, bottom: insets.bottom / frame.height, left: insets.left / frame.width, right: insets.right / frame.width },
-              flags: (pick) => (crossingAt(crossing, pick.frame) ? ["subtitle"] : []),
+              flags: (pick) => subjectsAt(crossing, pick.frame),
             });
             safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, sheets: paths, flags: safeFlags(crossing, source.fps) });
           }
@@ -181,7 +210,22 @@ export class ReviewService {
         const series = await motion();
         const seconds = { from: frameTime(range.first, source.fps), to: frameTime(range.end, source.fps) };
         const loudness = await this.#loudness(request, source, ffmpeg, warnings, signal);
-        metrics = reviewMetrics({ fps: source.fps, range: seconds, series, tracks: subtitles, loudness, hasSound: source.audio ?? null });
+        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, critical, seconds, ffmpeg, scratch, warnings, signal);
+        const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
+        const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
+        metrics = reviewMetrics({
+          fps: source.fps,
+          range: seconds,
+          series,
+          tracks: subtitles,
+          loudness,
+          hasSound: source.audio ?? null,
+          sync,
+          seam,
+          loop: request.loop === true,
+          delivery,
+          safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
+        });
         await writeFile(join(dir, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
       }
 
@@ -209,6 +253,127 @@ export class ReviewService {
       return result;
     } finally {
       await rm(scratch, { recursive: true, force: true });
+    }
+  }
+
+
+  /**
+   * Boxes of the film's pixels that graphics (generated clips with an alpha render) and faces (footage with a cached `people scan`)
+   * hold, for the safe-zone check. Says in `warnings` what could not be measured; never fails the run.
+   */
+  async #boxes(root: string, flat: () => Promise<Flat>, source: FilmSource, work: string, warnings: string[], signal?: AbortSignal): Promise<BoxSpan[]> {
+    const { generated, faceScans } = this.#options;
+    const film = { width: source.width, height: source.height };
+    let resolved: Flat;
+    try {
+      resolved = await flat();
+    } catch (error) {
+      warnings.push(`safe: graphics and faces are not placed (${(error as Error).message.split("\n")[0]}).`);
+      return [];
+    }
+    const found: BoxSpan[] = [];
+    if (faceScans) {
+      try {
+        found.push(...faceBoxes(resolved.timeline, await faceScans(root), film, resolved.project, resolved.layout));
+      } catch (error) {
+        warnings.push(`safe: faces are not placed (${(error as Error).message.split("\n")[0]}).`);
+      }
+    }
+    if (generated && generatedClips(resolved.timeline).length > 0) {
+      try {
+        const otherSize = film.width !== resolved.project.width || film.height !== resolved.project.height;
+        const renders = await generated(root, resolved.timeline, otherSize ? film : undefined);
+        const graphics = await graphicBoxes({ ffmpeg: await this.#options.ffmpeg(root), timeline: resolved.timeline, renders, film, project: resolved.project, work, signal });
+        found.push(...graphics.boxes);
+        if (graphics.opaque.length > 0) warnings.push(`safe: ${graphics.opaque.join(", ")} ${graphics.opaque.length === 1 ? "has a render" : "have renders"} with no alpha, so the box of what they draw is not known (it fills the frame).`);
+      } catch (error) {
+        signal?.throwIfAborted();
+        warnings.push(`safe: graphics are not placed (${(error as Error).message.split("\n")[0]}).`);
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Sounds against picture events: the generated takes on a timeline's audio tracks, or the hits found in a file's sound,
+   * against the visual events of the picture and the cuts. Null when there is no sound to place.
+   */
+  async #sync(
+    root: string,
+    request: ReviewRequest,
+    source: FilmSource,
+    flat: (() => Promise<Flat>) | null,
+    series: MotionSeries,
+    critical: readonly Critical[],
+    range: { from: number; to: number },
+    ffmpeg: string,
+    scratch: string,
+    warnings: string[],
+    signal?: AbortSignal,
+  ): Promise<ReviewSync | null> {
+    try {
+      let sounds;
+      if (request.file) {
+        if (!source.audio) return null;
+        sounds = await fileOnsets(ffmpeg, request.file, join(scratch, "onsets"));
+      } else if (flat) {
+        sounds = await takeOnsets(root, (await flat()).timeline);
+      } else return null;
+      const spacing = series.times.length > 1 ? (series.times.at(-1)! - series.times[0]!) / (series.times.length - 1) : 0;
+      return syncMetrics({
+        source: request.file ? "file" : "takes",
+        sounds,
+        events: visualEvents(series),
+        exact: critical.filter((item) => item.tag === "cut" || item.tag === "marker").map((item) => item.at),
+        cuts: critical.filter((cut) => cut.tag === "cut").map((cut) => cut.at),
+        range,
+        spacing,
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`sync: the sounds could not be placed against the picture (${(error as Error).message.split("\n")[0]}).`);
+      return null;
+    }
+  }
+
+  /** How far the last frame of the range is from the first; null for a range of one frame. */
+  async #seam(source: FilmSource, range: { first: number; end: number }, frames: Frames, ffmpeg: string, warnings: string[], signal?: AbortSignal): Promise<ReviewSeam | null> {
+    if (range.end - range.first < 2) return null;
+    const last = range.end - 1;
+    try {
+      const second = Math.min(range.first + 1, last);
+      const middle = Math.floor((range.first + range.end) / 2);
+      await frames.ensure([...new Set([range.first, second, middle, last])], signal);
+      const { jump, duplicate } = await seamOf(ffmpeg, { first: frames.path(range.first), second: frames.path(second), middle: frames.path(middle), last: frames.path(last) }, source);
+      return { first: frameTime(range.first, source.fps), last: frameTime(last, source.fps), jump: Math.round(jump * 100) / 100, verdict: seamVerdict(jump, duplicate) };
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`seam: the first and last frame could not be compared (${(error as Error).message.split("\n")[0]}).`);
+      return null;
+    }
+  }
+
+  /**
+   * `request.file` against the export plan of the timeline with `request.preset` (in `projectFormat`): size, frame rate, length,
+   * codecs and loudness. The plan is the preset's own: a file rendered with `--quality draft` differs in frame rate by design. Null, with a warning, when the plan cannot be made or the file cannot be read.
+   */
+  async #delivery(root: string, request: ReviewRequest, ffmpeg: string, loudness: ReviewLoudness | null, warnings: string[], signal?: AbortSignal): Promise<ReviewDelivery | null> {
+    const { exports } = this.#options;
+    try {
+      // The plan of the version `view` shows, like the rest of the run; made without `--quality`, as the preset says.
+      const viewed = await this.#options.timelines.viewTimeline(root, request.timeline, request.view);
+      const planned = await exports.planRender(root, { timeline: request.timeline, preset: request.preset, ...(request.projectFormat ? { formats: [request.projectFormat] } : {}) }, viewed);
+      const found = (await exports.presets(root)).find((candidate) => candidate.id === planned.result.preset);
+      if (!found) return null;
+      const { plugin: _plugin, ...rest } = found;
+      const preset = rest as ExportPreset;
+      const file = request.file!;
+      const [probe, info] = await Promise.all([probeMedia(await this.#options.ffprobe(root), file, signal), stat(file)]);
+      return { timeline: request.timeline, preset: preset.id, format: planned.result.format, bytes: info.size, checks: deliveryChecks(planned.result, preset, probe, loudness) };
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`delivery: the file cannot be checked against the export plan (${(error as Error).message.split("\n")[0]}).`);
+      return null;
     }
   }
 
@@ -240,11 +405,11 @@ export class ReviewService {
     request: ReviewRequest,
     ffmpeg: string,
     scratch: string,
-  ): Promise<{ source: FilmSource; critical: Critical[]; subtitles: ResolvedSubtitleTrack[]; viewed: Pick<ReviewResult, "view" | "proposal">; warnings: string[] }> {
+  ): Promise<{ source: FilmSource; critical: Critical[]; subtitles: ResolvedSubtitleTrack[]; viewed: Pick<ReviewResult, "view" | "proposal">; loaded: LoadedTimeline | null; warnings: string[] }> {
     const warnings: string[] = [];
     if (request.file) {
       const source = await fileSource(ffmpeg, await this.#options.ffprobe(root), request.file);
-      return { source, critical: [], subtitles: [], viewed: { view: "current", proposal: null }, warnings };
+      return { source, critical: [], subtitles: [], viewed: { view: "current", proposal: null }, loaded: null, warnings };
     }
     const { timelines, exports } = this.#options;
     const loaded = { ...(await timelines.viewTimeline(root, request.timeline, request.view)), ...(request.formats ? { formats: request.formats } : {}) };
@@ -272,7 +437,7 @@ export class ReviewService {
       },
       scratch,
     );
-    return { source, critical: timelineCritical(shown, cues), subtitles, viewed: { view: loaded.view, proposal: loaded.proposal }, warnings };
+    return { source, critical: timelineCritical(shown, cues), subtitles, viewed: { view: loaded.view, proposal: loaded.proposal }, loaded, warnings };
   }
 
   /**

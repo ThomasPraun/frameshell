@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 121;
+export const PROTOCOL_VERSION = 122;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1371,6 +1371,11 @@ export const methods = {
       "visual events, near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
       "`file` (integrated LUFS, range, true peak, the phone band 200 Hz to 6 kHz; measured after the encode, so export first: a timeline has none) and `craft` warnings " +
       "(still over 3 s, empty frame 0, a blank picture, a cue too short, a true peak above -1 dBTP, a phone band 6 LU under the mix, over 15 s of silence). " +
+      "`metrics.sync` sets the sounds against the picture events they belong to (the generated sounds `sound.place` put on the timeline, or the hits found in a `file`'s sound; whooshes, risers and ticks are left out): " +
+      "each sound's offset to the nearest visual event (early over 45 ms, late over 75 ms), how many land within 45 ms, the share near an event next to what the same sounds score moved by fixed offsets (random placement), and the cuts with no sound. " +
+      "`metrics.seam` is the grey jump between the last frame and the first (a hard cut reads 40 to 80, under 10 is continuous); with `loop` a duplicate or a jump is a warning. " +
+      "With `file` and `preset`, `metrics.delivery` checks the file against the export plan. The `safe` sheet and `safeZones` also flag graphics (generated clips with an alpha render: titles included) and faces (footage with a cached `people scan`) that reach into a zone, " +
+      "and each is a `safe-zone` craft warning. " +
       "The MCP tool returns the sheets as images. " +
       "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",
@@ -1383,7 +1388,7 @@ export const methods = {
         .optional()
         .describe(
           "An exported video to review instead of the timeline (the judge of a reel is the file people get): absolute, or relative to `cwd`, " +
-            "e.g. `exports/draft.mp4`. Then `timeline`, `projectFormat` and `view` are ignored and only the grid frames of the contact sheet exist (no cuts, markers or cues).",
+            "e.g. `exports/draft.mp4`. Then `view` is ignored, and `timeline` and `projectFormat` only name the export plan `preset` is checked against; only the grid frames of the contact sheet exist (no cuts, markers or cues).",
         ),
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
@@ -1403,6 +1408,18 @@ export const methods = {
         .optional()
         .describe("Seconds between the grid frames of the contact sheet. Default 0.5 (2 per second), widened so that a long film stays within 120 tiles."),
       projectFormat: FormatIdSchema.optional().describe("Format of the project to lay a timeline out in (`format.list`), e.g. `9x16`. Default: the primary format."),
+      preset: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "With `file`: the export preset the file was made with (`export.presets`), e.g. `youtube-1080p`. The file is then checked against the export plan of `timeline` (in `projectFormat`) made with it: " +
+            "width, height, frame rate, length, video and audio codec and loudness; the answer is `metrics.delivery`.",
+        ),
+      loop: z
+        .boolean()
+        .optional()
+        .describe("The film is meant to repeat (a title loop, a GIF): a last frame that repeats the first, or jumps from it, becomes a craft warning (`metrics.seam` is measured either way)."),
       view: ViewParam,
     }),
     result: ReviewResultSchema,

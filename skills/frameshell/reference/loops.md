@@ -22,7 +22,7 @@ A loop is a first key identical to the last, with the frame range leaving the du
 - Noise, particles and wobble: sample them on a circle (angle = 2 pi x frame / N), not along a line, so they close on themselves.
 - Frame 0 is a finished composition: it is also the thumbnail where platforms use the first frame.
 - The warning "the last frame repeats frame 0": the last key sits on frame 0's state at frame N-1 instead of frame N. End the last key one frame earlier (`clip trim`, or the key's time), or trim one frame off the end of the timeline.
-- Check the seam by looking at the last frames beside the first frames, not at a still: `frameshell review --sheets seam --file exports/title-loop.mp4` (MCP `review`).
+- Check the seam by looking at the last frames beside the first frames, not at a still: `frameshell review --sheets seam --file exports/title-loop.mp4` (MCP `review`). `frameshell review --file exports/title-loop.mp4 --loop` also measures it: `metrics.seam.jump` is the grey difference between the last frame and the first (under 10 reads continuous, a hard cut 40 to 80) and a duplicate or a jump becomes a `loop-seam` warning ([critique.md](critique.md)).
 - Sound: an MP4 loop is not sample-exact in most players (AAC priming), so the fades hide a click, not a gap. For a loop whose sound must meet, deliver MOV with a PCM preset or WebM with Opus (WebM gets no fade).
 
 ## GIF

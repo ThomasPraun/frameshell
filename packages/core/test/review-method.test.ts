@@ -255,6 +255,8 @@ describe("review method", () => {
       expect(outside).toMatchObject({ code: ErrorCode.InvalidOperation, data: { valid: { min: 0, max: 2.967 } } });
       const missing = await conn.request("review", { cwd: project, file: join(project, "exports", "nope.mp4") }).catch((error: unknown) => error);
       expect(missing).toMatchObject({ code: ErrorCode.AssetNotFound });
+      const lonely = await conn.request("review", { cwd: project, preset: "youtube-1080p", sheets: ["metrics"] }).catch((error: unknown) => error);
+      expect(lonely).toMatchObject({ code: ErrorCode.InvalidParams });
     },
     MEDIA_TIMEOUT,
   );

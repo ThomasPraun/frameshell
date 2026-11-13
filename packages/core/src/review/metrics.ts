@@ -1,6 +1,10 @@
-import type { ReviewCraftWarning, ReviewLoudness, ReviewMetrics, ReviewShortCue, ReviewSpan } from "@frameshell/protocol";
+import type { ReviewCraftWarning, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSpan, ReviewSync } from "@frameshell/protocol";
 import type { ResolvedSubtitleTrack } from "@frameshell/schema";
+import { deliveryWarnings } from "./delivery.js";
+import { seamWarnings } from "./loop.js";
+import { safeWarnings } from "./safe.js";
 import type { MotionSeries } from "./source.js";
+import { syncWarnings } from "./sync.js";
 
 // The numbers of `review` (#457): what a picture sheet cannot tell. Pure: a motion series and cues in, metrics out.
 // Thresholds are the owner's launch-film checklist in #457's comments (the HyperFrames `check` and earshot ranges it
@@ -49,6 +53,16 @@ export interface MetricsInput {
   loudness: ReviewLoudness | null;
   /** Whether the film has a sound track: false for a file without one, null when unknown (a timeline). */
   hasSound: boolean | null;
+  /** Sounds against picture events; absent: not measured. */
+  sync?: ReviewSync | null;
+  /** The last frame against the first; absent: not measured. */
+  seam?: ReviewSeam | null;
+  /** The film is meant to repeat: a seam that holds a frame or jumps is a warning. */
+  loop?: boolean;
+  /** The file against its export plan; absent: not checked. */
+  delivery?: ReviewDelivery | null;
+  /** Graphics and faces that cross each platform's zones. */
+  safe?: readonly { platform: string; flags: readonly ReviewSafeFlag[] }[];
 }
 
 /** Runs of consecutive samples (first and last index) where `test` holds, starting at index `from`. */
@@ -168,11 +182,20 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
     craft.push({ check: "silent", from: null, to: null, message: `the film runs ${round(range.to - range.from)} s with no sound.` });
   }
 
+  const { sync = null, seam = null, delivery = null } = input;
+  if (sync) craft.push(...syncWarnings(sync));
+  if (seam && input.loop) craft.push(...seamWarnings(seam));
+  if (delivery) craft.push(...deliveryWarnings(delivery));
+  for (const { platform, flags } of input.safe ?? []) craft.push(...safeWarnings(platform, flags));
+
   craft.sort((a, b) => (a.from ?? -1) - (b.from ?? -1));
   return {
     picture: { samples, spacing: round(spacing), longestStatic, staticRuns, events: events.length, largestGap, blank, firstFrameEmpty },
     subtitles,
     loudness,
+    sync,
+    seam,
+    delivery,
     craft,
   };
 }

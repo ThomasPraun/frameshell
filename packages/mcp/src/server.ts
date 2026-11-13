@@ -65,7 +65,7 @@ const INSTRUCTIONS =
   "start/end/at/from/to, source seconds for in/out), snapped to the frame grid. Read the timeline (resource " +
   "`frameshell://timelines/main` or `timeline_show`) before editing and use the ids it returns. Every mutating tool " +
   "returns the new `revision` and `operation.tx`; `revert` with that tx id undoes your change, `tx_begin`/`tx_commit` " +
-  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets, safe-zone sheets with `platform`, and `metrics`: still stretches, loudness of a `file`, craft warnings); measure a reference video with `analyze` (shots, palette, look, rhythm, events, loudness, tempo). `history` with `since` " +
+  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets, safe-zone sheets with `platform`, and `metrics`: still stretches, loudness of a `file`, sound sync, loop seam, a `file` against its export plan with `preset`, craft warnings); measure a reference video with `analyze` (shots, palette, look, rhythm, events, loudness, tempo). `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
   "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +

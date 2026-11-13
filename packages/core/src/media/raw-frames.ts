@@ -38,6 +38,7 @@ export async function* readRawFrames(
     child.once("error", reject);
     child.once("close", resolve);
   });
+  exited.catch(() => undefined);
   let pending: Buffer = Buffer.alloc(0);
   let finished = false;
   try {
@@ -52,6 +53,10 @@ export async function* readRawFrames(
     if (code !== 0) throw new Error(`ffmpeg could not read the picture of ${path} (exit ${code}): ${stderr.trim()}`);
   } finally {
     // The consumer stopped early (an error, a closed connection): do not leave ffmpeg decoding.
-    if (!finished) child.kill();
+    if (!finished) {
+      child.kill();
+      // Windows keeps the input file locked until the process is gone: callers delete it right after.
+      await exited.catch(() => undefined);
+    }
   }
 }
