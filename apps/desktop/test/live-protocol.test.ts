@@ -49,6 +49,18 @@ describe("serveLive", () => {
     expect(await (await serveLive(get(url), pages)).text()).toContain(`<script data-frameshell-elements="#a { scale: 2 !important }">`);
   });
 
+  it("puts the style's token sheet (ADR 0028) first in the head, where the render has it", async () => {
+    const css = ":root { --fs-color-accent: #ff5a1f; }</style>";
+    const html = injectHead(ENTRY_HTML, HEAD, undefined, css);
+    expect(html).toBe(
+      ENTRY_HTML.replace("<head>", () => `<head><style data-frameshell-style>:root { --fs-color-accent: #ff5a1f; }<\\/style></style><script>${HEAD}</script><script>${LIVE_BRIDGE}</script>`),
+    );
+    expect(injectHead(ENTRY_HTML, HEAD, undefined, "")).toBe(injectHead(ENTRY_HTML, HEAD));
+    const { root, pages } = project();
+    const url = pages.issue({ project: root, root: "compositions/hyperframes/card", entry: "compositions/hyperframes/card/index.html", head: HEAD, styleCss: ":root { --fs-motion-quick: 0.2s; }" });
+    expect(await (await serveLive(get(url), pages)).text()).toContain("<head><style data-frameshell-style>:root { --fs-motion-quick: 0.2s; }</style>");
+  });
+
   it("serves the page's other files as they are, with byte ranges, and encoded names", async () => {
     const { pages, base } = project();
     const script = await serveLive(get(`${base}app.js`), pages);

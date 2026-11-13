@@ -206,6 +206,7 @@ export {
   voiceChainOf,
   glassOf,
 } from "./style.js";
+export { STYLE_TOKEN_PREFIX, type StyleTokenFace, styleTokenCss } from "./style-tokens.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {
   CREDITS_FILE,
@@ -400,6 +401,12 @@ export {
 } from "./composite.js";
 export {
   SUBTITLE_FONT,
+  BUNDLED_CAPTION_FONT,
+  type CaptionFont,
+  type CaptionTokens,
+  captionFontSource,
+  styleCaptionTokens,
+  captionTokens,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESETS,
   SUBTITLE_PRESET_IDS,
@@ -429,6 +436,7 @@ export {
   subtitleLayout,
   subtitleTracks,
 } from "./subtitles.js";
+export { type FontMetrics, parseFontMetrics } from "./font-file.js";
 export {
   type TransitionContext,
   type ClipHandles,

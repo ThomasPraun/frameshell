@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Captions and generated clips take the project style, third slice of #468 (ADR 0028, epic #451; `clip.live`
+  `styleCss`, style `type.caption`, plugin API `styleTokens` / `RenderContext.styleCss`, protocol 115): a subtitle
+  track that names no preset shows its text in `colors.ink` outlined in `colors.bg`, the keyword in `colors.keyword`
+  (else the accent), the spoken word in `colors.highlight` (else the accent), at `type.caption` px, and neither mark
+  under `calm`; a track that names a preset looks as before, and the track's own fields and the vertical-format scale
+  still win. `fonts.captions` sets the caption face: a `.ttf` or `.otf` under `assets/fonts/`, whose family and line
+  metrics are read from the file, so export, the preview and review safe zones place lines alike; a face that cannot
+  be used falls back to Archivo Black and `render` warns. HyperFrames renders and live pages get the style as CSS
+  variables (`--fs-color-accent`, `--fs-font-display`, `--fs-motion-standard`, ...) in a first stylesheet, with style
+  font files inlined; the sheet's hash enters the render key only for adapters that take tokens and only with a
+  `style.json`, so other renders keep their keys. The first run after the upgrade re-renders every HyperFrames clip of
+  a project that has a `style.json`, and any later change to a colour, font, type size or motion value re-renders them
+  all again. An invalid `style.json` blocks HyperFrames renders and exports of subtitled timelines until it is fixed.
+- GIF preset, second slice of #474 (ADR 0039, ADR 0027 decision 13, epic #451; `render` with `preset: "gif"`, CLI `render --preset gif`,
+  protocol 114): `render --preset gif` writes a silent GIF that loops forever. Each format is fitted inside 1200 x 1200
+  (16:9 is 1200 x 675, 9:16 is 675 x 1200, never scaled up) through the new preset field `video.fit: "inside"`, which
+  ADR 0027's aspect check honours. The frames render as lossless RGB temps, one palette (`palettegen stats_mode=diff`)
+  covers the whole file, and `paletteuse` dithers with bayer scale 5 and diff rectangles; the frame rate is capped at
+  30 (24 and 25 keep theirs) and the delays come out 4,4,5,4,4,4 hundredths of a second at 24 fps, pinned by a test that
+  reads the file's blocks. More than 350 output frames is refused before anything is queued, with the count and the
+  length that fits; a finished file over 15 MB adds a job warning with its size. A GIF has the loop rules without
+  `--loop` (a cover frame is refused, the cycle and black-end warnings, the repeated last frame check) and ignores
+  `--quality`. Export presets may now be silent (container `gif`, no `audio`): in the plugin contract `ExportPreset.audio`
+  is optional. The skill documents the preset in `loops.md`.
 - Motion film playbook in the agent skill, first slice of #453 (epic #451; skill only, no wire change): the new
   `skills/frameshell/reference/motion-films.md` walks an agent from a brief with no footage to a delivered film with the
   commands that exist today: a one-round intake kept in `style.json` `brand`, three storylines and a stop for the
@@ -133,8 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a frame and when frame 0 or the last frame is black. Once the file is written the job compares frame 0 with the
   last frame at 160 px and, when they are the same picture while the file moves, adds a warning to the job (`warnings`
   of `job.list`, printed by the CLI after `Rendered`) naming the fix: end the last key one frame earlier or trim one
-  frame. The timeline's length is never changed. Every job now carries `warnings` (empty when none). The GIF preset is
-  the next slice.
+  frame. The timeline's length is never changed. Every job now carries `warnings` (empty when none).
 - HyperFrames clips rendered at each format's size, third slice of #469 with the format half of #465 slice 4 (ADR 0027,
   ADR 0033, epic #451; daemon `clip.renders` `format`, MCP `clip_renders`, protocol 104): in a format of the project
   whose aspect differs from the composition's (`9x16` of a 16:9 project), the `hyperframes` adapter sets the copied

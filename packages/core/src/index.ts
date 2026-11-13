@@ -256,14 +256,18 @@ export {
   SUBTITLES_FILE,
   COVER_FILE,
   FONTS_DIR,
+  gifStep,
   loudnessAnalysis,
   mixStep,
   muxStep,
+  paletteStep,
   parseLoudnessStats,
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
-export { type FontMetrics, bundledFontMetrics, parseFontMetrics } from "./export/font-metrics.js";
+export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";
+export { bundledFontMetrics, captionFontMetrics, fontFileMetrics } from "./export/font-metrics.js";
+export { readCaptionTokens } from "./style/captions.js";
 export {
   COVER_MAX_CHARS,
   type CoverLayout,
@@ -278,7 +282,17 @@ export {
   hookWordTime,
   layoutCover,
 } from "./export/cover.js";
-export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
+export {
+  BUILTIN_PRESETS,
+  DEFAULT_LOUDNESS_LUFS,
+  DEFAULT_PRESET_ID,
+  GIF_MAX_FPS,
+  GIF_MAX_FRAMES,
+  GIF_WARN_BYTES,
+  fitInside,
+  gifSizeWarning,
+  loudnessTarget,
+} from "./export/presets.js";
 export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,

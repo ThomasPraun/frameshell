@@ -1,5 +1,6 @@
 import { COVER_MAX_CHARS } from "@frameshell/protocol";
 import {
+  type FontMetrics,
   SUBTITLE_FONT,
   SUBTITLE_PRESETS,
   type Size,
@@ -11,13 +12,15 @@ import {
   trackWords,
 } from "@frameshell/schema";
 import { assColor, assDocument } from "./ass.js";
-import type { FontMetrics } from "./font-metrics.js";
 
 /**
  * Cover image and finished frame 0: a chosen frame of the timeline with one big word over it, in the
  * subtitle face and the `big-keyword` look until the project style (#468) holds its own. Pure: the face's
  * metrics come in as an argument, so plans stay golden-testable.
  */
+
+/** What sizing a word needs of a face. */
+type SizingMetrics = Pick<FontMetrics, "capHeight" | "width">;
 
 /** Width a platform grid shows a cover at, px: the readability check scales the cover down to it. */
 export const THUMBNAIL_WIDTH = 180;
@@ -64,7 +67,7 @@ export function coverText(raw: string): string {
  * ({@link MAX_WIDTH_SHARE}) and height ({@link MAX_SIZE_SHARE}) allow. `text` must be non-empty after
  * {@link coverText}.
  */
-export function layoutCover(text: string, frame: Size, metrics: FontMetrics, fill: string = DEFAULT_COVER_COLOR): CoverLayout {
+export function layoutCover(text: string, frame: Size, metrics: SizingMetrics, fill: string = DEFAULT_COVER_COLOR): CoverLayout {
   const em = metrics.width(text);
   const fontSize = Math.max(1, Math.floor(Math.min((MAX_WIDTH_SHARE * frame.width) / (em + 2 * OUTLINE_SHARE), MAX_SIZE_SHARE * frame.height)));
   return {
@@ -94,7 +97,7 @@ export interface CoverReadability {
 }
 
 /** Check `layout` at thumbnail size. */
-export function coverReadability(layout: CoverLayout, frame: Size, metrics: FontMetrics): CoverReadability {
+export function coverReadability(layout: CoverLayout, frame: Size, metrics: SizingMetrics): CoverReadability {
   const capHeight = round2((layout.fontSize * metrics.capHeight * THUMBNAIL_WIDTH) / frame.width);
   return { thumbnailWidth: THUMBNAIL_WIDTH, capHeight, minCapHeight: MIN_THUMBNAIL_CAP_HEIGHT, readable: capHeight >= MIN_THUMBNAIL_CAP_HEIGHT };
 }

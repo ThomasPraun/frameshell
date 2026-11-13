@@ -51,6 +51,19 @@ describe("serveMedia", () => {
     expect((await serveMedia(get(`${base}.frameshell/cache/render/x.mp4`), roots)).status).toBe(403);
   });
 
+  it("serves caption fonts under assets/fonts/ (ADR 0028), not other font files", async () => {
+    const { root, roots, base } = project();
+    mkdirSync(join(root, "assets", "fonts"), { recursive: true });
+    writeFileSync(join(root, "assets", "fonts", "Brand.ttf"), BYTES);
+    writeFileSync(join(root, "assets", "fonts", "Brand.woff2"), BYTES);
+    writeFileSync(join(root, "assets", "Loose.ttf"), BYTES);
+    const response = await serveMedia(get(`${base}assets/fonts/Brand.ttf`), roots);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("font/ttf");
+    expect((await serveMedia(get(`${base}assets/fonts/Brand.woff2`), roots)).status).toBe(403);
+    expect((await serveMedia(get(`${base}assets/Loose.ttf`), roots)).status).toBe(403);
+  });
+
   it("serves subject mattes (ADR 0032) as MP4 ranges, not their records", async () => {
     const { root, roots, base } = project();
     const mattes = join(root, ".frameshell", "cache", "mattes");

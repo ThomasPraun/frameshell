@@ -105,7 +105,7 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                how many talk, when known. First run downloads the engine (about 95 MB)
 ${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop]
                                Export a timeline to video (default preset: export.defaultPreset,
-                               else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
+                               else youtube-1080p; default file: exports/<timeline>-<preset>.<container>).
                                --quality draft: 30 fps at most, fast encode for review rounds; final:
                                slow, bt709, AAC 320k. Both use the machine's best working encoder.
                                --formats: one file per format of the project (format list), named
@@ -118,6 +118,9 @@ ${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draf
                                output fps breaks the cycle, when an end is black, and, once written,
                                when the last frame repeats frame 0 (end the last key a frame earlier).
                                Refused with --cover-frame. Never changes the timeline
+                               --preset gif: a silent looping GIF (loop rules always on), each format
+                               fitted inside 1200x1200, 30 fps at most, over 350 frames refused,
+                               over 15 MB warned; --quality does not apply
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp|<format id>] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, image type from the
                                extension of <file> unless --format png|jpg|webp. --format <format id> (e.g.

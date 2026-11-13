@@ -2,6 +2,7 @@ import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, R
 import {
   type AdapterClip,
   type Backdrop,
+  type CaptionTokens,
   type Clip,
   type ClipEdges,
   type ClipTrack,
@@ -49,6 +50,7 @@ import {
   withTrackMutes,
 } from "@frameshell/schema";
 import { tierFps, tierVideoArgs } from "../encoders/tiers.js";
+import { GIF_MAX_FPS, GIF_MAX_FRAMES } from "./presets.js";
 import { SIDECAR_CHANNELS, SIDECAR_SAMPLE_RATE, fpsRational } from "../media/recipe.js";
 import { FrameGrid } from "../timeline/grid.js";
 import {
@@ -124,6 +126,8 @@ export interface RenderInput {
    * An asset without one shows no subtitles (and a warning when it has sound).
    */
   transcripts?: ReadonlyMap<string, Transcript>;
+  /** The project style's caption values (ADR 0028 decision 11, `readCaptionTokens`); absent: the presets alone. */
+  captions?: CaptionTokens;
   /** Render of every generated clip on a video track, by clip id; they composite like footage (SPEC §3.5 step 2). */
   generated?: ReadonlyMap<string, GeneratedSource>;
   /**
@@ -216,8 +220,8 @@ export interface RenderPlan {
   /** Files to write into the work directory before any step runs. */
   files: Record<string, string>;
   /**
-   * Font files (`SUBTITLE_FONT.file`) to copy into `fonts/` of the work
-   * directory before any step runs: burned subtitles read them. Empty when
+   * Font files to copy into `fonts/` of the work directory before any step runs: burned subtitles read them.
+   * `SUBTITLE_FONT.file` for the bundled face, else a project-relative font file of the style. Empty when
    * nothing is burned.
    */
   fonts: string[];
@@ -265,6 +269,8 @@ export interface FrameInput {
   resolution: Size;
   /** See {@link RenderInput.transcripts}. */
   transcripts?: ReadonlyMap<string, Transcript>;
+  /** See {@link RenderInput.captions}. */
+  captions?: CaptionTokens;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** See {@link RenderInput.mattes}. */
@@ -320,6 +326,8 @@ export const LOUDNESS_STATS_FILE = "loudness.json";
 export const MIX_FILE = "mix.wv";
 /** Concat demuxer list, relative to the work directory. */
 const CONCAT_LIST = "segments.txt";
+/** Palette of a GIF export, written by {@link paletteStep}. */
+const PALETTE_FILE = "palette.png";
 /** Burned subtitles, relative to the work directory. */
 export const SUBTITLES_FILE = "subtitles.ass";
 /** The cover word, relative to the work directory. */
@@ -436,24 +444,39 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx, input.mattes);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx, input.mattes, input.captions);
   const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
-  const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
+  const gif = preset.container === "gif";
+  const outFps = gif ? Math.min(preset.video.fps ?? fps, GIF_MAX_FPS) : tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
+  // A GIF always repeats (ADR 0039): it has the loop rules whether or not `loop` was asked for.
+  const loop = input.loop === true || gif;
   const rate = fpsRational(outFps);
   const { width, height } = preset.video;
   const segmentFrames = Math.max(1, Math.round((input.segmentSeconds ?? DEFAULT_SEGMENT_SECONDS) * fps));
   const edges = [...layout.video.flatMap(({ placed }) => [placed.start, placed.end]), ...layout.shotEdges];
-  const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
+  // A GIF is quantized from RGB: no chroma subsampling on the way.
+  const target = { fps, width, height, pixFmt: gif ? "bgr0" : "yuv420p", project: input.resolution };
   const warnings = [...layout.warnings];
   if (input.encode && !tiered) warnings.push(`Quality "${input.encode.tier}" only applies to H.264 presets; ${preset.id} renders as written.`);
-  if (input.loop && input.cover) {
+  if (loop && input.cover) {
     throw new RpcError(
       ErrorCode.InvalidOperation,
-      "A loop cannot have a cover frame: the cover replaces frame 0 and breaks the seam. Render without `cover` (`--cover-frame`), or without `loop`.",
-      { op: "render", field: "loop", reason: "cover replaces frame 0" },
+      `${gif ? "A GIF" : "A loop"} cannot have a cover frame: the cover replaces frame 0 and breaks the seam. Render without \`cover\` (\`--cover-frame\`)${gif ? "" : ", or without `loop`"}.`,
+      { op: "render", field: gif ? "cover" : "loop", reason: "cover replaces frame 0" },
     );
   }
-  if (input.loop) warnings.push(...loopWarnings(layout, fps, outFps));
+  if (gif) {
+    const total = Math.round((layout.frames / fps) * outFps);
+    if (total > GIF_MAX_FRAMES) {
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        `A GIF holds at most ${GIF_MAX_FRAMES} frames; this timeline would render ${total} (${seconds(layout.frames, fps)} s at ${Number(outFps.toFixed(3))} fps). ` +
+          `Shorten it to ${Number((GIF_MAX_FRAMES / outFps).toFixed(2))} s or less, or export an MP4 or WebM.`,
+        { op: "render", field: "preset", reason: "gif frame cap", frames: total, max: GIF_MAX_FRAMES },
+      );
+    }
+  }
+  if (loop) warnings.push(...loopWarnings(layout, fps, outFps));
   const requested = input.cover ?? null;
   const choosable = requested !== null && outFps === fps;
   const coverFrame = choosable ? frameAt(input.timeline.id, requested.at, fps, layout.frames) : 0;
@@ -461,7 +484,7 @@ export function compileRender(input: RenderInput): RenderPlan {
   const cover = choosable && !(requested.layout === null && coverFrame === 0) ? { frame: coverFrame, layout: requested.layout } : null;
   if (requested && !choosable) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
   // A loop refuses a cover, so its black first frame has its own warning.
-  const empty = input.loop ? null : emptyFrame(layout, coverFrame, fps);
+  const empty = loop ? null : emptyFrame(layout, coverFrame, fps);
   if (empty) {
     const hint = !requested
       ? "Export with a cover frame (`frameshell render --cover-frame`) or start a picture at 0."
@@ -475,7 +498,7 @@ export function compileRender(input: RenderInput): RenderPlan {
   const bounds = segmentBounds(layout.frames, edges, segmentFrames).flatMap(([from, to]): [number, number][] =>
     cover && from === 0 ? [[0, 1], ...(to > 1 ? ([[1, to]] as [number, number][]) : [])] : [[from, to]],
   );
-  const ext = preset.container;
+  const ext = gif ? "mkv" : preset.container;
   const files: Record<string, string> = {};
   if (layout.subtitles.length > 0) files[SUBTITLES_FILE] = assSubtitles(layout.subtitles, { width, height }, fps);
   if (cover?.layout) files[COVER_FILE] = assCover(cover.layout, { width, height });
@@ -497,14 +520,15 @@ export function compileRender(input: RenderInput): RenderPlan {
         ...graph.inputs,
         ...["-/filter_complex", `${name}.filter`, "-map", "[v]", "-an", "-frames:v", String(outFrames), "-r", rate],
         ...(tiered ? tierVideoArgs(tiered.encoder, tiered.tier, { width, height, fps: outFps }) : videoCodecArgs(preset)),
-        ...["-map_metadata", "-1", "-f", preset.container, `${name}.${ext}`],
+        ...["-map_metadata", "-1", "-f", gif ? "matroska" : preset.container, `${name}.${ext}`],
       ],
     };
   });
   files[CONCAT_LIST] = segments.map((segment) => `file '${segment.file}'\n`).join("");
 
-  const sampleRate = preset.audio.sampleRate ?? 48_000;
-  const audio = { ...audioPlan(layout, fps, sampleRate), codec: audioCodecArgs(preset, sampleRate, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined) };
+  const audio = preset.audio
+    ? { ...audioPlan(layout, fps, preset.audio.sampleRate ?? 48_000), codec: audioCodecArgs(preset.audio, preset.audio.sampleRate ?? 48_000, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined) }
+    : { sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [] };
   return {
     timeline: timeline.id,
     preset: preset.id,
@@ -516,9 +540,9 @@ export function compileRender(input: RenderInput): RenderPlan {
     loudness: input.loudness,
     container: preset.container,
     warnings,
-    ...(input.loop ? { loop: true as const } : {}),
+    ...(loop ? { loop: true as const } : {}),
     files,
-    fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
+    fonts: burnedFonts(layout.subtitles, Boolean(cover?.layout)),
     segments,
     audio,
   };
@@ -584,6 +608,33 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
   };
 }
 
+/**
+ * GIF pass 1 (ADR 0039): one `palettegen stats_mode=diff` over the joined lossless segments, written to
+ * {@link PALETTE_FILE}. Runs after every segment is encoded.
+ */
+export function paletteStep(): FfmpegStep {
+  return {
+    files: {},
+    args: [...BASE, ...["-f", "concat", "-safe", "0", "-i", CONCAT_LIST], ...["-vf", "palettegen=stats_mode=diff", "-frames:v", "1", "-update", "1", PALETTE_FILE]],
+  };
+}
+
+/**
+ * GIF pass 2 (ADR 0039): the joined segments through `paletteuse` (bayer dither scale 5, diff rectangles) into the
+ * `gif` muxer, looping forever. The muxer rounds each frame's time to 1/100 s, which gives 4,4,5,4,4,4 at 24 fps.
+ */
+export function gifStep(output: string): FfmpegStep {
+  return {
+    files: {},
+    args: [
+      ...BASE,
+      ...["-f", "concat", "-safe", "0", "-i", CONCAT_LIST, "-i", PALETTE_FILE],
+      ...["-filter_complex", "[0:v][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle[v]", "-map", "[v]"],
+      ...["-map_metadata", "-1", "-loop", "0", "-f", "gif", output],
+    ],
+  };
+}
+
 /** Half-sine (`hsin`) fades over the first and last `S = round(0.002 x rate)` samples: the tail of a loop's audio chain. */
 function loopFades(rate: number, samples: number): string {
   const length = Math.min(Math.round(LOOP_FADE_SECONDS * rate), Math.floor(samples / 2));
@@ -620,7 +671,18 @@ function loopWarnings(layout: Layout, fps: number, outFps: number): string[] {
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant, undefined, input.mattes);
+  const layout = layoutTimeline(
+    input.timeline,
+    fps,
+    input.sources,
+    { width, height },
+    input.transcripts,
+    input.generated,
+    input.variant,
+    undefined,
+    input.mattes,
+    input.captions,
+  );
   const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
@@ -632,7 +694,7 @@ export function compileFrame(input: FrameInput): FramePlan {
     at: seconds(frame, fps),
     clip: clip?.clip.id ?? null,
     files: burn ? script : {},
-    fonts: burn ? [SUBTITLE_FONT.file] : [],
+    fonts: !burn ? [] : input.cover ? burnedFonts([], true) : burnedFonts(layout.subtitles, false),
     args: [
       ...BASE,
       ...graph.inputs,
@@ -713,6 +775,13 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
   return Number.isFinite(integrated) && integrated > -70 ? measured : null;
 }
 
+/** Font files a plan burns with (see {@link RenderPlan.fonts}): each subtitle track's face, and the bundled one for a cover word. */
+function burnedFonts(subtitles: readonly ResolvedSubtitleTrack[], cover: boolean): string[] {
+  const files = subtitles.map((track) => track.style.font.file ?? SUBTITLE_FONT.file);
+  if (cover) files.push(SUBTITLE_FONT.file);
+  return [...new Set(files)];
+}
+
 /**
  * Place the timeline's clips on the frame grid, resolve subtitle cues, and
  * reject what export cannot render. A generated clip plays its cached render
@@ -735,6 +804,7 @@ function layoutTimeline(
   variant?: FormatLayout,
   audioFx: ReadonlyMap<string, string> = new Map(),
   mattes: ReadonlyMap<string, MatteSource> = new Map(),
+  captions?: CaptionTokens,
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -882,7 +952,7 @@ function layoutTimeline(
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const subtitles = scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), variant);
+  const subtitles = scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps, captions), variant);
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -1743,6 +1813,9 @@ function videoCodecArgs(preset: ExportPreset): string[] {
       return ["-c:v", "libvpx-vp9", "-row-mt", "1", "-pix_fmt", "yuv420p", ...(bitrateKbps ? [] : ["-b:v", "0"]), ...rate];
     case "prores":
       return ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"];
+    case "gif":
+      // Lossless temp for the palette passes (ADR 0039): compression noise would defeat the GIF's diff rectangles.
+      return ["-c:v", "ffv1", "-level", "3", "-pix_fmt", "bgr0"];
   }
 }
 
@@ -1750,9 +1823,9 @@ function videoCodecArgs(preset: ExportPreset): string[] {
 const FINAL_AAC_KBPS = 320;
 
 /** `aacKbps` replaces the preset's own AAC bitrate. */
-function audioCodecArgs(preset: ExportPreset, rate: number, aacKbps?: number): string[] {
-  const { codec } = preset.audio;
-  const bitrateKbps = codec === "aac" && aacKbps ? aacKbps : preset.audio.bitrateKbps;
+function audioCodecArgs(audio: NonNullable<ExportPreset["audio"]>, rate: number, aacKbps?: number): string[] {
+  const { codec } = audio;
+  const bitrateKbps = codec === "aac" && aacKbps ? aacKbps : audio.bitrateKbps;
   const bitrate = bitrateKbps ? ["-b:a", `${bitrateKbps}k`] : [];
   switch (codec) {
     case "aac":
