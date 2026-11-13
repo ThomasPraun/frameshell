@@ -1383,9 +1383,12 @@ code {
 /* ---------- Clip inspector (under the preview) ---------- */
 
 /* Wraps into rows when the preview column is narrow: every field stays reachable. */
+/* Capped so a tall inspector (many wrapped groups in a short window) scrolls instead of squeezing the picture to 0. */
 .clip-inspector {
   flex: none;
   min-height: 32px;
+  max-height: 50%;
+  overflow-y: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

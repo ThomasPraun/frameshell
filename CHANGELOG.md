@@ -691,6 +691,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preview: in a short window the clip inspector takes at most half the panel and scrolls, instead of squeezing the
+  picture, and its handles, to nothing (#581).
 - Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports
   the previous picture as the new one's frame while the engine still decodes it (#551).
 - Desktop: a detached panel window closed within a moment of being moved, resized or leaving full screen keeps that
