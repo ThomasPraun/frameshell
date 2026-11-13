@@ -1,0 +1,154 @@
+{
+  "audio": {
+    "sampleRate": 48000,
+    "samples": 288000,
+    "inputs": [
+      "/project/assets/music.wav"
+    ],
+    "tracks": [
+      [
+        {
+          "kind": "clip",
+          "clip": "p1",
+          "input": 0,
+          "from": 0,
+          "to": 52800,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 52800,
+          "ramps": [
+            {
+              "type": "out",
+              "start": 43200,
+              "length": 9600
+            },
+            {
+              "type": "in",
+              "start": 0,
+              "length": 576
+            }
+          ]
+        },
+        {
+          "kind": "silence",
+          "samples": 139200
+        },
+        {
+          "kind": "clip",
+          "clip": "p3",
+          "input": 0,
+          "from": 240000,
+          "to": 241600,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 1600,
+          "ramps": [
+            {
+              "type": "in",
+              "start": 0,
+              "length": 800
+            },
+            {
+              "type": "out",
+              "start": 800,
+              "length": 800
+            }
+          ]
+        },
+        {
+          "kind": "silence",
+          "samples": 46400
+        },
+        {
+          "kind": "clip",
+          "clip": "p4",
+          "input": 0,
+          "from": 288000,
+          "to": 336000,
+          "speed": 1,
+          "gainDb": 0,
+          "samples": 48000,
+          "ramps": [
+            {
+              "type": "in",
+              "start": 0,
+              "length": 24000
+            },
+            {
+              "type": "in",
+              "start": 0,
+              "length": 576
+            }
+          ]
+        }
+      ],
+      [
+        {
+          "kind": "silence",
+          "samples": 43200
+        },
+        {
+          "kind": "clip",
+          "clip": "p2",
+          "input": 0,
+          "from": 91200,
+          "to": 144000,
+          "speed": 1,
+          "gainDb": -6,
+          "samples": 52800,
+          "ramps": [
+            {
+              "type": "in",
+              "start": 0,
+              "length": 9600
+            },
+            {
+              "type": "out",
+              "start": 52224,
+              "length": 576
+            }
+          ]
+        },
+        {
+          "kind": "silence",
+          "samples": 192000
+        }
+      ]
+    ],
+    "codec": [
+      "-c:a",
+      "aac",
+      "-b:a",
+      "320k",
+      "-ar",
+      "48000"
+    ]
+  },
+  "mix": {
+    "files": {
+      "mix.filter": "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=4[i0c0][i0c1][i0c2][i0c3];\n[i0c0]atrim=start_sample=0:end_sample=52800,asetpts=PTS-STARTPTS,apad=whole_len=52800,atrim=end_sample=52800,afade=t=out:ss=43200:ns=9600:curve=qsin,afade=t=in:ss=0:ns=576:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=52704:ns=96[t0i0];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=139200,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t0i1];\n[i0c1]atrim=start_sample=240000:end_sample=241600,asetpts=PTS-STARTPTS,apad=whole_len=1600,atrim=end_sample=1600,afade=t=in:ss=0:ns=800:curve=qsin,afade=t=out:ss=800:ns=800:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=1504:ns=96[t0i2];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=46400,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t0i3];\n[i0c2]atrim=start_sample=288000:end_sample=336000,asetpts=PTS-STARTPTS,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:ss=0:ns=24000:curve=qsin,afade=t=in:ss=0:ns=576:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=47904:ns=96[t0i4];\n[t0i0][t0i1][t0i2][t0i3][t0i4]concat=n=5:v=0:a=1[t0];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=43200,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t1i0];\n[i0c3]atrim=start_sample=91200:end_sample=144000,asetpts=PTS-STARTPTS,volume=-6dB,apad=whole_len=52800,atrim=end_sample=52800,afade=t=in:ss=0:ns=9600:curve=qsin,afade=t=out:ss=52224:ns=576:curve=qsin,afade=t=in:ss=0:ns=96,afade=t=out:ss=52704:ns=96[t1i1];\nanullsrc=r=48000:cl=stereo,atrim=end_sample=192000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[t1i2];\n[t1i0][t1i1][t1i2]concat=n=3:v=0:a=1[t1];\n[t0][t1]amix=inputs=2:duration=longest:normalize=0[mix]\n"
+    },
+    "args": [
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-nostats",
+      "-progress",
+      "pipe:1",
+      "-y",
+      "-vn",
+      "-i",
+      "/project/assets/music.wav",
+      "-/filter_complex",
+      "mix.filter",
+      "-map",
+      "[mix]",
+      "-c:a",
+      "wavpack",
+      "-f",
+      "wv",
+      "mix.wv"
+    ]
+  }
+}

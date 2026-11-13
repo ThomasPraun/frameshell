@@ -604,10 +604,11 @@ class Edit {
         out = maxOut;
       }
       const media: MediaClip = { id, type, asset: args.asset, start, in: clipIn, out, ...(speed !== 1 ? { speed } : {}), ...extras };
+      setAudioFades(media, args.audioFadeInMs, args.audioFadeOutMs);
       if (args.snap === true) await this.snapNewClip(media, info, args, out);
       clip = media;
     } else if (type === "timeline") {
-      this.refuse(args, ["asset", "out", "speed", "props"], "timeline clips");
+      this.refuse(args, ["asset", "out", "speed", "props", "audioFadeInMs", "audioFadeOutMs"], "timeline clips");
       if (!args.source) throw this.invalid("timeline clips need `source`, e.g. `timelines/intro.json`.", { field: "source" });
       const nested = await this.nestedSource(args.source);
       const clipIn = this.grid.snap(args.in ?? 0);
@@ -623,7 +624,7 @@ class Edit {
         ...extras,
       };
     } else {
-      this.refuse(args, ["asset", "out", "speed"], `${type} clips`);
+      this.refuse(args, ["asset", "out", "speed", "audioFadeInMs", "audioFadeOutMs"], `${type} clips`);
       if (track.kind === "audio") throw this.invalid(`${type} clips render video; use a video track.`, { field: "track" });
       const adapter = await this.adapter(type);
       const duration = args.duration ?? this.context.defaultStillDuration;
@@ -664,7 +665,7 @@ class Edit {
     if (args.type !== "shot") {
       throw this.invalid(`track ${track.id} is a program track: it holds shots only.`, { field: "type", hint: "Pass `type: \"shot\"`, or use a video or audio track." });
     }
-    this.refuse(args, ["asset", "source", "speed", "props", "transform", "gain", "muted", "duration"], "shots");
+    this.refuse(args, ["asset", "source", "speed", "props", "transform", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "duration"], "shots");
     if (args.snap === true) throw this.invalid("shots take no `snap`.", { field: "snap" });
     if (args.in === undefined || args.out === undefined) throw this.invalid("shots need `in` and `out` on the group clock.", { field: args.in === undefined ? "in" : "out" });
     const group = programGroup(this.draft, track);
@@ -957,10 +958,10 @@ class Edit {
         hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
       });
     }
-    const { speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef } = args;
-    if ([speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, transform, props, elements, scriptRef } = args;
+    if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, transform, props, elements, scriptRef].every((value) => value === undefined)) {
       throw this.invalid("nothing to set.", {
-        hint: "Pass at least one of speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef.",
+        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, transform, props, elements, scriptRef.",
       });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
@@ -968,10 +969,10 @@ class Edit {
       // ADR 0031 decision 5: no effects on shots or angles in v1, skipped like transitions on program tracks.
       const skipped = [audioEffects !== undefined ? "audioEffects" : null, backdrop !== undefined ? "backdrop" : null].filter(Boolean).join(" and ");
       this.warnings.push(`${clip.id} is a multicam shot: shots take no effects in this version; ${skipped} skipped.`);
-      if ([speed, gain, muted, transform, props, elements, scriptRef].every((value) => value === undefined)) return;
+      if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, transform, props, elements, scriptRef].every((value) => value === undefined)) return;
     }
     if (isShotClip(clip)) {
-      const given = (["speed", "gain", "muted", "transform", "props", "elements"] as const).filter((field) => args[field] !== undefined);
+      const given = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "transform", "props", "elements"] as const).filter((field) => args[field] !== undefined);
       if (given.length > 0) {
         throw this.invalid(`shots take no ${given.map((f) => `\`${f}\``).join(", ")}; only \`scriptRef\` is set per shot.`, {
           field: given[0]!,
@@ -989,6 +990,15 @@ class Edit {
     }
     if (gain !== undefined || muted !== undefined) {
       clip.audio = { ...clip.audio, ...(gain !== undefined ? { gain } : {}), ...(muted !== undefined ? { muted } : {}) };
+    }
+    if (audioFadeInMs !== undefined || audioFadeOutMs !== undefined) {
+      if (!isMedia(clip)) {
+        throw this.invalid(`only media clips take audio fades; ${clip.id} is ${clip.type}.`, {
+          field: audioFadeInMs !== undefined ? "audioFadeInMs" : "audioFadeOutMs",
+          hint: "Set them on the media clips inside a nested timeline, or use `transition.set` fades on this clip.",
+        });
+      }
+      setAudioFades(clip, audioFadeInMs, audioFadeOutMs);
     }
     if (audioEffects !== undefined) {
       if (!isMedia(clip)) {
@@ -1032,7 +1042,7 @@ class Edit {
    */
   async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
     this.checkFormat(format);
-    const shared = (["speed", "gain", "muted", "audioEffects", "backdrop", "scriptRef"] as const).filter((field) => args[field] !== undefined);
+    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "scriptRef"] as const).filter((field) => args[field] !== undefined);
     if (shared.length > 0) {
       throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
         field: shared[0]!,
@@ -1211,13 +1221,14 @@ class Edit {
   }
 
   /**
-   * A split or cut makes a new edge: a clip's new tail loses its `fadeOut`, its new head its `dissolve`, `shape` and
-   * `fadeIn`. Keys stay.
+   * A split or cut makes a new edge: a clip's new tail loses its `fadeOut` and `audio.fadeOutMs`, its new head its
+   * `dissolve`, `shape`, `fadeIn` and `audio.fadeInMs`. Keys stay.
    */
   dropCutEdgeFields(clip: AnyClip, edge: "head" | "tail"): void {
     if (isShotClip(clip)) return;
     if (edge === "tail") delete clip.fadeOut;
     else clearIncoming(clip);
+    if (isMedia(clip)) setAudioFades(clip, edge === "head" ? 0 : undefined, edge === "tail" ? 0 : undefined);
   }
 
   // Transitions and keyframes (ADR 0018)
@@ -3137,6 +3148,21 @@ function transitionIssues(clips: readonly Clip[], context: TransitionContext): M
     if (found.length > 0) issues.set(clip.id, found);
   }
   return issues;
+}
+
+/**
+ * Set `clip`'s sample-accurate sound fades (`audio.fadeInMs`, `audio.fadeOutMs`): a number sets one, 0 removes it,
+ * undefined keeps it. An `audio` left empty goes.
+ */
+function setAudioFades(clip: MediaClip, fadeInMs: number | undefined, fadeOutMs: number | undefined): void {
+  if (fadeInMs === undefined && fadeOutMs === undefined) return;
+  const audio = { ...clip.audio };
+  for (const [key, ms] of [["fadeInMs", fadeInMs], ["fadeOutMs", fadeOutMs]] as const) {
+    if (ms === 0) delete audio[key];
+    else if (ms !== undefined) audio[key] = ms;
+  }
+  if (Object.keys(audio).length === 0) delete clip.audio;
+  else clip.audio = audio;
 }
 
 /** Clear what a clip comes in by: its `dissolve`, the dissolve's `shape`, its `fadeIn`. */

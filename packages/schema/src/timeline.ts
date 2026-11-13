@@ -152,6 +152,19 @@ export const MediaClipAudioSchema = ClipAudioSchema.extend({
       `Audio effects applied in order (at most ${MAX_AUDIO_EFFECTS}), e.g. the voice chain highpass, denoise, compressor. ` +
         "Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
     ),
+  fadeInMs: z
+    .number()
+    .positive()
+    .optional()
+    .describe(
+      "Milliseconds: equal-power sound ramp from silence at the clip's start, sample-accurate (not snapped to frames), e.g. 12 to " +
+        "de-click a phrase. At most half the clip; none where a dissolve crossfades the edge. Multiplies with `fadeIn`.",
+    ),
+  fadeOutMs: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Milliseconds: the same ramp to silence at the clip's end. At most half the clip; none under a crossfade. Multiplies with `fadeOut`."),
 });
 
 /** Eases between two keys (ADR 0018): the value follows the leaving key's ease. */

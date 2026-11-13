@@ -135,6 +135,18 @@ const rippleTracksArg = z
       "behind them, e.g. footage or music under a restored voice line; that track keeps its timing.",
   );
 
+/** `audioFadeInMs`/`audioFadeOutMs` args of `clip.add` and `clip.set`: a media clip's `audio.fadeInMs`/`fadeOutMs`. */
+const audioFadeArg = (edge: "start" | "end") =>
+  z
+    .number()
+    .nonnegative()
+    .optional()
+    .describe(
+      `\`media\` only: milliseconds of an equal-power sound ramp ${edge === "start" ? "from silence at the clip's start" : "to silence at the clip's end"}, ` +
+        "sample-accurate (not whole frames, unlike `transition.set` fades), e.g. 12 so a cut edge never clicks. At most half the clip; " +
+        "none under a crossfade. 0 removes it.",
+    );
+
 /** Source-seconds range a snapped edge must stay in. */
 const SnapRangeSchema = z
   .strictObject({
@@ -320,6 +332,8 @@ export const operationArgs = {
     transform: TransformSchema.optional(),
     gain: z.number().optional().describe("Audio gain in dB, e.g. -18. Default 0."),
     muted: z.boolean().optional().describe("Mute the clip's audio. Default false."),
+    audioFadeInMs: audioFadeArg("start"),
+    audioFadeOutMs: audioFadeArg("end"),
     scriptRef: z.string().min(1).optional().describe("Script scene, e.g. `scripts/script.md#intro`; the path alone refers to the whole script."),
     take: TakeIdSchema.optional().describe("Shoot take the clip comes from (`k_…`), as `shoot.assemble` sets it; leave it out otherwise."),
     shot: z
@@ -375,6 +389,8 @@ export const operationArgs = {
     speed: z.number().positive().optional().describe("`media` only: playback rate; the start stays, the end moves."),
     gain: z.number().optional().describe("Audio gain in dB."),
     muted: z.boolean().optional(),
+    audioFadeInMs: audioFadeArg("start"),
+    audioFadeOutMs: audioFadeArg("end"),
     audioEffects: z
       .array(AudioEffectSchema)
       .min(1)
@@ -406,7 +422,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
     format: formatArg(
       "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
-        "(`speed`, `gain`, `muted`, `audioEffects`) and `backdrop`, `scriptRef` are shared by every format and refused with it.",
+        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `scriptRef` are shared by every format and refused with it.",
     ),
     hidden: z
       .boolean()
