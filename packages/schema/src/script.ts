@@ -303,6 +303,9 @@ function readScenes(scan: ScriptScan, warnings: string[], outside: string): Read
  */
 export const VOICEOVER_WORDS_PER_SECOND = 2.5;
 
+/** Seconds of air `voiceover.place` leaves between one line and the next when neither is anchored (ADR 0034 decision 19). */
+export const VOICEOVER_LINE_GAP_S = 0.4;
+
 /** Voiceover conventions from the frontmatter (ADR 0034). */
 export const VoiceoverMetaSchema = z.object({
   voiceover: z.boolean().describe("Frontmatter `voiceover: true`: the voiceover conventions apply."),

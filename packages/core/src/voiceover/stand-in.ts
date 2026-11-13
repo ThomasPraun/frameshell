@@ -5,6 +5,10 @@ import { pcmWavBytes } from "../transcripts/window.js";
 
 /** Id of {@link standInSpeechProvider}. */
 export const STAND_IN_SPEECH_PROVIDER = "stand-in";
+/** Id of {@link paidStandInSpeechProvider}. */
+export const PAID_STAND_IN_SPEECH_PROVIDER = "stand-in-paid";
+/** What the paid stand-in charges per spoken word, USD: a round figure the cost dialog can be checked against. */
+export const PAID_STAND_IN_PRICE_PER_WORD = 0.01;
 
 const RATE = 16_000;
 /** Silence before and after the words: the host must trim it. */
@@ -13,6 +17,7 @@ const TAIL_S = 0.5;
 /** One word: a tone this long, then a gap of silence. */
 const WORD_S = 0.3;
 const GAP_S = 0.1;
+const wordsOf = (text: string) => text.split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
 /** Tone frequency per voice, Hz. */
 const VOICES: Readonly<Record<string, number>> = { tone: 440, low: 220 };
 
@@ -30,7 +35,7 @@ export function standInSpeechProvider(): SpeechProvider {
     async synthesize(text, voice, _options, context) {
       const hz = VOICES[voice];
       if (hz === undefined) throw new Error(`unknown voice ${voice}`);
-      const words = text.split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+      const words = wordsOf(text);
       const samples = new Int16Array(Math.round((HEAD_S + words * (WORD_S + GAP_S) + TAIL_S) * RATE));
       for (let word = 0; word < words; word++) {
         const start = Math.round((HEAD_S + word * (WORD_S + GAP_S)) * RATE);
@@ -41,5 +46,19 @@ export function standInSpeechProvider(): SpeechProvider {
       await writeFile(file, pcmWavBytes({ sampleRate: RATE, samples }));
       return { file, model: "stand-in" };
     },
+  };
+}
+
+/**
+ * {@link standInSpeechProvider} that charges {@link PAID_STAND_IN_PRICE_PER_WORD} USD per word (`FRAMESHELL_SPEECH_STAND_IN=paid`
+ * in `frameshelld`, e2e only): the same tones, so the cost confirmation of paid providers can be driven without a cloud account.
+ */
+export function paidStandInSpeechProvider(): SpeechProvider {
+  const free = standInSpeechProvider();
+  const { free: _free, ...rest } = free;
+  return {
+    ...rest,
+    id: PAID_STAND_IN_SPEECH_PROVIDER,
+    estimate: (text) => ({ cost: Math.round(wordsOf(text) * PAID_STAND_IN_PRICE_PER_WORD * 1e6) / 1e6, currency: "USD", characters: text.length }),
   };
 }

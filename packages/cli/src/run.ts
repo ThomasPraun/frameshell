@@ -531,6 +531,8 @@ function parseBuiltin(
     "no-snap"?: boolean | undefined;
     force?: boolean | undefined;
     replace?: boolean | undefined;
+    start?: string | undefined;
+    gap?: string | string[] | undefined;
     dtw?: string | undefined;
     lines?: string | undefined;
     bpm?: string | undefined;
@@ -922,6 +924,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "beats.measure":
     case "beats.show":
       return executeBeats(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
+    case "voiceover.place":
+      return executeVoiceover(conn, inv, cwd, flags.json, undefined);
     case "voiceover.generate":
       await settleTrust(conn, flags, io);
       return executeVoiceover(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));

@@ -50,6 +50,7 @@ const api: FrameshellApi = {
     },
     onChanged: (listener) => subscribe(Channel.filesChanged, listener),
     trash: (path) => invokeOutcome(Channel.filesTrash, path),
+    generateVoiceover: (path) => invokeOutcome(Channel.filesVoiceover, path),
     reveal: (path) => ipcRenderer.invoke(Channel.filesReveal, path),
     copyPath: (path) => ipcRenderer.invoke(Channel.filesCopyPath, path),
     pathOf: (file) => webUtils.getPathForFile(file),

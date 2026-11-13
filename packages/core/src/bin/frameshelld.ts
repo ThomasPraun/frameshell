@@ -4,13 +4,14 @@
 // FRAMESHELL_TX_IDLE_MS (ms of session inactivity that ends an automatic transaction).
 // FRAMESHELL_SEGMENT_STAND_IN=1 (e2e only): photo segmentation answers with squares instead of downloading MobileSAM.
 // FRAMESHELL_SHOOT_STAND_IN=1 (e2e only): takes recorded in the app are heard as their scene's words, no speech model.
-// FRAMESHELL_SPEECH_STAND_IN=1 (tests only): a free built-in speech provider `stand-in` that says each word as a tone.
+// FRAMESHELL_SPEECH_STAND_IN=1 (tests only): a free built-in speech provider `stand-in` that says each word as a tone;
+// `paid` adds `stand-in-paid`, the same voice at 0.01 USD a word, for the app's cost dialog.
 // FRAMESHELL_MATTE_STAND_IN=1 (tests only): subject mattes take what is brighter than mid-gray, no model download.
 // Startup errors go to stderr: the spawning CLI relays them to the user.
 import { resolveSocketPath } from "@frameshell/protocol";
 import { DEFAULT_IDLE_TIMEOUT_MS, startDaemon } from "../daemon.js";
 import { standInSegmentEngine } from "../segment/stand-in.js";
-import { standInSpeechProvider } from "../voiceover/stand-in.js";
+import { paidStandInSpeechProvider, standInSpeechProvider } from "../voiceover/stand-in.js";
 import { DEFAULT_TX_IDLE_GAP_MS } from "../history/transactions.js";
 
 // The spawning CLI closes its end of the stderr pipe once connected; later writes must not crash us.
@@ -22,7 +23,8 @@ try {
   const txIdleGapMs = parseMs("FRAMESHELL_TX_IDLE_MS", DEFAULT_TX_IDLE_GAP_MS);
   const segmentEngine = process.env["FRAMESHELL_SEGMENT_STAND_IN"] === "1" ? standInSegmentEngine() : undefined;
   const shootStandIn = process.env["FRAMESHELL_SHOOT_STAND_IN"] === "1";
-  const speechProviders = process.env["FRAMESHELL_SPEECH_STAND_IN"] === "1" ? [standInSpeechProvider()] : [];
+  const speechStandIn = process.env["FRAMESHELL_SPEECH_STAND_IN"];
+  const speechProviders = speechStandIn === "paid" ? [standInSpeechProvider(), paidStandInSpeechProvider()] : speechStandIn === "1" ? [standInSpeechProvider()] : [];
   const matteStandIn = process.env["FRAMESHELL_MATTE_STAND_IN"] === "1";
   const daemon = await startDaemon({
     socketPath,

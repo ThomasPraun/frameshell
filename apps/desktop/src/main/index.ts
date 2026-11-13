@@ -123,6 +123,7 @@ import {
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
+import { runVoiceover } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
@@ -1514,6 +1515,46 @@ function registerIpc(): void {
       if (response !== 0) return false;
       await shell.trashItem(absolute);
       return true;
+    }),
+  );
+  ipcMain.handle(Channel.filesVoiceover, (event, path: string) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const said = text.app.dialogs;
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+      try {
+        // The misread check stays with the agent for now: it may download a transcription model, which the person has not agreed to here.
+        const result = await runVoiceover(
+          (yes) => daemon.request("voiceover.generate", { cwd: project.dir, script: path, yes, verify: false }),
+          async (ask) => {
+            const { response } = await box({
+              type: "warning",
+              message: said.voiceoverCostTitle(ask.provider, ask.lines),
+              detail: ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost),
+              buttons: [said.voiceoverGenerate, said.cancel],
+              defaultId: 1,
+              cancelId: 1,
+              noLink: true,
+            });
+            return response === 0;
+          },
+        );
+        if (!result) return false;
+        const generated = result.lines.filter((line) => line.state !== "cached").length;
+        const warnings = result.warnings.length > 0 ? `\n\n${result.warnings.join("\n")}` : "";
+        await box({
+          type: "info",
+          message: said.voiceoverDoneTitle(basename(path)),
+          detail: said.voiceoverDoneDetail(generated, result.lines.length - generated) + warnings,
+          buttons: [said.ok],
+          noLink: true,
+        });
+        return true;
+      } catch (error) {
+        await box({ type: "error", message: said.voiceoverFailed, detail: (error as Error).message, buttons: [said.ok], noLink: true });
+        return false;
+      }
     }),
   );
   ipcMain.handle(Channel.filesReveal, async (event, path: string) => {

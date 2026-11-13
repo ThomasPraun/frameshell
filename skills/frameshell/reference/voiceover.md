@@ -37,7 +37,7 @@ frameshell voiceover generate scripts/launch-vo.md --json
 frameshell voiceover generate scripts/launch-vo.md --lines hook-1 --voice em_alex --json
 ```
 
-- Takes land in `assets/voiceover/<script slug>/<line id>.wav`, trimmed of head and tail silence, and are imported (ingest queued). Nothing goes on a timeline: place them with `frameshell clip add`.
+- Takes land in `assets/voiceover/<script slug>/<line id>.wav`, trimmed of head and tail silence, and are imported (ingest queued). Nothing goes on a timeline until you run `voiceover place` (below).
 - Each line's `state`: `generated` (said now), `cached` (its take is current, nothing done), `copied` (same text moved to another line id). Edit a line and only that line is said again.
 - A take file you or the person made or edited by hand is never overwritten: the call fails with `InvalidOperation` naming it.
 - **Paid providers.** When the provider charges, or gives no cost estimate and does not declare itself free, the call generates nothing and fails with `ConfirmationRequired`; `error.data.cost` holds the estimate, or `null` when the cost is unknown. Tell the person (cost, or "unknown") and pass `--yes` only after they confirm it. Never confirm on your own. Cached lines never ask.
@@ -49,10 +49,27 @@ frameshell voiceover generate scripts/launch-vo.md --lines hook-1 --voice em_ale
 
 Every line in the result carries both, for the lines it asked for, cached ones included.
 
-- **`phrases`**: the take cut where it falls silent for 60 ms or more, as `{ from, to, heard }` ranges of the take in seconds (`heard`: the words inside, when the line was checked). They are the cuts of phrase clips: `frameshell clip add <track> assets/voiceover/<script slug>/hook-1.wav --in <from> --out <to> --start <t>`, one per phrase, so a person corrects a cut by trimming that clip. Nothing is placed for you. `phraseFade` (12 ms) is the fade each phrase edge gets when placed; a clip fade sits on the frame grid, so a 12 ms fade is not something `clip add` can apply yet.
+- **`phrases`**: the take cut where it falls silent for 60 ms or more, as `{ from, to, heard }` ranges of the take in seconds (`heard`: the words inside, when the line was checked). They are the cuts of phrase clips, one per phrase, so a person corrects a cut by trimming that clip: `voiceover place` makes them. `phraseFade` (12 ms, the fade #470 asks for) is reported but not applied yet: a clip fade is whole frames, so it waits for a sub-frame ramp; each phrase keeps 20 ms before and 30 ms after its sound meanwhile.
 - **`check`**: the take transcribed by the project's transcription provider and compared with the line's spoken text. `status` is `clean`, `doubtful` (every difference may be the transcription's: a number, a close spelling, a short word it dropped) or `misread` (the voice said something else); `misreads` lists each `missing`, `changed`, `added`, `moved`, `restart` or `pause` with what was `expected` and `heard` and where (`at`, take seconds). A line with respellings also passes when heard as written (`Frameshell` for `{Frameshell|freim shel}`). Fix a `misread` by respelling the term or rewording the line, then generate again: only that line is said again. A `doubtful` line is worth one listen, not a rewrite.
 - **`verification`** says whether the check ran. It is `skipped` (never an error, the takes are still written) when the project is not trusted (its plugins do not load until the person agrees to trust it and you re-run with `--trust`), has no transcription plugin (`frameshell plugin install @frameshell/whisper-cpp`), `--no-verify`/`verify: false` was passed or the transcription failed; `reason` says which. Tell the person when it was skipped: the lines are unchecked. The first check may download the transcription model.
 - Re-run `voiceover generate` after editing a take by hand to check it again: cached lines say nothing and cost nothing.
+
+## Place on the timeline
+
+```sh
+frameshell voiceover place scripts/launch-vo.md --json
+frameshell voiceover place scripts/launch-vo.md --at hook-1=hook+0.5,the-fix-1=bar:3 --json
+frameshell voiceover place scripts/launch-vo.md --lines the-fix-1 --at the-fix-1.2=beat:17 --dry-run --json
+```
+
+- One transaction `Voiceover: launch-vo (2 lines)` (`revert` undoes it; review mode holds it as one proposal). It reads the takes `voiceover generate` wrote, so generate first: a line with no take fails and is named. It never speaks and never costs.
+- Every phrase of every line becomes a media clip of its take (`in`/`out` from the phrase, on whole frames, `scriptRef` `<script>#<scene>`) on the audio track `Voiceover` (made when absent; `--track` names another audio track). The phrases of a line keep the spacing the take has.
+- **Where**: `--at line=time` anchors a line (`hook-1`) or one phrase of it (`hook-1.2`, counting from 1). A time is seconds, a marker id or label with an optional offset (`hook`, `hook+0.5`), or a point of the timeline's grid (`beat:9`, `bar:3`; needs `tempo.set`, and a grid that is not LOW confidence), the same references every time argument takes. Commas separate the entries, so a label with a comma needs its marker id. A line or phrase with no `--at` follows the previous one by `--gap` seconds (0.4); the first starts at `--start`, else right after the track's last clip, else 0. The clip starts on the nearest frame, so the first sound follows by about 20 ms.
+- **Picture rules**: when voice and picture disagree, move the picture: anchor lines on the markers and beats the picture already has, then adjust the cut. A transition starts 3 to 6 frames before a line ends.
+- The voice never overlaps itself: a phrase that would start before the previous one ends, or on a clip already on the track, fails (`InvalidOperation`) naming both, and nothing is written. Move the anchor or drop it. Anchors run in script order: an `--at` earlier than the phrase before it fails the same way.
+- **Re-placing**: clips that already play these takes fail the call, naming them. After `voiceover generate` changed a take (the result warns when it replaced one a clip plays), run `place --replace`: it removes those clips and places the phrases again in the same transaction. Use `--lines` to place only some lines.
+- `--dry-run` plans and reports every clip (`clip: null`) without writing. A take said from older text than the line has now is placed with a warning: generate it again.
+- No 12 ms fade yet and no per-phrase tempo yet. MCP: `voiceover_place`.
 
 ## The `command` provider
 

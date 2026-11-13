@@ -96,6 +96,16 @@ const en = {
     trashProjectFile: (path: string) => `${path} holds the project itself and cannot be moved to the trash.`,
     trashMainTimeline: "This is the project's main timeline and cannot be moved to the trash.",
     trashBin: (windows: boolean): string => (windows ? "Recycle Bin" : "Trash"),
+    voiceoverCostTitle: (provider: string, lines: number) => `Generate ${lines === 1 ? "1 line" : `${lines} lines`} with ${provider}?`,
+    voiceoverCostKnown: (cost: string) =>
+      `${cost} (estimated). The provider bills this to you as each line is generated, and a finished take is kept in assets/voiceover/ so it is never paid for twice.`,
+    voiceoverCostUnknown:
+      "This provider does not say what it costs and does not declare itself free, so it may charge you. A finished take is kept in assets/voiceover/ so it is never paid for twice.",
+    voiceoverGenerate: "Generate",
+    voiceoverDoneTitle: (script: string) => `Voiceover of ${script} is ready`,
+    voiceoverDoneDetail: (generated: number, reused: number) =>
+      `${generated === 1 ? "1 line was generated" : `${generated} lines were generated`}${reused > 0 ? ` and ${reused === 1 ? "1 was already there" : `${reused} were already there`}` : ""}. The takes are in assets/voiceover/.`,
+    voiceoverFailed: "The voiceover could not be generated",
     ok: "OK",
   },
   setup: {
@@ -248,6 +258,16 @@ const es: typeof en = {
     trashProjectFile: (path) => `${path} contiene el proyecto en sí y no se puede mover a la papelera.`,
     trashMainTimeline: "Es la línea de tiempo principal del proyecto y no se puede mover a la papelera.",
     trashBin: (windows) => (windows ? "Papelera de reciclaje" : "Papelera"),
+    voiceoverCostTitle: (provider, lines) => `¿Generar ${lines === 1 ? "1 línea" : `${lines} líneas`} con ${provider}?`,
+    voiceoverCostKnown: (cost) =>
+      `${cost} (estimado). El proveedor te lo cobra a medida que genera cada línea, y una toma terminada se guarda en assets/voiceover/ para no pagarla dos veces.`,
+    voiceoverCostUnknown:
+      "Este proveedor no indica cuánto cuesta ni declara ser gratuito, así que puede cobrarte. Una toma terminada se guarda en assets/voiceover/ para no pagarla dos veces.",
+    voiceoverGenerate: "Generar",
+    voiceoverDoneTitle: (script) => `La voz en off de ${script} está lista`,
+    voiceoverDoneDetail: (generated, reused) =>
+      `${generated === 1 ? "Se generó 1 línea" : `Se generaron ${generated} líneas`}${reused > 0 ? ` y ${reused === 1 ? "1 ya estaba" : `${reused} ya estaban`}` : ""}. Las tomas están en assets/voiceover/.`,
+    voiceoverFailed: "No se pudo generar la voz en off",
     ok: "Aceptar",
   },
   setup: {
