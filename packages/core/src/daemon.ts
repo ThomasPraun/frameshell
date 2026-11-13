@@ -153,7 +153,7 @@ import { FrameGrid } from "./timeline/grid.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
-import { resolveTimeRef } from "./timeline/time-ref.js";
+import { resolveTimeRef, resolveTimeRefAsync } from "./timeline/time-ref.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -168,6 +168,7 @@ import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { generateVoiceover } from "./voiceover/generate.js";
+import { planVoiceoverPlacement, runVoiceoverPlan } from "./voiceover/place.js";
 import { type SfxRequest, generateSfx } from "./sound/generate.js";
 import { allWarnings, planSounds, runPlan } from "./sound/place.js";
 import { sectionStarts } from "./sound/music.js";
@@ -1770,6 +1771,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           ],
           ensureBinary: async (name) => binaries.ensure(name, await projectBinaries(dir)),
           importAssets: (files) => media.import(dir, files, "copy"),
+          uses: async (file) => (await fileUses(join(dir, ...file.split("/")))).uses,
           progress: (update) => {
             try {
               request.progress(update);
@@ -1791,6 +1793,72 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
       });
       return run;
+    },
+    "voiceover.place": async (params, caller) => {
+      const { cwd, timeline, dryRun } = params;
+      const dir = await root(cwd);
+      // One grid load serves every beat or bar anchor of the call; a later anchor that reaches further loads again.
+      let grid: { horizon: number; result: Awaited<ReturnType<typeof tempoGrid>> } | undefined;
+      const plan = await planVoiceoverPlacement(params, {
+        root: dir,
+        load: async () => loadFor(dir, timeline, caller),
+        resolve: (ref, loaded) =>
+          resolveTimeRefAsync(ref, loaded.timeline, async (horizon) => {
+            if (!grid || grid.horizon < horizon) grid = { horizon, result: await tempoGrid({ fps: loaded.fps, timeline: loaded.timeline, horizon, beatsOf: (asset) => beatsOf(dir, asset) }) };
+            return grid.result;
+          }),
+      });
+      const report = { timeline, script: plan.script, track: plan.track, lines: plan.lines, dryRun };
+      const planned = plan.clips.map((clip) => ({ line: clip.line, phrase: clip.phrase, file: clip.file, in: clip.in, out: clip.out, start: clip.start, end: clip.end, anchor: clip.anchor }));
+      if (dryRun || plan.clips.length === 0) {
+        const warnings = !dryRun && plan.remove.length > 0 ? [...plan.warnings, `Nothing was placed, so \`replace\` removed nothing: ${plan.remove.join(", ")} stay on the timeline.`] : plan.warnings;
+        return { ...report, revision: plan.revision, tx: null, placed: planned.map((clip) => ({ ...clip, clip: null })), replaced: dryRun ? plan.remove : [], warnings };
+      }
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: plan.label };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      const author = journalAuthorOf(caller);
+      try {
+        // Each step checks the revision its predecessor left: a person's edit in between fails the step instead of putting phrases on a timeline they have changed.
+        let expected = plan.revision;
+        const written = await runVoiceoverPlan(plan, async (step) => {
+          const request = step as OperationRequest;
+          const result = await timelines.apply({
+            root: dir,
+            cwd,
+            timeline,
+            request,
+            author,
+            tx,
+            prepare: async (current) => {
+              if (current.revision !== expected) {
+                throw new RpcError(ErrorCode.StaleRevision, `voiceover.place: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the phrases were placed. Check it with timeline show.`, {
+                  op: "voiceover.place",
+                  timeline,
+                  revision: expected,
+                  current: current.revision,
+                });
+              }
+              return request;
+            },
+          });
+          expected = result.revision;
+          await transactions.applied(key, tx);
+          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
+        });
+        return {
+          ...report,
+          revision: written.revision,
+          tx: tx.id,
+          track: { ...plan.track, id: written.track },
+          placed: planned.map((clip, index) => ({ ...clip, clip: written.clipIds[index]! })),
+          replaced: plan.remove,
+          warnings: [...new Set([...plan.warnings, ...written.warnings])],
+        };
+      } finally {
+        await settle(key, tx);
+      }
     },
     "sound.sfx": async ({ cwd, kind, variant, seed, pitch, length }) => {
       const dir = await root(cwd);

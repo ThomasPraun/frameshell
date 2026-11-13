@@ -501,9 +501,10 @@ export {
   planSync,
 } from "./multicam/sync.js";
 export { COMMAND_SPEECH_PROVIDER, commandSpeechProvider, readCommandSpeechProvider } from "./voiceover/command.js";
-export { STAND_IN_SPEECH_PROVIDER, standInSpeechProvider } from "./voiceover/stand-in.js";
+export { PAID_STAND_IN_PRICE_PER_WORD, PAID_STAND_IN_SPEECH_PROVIDER, STAND_IN_SPEECH_PROVIDER, paidStandInSpeechProvider, standInSpeechProvider } from "./voiceover/stand-in.js";
 export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
 export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";
+export { VOICE_TRACK_NAME, planVoiceoverPlacement, runVoiceoverPlan } from "./voiceover/place.js";
 export { PHRASE_FADE_S, type Phrase, SPLIT_HOP_S, SPLIT_LEAD_S, SPLIT_MIN_SILENCE_S, SPLIT_RANGE_DB, SPLIT_TAIL_S, splitPhrases } from "./voiceover/split.js";
 export { type LineCheck, type TakeToCheck, type Verification, type VerifyOutcome, type VerifyRequest, checkLine, textInRanges, verifyTakes } from "./voiceover/verify.js";
 export {

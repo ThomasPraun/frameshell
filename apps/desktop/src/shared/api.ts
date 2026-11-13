@@ -359,6 +359,12 @@ export interface FrameshellApi {
      * it (daemon `file.uses`). False when the person cancelled, or when it is one of the project's own files (a message box says so).
      */
     trash(path: string): Promise<boolean>;
+    /**
+     * Generate the voiceover of a project-relative voiceover script (daemon `voiceover.generate`, ADR 0034). A paid
+     * provider asks first in a native dialog naming the cost (or that it is unknown); main sends `yes` only after the
+     * person confirms. False when the person cancelled or it failed (a message box says why), true once the takes are written.
+     */
+    generateVoiceover(path: string): Promise<boolean>;
     /** Show a project-relative file or folder in Finder / Explorer / the file manager. */
     reveal(path: string): Promise<void>;
     /** Put the absolute path of a project-relative file or folder on the clipboard. */
@@ -928,6 +934,7 @@ export const Channel = {
   filesWrite: "files:write",
   filesChanged: "files:changed",
   filesTrash: "files:trash",
+  filesVoiceover: "files:voiceover",
   filesReveal: "files:reveal",
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",

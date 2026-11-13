@@ -46,6 +46,10 @@ _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 One stretch of a voiceover take between silences of 60 ms or more, as a range of the take in seconds; the cuts of the phrase clips a person corrects by trimming. Derived from the file, never stored.
 _Avoid_: segment, chunk
 
+**Phrase clip**:
+The media clip `voiceover place` makes for one phrase: it plays that range of the take on the audio track `Voiceover`, on whole frames, linked to its scene by `scriptRef`. A person corrects a cut by trimming it.
+_Avoid_: voiceover clip (every clip of the track is one), segment
+
 **Misread**:
 A difference between what a voiceover take was heard to say (through the project's transcription provider) and the line it was asked to read: `missing`, `changed`, `added`, `moved`, `restart` or `pause`; the line is `clean`, `doubtful` (the transcription may have made it) or `misread`.
 _Avoid_: error (too broad), mispronunciation (the check hears words, not sounds)

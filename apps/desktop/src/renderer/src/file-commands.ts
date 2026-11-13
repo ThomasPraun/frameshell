@@ -20,6 +20,11 @@ export function copyPathItem(path: string): MenuItem {
   return { label: t.editor.copyPath, run: () => void window.frameshell.files.copyPath(path) };
 }
 
+/** "Generate voiceover…" for project-relative script `path`: says its lines, asking first when the provider charges. */
+export function voiceoverItem(path: string): MenuItem {
+  return { label: t.editor.generateVoiceover, run: () => void window.frameshell.files.generateVoiceover(path) };
+}
+
 /** Reveal, Copy path, then Move to Trash (main asks first; the OS trash is the undo) for project-relative `path`. */
 export function placeItems(path: string): MenuItem[] {
   const files = window.frameshell.files;

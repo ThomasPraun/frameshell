@@ -6,12 +6,12 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import type { SpeechOptions, SpeechProvider } from "@frameshell/plugin-api";
 import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
-import { type VoiceoverLine, parseVoiceoverScript, shootSlug } from "@frameshell/schema";
+import { type VoiceoverLine, shootSlug } from "@frameshell/schema";
 import { writeTextAtomic } from "../fs-util.js";
 import type { MediaImportResult } from "../media/service.js";
-import { locateScript } from "../scripts/outline.js";
 import { type Pcm16, pcmOfWav, readPcmWav } from "../transcripts/window.js";
 import { type TakeFile, type TakeMark, VOICEOVER_DIR, readTakes, takeKey, takeWavBytes } from "./takes.js";
+import { invalidParam, pickLines, readVoiceoverScript } from "./script.js";
 import { PHRASE_FADE_S, splitPhrases } from "./split.js";
 import { trimSilence } from "./trim.js";
 import { type Verification, type VerifyRequest, textInRanges, verifyTakes } from "./verify.js";
@@ -42,6 +42,8 @@ export interface VoiceoverRequest {
   ensureBinary(name: string): Promise<string>;
   /** Import project files already under `assets/` and queue their ingest. */
   importAssets(files: string[]): Promise<MediaImportResult>;
+  /** Timeline clips (`timeline` id and clip `id`) that play project-relative `file`, for the warning about a take replaced under them. */
+  uses(file: string): Promise<{ timeline: string; id: string }[]>;
   progress(update: Progress): void;
   /** Aborted when the daemon stops. */
   signal: AbortSignal;
@@ -69,30 +71,20 @@ interface Plan {
 /** Generate (or reuse) the takes of a voiceover script's lines and import the new ones; see the `voiceover.generate` registry entry. */
 export async function generateVoiceover(request: VoiceoverRequest): Promise<VoiceoverGenerateResult> {
   const { root } = request;
-  const { path, text } = await locateScript(root, request.cwd, request.script);
-  const script = parseVoiceoverScript(text);
-  if (!script.voiceover.voiceover) {
-    throw new RpcError(ErrorCode.InvalidOperation, `${path} is not a voiceover script: add \`voiceover: true\` to its frontmatter.`, {
-      op: "voiceover.generate",
-      reason: "not a voiceover script",
-      field: "script",
-      hint: "Write the lines to be read in a script with `voiceover: true` in its frontmatter.",
-    });
-  }
-  const all = script.scenes.flatMap((scene) => scene.lines);
+  const { path, script, lines: all } = await readVoiceoverScript(root, request.cwd, request.script, "voiceover.generate");
   const lines = pickLines(all, request.lines);
 
   const providerId = request.provider ?? script.voiceover.provider;
   if (!providerId) {
     const available = await request.speechProviders();
-    throw invalid("provider", `Name a speech provider: \`--provider <id>\` or \`provider:\` in ${path}'s frontmatter (available: ${available.join(", ") || "none"}).`);
+    throw invalidParam("provider", `Name a speech provider: \`--provider <id>\` or \`provider:\` in ${path}'s frontmatter (available: ${available.join(", ") || "none"}).`);
   }
   const provider = await request.speechProvider(providerId);
   const voices = await providerCall(provider, null, () => provider.voices());
   const voice = request.voice ?? script.voiceover.voice ?? provider.defaultVoice;
-  if (!voice) throw invalid("voice", `Speech provider ${providerId} has no default voice: name one (voices: ${voices.map((v) => v.id).join(", ") || "none listed"}).`);
+  if (!voice) throw invalidParam("voice", `Speech provider ${providerId} has no default voice: name one (voices: ${voices.map((v) => v.id).join(", ") || "none listed"}).`);
   if (voices.length > 0 && !voices.some((known) => known.id === voice)) {
-    throw invalid("voice", `Speech provider ${providerId} has no voice "${voice}" (voices: ${voices.map((v) => v.id).join(", ")}).`);
+    throw invalidParam("voice", `Speech provider ${providerId} has no voice "${voice}" (voices: ${voices.map((v) => v.id).join(", ")}).`);
   }
   const options: SpeechOptions = script.voiceover.language ? { language: script.voiceover.language } : {};
 
@@ -151,6 +143,14 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   const results = new Map<string, PartialLine>();
   const written: string[] = [];
   const warnings = [...script.warnings];
+  // Line ids are positional (ADR 0034 decision 19): a take replaced by other speech changes what its clips play.
+  for (const plan of plans) {
+    if (plan.state === "cached" || plan.existing === null) continue;
+    const uses = await request.uses(plan.file);
+    if (uses.length === 0) continue;
+    const clips = uses.map((use) => `${use.id} (${use.timeline})`).join(", ");
+    warnings.push(`Line ${plan.line.id}: ${plan.file} was replaced by other speech and ${uses.length === 1 ? "a clip plays" : "clips play"} it: ${clips}. Place its phrases again with \`voiceover place --replace\`.`);
+  }
   const pcms = new Map<string, Pcm16>();
   const finish = (plan: Plan, take: { pcm: Pcm16; head: number; tail: number }) => {
     pcms.set(plan.line.id, take.pcm);
@@ -257,21 +257,6 @@ async function checkTakes(
   });
 }
 
-/** Lines `ids` names, in script order; all when absent. Throws `InvalidParams` naming unknown ids. */
-function pickLines(all: VoiceoverLine[], ids: readonly string[] | undefined): VoiceoverLine[] {
-  if (!ids) {
-    if (all.length === 0) throw invalid("script", "The script has no lines to say: write them under `## ` scene headings.");
-    return all;
-  }
-  const known = new Set(all.map((line) => line.id));
-  const unknown = ids.filter((id) => !known.has(id));
-  if (unknown.length > 0) {
-    throw invalid("lines", `No line ${unknown.join(", ")} in the script (lines: ${all.map((line) => line.id).join(", ") || "none"}).`);
-  }
-  const wanted = new Set(ids);
-  return all.filter((line) => wanted.has(line.id));
-}
-
 /** Summed estimate of the lines to say; null when the provider gives none (free). */
 async function estimate(provider: SpeechProvider, plans: Plan[], voice: string, options: SpeechOptions): Promise<{ amount: number; currency: string } | null> {
   if (!provider.estimate) return null;
@@ -328,10 +313,6 @@ function pcmOf(bytes: Buffer) {
 function lineFields(plan: Plan): Omit<PartialLine, "duration" | "trimmed"> {
   const { id, scene, line, display, spoken } = plan.line;
   return { id, scene, line, display, spoken, file: plan.file, state: plan.state };
-}
-
-function invalid(field: string, message: string): RpcError {
-  return new RpcError(ErrorCode.InvalidParams, message, { issues: [{ path: [field], message }] });
 }
 
 function formatCost(cost: { amount: number; currency: string }): string {

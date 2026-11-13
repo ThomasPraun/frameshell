@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 117): `frameshell voiceover place <script>`
+  (daemon `voiceover.place`, MCP `voiceover_place`) puts the takes of a voiceover script on the timeline as phrase clips
+  in one transaction: each take is cut at its silences, every phrase becomes a clip on the audio track `Voiceover`
+  (made when absent) with the spacing the take has and a `scriptRef` to its scene. `--at line=time` anchors a line
+  (`hook-1`) or one phrase (`hook-1.2`) on seconds, a marker (`hook+0.5`) or a beat or bar of the grid (`beat:9`,
+  `bar:3`) through the shared TimeRef resolver; the rest follow by `--gap` (0.4 s). The voice never overlaps itself,
+  `--dry-run` plans without writing, and clips already playing the takes fail the call unless `--replace` removes them
+  first. `voiceover generate` now warns, naming the clips, when it replaces a take a clip plays. In the app, the
+  Explorer's menu of a script has "Generate voiceover…": a paid provider asks first in a dialog with its estimated cost
+  (or that it does not say), and only a confirm sends `yes` (English and Spanish). The e2e daemon takes
+  `FRAMESHELL_SPEECH_STAND_IN=paid` for a stand-in provider that charges 0.01 USD a word.
 - Captions and generated clips take the project style, third slice of #468 (ADR 0028, epic #451; `clip.live`
   `styleCss`, style `type.caption`, plugin API `styleTokens` / `RenderContext.styleCss`, protocol 115): a subtitle
   track that names no preset shows its text in `colors.ink` outlined in `colors.bg`, the keyword in `colors.keyword`
@@ -199,7 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Voiceover, slice 3 of #470 (ADR 0034 decisions 17 and 18, epic #451; protocol 103): `voiceover generate` now splits each
   take into phrases and checks it for misreads. Every line reports its `phrases`: the take cut where it falls silent for
   60 ms or more (5 ms RMS, 38 dB under its peak, 20 ms lead and 30 ms tail kept) as ranges of the take in seconds, the
-  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade each edge gets when placed). With
+  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade #470 asks for, reported; placement does not apply it until sample-accurate fades, #585). With
   `verify` (the default; `--no-verify` skips it) each take is also transcribed by the project's transcription provider
   and compared with the line's spoken text by the shoot comparison, so spoken numbers and word normalization stay in one
   place: each line gets a `check` (`clean`, `doubtful` when the transcription may be to blame, `misread`) listing what was
