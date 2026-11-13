@@ -1,4 +1,4 @@
-import { CURSOR_CSS, CURSOR_HTML, CURSOR_MATH, CURSOR_SCRIPT, cursorVariables, hesitateVariable } from "./cursor-kit.js";
+import { CAMERA_MATH, CURSOR_CSS, CURSOR_HTML, CURSOR_MATH, CURSOR_SCRIPT, cameraVariables, cursorVariables, hesitateVariable } from "./cursor-kit.js";
 import {
   BACKDROP_CSS,
   BACKDROP_SETUP,
@@ -15,8 +15,10 @@ import {
 /**
  * Cursor click (#466, UI demo): a cursor enters from outside the frame, hesitates,
  * clicks a button, and on that same frame the button presses, a ring spreads and
- * a confirmation springs in; then the cursor drifts aside. Transparent unless
- * `backdrop` is raised.
+ * a confirmation springs in; then the cursor drifts aside. With `camera` set to
+ * follow, the frame zooms in with the cursor to the click and pulls back after it.
+ * A clip too short for the click gets a cursor without its hesitation, then a
+ * faster one (timing guard). Transparent unless `backdrop` is raised.
  */
 export const cursorClick: Template = {
   id: "cursor-click",
@@ -28,6 +30,7 @@ export const cursorClick: Template = {
       { id: "button", type: "string", label: "Button text", default: tokens.brand.cta ?? "Start free trial", maxLength: 28 },
       { id: "result", type: "string", label: "Confirmation that appears under the button; empty for none", default: "You're in. Welcome aboard", maxLength: 40 },
       hesitateVariable(0.3),
+      ...cameraVariables(),
       { id: "ink", type: "color", label: "Confirmation text colour", default: tokens.colors.ink ?? PLACEHOLDER.ink },
       { id: "accent", type: "color", label: "Button colour", default: tokens.colors.accent ?? PLACEHOLDER.accent },
       { id: "card", type: "color", label: "Confirmation card colour", default: tokens.colors.card ?? PLACEHOLDER.bg },
@@ -69,6 +72,7 @@ export const cursorClick: Template = {
       ${COLOR_HELPERS}
       ${BACKDROP_SETUP}
       ${CURSOR_MATH}
+      ${CAMERA_MATH}
       ${CURSOR_SCRIPT}
 
       // Layout per format (sizes are fractions of the short side, y of the frame height). wide, square, tall.
@@ -102,12 +106,24 @@ export const cursorClick: Template = {
       // The cursor arrives on an arc, hesitates, and clicks a little right of the button's centre; then it drifts aside.
       var target = { x: cx + 0.15 * bw, y: by + 0.1 * bh };
       var rest = inFrame({ x: cx + Math.max(bw, result ? tw : 0) / 2 + 0.04 * unit, y: ty + th * 0.2 }, 0.06);
-      var trip = journey(FROM, [
-        { x: target.x, y: target.y, hesitate: P.hesitate, wait: 0.54 },
-        { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
-      ], START, { x: 0.004 * unit, y: 0.003 * unit });
+      var stops = function (hesitate) {
+        return [
+          { x: target.x, y: target.y, hesitate: P.hesitate * hesitate, wait: 0.54 },
+          { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
+        ];
+      };
       // The click is the one moment everything else hangs on: the press, the ring and the confirmation share it.
-      var clickAt = trip.legs[0].arrive + 0.04;
+      var made = fitFirst(CURSOR_TRIES, function (hesitate, rate) {
+        var trip = journey(FROM, stops(hesitate), START, { x: 0.004 * unit, y: 0.003 * unit }, rate);
+        return { trip: trip, ready: trip.legs[0].arrive + 0.04 };
+      }, latest(0.5));
+      var trip = made.trip;
+      var clickAt = made.ready;
+
+      // The follow camera: in by the press, out again once the confirmation has been read.
+      var follow = P.camera === "follow";
+      var camIn = Math.max(0.5, clickAt - 0.1);
+      var camOut = Math.max(clickAt + 0.3, Math.min(clickAt + 0.9, latest(0.7)));
 
       var world = document.getElementById("world");
       var D = S.duration;
@@ -116,8 +132,13 @@ export const cursorClick: Template = {
       M.bind("${id}", function (t) {
         var out = M.ease("exit", (t - (D - OUT)) / OUT);
         put(backdrop, { opacity: P.backdrop * M.ease("enter", t / 0.3) * (1 - out) });
-        // Holds never stop: a slow push over the whole clip.
-        put(world, { scale: 1 + 0.025 * Math.min(1, t / D) - 0.02 * out, opacity: 1 - out });
+        // Holds never stop: a slow push over the whole clip, or the follow camera.
+        if (follow) {
+          var cam = camera(trip.at(Math.max(0, t - 0.12)), zoomAt(t, 0.1, camIn, camOut, camOut + 0.7), P.zoom);
+          put(world, { x: cam.x, y: cam.y, scale: cam.scale * (1 - 0.02 * out), opacity: 1 - out });
+        } else {
+          put(world, { scale: 1 + 0.025 * Math.min(1, t / D) - 0.02 * out, opacity: 1 - out });
+        }
 
         var cp = press(t, clickAt, clickAt + 0.1);
         var hover = M.ease("enter", (t - (trip.legs[0].arrive - 0.2)) / 0.25);

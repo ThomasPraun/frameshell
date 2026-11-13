@@ -5,6 +5,9 @@ import {
   ErrorCode,
   REVIEW_KEEP,
   REVIEW_SHEETS,
+  type ReviewLoudness,
+  type ReviewMetrics,
+  type ReviewOutput,
   type ReviewPeak,
   type ReviewResult,
   type ReviewSafeZone,
@@ -13,7 +16,8 @@ import {
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES } from "@frameshell/schema";
+import { type FormatEntry, type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES } from "@frameshell/schema";
+import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { bundledFontMetrics } from "../export/font-metrics.js";
 import type { ExportService } from "../export/service.js";
 import type { TimelineService } from "../timeline/service.js";
@@ -33,8 +37,9 @@ import {
   timelineCritical,
 } from "./plan.js";
 import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
+import { reviewMetrics } from "./metrics.js";
 import { crossingAt, cueCrossings, filmInsets, safeFlags, sameOrientation } from "./safe.js";
-import { type FilmSource, fileSource, timelineSource } from "./source.js";
+import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
 
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
@@ -54,21 +59,24 @@ export interface ReviewRequest {
   file?: string | undefined;
   from?: number | undefined;
   to?: number | undefined;
-  sheets?: readonly ReviewSheetKind[] | undefined;
+  /** Sheets and `metrics` to write; absent: the default sheets and the metrics. */
+  sheets?: readonly ReviewOutput[] | undefined;
   /** Platform whose safe zones the `safe` sheet draws. */
   platform?: PlatformId | undefined;
   every?: number | undefined;
   projectFormat?: string | undefined;
   /** Which version of the timeline to look at. */
   view: TimelineViewName;
+  /** The project's format list as `view` shows it, when a proposal changes it (ADR 0036); absent: the file's. */
+  formats?: readonly FormatEntry[] | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
 export const REVIEW_DIR = [".frameshell", "review"] as const;
 
 /**
- * `review` (#457): contact sheet, phone sheet, fast-motion strips and loop seam of a timeline or an exported file,
- * written to `.frameshell/review/<n>/`. Frames come from the `frame` method (timeline) or ffmpeg (file); sampling
+ * `review` (#457): contact sheet, phone sheet, fast-motion strips, loop seam and `metrics.json` of a timeline or an
+ * exported file, written to `.frameshell/review/<n>/`. Frames come from the `frame` method (timeline) or ffmpeg (file); sampling
  * is in `plan.ts` and tiling in `sheet.ts`, which #471 `analyze` shares.
  */
 export class ReviewService {
@@ -102,6 +110,9 @@ export class ReviewService {
       const aspect = source.width / source.height;
       const sheets: ReviewSheet[] = [];
       const peaks: ReviewPeak[] = [];
+      let measured: MotionSeries | undefined;
+      /** The motion of the range, measured once for the `motion` sheet and the metrics. */
+      const motion = async () => (measured ??= await source.motion(range, join(scratch, "motion"), signal));
       const safeZones: ReviewSafeZone[] = [];
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
@@ -153,7 +164,7 @@ export class ReviewService {
           if (picks) await write("seam", picks, "seam");
           else warnings.push("seam: the range is a single frame, so there is no seam to look at.");
         } else {
-          const series = await source.motion(range, join(scratch, "motion"), signal);
+          const series = await motion();
           const found = motionPeaks(series.times, series.energy);
           if (found.length === 0) warnings.push("motion: nothing in the picture changes between frames, so there are no fast moments to show.");
           for (const [i, peak] of found.entries()) {
@@ -161,6 +172,16 @@ export class ReviewService {
             peaks.push({ ...peak, strip });
           }
         }
+      }
+
+      let metrics: ReviewMetrics | null = null;
+      if (request.sheets === undefined || request.sheets.includes("metrics")) {
+        signal?.throwIfAborted();
+        const series = await motion();
+        const seconds = { from: frameTime(range.first, source.fps), to: frameTime(range.end, source.fps) };
+        const loudness = await this.#loudness(request, source, ffmpeg, warnings, signal);
+        metrics = reviewMetrics({ fps: source.fps, range: seconds, series, tracks: subtitles, loudness, hasSound: source.audio ?? null });
+        await writeFile(join(dir, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
       }
 
       const result: ReviewResult = {
@@ -178,14 +199,37 @@ export class ReviewService {
         sheets,
         peaks,
         safeZones,
+        metrics,
         warnings,
       };
-      const { view: _view, proposal: _proposal, ...manifest } = result;
+      const { view: _view, proposal: _proposal, metrics: _metrics, ...manifest } = result;
       await writeFile(join(dir, "review.json"), `${JSON.stringify(manifest, null, 2)}\n`);
       await this.#prune(root);
       return result;
     } finally {
       await rm(scratch, { recursive: true, force: true });
+    }
+  }
+
+  /** The loudness of an exported file's sound, whole and in the phone band; null for a timeline, or for a file with no sound (`warnings` says so). */
+  async #loudness(request: ReviewRequest, source: FilmSource, ffmpeg: string, warnings: string[], signal?: AbortSignal): Promise<ReviewLoudness | null> {
+    // A timeline's sound is mixed only by `render`, and the number that counts is the file's after the encode.
+    if (!request.file) return null;
+    if (!source.audio) {
+      warnings.push("loudness: the file has no sound.");
+      return null;
+    }
+    try {
+      const [whole, band] = await Promise.all([measureLoudness(ffmpeg, request.file, signal), measureLoudness(ffmpeg, request.file, signal, PHONE_BAND_FILTER)]);
+      if (whole === null) {
+        warnings.push("loudness: ffmpeg reported no reading for the sound.");
+        return null;
+      }
+      return { integrated: whole.integrated, range: whole.range, truePeak: whole.truePeak, phoneBand: band?.integrated ?? null };
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`loudness: ffmpeg could not measure the sound (${(error as Error).message.split("\n")[0]}).`);
+      return null;
     }
   }
 
@@ -202,7 +246,7 @@ export class ReviewService {
       return { source, critical: [], subtitles: [], viewed: { view: "current", proposal: null }, warnings };
     }
     const { timelines, exports } = this.#options;
-    const loaded = await timelines.viewTimeline(root, request.timeline, request.view);
+    const loaded = { ...(await timelines.viewTimeline(root, request.timeline, request.view)), ...(request.formats ? { formats: request.formats } : {}) };
     const shown = await timelines.show(root, request.timeline, request.view);
     if (shown.duration === null) {
       throw new RpcError(ErrorCode.InvalidOperation, `review: timeline ${request.timeline} has a clip whose end is unknown (${shown.problems[0]?.message ?? "nested timeline problem"}); fix it first.`, {

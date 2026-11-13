@@ -1,4 +1,4 @@
-import { type Backdrop, type ClipKey, type ElementAdjust, parseStyleFile, resolveStyle, STYLE_FILE, glassOf } from "@frameshell/schema";
+import { type Backdrop, type ClipKey, type ElementAdjust, glassOf } from "@frameshell/schema";
 import { keyedValueAt } from "@frameshell/schema/composite";
 import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { useEffect, useMemo, useState } from "react";
@@ -9,9 +9,11 @@ import { useElementMode } from "../preview/element-mode.js";
 import { useTransport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
+import { VoiceControl } from "./VoiceControl.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "../timeline/layout.js";
 import { type EdgeState, KEY_PROPS, type KeyBox, type KeyProp, clipClock, edgeState, keyAt } from "../timeline/transitions.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { projectStyle } from "../project-style.js";
 import { t } from "../i18n.js";
 import { sendClipEdit } from "./clip-edits.js";
 import { NumberField } from "./inspector-fields.js";
@@ -23,6 +25,7 @@ import { ShotInspector } from "./ShotInspector.js";
  * shot's layout and angles in {@link ShotInspector}. Each
  * change is one `clip.set` by `ui`, saved at once and undoable from the
  * timeline; values shown are the saved ones, from the shared timeline feed.
+ * A media clip's voice chain (ADR 0031) is edited in {@link VoiceControl}.
  * Video projects add the clip's edge transitions and keyframes (ADR 0018):
  * a keyed property shows its value at the playhead, and editing it keys it there.
  * A generated clip lists its element adjustments (ADR 0021) while it has any
@@ -115,6 +118,7 @@ export function ClipInspector() {
           </button>
         </div>
       )}
+      {audible && <VoiceControl clip={clip.id} effects={clip.audioEffects} onSend={send} onError={setError} />}
       {!image && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.transitions}>
           {(["in", "out"] as const).map((side) => (
@@ -209,9 +213,9 @@ function TransitionEdge({ side, state, onSend }: { side: "in" | "out"; state: Ed
           name="length"
           stored={state.length}
           onCommit={(value) =>
-            // A shaped dissolve (ADR 0030) keeps its shape: the inspector does not edit shapes yet.
+            // A shaped dissolve (ADR 0030) keeps its shape (an iris its origin): the inspector does not edit shapes yet.
             state.shape
-              ? onSend({ op: "transition.set", args: { at: state.at, kind: state.shape.kind, direction: state.shape.direction ?? "left", duration: value } }, { label: "Change transition length" })
+              ? onSend({ op: "transition.set", args: { at: state.at, ...state.shape, duration: value } }, { label: "Change transition length" })
               : set(state.kind!, value, "Change transition length")
           }
         />
@@ -275,11 +279,7 @@ function KeyControl({
 
 /** The project's glass numbers (`style.json` `glass`, ADR 0028), the motion kit's without a style file. */
 async function styleGlass(): Promise<Required<Backdrop>> {
-  const text = await window.frameshell.files.read(STYLE_FILE).catch(() => null);
-  if (text === null) return glassOf(resolveStyle(null).glass);
-  const parsed = parseStyleFile(JSON.parse(text));
-  if (!parsed.ok) throw new Error(`${STYLE_FILE}: ${parsed.error}`);
-  return glassOf(resolveStyle(parsed.value).glass);
+  return glassOf((await projectStyle()).glass);
 }
 
 /**

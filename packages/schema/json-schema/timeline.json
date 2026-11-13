@@ -118,6 +118,59 @@
                               "description": "Default false.",
                               "type": "boolean"
                             },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
+                            },
                             "effects": {
                               "description": "Audio effects applied in order (at most 8), e.g. the voice chain highpass, denoise, compressor. Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
                               "minItems": 1,
@@ -233,12 +286,13 @@
                               "type": "string",
                               "enum": [
                                 "wipe",
-                                "push"
+                                "push",
+                                "iris"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
                             },
                             "direction": {
-                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -246,6 +300,35 @@
                                 "up",
                                 "down"
                               ]
+                            },
+                            "origin": {
+                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 4,
+                              "maxItems": 4
                             }
                           },
                           "required": [
@@ -578,6 +661,59 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -594,12 +730,13 @@
                               "type": "string",
                               "enum": [
                                 "wipe",
-                                "push"
+                                "push",
+                                "iris"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
                             },
                             "direction": {
-                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -607,6 +744,35 @@
                                 "up",
                                 "down"
                               ]
+                            },
+                            "origin": {
+                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 4,
+                              "maxItems": 4
                             }
                           },
                           "required": [
@@ -932,6 +1098,59 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -948,12 +1167,13 @@
                               "type": "string",
                               "enum": [
                                 "wipe",
-                                "push"
+                                "push",
+                                "iris"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
                             },
                             "direction": {
-                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -961,6 +1181,35 @@
                                 "up",
                                 "down"
                               ]
+                            },
+                            "origin": {
+                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 4,
+                              "maxItems": 4
                             }
                           },
                           "required": [
@@ -1708,6 +1957,59 @@
                     "muted": {
                       "description": "Default false.",
                       "type": "boolean"
+                    },
+                    "duck": {
+                      "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "under": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the clip dips below its level while someone speaks."
+                        },
+                        "attackMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the dip takes to reach full depth."
+                        },
+                        "releaseMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the level takes to come back after the voice stops."
+                        },
+                        "threshold": {
+                          "type": "number",
+                          "description": "dBFS above which sound counted as speech."
+                        },
+                        "gap": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds under which two stretches of speech merged."
+                        },
+                        "level": {
+                          "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "under",
+                        "depth",
+                        "attackMs",
+                        "releaseMs",
+                        "threshold",
+                        "gap"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -1780,6 +2082,59 @@
                     "muted": {
                       "description": "Default false.",
                       "type": "boolean"
+                    },
+                    "duck": {
+                      "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "under": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the clip dips below its level while someone speaks."
+                        },
+                        "attackMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the dip takes to reach full depth."
+                        },
+                        "releaseMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the level takes to come back after the voice stops."
+                        },
+                        "threshold": {
+                          "type": "number",
+                          "description": "dBFS above which sound counted as speech."
+                        },
+                        "gap": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds under which two stretches of speech merged."
+                        },
+                        "level": {
+                          "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "under",
+                        "depth",
+                        "attackMs",
+                        "releaseMs",
+                        "threshold",
+                        "gap"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false

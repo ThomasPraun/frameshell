@@ -11,6 +11,7 @@ import {
   placeholdersAt,
   programAt,
   readyMattes,
+  shapedRect,
   spanShape,
 } from "../src/renderer/src/preview/program.js";
 import { syncTable } from "../src/renderer/src/preview/decode-plan.js";
@@ -175,6 +176,17 @@ describe("subject layers in the preview (ADR 0032)", () => {
     const [x0] = rect(incoming)!;
     expect(x0).toBeGreaterThan(0.3);
     expect(rect(outgoing)).toEqual([0, 0, x0, 1]);
+  });
+
+  it("gives a subject of a base plate clip its iris, the outgoing one outside the circle", () => {
+    const shown = program(stack({ b: { shape: { kind: "iris", origin: [0.2, 0.2, 0.4, 0.4] } } }));
+    const subjects = subjectsAt(shown, 90);
+    const outgoing = spanShape(subjects.find((span) => span.clip === "c_a")!, 90, FPS)!;
+    const incoming = spanShape(subjects.find((span) => span.clip === "c_b")!, 90, FPS)!;
+    expect(incoming.circle).toMatchObject({ cx: expect.closeTo(0.3, 9), cy: expect.closeTo(0.3, 9) });
+    expect(incoming).not.toHaveProperty("outside");
+    expect(outgoing).toEqual({ dx: 0, dy: 0, clip: null, circle: incoming.circle, outside: true });
+    expect(shapedRect(outgoing, { left: 0, top: 0, width: 1920, height: 1080 }, { width: 1920, height: 1080 }).circle?.outside).toBe(true);
   });
 
   it("decodes a subject from its proxy with the matte as alpha, starting where both files have a keyframe", async () => {

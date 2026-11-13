@@ -1,9 +1,9 @@
-import { type DaemonConnection, REVIEW_SHEETS, type ReviewResult, type ReviewSheetKind } from "@frameshell/protocol";
+import { type DaemonConnection, REVIEW_OUTPUTS, type ReviewMetrics, type ReviewOutput, type ReviewResult } from "@frameshell/protocol";
 import { FormatIdSchema, PLATFORM_IDS, type PlatformId } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `review` (#457), in `frameshell --help`. */
-export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam] [--platform p] [--every s] [--format id]
+export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,metrics] [--platform p] [--every s] [--format id]
                                Look at the film before showing it: write contact sheets and strips into
                                .frameshell/review/<n>/ (last 10 kept; project files untouched) and print their paths.
                                contact = frames at clip starts and ends, cuts, markers, subtitle cues and the deepest
@@ -12,6 +12,9 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                seam = the last 6 and first 6 frames; safe = up to 36 frames with the UI zones of
                                --platform (instagram, tiktok, shorts, youtube) shaded red and captions that cross them
                                marked !subtitle (--platform alone adds it; vertical films use the style guide's platforms).
+                               metrics = metrics.json and a summary: longest still stretch, largest gap between visual
+                               events, near-blank frames, empty frame 0, subtitle cues too short to read, loudness of a
+                               --file (LUFS, LRA, true peak, phone band) and craft warnings; written without --sheets.
                                --file reviews an exported video (the file
                                people get) instead of the timeline; --range limits it to seconds a to b;
                                --format lays a timeline out as that format of the project (9x16)
@@ -29,7 +32,7 @@ export interface ReviewInvocation {
   file?: string;
   from?: number;
   to?: number;
-  sheets?: ReviewSheetKind[];
+  sheets?: ReviewOutput[];
   platform?: PlatformId;
   every?: number;
   projectFormat?: string;
@@ -68,14 +71,14 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
     }
     [from, to] = parts as [number, number];
   }
-  let sheets: ReviewSheetKind[] | undefined;
+  let sheets: ReviewOutput[] | undefined;
   if (options.sheets !== undefined) {
     const names = options.sheets.split(",").map((name) => name.trim()).filter((name) => name !== "");
-    const unknown = names.filter((name) => !(REVIEW_SHEETS as readonly string[]).includes(name));
+    const unknown = names.filter((name) => !(REVIEW_OUTPUTS as readonly string[]).includes(name));
     if (names.length === 0 || unknown.length > 0) {
-      throw new UsageError(`--sheets takes ${REVIEW_SHEETS.join(", ")} separated by commas${unknown.length > 0 ? `; unknown: ${unknown.join(", ")}` : ""}.`);
+      throw new UsageError(`--sheets takes ${REVIEW_OUTPUTS.join(", ")} separated by commas${unknown.length > 0 ? `; unknown: ${unknown.join(", ")}` : ""}.`);
     }
-    sheets = names as ReviewSheetKind[];
+    sheets = names as ReviewOutput[];
   }
   const platform = options.platform === undefined ? undefined : parsePlatform(options.platform);
   const every = options.every === undefined ? undefined : Number(options.every);
@@ -113,7 +116,24 @@ function formatReview(result: ReviewResult): string {
       lines.push(`  ${flag.subject} ${flag.track} reaches into the ${flag.zone} zone by up to ${flag.reach} px: ${flag.cues} cues from ${flag.first} to ${flag.last} s`);
     }
   }
+  if (result.metrics) lines.push(...formatMetrics(result.metrics));
   if (result.peaks.length > 0) lines.push(`Fastest moments: ${result.peaks.map((peak) => `${peak.at} s (${peak.energy})`).join(", ")}`);
   lines.push(...result.warnings.map((warning) => `warning: ${warning}`));
   return `${lines.join("\n")}\n`;
+}
+
+/** The lines `review` prints for `metrics`: the numbers, then the craft warnings. */
+function formatMetrics(metrics: ReviewMetrics): string[] {
+  const { picture, subtitles, loudness } = metrics;
+  const span = (found: { from: number; to: number; seconds: number } | null) => (found ? `${found.seconds} s (${found.from} to ${found.to})` : "none");
+  const lines = [
+    `Metrics (${picture.samples} samples, ${picture.spacing} s apart): longest still ${span(picture.longestStatic)}, largest gap between visual events ${span(picture.largestGap)} (${picture.events} events), ` +
+      `${picture.blank.length} near-blank stretches, frame 0 ${picture.firstFrameEmpty === null ? "not measured" : picture.firstFrameEmpty ? "empty" : "not empty"}`,
+  ];
+  if (subtitles) lines.push(`  subtitles: ${subtitles.cues} cues, ${subtitles.shortCues.length} on screen for less than they take to read`);
+  if (loudness) {
+    lines.push(`  loudness: ${loudness.integrated ?? "silent"} LUFS, range ${loudness.range ?? "-"} LU, true peak ${loudness.truePeak ?? "-"} dBTP, phone band ${loudness.phoneBand ?? "-"} LUFS`);
+  }
+  lines.push(...metrics.craft.map((warning) => `  craft ${warning.check}: ${warning.message}`));
+  return lines;
 }

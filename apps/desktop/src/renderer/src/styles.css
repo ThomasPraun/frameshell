@@ -3309,6 +3309,36 @@ button.track-head:focus-visible {
   color: var(--accent);
 }
 
+/* Voice chain of a media clip: a head row, then one row per effect in processing order. */
+.voice-chain {
+  flex: 1 0 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.voice-chain-head,
+.voice-effect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.voice-chain-head .clip-inspector-hint {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.voice-effect-name {
+  min-width: 72px;
+}
+
+.clip-inspector-switch.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .status-agents {
   padding: 0;
   border: 0;
