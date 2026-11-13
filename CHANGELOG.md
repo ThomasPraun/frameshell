@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion film playbook in the agent skill, first slice of #453 (epic #451; skill only, no wire change): the new
+  `skills/frameshell/reference/motion-films.md` walks an agent from a brief with no footage to a delivered film with the
+  commands that exist today: a one-round intake kept in `style.json` `brand`, three storylines and a stop for the
+  person's pick, assumptions with a free alternative beside every paid item, the style guide and banned looks through
+  `style apply` and `style set`, a time budget in bars with launch beat shares, the beat grid (`tempo set`,
+  `beats measure`), the storyboard as a script with scene markers at `bar:N` and a stop for an explicit OK, a board
+  and an animatic, motion templates as shots on the bottom video track (where push and wipe play), cuts and
+  transitions on bars, `sound place` and `music fit` on markers, formats and safe zones with `review`, the critique
+  loop and finals with a contact sheet, loop check and poster. It answers the "Make my film" prompt of the Welcome screen.
 - Hand edits of `formats` and `style.json` are config operations, rest of #496 (ADR 0036 slice 5, epic #451, no wire
   change): the daemon watches `frameshell.json` and `style.json` at the project root and diffs a change of formats or
   style values against the journal's last version (a head snapshot per document in `.frameshell/history/`). With review
