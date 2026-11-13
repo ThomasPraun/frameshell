@@ -121,8 +121,9 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * {@link nestingOf} hosts, which {@link placementAt}, {@link gainAt} and
  * {@link hostFades} fold. With `fps` (flattening for playback), the nested
  * clip's `fadeIn` and `fadeOut` become host fades of every clip it plays,
- * its `dissolve` goes onto the clip of T that starts the window (its extra
- * tracks fade in instead, {@link nestedFades}), and clips on a window edge
+ * its `dissolve` (and `shape`) goes onto the clip of T that starts the window
+ * (its extra tracks fade in instead, {@link nestedFades}, or follow the shape
+ * through `NestHost.shapeIn` on video tracks), and clips on a window edge
  * record the nested timeline's seconds outside it as their handle limit.
  *
  * A nested program track on a video track T becomes program track `T/p1`,
@@ -277,8 +278,13 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
       const opener = fades && clip.dissolve !== undefined ? windowed.find((w) => w.own && w.atStart) : undefined;
       for (const w of windowed) {
         const fadeIn = fades ? Math.max(fades.fadeIn, opener && w.own ? 0 : fades.dissolveIn) : 0;
-        composeHost(w, clip, from, to, fadeIn, fades?.fadeOut ?? 0);
-        if (w === opener) w.placed.dissolve = clip.dissolve!;
+        // A shape reaches the pictures of the extra tracks (ADR 0030); the host track's own clips keep the fade.
+        const shapeIn = fades?.shapeIn && w.video && !w.own ? { ...fades.shapeIn, fadeIn: fades.fadeIn } : undefined;
+        composeHost(w, clip, from, to, fadeIn, fades?.fadeOut ?? 0, shapeIn);
+        if (w === opener) {
+          w.placed.dissolve = clip.dissolve!;
+          if (clip.shape && w.video) w.placed.shape = clip.shape;
+        }
         w.target.push(w.placed);
       }
     }
@@ -413,12 +419,20 @@ function window(part: Clip, { from, to, duration, host, playback }: Window): Pic
  * `fadeIn`, `fadeOut`) composed into `w`'s clip: baked into its transform and
  * audio when neither changes over time, else recorded as its outermost host.
  */
-function composeHost({ placed, part, video }: Windowed, host: NestedClip, from: number, to: number, fadeIn: number, fadeOut: number): void {
+function composeHost(
+  { placed, part, video }: Windowed,
+  host: NestedClip,
+  from: number,
+  to: number,
+  fadeIn: number,
+  fadeOut: number,
+  shapeIn?: NestHost["shapeIn"],
+): void {
   const keys = hostKeys(host.keys, video);
   const animated = hasKeys(part.keys) || (nestingOf(placed)?.hosts.length ?? 0) > 0;
   const gain = host.audio?.gain ?? 0;
   const moves = (video && !isIdentityPlacement(placementOf(host.transform))) || gain !== 0;
-  if (keys === undefined && fadeIn === 0 && fadeOut === 0 && !(animated && moves)) {
+  if (keys === undefined && fadeIn === 0 && fadeOut === 0 && !shapeIn && !(animated && moves)) {
     if (video && host.transform) {
       placed.transform = composePlacement(placementOf(host.transform), placementOf(part.transform));
     } else if (!video) {
@@ -440,6 +454,7 @@ function composeHost({ placed, part, video }: Windowed, host: NestedClip, from: 
     ...(gain !== 0 ? { gain } : {}),
     ...(fadeIn > 0 ? { fadeIn } : {}),
     ...(fadeOut > 0 ? { fadeOut } : {}),
+    ...(shapeIn ? { shapeIn } : {}),
   };
   const nesting = nestingOf(placed);
   Object.assign(placed, { nesting: { ...nesting, hosts: [entry, ...(nesting?.hosts ?? [])] } satisfies Nesting });
@@ -1123,11 +1138,15 @@ export interface HostFade {
   fadeOut: number;
 }
 
-/** Fades of the hosts of `clip` that have any ({@link nestingOf}), outermost first. Multiply each in like the clip's own. */
-export function hostFades(clip: Clip): HostFade[] {
-  return (nestingOf(clip)?.hosts ?? []).flatMap((host) =>
-    host.fadeIn || host.fadeOut ? [{ start: host.start, end: host.end, fadeIn: host.fadeIn ?? 0, fadeOut: host.fadeOut ?? 0 }] : [],
-  );
+/**
+ * Fades of the hosts of `clip` that have any ({@link nestingOf}), outermost first. Multiply each in like the clip's own.
+ * `picture`: a host's shaped dissolve (`NestHost.shapeIn`) moves or cuts the picture instead of fading it in.
+ */
+export function hostFades(clip: Clip, picture = false): HostFade[] {
+  return (nestingOf(clip)?.hosts ?? []).flatMap((host) => {
+    const fadeIn = (picture && host.shapeIn ? host.shapeIn.fadeIn : host.fadeIn) ?? 0;
+    return fadeIn || host.fadeOut ? [{ start: host.start, end: host.end, fadeIn, fadeOut: host.fadeOut ?? 0 }] : [];
+  });
 }
 
 const clamp01 = (f: number) => Math.min(1, Math.max(0, f));

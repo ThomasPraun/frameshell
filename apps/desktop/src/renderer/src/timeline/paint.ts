@@ -1,6 +1,7 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
 import type { ClipDiff } from "@frameshell/protocol";
-import type { MarkerColor } from "@frameshell/schema";
+import type { MarkerColor, TransitionShape } from "@frameshell/schema";
+import { irisCentre, shapeStep } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import type { CueBox } from "../subtitles/model.js";
 import {
@@ -471,7 +472,8 @@ function paintKeys<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, clip: ClipBox
 
 /**
  * The transitions of a row's clips at their effective lengths, over the clips: a dissolve as a crossed band
- * straddling the cut, a fade as a shaded wedge inside its clip (dark at the edge, clear toward the middle).
+ * straddling the cut (a shaped one as a band with its kind's sign, {@link shapeSign}), a fade as a shaded wedge inside
+ * its clip (dark at the edge, clear toward the middle), a dip cut as a shaded strip ending in a line at the cut.
  */
 function paintTransitions<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow, top: number, t0: number, t1: number): void {
   const { pxPerSecond, scrollLeft, width } = input.viewport;
@@ -488,9 +490,20 @@ function paintTransitions<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: T
         ctx.fillStyle = withAlpha(input.theme.text, DISSOLVE_ALPHA);
         ctx.fill();
         ctx.beginPath();
-        ctx.moveTo(x0, y + h);
-        ctx.lineTo(x1, y);
-        ctx.moveTo(x0, y);
+        if (mark.shape) {
+          shapeSign(ctx, mark.shape, x0, y, x1 - x0, h);
+        } else {
+          ctx.moveTo(x0, y + h);
+          ctx.lineTo(x1, y);
+          ctx.moveTo(x0, y);
+          ctx.lineTo(x1, y + h);
+        }
+      } else if (mark.kind === "dip-cut") {
+        ctx.rect(x0, y, x1 - x0, h);
+        ctx.fillStyle = FADE_SHADE;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x1, y);
         ctx.lineTo(x1, y + h);
       } else {
         const fadeIn = mark.side === "in";
@@ -509,6 +522,52 @@ function paintTransitions<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: T
       ctx.stroke();
     }
   }
+}
+
+/**
+ * The sign of a shaped dissolve's kind (ADR 0030) inside its band at `x`, `y` (`w` x `h` px), as a path to stroke: a
+ * wipe is its straight edge with an arrowhead the way it travels, a push two arrowheads, an iris a diamond around the
+ * point it opens from. Signs fit the smaller side of the band, so a short band still reads.
+ */
+function shapeSign<Img>(ctx: Paint2D<Img>, shape: TransitionShape, x: number, y: number, w: number, h: number): void {
+  const size = Math.max(2, Math.min(w, h) / 2 - 2);
+  if (shape.kind === "iris") {
+    const [ox, oy] = irisCentre(shape);
+    const cx = x + w * ox;
+    const cy = y + h * oy;
+    ctx.moveTo(cx, cy - size);
+    ctx.lineTo(cx + size, cy);
+    ctx.lineTo(cx, cy + size);
+    ctx.lineTo(cx - size, cy);
+    ctx.closePath();
+    return;
+  }
+  const [ux, uy] = shapeStep(shape);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  /** An arrowhead pointing the way the shape travels, its tip `ahead` px past the centre. */
+  const head = (ahead: number) => {
+    const tipX = cx + ux * ahead;
+    const tipY = cy + uy * ahead;
+    const back = size / 2;
+    ctx.moveTo(tipX - ux * back - uy * back, tipY - uy * back - ux * back);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(tipX - ux * back + uy * back, tipY - uy * back + ux * back);
+  };
+  if (shape.kind === "push") {
+    head(size / 2);
+    head(0);
+    return;
+  }
+  // A wipe: its edge across the band, the arrowhead on the side it moves to.
+  if (ux !== 0) {
+    ctx.moveTo(cx, y);
+    ctx.lineTo(cx, y + h);
+  } else {
+    ctx.moveTo(x, cy);
+    ctx.lineTo(x + w, cy);
+  }
+  head(size);
 }
 
 /**

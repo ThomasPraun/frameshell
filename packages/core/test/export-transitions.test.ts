@@ -501,6 +501,62 @@ describe("export transitions and keys (real ffmpeg)", () => {
         }
         expect(shown[20]![32 * 64 + 60]!, `${kind} before`).toBeLessThan(100);
         expect(shown[40]![32 * 64 + 4]!, `${kind} after`).toBeGreaterThan(150);
+
+        if (kind !== "wipe") continue;
+        // Slice 3: the same wipe on an upper track, both clips a half-size inset over grey (columns and rows 16-47):
+        // the outgoing inset shows only left of the edge, the incoming one right of it, grey around both.
+        sources.set("assets/grey.mp4", await flat("grey.mp4", "0x808080"));
+        const inset = { transform: { scale: 0.5 } };
+        const upper = timelineOf([
+          { id: "v0", kind: "video", clips: [media("g", "assets/grey.mp4", 0, 0, 2)] },
+          { id: "v1", kind: "video", clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5, inset), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape, ...inset })] },
+        ]);
+        const lifted = join(dir, "shaped-upper-wipe.mp4");
+        await executeRender(compileRender({ timeline: upper, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 2 }), {
+          ffmpeg,
+          workDir: join(dir, "work-upper-wipe"),
+          output: lifted,
+        });
+        const over = await frames(lifted);
+        for (const frame of [27, 30, 33]) {
+          const edge = Math.round(64 * shapeAt(shape, dissolveProgress(1, 0.2, frame / 30)).incoming.clip![0]);
+          const row = over[frame]!.subarray(32 * 64, 33 * 64);
+          for (let x = 0; x < 64; x++) {
+            if (Math.abs(x + 0.5 - edge) < 3 || Math.abs(x - 16) < 2 || Math.abs(x - 48) < 2) continue;
+            const expected = x < 16 || x >= 48 ? "grey" : x >= edge ? "bright" : "dark";
+            const seen = row[x]! > 160 ? "bright" : row[x]! < 80 ? "dark" : "grey";
+            expect(seen, `upper wipe frame ${frame} column ${x} (edge ${edge}): ${row[x]}`).toBe(expected);
+          }
+        }
+
+        // And on the bottom track with keyed scale: the incoming picture grows from 0.75 while the edge crosses the
+        // frame, so the mask reads the layer's corner and size on every frame.
+        const keyed = timelineOf([
+          {
+            id: "v1",
+            kind: "video",
+            clips: [
+              media("a", "assets/dark.mp4", 0, 0.5, 1.5),
+              media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape, keys: { scale: [{ at: 0, value: 0.75 }, { at: 1, value: 1 }] } }),
+            ],
+          },
+        ]);
+        const scaled = join(dir, "shaped-keyed-wipe.mp4");
+        await executeRender(compileRender({ timeline: keyed, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 2 }), {
+          ffmpeg,
+          workDir: join(dir, "work-keyed-wipe"),
+          output: scaled,
+        });
+        const grown = await frames(scaled);
+        for (const frame of [27, 30, 33]) {
+          const edge = Math.round(64 * shapeAt(shape, dissolveProgress(1, 0.2, frame / 30)).incoming.clip![0]);
+          const row = grown[frame]!.subarray(32 * 64, 33 * 64);
+          // The picture covers at least columns 8-55 at scale 0.75; the outgoing clip shows beside it.
+          for (let x = 12; x < 52; x++) {
+            if (Math.abs(x + 0.5 - edge) < 3) continue;
+            expect(row[x]! > 128, `keyed wipe frame ${frame} column ${x} (edge ${edge}): ${row[x]}`).toBe(x >= edge);
+          }
+        }
         // bright's sound reaches before its source's first sample: the mix pads it with silence (`adelay`).
         const samples = await audioSamples(output);
         expect(amplitude(samples, 0.5, 440)).toBeGreaterThan(0.2);

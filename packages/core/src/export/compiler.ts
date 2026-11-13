@@ -32,6 +32,7 @@ import {
   formatCrop,
   hasPictureKeys,
   hostFades,
+  hostShapes,
   isKeyed,
   isIdentityPlacement,
   isProgramSound,
@@ -378,10 +379,17 @@ interface Placed {
    * beyond hold the edge frame. Absent: the source has whatever a dissolve asks for.
    */
   reach?: { before: number; after: number };
-  /** On the base track: the shape this clip comes in by (`lead` frames each side of its start). */
+  /** The shape this clip comes in by (`lead` frames each side of its start). */
   shapeIn?: TransitionShape;
-  /** On the base track: the shape the next clip comes in by (`trail` frames each side of this clip's end). */
+  /** The shape the next clip comes in by (`trail` frames each side of this clip's end). */
   shapeOut?: TransitionShape;
+  /**
+   * Not covered by the next clip under `shapeOut` (an upper track, a subject): a wipe or iris shows it only where the
+   * incoming picture does not, the inverse mask (ADR 0030). On the base track the incoming clip is drawn over it.
+   */
+  uncover?: true;
+  /** The shaped dissolve of a nested clip it plays inside (`hostShapes`): timeline frames `half` each side of `cut`. */
+  hostShape?: { shape: TransitionShape; cut: number; half: number };
   /** Source pixels kept when a clip covers the frame of a non-primary format (ADR 0027; not an upper-track source with alpha): scaled to fill it exactly. */
   cover?: LayerRect;
   /**
@@ -973,38 +981,49 @@ function layoutTimeline(
     delete placed.glass;
     warnings.push(`Clip ${placed.clip.id} is on the bottom picture track: nothing is below it, so its backdrop was not drawn.`);
   }
-  // Shapes play on the base track only (ADR 0030); elsewhere a shaped dissolve mixes.
-  for (const placed of baseLayer) {
-    const { shape } = placed.clip;
-    if (!shape || !placed.lead) continue;
-    placed.shapeIn = shape;
-    const before = baseLayer.find((candidate) => candidate.next === placed);
-    if (before) before.shapeOut = shape;
+  // Shapes play on every video track (ADR 0030); a subject takes its plate clip's instead of its own.
+  const plates = new Map<string, Placed>();
+  for (const layer of pictures) {
+    if (layer.program) continue;
+    for (const placed of layer.placed) {
+      if (placed.matte) continue;
+      plates.set(placed.clip.id, placed);
+      const { shape } = placed.clip;
+      const host = hostShapes(placed.clip)[0];
+      if (host) placed.hostShape = { shape: host.shape, cut: Math.round(host.at * fps), half: Math.round(host.half * fps) };
+      if (!shape || !placed.lead) continue;
+      placed.shapeIn = shape;
+      const before = layer.placed.find((candidate) => candidate.next === placed);
+      if (!before) continue;
+      before.shapeOut = shape;
+      if (!before.bottom) before.uncover = true;
+    }
   }
   const upper = (baseLayer === pictures[0]?.placed ? pictures.slice(1) : pictures).map((layer) => layer.placed);
-  // A subject of a base plate clip (same id) takes that clip's shapes; a plain dissolve crossfades the two subjects.
-  const baseClips = new Map(baseLayer.map((placed) => [placed.clip.id, placed]));
+  // A subject of a plate clip (same id) takes that clip's shapes; a plain dissolve crossfades the two subjects.
   for (const placed of upper.flat()) {
-    const plate = placed.matte ? baseClips.get(placed.clip.id) : undefined;
+    const plate = placed.matte ? plates.get(placed.clip.id) : undefined;
     if (!plate) continue;
     if (plate.shapeIn) placed.shapeIn = plate.shapeIn;
     if (plate.shapeOut) {
       // The shape uncovers it (pushed out, or wiped off by the inverse mask): it does not fade too.
       placed.shapeOut = plate.shapeOut;
-      placed.bottom = true;
+      placed.uncover = true;
     }
   }
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   /**
-   * {@link whole} cut where its wipes and irises end and start (a subject's outgoing one too): their mask costs per
-   * pixel, only the frames it plays over get it.
+   * {@link whole} cut where its wipes and irises end and start (an uncovered outgoing one and a nested clip's too): their
+   * mask costs per pixel, only the frames it plays over get it.
    */
   const wipeSplit = (placed: Placed): Span[] => {
     const { from, to } = whole(placed);
+    const host = placed.hostShape;
     const cuts = [
       ...(masks(placed.shapeIn) ? [placed.start + (placed.lead ?? 0)] : []),
-      ...(masks(placed.shapeOut) && placed.matte ? [placed.end - (placed.trail ?? 0)] : []),
+      ...(masks(placed.shapeOut) && placed.uncover ? [placed.end - (placed.trail ?? 0)] : []),
+      ...(host && masks(host.shape) ? [host.cut - host.half, host.cut + host.half] : []),
     ].filter((cut) => cut > from && cut < to);
     const edges = [from, ...[...new Set(cuts)].sort((a, b) => a - b), to];
     return edges.slice(1).map((end, index) => ({ placed, from: edges[index]!, to: end }));
@@ -1404,12 +1423,12 @@ function pictureRamps(placed: Placed, start: number, end: number, fps: number, l
   const fadeOut = Math.round((placed.edges?.fadeOut ?? 0) * fps);
   // A shape moves or masks the incoming picture instead of raising its opacity (ADR 0030).
   const lead = layer && !placed.shapeIn ? (placed.lead ?? 0) : 0;
-  const trail = layer && !placed.bottom ? (placed.trail ?? 0) : 0;
+  const trail = layer && !placed.bottom && !placed.shapeOut ? (placed.trail ?? 0) : 0;
   add("in", placed.start - lead, 2 * lead);
   add("in", placed.start, fadeIn);
   add("out", placed.end - fadeOut, fadeOut);
   add("out", placed.end - trail, 2 * trail);
-  for (const host of hostFades(placed.clip)) {
+  for (const host of hostFades(placed.clip, true)) {
     const hostOut = Math.round(host.fadeOut * fps);
     add("in", Math.round(host.start * fps), Math.round(host.fadeIn * fps));
     add("out", Math.round(host.end * fps) - hostOut, hostOut);
@@ -1455,10 +1474,10 @@ function layerOrigin(placed: Placed, time: string, first: number, last: number, 
 }
 
 /**
- * What a shaped dissolve (ADR 0030, `shapeAt`) does to a base-track piece on timeline frames [start, end) of a graph
- * starting at frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a
- * wipe or iris `geq` on the incoming layer (and on a subject's outgoing one), reading the frame time `T` as timeline
- * seconds. Null when neither applies.
+ * What a shaped dissolve (ADR 0030, `shapeAt`) does to a piece on timeline frames [start, end) of a graph starting at
+ * frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a wipe or iris
+ * `geq` on the incoming layer (and the inverse on an uncovered outgoing one), reading the frame time `T` as timeline
+ * seconds. A nested clip's shape (`hostShape`) moves or cuts its clips as an incoming picture. Null when none applies.
  */
 function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): { x?: string; y?: string; mask?: string } | null {
   const { fps, width, height } = out;
@@ -1473,16 +1492,17 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
       const offsets = shapeOffsets(shape, which, progress(time), width, height);
       if (offsets.x) xs.push(offsets.x);
       if (offsets.y) ys.push(offsets.y);
-    } else if (which === "incoming" || placed.matte) {
+    } else if (which === "incoming" || placed.uncover) {
       // A keyed layer moves: its corner is an expression of the frame time and the frame's own size.
       const corner = moves(placed) ? layerOrigin(placed, "T", start / fps, (end - 1) / fps, out, ["W", "H"]) : { x: num(rect.left), y: num(rect.top) };
-      // The base's outgoing clip is covered by the incoming one; a subject's must be uncovered (ADR 0032).
+      // The base's outgoing clip is covered by the incoming one; an upper track's or a subject's is uncovered.
       const alpha = (shape.kind === "iris" ? irisAlpha : wipeAlpha)(shape, progress("T"), corner.x, corner.y, width, height, which === "outgoing");
       mask = mask ? `${mask},${alpha}` : alpha;
     }
   };
   side(placed.shapeIn, placed.start, placed.lead ?? 0, "incoming");
   side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
+  if (placed.hostShape) side(placed.hostShape.shape, placed.hostShape.cut, placed.hostShape.half, "incoming");
   if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
   return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
 }

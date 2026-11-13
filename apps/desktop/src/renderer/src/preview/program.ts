@@ -37,6 +37,7 @@ import {
   circleReach,
   clipLength,
   edgeTransitions,
+  hostShapes,
   shapeAt,
 } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
@@ -181,7 +182,7 @@ export interface SpanDissolve {
   at: number;
   /** Timeline seconds on each side of it. */
   half: number;
-  /** Its shape on the bottom track (ADR 0030): the pictures move or are cut by `shapeAt` instead of mixing. */
+  /** Its shape (ADR 0030): the pictures move or are cut by `shapeAt` instead of mixing. */
   shape?: TransitionShape;
 }
 
@@ -200,13 +201,18 @@ export interface EdgeWeights {
   dissolveOut?: SpanDissolve;
   /** Fades of the nested clips the clip plays inside (`hostFades`), each over its own window. */
   hosts?: HostFade[];
+  /** A picture's: the shaped dissolve a nested clip it plays inside comes in by (`hostShapes`), which moves or cuts it. */
+  hostShape?: SpanDissolve & { shape: TransitionShape };
 }
 
 /** What changes a picture span from frame to frame (ADR 0018); absent: `placement` holds. See {@link spanPlacement}. */
 export interface SpanMotion extends EdgeWeights {
   /** The clip when it has picture keys: `placementAt` reads its timing, `transform` and `keys`. */
   keyed?: Clip;
-  /** `bottom`: the outgoing clip of a dissolve stays opaque under the incoming one; `upper`: it fades out. */
+  /**
+   * `bottom`: the outgoing clip of a dissolve stays opaque under the incoming one; `upper`: it fades out, or under a
+   * wipe or iris shows only where the incoming one does not.
+   */
   track: "bottom" | "upper";
 }
 
@@ -254,27 +260,28 @@ export function spanShape(span: PlacedSpan, frame: number, fps: number): PartSha
   const t = frame / fps;
   const playing = (dissolve: SpanDissolve | undefined): dissolve is SpanDissolve & { shape: TransitionShape } =>
     dissolve?.shape !== undefined && t >= dissolve.at - dissolve.half && t < dissolve.at + dissolve.half;
-  const incoming = playing(motion.dissolveIn) ? shapeAt(motion.dissolveIn.shape, dissolveProgress(motion.dissolveIn.at, motion.dissolveIn.half, t)).incoming : null;
+  const comesIn = playing(motion.dissolveIn) ? motion.dissolveIn : playing(motion.hostShape) ? motion.hostShape : null;
+  const incoming = comesIn ? shapeAt(comesIn.shape, dissolveProgress(comesIn.at, comesIn.half, t)).incoming : null;
   const outgoing = playing(motion.dissolveOut) ? outgoingPart(span, motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)) : null;
   if (!incoming || !outgoing) return incoming ?? outgoing;
   // A clip shorter than both its dissolves: both move it; the incoming one cuts it.
   return { dx: incoming.dx + outgoing.dx, dy: incoming.dy + outgoing.dy, clip: incoming.clip, ...(incoming.circle ? { circle: incoming.circle } : {}) };
 }
 
-/** A {@link ShapePart} as the preview draws it: an outgoing subject an iris uncovers shows outside the circle. */
+/** A {@link ShapePart} as the preview draws it: an uncovered outgoing picture an iris cuts shows outside the circle. */
 export interface PartShape extends ShapePart {
-  /** True: it shows outside `circle` instead of inside (a subject of the outgoing plate clip, ADR 0032). */
+  /** True: it shows outside `circle` instead of inside (the outgoing clip of an upper track, a subject, ADR 0032). */
   outside?: true;
 }
 
 /**
- * The outgoing side of `shape` at progress `f` for `span`. A subject (ADR 0032) is not covered by the incoming plate
- * clip of a wipe or iris, so it shows only where the incoming picture does not: the complement of its strip or circle,
- * as export masks it.
+ * The outgoing side of `shape` at progress `f` for `span`. Only the bottom track's outgoing clip is covered by the
+ * incoming one; on an upper track, and on a subject (ADR 0032), it shows only where the incoming picture of a wipe or
+ * iris does not: the complement of its strip or circle, as export masks it.
  */
 function outgoingPart(span: PlacedSpan, shape: TransitionShape, f: number): PartShape {
   const frame = shapeAt(shape, f);
-  if (shape.kind === "push" || span.kind !== "media" || span.matte === undefined) return frame.outgoing;
+  if (shape.kind === "push" || span.motion?.track !== "upper") return frame.outgoing;
   const { clip, circle } = frame.incoming;
   if (circle) return { dx: 0, dy: 0, clip: null, circle, outside: true };
   return clip ? { dx: 0, dy: 0, clip: complementStrip(clip) } : frame.outgoing;
@@ -436,8 +443,6 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const flat = flattenTimeline(root, resolve, fps);
   const moved = movedProgramGroups(root, resolve);
   const context: TransitionContext = { fps, sourceDuration: (clip) => sourceSeconds(clip, assets, options.nested) };
-  /** The bottom picture track when it is a video track: its clips' shapes play there and on their subjects (ADR 0030, 0032). */
-  let baseTrack: string | null = null;
 
   for (const track of flat.tracks) {
     if (track.kind === "subtitles") continue;
@@ -484,11 +489,9 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         const glazed = glass && picture?.kind === "generated" ? { ...picture, glass } : picture;
         return options.format ? covered(glazed, clip, info, bottom, options.format) : glazed;
       });
-      if (bottom) baseTrack = track.id;
-      // A subject takes the shapes of its plate clip when the plate is the bottom track, as export draws it.
+      // A subject carries its plate clip's dissolve and shape, as export draws it.
       const plate = kept.map(({ clip }) => subjectOf(clip)?.plate).find((id) => id !== undefined);
-      const shaped = bottom || (plate !== undefined && plate === baseTrack);
-      const own = pictureLayers(kept, pictures, edges, context, bottom ? "bottom" : "upper", shaped);
+      const own = pictureLayers(kept, pictures, edges, context, bottom ? "bottom" : "upper");
       layers.push(...(plate === undefined ? own : own.map((layer) => inSubjectWindows(layer, kept, frame))));
     }
 
@@ -855,7 +858,6 @@ function pictureLayers(
   edges: ReadonlyMap<string, ClipEdges>,
   context: TransitionContext,
   track: SpanMotion["track"],
-  shaped = track === "bottom",
 ): VideoSpan[][] {
   const { fps } = context;
   // Only a picture can dissolve in: a clip still ingesting (placeholder) or with no picture cuts.
@@ -866,15 +868,15 @@ function pictureLayers(
   });
   const main: VideoSpan[] = [];
   const slot: VideoSpan[] = [];
-  // Shapes play on the bottom track only (ADR 0030), and on the subjects of its clips; elsewhere a shaped dissolve mixes, as export does.
-  const shapeOf = (clip: Clip) => (shaped && clip.shape ? { shape: clip.shape } : {});
+  // Shapes play on every video track and on subjects (ADR 0030), as export draws them.
+  const shapeOf = (clip: Clip) => (clip.shape ? { shape: clip.shape } : {});
   kept.forEach(({ clip }, i) => {
     const picture = pictures[i];
     if (!picture) return;
     const next = kept[i + 1];
     const outHalf = next ? halves[i + 1]! : 0;
     const out = outHalf > 0 ? { at: next!.clip.start, half: outHalf, ...shapeOf(next!.clip) } : undefined;
-    const weights = edgeWeightsOf(clip, edges.get(clip.id), halves[i]!, out, context, shapeOf(clip).shape);
+    const weights = edgeWeightsOf(clip, edges.get(clip.id), halves[i]!, out, context, shapeOf(clip).shape, true);
     let span = picture.kind === "placeholder" ? picture : withMotion(picture, clip, weights, track);
     const head = Math.round(halves[i]! * fps);
     if (head > 0 && span.kind !== "placeholder") {
@@ -953,7 +955,7 @@ function envelopeOf(clip: Clip, weights: EdgeWeights, rate: number): AudioEnvelo
 
 /**
  * The {@link EdgeWeights} of `clip` from its effective edges, the dissolve it comes in by (shaped by `shape`) and the
- * one it goes out by.
+ * one it goes out by. `picture`: a nested clip's shaped dissolve moves or cuts it instead of fading it in.
  */
 function edgeWeightsOf(
   clip: Clip,
@@ -962,8 +964,10 @@ function edgeWeightsOf(
   out: SpanDissolve | undefined,
   context: TransitionContext,
   shape?: TransitionShape,
+  picture = false,
 ): EdgeWeights {
-  const hosts = hostFades(clip);
+  const hosts = hostFades(clip, picture);
+  const host = picture ? hostShapes(clip)[0] : undefined;
   return {
     start: clip.start,
     end: clip.start + clipLength(clip, context),
@@ -972,11 +976,19 @@ function edgeWeightsOf(
     ...(inHalf > 0 ? { dissolveIn: { at: clip.start, half: inHalf, ...(shape ? { shape } : {}) } } : {}),
     ...(out ? { dissolveOut: out } : {}),
     ...(hosts.length > 0 ? { hosts } : {}),
+    ...(host ? { hostShape: host } : {}),
   };
 }
 
 function hasEdges(weights: EdgeWeights): boolean {
-  return weights.fadeIn > 0 || weights.fadeOut > 0 || weights.dissolveIn !== undefined || weights.dissolveOut !== undefined || weights.hosts !== undefined;
+  return (
+    weights.fadeIn > 0 ||
+    weights.fadeOut > 0 ||
+    weights.dissolveIn !== undefined ||
+    weights.dissolveOut !== undefined ||
+    weights.hosts !== undefined ||
+    weights.hostShape !== undefined
+  );
 }
 
 /**

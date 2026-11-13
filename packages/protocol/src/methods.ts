@@ -3564,9 +3564,10 @@ export const methods = {
       "`left` (default), `right`, `up` or `down` is the way the incoming picture travels: `{ at: 12.5, kind: \"push\", direction: \"up\" }`. " +
       "`kind: \"iris\"` opens the incoming clip in a circle growing from the centre of `origin`, `[x0, y0, x1, y1]` in fractions of the " +
       "frame (the element that just lit up, from `inspect.point`; default the frame's centre): `{ at: 12.5, kind: \"iris\", origin: [0.6, 0.2, 0.8, 0.4] }`. " +
-      "They play on the bottom video track only (the first shown picture track; a video track over a multicam program track is not it): " +
-      "any other video track named in `tracks` is refused, and without `tracks` the others are skipped with a warning; audio tracks " +
-      "crossfade. They are refused at an edge of a nested timeline clip. `kind: \"dip-cut\"` makes the edge a hard cut on the bottom " +
+      "They play on every video track with an edge there, like a dissolve: on an upper track the outgoing clip shows only where the " +
+      "incoming one does not (the shape cuts both, keeping a render's own alpha), so a title can wipe or push off over the picture below. " +
+      "At an edge of a nested timeline clip the shape plays on its clips too, its upper tracks included. Audio tracks crossfade. " +
+      "`kind: \"dip-cut\"` makes the edge a hard cut on the bottom " +
       "video track and darkens the clip ending there by 40 % over its last 3 frames, as `opacity` keys on it (`duration` is ignored; " +
       "sound and other tracks are not touched; another video track named in `tracks` is refused); `transition.remove` there takes the " +
       "dip keys away again. Pick the kind by why the picture changes (see the skill's transitions reference); " +
@@ -3578,8 +3579,8 @@ export const methods = {
       "cuts). Short material never fails: it shortens the transition, or plays a dissolve with no spare source as a dip, and a `warnings` " +
       "entry says so; a wipe, push or iris with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
       "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), `direction` comes " +
-      "with another kind than `wipe` or `push`, `origin` with another kind than `iris`, a wipe, push or iris finds the edge only on " +
-      "video tracks that are not the bottom one, or a dip cut finds no clip ending at `at` on the bottom video track; TrackNotFound.",
+      "with another kind than `wipe` or `push`, `origin` with another kind than `iris`, or a dip cut finds no clip ending at `at` on " +
+      "the bottom video track; TrackNotFound.",
     params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

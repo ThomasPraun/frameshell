@@ -46,6 +46,33 @@ describe("transition marks", () => {
     expect(b!.marks).toEqual([{ kind: "fade", side: "in", from: 2, to: 2.5 }]);
   });
 
+  it("marks a shaped dissolve with its shape (ADR 0030)", () => {
+    const shape = { kind: "wipe", direction: "down" };
+    const layout = layoutTimeline(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23, { dissolve: 1, shape })])]), [], undefined, plenty);
+    expect(layout.rows[0]!.clips[1]!.marks).toEqual([{ kind: "dissolve", side: "in", from: 1.5, to: 2.5, shape }]);
+  });
+
+  it("marks a dip cut over the last 3 frames of its clip on the bottom video track only", () => {
+    // a plays source 10-12 from 0 s: its dip keys sit on frames 56 and 59, at source 10 + 56/30 and 10 + 59/30.
+    const dip = { keys: { opacity: [{ at: 11.867, value: 1 }, { at: 11.967, value: 0.6 }] } };
+    const tracks = [video([clip("a", 0, 10, 12, dip), clip("b", 2, 20, 23)]), { ...video([clip("u", 0, 10, 12, dip)]), id: "t_u" }];
+    const layout = layoutTimeline(view(tracks));
+    const [upper, bottom] = layout.rows;
+    expect(bottom!.bottom).toBe(true);
+    expect(bottom!.clips[0]!.marks).toEqual([{ kind: "dip-cut", side: "out", from: 1.9, to: 2 }]);
+    expect(upper!.bottom).toBe(false);
+    expect(upper!.clips[0]!.marks).toEqual([]);
+    // Keys edited off the pattern are no dip cut.
+    const edited = layoutTimeline(view([video([clip("a", 0, 10, 12, { keys: { opacity: [{ at: 11.867, value: 1 }, { at: 11.967, value: 0.5 }] } })])]));
+    expect(edited.rows[0]!.clips[0]!.marks).toEqual([]);
+    // A hidden bottom track passes the bottom on, as export stacks the tracks.
+    const hidden = layoutTimeline(view([{ ...video([clip("h", 0, 10, 12, dip)]), id: "t_h", hidden: true }, video([clip("a", 0, 10, 12, dip)])]));
+    expect(hidden.rows.map((row) => [row.id, row.bottom])).toEqual([
+      ["t_v", true],
+      ["t_h", false],
+    ]);
+  });
+
   it("has no marks without transitions, and keeps the stored fields", () => {
     const plain = layoutTimeline(view([video([clip("a", 0, 0, 2)])]));
     expect(plain.rows[0]!.clips[0]).toMatchObject({ marks: [], keys: {}, dissolve: null, fadeIn: null, fadeOut: null });
@@ -110,6 +137,14 @@ describe("edges", () => {
     const [first, second] = shaped.rows[0]!.clips;
     expect(edgeState(shaped.rows[0]!, second!, "in")).toMatchObject({ kind: "dissolve", shape });
     expect(edgeState(shaped.rows[0]!, first!, "out")).toMatchObject({ kind: "dissolve", shape });
+  });
+
+  it("reads a dip cut on both sides of its cut, with no length", () => {
+    const dip = { keys: { opacity: [{ at: 11.867, value: 1 }, { at: 11.967, value: 0.6 }] } };
+    const dipped = layoutTimeline(view([video([clip("a", 0, 10, 12, dip), clip("b", 2, 20, 23)])]));
+    const [first, second] = dipped.rows[0]!.clips;
+    expect(edgeState(dipped.rows[0]!, first!, "out")).toEqual({ at: 2, kind: "dip-cut", length: 0, butted: true, shape: null });
+    expect(edgeState(dipped.rows[0]!, second!, "in")).toEqual({ at: 2, kind: "dip-cut", length: 0, butted: true, shape: null });
   });
 
   it("counts a fade at a cut as both halves", () => {
@@ -178,6 +213,17 @@ describe("painting", () => {
     paintTimeline(ctx, { layout, viewport: { pxPerSecond: 60, scrollLeft: 0, scrollTop: 0, width: 600, height: 200 }, fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
     return count;
   }
+
+  it("draws a shaped dissolve as a band with its sign, and a dip cut as a shaded strip", () => {
+    const plain = fills(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23)])]));
+    for (const shape of [{ kind: "wipe" }, { kind: "push", direction: "up" }, { kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] }]) {
+      // The band; its sign is stroked.
+      expect(fills(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23, { dissolve: 1, shape })])])), shape.kind).toBe(plain + 1);
+    }
+    const dip = { keys: { opacity: [{ at: 11.867, value: 1 }, { at: 11.967, value: 0.6 }] } };
+    // The strip, plus the two key diamonds.
+    expect(fills(view([video([clip("a", 0, 10, 12, dip), clip("b", 2, 20, 23)])]))).toBe(plain + 3);
+  });
 
   it("draws diamonds, a dissolve band and fade wedges only where the file has them", () => {
     const plain = fills(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23)])]));

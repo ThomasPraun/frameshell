@@ -796,6 +796,31 @@ describe("export compiler", () => {
         expect(graphs).not.toContain("d=0.5");
       });
 
+      it("carries a shaped dissolve into the nested clip's tracks: its own track's first clip and its extra layers (ADR 0030)", () => {
+        // The badge starts with the window, so it is on screen while the wipe plays (1.7 to 2.3 s).
+        const early: Timeline = {
+          ...scene,
+          tracks: scene.tracks.map((track) =>
+            track.id === "v2" && track.kind === "video" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, start: 0, out: 5 }) as Clip) } : track,
+          ),
+        };
+        const both = (source: string) => (source === "timelines/scene.json" ? early : null);
+        const wiped = { ...host, shape: { kind: "wipe" as const, direction: "right" as const } };
+        const plan = compileRender({ ...nestedInput, timeline: flattenTimeline(hosted(wiped), both, 30) });
+        const plain = compileRender({ ...nestedInput, timeline: flattenTimeline(hosted(host), both, 30) });
+        const graphs = Object.values(plan.files).join("\n");
+        const mixed = Object.values(plain.files).join("\n");
+        // A plain dissolve fades the badge in over the half after the cut; the wipe cuts it instead, as it cuts the camera.
+        expect(mixed).toContain("fade=t=in:alpha=1:st=2:d=0.3");
+        expect(graphs).not.toContain("fade=t=in:alpha=1:st=2:d=0.3");
+        expect(graphs).not.toContain("fade=t=in:alpha=1:st=1.7:d=0.6");
+        expect(graphs.match(/geq=/g)?.length).toBeGreaterThanOrEqual(2);
+        // The badge's corner moves with its keyed host scale: the mask reads it per frame (`W`, `H`).
+        expect(graphs).toContain("a='if(lt(X+floor(960+((500)*(if(lt(T,2)");
+        // Sound still crossfades in by the dissolve.
+        expect(plan.audio).toEqual(plain.audio);
+      });
+
       it("compiles a nested clip without keys or edges exactly as before, handles recorded or not", () => {
         const plain: Clip = { id: "c_scene", type: "timeline", source: "timelines/scene.json", start: 2, in: 0.5, duration: 3, transform: { scale: 0.5 } };
         const quiet: Timeline = { ...scene, tracks: scene.tracks.map((track) => (track.kind === "subtitles" || track.kind === "program" ? track : { ...track, clips: track.clips.map(({ fadeIn: _i, fadeOut: _o, ...clip }) => clip as Clip) })) };
@@ -874,12 +899,31 @@ describe("export compiler", () => {
       expect(graphs).not.toContain("eval=frame");
     });
 
-    it("plays a shaped clip on an upper track as a plain dissolve", () => {
-      const timeline = shaped({ kind: "push" }, { kind: "wipe" });
-      const lifted: Timeline = { ...timeline, tracks: [{ id: "v0", kind: "video", clips: [{ id: "c_bg", type: "media", asset: "assets/logo.png", start: 0, in: 0, out: 9 }] }, ...timeline.tracks] };
-      const graphs = Object.values(planOf(lifted).files).join("\n");
+    /** `timeline` with its talk track lifted over a still on a new bottom track. */
+    const lifted = (timeline: Timeline): Timeline => ({
+      ...timeline,
+      tracks: [{ id: "v0", kind: "video", clips: [{ id: "c_bg", type: "media", asset: "assets/logo.png", start: 0, in: 0, out: 9 }] }, ...timeline.tracks],
+    });
+
+    it("wipes on an upper track: the incoming head masked, the outgoing tail under the inverse mask, no fades (golden)", () => {
+      const plan = planOf(lifted(shaped({ kind: "wipe", direction: "left" }, { kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] })));
+      golden("shaped-upper-plan", { segments: plan.segments, files: plan.files });
+      const graphs = Object.values(plan.files).join("\n");
+      expect(graphs).not.toContain("alpha=1");
+      // c_talk2's head shows right of the edge, c_talk1's tail left of it; the alpha a picture has is kept.
+      expect(graphs).toContain("a='if(lt(X+0+0.5,1920*(1-(");
+      expect(graphs).toMatch(/a='if\(lt\(X\+0\+0\.5,1920\*\(1-\(.*\)\)\),alpha\(X,Y\),0\)'/);
+      expect(graphs).toMatch(/a='if\(lt\(X\+0\+0\.5,1920\*\(1-\(.*\)\)\),0,alpha\(X,Y\)\)'/);
+      // The iris into c_talk3: its head inside the circle, c_talk2's tail outside it.
+      expect(graphs).toMatch(/hypot\(X\+0\+0\.5-1344,Y\+0\+0\.5-324\)[^']*\),alpha\(X,Y\),0\)'/);
+      expect(graphs).toMatch(/hypot\(X\+0\+0\.5-1344,Y\+0\+0\.5-324\)[^']*\),0,alpha\(X,Y\)\)'/);
+    });
+
+    it("pushes on an upper track: both pieces moved, neither faded", () => {
+      const graphs = Object.values(planOf(lifted(shaped({ kind: "push", direction: "right" }, { kind: "push" }))).files).join("\n");
       expect(graphs).not.toContain("geq");
-      expect(graphs).toContain("fade=t=in:alpha=1:st=2.5:d=1");
+      expect(graphs).not.toContain("alpha=1");
+      expect(graphs.match(/x='0\+floor\(1920\*\(/g)?.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

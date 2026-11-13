@@ -42,14 +42,15 @@ frameshell transition set --at 55 --kind dip-cut                         # a har
 - `--direction` is the way the incoming picture travels: `left` (default, it enters from the right edge), `right`, `up` (enters from the bottom), `down`. Keep one dominant direction per film. Only `wipe` and `push` take it.
 - `--origin x0,y0,x1,y1` is the element an iris opens from, in fractions of the frame (0 to 1, x0 <= x1, y0 <= y1): a circle grows from its centre until it covers the frame. Take it from `frameshell inspect --at <s> --point x,y`: a photo mask's `frameBox` (`--segment`) as it is; a generated clip element's `box` (`x`, `y`, `width`, `height` in project pixels, for a clip that fills the frame) as `x/W, y/H, (x+width)/W, (y+height)/H` of the project size; or the point itself, `x,y,x,y`. Without it the iris opens from the frame's centre. Only `iris` takes it; fractions keep it right in every format.
 - 0.45 to 0.6 s fits most cuts; the default 0.5 s is fine.
-- Shapes play on the bottom video track only for now: the first shown picture track, so none when a multicam program track is first. Naming another video track in `--track` fails, and without `--track` the others are skipped with a warning. Audio tracks crossfade.
-- A shape at an edge of a nested timeline clip fails for now: use a dissolve or a fade there.
+- Shapes play on every video track with the edge, like a dissolve; `--track` limits them. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not, over the tracks below, so a title or card can wipe, push or iris off and the next one on. A render's own transparency is kept. Audio tracks crossfade.
+- At an edge of a nested timeline clip the shape plays inside it too: on the clip starting its window on its own track, and on its upper tracks (a title inside a nested scene wipes in with the scene, instead of fading in over the outgoing picture).
+- The app's clip inspector offers the same kinds at each clip edge (a direction for `wipe` and `push`; `dip-cut` on the bottom track), and the timeline marks each kind; an iris picked there opens from the frame's centre, so set `--origin` yourself when it should open from an element.
 - With no spare source around the cut, a shaped transition holds the outgoing clip's last frame or the incoming clip's first (a warning says so) instead of dipping through black. Trim the neighbours less to keep the motion.
 - `--kind dissolve` or `fade`, `transition remove`, `clip split` and `cut` on that edge drop the shape.
 
 ### Dip cut
 
-`--kind dip-cut` makes the edge a hard cut on the bottom video track and darkens the clip ending there by 40 % over its last 3 frames. It writes two `opacity` keys on that clip (`clip key` keys you can see and edit); `--duration` is ignored. Sound and the other tracks are not touched; naming an upper video track fails (lowering opacity there would show the track below, not black). Running it again writes the same keys. `transition remove` at that edge takes the two keys away; trimming the clip's end leaves them where they were, so run it again after a trim.
+`--kind dip-cut` makes the edge a hard cut on the bottom video track and darkens the clip ending there by 40 % over its last 3 frames. It writes two `opacity` keys on that clip (`clip key` keys you can see and edit); `--duration` is ignored. Sound and the other tracks are not touched; naming an upper video track fails (lowering opacity there would show the track below, not black). Running it again writes the same keys. `transition remove` at that edge takes the two keys away; trimming the clip's end moves them to its new last frames, and a split keeps them on the right part.
 
 ### Variety rules
 

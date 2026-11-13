@@ -1,6 +1,6 @@
 // Transition marks, key diamonds and edge hit testing for the timeline panel (ADR 0018 decision 12): pure, DOM-free.
 import type { Clip, KeyEase, TransitionShape } from "@frameshell/schema";
-import { type TransitionContext, edgeTransitions } from "@frameshell/schema/transitions";
+import { DIP_FRAMES, type TransitionContext, dipKeyIndexes, edgeTransitions, playedShape } from "@frameshell/schema/transitions";
 import type { ClipBox, LaneViewport, TimelineLayout, TrackRow } from "./layout.js";
 
 /** Properties a clip can keyframe; audio tracks take only `gain`. */
@@ -18,19 +18,25 @@ export interface KeyBox {
 
 /** What a transition looks like on a clip edge, timeline seconds. */
 export interface TransitionMark {
-  /** A dissolve straddles the cut; a fade (also a dip's two halves, a fade in or out) stays inside its clip. */
-  kind: "dissolve" | "fade";
+  /**
+   * A dissolve straddles the cut; a fade (also a dip's two halves, a fade in or out) stays inside its clip; a dip cut
+   * (ADR 0030 decision 5) darkens its clip's last frames before a hard cut.
+   */
+  kind: "dissolve" | "fade" | "dip-cut";
   /** Which edge of the owning clip it belongs to. */
   side: "in" | "out";
   from: number;
   to: number;
+  /** The shape a dissolve plays as (ADR 0030); absent for a mix. */
+  shape?: TransitionShape;
 }
 
 /** Stored transition of one clip edge as the inspector edits it. */
 export interface EdgeState {
   /** Timeline second of the edge, what `transition.set` takes as `at`. */
   at: number;
-  kind: "dissolve" | "fade" | null;
+  /** `dip-cut`: the clip ending at the edge carries a dip cut's keys (ADR 0030 decision 5); its `length` is 0. */
+  kind: "dissolve" | "fade" | "dip-cut" | null;
   /** Requested length in seconds as `transition.set` takes it (both halves of a dissolve or a dip); 0 without a transition. */
   length: number;
   /** Another clip on the track ends (start edge) or starts (end edge) there: a cut, where a dissolve can play. */
@@ -54,21 +60,45 @@ export const EDGE_GRAB_PX = 6;
 /** Stored times carry 3 decimals. */
 const EDGE_EPSILON = 0.0005;
 
-/** Marks of the clips of one video or audio track by clip id, at the effective lengths (handles and clip lengths cut them). */
-export function transitionMarks(clips: readonly (Clip & { end?: number | null })[], context: TransitionContext): Map<string, TransitionMark[]> {
+/**
+ * Marks of the clips of one video or audio track by clip id, at the effective lengths (handles and clip lengths cut
+ * them). `dips`: the track is the bottom video track, where a clip's dip cut keys mark a dip cut (ADR 0030).
+ */
+export function transitionMarks(clips: readonly (Clip & { end?: number | null })[], context: TransitionContext, dips = false): Map<string, TransitionMark[]> {
   const marks = new Map<string, TransitionMark[]>();
-  if (!clips.some((clip) => clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined)) return marks;
-  const edges = edgeTransitions(clips, context);
+  const edged = clips.some((clip) => clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined);
+  const edges = edged ? edgeTransitions(clips, context) : new Map<string, never>();
   for (const clip of clips) {
     const own = edges.get(clip.id);
-    if (!own) continue;
     const found: TransitionMark[] = [];
-    if (own.mode === "dissolve") found.push({ kind: "dissolve", side: "in", from: clip.start - own.dissolve, to: clip.start + own.dissolve });
-    if (own.fadeIn > 0) found.push({ kind: "fade", side: "in", from: clip.start, to: clip.start + own.fadeIn });
-    if (own.fadeOut > 0 && typeof clip.end === "number") found.push({ kind: "fade", side: "out", from: clip.end - own.fadeOut, to: clip.end });
+    if (own?.mode === "dissolve") {
+      const shape = playedShape(clip);
+      found.push({ kind: "dissolve", side: "in", from: clip.start - own.dissolve, to: clip.start + own.dissolve, ...(shape ? { shape } : {}) });
+    }
+    if (own && own.fadeIn > 0) found.push({ kind: "fade", side: "in", from: clip.start, to: clip.start + own.fadeIn });
+    if (own && own.fadeOut > 0 && typeof clip.end === "number") found.push({ kind: "fade", side: "out", from: clip.end - own.fadeOut, to: clip.end });
+    if (dips && typeof clip.end === "number" && endsInDipCut(clip, clip.end, context.fps)) {
+      found.push({ kind: "dip-cut", side: "out", from: clip.end - DIP_FRAMES / context.fps, to: clip.end });
+    }
     if (found.length > 0) marks.set(clip.id, found);
   }
   return marks;
+}
+
+/**
+ * True when `clip`, ending at timeline second `end`, carries the two `opacity` keys a dip cut writes on its last frames
+ * (`transition.set kind: "dip-cut"`), as the engine finds them: on the frame grid, `at` rounded to the millisecond.
+ */
+export function endsInDipCut(clip: Clip, end: number, fps: number): boolean {
+  const lane = clip.keys?.opacity;
+  if (!lane) return false;
+  const last = Math.round(end * fps) - 1;
+  const from = Math.max(Math.round(clip.start * fps), last - DIP_FRAMES);
+  if (from === last) return false;
+  const speed = "asset" in clip ? (clip.speed ?? 1) : 1;
+  const clipIn = "in" in clip && typeof clip.in === "number" ? clip.in : 0;
+  const keyAt = (frame: number) => Math.round((clipIn + (frame / fps - clip.start) * speed) * 1000) / 1000;
+  return dipKeyIndexes(lane, keyAt(from), keyAt(last), (0.5 / fps) * speed) !== null;
 }
 
 /** Keys of a clip as `timeline.show` carries them (loose JSON); entries that are not keys are dropped. */
@@ -128,17 +158,20 @@ const near = (a: number, b: number) => Math.abs(a - b) < EDGE_EPSILON;
  * butt is two halves (`transition.set` splits it in whole frames), so its length is their sum.
  */
 export function edgeState(row: TrackRow, clip: ClipBox, side: "in" | "out"): EdgeState {
+  const dipped = (box: ClipBox | undefined) => box?.marks.some((mark) => mark.kind === "dip-cut") === true;
   if (side === "in") {
     const previous = row.clips.find((other) => other.id !== clip.id && !other.problem && near(other.end, clip.start));
     const butted = previous !== undefined;
     if (clip.dissolve !== null) return { at: clip.start, kind: "dissolve", length: clip.dissolve, butted, shape: clip.shape };
     if (clip.fadeIn !== null) return { at: clip.start, kind: "fade", length: clip.fadeIn + (previous?.fadeOut ?? 0), butted, shape: null };
+    if (dipped(previous) && previous!.fadeOut === null) return { at: clip.start, kind: "dip-cut", length: 0, butted, shape: null };
     return { at: clip.start, kind: null, length: 0, butted, shape: null };
   }
   const next = row.clips.find((other) => other.id !== clip.id && near(other.start, clip.end));
   const butted = next !== undefined;
   if (next?.dissolve != null) return { at: clip.end, kind: "dissolve", length: next.dissolve, butted, shape: next.shape };
   if (clip.fadeOut !== null) return { at: clip.end, kind: "fade", length: clip.fadeOut + (next?.fadeIn ?? 0), butted, shape: null };
+  if (dipped(clip) && next?.fadeIn == null) return { at: clip.end, kind: "dip-cut", length: 0, butted, shape: null };
   return { at: clip.end, kind: null, length: 0, butted, shape: null };
 }
 

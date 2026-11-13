@@ -233,7 +233,10 @@ export const TransitionShapeSchema = z
         "Default: the whole frame.",
     ),
   })
-  .describe("Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades.");
+  .describe(
+    "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`), on any video track: on an upper track the outgoing clip shows " +
+      "only where the incoming one does not. Sound still crossfades.",
+  );
 
 /**
  * What a clip looks like in one format other than the primary (ADR 0027 decision 5): placement, picture keys,
