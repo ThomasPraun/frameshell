@@ -13,6 +13,7 @@ import type {
   MulticamGalleryResult,
   MulticamTurnsResult,
   MusicCandidatesResult,
+  MusicShapeResult,
   MusicFitResult,
   MethodName,
   MethodResult,
@@ -257,6 +258,14 @@ mutations print the new revision):
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
                                Choose with track set <track> --unmuted, then track remove <others> --force. One
                                transaction (revert it)
+  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s] [--clear] [--dry-run]
+                               Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
+                               (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,
+                               complete --lead s (0.4) before it, held --hold s (0.3) after, back over --release s (0.6);
+                               from --ending it fades out over --fade s (2.5; a short one with --ending bar:N stops on a
+                               bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
+                               keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
+                               fit re-runs it when it moves the clip. --dry-run prints the dip curve. One transaction
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -420,6 +429,11 @@ export const TIMELINE_OPTIONS = {
   skip: { type: "string", multiple: true },
   "dry-run": { type: "boolean" },
   hit: { type: "string" },
+  drop: { type: "string", multiple: true },
+  ending: { type: "string" },
+  lead: { type: "string" },
+  hold: { type: "string" },
+  fade: { type: "string" },
   exact: { type: "boolean" },
   level: { type: "string" },
   loudness: { type: "string" },
@@ -518,6 +532,7 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
+  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "clear", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -568,6 +583,7 @@ const ARITY: Record<string, [number, number]> = {
   cleanup: [0, 0],
   "music fit": [1, 1],
   "music candidates": [2, 7],
+  "music shape": [1, 1],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -636,6 +652,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     const raw = values[flag];
     if (raw === undefined) return undefined;
     if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
+    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+  };
+  /** One time given as text: seconds as a number, else the name for the daemon to resolve. */
+  const whenOf = (raw: string, flag: string): number | string => {
+    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
     return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
   };
   const list = (flag: string): string[] | undefined => {
@@ -1133,6 +1154,21 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music shape":
+      method = "music.shape";
+      Object.assign(params, {
+        clip: args[0],
+        drop: list("drop")?.map((raw) => whenOf(raw, "drop")),
+        ending: when("ending"),
+        lead: num("lead"),
+        depth: num("depth"),
+        hold: num("hold"),
+        release: num("release"),
+        fade: num("fade"),
+        clear: values["clear"] === true ? true : undefined,
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -1218,6 +1254,7 @@ export async function executeTimeline(
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
+  if (inv.method === "music.shape") return formatMusicShape(result as MusicShapeResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -1282,6 +1319,22 @@ function formatMusicFit(result: MusicFitResult): string {
   if (hit.candidates.length > 1) lines.push(`Other strong hits (--hit): ${hit.candidates.slice(0, -1).map((candidate) => s(candidate.at)).join(", ")}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicShape(result: MusicShapeResult): string {
+  const s = (value: number) => `${value.toFixed(2)} s`;
+  const lines = [`Music shape of ${result.clip} (${result.asset}) on ${result.track}${result.dryRun ? " · dry run" : ""}`];
+  if (result.cleared) lines.push("  music keys removed");
+  else if (result.settings) {
+    const { settings } = result;
+    for (const at of result.drops) lines.push(`  steps down ${settings.depth} dB, complete ${s(settings.lead)} before the hit at ${s(at)}, stays down to ${s(at + settings.hold)}, back over ${s(settings.release)}`);
+    if (result.ending !== null) lines.push(`  fades out from ${s(result.ending)} over ${s(settings.fade)}`);
+  }
+  if (result.dryRun && result.curve.length > 0) lines.push(`  dip curve: ${result.curve.map((point) => `${point.time} s ${point.dip} dB`).join(", ")}`);
+  for (const step of result.steps) lines.push(`  ${step.id.padEnd(6)}${step.detail}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }
 

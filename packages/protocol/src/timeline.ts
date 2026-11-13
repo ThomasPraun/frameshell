@@ -6,6 +6,7 @@ import {
   DirectorRulesSchema,
   DuckSettingsSchema,
   ElementAdjustSchema,
+  ShapeSettingsSchema,
   FormatIdSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
@@ -514,6 +515,24 @@ export const operationArgs = {
     settings: DuckSettingsSchema.optional().describe(
       "What the method was asked, kept in `audio.duck` of each clip that gets duck keys so a later run (`music.fit` moving a ducked clip) " +
         "dips the same way; a clip with no duck keys after the run loses it.",
+    ),
+  }),
+  "music.shape": z.strictObject({
+    clip: ClipRef.describe("Music clip: a media clip of an audio track."),
+    curve: z
+      .array(
+        z.strictObject({
+          time: Seconds("Timeline time of the point."),
+          dip: z.number().nonnegative().describe("dB the clip sits below its own level at `time`: 0 = full level."),
+        }),
+      )
+      .describe(
+        "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last; empty clears the clip's `music` keys. " +
+          "The `music.shape` method computes it from the hits and the ending and passes it here.",
+      ),
+    settings: ShapeSettingsSchema.optional().describe(
+      "What the method was asked, kept in `audio.shape` of the clip so `music.fit` can run the same shaping again after it moves the clip; " +
+        "a clip with no `music` keys after the run loses it.",
     ),
   }),
   "multicam.create": z.strictObject({

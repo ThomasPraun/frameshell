@@ -69,6 +69,8 @@ export {
   ClipKeysSchema,
   ClipFormatOverrideSchema,
   DuckSettingsSchema,
+  ShapeSettingsSchema,
+  type ShapeSettings,
   type DuckSettings,
   PaintedTurnSchema,
   TransformSchema,

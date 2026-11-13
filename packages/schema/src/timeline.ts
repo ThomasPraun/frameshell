@@ -74,12 +74,32 @@ export const DuckSettingsSchema = z.strictObject({
 /** See {@link DuckSettingsSchema}. */
 export type DuckSettings = z.output<typeof DuckSettingsSchema>;
 
+/**
+ * What the `music.shape` that wrote a clip's `auto: "music"` keys was asked (ADR 0037 slice 4): kept on the clip so the
+ * same shaping can run again after `music.fit` moves it. Times are resolved timeline seconds, not names. Not applied by itself.
+ */
+export const ShapeSettingsSchema = z.strictObject({
+  drops: z.array(Seconds).optional().describe("Timeline seconds of the hits the music stepped down before."),
+  lead: z.number().positive().describe("Seconds before a hit that the step down is complete."),
+  depth: z.number().positive().describe("dB the music stepped down by."),
+  hold: z.number().nonnegative().describe("Seconds after a hit that the music stayed down."),
+  release: z.number().positive().describe("Seconds the level took to come back."),
+  ending: Seconds.optional().describe("Timeline second the music's closing fade began."),
+  fade: z.number().positive().describe("Seconds of the closing fade."),
+});
+
+/** See {@link ShapeSettingsSchema}. */
+export type ShapeSettings = z.output<typeof ShapeSettingsSchema>;
+
 /** Clip audio settings. */
 export const ClipAudioSchema = z.strictObject({
   gain: z.number().optional().describe("Gain in dB; 0 = unchanged, negative = quieter. Default 0."),
   muted: z.boolean().optional().describe("Default false."),
   duck: DuckSettingsSchema.optional().describe(
     "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+  ),
+  shape: ShapeSettingsSchema.optional().describe(
+    "Set by `music.shape` on a clip that carries its `auto: \"music\"` keys: what it was asked, so the same shaping can run again after `music.fit` moves the clip. Leave it as it is.",
   ),
 });
 
@@ -164,10 +184,10 @@ const keyList = (value: z.ZodNumber, unit: string) =>
           .optional()
           .describe("How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`."),
         auto: z
-          .literal("duck")
+          .enum(["duck", "music"])
           .optional()
           .describe(
-            "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; " +
+            "Set by the command that wrote this key (`duck`: `track.duck`; `music`: `music.shape`). Running that command again replaces keys with this mark and keeps the others; " +
               "setting or moving a key by hand (`clip.key`) clears it.",
           ),
         base: z
@@ -177,6 +197,10 @@ const keyList = (value: z.ZodNumber, unit: string) =>
             "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. " +
               "Running the command again puts that level back as the hand key and takes the dip from it.",
           ),
+        baseAuto: z
+          .literal("music")
+          .optional()
+          .describe("Only with `base`, on a `duck` key written over a `music` key: the mark that key goes back to when the duck runs again."),
       }),
     )
     .min(1)

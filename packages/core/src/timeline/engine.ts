@@ -71,6 +71,16 @@ import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
 
 const round4 = (value: number) => Math.round(value * 10000) / 10000;
 
+/**
+ * A gain lane without the dips of `track.duck`: a duck key that stands in for another key goes back to being that key
+ * (a hand key, or a `music` key it dipped); a duck key of its own goes. Other keys stay.
+ */
+function restoredKeys(lane: readonly ClipKey[]): ClipKey[] {
+  return lane
+    .filter((key) => key.auto !== "duck" || key.base !== undefined)
+    .map((key): ClipKey => (key.auto === "duck" ? { at: key.at, value: key.base!, ...(key.ease ? { ease: key.ease } : {}), ...(key.baseAuto ? { auto: key.baseAuto } : {}) } : key));
+}
+
 /** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
 const DIP_DEPTH = 0.4;
 /** Frames a dip cut darkens before the cut (#483: "for 3 frames"). */
@@ -264,6 +274,8 @@ class Edit {
         return this.clipKey(request.args);
       case "track.duck":
         return this.trackDuck(request.args);
+      case "music.shape":
+        return this.musicShape(request.args);
       case "multicam.create":
         return this.multicamCreate(request.args);
       case "multicam.gallery":
@@ -1653,10 +1665,8 @@ class Edit {
     const curve = args.curve;
     let ducked = 0;
     for (const clip of track.clips.filter((candidate): candidate is Clip => !isShotClip(candidate))) {
-      // A duck key that stands in for a hand key goes back to being that key.
-      const hand = (clip.keys?.gain ?? [])
-        .filter((key) => key.auto !== "duck" || key.base !== undefined)
-        .map((key): ClipKey => (key.auto === "duck" ? { at: key.at, value: key.base!, ...(key.ease ? { ease: key.ease } : {}) } : key));
+      // Music keys are part of the level the dip is taken from, like hand keys: they stay and are dipped too.
+      const hand = restoredKeys(clip.keys?.gain ?? []);
       const kept: ClipKeys = { ...clip.keys };
       delete kept.gain;
       const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
@@ -1683,7 +1693,7 @@ class Edit {
    * `curve` inside it, at its start and end, and at every hand key. A hand key where the dip is on comes back dipped
    * (`auto: "duck"`, level in `base`); one outside any dip stays as it is. The hand keys alone when no dip touches the clip.
    */
-  duckLane(clip: Clip, hand: readonly ClipKey[], curve: readonly { time: number; dip: number }[], end: number, speed: number): ClipKey[] {
+  duckLane(clip: Clip, hand: readonly ClipKey[], curve: readonly { time: number; dip: number }[], end: number, speed: number, mark: "duck" | "music" = "duck"): ClipKey[] {
     const g = this.grid;
     const dipPoints = curve.map((point) => ({ time: point.time, dip: point.dip }));
     const timeOf = (at: number) => clip.start + (at - (clip.in ?? 0)) / speed;
@@ -1698,17 +1708,65 @@ class Edit {
       const at = Math.round(clipTime(clip, t) * 1000) / 1000;
       if (hand.some((other) => Math.abs(other.at - at) < half)) continue;
       const level = keyedValueAt(hand, at) ?? clip.audio?.gain ?? 0;
-      const key: ClipKey = { at, value: round4(level - dipAt(dipPoints, time)), auto: "duck" };
+      const key: ClipKey = { at, value: round4(level - dipAt(dipPoints, time)), auto: mark };
       // Two points in one frame (a ramp shorter than a frame): the later one wins.
       if (g.frame(t) === lastFrame) keys[keys.length - 1] = key;
       else keys.push(key);
       lastFrame = g.frame(t);
     }
     for (const key of hand) {
+      // A shaping leaves hand keys as they are; only a duck dips them.
+      if (mark === "music") {
+        keys.push(key);
+        continue;
+      }
       const dip = dipAt(dipPoints, timeOf(key.at));
-      keys.push(dip > 0 ? { at: key.at, value: round4(key.value - dip), ...(key.ease ? { ease: key.ease } : {}), auto: "duck", base: key.value } : key);
+      keys.push(
+        dip > 0
+          ? { at: key.at, value: round4(key.value - dip), ...(key.ease ? { ease: key.ease } : {}), auto: "duck", base: key.value, ...(key.auto === "music" ? { baseAuto: "music" as const } : {}) }
+          : key,
+      );
     }
     return keys.sort((a, b) => a.at - b.at);
+  }
+
+  /**
+   * `music.shape`: write the dip `curve` into the `gain` keys of music clip `args.clip`, marked `auto: "music"`. Keys with
+   * that mark from an earlier run go, and so do duck keys (they are taken from a level that is changing; the method runs the
+   * duck again over the result); keys without a mark stay and set the level the dip is taken from, and a hand key inside a dip
+   * stays as it is (a warning names it). An empty curve removes the clip's music keys. `args.settings` goes to `audio.shape`
+   * of a clip that ends with music keys.
+   */
+  async musicShape(args: OperationArgs<"music.shape">): Promise<void> {
+    const { track, clip } = this.clip(args.clip);
+    if (track.kind !== "audio" || isShotClip(clip) || !isMedia(clip)) {
+      throw this.invalid(`${clip.id} is not a media clip of an audio track: shaping writes gain keys on music.`, { field: "clip", hint: "Name a media clip of an audio track." });
+    }
+    // Duck keys over a hand key give the hand key back; every other mark goes.
+    const hand = restoredKeys(clip.keys?.gain ?? []).filter((key) => key.auto === undefined);
+    const speed = clip.speed ?? 1;
+    const end = (await this.span(clip)).end;
+    const lane = clip.audio?.muted === true || args.curve.length === 0 ? hand : this.duckLane(clip, hand, args.curve, end, speed, "music");
+    const keyed = lane.some((key) => key.auto === "music");
+    const inside = hand.filter((key) => {
+      const time = clip.start + (key.at - (clip.in ?? 0)) / speed;
+      return keyed && dipAt(args.curve, time) > 0;
+    });
+    if (inside.length > 0) {
+      this.warnings.push(`${clip.id} has ${inside.length === 1 ? "a gain key" : `${inside.length} gain keys`} of its own inside the shaped dips (${inside.map((key) => `${key.at} s`).join(", ")} of the file): ${inside.length === 1 ? "it stays" : "they stay"} as set.`);
+    }
+    const kept: ClipKeys = { ...clip.keys };
+    delete kept.gain;
+    if (lane.length > 0) kept.gain = lane as [ClipKey, ...ClipKey[]];
+    if (Object.keys(kept).length === 0) delete clip.keys;
+    else clip.keys = kept;
+    if (keyed && args.settings) clip.audio = { ...clip.audio, shape: structuredClone(args.settings) };
+    else if (clip.audio?.shape) {
+      const { shape: _shape, ...rest } = clip.audio;
+      if (Object.keys(rest).length > 0) clip.audio = rest;
+      else delete clip.audio;
+    }
+    if (args.curve.length > 0 && !keyed) this.warnings.push(`no dip touches ${clip.id}: no music keys written.`);
   }
 
   /**

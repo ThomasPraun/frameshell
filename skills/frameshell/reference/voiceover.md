@@ -43,7 +43,7 @@ frameshell voiceover generate scripts/launch-vo.md --lines hook-1 --voice em_ale
 - **Paid providers.** When the provider charges, or gives no cost estimate and does not declare itself free, the call generates nothing and fails with `ConfirmationRequired`; `error.data.cost` holds the estimate, or `null` when the cost is unknown. Tell the person (cost, or "unknown") and pass `--yes` only after they confirm it. Never confirm on your own. Cached lines never ask.
 - A line repeated in one call is said once and copied (`copied`). Ctrl+C or a dropped connection does not stop a running generation: finished takes are kept and a paid run keeps going, so confirm the cost before `--yes`. Run it again to reuse them.
 - `SpeechProviderNotFound`: no such provider here; `error.data.available` lists the ones there are. `SpeechFailed`: the provider failed on one line; the lines finished before it are kept and reused by the next call.
-- MCP: `voiceover_generate` with `yes` under the same rule.
+- MCP: `voiceover_generate` with `yes` under the same rule. Pass the refusal's `error.data.confirmation` as `confirmation` too: if the script or the price changed after the person confirmed, the call fails with `ConfirmationStale` (new cost in its data) and generates nothing; ask them again.
 
 ## Phrases and misreads
 
