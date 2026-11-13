@@ -63,9 +63,13 @@ export {
   KEY_EASES,
   TRANSITION_SHAPE_KINDS,
   TRANSITION_DIRECTIONS,
+  FrameRectSchema,
+  orderedFrameRect,
   TransitionShapeSchema,
   ClipKeysSchema,
   ClipFormatOverrideSchema,
+  DuckSettingsSchema,
+  type DuckSettings,
   PaintedTurnSchema,
   TransformSchema,
   ClipAudioSchema,
@@ -207,6 +211,7 @@ export {
   voiceChainOf,
   glassOf,
 } from "./style.js";
+export { STYLE_TOKEN_PREFIX, type StyleTokenFace, styleTokenCss } from "./style-tokens.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {
   CREDITS_FILE,
@@ -401,6 +406,12 @@ export {
 } from "./composite.js";
 export {
   SUBTITLE_FONT,
+  BUNDLED_CAPTION_FONT,
+  type CaptionFont,
+  type CaptionTokens,
+  captionFontSource,
+  styleCaptionTokens,
+  captionTokens,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESETS,
   SUBTITLE_PRESET_IDS,
@@ -430,6 +441,7 @@ export {
   subtitleLayout,
   subtitleTracks,
 } from "./subtitles.js";
+export { type FontMetrics, parseFontMetrics } from "./font-file.js";
 export {
   type TransitionContext,
   type ClipHandles,
@@ -444,12 +456,15 @@ export {
   type NestedFades,
   nestedFades,
   type FrameRect,
+  type FrameCircle,
   type ShapePart,
   type ShapeFrame,
   playedShape,
   shapeProgress,
   shapeStep,
   shapeAt,
+  irisCentre,
+  circleReach,
 } from "./transitions.js";
 
 export { ElementAdjustSchema, ElementsSchema, elementStyles, type ElementAdjust } from "./element-styles.js";
@@ -501,6 +516,23 @@ export {
   SOUND_TYPING_RATE,
   SOUND_MAX_PER_FRAME,
   SOUND_MAX_PLACEMENTS,
+  MUSIC_PRESETS,
+  MUSIC_PRESET_DEFAULTS,
+  MUSIC_SECTIONS,
+  MUSIC_BPM_RANGE,
+  MUSIC_METER_RANGE,
+  MUSIC_MAX_BARS,
+  MUSIC_MAX_SECONDS,
+  MUSIC_TAIL_SECONDS,
+  MUSIC_LUFS,
+  MUSIC_PEAK_DBFS,
+  MUSIC_LIMITS,
+  MUSIC_CHORD_QUALITIES,
+  MUSIC_CHORD_PATTERN,
+  MusicPresetSchema,
+  MusicSectionSchema,
+  type MusicPreset,
+  type MusicSection,
   SfxKindSchema,
   SoundRoleSchema,
   SoundTierSchema,

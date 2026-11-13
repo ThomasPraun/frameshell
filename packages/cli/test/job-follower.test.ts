@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DaemonConnection, JobInfo } from "@frameshell/protocol";
 import { followJobs } from "../src/job-follower.js";
 
-const job = (state: JobInfo["state"], step: JobInfo["step"] = null): JobInfo => ({
+const job = (state: JobInfo["state"], step: JobInfo["step"] = null, progress?: number): JobInfo => ({
   id: "j_2",
   kind: "ingest",
   project: "/talk",
@@ -10,7 +10,7 @@ const job = (state: JobInfo["state"], step: JobInfo["step"] = null): JobInfo => 
   output: null,
   state,
   step,
-  progress: state === "done" ? 1 : 0,
+  progress: progress ?? (state === "done" ? 1 : 0),
   cached: state === "done" ? true : null,
   error: null,
   warnings: [],
@@ -57,5 +57,15 @@ describe("followJobs", () => {
     const conn = connection([], [job("done")]);
     const follower = await followJobs(conn, "/talk");
     expect((await follower.wait(["j_2"])).get("j_2")).toMatchObject({ state: "done" });
+  });
+
+  it("does not step back to the previous step when a job.list reply older than the events shows it at the same progress", async () => {
+    // The hash step ends at the progress where the probe step starts: only the step tells them apart.
+    const conn = connection([job("running", "hash", 0.05), job("running", "probe", 0.05)], [job("running", "hash", 0.05)]);
+    const follower = await followJobs(conn, "/talk");
+    const steps: (string | null)[] = [];
+    void follower.wait(["j_2"], (change) => steps.push(change.step));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(steps).toEqual(["hash", "probe"]);
   });
 });

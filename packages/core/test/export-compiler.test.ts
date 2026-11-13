@@ -6,6 +6,7 @@ import {
   type AudioEffect,
   type Clip,
   type ClipTrack,
+  type ExportPreset,
   type MediaClip,
   type Timeline,
   type Transcript,
@@ -21,9 +22,12 @@ import {
   assCentiseconds,
   compileFrame,
   compileRender,
+  fitInside,
+  gifStep,
   loudnessAnalysis,
   mixStep,
   muxStep,
+  paletteStep,
   parseLoudnessStats,
 } from "../src/index.js";
 
@@ -41,7 +45,8 @@ function golden(name: string, actual: unknown): void {
   expect(text).toBe(readFileSync(path, "utf8").replace(/\r\n/g, "\n"));
 }
 
-const youtube1080 = BUILTIN_PRESETS.find((p) => p.id === "youtube-1080p")!;
+/** A preset with sound: its `audio` is never undefined. */
+const youtube1080 = BUILTIN_PRESETS.find((p) => p.id === "youtube-1080p")! as ExportPreset & { audio: NonNullable<ExportPreset["audio"]> };
 /** `frameshell.json` resolution: transform offsets are in these pixels. */
 const resolution = { width: 1920, height: 1080 };
 
@@ -490,6 +495,68 @@ describe("export compiler", () => {
     });
   });
 
+  describe("GIF (ADR 0039)", () => {
+    const gifPreset = BUILTIN_PRESETS.find((p) => p.id === "gif")!;
+    /** What the service passes: the preset's box already fitted to the format (1920x1080 into 1200x1200 is 1200x675). */
+    const sized = { ...gifPreset, video: { ...gifPreset.video, ...fitInside(gifPreset.video, resolution) } };
+    const gifPlan = (over: Partial<Parameters<typeof compileRender>[0]> = {}) =>
+      compileRender({ timeline, fps: 30, preset: sized, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4, ...over });
+
+    it("fits the format inside the preset's box, never up", () => {
+      expect(sized.video).toMatchObject({ width: 1200, height: 675 });
+      expect(fitInside(gifPreset.video, { width: 1080, height: 1920 })).toEqual({ width: 675, height: 1200 });
+      expect(fitInside(gifPreset.video, { width: 1000, height: 1000 })).toEqual({ width: 1000, height: 1000 });
+      expect(fitInside(gifPreset.video, { width: 640, height: 360 })).toEqual({ width: 640, height: 360 });
+    });
+
+    it("plans lossless RGB segments, a palette pass and a GIF pass, with no audio (golden)", () => {
+      const plan = gifPlan();
+      expect(plan).toMatchObject({ container: "gif", loop: true, fps: "30/1", width: 1200, height: 675, frames: 240, warnings: [] });
+      expect(plan.audio).toEqual({ sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [] });
+      expect(mixStep(plan)).toBeNull();
+      expect(loudnessAnalysis(plan)).toBeNull();
+      golden("gif-plan", { segments: plan.segments, files: plan.files, palette: paletteStep(), gif: gifStep("/out/main.gif.partial") });
+    });
+
+    it("caps the frame rate at 30 and keeps 24 and 25", () => {
+      const rate = (fps: number) => gifPlan({ preset: { ...sized, video: { ...sized.video, fps } } });
+      expect(rate(60).fps).toBe("30/1");
+      expect(rate(24).fps).toBe("24/1");
+      expect(rate(25).fps).toBe("25/1");
+      expect(rate(24).frames).toBe(192);
+      expect(gifPlan({ fps: 60 }).fps).toBe("30/1");
+    });
+
+    it("refuses more than 350 output frames before rendering, naming the count", () => {
+      const long = (frames: number): Timeline => ({
+        ...timeline,
+        tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_long", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: frames / 30 }] }],
+      });
+      expect(gifPlan({ timeline: long(350) }).frames).toBe(350);
+      expect(() => gifPlan({ timeline: long(351) })).toThrow(expect.objectContaining({ code: ErrorCode.InvalidOperation, data: expect.objectContaining({ frames: 351, max: 350 }) }));
+      expect(() => gifPlan({ timeline: long(351) })).toThrow(/at most 350 frames; this timeline would render 351 .*Shorten it to 11\.67 s or less/);
+      // The cap counts output frames: 420 frames at 30 fps are 336 at 24 fps.
+      const rate24 = { ...sized, video: { ...sized.video, fps: 24 } };
+      expect(gifPlan({ timeline: long(420), preset: rate24 }).frames).toBe(336);
+    });
+
+    it("has the loop rules without being asked: a cover frame is refused, a black end warns", () => {
+      expect(() => gifPlan({ cover: { at: 1, layout: null } })).toThrow(expect.objectContaining({ code: ErrorCode.InvalidOperation, data: expect.objectContaining({ field: "cover" }) }));
+      const fadeIn = {
+        ...timeline,
+        tracks: timeline.tracks.map((track) => (track.id === "v1" && "clips" in track ? { ...track, clips: track.clips.map((clip, i) => (i === 0 ? { ...clip, fadeIn: 0.5 } : clip)) } : track)),
+      } as unknown as Timeline;
+      expect(gifPlan({ timeline: fadeIn }).warnings).toEqual([expect.stringMatching(/^Loop: frame 0 is black/)]);
+    });
+
+    it("leaves quality tiers alone, with the H.264-only warning", () => {
+      const plan = gifPlan({ encode: { encoder: "libx264", tier: "draft" } });
+      expect(plan.warnings).toEqual(['Quality "draft" only applies to H.264 presets; gif renders as written.']);
+      expect(plan.fps).toBe("30/1");
+      expect(plan.segments[0]!.args.join(" ")).toContain("-c:v ffv1");
+    });
+  });
+
   it("refuses an empty timeline", () => {
     const empty: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [] }] };
     expect(() => compileRender({ timeline: empty, fps: 30, preset: youtube1080, loudness: -17, sources, resolution })).toThrow(
@@ -791,6 +858,18 @@ describe("export compiler", () => {
       const graphs = Object.values(plan.files).join("\n");
       // c_talk2's head, and c_talk3's in two pieces: the segment join at its cut.
       expect(graphs.match(/geq=/g)).toHaveLength(3);
+      expect(graphs).not.toContain("alpha=1");
+      expect(graphs).not.toContain("eval=frame");
+    });
+
+    it("irises: a geq circle on the incoming head only, centred on the origin, the outgoing clip concatenated under it (golden)", () => {
+      const plan = planOf(shaped({ kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] }, { kind: "iris" }));
+      golden("shaped-iris-plan", { segments: plan.segments, files: plan.files, audio: plan.audio });
+      const graphs = Object.values(plan.files).join("\n");
+      expect(graphs.match(/geq=/g)).toHaveLength(3);
+      // Centres in output pixels: (0.7, 0.3) of the frame, then the frame's centre.
+      expect(graphs).toContain("hypot(X+0+0.5-1344,Y+0+0.5-324)");
+      expect(graphs).toContain("hypot(X+0+0.5-960,Y+0+0.5-540)");
       expect(graphs).not.toContain("alpha=1");
       expect(graphs).not.toContain("eval=frame");
     });

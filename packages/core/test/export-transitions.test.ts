@@ -5,6 +5,8 @@ import {
   type ExportPreset,
   type MediaClip,
   type Timeline,
+  type TransitionShape,
+  circleReach,
   dissolveProgress,
   dissolveWeights,
   fadeWeight,
@@ -14,7 +16,7 @@ import {
   placementAt,
   shapeAt,
 } from "@frameshell/schema";
-import { type ExportSource, compileRender, executeRender } from "../src/index.js";
+import { type ExportSource, applyOperation, compileRender, executeRender } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 import { frameLuma } from "./media-fixtures.js";
 import { mediaTools, run, runBuffer } from "./media-tools.js";
@@ -412,6 +414,39 @@ describe("export transitions and keys (real ffmpeg)", () => {
   );
 
   it(
+    "darkens a dip cut's outgoing clip over black on the bottom track, then cuts hard (ADR 0030)",
+    async () => {
+      const before = timelineOf([
+        { id: "v1", kind: "video", clips: [media("a", "assets/counter.mp4", 0, 1, 2), media("b", "assets/counter.mp4", 1, 5, 6)] },
+      ]);
+      const { timeline } = await applyOperation(
+        before,
+        { op: "transition.set", args: { at: 1, kind: "dip-cut", duration: 0.5 } },
+        {
+          fps: 30,
+          source: async () => ({ duration: 20, video: true, audio: true }),
+          nestedDuration: async () => 0,
+          clipTypes: async () => new Map(),
+          newId: (prefix) => `${prefix}_1`,
+        },
+      );
+      const sources = new Map([["assets/counter.mp4", counter]]);
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution });
+      const output = join(dir, "dip-cut.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-dip-cut"), output });
+      const shown = await frameLuma(output);
+      const level = (frame: number) => levels[frame % LEVELS]!;
+      // Frames 26-29 go from full to 60 % over black (full-range luma 0); frame 30 is b at full.
+      for (const n of [20, 26, 27, 28, 29, 30, 31]) {
+        const opacity = n <= 26 || n >= 30 ? 1 : 1 - (0.4 * (n - 26)) / 3;
+        const expected = level(n < 30 ? 30 + n : 120 + n) * opacity;
+        expect(Math.abs(shown[n]! - expected), `frame ${n}: ${shown[n]} vs ${expected}`).toBeLessThan(2.5);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "wipes and pushes on the bottom track where shapeAt puts the edge, the incoming clip's missing handle held (ADR 0030)",
     async () => {
       const flat = async (name: string, colour: string): Promise<ExportSource> => {
@@ -427,13 +462,14 @@ describe("export transitions and keys (real ffmpeg)", () => {
         ["assets/dark.mp4", await flat("dark.mp4", "0x303030")],
         ["assets/bright.mp4", await flat("bright.mp4", "0xd0d0d0")],
       ]);
-      for (const kind of ["wipe", "push"] as const) {
+      for (const kind of ["wipe", "push", "iris"] as const) {
+        const shape: TransitionShape = kind === "iris" ? { kind, origin: [0.5, 0.25, 0.75, 0.5] } : { kind, direction: "left" };
         // bright starts at its source's first frame: its push head holds that frame.
         const timeline = timelineOf([
           {
             id: "v1",
             kind: "video",
-            clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape: { kind, direction: "left" } })],
+            clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape })],
           },
         ]);
         const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 2 });
@@ -441,8 +477,20 @@ describe("export transitions and keys (real ffmpeg)", () => {
         await executeRender(plan, { ffmpeg, workDir: join(dir, `work-${kind}`), output });
         const shown = await frames(output);
         expect(shown).toHaveLength(60);
-        // Frames 27 and 30 of the 12-frame dissolve centered on frame 30: the incoming picture from column 64 * (1 - p).
-        for (const frame of [27, 30, 33]) {
+        // Frames 27, 30 and 33 of the 12-frame dissolve centered on frame 30: the iris's circle around (40, 24).
+        for (const frame of kind === "iris" ? [27, 30, 33] : []) {
+          const { circle } = shapeAt(shape, dissolveProgress(1, 0.2, frame / 30)).incoming;
+          const radius = circle!.r * circleReach(circle!, 64, 64);
+          for (let y = 2; y < 64; y += 4) {
+            for (let x = 2; x < 64; x += 4) {
+              const distance = Math.hypot(x + 0.5 - 40, y + 0.5 - 24);
+              if (Math.abs(distance - radius) < 3) continue;
+              expect(shown[frame]![y * 64 + x]! > 128, `iris frame ${frame} pixel ${x},${y} (radius ${radius})`).toBe(distance < radius);
+            }
+          }
+        }
+        // The same frames of the wipe and push: the incoming picture from column 64 * (1 - p).
+        for (const frame of kind === "iris" ? [] : [27, 30, 33]) {
           const { incoming } = shapeAt({ kind: "wipe" }, dissolveProgress(1, 0.2, frame / 30));
           const edge = Math.round(64 * incoming.clip![0]);
           const row = shown[frame]!.subarray(32 * 64, 33 * 64);

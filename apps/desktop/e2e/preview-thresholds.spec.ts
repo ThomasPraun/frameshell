@@ -13,6 +13,7 @@ import { expect, test } from "@playwright/test";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { type Sandbox, isWindows, launch } from "./harness.js";
 import { makeSource, testFfmpeg } from "./media.js";
+import { drawnFrames, startDrawLog } from "./draw-log.js";
 import { type RunLog, analyze, checkThresholds, spikeCutList } from "./preview-analysis.js";
 import { installFrameReader, waitForIngest } from "./preview-probe.js";
 
@@ -101,6 +102,7 @@ test("preview meets the ADR 0001 pass thresholds on the spike's cut list", async
     blocks.length = 0;
 
     await page.keyboard.press("Home");
+    await startDrawLog(page);
     await page.getByRole("button", { name: "Play" }).click();
     const anchor = await expect
       .poll(() => page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { anchor(): unknown } }).frameshellPreviewProbe.anchor()))
@@ -114,6 +116,7 @@ test("preview meets the ADR 0001 pass thresholds on the spike's cut list", async
     await page.waitForTimeout(500);
     await drain();
     const probes = await page.evaluate(() => (window as unknown as { probes: [number, number][] }).probes);
+    const drawn = await drawnFrames(page);
     const stats = await page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats(): unknown } }).frameshellPreviewProbe.stats());
 
     // Recorded blocks into one buffer on the context-frame axis.
@@ -147,7 +150,7 @@ test("preview meets the ADR 0001 pass thresholds on the spike's cut list", async
       return ((pcm[s.inF * hz + i] ?? 0) / 32768) * Math.max(0, Math.min(1, i / 96, (n - 1 - i) / 96));
     };
 
-    const run: RunLog = { fps: FPS, sampleRate: SR, segments, probes, anchor, audioStart, audio, audioGaps: gaps, timestamps, expected };
+    const run: RunLog = { fps: FPS, sampleRate: SR, segments, probes, drawn, anchor, audioStart, audio, audioGaps: gaps, timestamps, expected };
     const summary = analyze(run);
     const verdicts = checkThresholds(summary);
     const name = `real-app-${MINUTES}min-${segments.length - 1}cuts`;

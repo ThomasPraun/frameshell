@@ -1,15 +1,11 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import puppeteer, { type Browser } from "puppeteer-core";
 import { describe, expect, it } from "vitest";
-import { BinaryManager } from "@frameshell/core";
+import { BinaryManager, ClipVerifier } from "@frameshell/core";
 import { createHyperframesAdapter } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE } from "../src/motion-runtime.js";
 
@@ -135,71 +131,27 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
   );
 
   it(
-    "paints the same 12 probe frames cold and after seeking from an unrelated time (≤ 2/255)",
+    "passes clip verify (the core determinism check) on the motion composition",
     async () => {
       const dir = project();
       const manager = binaries();
-      const [chrome, ffmpeg] = await Promise.all([manager.ensure("chrome-headless-shell"), manager.ensure("ffmpeg")]);
       const adapter = createHyperframesAdapter({ projectDir: dir });
-      const live = await adapter.livePreview!(clip, { projectDir: dir, fps: 30, width: 160, height: 90, ensureBinary: (name) => manager.ensure(name) });
-      // Serves `root` and inserts `head` into the entry, as the app's frameshell-live scheme does.
-      const server = createServer((request, response) => {
-        const path = posix.join(live.root, decodeURIComponent(new URL(request.url ?? "/", "http://x").pathname));
-        readFile(join(dir, ...path.split("/"))).then(
-          (body) => {
-            const html = path === live.entry;
-            response.writeHead(200, { "content-type": html ? "text/html" : "text/javascript" });
-            response.end(html ? body.toString("utf8").replace(/<head>/i, () => `<head><script>${live.head}</script>`) : body);
-          },
-          () => response.writeHead(404).end(),
-        );
+      const timeline = { id: "main", revision: 1, tracks: [{ id: "v1", kind: "video", clips: [{ ...clip, type: "hyperframes", start: 0, in: 0, duration: DURATION }] }] };
+      const verifier = new ClipVerifier({
+        timeline: async () => ({ timeline: timeline as never, fps: 30 }),
+        live: async (_root, _timeline, id) => ({
+          ...(await adapter.livePreview!(clip, { projectDir: dir, fps: 30, width: 160, height: 90, ensureBinary: (name) => manager.ensure(name) })),
+          clip: id,
+          key: "k",
+        }),
+        resolution: async () => ({ width: 160, height: 90 }),
+        chrome: () => manager.ensure("chrome-headless-shell"),
+        ffmpeg: () => manager.ensure("ffmpeg"),
       });
-      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/${posix.basename(live.entry)}`;
-      const scratch = tempDir();
-      /** RGBA bytes of a PNG screenshot, decoded by ffmpeg. */
-      const pixels = async (png: Uint8Array, name: string) => {
-        const file = join(scratch, `${name}.png`);
-        writeFileSync(file, png);
-        const { stdout } = await execFileAsync(ffmpeg, ["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgba", "-"], { encoding: "buffer" });
-        return stdout;
-      };
-      const errors: string[] = [];
-      const open = async (browser: Browser) => {
-        const page = await browser.newPage();
-        page.on("pageerror", (error) => errors.push(String(error)));
-        await page.setViewport({ width: 160, height: 90 });
-        await page.goto(url);
-        await page.evaluate("window.frameshellLive.ready");
-        return page;
-      };
-      const probes = Array.from({ length: 12 }, (_, i) => ((i + 0.37) * DURATION) / 12);
-      const browser = await puppeteer.launch({ executablePath: chrome });
-      try {
-        const cold: Buffer[] = [];
-        for (const [i, t] of probes.entries()) {
-          const page = await open(browser);
-          await page.evaluate(`window.frameshellLive.seek(${t})`);
-          cold.push(await pixels(await page.screenshot({ type: "png", omitBackground: true }), `cold-${i}`));
-          await page.close();
-        }
-        const page = await open(browser);
-        let worst = 0;
-        for (const [i, t] of probes.entries()) {
-          await page.evaluate(`window.frameshellLive.seek(${probes[(i + 5) % probes.length]})`);
-          await page.evaluate(`window.frameshellLive.seek(${t})`);
-          const again = await pixels(await page.screenshot({ type: "png", omitBackground: true }), `reseek-${i}`);
-          expect(again.length).toBe(cold[i]!.length);
-          for (let b = 0; b < again.length; b++) worst = Math.max(worst, Math.abs(again[b]! - cold[i]![b]!));
-        }
-        expect(errors).toEqual([]);
-        expect(worst).toBeLessThanOrEqual(2);
-        // The probes are frames of a moving picture, not one frame twelve times.
-        expect(new Set(cold.map((frame) => frame.toString("base64"))).size).toBeGreaterThan(8);
-      } finally {
-        await browser.close();
-        server.close();
-      }
+      const result = await verifier.verify(dir, { timeline: "main", clip: "c_motion" });
+      expect(result).toMatchObject({ ok: true, worst: null, warnings: [] });
+      expect(result.probes).toHaveLength(12);
+      expect(result.distinct).toBeGreaterThan(8);
     },
     600_000,
   );

@@ -18,6 +18,7 @@ import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
+import { readStyleTokens } from "../style/tokens.js";
 import { type NestedReader, resolveNested, resolveNestedIn } from "../timeline/nested.js";
 import { clipCacheKey } from "./cache-key.js";
 
@@ -100,8 +101,8 @@ interface Placed {
   track: string;
 }
 
-/** Key of a clip, or why it has none. */
-type Keyed = { key: string; registered: RegisteredClipType } | { key: null; error: string };
+/** Key of a clip, or why it has none; `styleCss`: the token sheet the key counts, which the render gets (ADR 0028). */
+type Keyed = { key: string; registered: RegisteredClipType; styleCss?: string } | { key: null; error: string };
 
 interface Pending {
   job: string;
@@ -254,7 +255,7 @@ export class ClipRenderer {
         clips.push({ ...info, state: "failed", error: failed });
         continue;
       }
-      const pending = this.#render(root, keyed.key, clip, keyed.registered, format);
+      const pending = this.#render(root, keyed, clip, format);
       const job = this.#options.jobs.get(pending.job);
       clips.push({ ...info, state: job?.state === "running" ? "rendering" : "queued", job: pending.job, progress: job?.progress ?? 0 });
     }
@@ -316,7 +317,7 @@ export class ClipRenderer {
     if (!(await stat(join(root, ...entry.split("/"))).then((info) => info.isFile(), () => false))) {
       throw unavailable(`its live page ${entry} does not exist.`);
     }
-    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key, ...elementCssOf(clip) };
+    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key, ...elementCssOf(clip), ...(keyed.styleCss ? { styleCss: keyed.styleCss } : {}) };
   }
 
   /**
@@ -349,7 +350,7 @@ export class ClipRenderer {
         continue;
       }
       this.#failed.delete(entryId(root, keyed.key));
-      waits.push({ clip, done: this.#render(root, keyed.key, clip, keyed.registered, format).done });
+      waits.push({ clip, done: this.#render(root, keyed, clip, format).done });
     }
     let done = rendered.size;
     onProgress?.(done / placed.length);
@@ -476,7 +477,7 @@ export class ClipRenderer {
       const keyed = await this.#keyOf(root, clip, adapters, format);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
       if (await this.#ready(root, keyed.key)) continue;
-      this.#render(root, keyed.key, clip, keyed.registered, format);
+      this.#render(root, keyed, clip, format);
     }
   }
 
@@ -495,7 +496,16 @@ export class ClipRenderer {
       return { key: null, error: `${registered.plugin.name} could not list the inputs of ${clip.id}: ${(error as Error)?.message ?? error}` };
     }
     const inputs = await Promise.all(paths.map(async (path) => ({ path, hash: await this.#hashInput(root, path) })));
-    return { key: clipCacheKey({ plugin: registered.plugin, clip, inputs, format }), registered };
+    let sheet: Awaited<ReturnType<typeof readStyleTokens>> = null;
+    if (registered.adapter.styleTokens) {
+      try {
+        sheet = await readStyleTokens(root);
+      } catch (error) {
+        return { key: null, error: (error as Error).message };
+      }
+    }
+    const key = clipCacheKey({ plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}) });
+    return { key, registered, ...(sheet ? { styleCss: sheet.css } : {}) };
   }
 
   /** Content hash of a project-relative input; null when missing or outside the project. */
@@ -526,8 +536,9 @@ export class ClipRenderer {
     return { path, file: `${CLIP_CACHE_DIR}/${meta.file}`, hasAlpha: meta.hasAlpha, width: meta.width, height: meta.height, duration: meta.duration };
   }
 
-  /** The pending render of `key`, queueing one when none runs. */
-  #render(root: string, key: string, clip: AdapterClip, registered: RegisteredClipType, format: ClipFormat): Pending {
+  /** The pending render of `keyed`, queueing one when none runs. */
+  #render(root: string, keyed: Extract<Keyed, { key: string }>, clip: AdapterClip, format: ClipFormat): Pending {
+    const { key, registered, styleCss } = keyed;
     const id = entryId(root, key);
     const running = this.#pending.get(id);
     if (running) return running;
@@ -540,7 +551,7 @@ export class ClipRenderer {
       project: root,
       asset: clip.source ?? `${clip.type}:${clip.id}`,
       output: join(dir, key),
-      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx),
+      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx, styleCss),
     });
     const done = (async () => {
       const job = info.state === "canceled" ? info : await finished;
@@ -573,6 +584,7 @@ export class ClipRenderer {
     registered: RegisteredClipType,
     format: ClipFormat,
     ctx: JobContext,
+    styleCss?: string,
   ): Promise<void> {
     ctx.update({ step: "render", progress: 0 });
     const outDir = join(dir, `.tmp-${key}-${randomBytes(4).toString("hex")}`);
@@ -585,6 +597,7 @@ export class ClipRenderer {
         signal: ctx.signal,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
         ...elementCssOf(clip),
+        ...(styleCss ? { styleCss } : {}),
         progress: ({ fraction }) => {
           if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
         },

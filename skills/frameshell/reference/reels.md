@@ -37,6 +37,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 - **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. `frameshell review --platform <instagram|tiktok|shorts>` draws the zones over the frames and flags captions that cross them ([critique.md](critique.md)); check each graphic in a frame, not in its file.
 - **Face first:** nothing covers the face or chin, also at the deepest zoom: cards start below the chin at the zoom they appear in.
+- **Glass cards:** only when `style.json` `glass.cards` is true or the person asks. Use the `glass-card` template (see the `hyperframes` skill), add it above the footage, then `frameshell clip set <clip> --glass` (`--backdrop-dim 0.72` over bright footage); without it the card is a pale pane.
 - **One idea on screen:** when a graphic says what the caption says, the caption is noise; leave the caption and drop the graphic, or move the graphic to a moment the caption does not cover.
 - **Text:** no caption on screen under 0.4 s; type at least 28 px at 1080 wide; one display face and one text face; one accent colour, on the key word only.
 

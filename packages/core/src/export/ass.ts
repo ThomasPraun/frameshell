@@ -1,7 +1,6 @@
 import {
   type ResolvedSubtitleTrack,
   SUBTITLE_ENTRY,
-  SUBTITLE_FONT,
   type Size,
   cueTokens,
   entryEnd,
@@ -13,7 +12,7 @@ import {
 /**
  * ASS script burning subtitle cues into export (SPEC §3.5 step 3), laid out
  * with the same `subtitleLayout` the preview draws with: one style per track
- * (bundled face, size, outline, colours), one event per cue, or per spoken
+ * (its face, size, outline, colours), one event per cue, or per spoken
  * word when the style highlights it. A phrase's keyword takes the style's
  * keyword colour. A cue with an `entry` fades and unblurs its units in (`\t`
  * with the preview's easing; the keyword also settles from `keywordScale`);
@@ -32,24 +31,26 @@ export function assSubtitles(tracks: readonly ResolvedSubtitleTrack[], frame: Si
   tracks.forEach((track, layer) => {
     const { style } = track;
     const layout = subtitleLayout(style, frame);
+    const { font } = style;
     const name = `t${layer}`;
     styles.push(
       [
         `Style: ${name}`,
-        SUBTITLE_FONT.family,
-        num(layout.fontSize * (SUBTITLE_FONT.ascent + SUBTITLE_FONT.descent)),
+        // A comma would end the field; libass matches the family as the font file names it.
+        font.family.replace(/,/g, ""),
+        num(layout.fontSize * (font.ascent + font.descent)),
         assColor(style.color),
         assColor(style.color),
         assColor(style.outlineColor),
         assColor(style.outlineColor),
-        // Bold, italic, underline, strike: the face is already black; synthetic bold would widen it.
+        // Bold, italic, underline, strike: the face's own weight; synthetic bold would widen it.
         "0,0,0,0,100,100,0,0,1",
         num(layout.outline),
         "0,2,0,0,0,1",
       ].join(","),
     );
     // \an2: the point is the bottom of the line box, i.e. baseline + descent.
-    const anchor = `{\\an2\\pos(${num(layout.centerX)},${num(layout.baseline + layout.fontSize * SUBTITLE_FONT.descent)})}`;
+    const anchor = `{\\an2\\pos(${num(layout.centerX)},${num(layout.baseline + layout.fontSize * font.descent)})}`;
     const blur = layout.fontSize * SUBTITLE_ENTRY.blur;
     const base = assColor(style.color);
     for (const cue of track.cues) {

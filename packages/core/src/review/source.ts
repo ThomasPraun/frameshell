@@ -10,10 +10,14 @@ import { ENERGY_WIDTH, type FrameRange, fileSampleRate, frameTime, tileHeight, t
 
 // Where the frames of a review come from: an exported file decoded by ffmpeg, or a timeline rendered frame by frame.
 
-/** Motion of a range: `energy[i]` is how much the grey picture changed between sample `i - 1` and sample `i` (0 for the first), `times` their seconds. */
+/**
+ * Motion of a range: `energy[i]` is how much the grey picture changed between sample `i - 1` and sample `i` (0 for the
+ * first), `times` their seconds, `spread[i]` the standard deviation of sample `i`'s grey levels (0 flat, up to 128).
+ */
 export interface MotionSeries {
   times: number[];
   energy: number[];
+  spread: number[];
 }
 
 /** A film frames can be taken from. */
@@ -25,6 +29,8 @@ export interface FilmSource {
   height: number;
   /** Write frame `frame` (0-based) as a PNG to absolute `out`. */
   capture(frame: number, out: string): Promise<void>;
+  /** A file: whether it has a sound track. Absent for a timeline, whose sound is not measured. */
+  audio?: boolean;
   /** Measure the motion of `range`; `scratch` is a folder it may fill (the caller removes it). */
   motion(range: FrameRange, scratch: string, signal?: AbortSignal): Promise<MotionSeries>;
 }
@@ -36,14 +42,27 @@ export function captureParallelism(): number {
 
 /** The series of consecutive frames `grey`, sampled at `times`. */
 async function series(grey: AsyncIterable<Uint8Array>, times: (index: number) => number): Promise<MotionSeries> {
-  const out: MotionSeries = { times: [], energy: [] };
+  const out: MotionSeries = { times: [], energy: [], spread: [] };
   let previous: Uint8Array | undefined;
   for await (const frame of grey) {
     out.times.push(times(out.times.length));
     out.energy.push(previous ? frameDifference(previous, frame) : 0);
+    out.spread.push(lumaSpread(frame));
     previous = frame;
   }
   return out;
+}
+
+/** Standard deviation of the grey levels of `frame`. */
+function lumaSpread(frame: Uint8Array): number {
+  let sum = 0;
+  let squares = 0;
+  for (const value of frame) {
+    sum += value;
+    squares += value * value;
+  }
+  const mean = sum / frame.length;
+  return Math.sqrt(Math.max(0, squares / frame.length - mean * mean));
 }
 
 /** Size of the grey frames the motion measure compares for pictures `width` x `height`. */
@@ -75,6 +94,7 @@ export async function fileSource(ffmpeg: string, ffprobe: string, path: string, 
     frames,
     width: video.width,
     height: video.height,
+    audio: probe.audio !== null,
     async capture(frame, out) {
       // Mid-frame, so a rounding error in the seek never lands on a neighbour.
       await runTool(ffmpeg, [...base, "-ss", ((frame + 0.5) / fps).toFixed(4), "-i", path, "-map", "0:v:0", "-frames:v", "1", out]);

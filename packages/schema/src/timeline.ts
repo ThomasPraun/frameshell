@@ -57,10 +57,30 @@ export const TransformSchema = z
   })
   .describe("Overlay placement (video tracks only).");
 
+/**
+ * What the `track.duck` that wrote a clip's `auto: "duck"` keys was asked (ADR 0037 slice 3): kept on the clip so a later
+ * run of it (`music.fit` moving the clip) dips the same way over the same tracks. Not applied by itself: the keys are the duck.
+ */
+export const DuckSettingsSchema = z.strictObject({
+  under: z.array(Id).min(1).describe("Ids of the video or audio tracks whose speech the music dipped under."),
+  depth: z.number().positive().describe("dB the clip dips below its level while someone speaks."),
+  attackMs: z.number().positive().describe("Milliseconds the dip takes to reach full depth."),
+  releaseMs: z.number().positive().describe("Milliseconds the level takes to come back after the voice stops."),
+  threshold: z.number().describe("dBFS above which sound counted as speech."),
+  gap: z.number().nonnegative().describe("Seconds under which two stretches of speech merged."),
+  level: z.number().nonnegative().optional().describe("`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked."),
+});
+
+/** See {@link DuckSettingsSchema}. */
+export type DuckSettings = z.output<typeof DuckSettingsSchema>;
+
 /** Clip audio settings. */
 export const ClipAudioSchema = z.strictObject({
   gain: z.number().optional().describe("Gain in dB; 0 = unchanged, negative = quieter. Default 0."),
   muted: z.boolean().optional().describe("Default false."),
+  duck: DuckSettingsSchema.optional().describe(
+    "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+  ),
 });
 
 const effectParam = (limit: { min: number; max: number; default: number }, what: string) =>
@@ -171,7 +191,7 @@ export const ClipKeysSchema = z
 const TransitionSeconds = z.number().positive();
 
 /** Shapes a dissolve can take instead of mixing the pictures (ADR 0030). */
-export const TRANSITION_SHAPE_KINDS = ["wipe", "push"] as const;
+export const TRANSITION_SHAPE_KINDS = ["wipe", "push", "iris"] as const;
 
 /** Name of a shape in {@link TRANSITION_SHAPE_KINDS}. */
 export type TransitionShapeKind = (typeof TRANSITION_SHAPE_KINDS)[number];
@@ -182,16 +202,36 @@ export const TRANSITION_DIRECTIONS = ["left", "right", "up", "down"] as const;
 /** Name of a direction in {@link TRANSITION_DIRECTIONS}. */
 export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number];
 
+const FrameFraction = z.number().min(0).max(1);
+
+/**
+ * A rectangle `[x0, y0, x1, y1]` in fractions of the frame being rendered (0 to 1), so it survives formats (ADR 0030
+ * decision 4). The timeline check wants x0 <= x1 and y0 <= y1.
+ */
+export const FrameRectSchema = z.tuple([FrameFraction, FrameFraction, FrameFraction, FrameFraction]);
+
+/** True when `[x0, y0, x1, y1]` is ordered: x0 <= x1 and y0 <= y1. */
+export function orderedFrameRect([x0, y0, x1, y1]: readonly [number, number, number, number]): boolean {
+  return x0 <= x1 && y0 <= y1;
+}
+
 /** How a clip's `dissolve` moves the pictures instead of mixing them (ADR 0030); `shapeAt` evaluates it. */
 export const TransitionShapeSchema = z
   .strictObject({
     kind: z
       .enum(TRANSITION_SHAPE_KINDS)
-      .describe("`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."),
+      .describe(
+        "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. " +
+          "`iris`: the incoming clip opens in a growing circle from the centre of `origin`.",
+      ),
     direction: z
       .enum(TRANSITION_DIRECTIONS)
       .optional()
-      .describe("Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`."),
+      .describe("`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`."),
+    origin: FrameRectSchema.optional().describe(
+      "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. " +
+        "Default: the whole frame.",
+    ),
   })
   .describe("Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades.");
 
@@ -763,6 +803,16 @@ export const TimelineSchema = z
           const path = ["tracks", t, "clips", c, "shape"];
           if (track.kind === "audio") ctx.addIssue({ code: "custom", message: "audio tracks have no picture to shape: `shape` is for video tracks", path });
           else if (clip.dissolve === undefined) ctx.addIssue({ code: "custom", message: "`shape` shapes a dissolve: give the clip a `dissolve` too, or remove `shape`", path });
+          const { kind, direction, origin } = clip.shape;
+          if (kind === "iris" && direction !== undefined) {
+            ctx.addIssue({ code: "custom", message: "an iris opens from `origin`: it takes no `direction`", path: [...path, "direction"] });
+          }
+          if (kind !== "iris" && origin !== undefined) {
+            ctx.addIssue({ code: "custom", message: `\`origin\` is for an iris; a ${kind} takes \`direction\``, path: [...path, "origin"] });
+          }
+          if (origin !== undefined && !orderedFrameRect(origin)) {
+            ctx.addIssue({ code: "custom", message: "`origin` is `[x0, y0, x1, y1]` with x0 <= x1 and y0 <= y1", path: [...path, "origin"] });
+          }
         });
       }
       if (track.kind === "video" && track.behind !== undefined) {

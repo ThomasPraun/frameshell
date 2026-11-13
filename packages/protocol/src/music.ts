@@ -24,6 +24,19 @@ export const MusicFitHitCandidateSchema = z.object({
   level: z.number().describe("dB of the hit against the loud part of the track (0 = as loud as it, positive = louder; a final crash is usually above it)."),
 });
 
+/** The final hit a fit lands on the cut. */
+export const MusicFitHitSchema = z.object({
+  at: z.number().describe("Source seconds of the hit that lands on `end`."),
+  source: z.enum(["given", "detected"]).describe("`given`: `hit` was passed. `detected`: found on the track's energy."),
+  confidence: z
+    .number()
+    .describe(
+      "0 to 1: 1 for a given hit. A detected one grows with how sharp the jump is, how much the sound falls away after it and how close it is to the end of the played part. Under 0.5 it never changes the speed.",
+    ),
+  rise: z.number().nullable().describe("dB the level jumps by there; null for a given hit."),
+  candidates: z.array(MusicFitHitCandidateSchema).describe("The last strong hits of the played part, latest last, to pick another with `hit`; empty for a given hit."),
+});
+
 /** Where a clip stood, or will stand. */
 export const MusicFitPlaceSchema = z.object({
   start: z.number().describe("Timeline seconds of the first frame."),
@@ -44,17 +57,7 @@ export const MusicFitResultSchema = z.object({
   asset: z.string().describe("Project-relative music file."),
   mode: z.enum(["slide", "exact"]).describe("`slide`: the clip moved, its speed kept. `exact`: its start kept and its speed changed a little."),
   end: z.number().describe("Timeline seconds the final hit was asked to land on (`end`, resolved and snapped to the frame grid)."),
-  hit: z.object({
-    at: z.number().describe("Source seconds of the hit that lands on `end`."),
-    source: z.enum(["given", "detected"]).describe("`given`: `hit` was passed. `detected`: found on the track's energy."),
-    confidence: z
-      .number()
-      .describe(
-        "0 to 1: 1 for a given hit. A detected one grows with how sharp the jump is, how much the sound falls away after it and how close it is to the end of the played part. Under 0.5 it never changes the speed.",
-      ),
-    rise: z.number().nullable().describe("dB the level jumps by there; null for a given hit."),
-    candidates: z.array(MusicFitHitCandidateSchema).describe("The last strong hits of the played part, latest last, to pick another with `hit`; empty for a given hit."),
-  }),
+  hit: MusicFitHitSchema,
   before: MusicFitPlaceSchema,
   after: MusicFitPlaceSchema,
   landsAt: z.number().describe("Timeline seconds where the hit now plays (3 decimals)."),
@@ -69,6 +72,9 @@ export const MusicFitResultSchema = z.object({
     .object({
       under: z.array(z.string()).describe("Tracks listened to for speech."),
       rerun: z.boolean().describe("True when duck ran again in the same transaction."),
+      parameters: z
+        .enum(["stored", "defaults"])
+        .describe("`stored`: the depth, attack, release, threshold and gap of the `track.duck` that wrote the clip's keys (kept in its `audio.duck`). `defaults`: the clip has none stored (ducked before they were)."),
     })
     .nullable()
     .describe("Set when the clip carries `auto: \"duck\"` keys, which sit on the clip's own clock and no longer fit the voice after a move or a speed change; null otherwise."),
@@ -78,3 +84,50 @@ export const MusicFitResultSchema = z.object({
 
 /** See {@link MusicFitResultSchema}. */
 export type MusicFitResult = z.output<typeof MusicFitResultSchema>;
+
+// `music.candidates` (#485 slice 3, ADR 0037 decision 4): several tracks under the same picture at one loudness.
+
+/** Most candidates one call places: the ear stops telling them apart. */
+export const MUSIC_CANDIDATES_MAX = 7;
+
+/** One candidate track, placed or (dry run) planned. */
+export const MusicCandidateSchema = z.object({
+  rank: z.int().describe("1 = the first choice: the one left unmuted. With `end` the order is the fit's (see `ranking`), else the order of `assets`."),
+  asset: z.string().describe("Project-relative music file."),
+  name: z.string().describe("Name of its audio track, `Music <rank>`."),
+  track: z.string().nullable().describe("Its audio track id; null in a dry run."),
+  clip: z.string().nullable().describe("Its clip id; null in a dry run."),
+  muted: z.boolean().describe("True for every rank but the first: unmute one with `track.set`, and `track.remove --force` the others."),
+  loudness: z.number().describe("Integrated loudness of the whole file, LUFS (EBU R128)."),
+  truePeak: z.number().nullable().describe("True peak of the file, dBTP; null for digital silence."),
+  gain: z.number().describe("Static clip gain, dB, that brings the file to `loudness.target` (0.1 dB steps)."),
+  place: MusicFitPlaceSchema.describe("Where the clip plays: `start`, `in` and `end` on the timeline and the file."),
+  hit: MusicFitHitSchema.nullable().describe("Only with `end`: the final hit that lands on it, as `music.fit` finds it."),
+  landsAt: z.number().nullable().describe("Only with `end`: timeline seconds where the hit plays."),
+  introCut: z.number().describe("Source seconds dropped from the start of the file because it is longer than the picture before the hit; 0 when none."),
+  silentBefore: z.number().describe("Seconds between the start and the first sound when the file is shorter than the picture before the hit; 0 when none."),
+  warnings: z.array(z.string()),
+});
+
+/** Result of `music.candidates`. */
+export const MusicCandidatesResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  revision: z.int().describe("Revision after the change; the revision it was planned from when nothing was written."),
+  dryRun: z.boolean(),
+  applied: z.boolean().describe("True when the tracks were added (a review-mode proposal counts: it waits for the person)."),
+  tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
+  end: z.number().nullable().describe("Timeline seconds every final hit was asked to land on; null without `end`."),
+  loudness: z.object({
+    target: z.number().describe("LUFS every candidate was brought to."),
+    source: z.enum(["given", "quietest"]).describe("`given`: `loudness` was passed. `quietest`: the quietest file's own loudness, so no candidate is made louder than it is."),
+  }),
+  ranking: z.string().describe("How `rank` was chosen, in one sentence."),
+  candidates: z.array(MusicCandidateSchema).describe("Best first."),
+  skipped: z.array(z.object({ asset: z.string(), reason: z.string() })).describe("Files left out, and why (silent, no sound, no final hit, cannot be decoded)."),
+  warnings: z.array(z.string()),
+});
+
+/** See {@link MusicCandidatesResultSchema}. */
+export type MusicCandidatesResult = z.output<typeof MusicCandidatesResultSchema>;
+/** See {@link MusicCandidateSchema}. */
+export type MusicCandidate = z.output<typeof MusicCandidateSchema>;

@@ -4,6 +4,7 @@ import {
   AudioEffectSchema,
   BackdropSchema,
   DirectorRulesSchema,
+  DuckSettingsSchema,
   ElementAdjustSchema,
   FormatIdSchema,
   MAX_SNAP_WINDOW_S,
@@ -31,6 +32,7 @@ import {
   TransformSchema,
   TRANSITION_DIRECTIONS,
   TRANSITION_SHAPE_KINDS,
+  FrameRectSchema,
 } from "@frameshell/schema";
 import { AGENT_LABEL_PATTERN } from "./agents.js";
 
@@ -426,13 +428,14 @@ export const operationArgs = {
     snapTo: snapToArg,
     at: TimeRef("Timeline time of a clip edge: where two clips meet, or a clip's start or end."),
     kind: z
-      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS])
+      .enum(["dissolve", "fade", ...TRANSITION_SHAPE_KINDS, "dip-cut"])
       .default("dissolve")
       .describe(
         "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
           "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the " +
-          "outgoing one out. `wipe` and `push` play on the bottom video track only; sound crossfades as for a dissolve. " +
-          "A clip edge with nothing butted fades in or out for any kind.",
+          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `wipe`, `push` and `iris` play on the " +
+          "bottom video track only; sound crossfades as for a dissolve. A clip edge with nothing butted fades in or out for these kinds. " +
+          "`dip-cut`: a hard cut, the outgoing bottom-track clip darkened 40 % over its last 3 frames (opacity keys); sound is not touched.",
       ),
     direction: z
       .enum(TRANSITION_DIRECTIONS)
@@ -441,7 +444,15 @@ export const operationArgs = {
         "`wipe` and `push` only: the way the incoming picture travels. `left` (default: it enters from the right edge), `right`, " +
           "`up` (enters from the bottom) or `down`.",
       ),
-    duration: z.number().positive().default(0.5).describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so)."),
+    origin: FrameRectSchema.optional().describe(
+      "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1; take it from " +
+        "`inspect.point`: `frameBox`, or `box` divided by the project size). The circle grows from its centre. Default: the frame's centre.",
+    ),
+    duration: z
+      .number()
+      .positive()
+      .default(0.5)
+      .describe("Total seconds the transition plays. Default 0.5; short material shortens it (a warning says so). A `dip-cut` is always 3 frames."),
     tracks: z
       .array(TrackRef)
       .min(1)
@@ -484,6 +495,10 @@ export const operationArgs = {
         "The dip over time as straight lines between points sorted by `time`, 0 before the first and after the last. " +
           "The `track.duck` method measures it from the speech tracks and passes it here.",
       ),
+    settings: DuckSettingsSchema.optional().describe(
+      "What the method was asked, kept in `audio.duck` of each clip that gets duck keys so a later run (`music.fit` moving a ducked clip) " +
+        "dips the same way; a clip with no duck keys after the run loses it.",
+    ),
   }),
   "multicam.create": z.strictObject({
     angles: z
@@ -1085,6 +1100,23 @@ export const TrackDuckResultSchema = OperationResultSchema.extend({
   under: z.array(z.string()).describe("Tracks listened to for speech."),
   stretches: z.int().describe("Stretches of speech found, after merging those closer than `gap`."),
   speechSeconds: z.number().describe("Total seconds of those stretches."),
+  level: z
+    .object({
+      under: z.number().describe("dB under the voice that was asked (`level`)."),
+      voice: z.number().describe("Loudness of the voice, LUFS: the integrated loudness of each voice file plus its gain, averaged by the time it plays."),
+      target: z.number().describe("Loudness the music was set to, LUFS (`voice - under`)."),
+      clips: z
+        .array(
+          z.object({
+            clip: z.string(),
+            loudness: z.number().describe("Integrated loudness of the clip's file, LUFS."),
+            gain: z.number().describe("Static gain written to the clip, dB (`target - loudness`, 0.1 dB steps)."),
+          }),
+        )
+        .describe("Clips of the track whose gain was set."),
+    })
+    .nullable()
+    .describe("Set when `level` was asked: how the music's static gain was chosen; null otherwise."),
 });
 
 /** See {@link TrackDuckResultSchema}. */

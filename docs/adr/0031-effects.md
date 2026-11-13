@@ -83,5 +83,6 @@ Cross decisions, shared with ADR 0030 (transition shapes) and the matte ADR (#46
 
 ## Later slices
 
+- Backdrop (#462) follow-up: the `glass-card` motion template (ADR 0033) is the card to pair with `clip set --glass`; its fill stays above the mask threshold and its shadow is off by default, because the mask is the render's alpha.
 - `--voice` copying the defaults from `style.json` once ADR 0028 lands.
 - Grade (#384): a pure schema function turns correction + `.cube` into one 33/65-point table for `lut3d interp=trilinear` and a WebGL2 pass in the preview, after a measured WebGL2 spike; `grade.analyze` and `grade.compare` methods.

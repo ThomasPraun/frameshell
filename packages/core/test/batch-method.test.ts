@@ -170,4 +170,19 @@ describe("batch.render", () => {
       data: { row: "es" },
     });
   });
+
+  it("refuses a gif row above 350 frames before anything is queued or written", async () => {
+    // The template already holds 1 s of card; 13 s more is 420 frames at 30 fps.
+    const video = (await conn.request("track.list", { cwd: project })).tracks.find((track) => track.kind === "video")!.id;
+    await conn.request("clip.add", { cwd: project, track: video, type: "card", source: "compositions/cards/red.json", start: 1, duration: 13, props: { label: "Long" } });
+    writeBatch("loops", { preset: "gif", rows: [{ id: "es", title: "Hola" }] });
+    const renders = async () => (await conn.request("job.list", { cwd: project })).jobs.filter((job) => job.kind === "render").length;
+    const before = await renders();
+    await expect(conn.request("batch.render", { cwd: project, file: "loops.batch.json" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      data: { row: "es", field: "preset", reason: "gif frame cap", max: 350 },
+    });
+    expect(await renders()).toBe(before);
+    expect(existsSync(join(project, "exports", "loops"))).toBe(false);
+  });
 });

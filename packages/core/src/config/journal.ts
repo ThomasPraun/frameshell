@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AuthorSchema,
@@ -10,7 +11,7 @@ import {
 } from "@frameshell/protocol";
 import { FormatEntrySchema } from "@frameshell/schema";
 import { z } from "zod";
-import { appendJsonLine, readJsonLines } from "../fs-util.js";
+import { appendJsonLine, readJsonLines, writeJsonAtomic } from "../fs-util.js";
 import type { TxRef } from "../timeline/service.js";
 import { type ConfigRules, type ConfigState, configHash, diffConfig } from "./patch.js";
 import { FORMAT_RULES, formatState } from "./project-doc.js";
@@ -21,6 +22,33 @@ import { planConfigRevert } from "./revert.js";
  * separate from the timeline journals. Timeline ids hold no `.`, so it never collides with one in the same folder.
  */
 export const CONFIG_JOURNAL = ".frameshell/history/project.config.jsonl";
+
+/** Head snapshot of document `doc`: `.frameshell/history/project.config.<doc>.head.json`. The dots keep it from being a timeline's. */
+function headPath(root: string, doc: ConfigDoc): string {
+  return join(root, ".frameshell", "history", `project.config.${doc}.head.json`);
+}
+
+/** A document's keyed state as the daemon last saw it in its file, and the hash of that state. */
+export interface ConfigHead {
+  hash: string;
+  state: ConfigState;
+}
+
+/** The head snapshot of `doc`; null when missing or unreadable. */
+export async function readConfigHead(root: string, doc: ConfigDoc): Promise<ConfigHead | null> {
+  try {
+    const value = JSON.parse(await readFile(headPath(root, doc), "utf8")) as Partial<ConfigHead> | null;
+    if (typeof value?.hash !== "string" || typeof value.state !== "object" || value.state === null || Array.isArray(value.state)) return null;
+    return { hash: value.hash, state: value.state };
+  } catch {
+    return null;
+  }
+}
+
+/** Replace the head snapshot of `doc` with `state`. Callers hold {@link ConfigJournal.serial}. */
+export async function writeConfigHead(root: string, doc: ConfigDoc, state: ConfigState): Promise<void> {
+  await writeJsonAtomic(headPath(root, doc), { hash: configHash(state), state });
+}
 
 /** A line written before ADR 0036: a format edit with the whole list before and after, no transaction. */
 const LegacyFormatLineSchema = z.object({
@@ -214,7 +242,14 @@ export class ConfigJournal {
     };
     await appendJsonLine(join(root, ...CONFIG_JOURNAL.split("/")), entry);
     await (write ? write() : this.#docs[doc].write(root, after));
+    // A crash before this leaves the head one step behind the journal; the watcher then treats an edit as a gap.
+    await writeConfigHead(root, doc, after).catch(() => {});
     return entry;
+  }
+
+  /** Write keyed state `state` of `doc` into its file, as {@link ConfigDocument.write}. Not journaled: for putting a version back. */
+  write(root: string, doc: ConfigDoc, state: ConfigState): Promise<void> {
+    return this.#docs[doc].write(root, state);
   }
 
   /** Whether a line of the config journal of `root` has op id or tx id `target`. */

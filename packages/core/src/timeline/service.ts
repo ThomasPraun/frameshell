@@ -715,6 +715,50 @@ export class TimelineService {
   }
 
   /**
+   * A hand edit of config document `doc` that is already in its file (ADR 0036 slice 5): `edit.base` is the keyed
+   * state the journal last recorded, `edit.next` the file's. With no review mode it is journaled as a `file.edit`
+   * operation of author `file`, the file left as it is. In review mode it waits in a ready proposal of author
+   * `file` and the document goes back to `edit.base`; when another proposal is open the edit is not taken in:
+   * `edit.keep` saves the edited file aside, the document goes back to `edit.base`, and the result is null (the
+   * `timeline.patch` rule of {@link TimelineService.reconcile}). Caller holds `ConfigJournal.serial(root)`.
+   */
+  async directConfigEdit(
+    root: string,
+    doc: ConfigDoc,
+    edit: { file: string; base: ConfigState; next: ConfigState; keep(): Promise<void> },
+  ): Promise<ConfigChanged | null> {
+    const journal = this.#journal();
+    const saver = this.#fileSaver();
+    const who = { author: saver.author, tx: { ...saver.tx, label: `Edit ${edit.file}` } };
+    const [op, args] = ["file.edit", { path: edit.file }] as const;
+    let route: Route | null;
+    try {
+      route = await this.#route(root, who.author, who.tx);
+    } catch (error) {
+      if (!(error instanceof RpcError)) throw error;
+      await edit.keep();
+      await journal.write(root, doc, edit.base);
+      return null;
+    }
+    if (!route) {
+      const record = { op, args, author: who.author, tx: who.tx };
+      const entry = await journal.commit(root, doc, record, edit.base, edit.next, async () => {});
+      return { operation: configOperation(entry), state: edit.next, proposal: null };
+    }
+    // Only the proposal's base is needed: the change itself is made below, on the file as it was.
+    route.release();
+    await journal.write(root, doc, edit.base);
+    try {
+      const changed = await this.changeConfig(root, doc, who, async () => ({ op, args, after: edit.next }));
+      await this.ready(who.tx.id);
+      return changed;
+    } catch (error) {
+      await journal.write(root, doc, edit.next).catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
    * Change config document `doc` of project `root` (ADR 0036), a `ConfigChanger`: journaled and written at once,
    * or, in review mode for any author but `ui`, made on the open proposal's version of the document and held in
    * it, like a timeline operation (ADR 0019). `files.write` replaces the document's own writer when it applies at
