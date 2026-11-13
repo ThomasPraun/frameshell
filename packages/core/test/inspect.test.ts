@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { classifyContext } from "../src/context.js";
 import { encodeGrayPng } from "../src/segment/png.js";
 import type { PhotoPoint } from "../src/segment/segmenter.js";
-import { type InspectOptions, InspectService } from "../src/inspect/service.js";
+import { type InspectOptions, InspectService, injectProbeHead } from "../src/inspect/service.js";
 import { tempDir } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 
@@ -199,6 +199,19 @@ describe("inspect.point segment", () => {
     expect(point).not.toHaveProperty("segment");
     expect(point).not.toHaveProperty("segmentUnavailable");
     expect(calls).toEqual([]);
+  });
+});
+
+describe("probed page head", () => {
+  it("puts the style token sheet before the adapter head, the probe script and the element sheet", () => {
+    const html = injectProbeHead("<!doctype html><html><head><title>x</title></head></html>", "HEAD()", "#a{color:red}", ":root{--fs-x:1}</style>");
+    const head = html.slice(html.indexOf("<head>") + 6, html.indexOf("<title>"));
+    expect(head.startsWith('<style data-frameshell-style>:root{--fs-x:1}<\\/style></style><script>HEAD()</script><script>')).toBe(true);
+    expect(head.endsWith("<style data-frameshell-elements>#a{color:red}</style>")).toBe(true);
+  });
+
+  it("adds no token sheet when the clip has none", () => {
+    expect(injectProbeHead("<head></head>", "HEAD()")).not.toContain("data-frameshell-style");
   });
 });
 

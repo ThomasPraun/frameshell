@@ -100,6 +100,13 @@ describe("the caption face of a style", () => {
     expect(missing.tokens.paths).not.toHaveProperty("font");
     expect(missing.warning).toBe(`fonts.captions.file assets/fonts/Brand.ttf cannot be used (it does not exist): captions use ${SUBTITLE_FONT.family}.`);
   });
+
+  it("falls back with a warning for a family name an ASS style cannot hold as is", async () => {
+    const style = resolveStyle(file({ fonts: { captions: { family: "Brand", file: "assets/fonts/Brand.ttf" } } }));
+    const comma = await styleCaptionTokens(style, async () => ({ family: "Brand, Sans", ascent: 0.9, descent: 0.25 }));
+    expect(comma.tokens.font).toEqual(BUNDLED_CAPTION_FONT);
+    expect(comma.warning).toContain("holds a comma, quote or backslash");
+  });
 });
 
 describe("style token sheet of generated clips (ADR 0028)", () => {

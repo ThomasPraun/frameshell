@@ -4,7 +4,7 @@
 /** What laying out text in a face needs; all lengths in em. */
 export interface FontMetrics {
   /**
-   * Family name inside the file (name id 16, else 1): the name libass matches a style's `Fontname` against.
+   * Family name inside the file (Windows name id 1, else 16): the name libass matches a style's `Fontname` against.
    * Null when the file has no readable family name.
    */
   family: string | null;
@@ -67,7 +67,11 @@ export function parseFontMetrics(file: Uint8Array): FontMetrics {
   };
 }
 
-/** Typographic family (name id 16) else family (1), Windows Unicode first, then Mac Roman; null when none. */
+/**
+ * Windows family (name id 1), else Windows typographic family (16), then the Mac Roman ones; null when none.
+ * libass indexes only Microsoft-platform ids 1 and 4, so a static weight ("Montserrat ExtraBold" in 1,
+ * "Montserrat" in 16) must be named by its id 1.
+ */
 function familyName(view: DataView, name: number): string | null {
   const count = view.getUint16(name + 2);
   const strings = name + view.getUint16(name + 4);
@@ -89,7 +93,7 @@ function familyName(view: DataView, name: number): string | null {
     const key = `${id}:${platform === 3 ? "w" : "m"}`;
     if (!found.has(key) && text.trim() !== "") found.set(key, text.trim());
   }
-  return found.get("16:w") ?? found.get("1:w") ?? found.get("16:m") ?? found.get("1:m") ?? null;
+  return found.get("1:w") ?? found.get("16:w") ?? found.get("1:m") ?? found.get("16:m") ?? null;
 }
 
 /** Glyph index of a code point (0, `.notdef`, when the face lacks it) from the best Unicode `cmap` subtable. */

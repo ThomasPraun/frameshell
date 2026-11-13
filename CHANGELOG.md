@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be used falls back to Archivo Black and `render` warns. HyperFrames renders and live pages get the style as CSS
   variables (`--fs-color-accent`, `--fs-font-display`, `--fs-motion-standard`, ...) in a first stylesheet, with style
   font files inlined; the sheet's hash enters the render key only for adapters that take tokens and only with a
-  `style.json`, so other renders keep their keys.
+  `style.json`, so other renders keep their keys. The first run after the upgrade re-renders every HyperFrames clip of
+  a project that has a `style.json`, and any later change to a colour, font, type size or motion value re-renders them
+  all again. An invalid `style.json` blocks HyperFrames renders and exports of subtitled timelines until it is fixed.
 - Loop-safe export, first slice of #474 (ADR 0039, epic #451; `render` `loop`, CLI `render --loop`, `JobInfo.warnings`,
   protocol 105): `render --loop` makes a file meant to repeat (title loops, banners). MP4 and MOV audio gets a 2 ms
   half-sine fade at its first and last sample after loudness (silent exports unchanged); `--loop` with `--cover-frame`

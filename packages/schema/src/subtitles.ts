@@ -145,9 +145,14 @@ export function captionFontSource(font: StyleFont | null): { file: string } | { 
   };
 }
 
-/** The face of project font file `file`, `metrics` read from it; `family` names it when the file has no family name. */
+/**
+ * The face of project font file `file`, `metrics` read from it; `family` names it when the file has no family name.
+ * Throws for a family an ASS `Style:` field cannot hold as is, so export and preview fall back to the same face.
+ */
 function captionFontOf(file: string, family: string, metrics: Pick<FontMetrics, "family" | "ascent" | "descent">): CaptionFont {
-  return { family: metrics.family ?? family, file, ascent: metrics.ascent, descent: metrics.descent };
+  const name = metrics.family ?? family;
+  if (/[,"\\]/.test(name)) throw new Error(`its family name "${name}" holds a comma, quote or backslash`);
+  return { family: name, file, ascent: metrics.ascent, descent: metrics.descent };
 }
 
 /**
