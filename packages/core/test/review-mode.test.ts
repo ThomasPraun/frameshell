@@ -161,6 +161,19 @@ describe("review mode on: proposals (#315)", () => {
     expect(unknown.message).toContain('neither seconds nor a marker');
   });
 
+  it("resolves beat: and bar: against the proposal's tempo, not the file's (#550)", async () => {
+    const { dir, connect, read } = await setup({ review: true });
+    const agent = await connect("cli/test", "term-1");
+    await agent.request("tx.begin", { label: "Land on the bar" });
+    // The tempo exists only in the proposal: the file has none, so a grid reference can only resolve against the proposal.
+    await agent.request("tempo.set", { cwd: dir, bpm: 120 });
+    await agent.request("marker.add", { cwd: dir, at: "bar:3" as never, label: "drop" });
+    await agent.request("marker.add", { cwd: dir, at: "beat:2.5-0.25" as never, label: "lead" });
+    expect(JSON.parse(read())).not.toHaveProperty("tempo");
+    const own = await agent.request("timeline.show", { cwd: dir, timeline: "main" });
+    expect(own).toMatchObject({ view: "proposal", markers: [{ label: "lead", at: 0.5 }, { label: "drop", at: 4 }] });
+  });
+
   it("refuses a second author, a new transaction and the author's next change once ready; the person still edits", async () => {
     const { dir, connect, ui, t1, t2, read } = await setup({ review: true });
     const agent = await connect("cli/test");

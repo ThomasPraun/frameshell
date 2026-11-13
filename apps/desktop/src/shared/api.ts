@@ -98,6 +98,28 @@ export interface VideoProjectPlan {
 /** Frame of a project made from audio alone: 16:9 (1920x1080) or 9:16 (1080x1920). */
 export type AudioOrientation = "landscape" | "portrait";
 
+/** What the person says about a video they want made from nothing (#472), from the Welcome form. */
+export interface IdeaBrief {
+  /** Name of the video; also the project's name. */
+  name: string;
+  /** Built-in format ids (`16x9`, `9x16`, `1x1`, `4x5`); the first of the built-in list becomes the project's own size. */
+  formats: string[];
+  /** Rough length in seconds; null when unsure. */
+  seconds: number | null;
+  /** A page to take the idea from (http or https); null when none. */
+  url: string | null;
+}
+
+/** Folder a project made from an idea goes in, as main planned it: `parent`/`name`, numbered when the name is taken. */
+export interface IdeaProjectPlan {
+  /** Folder the project folder goes in. */
+  parent: string;
+  /** Folder name, made safe for any OS. */
+  name: string;
+  /** Absolute project folder. */
+  dir: string;
+}
+
 /** A live terminal. `session` is its `FRAMESHELL_SESSION`. */
 export interface TerminalInfo {
   id: string;
@@ -303,6 +325,19 @@ export interface FrameshellApi {
       mode: "copy" | "link",
       options?: { transcribe?: boolean; orientation?: AudioOrientation },
     ): Promise<OpenOutcome>;
+    /**
+     * Where the project of an idea goes (#472): `place.parent` (default the user's videos folder) and `place.name`
+     * (default "Untitled video"), numbered when the folder exists. Nothing is created.
+     */
+    planIdea(place?: { parent?: string; name?: string }): Promise<IdeaProjectPlan>;
+    /**
+     * Create an empty project for `brief` (#472), without footage, and open it in this window: `project.init` at the
+     * size of the first format, then `format.add` for each other one, through the daemon. `parent` is the folder
+     * it goes in (default the videos folder). The brief is kept for {@link takeIdea}.
+     */
+    fromIdea(brief: IdeaBrief, parent?: string): Promise<OpenOutcome>;
+    /** The brief this window's project was made from, once (#472): null when it was not made from an idea or already taken. */
+    takeIdea(): Promise<IdeaBrief | null>;
     /**
      * Setup still running, or just ended, for this window's project (#188);
      * null when none. With `transcribe`, {@link fromVideos} installs the
@@ -880,6 +915,9 @@ export const Channel = {
   projectChooseParent: "project:choose-parent",
   projectImageFromFrame: "project:image-from-frame",
   projectFromVideos: "project:from-videos",
+  projectPlanIdea: "project:plan-idea",
+  projectFromIdea: "project:from-idea",
+  projectTakeIdea: "project:take-idea",
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",

@@ -64,6 +64,14 @@ Cross decisions, shared with ADR 0030 (transition shapes) and the matte ADR (#46
 - **App:** the clip inspector shows a Glass switch for generated clips on video tracks: on, it writes the style's glass numbers (read from `style.json`); then Blur, Saturate and Dim fields. Strings in `shared/i18n/inspector.ts` (en + es).
 - **Limits:** the mask is the render's alpha above the threshold, so soft shadows above about 3 % get glass too. The canvas blur treats outside the frame as transparent, so the preview blurs a copy of the canvas whose edge pixels are stretched 3 sigma out, as `gblur` repeats the edge. Live preview pages (ADR 0010) show no backdrop while a generated clip's page plays instead of its render. `CACHE_LAYOUT_VERSION` and `RECIPE_VERSION` do not change: renders are untouched.
 
+### Slice 3: Voice section of the clip inspector (#464)
+
+- **What it shows:** media clips of a video project get a Voice group in the clip inspector (`components/VoiceControl.tsx`). The Voice switch is on while the clip has effects. Switching on writes the style's voice chain (`voiceChainOf` over `style.json` `sound.voice`, read in the renderer by `project-style.ts`, shared with the Glass switch; the numbers above without a style); the clip keeps its copy. While on, each effect is a row in processing order: its numbers (`NumberField`, held to `AUDIO_EFFECT_LIMITS`; a number outside the range is refused in the field), a move-earlier button and a remove button. A menu adds a kind the chain lacks, at the end; Voice preset replaces the chain with the style's.
+- **Bypass:** the model has no bypass flag (decision 6: the clip holds explicit entries), so the switch off clears `audio.effects` and remembers the chain in this window (`bypass` in `voice/model.ts`); switching on again writes it back instead of the style's. The memory is not saved with the project: another window or a restart gets the style's chain. A per-effect or clip-level `bypass` field would be a model change for its own slice.
+- **Writes:** every change is one `clip.set` `audioEffects` by `ui` with the whole list (`null` when it empties), so undo, history and review mode work as for any edit; no wire change. The preview asks for the bake on the next revision (`useAudioBakes`) and plays the dry sound until it is ready.
+- **Strings:** `shared/i18n/inspector.ts` (en + es). e2e `voice-inspector.spec.ts`; pure edits in `apps/desktop/test/voice-model.test.ts`.
+- **Out:** stereo bakes and effects on the host clip of a nested timeline stay out (they need a second bake).
+
 ## Consequences
 
 - An effect change takes seconds to bake before the preview hears it; the dry sound plays meanwhile. Export always waits for the bake.
@@ -75,6 +83,5 @@ Cross decisions, shared with ADR 0030 (transition shapes) and the matte ADR (#46
 
 ## Later slices
 
-- Inspector Voice section in the app (en + es strings).
 - `--voice` copying the defaults from `style.json` once ADR 0028 lands.
 - Grade (#384): a pure schema function turns correction + `.cube` into one 33/65-point table for `lut3d interp=trilinear` and a WebGL2 pass in the preview, after a measured WebGL2 spike; `grade.analyze` and `grade.compare` methods.

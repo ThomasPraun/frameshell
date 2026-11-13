@@ -4,10 +4,11 @@ import { useFileDrop } from "../file-drop.js";
 import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
 import { contextMenu } from "./ContextMenu.js";
+import { NewFromIdea } from "./NewFromIdea.js";
 
 /**
- * First screen of a window with no project: start from a video, audio or image file, open a folder, reopen a recent
- * one (right-click: Open, Reveal, Remove from Recent), or create a project.
+ * First screen of a window with no project: start from a video, audio or image file, or from an idea with no footage,
+ * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project.
  */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
@@ -15,6 +16,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
   const [plan, setPlan] = useState<VideoProjectPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [idea, setIdea] = useState(false);
 
   useEffect(() => {
     void window.frameshell.project.recent().then(setRecent);
@@ -98,10 +100,31 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
               void run(() => window.frameshell.project.fromVideos({ ...plan, name }, mode, { transcribe, orientation }))
             }
           />
+        ) : idea ? (
+          <NewFromIdea
+            busy={busy}
+            onError={setError}
+            onCancel={() => {
+              setIdea(false);
+              setError(null);
+            }}
+            onCreate={(brief, parent) => void run(() => window.frameshell.project.fromIdea(brief, parent))}
+          />
         ) : (
           <div className="welcome-actions">
             <button className="button primary" disabled={busy} onClick={() => void chooseVideos()}>
               {t.welcome.newFromVideo}
+            </button>
+            <button
+              className="button"
+              disabled={busy}
+              onClick={() => {
+                setIdea(true);
+                setNotProject(null);
+                setError(null);
+              }}
+            >
+              {t.welcome.newFromIdea}
             </button>
             <button className="button" disabled={busy} onClick={() => void run(window.frameshell.project.openFolder)}>
               {t.welcome.openFolder}
@@ -123,7 +146,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
           </p>
         )}
 
-        {recent.length > 0 && !plan && (
+        {recent.length > 0 && !plan && !idea && (
           <section className="welcome-recent" aria-label={t.welcome.recentProjects}>
             <h2>{t.welcome.recent}</h2>
             <ul>

@@ -1,12 +1,13 @@
 import { z } from "zod";
-import type { Size } from "./composite.js";
-import type { Timeline } from "./timeline.js";
+import { type LayerRect, type Size, coverCrop, fixedPlacement, hasPictureKeys, isIdentityPlacement } from "./composite.js";
+import type { Clip, Timeline } from "./timeline.js";
 
 /**
  * Formats of a project (ADR 0027): one edit delivered at several frame sizes (16:9, 1:1, 4:5, 9:16…).
  * `frameshell.json` `formats` lists them, the first is the primary and equals `resolution`; without the
  * field the project has one format, its resolution. {@link resolveFormat} is the one place that says how
- * a timeline lays out in a format: export, `frame` and later the preview and review read it.
+ * a timeline lays out in a format, {@link formatCrop} and {@link scaledCaptions} how its pictures and
+ * captions do: export, `frame` and the preview read them, later review too.
  */
 
 /** Built-in format ids and their canvases (ADR 0027 decision 6, measured canvases from #469). */
@@ -93,16 +94,54 @@ export function projectFormats(config: FormatSource): FormatEntry[] {
  * project has no format `id`.
  */
 export function resolveFormat(timeline: Timeline, config: FormatSource, id?: string): { timeline: Timeline; format: ResolvedFormat } | null {
+  const format = formatOf(config, id);
+  return format ? { timeline, format } : null;
+}
+
+/** Format `id` of the project (the primary when `id` is absent) with its layout; null when the project has no format `id`. */
+export function formatOf(config: FormatSource, id?: string): ResolvedFormat | null {
   const formats = projectFormats(config);
   const index = id === undefined ? 0 : formats.findIndex((format) => format.id === id);
   if (index === -1) return null;
   const format = formats[index]!;
   const primary = index === 0;
   const vertical = format.height > format.width;
-  return {
-    timeline,
-    format: { ...format, primary, cover: !primary, captionScale: !primary && vertical ? VERTICAL_CAPTION_SCALE : 1 },
-  };
+  return { ...format, primary, cover: !primary, captionScale: !primary && vertical ? VERTICAL_CAPTION_SCALE : 1 };
+}
+
+/** What {@link formatCrop} needs of a picture clip's source and track. */
+export interface FormatPicture {
+  /** Picture size in source pixels; null for a clip without a picture. */
+  size: Size | null;
+  /** A generated clip's render: made at the format's size (decision 12), never cropped. */
+  generated: boolean;
+  /** The source has an alpha plane (`media.video.alpha`). */
+  alpha: boolean;
+  /** On the base track: the first picture track, when it is a video track. */
+  base: boolean;
+}
+
+/**
+ * Source pixels of `clip` that cover a `frame`-sized format in `layout` (ADR 0027 decisions 3 and 13), scaled to fill
+ * it exactly; null where the clip keeps its fitted placement: the primary format, a transform or picture keys, a
+ * generated clip, a source with alpha on an upper track. Edges and size are even (what ffmpeg's `crop` keeps of a
+ * 4:2:0 picture), so export's plan and the preview cut the same pixels. Multicam shots never come here (`shotLayers`).
+ */
+export function formatCrop(layout: FormatLayout | undefined, clip: Clip, picture: FormatPicture, frame: Size): LayerRect | null {
+  if (layout?.cover !== true || picture.size === null || picture.generated || (picture.alpha && !picture.base)) return null;
+  if (!isIdentityPlacement(fixedPlacement(clip)) || hasPictureKeys(clip)) return null;
+  const { size } = picture;
+  const even = (value: number) => value - (value % 2);
+  const crop = coverCrop({ left: 0, top: 0, width: size.width, height: size.height }, frame);
+  const width = Math.max(2, even(crop.width));
+  const height = Math.max(2, even(crop.height));
+  return { left: even(Math.max(0, Math.floor((size.width - width) / 2))), top: even(Math.max(0, Math.floor((size.height - height) / 2))), width, height };
+}
+
+/** `tracks` with each style's font size times `layout.captionScale` (decision 7): what export burns and the preview draws. */
+export function scaledCaptions<T extends { style: { size: number } }>(tracks: readonly T[], layout: FormatLayout | undefined): T[] {
+  const scale = layout?.captionScale ?? 1;
+  return tracks.map((track) => (scale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * scale } }));
 }
 
 /** True when `a` and `b` have the same aspect ratio, within 1 % (1366x768 counts as 16:9). */

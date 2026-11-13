@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, type ReviewResult, connectToDaemon } from "@frameshell/protocol";
-import { SAFE_ZONES, type Transcript, VERTICAL_CAPTION_SCALE, parseTimeline, scaleCaptions, subtitleTracks } from "@frameshell/schema";
+import { SAFE_ZONES, type Transcript, VERTICAL_CAPTION_SCALE, parseTimeline, scaledCaptions, subtitleTracks } from "@frameshell/schema";
 import { type Daemon, bundledFontMetrics, startDaemon } from "../src/index.js";
 import { cueCrossings, filmInsets, safeFlags } from "../src/review/safe.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -99,7 +99,7 @@ describe("review safe sheet", () => {
       const insets = filmInsets(SAFE_ZONES["instagram-reels"], frame);
       const metrics = await bundledFontMetrics();
       const reachAt = (scale: number): number | undefined =>
-        safeFlags(cueCrossings(tracks.map((track) => scaleCaptions(track, scale)), insets, frame, metrics), result.fps)[0]?.reach;
+        safeFlags(cueCrossings(scaledCaptions(tracks, { cover: true, captionScale: scale }), insets, frame, metrics), result.fps)[0]?.reach;
       const scaled = reachAt(VERTICAL_CAPTION_SCALE);
       expect(scaled).toBeDefined();
       expect(scaled).not.toBe(reachAt(1));
