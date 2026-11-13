@@ -7,6 +7,7 @@ import type { FrameshellApi } from "../src/shared/api.js";
 import { laidOutBox, launch, sandbox } from "./harness.js";
 import { blockDiff, blockMean, exportedPixels, previewPixels } from "./frames.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
+import { drawnFrames, framesNeverDrawn, startDrawLog } from "./draw-log.js";
 import { addBarcodeAsset, installFrameReader, waitForIngest } from "./preview-probe.js";
 
 // A track behind a plate (ADR 0032) in the preview: the subject layer draws the plate's proxy through its matte (the
@@ -106,32 +107,26 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   await page.keyboard.press("Home");
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
   const before = await engineStats();
+  await startDrawLog(page);
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
-  // Until playback stops: every program frame the engine drew (`data-shown`), and the source frame read off the canvas
-  // at each page display frame. The worker draws without the page's main thread (ADR 0001), so a late page rAF misses
-  // frames that did reach the screen (#567): drops are counted from the draws, the canvas reads check what they showed.
-  const { drawn, read } = await page.evaluate(async (limit) => {
+  // Until playback stops: the source frame read off the canvas at each page display frame. Drops are counted from the
+  // engine's draws, not from these reads (#567; draw-log.ts).
+  const read = await page.evaluate(async (limit) => {
     const readShown = (window as unknown as { readShownFrame: () => number }).readShownFrame;
     const box = document.querySelector('[data-testid="preview-frame"]')!;
-    // Each record holds the value before its change: those, then the last value, are every value it had.
-    const values: (string | null)[] = [];
-    const observer = new MutationObserver((records) => values.push(...records.map((record) => record.oldValue)));
-    observer.observe(box, { attributes: true, attributeFilter: ["data-shown"], attributeOldValue: true });
-    const read: number[] = [];
+    const frames: number[] = [];
     const start = performance.now();
     while (performance.now() - start < limit) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      read.push(readShown());
+      frames.push(readShown());
       if (!box.hasAttribute("data-playing")) break;
     }
-    // The engine reports a draw after it: let the report of the last frame read arrive.
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    values.push(...observer.takeRecords().map((record) => record.oldValue), box.getAttribute("data-shown"));
-    observer.disconnect();
-    return { drawn: values.flatMap((value) => (value === null ? [] : [Number(value)])), read };
+    return frames;
   }, 15_000);
+  // The engine reports a draw after it: let the report of the last frame read arrive.
   await page.waitForTimeout(1_200);
+  const drawn = await drawnFrames(page);
   const after = await engineStats();
 
   const shown = [...new Set(read.filter((frame) => frame >= 0))];
@@ -140,7 +135,7 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   const announced = new Set(drawn);
   expect(shown.filter((frame) => !announced.has(frame)), "canvas frames the engine never reported").toEqual([]);
   // Inside the word (1 s to 5 s): source frames never drawn are dropped frames.
-  const dropped = 120 - new Set(drawn.filter((frame) => frame >= 30 && frame < 150)).size;
+  const dropped = framesNeverDrawn(drawn, 30, 150);
   const unread = 120 - shown.filter((frame) => frame >= 30 && frame < 150).length;
   const delta = Object.fromEntries(Object.entries(after ?? {}).map(([key, value]) => [key, key === "decoders" ? value : value - (before?.[key] ?? 0)]));
   test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ dropped, unread, ...delta }) });

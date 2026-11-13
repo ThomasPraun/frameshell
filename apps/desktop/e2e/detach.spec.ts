@@ -143,8 +143,20 @@ test("the View menu reaches the project window from the panel window", async () 
 test("Dock back returns the preview to its slot; closing the window does too", async () => {
   const child = await panelWindow(app, "preview");
   const closed = child.waitForEvent("close");
+  // Resized (once it left full screen) and docked at once, inside the placement's save delay.
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((one) => one.webContents.getURL().startsWith("about:"));
+        window?.setBounds({ x: 140, y: 100, width: 640, height: 420 });
+        return window?.getBounds().width;
+      }),
+    )
+    .toBe(640);
   await child.getByRole("button", { name: "Dock preview back" }).click();
   await closed;
+  // A placement change still waiting for its delayed save is written when the window closes (#533).
+  await expect.poll(() => readFileSync(join(box.configDir, "panel-windows.json"), "utf8")).toContain('"width": 640');
   await expect(page.getByTestId("panel-docked-elsewhere")).toHaveCount(0);
   await expect(page.locator(".preview-canvas")).toBeVisible();
 
