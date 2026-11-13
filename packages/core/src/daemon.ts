@@ -72,6 +72,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { musicCandidatesLabel, planMusicCandidates } from "./music/candidates.js";
 import { musicFitLabel, planMusicFit } from "./music/run.js";
+import { musicShapeLabel, planMusicShape } from "./music/shape-run.js";
 import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
 import { BeatsStore, beatsFileOf, formatBeatsFile, ownBeatsFile, resolveBeatsFile, summarizeBeats } from "./media/beats-store.js";
 import { EnergyStore } from "./media/energy-store.js";
@@ -911,6 +912,22 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { ...request, args: { ...request.args, curve: curve.length > 0 ? curve : [{ time: 0, dip: 0 }] } } as OperationRequest;
     };
     return { prepare, settings, heard: () => ({ stretches, warnings }) };
+  };
+  /**
+   * Duck again over a music clip's track inside a transaction `write` belongs to: with the parameters of the duck that wrote the
+   * clip's keys (`audio.duck`), else the defaults of the method. What `music.fit` and `music.shape` do after they change a ducked clip.
+   */
+  const duckAgainStep = async (
+    { dir, cwd, timeline }: { dir: string; cwd: string; timeline: string },
+    again: { track: string; under: string[]; settings: DuckSettings | null },
+    write: (request: OperationRequest, prepare?: (current: Timeline) => Promise<OperationRequest>) => Promise<unknown>,
+    warnings: Set<string>,
+  ): Promise<void> => {
+    const asked = again.settings ?? methods["track.duck"].params.parse({ cwd, timeline, track: again.track, under: again.under });
+    const ducking = duckPlanner(dir, { ...asked, under: again.under });
+    const request = { op: "track.duck", args: { track: again.track, curve: [{ time: 0, dip: 0 }], settings: ducking.settings } } as OperationRequest;
+    await write(request, (current) => ducking.prepare(current, request));
+    for (const warning of ducking.heard().warnings) warnings.add(warning);
   };
   /** Energy envelope and beat-grid hits of an asset: what `music.fit` and `music.candidates` find a final hit with. */
   const hitSources = (dir: string) => ({
@@ -2196,7 +2213,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "music.fit": async ({ cwd, timeline, clip, end, from, hit, exact, dryRun, skip }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
-      const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
+      const { operations, duckAgain, shapeAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
         ...hitSources(dir),
       });
@@ -2206,16 +2223,29 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(report.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicFitLabel(report), revision: loaded.revision, warnings }, async (write) => {
         for (const { clip: id, ...operation } of operations) await write({ op: operation.op, args: { clip: id, ...operation.args } } as OperationRequest);
-        if (duckAgain) {
-          // The parameters of the duck that wrote the clip's keys (`audio.duck`), else the defaults of the method.
-          const asked = duckAgain.settings ?? methods["track.duck"].params.parse({ cwd, timeline, track: duckAgain.track, under: duckAgain.under });
-          const ducking = duckPlanner(dir, { ...asked, under: duckAgain.under });
-          const request = { op: "track.duck", args: { track: duckAgain.track, curve: [{ time: 0, dip: 0 }], settings: ducking.settings } } as OperationRequest;
-          await write(request, (current) => ducking.prepare(current, request));
-          for (const warning of ducking.heard().warnings) warnings.add(warning);
-        }
+        // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
+        if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
+        if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
+    },
+    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const { operation, duckAgain, noop, ...report } = await planMusicShape(
+        loaded,
+        { clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun },
+        (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
+      );
+      const result = { timeline, ...report };
+      if (dryRun || noop) return { ...result, revision: loaded.revision, dryRun, applied: false, tx: null };
+      await assertFresh(dir, timeline, caller, "music.shape", loaded.revision, "the shaping");
+      const warnings = new Set(report.warnings);
+      const written = await writeSteps({ dir, cwd, timeline, caller, label: musicShapeLabel(report), revision: loaded.revision, warnings }, async (write) => {
+        await write({ op: "music.shape", args: { clip: operation.clip, curve: operation.curve, ...(operation.settings ? { settings: operation.settings } : {}) } } as OperationRequest);
+        if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
+      });
+      return { ...result, revision: written.revision, dryRun, applied: true, tx: written.tx, warnings: [...warnings] };
     },
     "music.candidates": async ({ cwd, timeline, assets, end, from, loudness, dryRun }, caller) => {
       const dir = await root(cwd);

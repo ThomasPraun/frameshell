@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Music steps down before a hit, fourth slice of #485 (ADR 0037 decision 6, epic #451; daemon `music.shape`, CLI
+  `music shape`, MCP `music_shape`, protocol 118): `frameshell music shape <clip> [--drop <time>]… [--ending <time>]
+  [--lead s] [--depth dB] [--hold s] [--release s] [--fade s] [--clear] [--dry-run]` puts the music `--depth` dB (9) down
+  by `--lead` s (0.4) before each hit of the picture instead of ducking after it, holds it `--hold` s (0.3) past the hit and
+  brings it back over `--release` s (0.6); from `--ending` it fades out over `--fade` s (2.5, so `--ending bar:17` with a
+  short fade stops on a bar line). Times are seconds, markers or `beat:N` / `bar:N`. The result is gain keys marked `auto:
+  "music"`: a re-run replaces only those and never a hand key, `--clear` removes them, and a duck on the clip is written
+  again after it (its stored parameters), so the voice still ducks the shaped music. `music fit` runs the shaping again
+  when it moves the clip (the hits stay on the picture; `--skip shape` leaves the keys). The hits are kept in the clip's
+  `audio.shape`. Schema: `auto` takes `music`, a duck key over a music key carries `baseAuto`, clips take `audio.shape`;
+  older Frameshell versions reject such a timeline. The 5 ms entry fade waits for sample-accurate audio fades (#585);
+  `duck --level` from the style's `sound.musicUnderVoice` is not done.
 - Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 117): `frameshell voiceover place <script>`
   (daemon `voiceover.place`, MCP `voiceover_place`) puts the takes of a voiceover script on the timeline as phrase clips
   in one transaction: each take is cut at its silences, every phrase becomes a clip on the audio track `Voiceover`
