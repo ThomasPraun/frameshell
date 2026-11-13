@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 105;
+export const PROTOCOL_VERSION = 107;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -687,6 +687,33 @@ const RenderOutputSchema = z.object({
   warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
 });
 
+/** One row × format of a batch (ADR 0040), as `batch.render` returns it and `<out>/manifest.json` keeps it. */
+const BatchEntrySchema = z.object({
+  row: z.string().describe("Row id of the batch file."),
+  format: z.string().describe("Format id rendered, e.g. `9x16`."),
+  output: z.string().describe("Absolute file the render writes: `<out>/<row>.<container>`, with `-<format>` when the batch lists formats."),
+  status: z
+    .enum(["planned", "queued", "running", "done", "failed", "canceled"])
+    .describe("`planned` only in a dry run; then `queued` until its row's turn, `running`, and `done`, `failed` or `canceled`."),
+  job: z.string().nullable().describe("Render job id (`job.list`) once the row is queued; null before."),
+  error: z.string().nullable().describe("Why the render failed; null otherwise."),
+  startedAt: z.string().nullable().describe("ISO time the render started; null before."),
+  finishedAt: z.string().nullable().describe("ISO time it ended; null before."),
+  duration: z.number().nullable().describe("Seconds the render took; null until it ended."),
+  warnings: z.array(z.string()).describe("What this render skips, and assets of the row without verified provenance (ADR 0026)."),
+});
+
+/** `<out>/manifest.json` of a batch (ADR 0040): one entry per row × format, rewritten atomically on each job change. */
+export const BatchManifestSchema = z.object({
+  batch: z.string().describe("Absolute path of the batch file."),
+  template: z.string().describe("Template timeline id."),
+  out: z.string().describe("Absolute folder of the outputs and this manifest."),
+  state: z.enum(["running", "done"]).describe("`done` once every entry ended; `running` left behind means the daemon stopped mid-batch."),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  entries: z.array(BatchEntrySchema).describe("Row order, then format order."),
+});
+
 /** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
 const VerifiedWordSchema = z.object({
   word: z.string().describe("Word id in the source transcript, e.g. `w_000019`."),
@@ -1211,6 +1238,48 @@ export const methods = {
       loudness: z.number().describe("Integrated loudness target, LUFS."),
       segments: z.int().describe("Video segments encoded in parallel."),
       warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
+    }),
+  },
+  "batch.render": {
+    mutating: true,
+    description:
+      "Render variants of one template timeline from data rows (ADR 0040): sizes, languages, product rows. The batch file " +
+      "(`*.batch.json`, JSON Schema `batch.json`) names `template` (timeline id, default `main`), `slots` (name → " +
+      "`<clipId>.props.<dot.path>` or `<clipId>.asset`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
+      "used as file names; a slot a row leaves out keeps the template's value), and optional `formats`, `preset`, `quality`. " +
+      "Each row patches the template in memory only, never under `timelines/` (no journal, no proposal): a props value is " +
+      "written at its path over the clip's props and checked by the adapter like `clip.set`; an asset swap keeps the clip's " +
+      "in, out and placement and fails when the new file lacks the stream the track plays, is shorter than `out`, or lacks a " +
+      "transcript a subtitle track follows. Every row × format is validated and compiled first; then the rows render one at a " +
+      "time as ordinary `render` jobs, to `<out>/<row>.<container>` (`-<format>` added with formats), and the call returns at " +
+      "once. `<out>/manifest.json` (default `<project>/exports/<batch file name>/`) holds every row × format with status, " +
+      "output, job, error and timings, rewritten on each job change; follow the jobs with `job.list` or `job.progress`. " +
+      "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover: swap in takes " +
+      "that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
+      "unknown clip, props the adapter refuses, an asset too short or without the stream or transcript; a batch already " +
+      "running into the same `out`), InvalidProjectFile (the batch file), and what `render` fails with, its data naming the `row`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
+      out: AbsolutePath.optional().describe("Absolute folder for the outputs and `manifest.json`. Default `<project>/exports/<batch file name without .batch.json>/`."),
+      formats: z
+        .array(FormatIdSchema)
+        .min(1)
+        .optional()
+        .describe("Format ids to render each row in, instead of the batch file's `formats`; each must be in `format.list`."),
+      dryRun: z.boolean().default(false).describe("Validate every row × format and return the plan; nothing is rendered or written."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      file: z.string().describe("Absolute path of the batch file."),
+      template: z.string().describe("Template timeline id."),
+      out: z.string().describe("Absolute output folder."),
+      manifest: z.string().nullable().describe("Absolute path of `manifest.json`; null in a dry run."),
+      dryRun: z.boolean(),
+      preset: z.string().describe("Preset id every row renders with."),
+      quality: QualityTierSchema.extract(["draft", "final"]).nullable().describe("Tier asked for; null = the preset as written."),
+      entries: z.array(BatchEntrySchema).describe("Every row × format, row order then format order: the manifest as written now."),
+      jobs: z.array(JobSchema).describe("Render jobs queued by this call: the first row's. Later rows queue as the one before ends."),
     }),
   },
   frame: {
@@ -3309,7 +3378,7 @@ export const methods = {
     description:
       "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
       "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
-      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "(`m_1a2b3c`) or a grid reference (`beat:8`, `bar:2`, any case). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
       "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
       "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
       "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
@@ -3414,7 +3483,7 @@ export const methods = {
     description:
       "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
       "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
-      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "(`end-card`, `outro-1`) or a beat or bar of the timeline's grid (`bar:16`, read on the clip as it is before the fit). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
       "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
       "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
       "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +
@@ -4443,6 +4512,12 @@ export type PluginPins = Record<string, string>;
 export type RenderParams = MethodParams<"render">;
 /** Result of `render`. */
 export type RenderResult = MethodResult<"render">;
+/** Result of `batch.render`. */
+export type BatchRenderResult = MethodResult<"batch.render">;
+/** One row × format of a batch; see {@link BatchEntrySchema}. */
+export type BatchEntry = z.output<typeof BatchEntrySchema>;
+/** `<out>/manifest.json` of a batch; see {@link BatchManifestSchema}. */
+export type BatchManifest = z.output<typeof BatchManifestSchema>;
 /** `frame` params. */
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */

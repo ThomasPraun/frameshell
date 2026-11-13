@@ -28,6 +28,8 @@ One round, every question with options and your recommendation first. Read what 
 
 Keep the answers in the style file, value by value: `frameshell style set brand.product "Acme"`, then `brand.url`, `brand.promise`, `brand.cta`, `brand.audience`, `brand.mustShow`, `brand.mustAvoid` (lists as JSON). A later session reads them with `style show` instead of asking.
 
+Add every format the person named that `frameshell format list` lacks, in the first transaction: `frameshell format add 9x16` (also `1x1`, `4x5`). The finals and `review --format` of gate 8 need them.
+
 ## 2. Three storylines
 
 Write three storylines into `scripts/storylines.md` and recommend one. Each is **one viewer doing one real task**, with one real piece of data travelling from the hook to the payoff. The three differ in the central idea, and each lives in a different world, uses a different device (a cursor in an app, a chat, a phone in a hand, a terminal) and takes a different form (a demo, a before/after, a countdown, a single unbroken move). Never default to a template's story or to the last film's look.
@@ -55,22 +57,26 @@ List what you assume (audience, platform, length, every fact on screen) and ever
 
 - **Real brand, never redrawn.** Logo, screenshots and colours come from the person or their page. Save what you fetch under a new name in `assets/` (the first-bytes check of [credits.md](credits.md)) and record it: `frameshell credits set assets/logo.svg --licence own --source-url <page>`. A font file goes into `assets/fonts/` with its own licence: `frameshell credits set assets/fonts/Inter.ttf --licence OFL-1.1 --source-url <url>`.
 - **Style values.** `frameshell style apply premium` (or `playful`, `corporate`, `energetic`, `calm`: the motion personality the storyline asks for), then `style set` for `colors.bg`, `colors.ink`, `colors.accent`, `fonts.display`, `fonts.ui`, and `platforms` for vertical delivery ([project-model.md](project-model.md#style)). One display face, one UI face, one accent colour.
-- **Banned looks** go into the file before the first shot, so every round checks against them: `frameshell style set banned '["centred title on a gradient","everything fading in","corner labels","frame borders","glow on UI","generic particle bursts","crossfades between shots","spins, glitches, light leaks","bounce on UI or type"]'`, plus the person's own.
+- **Banned looks** go into the file before the first shot, so every round checks against them. `style set banned` replaces the whole list: read `frameshell style show` first and pass what is already there (the person's rejections from earlier rounds) together with the new entries: `frameshell style set banned '["centred title on a gradient","everything fading in","corner labels","frame borders","glow on UI","generic particle bursts","crossfades between shots","spins, glitches, light leaks","bounce on UI or type"]'`, plus the person's own.
 - **Loudness:** set `export.loudness` to `-14` in `frameshell.json` for social platforms.
 
 ## 5. Beat grid and storyboard
 
-**Time budget first.** Length in bars = seconds × BPM ÷ (60 × beats per bar): 30 s at 120 BPM is 15 bars. State the lead's share (the product at work) before writing scenes: aim at 35-40 % of the runtime. When proportions are off, add runtime elsewhere; keep the favourite scene.
+**Time budget first.** Length in bars = seconds × BPM ÷ (60 × beats per bar): 30 s at 120 BPM is 15 bars. State the lead's share (the proof: the product at work) before writing scenes: aim at 35-40 % of the runtime. When proportions are off, add runtime elsewhere; keep the favourite scene.
 
-Default structure when the brief gives none, with beat shares for a launch:
+Default structure when the brief gives none, with beat shares for a launch (they add up to 100 %):
 
 | Part | Share | Holds |
 |---|---|---|
 | Hook | 8 % | The pain in one image; the densest 2 s, never black or a logo alone |
 | Problem | 12 % | What people do today |
-| Product | 8 % reveal + 40 % proof | The key feature in real UI, the data travelling |
+| Reveal | 8 % | The product appears, the key feature in real UI |
+| Proof | 36 % | The lead: the product at work, the data travelling |
 | Payoff | 20 % | The result |
-| Logo + CTA | 8 % claim + 8 % end card | The claim, then the end card (2 s at most, never static) |
+| Claim | 8 % | The claim in one line |
+| End card | 8 %, 2 s at most | Logo and CTA, never static |
+
+Turn shares into seconds (share × length), cap the end card at 2 s and give what it loses to the proof, then round each scene start to a bar (a beat for scenes shorter than a bar) and give the rounding remainder to the proof too, so the scenes add up to the length exactly. 30 s: the end card 2 s, the proof 11.2 s (37 %).
 
 **The grid.** Before music exists, block in bars on a nominal grid: `frameshell tempo set --bpm 120 --meter 4`. With the track: import it (with its credit), `frameshell beats measure assets/music.wav`, read `frameshell beats show assets/music.wav` (a `LOW` grid: offer the alternatives and wait, see [project-model.md](project-model.md#beat-grid)), put it on an audio track at 0, then `frameshell tempo set --clip <music clip>`. A film led by a voice is clocked by the voice instead: generate it first, place its phrases, and each scene lasts its narration plus the silences before, between and after ([voiceover.md](voiceover.md)).
 
@@ -84,6 +90,7 @@ Default structure when the brief gives none, with beat shares for a launch:
 - Hero move: the drop (one per shot); camera: slow push 1.00 -> 1.05
 - Text on screen, exact: "Filed." / "1,240.00"
 - In: hard cut on bar 4; out: the ledger row is carried into the payoff
+- Exposure: ones for the drag (every frame moves), a hold of half a bar on the badge
 - Sound: thump on the drop, tick on the count; VO: none
 - 9:16: ledger stacked under the invoice, text over 28 px
 ```
@@ -96,21 +103,25 @@ Then:
 
 **Reads.** Per shot, in order, what the viewer must understand, each with a start and an end, no overlaps, each long enough (anything important about 1.5 s). One read at a time; fast actions, slow meanings; reveal each element when the voice or the type names it. A cut must add information.
 
-**Stop** and show the storyboard as a table. Build after the person's explicit OK.
+**Stop** and show the storyboard as a table. Build after the person's explicit OK. Never animate without a storyboard: when the person asks to skip it, offer to draft one from the brief and show that.
 
 ## 6. Shots, board, animatic
 
-1. **Shots.** Pick a template from the catalog in the `hyperframes` skill (`frameshell plugin list` shows it; install the plugin and pass `--trust` only after the person agrees) or write a motion composition by hand under that skill's rules. A `scene-background` on the bottom video track, shots on the tracks above. Place each on its scene and link it: `frameshell clip add <track> --type hyperframes --source compositions/hyperframes/proof/index.html --start proof --duration 12 --props '{"to":1240}'`, then `frameshell clip set <clip> --script-ref scripts/film.md#<slug>` with the scene's slug from `script outline`. One transaction per shot.
+1. **Shots.** Each shot is a composition of the `hyperframes` plugin (`frameshell plugin list` says whether it is installed; install it and pass `--trust` only after the person agrees). Scaffold it from a template of the catalog in the `hyperframes` skill, `frameshell hyperframes new proof --template counter` (it prints the props and what it took from `style.json`), or write one by hand under that skill's rules.
+   **Layout:** push and wipe play on the bottom video track only ([transitions.md](transitions.md#shaped-transitions-pick-by-cause)), so the shots themselves go there, butted end to end, each painting the full frame: a template that paints its own background (`app-window`, `device-frame`, `end-card`), one with `bg` and `backdrop` raised toward 1, or a hand-written composition with the backdrop inside it. Never a `scene-background` under the shots: the push would land on it, or fail where it has no edge, and the shots would cut hard. Transparent pieces (`kinetic-headline`, `lower-third`, `big-word`) go on a track above, inside their shot's range; they cut hard at the shot's edge, so end them before it or let them leave on their own move. A film that wants one continuous background under every shot keeps it on the bottom track and moves between shots with hard cuts and carry inside the compositions instead of push or wipe.
+   Place each shot on its scene and link it: `frameshell clip add <bottom track> --type hyperframes --source compositions/hyperframes/proof/index.html --start proof --duration 12 --props '{"to":1240}'`, then `frameshell clip set <clip> --script-ref scripts/film.md#<slug>` with the scene's slug from `script outline`. One transaction per shot.
 2. **Board.** One still per shot, posed in the real composition: `frameshell review --sheets contact` lays the timeline out with its markers and cuts; add `frameshell frame --at <s> --out boards/<shot>.png` at each hero move. Show it with the reads written under each still.
-3. **Animatic.** `frameshell render --quality draft --out exports/animatic.mp4` with the grid's placeholder or the unfitted music. Fix pacing here, before any polish.
+3. **Animatic.** `frameshell render --quality draft --out exports/animatic.mp4` with the grid's placeholder or the unfitted music. There is no 540p export: the draft renders at the project size, and its 30 fps cap and fast encode keep it quick. Fix pacing here, before any polish.
 4. **Hardest seconds first.** Build the hardest 2-4 s completely and look at them in consecutive frames (`frameshell review --range 6,10 --sheets motion`) before building the rest.
 
-More than about six scenes: write an animation guide first (springs per role, durations, the style values), give each subagent 2-3 scenes and launch them all at once; shared helpers are read-only. Paste the style guide verbatim at the top of every composition: a paraphrase drifts.
+**The shot brief.** Before building a shot (yourself or through a subagent), write its directed brief of about 450 words: GOAL (the one feeling), OUTPUT (format, size, file), TIME (frame range, bars), LOOK (3-5 lines plus the banned looks), MOTION (the personality, springs, the measured defaults below), SHOTS (frame range, one hero move, the handoff; hard cut by default), BANNED, QA (what you check and how); for 3D also MODEL and CAMERA. A directed brief beats a one-liner, and identical briefs make films that rhyme: write each from its storyline.
+
+Up to about six short scenes, one agent is faster. More: write an animation guide first (springs per role, durations, the style values), give each subagent 2-3 scenes and launch them all at once (a second wave nearly doubles the time); shared helpers are read-only. Paste the style guide verbatim at the top of every composition: a paraphrase drifts.
 
 ## 7. Cuts, sound and music
 
 - **Cuts on bars.** Hard cuts on bar lines, inner events on beats or half-beats: `--start bar:4`, `--at beat:17.5`, or `--snap-to bar` on a time you have. Visual hits lead slightly so they read on the beat.
-- **Transitions by cause** ([transitions.md](transitions.md#shaped-transitions-pick-by-cause)): `frameshell transition set --at proof --kind push --direction left`; never a crossfade between shots.
+- **Transitions by cause** ([transitions.md](transitions.md#shaped-transitions-pick-by-cause)): `frameshell transition set --at proof --kind push --direction left`; never a crossfade between shots. Push and wipe play on the bottom video track only, where the shots are (gate 6); with a background there instead, cut hard.
 - **Carry between shots.** At each boundary a survivor carries across (moves at least 2 % of the frame diagonal or scales at least 10 %), or one large element stays unchanged (anchored). Score = (carried + anchored ÷ 2) ÷ boundaries: under 0.5 fails, under 0.7 needs work. Judge it on the contact sheet, shot by shot.
 - **Sound effects** on markers, cuts or typing: `frameshell sound place thump --at proof+1.2 --seed 7`, `frameshell sound place tick --typing --from hook --to hook+1.5` ([sound.md](sound.md)). One seed per film; about 85 % of cuts get no sound.
 - **Music on the end card.** `--end` of `music fit` and `--at` of `sound place` take seconds or a marker, not `bar:N`: mark the bar first. `frameshell marker add --at bar:15 --label end-card`, then `frameshell music fit <music clip> --end end-card --dry-run`, then without `--dry-run` ([music.md](music.md)). The grid follows the moved clip: read `frameshell tempo show`, re-snap markers that drifted (`frameshell marker set <marker> --at <s> --snap-to bar`) and move their clips (`frameshell clip move <clip> --start <marker>`).
@@ -119,7 +130,7 @@ More than about six scenes: write an animation guide first (springs per role, du
 
 - **Every format is re-blocked, never letterboxed.** Templates lay out per format; a hand-written composition picks its layout with `M.pick` (the `hyperframes` skill). Look at each: `frameshell review --format 9x16` and, for vertical delivery, `frameshell review --platform instagram` (safe zones, [critique.md](critique.md)).
 - **Critique loop:** at least three rounds of [critique.md](critique.md) on a draft render until every score is 8 or more. Never show the film before that unless the person asks for an early look.
-- **Finals:** `frameshell render --quality final --formats 16x9,9x16`, `frameshell credits`, then deliver with each file a contact sheet (`frameshell review --file exports/<file>.mp4`), a loop check (`frameshell review --file exports/<file>.mp4 --sheets seam`: would it hold played twice back to back) and a poster frame (`frameshell cover --text <word> --out exports/poster.png`). Report the scores, the free and paid items used, and anything still imperfect.
+- **Finals:** `frameshell render --quality final --formats 16x9,9x16`, `frameshell credits`, then deliver with each file a contact sheet (`frameshell review --file exports/<file>.mp4`), a loop check (`frameshell review --file exports/<file>.mp4 --sheets seam`: would it hold played twice back to back; a film delivered as a loop renders with `--loop`, see [loops.md](loops.md)) and a poster frame (`frameshell cover --text <word> --out exports/poster.png`). Report the scores, the free and paid items used, and anything still imperfect.
 
 ## Motion and layout rules
 
@@ -132,6 +143,7 @@ More than about six scenes: write an animation guide first (springs per role, du
 
 ## Director notes
 
+- **Effort**, where your harness sets it: medium for fixes and re-renders, high for a new film, max when the first 3 s must carry a launch.
 - A note from the person is a rule for the whole film. Change the smallest thing that answers it, in its own transaction, and keep the rest exactly as it was.
 - Ask for notes in camera words ("slow every zoom to 0.7x", "hard cut here", "push in on the button"); a vague note leads to random changes, so turn it into one before acting.
 - To choose between directions, build two or three variants of the storyboard or of one shot and let the person pick, as in the comparison of [critique.md](critique.md#3-score-or-compare).

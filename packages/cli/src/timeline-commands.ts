@@ -173,7 +173,8 @@ mutations print the new revision):
   transition remove --at s [--track <track>…]
   marker add --at s --label l [--color red|orange|yellow|green|blue|purple]
                                A named point on the timeline clock (a hook, a beat to land on); labels are unique
-                               ignoring case, never shaped like an id (m_…). cut moves markers after the cut with the
+                               ignoring case, never shaped like an id (m_…) or a grid ref (beat:8,
+                               bar:2). cut moves markers after the cut with the
                                material and removes markers strictly inside the range (one on its first frame stays)
                                when it cuts every track; ripple trims and inserts move them the same way, and a ripple
                                trim removes markers inside the material it cuts away
@@ -235,10 +236,12 @@ mutations print the new revision):
   --end of clip add, clip move and clip trim) are seconds or a marker id or label, with an optional offset:
   --at hook, --at hook+0.5, --from intro --to outro-1. The daemon turns the name into seconds before the change
   runs and the history records seconds. A label that looks like an offset (end-card) is tried whole first.
-  beat:N and bar:N name a beat or a bar start of the timeline's grid counting from 1, with the same optional
+  beat:N and bar:N name a beat or a bar start counting from 1 in the music FILE (beat:1 = its first measured
+  beat, bar:1 = its first downbeat; trimming the clip head does not renumber), with the same optional
   offset: --at bar:8, --from bar:2 --to bar:6, --start beat:17-0.1, --at beat:2.5 (halfway between beats 2 and 3).
-  They need a tempo (tempo set) and are refused on a LOW confidence grid or past the end of the grid, like
-  --snap-to beat|bar. word: names are still refused.
+  Past the measured part they continue at the tempo. With a pickup, bar:N is not beat:(meter*(N-1)+1). They need
+  a tempo (tempo set) and are refused on a LOW confidence grid or with no beats file, like --snap-to beat|bar.
+  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit). word: names are still refused.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
@@ -1014,7 +1017,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "music fit":
       method = "music.fit";
-      if (values["end"] === undefined) throw new UsageError("`frameshell music fit <clip>` needs --end <time>: seconds, or a marker id or label.");
+      if (values["end"] === undefined) throw new UsageError("`frameshell music fit <clip>` needs --end <time>: seconds, a marker id or label, or beat:N / bar:N.");
       Object.assign(params, {
         clip: args[0],
         end: when("end"),

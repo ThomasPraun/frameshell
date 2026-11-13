@@ -42,6 +42,13 @@ export interface TimelineGrid {
   beats: number[];
   /** Timeline seconds of the beats that start a bar (a subset of `beats`). */
   bars: number[];
+  /**
+   * Beats of the music FILE before `beats[0]` (the head a trim cuts away): `beat:N` counts from the file's first
+   * measured beat, so `beats[i]` is `beat:(beatBase + i + 1)`. 0 for a grid on the timeline clock.
+   */
+  beatBase: number;
+  /** Bar starts of the music file before `bars[0]`, like {@link TimelineGrid.beatBase}: `bars[i]` is `bar:(barBase + i + 1)`. */
+  barBase: number;
 }
 
 /** What {@link tempoGrid} found. */
@@ -92,10 +99,17 @@ export async function tempoGrid(input: TempoInput): Promise<TempoResult> {
   const starts = barIndexes(effective.beats.length, effective.downbeat, effective.meter);
   const beats: number[] = [];
   const bars: number[] = [];
+  let beatBase = 0;
+  let barBase = 0;
   let last = -1;
   effective.beats.forEach((time, index) => {
     // Half a frame of slack at the clip's edges: a beat on the first or last frame belongs to the clip.
-    if (time < clip.in - 0.5 / fps || time >= clip.out - 0.5 / fps || beats.length >= MAX_GRID_BEATS) return;
+    if (time < clip.in - 0.5 / fps) {
+      beatBase++;
+      if (starts.has(index)) barBase++;
+      return;
+    }
+    if (time >= clip.out - 0.5 / fps || beats.length >= MAX_GRID_BEATS) return;
     const frame = frames.frame(clip.start + (time - clip.in) / speed);
     const seconds = frames.seconds(frame);
     if (frame === last) {
@@ -117,6 +131,8 @@ export async function tempoGrid(input: TempoInput): Promise<TempoResult> {
     low: isLowConfidence(file),
     beats,
     bars,
+    beatBase,
+    barBase,
   };
   return { grid, problem: null };
 }
@@ -135,7 +151,7 @@ function nominalGrid(tempo: Tempo, fps: number, horizon: number, frames: FrameGr
     beats.push(frames.seconds(frame));
     if (index % meter === 0) bars.push(frames.seconds(frame));
   }
-  return { source: "nominal", bpm, meter, low: false, beats, bars };
+  return { source: "nominal", bpm, meter, low: false, beats, bars, beatBase: 0, barBase: 0 };
 }
 
 /** A nominal grid riding on a music clip: source second `offset + 60 i / bpm` mapped through the clip, beats inside it only. */
@@ -149,14 +165,20 @@ function nominalClipGrid(tempo: Tempo, clip: MediaClip, speed: number, fps: numb
   const bars: number[] = [];
   const startFrame = frames.frame(clip.start);
   const endFrame = frames.frame(clip.start + (clip.out - clip.in) / speed);
+  let beatBase = 0;
+  let barBase = 0;
   for (let index = 0; index < MAX_GRID_BEATS; index++) {
     const frame = nominalBeatFrame(index, bpm * speed, fps, first);
     if (frame >= endFrame) break;
-    if (frame < startFrame) continue;
+    if (frame < startFrame) {
+      beatBase++;
+      if (index % meter === 0) barBase++;
+      continue;
+    }
     beats.push(frames.seconds(frame));
     if (index % meter === 0) bars.push(frames.seconds(frame));
   }
-  return { source: "nominal", bpm: Math.round(bpm * speed * 100) / 100, meter, clip: clip.id, asset: clip.asset, low: false, beats, bars };
+  return { source: "nominal", bpm: Math.round(bpm * speed * 100) / 100, meter, clip: clip.id, asset: clip.asset, low: false, beats, bars, beatBase, barBase };
 }
 
 /** The beat or bar of `grid` nearest to `seconds`; the earlier one on a tie. Throws when the grid has none within a beat of it. */
