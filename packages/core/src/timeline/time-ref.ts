@@ -1,5 +1,5 @@
 import { ErrorCode, type OperationName, RpcError, SECONDS_TEXT, TIME_REF_FIELDS } from "@frameshell/protocol";
-import { type Timeline, describeMarkers, findMarker } from "@frameshell/schema";
+import { type Timeline, describeMarkers, findMarker, isGridRefLabel } from "@frameshell/schema";
 import type { OperationRequest } from "./engine.js";
 import type { TempoResult, TimelineGrid } from "./tempo.js";
 
@@ -13,9 +13,11 @@ import type { TempoResult, TimelineGrid } from "./tempo.js";
  * 2. the id or label (ignoring case) of a marker of the timeline: its time;
  * 3. such a name with an offset in seconds (`hook+0.5`, `outro-1`): the marker's time plus the offset. The whole
  *    string is tried as a name first, so a label like `end-card` is never read as `end` minus `card`;
- * 4. a scheme prefix: `beat:N` and `bar:N` (ADR 0029 slice 4) read the timeline's beat grid, counting from 1
- *    (`beat:1` is the first beat of the grid, `bar:8` the start of the eighth bar), with the same optional `+s`/`-s`
- *    offset as a marker (`bar:8-0.2`); `N` may be fractional (`beat:2.5`, halfway between beats 2 and 3). `word:…` is
+ * 4. a scheme prefix: `beat:N` and `bar:N` (ADR 0029 slice 4) read the timeline's beat grid, counting from 1 in the
+ *    music FILE (`beat:1` is its first measured beat, `bar:1` its first downbeat, whatever the clip trims; a pickup
+ *    makes `bar:N` differ from `beat:(meter*(N-1)+1)`), carried on at the grid's period past the measured part, with the
+ *    same optional `+s`/`-s` offset as a marker (`bar:8-0.2`); `N` may be fractional (`beat:2.5`, halfway between beats
+ *    2 and 3). `word:…` is
  *    reserved for its slice and refused with a pointer until then. New schemes join {@link SCHEMES}; nothing else
  *    changes.
  */
@@ -87,10 +89,12 @@ export function resolveTimeRef(ref: number | string, scope: TimeRefScope): numbe
   if (text === "") throw new TimeRefError("A time reference is empty.", "Give seconds, or a marker id or label.");
   if (SECONDS_TEXT.test(text)) return checked(Number(text), text);
 
-  const marker = findMarker(scope.timeline.markers, text);
+  // The grid wins over a marker an older project stored under such a label (new ones are refused on write).
+  const grid = isGridRefLabel(text);
+  const marker = grid ? undefined : findMarker(scope.timeline.markers, text);
   if (marker) return marker.at;
 
-  const offset = /^(.+?)\s*([+-])\s*(\d+(?:\.\d*)?|\.\d+)$/.exec(text);
+  const offset = grid ? null : /^(.+?)\s*([+-])\s*(\d+(?:\.\d*)?|\.\d+)$/.exec(text);
   if (offset) {
     const base = findMarker(scope.timeline.markers, offset[1]!);
     if (base) return checked(base.at + (offset[2] === "-" ? -1 : 1) * Number(offset[3]), text);
@@ -154,12 +158,12 @@ export async function resolveTimeRefs(request: WireRequestLike, timeline: TimeRe
 }
 
 /**
- * {@link resolveTimeRef} for argument `field` of method or operation `op`: a failure is an `RpcError` InvalidOperation that
+ * {@link resolveTimeRefAsync} for argument `field` of method or operation `op`: a failure is an `RpcError` InvalidOperation that
  * names both, with the reason `time reference`. For methods that take a time of their own (`music.fit` `end`).
  */
-export function resolveTimeRefArg(op: string, field: string, value: number | string, timeline: Pick<Timeline, "id" | "markers">): number {
+export async function resolveTimeRefArg(op: string, field: string, value: number | string, timeline: TimeRefScope["timeline"], loadGrid?: GridLoader): Promise<number> {
   try {
-    return resolveTimeRef(value, { timeline });
+    return await resolveTimeRefAsync(value, timeline, loadGrid);
   } catch (error) {
     throw asInvalidOperation(op, field, value, error);
   }
@@ -210,7 +214,7 @@ function horizonFor(tempo: NonNullable<Timeline["tempo"]>, scheme: "beat" | "bar
   return (tempo.offset ?? 0) + ((beats + 1) * 60) / tempo.bpm;
 }
 
-/** Time of `beat:N` / `bar:N`: entry N (from 1) of the grid's beats or bar starts, a fraction interpolated, plus the offset. */
+/** Time of `beat:N` / `bar:N`: entry N (from 1, counted in the song) of the grid's beats or bar starts, a fraction interpolated, plus the offset. */
 function gridPoint(scheme: "beat" | "bar", rest: string, scope: TimeRefScope): number {
   const shown = `${scheme}:${rest}`;
   const parsed = GRID_REF.exec(rest);
@@ -229,19 +233,22 @@ function gridPoint(scheme: "beat" | "bar", rest: string, scope: TimeRefScope): n
   if (refusal) throw new TimeRefError(`"${shown}": ${refusal.message}`, refusal.hint);
   const grid = scope.grid.grid as TimelineGrid;
   const times = scheme === "bar" ? grid.bars : grid.beats;
+  const base = scheme === "bar" ? grid.barBase : grid.beatBase;
+  if (times.length === 0) {
+    throw new TimeRefError(`"${shown}": the timeline's grid has no ${scheme === "bar" ? "bar starts" : "beats"} inside its music clip.`, "Extend the clip, or set a nominal tempo with `tempo.set` { bpm }.");
+  }
+  // Seconds between entries: the grid's own average (a measured grid drifts a little from its tempo); one entry falls back to the tempo.
+  const period = times.length > 1 ? (times[times.length - 1]! - times[0]!) / (times.length - 1) : (60 / grid.bpm) * (scheme === "bar" ? grid.meter : 1);
+  // Entry `index` (0-based, counted in the song): listed where the clip shows it, else carried on at the period before and past the listed part.
+  const timeAt = (index: number) => {
+    const slot = index - base;
+    return slot < 0 ? times[0]! + slot * period : slot < times.length ? times[slot]! : times[times.length - 1]! + (slot - times.length + 1) * period;
+  };
   const whole = Math.floor(position);
   const fraction = position - whole;
-  const first = times[whole - 1];
-  const next = times[whole];
-  if (first === undefined || (fraction > 0 && next === undefined)) {
-    const what = scheme === "bar" ? "bar starts" : "beats";
-    throw new TimeRefError(
-      `"${shown}" is past the end of the grid, which has ${times.length} ${what}${times.length ? ` (the last at ${times[times.length - 1]} s)` : ""}.`,
-      grid.source === "beats" ? "A measured grid covers its music clip only: use a smaller number, or make the clip longer." : "Use a smaller number.",
-    );
-  }
+  const first = timeAt(whole - 1);
   const offset = parsed[2] === undefined ? 0 : (parsed[2] === "-" ? -1 : 1) * Number(parsed[3]);
-  return first + (fraction > 0 ? fraction * (next! - first) : 0) + offset;
+  return first + (fraction > 0 ? fraction * (timeAt(whole) - first) : 0) + offset;
 }
 
 function checked(seconds: number, shown: string): number {

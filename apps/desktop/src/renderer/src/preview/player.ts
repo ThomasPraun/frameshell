@@ -20,8 +20,11 @@ const RESUME_TIMEOUT_MS = 1500;
 export interface PlayerEvents {
   /** Clock reached `time` (program seconds) while playing; every display frame. */
   onTime(time: number): void;
-  /** Program frame on the canvas changed; -1 = black. */
-  onShown?(frame: number): void;
+  /**
+   * Program frame on the canvas changed; -1 = black. Null as a new program is set: the canvas holds the previous
+   * program's picture until the engine draws the new one (a layer or matte it may still be decoding).
+   */
+  onShown?(frame: number | null): void;
   onError?(message: string): void;
   /** Audio output is unavailable: playback runs on a silent clock. */
   onSilent?(): void;
@@ -44,6 +47,8 @@ export class PreviewPlayer implements TransportPlayer {
   readonly #worker: Worker;
   readonly #events: PlayerEvents;
   #program: Program | null = null;
+  /** Programs sent to the engine: a `shown` of an earlier one is stale. */
+  #programs = 0;
   #context: AudioContext | null = null;
   /** Program output gain; zero while {@link setMuted}, so the audio clock keeps running. */
   #output: GainNode | null = null;
@@ -101,7 +106,9 @@ export class PreviewPlayer implements TransportPlayer {
   /** Play `program` from now on; a running playback continues (the engine re-decodes only what changed). */
   setProgram(program: Program): void {
     this.#program = program;
+    this.#programs++;
     this.#send({ type: "program", program });
+    this.#events.onShown?.(null);
   }
 
   /** Leave generated clip `clip` (flattened id) out of the picture while its live page shows instead; null shows every clip. */
@@ -222,8 +229,9 @@ export class PreviewPlayer implements TransportPlayer {
   }
 
   #onEngine(message: FromEngine): void {
-    if (message.type === "shown") this.#events.onShown?.(message.frame);
-    else if (message.type === "stats") this.#stats = message.stats;
+    if (message.type === "shown") {
+      if (message.program === this.#programs) this.#events.onShown?.(message.frame);
+    } else if (message.type === "stats") this.#stats = message.stats;
     else if (message.type === "alpha") {
       this.#alphaReplies.get(message.id)?.({ frame: message.frame, layers: message.layers });
       this.#alphaReplies.delete(message.id);

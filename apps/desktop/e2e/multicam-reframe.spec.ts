@@ -7,7 +7,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Reframing for 9:16 (#251, ADR 0016): the preview's 9:16 frame cuts a solo shot as a vertical export does, and
+// Reframing for 9:16 (#251, ADR 0016): the preview's 9x16 format cuts a solo shot as a vertical export does, and
 // the shot inspector's X field sets a reframe key at the playhead through `multicam.reframe`. The angle's
 // picture is red on its left half and lime on its right, so the cut reads as two letters.
 const box = sandbox("multicam");
@@ -88,6 +88,13 @@ test.beforeAll(async () => {
     },
   ];
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
+  const configFile = join(box.projectDir, "frameshell.json");
+  const config = JSON.parse(readFileSync(configFile, "utf8"));
+  config.formats = [
+    { id: "landscape", width: 960, height: 540 },
+    { id: "9x16", width: 1080, height: 1920 },
+  ];
+  writeFileSync(configFile, JSON.stringify(config, null, 2));
   ({ app, page } = await launch(box));
   await expect(page.getByTestId("preview-frame")).toBeVisible();
   await waitForIngest(page, ASSET);
@@ -110,8 +117,8 @@ test("the 9:16 frame cuts the solo around the reframe key the inspector sets, un
   await expect.poll(quarters).toBe("RG");
   await expect(reframeRow().getByTestId("reframe-keys")).toHaveText("centered");
 
-  await page.getByTestId("preview-vertical").click();
-  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-vertical", "true");
+  await page.getByTestId("preview-format").selectOption("9x16");
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-format", "9x16");
   await expect.poll(canvasShape).toBe("portrait");
   // Centered: the middle strip of the picture, red left of the centre and lime right of it.
   await expect.poll(quarters).toBe("RG");
@@ -135,8 +142,8 @@ test("the 9:16 frame cuts the solo around the reframe key the inspector sets, un
   await expect.poll(() => savedAngle()["reframe"]).toEqual([{ at: 0, x: 0.75, y: 0.5 }]);
   await expect.poll(quarters).toBe("GG");
 
-  // The project frame does not cut a 16:9 picture: the key changes nothing there.
-  await page.getByTestId("preview-vertical").click();
+  // The primary format does not cut a 16:9 picture: the key changes nothing there.
+  await page.getByTestId("preview-format").selectOption("landscape");
   await expect.poll(canvasShape).toBe("landscape");
   await expect.poll(quarters).toBe("RG");
 });

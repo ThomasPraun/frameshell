@@ -135,6 +135,15 @@ const en = {
   showTrack: "Show track",
   trackMuted: "Muted: this track plays no sound in preview and export",
   trackHidden: "Hidden: this track shows no picture in preview and export; its sound still plays",
+  /** Track menu entry (ADR 0032): this track's pictures go behind the person in front on the lower track `plate` (a label such as `V1`). */
+  behindPerson: (plate: string) => `Put behind the person on ${plate}`,
+  stopBehindPerson: "Stop going behind the person",
+  behindPlate: (plate: string) => `Behind the person on ${plate}`,
+  /** `progress` is a fraction, or null while no matte job runs yet. */
+  matteMaking: (plate: string, progress: number | null) =>
+    `Behind the person on ${plate}: preparing the matte${progress === null ? "" : ` (${Math.round(progress * 100)} %)`}. Until it is ready, this track's pictures show in front of the person`,
+  matteReady: (plate: string) => `Behind the person on ${plate}: matte ready`,
+  matteFailed: (plate: string, reason: string) => `Behind the person on ${plate}: the matte could not be made${reason ? ` (${reason})` : ""}`,
   trackName: (label: string) => `Name of track ${label}`,
   addSubtitlesOf: (label: string) => `Add subtitles of ${label}`,
   addVideoTrack: "Add video track",
@@ -275,6 +284,13 @@ const es: typeof en = {
   showTrack: "Mostrar pista",
   trackMuted: "Silenciada: esta pista no suena en la vista previa ni en la exportación",
   trackHidden: "Oculta: esta pista no muestra imagen en la vista previa ni en la exportación; su sonido se sigue oyendo",
+  behindPerson: (plate) => `Poner detrás de la persona de ${plate}`,
+  stopBehindPerson: "Dejar de ir detrás de la persona",
+  behindPlate: (plate) => `Detrás de la persona de ${plate}`,
+  matteMaking: (plate, progress) =>
+    `Detrás de la persona de ${plate}: preparando la máscara${progress === null ? "" : ` (${Math.round(progress * 100)} %)`}. Hasta que esté lista, las imágenes de esta pista se ven delante de la persona`,
+  matteReady: (plate) => `Detrás de la persona de ${plate}: máscara lista`,
+  matteFailed: (plate, reason) => `Detrás de la persona de ${plate}: no se pudo crear la máscara${reason ? ` (${reason})` : ""}`,
   trackName: (label) => `Nombre de la pista ${label}`,
   addSubtitlesOf: (label) => `Agregar subtítulos de ${label}`,
   addVideoTrack: "Agregar pista de video",

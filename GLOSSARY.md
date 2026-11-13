@@ -42,6 +42,14 @@ _Avoid_: narration script, TTS script
 The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
 _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 
+**Phrase**:
+One stretch of a voiceover take between silences of 60 ms or more, as a range of the take in seconds; the cuts of the phrase clips a person corrects by trimming. Derived from the file, never stored.
+_Avoid_: segment, chunk
+
+**Misread**:
+A difference between what a voiceover take was heard to say (through the project's transcription provider) and the line it was asked to read: `missing`, `changed`, `added`, `moved`, `restart` or `pause`; the line is `clean`, `doubtful` (the transcription may have made it) or `misread`.
+_Avoid_: error (too broad), mispronunciation (the check hears words, not sounds)
+
 ## Synthesized sound (ADR 0038)
 
 **Sound effect**:
@@ -260,6 +268,20 @@ _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 One journaled change of project config (a format added or removed, a `revert` of one), as keyed before/after values in `.frameshell/history/project.config.jsonl`; it belongs to a transaction like a timeline operation and is listed in every timeline's history.
 _Avoid_: config edit, settings change
 
+## Batch variants (ADR 0040)
+
+**Batch file**:
+A `*.batch.json` naming a template timeline, its slots and the rows to render; each row is one variant of the same edit (a size, a language, a product), never an episode.
+_Avoid_: job file, template file, data file
+
+**Slot**:
+A named place a row fills: `<clipId>.props.<path>` (a value in a generated clip's props) or `<clipId>.asset` (a media clip's file, in/out kept).
+_Avoid_: field, variable, placeholder
+
+**Row**:
+One variant of a batch: an `id` (its output file name) and a value per slot it sets.
+_Avoid_: record, entry (the manifest's per row × format line is an entry)
+
 ## Photo segmentation (ADR 0022)
 
 **Mask**:
@@ -295,7 +317,7 @@ One `review` of a timeline or an exported file: contact, phone, motion-strip and
 _Avoid_: review (alone, it reads as Review mode), audit
 
 **Analysis**:
-One `analyze` of a reference video: its shot table, contact and shots sheets, palette, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
+One `analyze` of a reference video: its shot table, contact and shots sheets, palette, look, rhythm, events, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
 _Avoid_: reference report, scan
 
 ## Video from audio (ADR 0015)

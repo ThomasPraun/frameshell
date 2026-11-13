@@ -41,6 +41,7 @@ import {
   elementStyles,
   gainAt,
   isShotClip,
+  isGridRefLabel,
   markerLabelKey,
   findMarker,
   describeMarkers,
@@ -1320,7 +1321,7 @@ class Edit {
    * `track.duck`: write the dip `curve` into the `gain` keys of every clip of audio track `args.track` (ADR 0018).
    * Keys marked `auto: "duck"` from an earlier run go; keys without the mark stay and set the level the dip is
    * taken from, and a hand key inside a dip is dipped too (it keeps its level in `base` for the next run). A clip the
-   * dip never touches ends with no duck keys.
+   * dip never touches ends with no duck keys. `args.settings` (what the method was asked) goes to `audio.duck` of each clip that gets duck keys.
    */
   async trackDuck(args: OperationArgs<"track.duck">): Promise<void> {
     const track = this.clipTrack(args.track);
@@ -1342,7 +1343,15 @@ class Edit {
       const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
       const end = (await this.span(clip)).end;
       const lane = clip.audio?.muted === true ? hand : this.duckLane(clip, hand, curve, end, speed);
-      if (lane.some((key) => key.auto === "duck")) ducked++;
+      const keyed = lane.some((key) => key.auto === "duck");
+      if (keyed) ducked++;
+      // The settings stay with the keys they wrote: a clip no dip touches ends with neither.
+      if (keyed && args.settings) clip.audio = { ...clip.audio, duck: structuredClone(args.settings) };
+      else if (clip.audio?.duck) {
+        const { duck: _duck, ...rest } = clip.audio;
+        if (Object.keys(rest).length > 0) clip.audio = rest;
+        else delete clip.audio;
+      }
       if (lane.length > 0) kept.gain = lane as [ClipKey, ...ClipKey[]];
       if (Object.keys(kept).length === 0) delete clip.keys;
       else clip.keys = kept;
@@ -2155,6 +2164,12 @@ class Edit {
 
   /** Refuse `label` when another marker than `self` holds it, ignoring case. */
   claimLabel(label: string, self: string | null): void {
+    if (isGridRefLabel(label)) {
+      throw this.invalid(`label "${label}" must not look like a beat or bar reference (\`beat:8\`, \`bar:2\`): it would shadow the grid.`, {
+        field: "label",
+        hint: "Pick another label.",
+      });
+    }
     const holder = this.draft.markers?.find((marker) => marker.id !== self && markerLabelKey(marker.label) === markerLabelKey(label));
     if (!holder) return;
     throw this.invalid(`label "${label}" is already marker ${holder.id} ("${holder.label}" at ${holder.at} s); labels are unique ignoring case.`, {
