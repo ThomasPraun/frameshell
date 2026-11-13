@@ -6,8 +6,7 @@ import { writeTextAtomic } from "../src/fs-util.js";
 import { tempDir } from "./helpers.js";
 
 // Windows refuses to replace a file another handle has open (EPERM): a reader, a watcher, antivirus.
-// Elsewhere the first two pass trivially; the Windows CI job is the one that proves them. Readers that
-// overlap without a gap would starve the rename for good: the retry needs a moment with no handle open.
+// Elsewhere the first two pass trivially; the Windows CI job is the one that proves them.
 describe("writeTextAtomic", () => {
   it("replaces a target another handle holds open, once that handle closes", async () => {
     const path = join(tempDir(), "main.json");
@@ -19,21 +18,33 @@ describe("writeTextAtomic", () => {
     expect(readFileSync(path, "utf8")).toBe("new");
   });
 
+  // A reader parses what it read before it reads again, so there is a moment with no handle open. A reader
+  // that reopens in the same tick would hold the target for good and starve any rename on Windows.
   it("keeps writing while a reader keeps reading the target (the daemon's own reads, a client's)", async () => {
     const dir = tempDir();
     const path = join(dir, "main.json");
-    writeFileSync(path, "0");
+    const whole = (i: number) => String(i % 10).repeat(20_000);
+    writeFileSync(path, whole(0));
     let writing = true;
+    let reads = 0;
+    const torn: string[] = [];
     const reader = (async () => {
-      while (writing) await readFile(path, "utf8");
+      while (writing) {
+        const text = await readFile(path, "utf8");
+        reads++;
+        if (text.length !== 20_000 || !/^(\d)\1*$/.test(text)) torn.push(text.slice(0, 20));
+        await new Promise((resolve) => setImmediate(resolve));
+      }
     })();
     try {
-      for (let i = 1; i <= 50; i++) await writeTextAtomic(path, String(i));
+      for (let i = 1; i <= 50; i++) await writeTextAtomic(path, whole(i));
     } finally {
       writing = false;
       await reader;
     }
-    expect(readFileSync(path, "utf8")).toBe("50");
+    expect(reads).toBeGreaterThan(0);
+    expect(torn).toEqual([]);
+    expect(readFileSync(path, "utf8")).toBe(whole(50));
     expect(readdirSync(dir)).toEqual(["main.json"]);
   });
 

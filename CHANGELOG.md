@@ -792,6 +792,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement for the next time it opens (#533).
 - CLI: `import --wait`, `render --wait` and other job followers no longer print a step twice when the job list the
   daemon answers is older than the events already read (#533).
+- Windows: an atomic write (`writeTextAtomic`) whose target a reader keeps opening tries the rename again every
+  25 ms at most instead of every 200 ms, so it reaches the moment no handle is open within the same 3 s (#533).
 
 ## [0.18.0] - 2026-11-07
 
