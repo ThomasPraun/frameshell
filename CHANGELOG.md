@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 107): `frameshell voiceover place <script>`
+  (daemon `voiceover.place`, MCP `voiceover_place`) puts the takes of a voiceover script on the timeline as phrase clips
+  in one transaction: each take is cut at its silences, every phrase becomes a clip on the audio track `Voiceover`
+  (made when absent) with the spacing the take has and a `scriptRef` to its scene. `--at line=time` anchors a line
+  (`hook-1`) or one phrase (`hook-1.2`) on seconds, a marker (`hook+0.5`) or a beat or bar of the grid (`beat:9`,
+  `bar:3`) through the shared TimeRef resolver; the rest follow by `--gap` (0.4 s). The voice never overlaps itself,
+  `--dry-run` plans without writing, and clips already playing the takes fail the call unless `--replace` removes them
+  first. `voiceover generate` now warns, naming the clips, when it replaces a take a clip plays. In the app, the
+  Explorer's menu of a script has "Generate voiceover…": a paid provider asks first in a dialog with its estimated cost
+  (or that it does not say), and only a confirm sends `yes` (English and Spanish). The e2e daemon takes
+  `FRAMESHELL_SPEECH_STAND_IN=paid` for a stand-in provider that charges 0.01 USD a word.
 - Batch variants from data rows, slices 1 and 2 of #477 (ADR 0040, epic #451; daemon `batch.render`, MCP
   `batch_render`, JSON Schema `batch.json`, protocol 106): `frameshell batch <file.batch.json> [--out dir] [--formats
   id,id] [--dry-run]` renders one template timeline (default `main`) once per row. `slots` name what a row sets:

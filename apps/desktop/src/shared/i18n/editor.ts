@@ -30,6 +30,7 @@ const en = {
     platform === "mac" ? "Reveal in Finder" : platform === "windows" ? "Show in File Explorer" : "Show in file manager",
   copyPath: "Copy path",
   moveToTrash: (windows: boolean): string => (windows ? "Move to Recycle Bin" : "Move to Trash"),
+  generateVoiceover: "Generate voiceover…",
 };
 
 const es: typeof en = {
@@ -62,6 +63,7 @@ const es: typeof en = {
     platform === "mac" ? "Mostrar en Finder" : platform === "windows" ? "Mostrar en el Explorador de archivos" : "Mostrar en el gestor de archivos",
   copyPath: "Copiar ruta",
   moveToTrash: (windows) => (windows ? "Mover a la Papelera de reciclaje" : "Mover a la Papelera"),
+  generateVoiceover: "Generar voz en off…",
 };
 
 export const editor = { en, es };

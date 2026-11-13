@@ -321,6 +321,7 @@ export {
   type ShootMeta,
   type ShootScene,
   type ShootScript,
+  VOICEOVER_LINE_GAP_S,
   VOICEOVER_WORDS_PER_SECOND,
   VoiceoverLineSchema,
   VoiceoverMetaSchema,

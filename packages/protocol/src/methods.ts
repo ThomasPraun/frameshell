@@ -33,7 +33,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
 import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VOICEOVER_LINE_GAP_S, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 106;
+export const PROTOCOL_VERSION = 107;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2341,6 +2341,95 @@ export const methods = {
       warnings: z.array(z.string()).describe("Script problems (budget over a scene's timing, digits without `language`…) and provider notes."),
     }),
   },
+  "voiceover.place": {
+    mutating: true,
+    description:
+      "Place the takes of a voiceover script (ADR 0034) on a timeline as phrase clips, in one transaction `Voiceover: …` " +
+      "(one proposal in review mode; `revert` undoes it whole). Run `voiceover.generate` first: each line's take is read from " +
+      "`assets/voiceover/<script slug>/<line id>.wav` (a line with no take fails and is named), cut at its silences into " +
+      "phrases (the ranges `voiceover.generate` reports) and every phrase becomes a media clip of the take (`in`/`out` on " +
+      "whole frames, `scriptRef` `<script>#<scene>`) on an audio track: `track`, else the one named `Voiceover`, made when absent. " +
+      "The phrases of a line keep the spacing the take has. Where a line goes: `at` maps a line id (`hook-1`) or one phrase of it " +
+      "(`hook-1.2`, counting from 1) to a time, given as seconds, a marker id or label (`hook`, `hook+0.5`) or a beat or bar of the timeline's " +
+      "grid (`beat:9`, `bar:3`), resolved by the same TimeRef rules as every time argument; the clip starts on the frame nearest it, " +
+      "so the first sound follows by 20 ms of air kept in the phrase. A line (or phrase) with no `at` follows the one before it by " +
+      `\`gap\` seconds (default ${VOICEOVER_LINE_GAP_S}); the first one starts at \`start\`, else right after the track's last clip, else 0. ` +
+      "Voice never overlaps itself: a phrase that would start before the previous one ends, or on a clip already on the track, fails " +
+      "and names both, so move the anchor or drop it. A line whose take is already on a timeline clip fails naming the clips unless " +
+      "`replace` is true, which removes those clips first (use it after `voiceover.generate` changed a take: the old phrase " +
+      "ranges no longer fit it). `dryRun` plans without writing. No fade is applied: a clip fade is whole frames (ADR 0018) and the " +
+      "phrase edges already keep 20 ms before and 30 ms after their sound. A take said from older text than the line has now " +
+      "is placed with a warning. Per-phrase tempo is not here (it waits for the preview pitch fix, #499). Fails with ScriptNotFound, " +
+      "InvalidParams (unknown line id, `at` key or phrase number), InvalidOperation (not a voiceover script, a line with no take, an unknown " +
+      "marker, a `track` that is not an audio track, overlap, clips already placed) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      script: z
+        .string()
+        .min(1)
+        .describe("Voiceover script inside the project, absolute or relative to `cwd` (then the project root), e.g. `scripts/launch-vo.md`."),
+      lines: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("Line ids to place (`hook-1`), default every line of the script, in script order."),
+      at: z
+        .record(z.string().min(1), TimeRefParam("Timeline time of the first sound of the line or phrase."))
+        .optional()
+        .describe("Where lines or phrases go: keys are line ids (`hook-1`, the same as `hook-1.1`) or one phrase (`hook-1.2`); lines and phrases left out follow the one before."),
+      start: TimeRefParam("Timeline time of the first line when it has no `at`. Default: right after the last clip of the voice track, else 0.").optional(),
+      gap: z
+        .number()
+        .min(0)
+        .max(30)
+        .default(VOICEOVER_LINE_GAP_S)
+        .describe(`Seconds of air between a line and the next one that has no \`at\`. Default ${VOICEOVER_LINE_GAP_S}.`),
+      track: z.string().min(1).optional().describe("Audio track for the voice, from `track.list`. Default: the audio track named `Voiceover`, made when absent."),
+      replace: z
+        .boolean()
+        .default(false)
+        .describe("Remove the clips that already play these lines' takes (on any track of the timeline) before placing. Default false: they make the call fail."),
+      dryRun: z.boolean().default(false).describe("Plan and report without changing the timeline."),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline id."),
+      revision: z.int().describe("Revision after the last change; the one before the call when nothing was written."),
+      dryRun: z.boolean().describe("Nothing was written."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null on a dry run."),
+      track: z
+        .object({ id: z.string().nullable().describe("Null for a track a dry run would make."), name: z.string().nullable(), created: z.boolean().describe("This call made the track (a dry run: would make).") })
+        .describe("The audio track the phrases went on."),
+      script: z.string().describe("Script file, project-relative."),
+      lines: z
+        .array(
+          z.object({
+            id: z.string().describe("Line id."),
+            start: z.number().describe("Timeline second of its first clip."),
+            end: z.number().describe("Timeline second just after its last clip."),
+            anchor: z.enum(["at", "start", "follows"]).describe("`at`: given by `at`. `start`: the first line, put at `start` or after the track's last clip. `follows`: after the previous line plus `gap`."),
+          }),
+        )
+        .describe("The lines placed, in order."),
+      placed: z
+        .array(
+          z.object({
+            line: z.string().describe("Line id."),
+            phrase: z.int().describe("Phrase number inside the line, from 1."),
+            clip: z.string().nullable().describe("Id of the new clip; null on a dry run."),
+            file: z.string().describe("The take, project-relative."),
+            in: z.number().describe("Source seconds of the take where the clip starts, on the frame grid."),
+            out: z.number().describe("Source seconds where it ends."),
+            start: z.number().describe("Timeline second the clip starts, on the frame grid."),
+            end: z.number().describe("Timeline second just after its last frame."),
+            anchor: z.enum(["at", "start", "follows", "spacing"]).describe("`spacing`: a later phrase of a line, at the spacing the take has; the others as in `lines`."),
+          }),
+        )
+        .describe("The phrase clips, in time order."),
+      replaced: z.array(z.string()).describe("Ids of the clips removed by `replace`."),
+      warnings: z.array(z.string()).describe("Takes older than their line, phrases shorter than a frame that were left out, and the engine's own warnings."),
+    }),
+  },
   "sound.sfx": {
     mutating: true,
     description:
@@ -4469,6 +4558,8 @@ export type ShootStatusResult = MethodResult<"shoot.status">;
 export type ScriptCheckResult = MethodResult<"script.check">;
 /** Result of `voiceover.generate`. */
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
+/** Result of `voiceover.place`. */
+export type VoiceoverPlaceResult = MethodResult<"voiceover.place">;
 /** Result of `sound.sfx`. */
 export type SoundSfxResult = MethodResult<"sound.sfx">;
 /** Result of `sound.place`. */

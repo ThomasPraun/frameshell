@@ -1,9 +1,10 @@
+import { isScriptPath } from "@frameshell/schema";
 import { type MouseEvent, useEffect, useMemo, useState } from "react";
 import type { FileNode } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
 import { selection, useSelection } from "../selection.js";
-import { placeItems } from "../file-commands.js";
+import { placeItems, voiceoverItem } from "../file-commands.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 
@@ -97,7 +98,11 @@ function Nodes({
       return;
     }
     if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
-    openAskMenu(event, [{ label: t.editor.open, run: () => onOpenFile(node.path) }, ...placeItems(node.path)]);
+    openAskMenu(event, [
+      { label: t.editor.open, run: () => onOpenFile(node.path) },
+      ...(isScriptPath(node.path) ? [voiceoverItem(node.path)] : []),
+      ...placeItems(node.path),
+    ]);
   };
   return (
     <>
