@@ -42,6 +42,9 @@ interface WorkerScope {
   requestAnimationFrame(callback: (time: number) => void): number;
 }
 const scope = self as unknown as WorkerScope;
+const DIAG: Record<string, number> = { tickGapMax: 0, ticksLate: 0, showMs: 0, maskMs: 0, lumaMs: 0, jumps: 0, starvedL0: 0, starvedL1: 0, lagMs0: 0, lagMs1: 0, lagMs1a: 0, outs0: 0, outs1: 0, outs1a: 0 };
+(globalThis as any).DIAG = DIAG;
+const sentAt = new Map<string, number>();
 
 /** Decoded frames kept ahead of the playhead per layer (decoder queue included): ~0.4 s at 30 fps, as measured in ADR 0001. */
 const MAX_AHEAD = 12;
@@ -242,6 +245,7 @@ class LayerDecoder {
         const timestamp = ++this.#seq;
         this.#pending.set(timestamp, { from: step.from, to: step.to, gen, alpha: alpha !== null, frame: null, alphaPlane: null });
         this.#fedUntil = Math.max(this.#fedUntil, step.to);
+        sentAt.set(`${this.layer}:${timestamp}`, performance.now());
         decoder.decode(new EncodedVideoChunk({ type: picture.key ? "key" : "delta", timestamp, data: picture.data }));
         if (alpha && picture.alpha) {
           alpha.decode(new EncodedVideoChunk({ type: picture.alpha.key ? "key" : "delta", timestamp, data: picture.alpha.data }));
@@ -325,6 +329,8 @@ class LayerDecoder {
 
   #onFrame(frame: VideoFrame, alpha: boolean): void {
     const pending = this.#pending.get(frame.timestamp);
+    const sent = sentAt.get(`${this.layer}:${frame.timestamp}`);
+    if (sent !== undefined) { const k = `${this.layer}${alpha ? "a" : ""}`; DIAG[`lagMs${k}`] = Math.max(DIAG[`lagMs${k}`] ?? 0, performance.now() - sent); DIAG[`outs${k}`] = (DIAG[`outs${k}`] ?? 0) + 1; }
     if (!pending || (alpha ? pending.alphaPlane : pending.frame)) {
       frame.close();
       return;
@@ -335,8 +341,10 @@ class LayerDecoder {
       this.#flush();
       return;
     }
+    const l0 = performance.now();
     void copyLuma(frame).then(
       (plane) => {
+        DIAG["lumaMs"]! += performance.now() - l0;
         pending.alphaPlane = plane;
       },
       (error: unknown) => {
@@ -512,7 +520,7 @@ class Engine implements LayerHost {
     this.#context.fillRect(0, 0, canvas.width, canvas.height);
     setInterval(() => {
       this.stats.decoders = this.#layers.reduce((sum, layer) => sum + layer.decoders, 0);
-      scope.postMessage({ type: "stats", stats: { ...this.stats } });
+      scope.postMessage({ type: "stats", stats: { ...this.stats, ...DIAG } as EngineStats });
     }, STATS_MS);
   }
 
@@ -588,6 +596,8 @@ class Engine implements LayerHost {
   #play(anchor: Anchor, clock: ClockSample): void {
     const program = this.#program;
     if (!program) return;
+    for (const key of Object.keys(DIAG)) DIAG[key] = 0;
+    this.#lastWant = -1;
     this.#stopAudio();
     this.#clock = clock;
     const from = Math.floor((anchor.sample / program.sampleRate) * program.fps + 1e-6);
@@ -672,12 +682,17 @@ class Engine implements LayerHost {
     scope.requestAnimationFrame(() => this.#tick());
   }
 
+  #lastTick = 0;
+  #lastWant = -1;
   #tick(): void {
     this.#tickQueued = false;
+    const t0 = performance.now();
+    if (this.#anchor && this.#lastTick) { const gap = t0 - this.#lastTick; DIAG["tickGapMax"] = Math.max(DIAG["tickGapMax"]!, gap); if (gap > 40) DIAG["ticksLate"]!++; }
+    this.#lastTick = this.#anchor ? t0 : 0;
     const program = this.#program;
     if (!program) return;
     const playing = this.#anchor !== null && this.#clock !== null;
-    if (program.frames > 0) this.#show(this.#wantFrame(), playing);
+    if (program.frames > 0) { const w = this.#wantFrame(); this.#show(w, playing); DIAG["showMs"]! += performance.now() - t0; }
     else this.#drawBlack();
     if (playing) this.#scheduleAudio();
     for (const layer of this.#layers) void layer.pump();
@@ -729,6 +744,7 @@ class Engine implements LayerHost {
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
+        if (playing) DIAG[`starvedL${pipeline.layer}`] = (DIAG[`starvedL${pipeline.layer}`] ?? 0) + 1;
         complete = false;
       }
     }
@@ -748,6 +764,8 @@ class Engine implements LayerHost {
       bitmap: part.image instanceof ImageBitmap ? part.image : null,
     }));
     if (this.#drawn !== key) {
+      if (playing && this.#lastWant >= 0 && want > this.#lastWant + 1) DIAG["jumps"]! += want - this.#lastWant - 1;
+      this.#lastWant = playing ? want : -1;
       this.#composite(parts);
       this.#drawn = key;
       this.stats.drawn++;
@@ -812,9 +830,11 @@ class Engine implements LayerHost {
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
         // Covering: masked at the picture's own size, so the crop reads the same pixels as without alpha.
+        const m0 = performance.now();
         const masked = cover
           ? this.#masker.apply(part.image, part.alpha, part.image.displayWidth, part.image.displayHeight)
           : this.#masker.apply(part.image, part.alpha, rect.width, rect.height);
+        DIAG["maskMs"]! += performance.now() - m0;
         const from = cover ?? { left: 0, top: 0, width: masked.width, height: masked.height };
         context.drawImage(masked, from.left, from.top, from.width, from.height, rect.left, rect.top, rect.width, rect.height);
       } else if (cover) {
