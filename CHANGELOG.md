@@ -711,6 +711,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Voiceover cost dialog (#586, ADR 0034 decision 20; protocol 118): the paid run is bound to what the person saw.
+  `voiceover.generate`'s `ConfirmationRequired` carries a `confirmation` token (provider, voice, lines to say and their
+  cost), the app sends it back with `yes`, and a paid run whose lines or cost changed since (the script was edited while
+  the dialog was open) fails with the new `ConfirmationStale` and generates nothing; the app then asks again with the
+  new cost. `yes` alone (CLI, agents) still confirms any cost. The Explorer offers "Generate voiceover…" only on scripts
+  with `voiceover: true` in their frontmatter.
 - Preview: in a short window the clip inspector takes at most half the panel and scrolls, instead of squeezing the
   picture, and its handles, to nothing (#581).
 - Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports

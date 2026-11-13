@@ -4,9 +4,9 @@ import type { FileNode } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
 import { selection, useSelection } from "../selection.js";
-import { placeItems, voiceoverItem } from "../file-commands.js";
+import { placeItems, voiceoverItems } from "../file-commands.js";
 import { windowOf } from "../windows.js";
-import { contextMenu } from "./ContextMenu.js";
+import { type MenuItem, contextMenu } from "./ContextMenu.js";
 
 /** Folders a fresh project shows open: where the agent writes first. */
 const INITIALLY_OPEN = new Set(["scripts", "timelines"]);
@@ -98,11 +98,16 @@ function Nodes({
       return;
     }
     if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
-    openAskMenu(event, [
+    const items = (voiceover: readonly MenuItem[]): MenuItem[] => [
       { label: t.editor.open, run: () => onOpenFile(node.path) },
-      ...(isScriptPath(node.path) ? [voiceoverItem(node.path)] : []),
+      ...voiceover,
       ...placeItems(node.path),
-    ]);
+    ];
+    if (!isScriptPath(node.path)) return openAskMenu(event, items([]));
+    // Whether it is a voiceover script is in the file's frontmatter: read it, then open the menu where the pointer was.
+    event.preventDefault();
+    const { clientX, clientY, target } = event;
+    void voiceoverItems(node.path).then((voiceover) => contextMenu.open(clientX, clientY, [...askItems(), ...items(voiceover)], windowOf(target)));
   };
   return (
     <>
