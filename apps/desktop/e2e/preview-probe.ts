@@ -3,6 +3,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Page, expect } from "@playwright/test";
+import type { EngineStats } from "../src/renderer/src/preview/engine-protocol.js";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { BARCODE, makeSource, testFfmpeg } from "./media.js";
 import type { Sandbox } from "./harness.js";
@@ -73,4 +74,19 @@ export async function installFrameReader(page: Page): Promise<void> {
 /** Source frame the preview shows now; see {@link installFrameReader}. */
 export function readShownFrame(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as { readShownFrame: () => number }).readShownFrame());
+}
+
+/** The preview engine's counters (`FRAMESHELL_PREVIEW_PROBE=1`): its latest report, posted once a second and at every pause. */
+export function engineStats(page: Page): Promise<EngineStats | null> {
+  return page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats: () => EngineStats | null } }).frameshellPreviewProbe.stats());
+}
+
+/** Counter growth from `before` to `after`; `decoders` (open now) and `dropped` (the last play's) as `after` has them. */
+export function statsDelta(before: EngineStats | null, after: EngineStats | null): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(after ?? {}).map(([key, value]) => [
+      key,
+      typeof value === "number" && key !== "decoders" ? value - ((before?.[key as keyof EngineStats] as number | undefined) ?? 0) : value,
+    ]),
+  );
 }

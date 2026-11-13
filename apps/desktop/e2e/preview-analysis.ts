@@ -1,5 +1,6 @@
 // ADR 0001 measurement analysis for the real preview, ported from spikes/gapless-preview/scripts (analyze.mjs,
 // audio-residual.mjs, repeated-quanta.mjs, check-thresholds.mjs). Pure: raw logs in, metrics and verdicts out.
+import { type Drops, classifyDrops } from "./draw-log.js";
 
 /** Kept segment of the cut list: source frames `[inF, outF)` play from program frame `pF`. */
 export interface Segment {
@@ -20,6 +21,8 @@ export interface RunLog {
    * worker draws without the page's main thread, so a late page rAF misses frames that did reach the screen (#573).
    */
   drawn: number[];
+  /** The engine's `dropped` stats of the play: which frames not in `drawn` were starved, which were cadence. */
+  dropped: Drops | null;
   /** Program sample `sample` played at context frame `frame`. */
   anchor: { frame: number; sample: number };
   /** Context frame of `audio[0]`; audio is the graph output as the recorder heard it (mono). */
@@ -55,7 +58,10 @@ export interface Summary {
     freezeMsMean: number;
     freezeMsP95: number;
     freezeMsMax: number;
+    /** Interior frames never drawn; threshold 3 counts the starved ones (ADR 0001 amendment). */
     interiorDrops: number;
+    interiorStarved: number;
+    interiorCadence: number;
     interiorFrames: number;
     invalidProbes: number;
     rafP99: number;
@@ -97,7 +103,9 @@ export function analyze(run: RunLog): Summary {
       freezeMsMean: r1(mean(freezes)),
       freezeMsP95: r1(pct(freezes, 0.95)),
       freezeMsMax: r1(Math.max(...freezes)),
-      interiorDrops: video.interiorDrops,
+      interiorDrops: video.interior.starved.length + video.interior.cadence.length,
+      interiorStarved: video.interior.starved.length,
+      interiorCadence: video.interior.cadence.length,
       interiorFrames: video.interiorFrames,
       invalidProbes: video.invalid,
       rafP99: r1(pct(video.rafDt, 0.99)),
@@ -161,15 +169,16 @@ function analyzeVideo(run: RunLog) {
       videoCutT: d[b]!.t0,
     });
   }
-  let interiorDrops = 0;
   let interiorFrames = 0;
   const drawn = new Set(run.drawn);
+  const missing: number[] = [];
   for (const s of run.segments) {
     for (let f = s.inF + 1; f < s.outF - 1; f++) {
       interiorFrames++;
-      if (!drawn.has(s.pF + f - s.inF)) interiorDrops++;
+      if (!drawn.has(s.pF + f - s.inF)) missing.push(s.pF + f - s.inF);
     }
   }
+  const interior = classifyDrops(missing, run.dropped);
   const rafDt: number[] = [];
   for (let i = 1; i < probes.length; i++) rafDt.push(probes[i]![0] - probes[i - 1]![0]);
   const first = firstIdx.get(0);
@@ -188,7 +197,7 @@ function analyzeVideo(run: RunLog) {
       wallS = (end - start) / 1000;
     }
   }
-  return { cuts, invalid, interiorDrops, interiorFrames, rafDt, wallS };
+  return { cuts, invalid, interior, interiorFrames, rafDt, wallS };
 }
 
 function analyzeAudio(run: RunLog) {
@@ -280,8 +289,8 @@ export function checkThresholds(s: Summary): { id: number; pass: boolean; detail
     },
     {
       id: 3,
-      pass: pc(v.interiorDrops, v.interiorFrames) <= 0.1,
-      detail: `interior drops ${v.interiorDrops}/${v.interiorFrames} = ${pc(v.interiorDrops, v.interiorFrames).toFixed(2)} %`,
+      pass: pc(v.interiorStarved, v.interiorFrames) <= 0.1,
+      detail: `interior drops starved ${v.interiorStarved}/${v.interiorFrames} = ${pc(v.interiorStarved, v.interiorFrames).toFixed(2)} %, cadence ${v.interiorCadence}`,
     },
     {
       id: 4,

@@ -1,4 +1,5 @@
 // Messages between the page's player and the engine worker, and the clock math both sides share.
+import type { PlayDrops } from "./drop-log.js";
 import type { MixChunk } from "./mixer.js";
 import type { Program } from "./program.js";
 
@@ -44,6 +45,8 @@ export interface EngineStats {
   audioChunks: number;
   /** `VideoDecoder`s open now: one per layer that decoded something, plus one per alpha stream (a multicam shot: one per angle slot). */
   decoders: number;
+  /** Program frames the current (or last) play passed over, starved or cadence (ADR 0001: CI fails on starved only). */
+  dropped: PlayDrops;
 }
 
 /** Page to engine worker. */
