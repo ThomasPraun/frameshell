@@ -1898,6 +1898,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
+        loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
         profile: (asset) => energy.profile(dir, asset),
         // A grid of other content (the file was replaced) places nothing.
         onsets: async (asset) => {

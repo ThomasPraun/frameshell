@@ -480,6 +480,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `beat:N` and `bar:N` count from the song, not the clip (#550, part of #458, ADR 0029; protocol 107): `beat:1` is the
+  music file's first measured beat and `bar:1` its first downbeat, so trimming the head of the music clip no longer
+  renumbers them (`bar:8` stays the same musical bar). Past the measured part a number continues at the grid's period
+  instead of being refused (a result before 0 still is), and `tempo.show` reports `beatBase` and `barBase`, the entries
+  of the file before the first one the clip shows. With a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; ADR, CLI help
+  and skill say so. `marker add`/`marker set` now refuse a label shaped like `beat:8` or `bar:2` (any case), so
+  a marker cannot shadow a grid reference (projects that stored such a label still load, and the grid wins over it). `music fit --end` and `--from` take `bar:16` and `beat:N` too: they go
+  through the same asynchronous resolver as every other time.
 - The preview's 9:16 toggle is gone (#469 slice 2, ADR 0027): its fixed 1080x1920 frame is replaced by the format
   switcher, which shows only the formats a project declares. A landscape project without `formats` has no 9:16 view any
   more; `frameshell format add 9x16` gives it one.

@@ -611,9 +611,17 @@ export const MarkerSchema = z.strictObject({
     .max(MARKER_LABEL_MAX)
     .regex(/^\S(.*\S)?$/, "must not start or end with a space")
     .regex(/^(?!m_[0-9a-f]+$)/i, "must not look like a marker id (`m_1a2b3c`): a reference to a marker would be ambiguous")
-    .describe(`Name, e.g. \`hook\`; unique in the timeline ignoring case, at most ${MARKER_LABEL_MAX} characters, never shaped like an id (\`m_1a2b3c\`).`),
+    .describe(`Name, e.g. \`hook\`; unique in the timeline ignoring case, at most ${MARKER_LABEL_MAX} characters, never shaped like an id (\`m_1a2b3c\`); \`marker.add\` and \`marker.set\` also refuse a grid reference (\`beat:8\`, \`bar:2\`, any case).`),
   color: z.enum(MARKER_COLORS).optional().describe("`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour."),
 });
+
+/**
+ * True for text shaped like a grid reference (`beat:8`, `BAR: 2.5`, `bar:8-0.2`). Not part of {@link MarkerSchema}, so a
+ * timeline saved with such a label still loads; writes refuse it and the TimeRef resolver reads it as the grid.
+ */
+export function isGridRefLabel(label: string): boolean {
+  return /^(?:beat|bar):\s*[.\d]/i.test(label);
+}
 
 /** Key two marker labels clash on: labels are unique per timeline ignoring case. */
 export function markerLabelKey(label: string): string {

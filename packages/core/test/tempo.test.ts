@@ -54,6 +54,8 @@ describe("tempoGrid", () => {
     // Beat index 2 (1.2) is the first inside the clip; bars start at source beats 0, 4, 8 …: source 2.2, 4.2.
     expect(grid.bars).toEqual([4.2, 6.2]);
     expect(grid.beats).toHaveLength(10);
+    // Two file beats (0.2, 0.7) and one bar start (beat 0) come before the first beat the clip shows: numbering counts them.
+    expect(grid).toMatchObject({ beatBase: 2, barBase: 1 });
   });
 
   it("follows the clip when it moves and speeds up: the same beats, at a faster tempo", async () => {
@@ -146,6 +148,8 @@ describe("nearestBeat", () => {
     low: false,
     beats: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4],
     bars: [0, 2, 4],
+    beatBase: 0,
+    barBase: 0,
   };
 
   it("lands on the nearest beat or bar start, the earlier one on a tie", () => {
