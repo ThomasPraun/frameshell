@@ -34,10 +34,13 @@ mutations print the new revision):
   track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
            [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
            [--gap from-to … | --clear-gaps] [--muted | --unmuted] [--hidden | --shown] [--behind <plate track> | none]
+           [--format <id> [--reset]]
                                --muted silences a video, audio or program track; --hidden leaves a video or
                                program track's pictures out of export and preview (its sound still plays);
                                --behind puts a video track's pictures behind the person in front on a lower video
-                               track (export makes the plate's subject matte when missing; not in the preview yet)
+                               track (export makes the plate's subject matte when missing; not in the preview yet).
+                               --format <id> (a format other than the primary) sets a subtitle track's style
+                               fields in that format only; --reset first drops that format's style
   track remove <track> [--force]
   captions set <track> (--text "…" | --file path) [--from s] [--to s] [--replace]
                                Hand-chunked captions on a subtitle track: one phrase per line, chunks (one cue each)
@@ -55,8 +58,11 @@ mutations print the new revision):
   clip split <clip> --at s
   clip remove <clip>
   clip key <clip> --prop x|y|scale|opacity|gain --at s [--value v] [--ease linear|in|out|in-out] [--remove] [--clear]
+           [--format <id>]
                                Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
-                               there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
+                               there now. --remove deletes the key at --at; --clear (no --at) every key of --prop.
+                               --format <id> keys x, y, scale or opacity in that format only; with --clear the
+                               clip moves there as in the primary again
   clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]
                                Frame a video clip for another aspect (default 9x16, for reels), keeping a face in
                                it: scales the picture to cover the frame and positions it so the face sits centered,
@@ -71,6 +77,12 @@ mutations print the new revision):
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
+           [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
+           [--hidden | --shown] [--reset]]
+                               --format <id> (a format other than the primary, see format list) sets the clip in
+                               that format only, where its automatic layout is wrong: placement, a generated clip's
+                               props and elements, --hidden (no picture there, its sound still plays); --reset
+                               first drops what that format had. Timing and sound are every format's
                                --voice writes the style's voice chain (style.json sound.voice; by default high-pass
                                85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
                                release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
@@ -365,6 +377,7 @@ export const TIMELINE_OPTIONS = {
   gap: { type: "string", multiple: true },
   "clear-gaps": { type: "boolean" },
   format: { type: "string" },
+  reset: { type: "boolean" },
   person: { type: "string" },
   anchor: { type: "string" },
   pauses: { type: "string" },
@@ -403,7 +416,7 @@ const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
   "track add": ["name", "follows", "index", "preset", "position", "entry", "keyword-color", "keyword-scale"],
-  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind", "format", "reset"],
   "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
@@ -411,7 +424,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window", "snap-to"],
   "clip split": ["at", "snap-to"],
   "clip remove": [],
-  "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to"],
+  "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to", "format"],
   "clip reframe": ["format", "person", "anchor"],
   "clip set": [
     "speed",
@@ -435,6 +448,10 @@ const ALLOWED: Record<string, string[]> = {
     "clear-backdrop",
     "script-ref",
     "clear-script-ref",
+    "format",
+    "hidden",
+    "shown",
+    "reset",
   ],
   "transition set": ["at", "kind", "direction", "duration", "track", "snap-to"],
   "transition remove": ["at", "track", "snap-to"],
@@ -637,6 +654,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
     return { snap: values["no-snap"] === true ? false : undefined, snapWindow: num("snap-window") };
   };
+  /** `--format <id>` and `--reset` of `clip set`, `clip key` and `track set` (ADR 0027 overrides), as `format` / `reset`. */
+  const inFormat = () => {
+    if (values["reset"] === true && str("format") === undefined) throw new UsageError("--reset drops a format's override: pass --format <id> too.");
+    return { format: str("format"), reset: values["reset"] === true ? true : undefined };
+  };
   /** `--ripple` and its `--ripple-track` scope, as `ripple` / `rippleTracks` params. */
   const ripple = () => {
     const tracks = values["ripple-track"] as string[] | undefined;
@@ -677,6 +699,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
         behind: str("behind") === "none" ? null : str("behind"),
+        ...inFormat(),
       });
       break;
     }
@@ -752,6 +775,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         ease: str("ease"),
         remove: values["remove"] === true ? true : undefined,
         clear: values["clear"] === true ? true : undefined,
+        format: str("format"),
         ...snapTo(),
       });
       break;
@@ -797,6 +821,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "clip set": {
       method = "clip.set";
       if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
+      if (values["hidden"] === true && values["shown"] === true) throw new UsageError("Pass --hidden or --shown, not both.");
       if (str("script-ref") !== undefined && values["clear-script-ref"] === true) {
         throw new UsageError("Pass --script-ref or --clear-script-ref, not both.");
       }
@@ -827,6 +852,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
         scriptRef: values["clear-script-ref"] === true ? null : str("script-ref"),
+        hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
+        ...inFormat(),
       });
       break;
     }

@@ -5,6 +5,7 @@ import {
   BackdropSchema,
   DirectorRulesSchema,
   ElementAdjustSchema,
+  FormatIdSchema,
   MAX_SNAP_WINDOW_S,
   MulticamGroupSchema,
   MIN_SNAP_WINDOW_S,
@@ -204,6 +205,19 @@ export const TimelineIdSchema = z
   .default("main")
   .describe("Timeline id; the file is `timelines/<id>.json`. Default `main`.");
 
+/** `format` of the operations that edit how a clip or a subtitle track shows in one format (ADR 0027 decision 5). */
+const formatArg = (what: string) =>
+  FormatIdSchema.optional().describe(
+    `A format of the project other than the primary (\`format.list\`), e.g. \`9x16\`: ${what} Stored in the \`formats\` ` +
+      "override; the primary and every other format stay as they are. Default: the clip or track itself, every format.",
+  );
+
+/** `reset` of the operations that take {@link formatArg}. */
+const resetFormatArg = z
+  .literal(true)
+  .optional()
+  .describe("With `format` only: first drop the override in that format, so it shows as in the primary again (other fields given then apply).");
+
 /** Args of each timeline operation, keyed by operation name (= daemon method name). */
 export const operationArgs = {
   "track.add": z.strictObject({
@@ -259,6 +273,8 @@ export const operationArgs = {
       .nonnegative()
       .optional()
       .describe("New stack position, 0 = bottom layer; the other tracks keep their order. Moves the layer up or down."),
+    format: formatArg("subtitle tracks only, `style` sets the captions in that format; takes `style` and `reset` only."),
+    reset: resetFormatArg,
   }),
   "track.remove": z.strictObject({
     track: TrackRef,
@@ -385,6 +401,15 @@ export const operationArgs = {
           "`{ x, y, scale }` (composition CSS px, scale about the centre); `null` removes it. `null` instead of the map clears every adjustment.",
       ),
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
+    format: formatArg(
+      "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
+        "(`speed`, `gain`, `muted`, `audioEffects`) and `backdrop`, `scriptRef` are shared by every format and refused with it.",
+    ),
+    hidden: z
+      .boolean()
+      .optional()
+      .describe("With `format` only: true shows no picture of the clip in that format (its sound still plays); false shows it again."),
+    reset: resetFormatArg,
   }),
   cut: z.strictObject({
     snapTo: snapToArg,
@@ -439,6 +464,10 @@ export const operationArgs = {
     ease: z.enum(KEY_EASES).optional().describe("How the value moves from this key to the next: `linear` (default), `in`, `out` or `in-out`."),
     remove: z.boolean().optional().describe("True removes the key at `time` (the one in that frame) instead of setting one."),
     clear: z.boolean().optional().describe("True removes every key of `prop`: its static value plays again. Takes no other field."),
+    format: formatArg(
+      "`x`, `y`, `scale` and `opacity` only, the key is set or removed in that format (its first key there starts from the " +
+        "clip's own keys of `prop`); `clear` drops that format's keys of `prop`, so it moves there as in the primary again.",
+    ),
   }),
   "track.duck": z.strictObject({
     track: TrackRef.describe("Audio track whose clips get the gain keys: the music or effects that dip under speech."),
@@ -1242,6 +1271,10 @@ export const TimelineViewSchema = z.object({
       behind: TrackBehindViewSchema,
       phrases: z.array(CaptionPhraseSchema).optional().describe("Subtitle tracks: hand-chunked phrases as stored (`captions.set`); absent when none."),
       gaps: z.array(CaptionGapSchema).optional().describe("Subtitle tracks: ranges in which no cue shows (`track.set` `gaps`); absent when none."),
+      formats: z
+        .record(z.string(), z.object({ style: StoredStyleSchema }))
+        .optional()
+        .describe("Subtitle tracks: caption style per format as stored (`track.set` with `format`, ADR 0027); absent when none."),
       clips: z.array(ClipViewSchema).describe("Sorted by start; empty for subtitle tracks."),
     }),
   ),

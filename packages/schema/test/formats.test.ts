@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { type Timeline, createProjectConfig, parseProjectConfig, primaryFormatId, projectFormats, resolveFormat, sameAspect } from "../src/index.js";
+import {
+  HIDDEN_IN_FORMAT_TRACK,
+  type Timeline,
+  clipInFormat,
+  createProjectConfig,
+  formatTimeline,
+  parseProjectConfig,
+  parseTimeline,
+  primaryFormatId,
+  projectFormats,
+  resolveFormat,
+  sameAspect,
+} from "../src/index.js";
 
 const timeline: Timeline = { schemaVersion: 1, id: "main", revision: 0, tracks: [] };
 const landscape = { resolution: { width: 1920, height: 1080 } };
@@ -59,5 +71,90 @@ describe("project formats (ADR 0027)", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toMatch(/formats: image projects have one frame/);
     });
+  });
+});
+
+describe("per-format overrides (ADR 0027 decision 5)", () => {
+  const config = { ...landscape, formats: [{ id: "16x9", width: 1920, height: 1080 }, { id: "9x16", width: 1080, height: 1920 }] };
+  const overridden = (): Timeline => ({
+    schemaVersion: 1,
+    id: "main",
+    revision: 3,
+    tracks: [
+      { id: "t_base", kind: "video", clips: [{ id: "c_talk", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 4 }] },
+      {
+        id: "t_top",
+        kind: "video",
+        muted: true,
+        clips: [
+          {
+            id: "c_title",
+            type: "hyperframes",
+            start: 0,
+            duration: 2,
+            transform: { x: 200, y: 300, scale: 0.5 },
+            keys: { y: [{ at: 0, value: 300 }, { at: 1, value: 250 }], opacity: [{ at: 0, value: 0 }, { at: 0.5, value: 1 }] },
+            props: { title: "Launch", size: 80 },
+            formats: { "9x16": { transform: { y: 700 }, keys: { x: [{ at: 0, value: 0 }] }, props: { size: 110 } } },
+          },
+          { id: "c_logo", type: "media", asset: "assets/logo.png", start: 2, in: 0, out: 2, formats: { "9x16": { hidden: true } } },
+        ],
+      },
+      { id: "t_subs", kind: "subtitles", follows: "t_base", style: { preset: "clean", position: "bottom" }, formats: { "9x16": { style: { position: "center" } } } },
+    ],
+  });
+
+  it("leaves the primary format and a timeline without overrides in a format as they are", () => {
+    const stored = overridden();
+    expect(resolveFormat(stored, config)!.timeline).toBe(stored);
+    expect(resolveFormat(timeline, config, "9x16")!.timeline).toBe(timeline);
+  });
+
+  it("lays the override over the clip: transform fields, keys per property, props key by key", () => {
+    const { timeline: shown } = resolveFormat(overridden(), config, "9x16")!;
+    const top = shown.tracks[1]!;
+    const title = top.kind === "video" ? top.clips[0]! : null;
+    expect(title).toMatchObject({ transform: { x: 200, y: 700, scale: 0.5 }, props: { title: "Launch", size: 110 } });
+    // `y` is set in the format, so the clip's own `y` keys go; `opacity` keeps the clip's keys, `x` takes the format's.
+    expect(title!.keys).toEqual({ opacity: [{ at: 0, value: 0 }, { at: 0.5, value: 1 }], x: [{ at: 0, value: 0 }] });
+  });
+
+  it("moves a clip hidden in the format onto a hidden track above its own, with the same mute, so its sound plays", () => {
+    const { timeline: shown } = resolveFormat(overridden(), config, "9x16")!;
+    expect(shown.tracks.map((track) => track.id)).toEqual(["t_base", "t_top", `t_top${HIDDEN_IN_FORMAT_TRACK}`, "t_subs"]);
+    const hidden = shown.tracks[2]!;
+    expect(hidden).toMatchObject({ kind: "video", hidden: true, muted: true });
+    expect(hidden.kind === "video" && hidden.clips.map((clip) => clip.id)).toEqual(["c_logo"]);
+  });
+
+  it("gives a subtitle track the format's style fields over its own", () => {
+    const { timeline: shown } = resolveFormat(overridden(), config, "9x16")!;
+    expect(shown.tracks[3]).toMatchObject({ style: { preset: "clean", position: "center" } });
+  });
+
+  it("works on a timeline view, whose clips carry derived fields", () => {
+    const view = { tracks: [{ id: "t_top", kind: "video", name: null, clips: [{ id: "c_a", end: 2, transform: { x: 5 }, formats: { "9x16": { transform: { x: 9 } } } }] }] };
+    expect(formatTimeline(view, "9x16").tracks[0]!.clips[0]).toMatchObject({ end: 2, transform: { x: 9 } });
+    expect(clipInFormat(view.tracks[0]!.clips[0]!, "1x1")).toBe(view.tracks[0]!.clips[0]);
+  });
+
+  it("is refused on audio tracks, as are props or elements on footage and gain keys", () => {
+    const stored = overridden();
+    expect(parseTimeline(stored).ok).toBe(true);
+    const footage = structuredClone(stored);
+    (footage.tracks[0] as { clips: Record<string, unknown>[] }).clips[0]!["formats"] = { "9x16": { props: { a: 1 } } };
+    const refused = parseTimeline(footage);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toMatch(/only generated clips take `props`/);
+    const sound: Timeline = {
+      ...stored,
+      tracks: [{ id: "t_music", kind: "audio", clips: [{ id: "c_m", type: "media", asset: "a.wav", start: 0, in: 0, out: 1, formats: { "9x16": { transform: { x: 1 } } } }] }],
+    };
+    const audio = parseTimeline(sound);
+    expect(audio.ok).toBe(false);
+    if (!audio.ok) expect(audio.error).toMatch(/audio tracks have no picture to change per format/);
+    const gain = structuredClone(stored);
+    (gain.tracks[1] as { clips: Record<string, unknown>[] }).clips[0]!["formats"] = { "9x16": { keys: { gain: [{ at: 0, value: -3 }] } } };
+    expect(parseTimeline(gain).ok).toBe(false);
   });
 });

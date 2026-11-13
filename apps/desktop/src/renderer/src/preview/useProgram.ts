@@ -1,6 +1,5 @@
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
-import type { Size } from "@frameshell/schema/composite";
-import { type FormatEntry, FormatEntrySchema, type FormatLayout, type ResolvedFormat, formatOf, formatProblems, projectFormats } from "@frameshell/schema/formats";
+import { type FormatEntry, FormatEntrySchema, type ResolvedFormat, formatOf, formatProblems, formatTimeline, projectFormats } from "@frameshell/schema/formats";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
@@ -20,20 +19,34 @@ const NESTED_SOURCE = /^timelines\/([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/;
  * the shared timeline feeds (one read per change for every panel; nested
  * timelines on their own feeds) and `asset.list`, re-read on each revision
  * and while proxies are being built. Null until both are known. `format`: the project format shown (ADR 0027), absent
- * for the primary.
+ * for the primary: its layout, and the clips with their overrides there.
  */
-export function useProgram(format?: FormatLayout & Size): Program | null {
-  const { view } = useTimelineView(SELECTION_TIMELINE);
-  const assets = useAssets(view?.revision ?? null);
+export function useProgram(format?: ResolvedFormat): Program | null {
+  const { view: stored } = useTimelineView(SELECTION_TIMELINE);
+  const assets = useAssets(stored?.revision ?? null);
   const resolution = useResolution();
-  const nested = useNestedViews(view);
-  const renders = useClipRenders(view, nested);
-  const bakes = useAudioBakes(view, nested);
-  const mattes = useSubjectMattes(view, nested, assets);
+  const storedNested = useNestedViews(stored);
+  const renders = useClipRenders(stored, storedNested);
+  const bakes = useAudioBakes(stored, storedNested);
+  const mattes = useSubjectMattes(stored, storedNested, assets);
+  const { view, nested } = useMemo(() => viewsInFormat(stored, storedNested, format?.id), [stored, storedNested, format?.id]);
   return useMemo(
     () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes, ...(format ? { format } : {}) }) : null),
     [view, assets, resolution, nested, renders, bakes, mattes, format],
   );
+}
+
+/**
+ * `view` and its nested views as they play in project format `id` (ADR 0027 overrides, `formatTimeline`), what
+ * export lays out there; as given when `id` is absent (the primary).
+ */
+export function viewsInFormat(
+  view: TimelineView | null,
+  nested: ReadonlyMap<string, TimelineView>,
+  id: string | undefined,
+): { view: TimelineView | null; nested: ReadonlyMap<string, TimelineView> } {
+  if (id === undefined || !view) return { view, nested };
+  return { view: formatTimeline(view, id), nested: new Map([...nested].map(([source, inner]) => [source, formatTimeline(inner, id)])) };
 }
 
 /**

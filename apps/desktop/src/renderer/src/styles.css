@@ -1580,6 +1580,13 @@ code {
   font-size: 11.5px;
 }
 
+/* Edits go to one format only (ADR 0027): marked like the format switcher when it shows another format. */
+.clip-inspector-format {
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
 .clip-inspector-button.is-open {
   border-color: var(--accent);
   color: var(--text);

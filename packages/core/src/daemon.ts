@@ -1543,9 +1543,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       if (format === undefined) return clips.status(clipRoot(dir), timeline);
       const config = await readProjectConfig(dir);
-      const found = projectFormats(config).find((entry) => entry.id === format);
+      const formats = projectFormats(config);
+      const found = formats.find((entry) => entry.id === format);
       if (!found) throw formatNotFound(format, config);
-      return clips.status(clipRoot(dir), timeline, { width: found.width, height: found.height });
+      return clips.status(clipRoot(dir), timeline, found === formats[0] ? undefined : found);
     },
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {

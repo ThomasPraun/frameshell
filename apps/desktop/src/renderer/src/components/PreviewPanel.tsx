@@ -1,6 +1,6 @@
 import type { ElementAdjust } from "@frameshell/schema";
-import type { Placement, Size } from "@frameshell/schema/composite";
-import { type FormatLayout, type ResolvedFormat, scaledCaptions } from "@frameshell/schema/formats";
+import { IDENTITY_PLACEMENT, type Placement, type Size } from "@frameshell/schema/composite";
+import { type ResolvedFormat, scaledCaptions } from "@frameshell/schema/formats";
 import { type CSSProperties, type MouseEvent, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ProjectView } from "../../../shared/api.js";
 import { openAskMenu } from "../ask/ask-agent.js";
@@ -70,9 +70,10 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * With more than one format in `frameshell.json` (ADR 0027), the format
  * switcher shows the frame as that format exports it: untransformed footage
  * cut to cover it, overlays with alpha fitted, multicam shots reframed,
- * vertical captions larger; generated clips stay fitted until renders per
- * format reach the preview. Handles, picking and live pages stay in the
- * primary format, so they are off in the others.
+ * vertical captions larger, each clip with its override there; generated
+ * clips stay fitted until renders per format reach the preview. There the
+ * handles and the inspector edit that format's override; element mode,
+ * picking and live pages stay in the primary format.
  * The header's button moves the panel to its own window and back
  * (ADR 0012); F, pressed in the window it shows in, toggles full screen.
  * The playback keys work from every window of the project.
@@ -298,14 +299,14 @@ export function PreviewPanel({
           {program && <RenderSlates program={program} frame={frame} live={mode.held?.clip ?? liveClip?.clip ?? null} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} format={shown} />
-          {program && !playing && !variant && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
+          {program && !playing && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} format={variant ? shown : null} />}
           {program && editing && view && !playing && !variant && !pickTool && (
             <ElementLayer program={program} frame={frame} timeline={view.timeline} clip={mode.clip!} elements={elements} onNotice={setNotice} />
           )}
           <PickLayer active={pickTool && !empty && !variant} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} photos={still} />
         </div>
       </div>
-      <Inspector />
+      <Inspector format={variant ? shown.id : null} />
       <TransportBar
         still={still}
         playing={playing}
@@ -358,14 +359,15 @@ function leaveFullScreen(doc: Document): void {
 /**
  * Settings of the selection: a subtitle track's style, a program track's
  * angles, else the selected clip's placement and sound (or a shot's layout).
+ * `format`: the format the preview shows when not the primary (ADR 0027), whose overrides placement and style edit.
  */
-function Inspector() {
+function Inspector({ format }: { format: string | null }) {
   const { track, clips } = useSelection();
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const kind = track === null ? undefined : view?.tracks.find((candidate) => candidate.id === track)?.kind;
-  if (track !== null && kind === "subtitles") return <SubtitleInspector track={track} />;
+  if (track !== null && kind === "subtitles") return <SubtitleInspector track={track} format={format} />;
   if (track !== null && kind === "program" && clips.length === 0) return <GroupInspector track={track} />;
-  return <ClipInspector />;
+  return <ClipInspector format={format} />;
 }
 
 /**
@@ -373,8 +375,8 @@ function Inspector() {
  * canvas the size of the player's, with the bundled face export burns with.
  * `data-frame` names the frame drawn once the face is loaded (tests wait on it).
  */
-function SubtitleOverlay({ size, frame, format }: { size: Size; frame: number; format: FormatLayout }) {
-  const { tracks: stored } = useSubtitles();
+function SubtitleOverlay({ size, frame, format }: { size: Size; frame: number; format: ResolvedFormat }) {
+  const { tracks: stored } = useSubtitles(format.primary ? undefined : format.id);
   const tracks = useMemo(() => scaledCaptions(stored, format), [stored, format]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const ready = useSubtitleFont(canvas);
@@ -457,22 +459,28 @@ const timelineClip = (id: string) => id.split("/")[0]!;
  * placement as one `clip.set` (the picture follows once the daemon has it).
  * Clips of nested timelines select their nested clip and get no handles:
  * their placement is composed, not stored. A double-click on a generated
- * clip of the timeline enters its elements (ADR 0021).
+ * clip of the timeline enters its elements (ADR 0021). In a `format` other
+ * than the primary (ADR 0027) a drag sets the clip's override there, and
+ * element mode stays in the primary.
  */
 function Handles({
   program,
   frame,
   frameRef,
   alphaAt,
+  format,
 }: {
   program: Program;
   frame: number;
   frameRef: RefObject<HTMLDivElement | null>;
   alphaAt: (point: { x: number; y: number }) => Promise<{ frame: number; layers: Map<number, number> }>;
+  /** The format shown when it is not the primary; null in the primary. */
+  format: ResolvedFormat | null;
 }) {
   const { clips } = useSelection();
   const selected = clips.length === 1 ? clips[0]! : null;
-  const target = selected ? layerBox(program, frame, selected) : null;
+  const output = format ?? program.resolution;
+  const target = selected ? layerBox(program, frame, selected, output) : null;
   const drag = useRef<{ pointer: number; kind: "move" | "scale"; from: { x: number; y: number }; start: Placement } | null>(null);
   const [ghost, setGhost] = useState<{ clip: string; placement: Placement } | null>(null);
 
@@ -496,7 +504,7 @@ function Handles({
     void alphaAt(point).then((shown) => {
       // Alpha of another frame (still decoding) says nothing about this one: boxes alone decide.
       const alpha = shown.frame === frame ? (layer: number) => shown.layers.get(layer) : undefined;
-      const hit = layerAt(program, frame, point, alpha);
+      const hit = layerAt(program, frame, point, alpha, output);
       if (hit) selection.selectClips([timelineClip(hit)], "preview");
       else selection.clear();
     });
@@ -504,6 +512,7 @@ function Handles({
 
   // The generated clip the user sees at that pixel, and nothing above it that paints there.
   const enterAt = (event: MouseEvent<HTMLDivElement>) => {
+    if (format) return;
     const rect = frameRef.current!.getBoundingClientRect();
     const point = { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
     void alphaAt(point).then((shown) => {
@@ -537,7 +546,9 @@ function Handles({
     const start = drag.current?.start;
     drag.current = null;
     if (!placement || !start || !selected) return;
-    const edit = placementEdit(selected, start, placement);
+    // A covering picture has no placement of its own yet: the drag stores the whole placement it ends with.
+    const before = target?.covered && !samePlacement(start, placement) ? IDENTITY_PLACEMENT : start;
+    const edit = placementEdit(selected, before, placement, format?.id);
     if (!edit) {
       // A click, not a drag: the handles cover the whole box, so pick what shows at that pixel (maybe a layer above).
       setGhost(null);
@@ -549,7 +560,7 @@ function Handles({
   };
 
   const editable = target !== null && selected !== null && !selected.includes("/");
-  const shown = editable ? (ghost?.clip === selected ? placedBox(program.resolution, target.size, ghost.placement) : target.box) : null;
+  const shown = editable ? (ghost?.clip === selected ? placedBox(program.resolution, target.size, ghost.placement, output) : target.box) : null;
   return (
     <div className="preview-hit" onPointerDown={onSelect} onDoubleClick={enterAt} data-testid="preview-hit">
       {shown && (
