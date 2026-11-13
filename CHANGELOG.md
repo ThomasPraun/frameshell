@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 107): `frameshell voiceover place <script>`
+- Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 108): `frameshell voiceover place <script>`
   (daemon `voiceover.place`, MCP `voiceover_place`) puts the takes of a voiceover script on the timeline as phrase clips
   in one transaction: each take is cut at its silences, every phrase becomes a clip on the audio track `Voiceover`
   (made when absent) with the spacing the take has and a `scriptRef` to its scene. `--at line=time` anchors a line
@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Voiceover, slice 3 of #470 (ADR 0034 decisions 17 and 18, epic #451; protocol 103): `voiceover generate` now splits each
   take into phrases and checks it for misreads. Every line reports its `phrases`: the take cut where it falls silent for
   60 ms or more (5 ms RMS, 38 dB under its peak, 20 ms lead and 30 ms tail kept) as ranges of the take in seconds, the
-  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade each edge gets when placed). With
+  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade #470 asks for, reported; placement does not apply it yet). With
   `verify` (the default; `--no-verify` skips it) each take is also transcribed by the project's transcription provider
   and compared with the line's spoken text by the shoot comparison, so spoken numbers and word normalization stay in one
   place: each line gets a `check` (`clean`, `doubtful` when the transcription may be to blame, `misread`) listing what was
@@ -491,6 +491,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `beat:N` and `bar:N` count from the song, not the clip (#550, part of #458, ADR 0029; protocol 107): `beat:1` is the
+  music file's first measured beat and `bar:1` its first downbeat, so trimming the head of the music clip no longer
+  renumbers them (`bar:8` stays the same musical bar). Past the measured part a number continues at the grid's period
+  instead of being refused (a result before 0 still is), and `tempo.show` reports `beatBase` and `barBase`, the entries
+  of the file before the first one the clip shows. With a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; ADR, CLI help
+  and skill say so. `marker add`/`marker set` now refuse a label shaped like `beat:8` or `bar:2` (any case), so
+  a marker cannot shadow a grid reference (projects that stored such a label still load, and the grid wins over it). `music fit --end` and `--from` take `bar:16` and `beat:N` too: they go
+  through the same asynchronous resolver as every other time.
 - The preview's 9:16 toggle is gone (#469 slice 2, ADR 0027): its fixed 1080x1920 frame is replaced by the format
   switcher, which shows only the formats a project declares. A landscape project without `formats` has no 9:16 view any
   more; `frameshell format add 9x16` gives it one.

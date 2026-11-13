@@ -213,8 +213,8 @@ export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps:
       if (last && start < last.end) {
         throw invalid(
           `at.${number === 1 ? line.id : `${line.id}.${number}`}`,
-          `${line.id} phrase ${number} would start at ${grid.seconds(start)} s, before ${last.line} phrase ${last.phrase} ends at ${grid.seconds(last.end)} s: the voice would overlap itself.`,
-          { hint: "Anchor it later, or leave its `at` out so it follows the previous phrase." },
+          `${line.id} phrase ${number} would start at ${grid.seconds(start)} s, before ${last.line} phrase ${last.phrase} ends at ${grid.seconds(last.end)} s: the voice would overlap itself (phrases are placed in script order, so anchors must run in that order).`,
+          { hint: "Anchor lines in script order (each `at` after the one before it), or leave an `at` out so the phrase follows the previous one." },
         );
       }
       const clash = busy.find((other) => start < other.end && other.start < end);

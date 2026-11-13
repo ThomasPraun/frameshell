@@ -80,6 +80,7 @@ export {
   MAX_TEMPO_BPM,
   MAX_TEMPO_METER,
   type Tempo,
+  isGridRefLabel,
   markerLabelKey,
   findMarker,
   findMusicClip,

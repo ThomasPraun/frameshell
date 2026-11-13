@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 107;
+export const PROTOCOL_VERSION = 108;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2226,8 +2226,8 @@ export const methods = {
       "language: a line whose take is current is not generated again (`cached`), and one whose text moved to another " +
       "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Each line also reports " +
       "its `phrases`: where the take falls silent for 60 ms or more (5 ms RMS, 38 dB under its peak), as ranges of the " +
-      "take in seconds, the cuts of phrase clips (`clip add --in from --out to`); `phraseFade` is the fade of 12 ms each phrase edge " +
-      "gets when placed. A person corrects the phrases by trimming the clips. With `verify` (default) each line's take is also " +
+      "take in seconds, the cuts of phrase clips (`clip add --in from --out to`); `phraseFade` is the 12 ms fade #470 asks for at each phrase edge, " +
+      "reported only: `voiceover.place` does not apply it yet (clip fades are whole frames). A person corrects the phrases by trimming the clips. With `verify` (default) each line's take is also " +
       "transcribed by the project's transcription provider and compared with the line's spoken text: `check` lists the " +
       "misreads, and `verification` says whether that ran. It is skipped, never a failure, when the project is not " +
       "trusted, has no transcription plugin or the transcription fails; the takes stay as they are. Nothing is placed " +
@@ -2320,7 +2320,7 @@ export const methods = {
           }),
         )
         .describe("The lines asked for, in script order."),
-      phraseFade: z.number().describe("Seconds of fade at each edge of a phrase clip (12 ms)."),
+      phraseFade: z.number().describe("The 12 ms fade at each phrase edge that #470 asks for, in seconds; reported, not applied by `voiceover.place` (clip fades are whole frames)."),
       verification: z
         .object({
           status: z.enum(["checked", "skipped"]).describe("`skipped`: the misread check did not run; `reason` says why."),
@@ -2355,10 +2355,11 @@ export const methods = {
       "so the first sound follows by 20 ms of air kept in the phrase. A line (or phrase) with no `at` follows the one before it by " +
       `\`gap\` seconds (default ${VOICEOVER_LINE_GAP_S}); the first one starts at \`start\`, else right after the track's last clip, else 0. ` +
       "Voice never overlaps itself: a phrase that would start before the previous one ends, or on a clip already on the track, fails " +
-      "and names both, so move the anchor or drop it. A line whose take is already on a timeline clip fails naming the clips unless " +
+      "and names both, so move the anchor or drop it. Anchors must run in script order: an `at` earlier than the phrase before it " +
+      "fails the same way even when nothing else is there. A line whose take is already on a timeline clip fails naming the clips unless " +
       "`replace` is true, which removes those clips first (use it after `voiceover.generate` changed a take: the old phrase " +
-      "ranges no longer fit it). `dryRun` plans without writing. No fade is applied: a clip fade is whole frames (ADR 0018) and the " +
-      "phrase edges already keep 20 ms before and 30 ms after their sound. A take said from older text than the line has now " +
+      "ranges no longer fit it). `dryRun` plans without writing. No fade is applied yet: a clip fade is whole frames (ADR 0018), so the 12 ms of #470 " +
+      "waits for a sub-frame ramp; meanwhile the phrase edges keep 20 ms before and 30 ms after their sound. A take said from older text than the line has now " +
       "is placed with a warning. Per-phrase tempo is not here (it waits for the preview pitch fix, #499). Fails with ScriptNotFound, " +
       "InvalidParams (unknown line id, `at` key or phrase number), InvalidOperation (not a voiceover script, a line with no take, an unknown " +
       "marker, a `track` that is not an audio track, overlap, clips already placed) or TimelineNotFound.",
@@ -3467,7 +3468,7 @@ export const methods = {
     description:
       "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
       "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
-      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "(`m_1a2b3c`) or a grid reference (`beat:8`, `bar:2`, any case). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
       "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
       "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
       "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
@@ -3572,7 +3573,7 @@ export const methods = {
     description:
       "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
       "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
-      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "(`end-card`, `outro-1`) or a beat or bar of the timeline's grid (`bar:16`, read on the clip as it is before the fit). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
       "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
       "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
       "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +

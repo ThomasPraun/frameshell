@@ -130,6 +130,7 @@ describe("voiceover.place", () => {
     expect(overlap.code).toBe(ErrorCode.InvalidOperation);
     expect(overlap.message).toContain("hook-2 phrase 1 would start at 0.2 s, before hook-1 phrase");
     expect(overlap.message).toContain("overlap itself");
+    expect(overlap.message).toContain("script order");
 
     await place({ lines: ["hook-1"], start: 0 });
     const clash = await rejection(place({ lines: ["fix-1"], start: 0.3, replace: true }));

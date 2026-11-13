@@ -1703,15 +1703,22 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "voiceover.place": async (params, caller) => {
       const { cwd, timeline, dryRun } = params;
       const dir = await root(cwd);
+      // One grid load serves every beat or bar anchor of the call; a later anchor that reaches further loads again.
+      let grid: { horizon: number; result: Awaited<ReturnType<typeof tempoGrid>> } | undefined;
       const plan = await planVoiceoverPlacement(params, {
         root: dir,
         load: async () => loadFor(dir, timeline, caller),
-        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, (horizon) => tempoGrid({ fps: loaded.fps, timeline: loaded.timeline, horizon, beatsOf: (asset) => beatsOf(dir, asset) })),
+        resolve: (ref, loaded) =>
+          resolveTimeRefAsync(ref, loaded.timeline, async (horizon) => {
+            if (!grid || grid.horizon < horizon) grid = { horizon, result: await tempoGrid({ fps: loaded.fps, timeline: loaded.timeline, horizon, beatsOf: (asset) => beatsOf(dir, asset) }) };
+            return grid.result;
+          }),
       });
       const report = { timeline, script: plan.script, track: plan.track, lines: plan.lines, dryRun };
       const planned = plan.clips.map((clip) => ({ line: clip.line, phrase: clip.phrase, file: clip.file, in: clip.in, out: clip.out, start: clip.start, end: clip.end, anchor: clip.anchor }));
       if (dryRun || plan.clips.length === 0) {
-        return { ...report, revision: plan.revision, tx: null, placed: planned.map((clip) => ({ ...clip, clip: null })), replaced: dryRun ? plan.remove : [], warnings: plan.warnings };
+        const warnings = !dryRun && plan.remove.length > 0 ? [...plan.warnings, `Nothing was placed, so \`replace\` removed nothing: ${plan.remove.join(", ")} stay on the timeline.`] : plan.warnings;
+        return { ...report, revision: plan.revision, tx: null, placed: planned.map((clip) => ({ ...clip, clip: null })), replaced: dryRun ? plan.remove : [], warnings };
       }
       const key = authorOf(caller);
       const next = transactions.next(key, { standalone: true });
@@ -1959,6 +1966,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const { operations, duckAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
+        loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
         profile: (asset) => energy.profile(dir, asset),
         // A grid of other content (the file was replaced) places nothing.
         onsets: async (asset) => {
