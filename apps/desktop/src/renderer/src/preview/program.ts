@@ -272,8 +272,8 @@ export function spanShape(span: PlacedSpan, frame: number, fps: number): PartSha
   const incoming = comesIn ? shapeAt(comesIn.shape, dissolveProgress(comesIn.at, comesIn.half, t)).incoming : null;
   const outgoing = playing(motion.dissolveOut) ? outgoingPart(span, motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)) : null;
   if (!incoming || !outgoing) return incoming ?? outgoing;
-  // A clip shorter than both its dissolves: both move it; the incoming one cuts it. Zooms act in turn, the outgoing one
-  // on what the incoming one drew: s = s1*s2, shift = t1 + s1*t2 (as export composes them).
+  // A clip shorter than both its dissolves: both move it; the incoming one cuts it. Zooms act in turn, the incoming one
+  // first and the outgoing one on what it drew: s = s1*s2, shift = t1 + s1*t2 (as export composes them).
   const zoom =
     incoming.zoom && outgoing.zoom
       ? { s: incoming.zoom.s * outgoing.zoom.s, tx: incoming.zoom.tx + incoming.zoom.s * outgoing.zoom.tx, ty: incoming.zoom.ty + incoming.zoom.s * outgoing.zoom.ty }

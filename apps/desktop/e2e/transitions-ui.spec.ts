@@ -127,6 +127,9 @@ test("the inspector picks a wipe and its direction, an iris, and a dip cut at a 
   await count.fill("6");
   await count.press("Enter");
   await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "down", count: 6 });
+  // Changing the direction keeps the count.
+  await direction.selectOption("up");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "up", count: 6 });
   await kind.selectOption("grid");
   await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "grid" });
   await expect(direction).toHaveCount(0);

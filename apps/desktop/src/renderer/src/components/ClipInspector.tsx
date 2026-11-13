@@ -313,7 +313,7 @@ function TransitionEdge({
           data-tip={t.inspector.transitionDirectionTitle}
           value={shape.direction ?? "left"}
           onChange={(event) =>
-            set({ kind: shape.kind, direction: event.target.value as TransitionDirection, duration: state.length }, "Change transition direction")
+            set({ ...shape, direction: event.target.value as TransitionDirection, duration: state.length }, "Change transition direction")
           }
         >
           {TRANSITION_DIRECTIONS.map((direction) => (

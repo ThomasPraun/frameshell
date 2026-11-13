@@ -1513,7 +1513,7 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
   side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
   if (placed.hostShape) side(placed.hostShape.shape, placed.hostShape.cut, placed.hostShape.half, "incoming");
   if (xs.length === 0 && ys.length === 0 && mask === undefined && zooms.length === 0) return null;
-  // Zooms in turn: the later one acts on what the earlier one drew, so scale = s1*s2 and shift = tx1 + s1*tx2.
+  // Zooms in turn: the earlier one acts on what the later one drew (M1 after M2), so scale = s1*s2 and shift = tx1 + s1*tx2.
   const zoom =
     zooms.length === 0
       ? undefined
