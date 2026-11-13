@@ -73,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Voiceover, slice 3 of #470 (ADR 0034 decisions 17 and 18, epic #451; protocol 103): `voiceover generate` now splits each
   take into phrases and checks it for misreads. Every line reports its `phrases`: the take cut where it falls silent for
   60 ms or more (5 ms RMS, 38 dB under its peak, 20 ms lead and 30 ms tail kept) as ranges of the take in seconds, the
-  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade #470 asks for, reported; placement does not apply it yet). With
+  cuts of phrase clips (`clip add --in from --out to`; `phraseFade` is the 12 ms fade #470 asks for, reported; placement does not apply it until sample-accurate fades, #585). With
   `verify` (the default; `--no-verify` skips it) each take is also transcribed by the project's transcription provider
   and compared with the line's spoken text by the shoot comparison, so spoken numbers and word normalization stay in one
   place: each line gets a `check` (`clean`, `doubtful` when the transcription may be to blame, `misread`) listing what was
