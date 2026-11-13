@@ -279,7 +279,7 @@ export {
   layoutCover,
 } from "./export/cover.js";
 export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
-export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
+export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,
   ENERGY_HOP_S,
