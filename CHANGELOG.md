@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The 5 ms fade in of #485 (ADR 0037), now that sample-accurate audio fades exist (#585): `music fit`, `music shape`
+  and `music candidates` give the music clip's start `audio.fadeInMs` 5, as one more step of the same transaction
+  (`revert` undoes it with the fit; one proposal in review mode), so a track cut mid-waveform does not click. A fade
+  in already on the clip (`audio.fadeInMs`, `fadeIn` or a dissolve) is kept; `music fit --skip fade` leaves it out; where
+  a fit already lands, the fade is all it writes. `fade` joins the step ids of `music.fit` and `music.shape` (protocol 123).
 - Shaped transitions on upper tracks and nested clips, slice 3 of #483 (ADR 0030, epic #451): `transition.set` with
   `kind` `wipe`, `push` or `iris` now plays on every video track with the edge, like a dissolve, instead of the bottom
   one only. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not
@@ -796,6 +801,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement for the next time it opens (#533).
 - CLI: `import --wait`, `render --wait` and other job followers no longer print a step twice when the job list the
   daemon answers is older than the events already read (#533).
+- Windows: an atomic write (`writeTextAtomic`) whose target a reader keeps opening tries the rename again every
+  25 ms at most instead of every 200 ms, so it reaches the moment no handle is open within the same 3 s (#533).
 
 ## [0.18.0] - 2026-11-07
 

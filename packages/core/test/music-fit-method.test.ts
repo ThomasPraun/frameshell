@@ -101,7 +101,7 @@ describe("music.fit", () => {
       expect(result.introCut).toBe(result.after.in);
       expect(Math.abs(result.offsetMs)).toBeLessThanOrEqual(1000 / FPS / 2 + 0.1);
       // The intro goes and the music stays at 0 s: no `place` step, though the clip is moved back after the head trim.
-      expect(result.steps.map((step) => step.id)).toEqual(["intro"]);
+      expect(result.steps.map((step) => step.id)).toEqual(["intro", "fade"]);
       expect(result.tail).toBeGreaterThan(5);
       expect(await revision()).toBe(before);
     },
@@ -124,7 +124,8 @@ describe("music.fit", () => {
       const history = await conn.request("history", { cwd: project });
       const tx = history.transactions.find((entry) => entry.tx === result.tx)!;
       expect(tx.label).toMatch(/^Music fit: /);
-      expect(tx.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move"]);
+      expect(tx.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move", "clip.set"]);
+      expect(fitted.audio?.fadeInMs).toBe(5);
 
       await conn.request("revert", { cwd: project, target: result.tx! });
       expect(await clipOf(clip)).toEqual(original);
@@ -159,7 +160,8 @@ describe("music.fit", () => {
       expect(Math.abs(result.speedChangePercent!)).toBeLessThan(1.7);
       expect(Math.abs(result.offsetMs)).toBeLessThan(0.5);
       expect(placed(fitted, result.hit.at)).toBeCloseTo(20.6, 3);
-      expect((await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === result.tx)!.operations.map((op) => op.op)).toEqual(["clip.set"]);
+      expect((await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === result.tx)!.operations.map((op) => op.op)).toEqual(["clip.set", "clip.set"]);
+      expect(fitted.audio?.fadeInMs).toBe(5);
       await conn.request("revert", { cwd: project, target: result.tx! });
 
       const before = await revision();
@@ -225,15 +227,15 @@ describe("music.fit", () => {
       const kept = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card", skip: ["duck"] });
       expect(kept.duck).toEqual({ under: [voiceTrack], rerun: false, parameters: "stored" });
       expect(kept.warnings.join(" ")).toContain("skipped");
-      expect((await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === kept.tx)!.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move"]);
+      expect((await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === kept.tx)!.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move", "clip.set"]);
       await conn.request("revert", { cwd: project, target: kept.tx! });
 
       const dry = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card", dryRun: true });
-      expect(dry.steps.map((step) => step.id)).toEqual(["intro", "duck"]);
+      expect(dry.steps.map((step) => step.id)).toEqual(["intro", "fade", "duck"]);
       const result = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card" });
       expect(result.duck).toEqual({ under: [voiceTrack], rerun: true, parameters: "stored" });
       const tx = (await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === result.tx)!;
-      expect(tx.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move", "track.duck"]);
+      expect(tx.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move", "clip.set", "track.duck"]);
       // The dips sit under the speech again (2-4 s and 7-9 s of the film), not where the song's own clock put them,
       // as deep as the first duck asked (12 dB, not the 7 dB default).
       const fitted = await clipOf(clip);
@@ -266,6 +268,37 @@ describe("music.fit", () => {
       } finally {
         ui.close();
       }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "writes the 5 ms fade in alone when the hit already lands, keeps a fade set by hand, and `skip: [\"fade\"]` leaves it out",
+    async () => {
+      const original = await clipOf(clip);
+      expect(original.audio?.fadeInMs).toBeUndefined();
+      // Where the clip already lands, the fade is all there is to write.
+      const fitted = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card", skip: ["fade"] });
+      expect((await clipOf(clip)).audio?.fadeInMs).toBeUndefined();
+      expect(fitted.steps.map((step) => step.id)).not.toContain("fade");
+      const only = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card" });
+      expect(only).toMatchObject({ applied: true, steps: [{ id: "fade", skippable: true }] });
+      expect(only.warnings.join(" ")).toContain("Only the fade in is written");
+      expect(only.warnings.join(" ")).not.toContain("nothing to change");
+      expect((await clipOf(clip)).audio?.fadeInMs).toBe(5);
+      expect((await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === only.tx)!.operations.map((op) => op.op)).toEqual(["clip.set"]);
+      await conn.request("revert", { cwd: project, target: only.tx! });
+      expect((await clipOf(clip)).audio?.fadeInMs).toBeUndefined();
+
+      // A fade set by hand (sound or frame fade) is not replaced.
+      await conn.request("clip.set", { cwd: project, clip, audioFadeInMs: 40 });
+      const kept = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card" });
+      expect(kept).toMatchObject({ applied: false, tx: null });
+      expect(kept.steps.map((step) => step.id)).not.toContain("fade");
+      expect((await clipOf(clip)).audio?.fadeInMs).toBe(40);
+      await conn.request("clip.set", { cwd: project, clip, audioFadeInMs: 0 });
+      await conn.request("revert", { cwd: project, target: fitted.tx! });
+      expect(await clipOf(clip)).toEqual(original);
     },
     MEDIA_TIMEOUT,
   );
