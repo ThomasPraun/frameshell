@@ -10,6 +10,12 @@ export interface JobFollower {
    * Rejects when the connection closes first.
    */
   wait(ids: readonly string[], onChange?: (job: JobInfo) => void): Promise<Map<string, JobInfo>>;
+  /**
+   * Resolve with the last snapshot per file once a job writing each of `outputs` (absolute) has ended. For jobs
+   * queued after the request that returned (a batch queues its rows in turn, ADR 0040), so only jobs seen since
+   * {@link followJobs} count. Rejects when the connection closes first.
+   */
+  waitOutputs(outputs: readonly string[], onChange?: (job: JobInfo) => void): Promise<Map<string, JobInfo>>;
 }
 
 const active = (job: JobInfo) => job.state === "queued" || job.state === "running";
@@ -46,17 +52,36 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
         listener = take;
         // Covers jobs that changed before the subscription (a reused queued job). The reply may be older than
         // events already read: a job finishing while the daemon writes it sends `done` first. Never step back, also
-        // within a run, where progress only grows: an older step after a newer one would print out of order.
+        // within a run, where progress only grows: an older step after a newer one would print out of order. A step
+        // starts at the progress where the last one ended (hash 100 % = probe 0 %), so an equal progress is not new:
+        // if it is, its event is still on the way.
         conn.request("job.list", { cwd }).then(({ jobs }) => {
           for (const job of jobs) {
             if (!wanted.has(job.id)) continue;
             const seen = latest.get(job.id);
-            if (seen && (stage(job) < stage(seen) || (stage(job) === stage(seen) && job.progress < seen.progress))) continue;
-            if (!seen || seen.state !== job.state || seen.step !== job.step || seen.progress !== job.progress) take(job);
+            if (seen && (stage(job) < stage(seen) || (stage(job) === stage(seen) && job.progress <= seen.progress))) continue;
+            take(job);
           }
           snapshotTaken = true;
           settleIfDone();
         }, reject);
+        void conn.closed.then(() => reject(new Error("frameshelld closed the connection before the jobs finished")));
+      }),
+    waitOutputs: (outputs, onChange) =>
+      new Promise((resolve, reject) => {
+        const wanted = new Set(outputs);
+        const latest = new Map<string, JobInfo>();
+        const take = (job: JobInfo) => {
+          if (job.output === null || !wanted.has(job.output)) return;
+          const seen = latest.get(job.output);
+          if (seen?.id === job.id && stage(job) < stage(seen)) return;
+          latest.set(job.output, job);
+          onChange?.(job);
+          if (latest.size === wanted.size && [...latest.values()].every((one) => !active(one))) resolve(latest);
+        };
+        for (const job of history.splice(0)) take(job);
+        listener = take;
+        if (wanted.size === 0) resolve(latest);
         void conn.closed.then(() => reject(new Error("frameshelld closed the connection before the jobs finished")));
       }),
   };

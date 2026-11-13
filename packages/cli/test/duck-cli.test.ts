@@ -61,7 +61,9 @@ describe("frameshell duck", () => {
       method: "track.duck",
       params: { track: "t_m", under: ["t_v", "t_w"], depth: 8, attackMs: 30, releaseMs: 300, threshold: -40, gap: 1 },
     });
+    expect(parseTimelineCommand(["duck", "t_m"], { under: ["t_v"], level: "12" })).toMatchObject({ params: { track: "t_m", under: ["t_v"], level: 12 } });
     expect(parseTimelineCommand(["duck", "t_m"], { under: ["t_v"] })!.params).toEqual({ track: "t_m", under: ["t_v"] });
+    expect(() => parseTimelineCommand(["duck", "t_m"], { under: ["t_v"], level: "low" })).toThrow(/expected a number/);
     expect(() => parseTimelineCommand(["duck", "t_m"], {})).toThrow(/needs --under/);
     expect(() => parseTimelineCommand(["duck"], { under: ["t_v"] })).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["duck", "t_m"], { under: ["t_v"], layout: "solo" })).toThrow(/does not take --layout/);
@@ -88,5 +90,10 @@ describe("frameshell duck", () => {
     const wrong = frameshell(["duck", voice, "--under", bed]);
     expect(wrong.code).toBe(1);
     expect(wrong.stderr).toContain("audio track");
+
+    const levelled = frameshell(["duck", bed, "--under", voice, "--level", "12"]);
+    expect(levelled.stderr).toBe("");
+    expect(levelled.code).toBe(0);
+    expect(levelled.stdout).toMatch(/\nLevel: voice -?\d+(\.\d)? LUFS, music set to -?\d+(\.\d)? LUFS \(12 dB under\): c_[0-9a-f]{6} [+-]?\d+(\.\d)? dB/);
   }, 60_000);
 });

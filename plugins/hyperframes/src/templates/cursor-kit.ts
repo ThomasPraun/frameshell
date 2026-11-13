@@ -1,4 +1,4 @@
-import type { TemplateVariable } from "./kit.js";
+import { type TemplateVariable, kitScript } from "./kit.js";
 
 /** The two props every template with a cursor shares: the arrow's colour and its size. */
 export function cursorVariables(): TemplateVariable[] {
@@ -11,6 +11,23 @@ export function cursorVariables(): TemplateVariable[] {
 /** The prop that makes the cursor stop short of its target before the last small move. */
 export function hesitateVariable(defaultSeconds: number): TemplateVariable {
   return { id: "hesitate", type: "number", label: "Seconds the cursor hesitates just before its target, 0 = none", default: defaultSeconds, min: 0, max: 1, step: 0.05, unit: "s" };
+}
+
+/** The two props of a template that can zoom in and follow its cursor to the click (needs {@link CAMERA_MATH}). */
+export function cameraVariables(): TemplateVariable[] {
+  return [
+    {
+      id: "camera",
+      type: "enum",
+      label: "Camera",
+      default: "still",
+      options: [
+        { value: "still", label: "Still: a slow push over the whole clip" },
+        { value: "follow", label: "Follow: zooms in and follows the cursor to the click, then pulls back" },
+      ],
+    },
+    { id: "zoom", type: "number", label: "How far the follow camera zooms in, 1 = not at all", default: 1.6, min: 1.1, max: 2.4, step: 0.05 },
+  ];
 }
 
 /** The prop of a template whose cursor is optional: on, or the action happens without one. */
@@ -26,13 +43,6 @@ export function cursorModeVariable(): TemplateVariable {
     ],
   };
 }
-
-/** Drops whole-line `//` comments and blank lines: the explanation lives here, and a composition file over 300 lines draws a lint warning. */
-const bare = (code: string): string =>
-  code
-    .split("\n")
-    .filter((line) => line.trim() !== "" && !line.trim().startsWith("//"))
-    .join("\n");
 
 /** CSS of the cursor and the click ring; both are the last children of the clip. */
 export const CURSOR_CSS = `
@@ -51,15 +61,16 @@ export const CURSOR_HTML = `<i id="ripple" class="ripple"></i>
  * tiny overshoot, and may hesitate near its target. A click scales it to 0.84
  * in 0.1 s and back in 0.22 s.
  */
-export const CURSOR_MATH = bare(String.raw`
+export const CURSOR_MATH = kitScript(String.raw`
       // Eases in and out and settles with a tiny overshoot (control points of a cubic-bezier).
       var CURSOR_EASE = [0.55, 0, 0.25, 1.1];
 
       // The cursor's travel: it leaves "from", visits the stops in order and waits at each for spot.wait seconds.
+      // "rate" (1 when left out) shortens every leg: 2 moves twice as fast; the timing guard (fitFirst) raises it.
       // A stop is { x, y, wait, hesitate, bend, weight }; "hesitate" seconds of pause close to the target before the
       // last small move; "bend" is how far the arc bows as a fraction of the leg (0.15 default); "weight" is "light",
       // "normal" or "heavy". After the last stop it keeps drifting by "drift" ({ x, y } pixels per second).
-      function journey(from, stops, start, drift) {
+      function journey(from, stops, start, drift, rate) {
         var legs = [];
         var clock = start;
         var prev = from;
@@ -69,7 +80,7 @@ export const CURSOR_MATH = bare(String.raw`
           var dy = spot.y - prev.y;
           var dist = Math.sqrt(dx * dx + dy * dy);
           // Travel time depends on the distance at a 1080-pixel frame, so every render size moves alike.
-          var dur = M.durationFromDistance((dist * 1080) / unit, spot.weight || "normal");
+          var dur = M.durationFromDistance((dist * 1080) / unit, spot.weight || "normal") / (rate || 1);
           var hold = spot.hesitate || 0;
           var travel = hold > 0 ? dur * 1.2 + hold : dur;
           var bend = (i % 2 === 0 ? 1 : -1) * (spot.bend === undefined ? 0.15 : spot.bend) * dist;
@@ -115,6 +126,23 @@ export const CURSOR_MATH = bare(String.raw`
         };
       }
 
+      // Timing guard: the first of the "tries" (argument lists of build) whose result is "ready" by the deadline.
+      // Nothing fits: the last try is returned, so a clip too short for the action still shows it as fast as it can.
+      function fitFirst(tries, build, deadline) {
+        var made;
+        for (var i = 0; i < tries.length; i++) {
+          made = build.apply(null, tries[i]);
+          if (made.ready <= deadline) return made;
+        }
+        return made;
+      }
+      // Tries for a template whose cursor travels: as asked, then without the hesitation, then with faster legs. Arguments are (hesitate factor, rate).
+      var CURSOR_TRIES = [[1, 1], [0, 1], [0, 1.25], [0, 1.6], [0, 2.2]];
+      // Latest moment a beat may happen so that "tail" seconds of its aftermath show before the clip's 0.3 s exit.
+      function latest(tail) {
+        return S.duration - 0.3 - tail;
+      }
+
       // Scale of the cursor: pressed down at "down" (0.84 in 0.1 s), let go at "up" (back in 0.22 s). A click is up = down + 0.1.
       function press(t, down, up) {
         var d = M.ease("snap", (t - down) / 0.1);
@@ -139,11 +167,33 @@ export const CURSOR_MATH = bare(String.raw`
       }`);
 
 /**
+ * Page-script math of the follow camera (needs `M`, `S`): the scene scales about
+ * the frame's centre and slides so the cursor comes toward the centre, never so
+ * far that the scene's edge shows inside the frame.
+ */
+export const CAMERA_MATH = kitScript(String.raw`
+      // "e" is how far the camera has zoomed (0 = the whole frame, 1 = full zoom); "focus" is the scene point it brings toward the centre. Returns a pose for put().
+      function camera(focus, e, zoom) {
+        var z = 1 + (zoom - 1) * e;
+        var mx = (S.width / 2) * (z - 1);
+        var my = (S.height / 2) * (z - 1);
+        return {
+          x: Math.min(mx, Math.max(-mx, -z * (focus.x - S.width / 2) * e)),
+          y: Math.min(my, Math.max(-my, -z * (focus.y - S.height / 2) * e)),
+          scale: z
+        };
+      }
+      // How far the camera has zoomed at t: in over [a, b], held, out over [c, d] (b > a, d > c).
+      function zoomAt(t, a, b, c, d) {
+        return M.ease("camera", (t - a) / (b - a)) * (1 - M.ease("camera", (t - c) / (d - c)));
+      }`);
+
+/**
  * Page-script setup and painters of the cursor (needs {@link COLOR_HELPERS},
  * {@link CURSOR_MATH} and the template's `P`, `S`, `unit`): draws the arrow and
  * the click ring, and starts just outside the frame so it never fades in.
  */
-export const CURSOR_SCRIPT = bare(String.raw`
+export const CURSOR_SCRIPT = kitScript(String.raw`
       var cursorEl = document.getElementById("cursor");
       var rippleEl = document.getElementById("ripple");
       var curH = P.cursorSize * unit;

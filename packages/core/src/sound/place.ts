@@ -256,7 +256,7 @@ export async function soundsOn(root: string, timeline: Timeline): Promise<SoundI
 }
 
 /** Frames `[start, end)` of the clips of `track`, for lane fitting; a clip of unknown length holds its first frame. */
-function occupied(track: Track, grid: FrameGrid): [number, number][] {
+export function occupied(track: Track, grid: FrameGrid): [number, number][] {
   if (track.kind === "subtitles") return [];
   return track.clips.map((clip) => {
     const start = grid.frame(clip.start);
