@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { authorOf } from "../history/model.js";
 import { t } from "../i18n.js";
-import { type ConfigLine, type ReviewSide, barOf, configLines, whoOf } from "../review/model.js";
+import { type ConfigLine, type ReviewSide, type StyleLine, barOf, configLines, styleLines, whoOf } from "../review/model.js";
 import { decide, dismissStaleNotice, showSide, useReview } from "../review/store.js";
 
 /**
@@ -41,6 +41,7 @@ export function ProposalBar() {
       </span>
       <span className="proposal-count">{t.review.operations(proposal.operations)}</span>
       <ConfigList lines={configLines(proposal)} />
+      <StyleList lines={styleLines(proposal)} />
       <SideToggle side={side} />
       {failure && (
         <span className="proposal-failure" role="alert">
@@ -68,6 +69,17 @@ function ConfigList({ lines }: { lines: ConfigLine[] }) {
   return (
     <span className="proposal-config" data-tip={t.review.formatsHint}>
       {t.review.formats(text.join(", "))}
+    </span>
+  );
+}
+
+/** The `style.json` values the proposal changes (ADR 0036), as text. */
+function StyleList({ lines }: { lines: StyleLine[] }) {
+  if (lines.length === 0) return null;
+  const text = lines.map((line) => t.review.styleChanged(line.path, line.from ?? t.review.styleNone, line.to ?? t.review.styleNone));
+  return (
+    <span className="proposal-config" data-tip={t.review.styleHint}>
+      {t.review.style(text.join("; "))}
     </span>
   );
 }

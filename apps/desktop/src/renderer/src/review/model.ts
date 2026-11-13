@@ -135,6 +135,22 @@ export function configLines(proposal: OpenProposal): ConfigLine[] {
   });
 }
 
+/** One style value a proposal changes, as the bar lists it: dotted path, and the value before and after as text (null: none). */
+export interface StyleLine {
+  path: string;
+  from: string | null;
+  to: string | null;
+}
+
+/** The bar's list of what `proposal` changes in `style.json` (ADR 0036), in key order; string arrays read joined by commas. */
+export function styleLines(proposal: OpenProposal): StyleLine[] {
+  const text = (value: unknown): string | null => (value === null || value === undefined ? null : Array.isArray(value) ? value.join(", ") : String(value));
+  return proposal.config.flatMap((change): StyleLine[] => {
+    const path = /^style:(.+)$/.exec(change.key)?.[1];
+    return path === undefined ? [] : [{ path, from: text(change.before), to: text(change.after) }];
+  });
+}
+
 /** Who made a proposal, in a word: an agent's own label (`claude`), else History's name for the author. */
 export function whoOf(author: string): string {
   const agent = /^agent:([^:]+)/.exec(author);

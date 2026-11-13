@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hand edits of `formats` and `style.json` are config operations, rest of #496 (ADR 0036 slice 5, epic #451, no wire
+  change): the daemon watches `frameshell.json` and `style.json` at the project root and diffs a change of formats or
+  style values against the journal's last version (a head snapshot per document in `.frameshell/history/`). With review
+  mode off it is journaled as a `file.edit` operation by `file`, so History lists it and `revert` undoes it; in review
+  mode it waits in a proposal of `file` ("Edit style.json") and the document goes back until you accept or reject it,
+  and while another proposal is open the edit is put back and its copy kept under `.frameshell/rejected/`. An edit made
+  while no daemon ran is caught up when the project opens. `frame --format <id>` and `review --format <id>` with
+  `view: proposal` capture a format only the open proposal adds. The proposal bar lists the style values a proposal
+  changes (`Style: colors.accent #1A1A1A → #FF5A00`, en + es). New e2e of a config proposal in the app.
 - Glass card template, second slice of #462 (ADR 0031 and 0033, epic #451; plugin only, no protocol change):
   `frameshell hyperframes new <name> --template glass-card` scaffolds a translucent card (hairline border at 38 %, light
   top edge, a skewed 220 px shine band that crosses in 0.9 s, 0.3 s after the entry, and again every `shineEvery`
