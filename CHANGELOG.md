@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Glass card template, second slice of #462 (ADR 0031 and 0033, epic #451; plugin only, no protocol change):
+  `frameshell hyperframes new <name> --template glass-card` scaffolds a translucent card (hairline border at 38 %, light
+  top edge, a skewed 220 px shine band that crosses in 0.9 s, 0.3 s after the entry, and again every `shineEvery`
+  seconds when set) with a kicker, a title and text rising through masks on springs. The card paints only the look: the
+  blur, saturation and dark scrim under it are the clip's backdrop, so the recipe is `clip add` then
+  `clip set <clip> --glass` (`--backdrop-dim 0.72` over bright footage). Its fill stays above the backdrop's 3 % alpha
+  threshold and its shadow is off by default, since the glass would cover a shadow too. Typed props (`label`, `title`,
+  `body`, `tint`, `tintOpacity`, `shine`, `shineEvery`, `shadow`, `size`, `place`, `align`), per-format layout with
+  `pick()`, empty or too long texts never break the picture. Listed in the plugin skill and the reels page.
 - Iris and dip cut, slice 2 of #483 (ADR 0030, epic #451; protocol 113): `transition set --kind iris --origin
   x0,y0,x1,y1` opens the incoming clip in a circle growing from the centre of `origin` (fractions of the frame, default
   its centre) until it covers the frame, on the bottom video track; export masks the incoming piece with a `geq` circle,
