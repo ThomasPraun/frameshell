@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Captions and generated clips take the project style, third slice of #468 (ADR 0028, epic #451; `clip.live`
+  `styleCss`, style `type.caption`, plugin API `styleTokens` / `RenderContext.styleCss`, protocol 115): a subtitle
+  track that names no preset shows its text in `colors.ink` outlined in `colors.bg`, the keyword in `colors.keyword`
+  (else the accent), the spoken word in `colors.highlight` (else the accent), at `type.caption` px, and neither mark
+  under `calm`; a track that names a preset looks as before, and the track's own fields and the vertical-format scale
+  still win. `fonts.captions` sets the caption face: a `.ttf` or `.otf` under `assets/fonts/`, whose family and line
+  metrics are read from the file, so export, the preview and review safe zones place lines alike; a face that cannot
+  be used falls back to Archivo Black and `render` warns. HyperFrames renders and live pages get the style as CSS
+  variables (`--fs-color-accent`, `--fs-font-display`, `--fs-motion-standard`, ...) in a first stylesheet, with style
+  font files inlined; the sheet's hash enters the render key only for adapters that take tokens and only with a
+  `style.json`, so other renders keep their keys. The first run after the upgrade re-renders every HyperFrames clip of
+  a project that has a `style.json`, and any later change to a colour, font, type size or motion value re-renders them
+  all again. An invalid `style.json` blocks HyperFrames renders and exports of subtitled timelines until it is fixed.
 - GIF preset, second slice of #474 (ADR 0039, ADR 0027 decision 13, epic #451; `render` with `preset: "gif"`, CLI `render --preset gif`,
   protocol 114): `render --preset gif` writes a silent GIF that loops forever. Each format is fitted inside 1200 x 1200
   (16:9 is 1200 x 675, 9:16 is 675 x 1200, never scaled up) through the new preset field `video.fit: "inside"`, which

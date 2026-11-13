@@ -65,6 +65,7 @@ import {
 } from "./cover.js";
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
+import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
 import { loopSeamWarning } from "./seam.js";
@@ -76,6 +77,8 @@ export interface ExecuteRenderOptions {
   workDir: string;
   /** Absolute file to write. Replaced atomically once complete; never left half-written. */
   output: string;
+  /** Project directory: where the plan's project font files (`RenderPlan.fonts`) are read. */
+  projectDir?: string;
   /** Segments encoded at once. Default: half the cores, 1 to 4 (x264 threads on its own too). */
   parallelism?: number;
   /** Kills every ffmpeg when aborted. */
@@ -110,7 +113,7 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
   try {
     await mkdir(workDir, { recursive: true });
     await writeFiles(workDir, plan.files);
-    await writeFonts(workDir, plan.fonts);
+    await writeFonts(workDir, plan.fonts, options.projectDir);
     const mix = mixStep(plan);
     const analysis = loudnessAnalysis(plan);
     for (const step of [mix, analysis]) if (step) await writeFiles(workDir, step.files);
@@ -320,6 +323,7 @@ export class ExportService {
     // Only the assets that can get one: the plan's warnings name the others, as the final plan does.
     const standInMattes = new Map((prepared?.assets ?? []).map((asset) => [asset, { path: "", ...pictureSize(sources.get(asset)!) }]));
     const encoder = params.quality ? ((await this.#options.encoder?.(await this.#options.ffmpeg(root))) ?? "libx264") : null;
+    const captions = await readCaptionTokens(root, timeline);
     const shared = {
       timeline,
       fps,
@@ -329,6 +333,7 @@ export class ExportService {
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources,
       transcripts: await this.#transcripts(root, timeline),
+      ...(captions.tokens ? { captions: captions.tokens } : {}),
       ...(this.#options.segmentSeconds !== undefined ? { segmentSeconds: this.#options.segmentSeconds } : {}),
     };
     const baked = this.#options.audioFx?.needs(timeline) ?? [];
@@ -359,7 +364,7 @@ export class ExportService {
                 "size, add and render the format of its aspect (`frameshell format add`).",
             ]
           : [];
-      return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...plan.warnings] };
+      return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...captions.warnings, ...plan.warnings] };
     }));
     const provenance = (await this.#options.provenance?.(root, [...sources.keys()])) ?? [];
     const first = planned[0]!;
@@ -421,6 +426,7 @@ export class ExportService {
                 ffmpeg,
                 workDir: join(cache, randomBytes(6).toString("hex")),
                 output,
+                projectDir: root,
                 signal: ctx.signal,
                 onProgress: (update: JobUpdate) => ctx.update(update),
                 ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
@@ -479,7 +485,8 @@ export class ExportService {
     const config = (await readEnclosingProject(root))?.config;
     const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
     const layout = resolveFormat(timeline, loaded.formats ? { ...project, formats: loaded.formats } : project, projectFormat)?.format;
-    return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), layout);
+    const { tokens } = await readCaptionTokens(root, timeline);
+    return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps, tokens), layout);
   }
 
   /**
@@ -604,11 +611,13 @@ export class ExportService {
     const matted = subjectAssets(timeline, (asset) => movingPicture(sources.get(asset)), params.at);
     // Not in a job: the mattes of the subjects drawn at `at` are made here, as a render job would.
     const mattes = matted.length > 0 && this.#options.mattes ? await (await this.#options.mattes.prepare(root, matted)).make() : new Map<string, MatteSource>();
+    const { tokens: captions } = cover === undefined ? await readCaptionTokens(root, timeline) : {};
     const plan = compileFrame({
       timeline,
       fps,
       sources,
       transcripts: await this.#transcripts(root, timeline),
+      ...(captions ? { captions } : {}),
       resolution,
       generated,
       mattes,
@@ -628,7 +637,7 @@ export class ExportService {
     try {
       await mkdir(workDir, { recursive: true });
       await writeFiles(workDir, plan.files);
-      await writeFonts(workDir, plan.fonts);
+      await writeFonts(workDir, plan.fonts, root);
       await runTool(ffmpeg, plan.args, { cwd: workDir });
       await renameRetrying(partial, params.out);
     } finally {

@@ -4,7 +4,6 @@ import type { Size } from "@frameshell/schema/composite";
 import {
   type ResolvedSubtitleTrack,
   SUBTITLE_ENTRY,
-  SUBTITLE_FONT,
   type SubtitleCue,
   type SubtitleStyle,
   cueTokens,
@@ -103,7 +102,7 @@ export function subtitleLines(
     if (!shown) continue;
     const { style } = track;
     const layout = subtitleLayout(style, size);
-    const font = `${layout.fontSize}px "${SUBTITLE_FONT.family}"`;
+    const font = `${layout.fontSize}px ${cssFamily(style)}`;
     const texts = cueTokens(shown.cue);
     const lead = texts.length - shown.cue.words.length;
     const text = texts.join(" ");
@@ -175,11 +174,16 @@ function enteringRuns(
     run.blur = round2(fontSize * SUBTITLE_ENTRY.blur * (1 - progress));
     const grow = unit.keyword ? 1 + (style.keywordScale - 1) * (1 - progress) : 1;
     if (grow !== 1) {
-      run.font = `${round2(fontSize * grow)}px "${SUBTITLE_FONT.family}"`;
+      run.font = `${round2(fontSize * grow)}px ${cssFamily(style)}`;
       run.x = x - (measure(unit.text, font) * (grow - 1)) / 2;
     }
     return run;
   });
+}
+
+/** The style's face as a quoted CSS family. */
+function cssFamily(style: SubtitleStyle): string {
+  return `"${style.font.family.replace(/["\\]/g, "")}"`;
 }
 
 function round2(value: number): number {

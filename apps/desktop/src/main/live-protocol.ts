@@ -22,6 +22,8 @@ export interface LivePageSource {
   head: string;
   /** Sheet of the clip's `elements` (ADR 0021) the bridge applies first; absent when it has none. */
   elementCss?: string;
+  /** The project style's token sheet (ADR 0028, daemon `clip.live`), first in `<head>`; absent when none. */
+  styleCss?: string;
 }
 
 /** Messages between the preview and a live page's bridge. */
@@ -283,7 +285,7 @@ export async function serveLive(request: Request, pages: LivePages): Promise<Res
   const ext = rel.slice(rel.lastIndexOf(".") + 1).toLowerCase();
   const type = TYPES[ext] ?? "application/octet-stream";
   if (rel === page.entry) {
-    const html = injectHead(await readFile(target, "utf8"), page.head, page.elementCss);
+    const html = injectHead(await readFile(target, "utf8"), page.head, page.elementCss, page.styleCss);
     const body = Buffer.from(html, "utf8");
     const headers = { ...HEADERS, "Content-Type": type, "Content-Length": String(body.length) };
     return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
@@ -305,10 +307,13 @@ export async function serveLive(request: Request, pages: LivePages): Promise<Res
  * doctype (so the page keeps standards mode), else first. A function
  * replacement keeps `$` sequences in the scripts literal. A non-empty
  * `elementCss` is the bridge's first element sheet, carried as an attribute.
+ * A non-empty `styleCss` (style tokens, ADR 0028) goes before them, as the
+ * render's first sheet, so the composition's own styles come after it.
  */
-export function injectHead(html: string, head: string, elementCss?: string): string {
+export function injectHead(html: string, head: string, elementCss?: string, styleCss?: string): string {
   const initial = elementCss ? ` data-frameshell-elements="${escapeAttribute(elementCss)}"` : "";
-  const scripts = `<script>${head}</script><script${initial}>${LIVE_BRIDGE}</script>`;
+  const tokens = styleCss ? `<style data-frameshell-style>${styleCss.replace(/<\//g, "<\\/")}</style>` : "";
+  const scripts = `${tokens}<script>${head}</script><script${initial}>${LIVE_BRIDGE}</script>`;
   for (const tag of [/<head(?:\s[^>]*)?>/i, /<html(?:\s[^>]*)?>/i, /<!doctype[^>]*>/i]) {
     if (tag.test(html)) return html.replace(tag, (open) => open + scripts);
   }
