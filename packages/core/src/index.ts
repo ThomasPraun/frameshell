@@ -508,6 +508,9 @@ export { type Burst, type Rhythm, bigChanges, bursts, lengthCv, rhythmOf, stillR
 export { type SoundHit, elementEvents, flashes, holds, hitEvents, soundHits } from "./analyze/events.js";
 export { type SfxRender, type SfxSpec, synthesizeSfx } from "./sound/sfx.js";
 export { SFX_TRACK_NAME, type SoundItem, type SoundWish, soundWarnings } from "./sound/place.js";
-export { SFX_KEY_VERSION, SOUND_DIR, type SoundMark, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";
+export { MUSIC_KEY_VERSION, type MusicMark, SFX_KEY_VERSION, SOUND_DIR, type SoundMark, musicFile, musicKey, musicMarkOf, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";
+export { type MusicGrid, type MusicRender, type MusicSpec, defaultSections, musicGrid, parseChord, scoreOf, sectionStarts, synthesizeMusic } from "./sound/music.js";
+export { type AskedSection, MUSIC_TRACK_NAME, arrangeSections } from "./sound/music-place.js";
+export { integratedLoudness, limitPeaks, normaliseLoudness } from "./sound/loudness.js";
 export { REVIEW_DIR, type ReviewRequest, ReviewService, type ReviewServiceOptions } from "./review/service.js";
 export { type SheetOptions, type SheetSize, type SheetTile, writeSheet } from "./review/sheet.js";

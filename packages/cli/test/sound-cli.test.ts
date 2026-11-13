@@ -122,3 +122,37 @@ describe("frameshell sound place", () => {
     expect(result.stderr).toContain("cues[0].at");
   });
 });
+
+describe("frameshell sound music", () => {
+  it("writes a bed with its beat grid, places it from a marker with a part on another, and prints both", () => {
+    expect(frameshell(["marker", "add", "--at", "20", "--label", "music-in"]).code).toBe(0);
+    expect(frameshell(["marker", "add", "--at", "24", "--label", "reveal"]).code).toBe(0);
+    const result = frameshell(["sound", "music", "minimal", "--bpm", "120", "--bars", "4", "--at", "music-in", "--sections", "intro,drop@reveal", "--accents", "reveal+1"]);
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const lines = result.stdout.trimEnd().split("\n");
+    expect(lines[0]).toMatch(/^assets\/sound\/music-minimal-[0-9a-f]{8}\.wav {2}generated {2}minimal 120 BPM, 4 beats a bar, 4 bars, seed 0$/);
+    expect(lines[1]).toMatch(/^ {2}10\.50 s, final hit at 8\.000 s, -1[34](\.\d+)? LUFS, peak -1(\.\d+)? dBFS$/);
+    expect(lines[2]).toBe("  parts: intro 2 (0.00 s), drop 2 (4.00 s); chords Am7 Fmaj7 C G");
+    expect(lines[3]).toMatch(/^ {2}beats\/sound\/music-minimal-[0-9a-f]{8}\.beats\.json written: exact grid, 17 beats$/);
+    expect(lines[4]).toMatch(/^c_\w+ {2}t_\w+ \(new audio track Music\) {2}start 20\.000 s, gain -12 dB$/);
+    expect(result.stdout).toContain("the timeline's tempo now follows this clip");
+    expect(result.stdout).toMatch(/transaction tx_\w+/);
+  });
+
+  it("only writes the take with --no-place, as JSON", () => {
+    const result = JSON.parse(frameshell(["sound", "music", "lofi", "--length", "6", "--chords", "Dm9,G13", "--seed", "3", "--no-place", "--json"]).stdout) as { bars: number; bpm: number; clip: string | null; chords: string[] };
+    expect(result).toMatchObject({ bpm: 78, bars: 2, clip: null, chords: ["Dm9", "G13"] });
+  });
+
+  it("rejects an unknown preset, bad parts, chords and flags with a usage error", () => {
+    expect(frameshell(["sound", "music", "polka"])).toMatchObject({ code: 2, stderr: expect.stringContaining("expected synthwave, lofi, minimal") });
+    expect(frameshell(["sound", "music", "lofi", "--bars", "2", "--length", "4"])).toMatchObject({ code: 2, stderr: expect.stringContaining("not both") });
+    expect(frameshell(["sound", "music", "lofi", "--sections", "chorus:2"])).toMatchObject({ code: 2, stderr: expect.stringContaining("--sections") });
+    expect(frameshell(["sound", "music", "lofi", "--sections", "intro:0"]).code).toBe(2);
+    expect(frameshell(["sound", "music", "lofi", "--chords", "Am,X7"])).toMatchObject({ code: 2, stderr: expect.stringContaining('"X7"') });
+    expect(frameshell(["sound", "music", "lofi", "--bpm", "300"]).code).toBe(2);
+    expect(frameshell(["sound", "music", "lofi", "--no-place", "--gain", "-6"]).code).toBe(2);
+    expect(frameshell(["sound", "music", "lofi", "--variant", "2"]).code).toBe(2);
+  });
+});

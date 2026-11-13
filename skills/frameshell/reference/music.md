@@ -1,6 +1,6 @@
 # Music on the cut
 
-Fit a music track to the picture so its last hit lands on the cut (ADR 0037). Commands assume the session rule of [SKILL.md](../SKILL.md). Music is a media clip on an audio track; put it there with `frameshell clip add`, set its level (about 12 dB under the voice is a start), then fit it.
+Fit a music track to the picture so its last hit lands on the cut (ADR 0037). Commands assume the session rule of [SKILL.md](../SKILL.md). Music is a media clip on an audio track; put it there with `frameshell clip add`, set its level (about 12 dB under the voice is a start), then fit it. No track to use: `frameshell sound music` makes one and places it ([sound.md](sound.md#music-bed)); its final hit is exact, so fitting it is reliable.
 
 ## Land the last hit on a cut
 

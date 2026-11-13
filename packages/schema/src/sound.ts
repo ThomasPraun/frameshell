@@ -112,3 +112,91 @@ export const SOUND_MAX_PER_FRAME = 2;
 
 /** Most sounds one `sound.place` call places. */
 export const SOUND_MAX_PLACEMENTS = 200;
+
+/** Genre presets of the music sequencer (ADR 0038 slice 3): each has its own instruments, groove, tempo and chords. */
+export const MUSIC_PRESETS = ["synthwave", "lofi", "minimal"] as const;
+
+/** One of {@link MUSIC_PRESETS}. */
+export type MusicPreset = (typeof MUSIC_PRESETS)[number];
+
+/** Zod model of a {@link MusicPreset}. */
+export const MusicPresetSchema = z.enum(MUSIC_PRESETS);
+
+/**
+ * Tempo (BPM) and chords (one per bar, repeating) a preset plays when the caller names none; `swing` delays every
+ * odd 16th by that fraction of a 16th. Numbers from the owner's notes on #463 (minimal has none: 110 BPM is ours).
+ */
+export const MUSIC_PRESET_DEFAULTS: Readonly<Record<MusicPreset, { bpm: number; chords: readonly string[]; swing: number }>> = {
+  synthwave: { bpm: 118, chords: ["Am", "F", "C", "G"], swing: 0 },
+  lofi: { bpm: 78, chords: ["Dm9", "G13", "Cmaj7", "Am7"], swing: 0.16 },
+  minimal: { bpm: 110, chords: ["Am7", "Fmaj7", "C", "G"], swing: 0 },
+};
+
+/**
+ * Parts of a generated track. `intro` pads and hats, `full` everything, `dark` stripped (pad, sub, soft kick: under
+ * dense picture or a voice), `build` a climbing motif, a clap roll and a riser that ends 75 ms before the next part,
+ * `gap` one stop-time hit then silence (so the next downbeat lands hard), `drop` everything with an accent on its
+ * first beat, `outro` half time; the track always ends on a final chord that rings.
+ */
+export const MUSIC_SECTIONS = ["intro", "full", "dark", "build", "gap", "drop", "outro"] as const;
+
+/** One of {@link MUSIC_SECTIONS}. */
+export type MusicSection = (typeof MUSIC_SECTIONS)[number];
+
+/** Zod model of a {@link MusicSection}. */
+export const MusicSectionSchema = z.enum(MUSIC_SECTIONS);
+
+/** Tempo range of generated music, BPM. */
+export const MUSIC_BPM_RANGE = { min: 50, max: 180 } as const;
+
+/** Beats per bar of generated music. */
+export const MUSIC_METER_RANGE = { min: 2, max: 7 } as const;
+
+/** Most bars of one generated track. */
+export const MUSIC_MAX_BARS = 128;
+
+/** Most seconds of one generated track before its ringing tail. */
+export const MUSIC_MAX_SECONDS = 300;
+
+/** Seconds the final chord rings after the last bar. */
+export const MUSIC_TAIL_SECONDS = 2.5;
+
+/** Integrated loudness every generated track is normalised to, LUFS (ADR 0038, gain). */
+export const MUSIC_LUFS = -14;
+
+/** Highest sample peak of a generated track, dBFS: a limiter holds it there when the loudness would push past it. */
+export const MUSIC_PEAK_DBFS = -1;
+
+/** Most chords, sections and accents one track takes. */
+export const MUSIC_LIMITS = { chords: 16, sections: 32, accents: 32 } as const;
+
+/**
+ * Chord qualities the sequencer plays, as semitones over the root. A chord is a root (`A`, `C#`, `Bb`) then one of
+ * these suffixes (none = major): `Am`, `Fmaj7`, `G13`.
+ */
+export const MUSIC_CHORD_QUALITIES: Readonly<Record<string, readonly number[]>> = {
+  "": [0, 4, 7],
+  m: [0, 3, 7],
+  "7": [0, 4, 7, 10],
+  maj7: [0, 4, 7, 11],
+  m7: [0, 3, 7, 10],
+  "9": [0, 4, 10, 14],
+  maj9: [0, 4, 11, 14],
+  m9: [0, 3, 10, 14],
+  "13": [0, 4, 10, 21],
+  "6": [0, 4, 7, 9],
+  m6: [0, 3, 7, 9],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
+  dim: [0, 3, 6],
+  aug: [0, 4, 8],
+  add9: [0, 4, 7, 14],
+};
+
+/** A chord name the sequencer can play: a root letter, an optional `#` or `b`, then a key of {@link MUSIC_CHORD_QUALITIES}. */
+export const MUSIC_CHORD_PATTERN = new RegExp(
+  `^[A-G][#b]?(${Object.keys(MUSIC_CHORD_QUALITIES)
+    .filter((quality) => quality !== "")
+    .sort((a, b) => b.length - a.length)
+    .join("|")})?$`,
+);
