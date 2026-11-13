@@ -40,7 +40,7 @@ import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSoun
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { BATCH_FLAGS, BATCH_USAGE, type BatchInvocation, batchOutcome, batchLabel, describeBatch, parseBatch } from "./batch-commands.js";
-import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
+import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
@@ -179,7 +179,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "rows", "failed", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "rows", "failed", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -267,6 +267,7 @@ type Invocation =
   | StyleInvocation
   | ReviewInvocation
   | AnalyzeInvocation
+  | AnalyzeDiffInvocation
   | PeopleInvocation
   | CreditsInvocation
   | ShootInvocation
@@ -393,6 +394,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           sheets: { type: "string" },
           platform: { type: "string" },
           every: { type: "string" },
+          lag: { type: "string" },
+          "max-lag": { type: "string" },
+          snapshots: { type: "string" },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -584,6 +588,9 @@ function parseBuiltin(
     sheets?: string | undefined;
     every?: string | undefined;
     threshold?: string | undefined;
+    lag?: string | undefined;
+    "max-lag"?: string | undefined;
+    snapshots?: string | undefined;
   },
 ): Invocation | null {
   const [command, ...rest] = positionals;
@@ -875,6 +882,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "review":
       return executeReview(conn, inv, cwd, flags.json);
     case "analyze":
+    case "analyze.diff":
       return executeAnalyze(conn, inv, cwd, flags.json);
     case "style.show":
     case "style.set":

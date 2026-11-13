@@ -31,7 +31,7 @@ import {
   TargetChangedSchema,
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
-import { AnalyzeResultSchema } from "./analyze.js";
+import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "./analyze.js";
 import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, MUSIC_BPM_RANGE, MUSIC_CHORD_PATTERN, MUSIC_LIMITS, MUSIC_LUFS, MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_METER_RANGE, MUSIC_PEAK_DBFS, MUSIC_PRESET_DEFAULTS, MUSIC_TAIL_SECONDS, MusicPresetSchema, MusicSectionSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VOICEOVER_LINE_GAP_S, VoiceoverLineSchema } from "@frameshell/schema";
@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 122;
+export const PROTOCOL_VERSION = 123;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1434,14 +1434,18 @@ export const methods = {
       "the **palette** of the whole film, the **look** (brightness 0 to 1, contrast, saturation, warmth from -1 blue to 1 red, and an 8 x 6 grid of mean colours for the film in the result and for every shot in `analysis.json`), " +
       "the **rhythm** (`shotLengthCv`: spread of the shot lengths over their mean, 0 a metronome; `stillShare`: share of frames in which the picture does not change; `longestStill`; big changes of the picture, their count and per minute; the `largestGap` between them; `bursts`: 3 or more big changes within 1.5 s), " +
       "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
+      "the **curve** (the change of the picture over time, one value per 0.1 s or more, and its `moves`: steady stretches with their start, duration, peak and the closest ease: linear, in, out or inOut), " +
+      "the **ink** of each shot and of the film (share of the picture covered by graphics or text, its peak, when and the box of grid cells), " +
+      "the **sync** (seconds the mouth of a talking face moves after the voice, when this exact file has a cached face scan from `people.scan`; otherwise `reason` says why it was skipped), " +
+      "`labels` (MEASURED, ESTIMATED or DECISION for every value, by field path), " +
       "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
       "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
       "A hard cut is found; a dissolve, a whip pan or a jump cut inside one continuous take is not (lower `threshold` to catch softer ones; " +
-      "motion curves, the mouth-to-voice lag and a read of the text itself come in later slices; events are hints, so look at the frames they name). Label what you tell the person: " +
-      "these numbers are MEASURED; what you read off the sheets by eye is ESTIMATED, and say which frames to check. " +
+      "a read of the text itself is not made; events, ink and ease are hints, so look at the frames they name). Label what you tell the person as `labels` does: " +
+      "MEASURED, ESTIMATED (hints, and what you read off the sheets by eye: say which frames to check) or DECISION (our creative choice). To compare our film with it, use `analyze.diff`. " +
       "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 35 seconds. The MCP tool returns the " +
       "sheets as images. Example: `{ file: \"references/reel.mp4\" }`. Fails with AssetNotFound (`file` missing), " +
       "InvalidOperation (no picture, or shorter than a frame), the Binary* errors when ffmpeg cannot be fetched.",
@@ -1461,6 +1465,34 @@ export const methods = {
         .describe("Scene score (how different a frame is from the one before, 0 to 1) from which a frame opens a new shot. Default 0.3: hard cuts. Lower finds softer ones and false ones (flashes, fast motion); higher keeps only violent changes."),
     }),
     result: AnalyzeResultSchema,
+  },
+  "analyze.diff": {
+    description:
+      "Compare our film with a reference video (#471): how far apart they are, in numbers, instead of \"looks similar\". The two are lined up by " +
+      "**activity-curve alignment** (how much the picture changes over time, correlated within `maxLag` seconds either way, or the `lag` you give), then read at matched times: " +
+      "`alignment` (`lag`: seconds to add to a time of our film to find the same moment of the reference; `source`: `activity`, `forced` or `none`; `correlation` of the two curves), " +
+      "`energy` (mean and 95th-percentile motion of each, their `ratio` (above 1 our film moves more), and `windows`: both curves second by second, to see where one moves and the other holds), " +
+      "`diff` (SSIM, ffmpeg's structural similarity, of our frame and the reference's every `every` seconds: `samples`, `mean`, the lowest `min` and its time, and `below`: the share of readings under 0.5) " +
+      "and a **side-by-side sheet** (our frame left, the reference's right at the same matched time, the lowest-SSIM moments and evenly spread ones, `snapshots` pairs; the MCP tool returns it as an image). " +
+      "Read it as a distance, not a pass or fail: a different film in the same style scores low SSIM everywhere and can still match in energy. A reference of another shape is stretched to our film's (a warning says so). " +
+      "Writes `.frameshell/analysis/<name>/` (`diff.json` and the sheet; replaced by a new run of the same name; project files are never touched). `labels` marks every value MEASURED, ESTIMATED or DECISION. " +
+      "Runs as a background job of kind `analyze` (`job.list`); a 30-second pair of 720p films takes about 10 seconds. Example: `{ file: \"exports/reel.mp4\", reference: \"references/reel.mp4\" }`. " +
+      "Fails with AssetNotFound (a file missing), InvalidOperation (no picture, or no stretch the two share at that lag), the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("Our film: an export, or any video. Absolute, or relative to `cwd`."),
+      reference: z.string().min(1).describe("The reference video to compare it with: absolute, or relative to `cwd`; it may be anywhere, it is only read."),
+      name: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .optional()
+        .describe("Name of the comparison, its folder is `.frameshell/analysis/<name>/`. Default `<film>-vs-<reference>` (file names in lower case, 64 characters at most). A new run with the same name replaces the folder, so do not reuse the name of an `analyze` run you want to keep."),
+      lag: z.number().min(-3600).max(3600).optional().describe("Seconds to add to a time of our film to find the same moment of the reference (positive: the reference is later), instead of finding it. Use it when you know where the two start together; the alignment is then a DECISION."),
+      maxLag: z.number().min(0.5).max(30).optional().describe("Most seconds the alignment looks for the lag either way. Default 3."),
+      every: z.number().min(0.1).max(30).optional().describe("Seconds between SSIM readings. Default 0.5; a long film is read less often (600 readings at most)."),
+      snapshots: z.int().min(1).max(24).optional().describe("Pairs of frames on the side-by-side sheet. Default 8, at most 24 (12 pairs make one image)."),
+    }),
+    result: AnalyzeDiffResultSchema,
   },
   cover: {
     description:
@@ -4980,6 +5012,10 @@ export type CoverResult = MethodResult<"cover">;
 export type AnalyzeParams = MethodParams<"analyze">;
 /** Result of `analyze`. */
 export type AnalyzeResult = MethodResult<"analyze">;
+/** `analyze.diff` params. */
+export type AnalyzeDiffParams = MethodParams<"analyze.diff">;
+/** Result of `analyze.diff`. */
+export type AnalyzeDiffResult = MethodResult<"analyze.diff">;
 /** `review` params. */
 export type ReviewParams = MethodParams<"review">;
 /** Result of `review`. */
