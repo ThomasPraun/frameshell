@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import {
@@ -47,9 +47,11 @@ import {
   type RenderPlan,
   compileFrame,
   compileRender,
+  gifStep,
   loudnessAnalysis,
   mixStep,
   muxStep,
+  paletteStep,
   parseLoudnessStats,
 } from "./compiler.js";
 import {
@@ -63,7 +65,7 @@ import {
 } from "./cover.js";
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
-import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
+import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
 import { loopSeamWarning } from "./seam.js";
 
@@ -133,10 +135,18 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     const measured = analysis ? parseLoudnessStats(await readFile(join(workDir, LOUDNESS_STATS_FILE), "utf8")) : null;
 
     report({ step: "mux", progress: VIDEO_SHARE });
-    const mux = muxStep(plan, measured, partial);
-    await writeFiles(workDir, mux.files);
     await mkdir(dirname(output), { recursive: true });
-    await run(mux.args, (seconds) => report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * Math.min(1, seconds / plan.duration) }));
+    const muxProgress = (from: number, to: number) => (seconds: number) =>
+      report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * (from + (to - from) * Math.min(1, seconds / plan.duration)) });
+    if (plan.container === "gif") {
+      // No sound to mix: the palette over every segment, then the GIF through it (ADR 0039).
+      await run(paletteStep().args, muxProgress(0, 0.4));
+      await run(gifStep(partial).args, muxProgress(0.4, 1));
+    } else {
+      const mux = muxStep(plan, measured, partial);
+      await writeFiles(workDir, mux.files);
+      await run(mux.args, muxProgress(0, 1));
+    }
     await renameRetrying(partial, output);
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
@@ -292,6 +302,8 @@ export class ExportService {
     const config = (await readEnclosingProject(root))?.config;
     const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
+    // A GIF always repeats (ADR 0039): it gets the loop rules without being asked.
+    const loop = params.loop === true || preset.container === "gif";
     const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
     const resolution = project.resolution;
     const formats = (params.formats ? [...new Set(params.formats)] : [undefined]).map((id) => {
@@ -312,7 +324,7 @@ export class ExportService {
       timeline,
       fps,
       ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
-      ...(params.loop ? { loop: true } : {}),
+      ...(loop ? { loop: true } : {}),
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources,
@@ -340,7 +352,7 @@ export class ExportService {
       const output = params.formats ? withSuffix(base, format.id) : base;
       // Before formats a configured default preset of another aspect letterboxed the project into its size.
       const overridden =
-        params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && !sameAspect(preset.video, format)
+        params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && preset.video.fit === undefined && !sameAspect(preset.video, format)
           ? [
               `Default preset ${preset.id} (export.defaultPreset) is ${preset.video.width}x${preset.video.height}, another aspect than format ` +
                 `${format.id}: rendered at ${size.width}x${size.height} with its codec, bitrate and loudness (ADR 0027). For the preset's ` +
@@ -413,7 +425,10 @@ export class ExportService {
                 onProgress: (update: JobUpdate) => ctx.update(update),
                 ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
               });
-              if (params.loop) {
+              const bytes = preset.container === "gif" ? await stat(output).then((info) => info.size, () => 0) : 0;
+              const sizeWarning = gifSizeWarning(bytes);
+              if (sizeWarning) ctx.update({ warning: sizeWarning });
+              if (loop) {
                 // A diagnostic: a check that cannot run must not fail a render that succeeded.
                 const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
                   (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
@@ -732,7 +747,7 @@ export class ExportService {
 
 /** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */
 function presetEncoder(preset: ExportPreset): string {
-  return { h264: "libx264", h265: "libx265", vp9: "libvpx-vp9", prores: "prores_ks" }[preset.video.codec];
+  return { h264: "libx264", h265: "libx265", vp9: "libvpx-vp9", prores: "prores_ks", gif: "gif" }[preset.video.codec];
 }
 
 /** Files of a multicam group: the cameras and the separate mics. */
@@ -792,6 +807,7 @@ function generatedClipIds(timeline: Timeline): string[] {
  */
 function outputSize(preset: ExportPreset, format: ResolvedFormat, explicit: boolean, op: "render" | "frame"): Size {
   const presetSize = { width: preset.video.width, height: preset.video.height };
+  if (preset.video.fit === "inside") return fitInside(presetSize, format);
   if (sameAspect(presetSize, format)) return explicit || format.primary ? presetSize : { width: format.width, height: format.height };
   if (!explicit) return { width: format.width, height: format.height };
   const id = BUILTIN_FORMAT_IDS.find((builtin) => sameAspect(BUILTIN_FORMATS[builtin]!, presetSize)) ?? `${presetSize.width}x${presetSize.height}`;

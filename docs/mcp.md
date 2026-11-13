@@ -125,7 +125,7 @@ Optional `credits.json`: where third-party assets came from. `asset_import` reco
 
 `render` also adds a warning for placed assets with no verified provenance, but only in a project whose ledger already holds an entry.
 
-`render` with `loop: true` (ADR 0039) exports a file meant to repeat: audio ends faded, refused with `cover`, warnings for a broken cycle or a black end, and the finished job's `warnings` (`job_list`) says when the last frame repeats frame 0.
+`render` with `loop: true` (ADR 0039) exports a file meant to repeat: audio ends faded, refused with `cover`, warnings for a broken cycle or a black end, and the finished job's `warnings` (`job_list`) says when the last frame repeats frame 0. `render` with `preset: "gif"` (ADR 0039) writes a silent looping GIF with the same loop rules, fitted inside 1200x1200, at most 30 fps and 350 frames (more is refused before queuing); `warnings` in the job report a file over 15 MB.
 
 ## People (ADR 0020)
 
