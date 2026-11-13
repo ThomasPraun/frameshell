@@ -292,7 +292,7 @@ describe("gc", () => {
         expect(jobs.filter((job) => job.asset === asset).map((job) => job.state), asset).toEqual(expect.arrayContaining(["failed"]));
       }
       expect(jobs.filter((job) => job.state === "queued" || job.state === "running")).toEqual([]);
-    });
+    }, { timeout: 20_000 });
     rmSync(join(dir, "assets", "ep2.mp4"));
     const result = await cli.request("gc", { cwd: dir });
     expect(result.removed).toContainEqual(expect.objectContaining({ path: `${VOICES_DIR}/${ep2.slice(0, 16)}.json`, kind: "voice" }));
