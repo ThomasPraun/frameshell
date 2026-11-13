@@ -101,6 +101,7 @@ const en = {
       `${cost} (estimated). The provider bills this to you as each line is generated, and a finished take is kept in assets/voiceover/ so it is never paid for twice.`,
     voiceoverCostUnknown:
       "This provider does not say what it costs and does not declare itself free, so it may charge you. A finished take is kept in assets/voiceover/ so it is never paid for twice.",
+    voiceoverCostChanged: "The script or the price changed since you confirmed, so nothing was generated.",
     voiceoverGenerate: "Generate",
     voiceoverDoneTitle: (script: string) => `Voiceover of ${script} is ready`,
     voiceoverDoneDetail: (generated: number, reused: number) =>
@@ -263,6 +264,7 @@ const es: typeof en = {
       `${cost} (estimado). El proveedor te lo cobra a medida que genera cada línea, y una toma terminada se guarda en assets/voiceover/ para no pagarla dos veces.`,
     voiceoverCostUnknown:
       "Este proveedor no indica cuánto cuesta ni declara ser gratuito, así que puede cobrarte. Una toma terminada se guarda en assets/voiceover/ para no pagarla dos veces.",
+    voiceoverCostChanged: "El guion o el precio cambiaron desde que confirmaste, así que no se generó nada.",
     voiceoverGenerate: "Generar",
     voiceoverDoneTitle: (script) => `La voz en off de ${script} está lista`,
     voiceoverDoneDetail: (generated, reused) =>

@@ -1723,7 +1723,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       );
       return checkScript(dir, cwd, file, names);
     },
-    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes, verify }, _caller, request) => {
+    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes, confirmation, verify }, _caller, request) => {
       const dir = await root(cwd);
       // The misread check goes through the project's own transcription provider, like `transcribe`.
       const config = await readProjectConfig(dir);
@@ -1763,6 +1763,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           ...(provider ? { provider } : {}),
           ...(voice ? { voice } : {}),
           yes,
+          ...(confirmation ? { confirmation } : {}),
           verify: verifyServices,
           speechProvider,
           speechProviders: async () => [
