@@ -178,12 +178,15 @@ mutations print the new revision):
                                and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
                                keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
                                music fit runs the same duck again after it moves one. Revert undoes it
-  transition set --at s [--kind dissolve|fade|wipe|push] [--direction left|right|up|down] [--duration s] [--track <track>…]
+  transition set --at s [--kind dissolve|fade|wipe|push|iris|dip-cut] [--direction left|right|up|down]
+           [--origin x0,y0,x1,y1] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
-                               push move the picture the --direction way (default left) on the bottom video track
-                               only. A clip's start or end with nothing butted fades in or out. Short material
-                               shortens it, with a warning
+                               push move the picture the --direction way (default left), iris opens it in a circle
+                               from the centre of --origin (fractions of the frame, default its centre); these play on
+                               the bottom video track only. dip-cut: a hard cut, the clip ending there darkened 40 %
+                               over its last 3 frames (opacity keys; bottom video track, sound untouched). A clip's
+                               start or end with nothing butted fades in or out. Short material shortens it, with a warning
   transition remove --at s [--track <track>…]
   marker add --at s --label l [--color red|orange|yellow|green|blue|purple]
                                A named point on the timeline clock (a hook, a beat to land on); labels are unique
@@ -333,6 +336,7 @@ export const TIMELINE_OPTIONS = {
   track: { type: "string", multiple: true },
   kind: { type: "string" },
   direction: { type: "string" },
+  origin: { type: "string" },
   prop: { type: "string" },
   ease: { type: "string" },
   value: { type: "string" },
@@ -465,7 +469,7 @@ const ALLOWED: Record<string, string[]> = {
     "script-ref",
     "clear-script-ref",
   ],
-  "transition set": ["at", "kind", "direction", "duration", "track", "snap-to"],
+  "transition set": ["at", "kind", "direction", "origin", "duration", "track", "snap-to"],
   "transition remove": ["at", "track", "snap-to"],
   "marker add": ["at", "label", "color", "snap-to"],
   "marker set": ["at", "label", "color", "clear-color", "snap-to"],
@@ -594,6 +598,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return value;
   };
   const str = (flag: string) => values[flag] as string | undefined;
+  /** A rectangle in fractions of the frame: four numbers `x0,y0,x1,y1`. */
+  const frameRect = (flag: string): number[] | undefined => {
+    const raw = str(flag);
+    if (raw === undefined) return undefined;
+    const parts = raw.split(",").map((part) => Number(part.trim()));
+    if (parts.length !== 4 || raw.split(",").some((part) => part.trim() === "") || parts.some((part) => !Number.isFinite(part))) {
+      throw new UsageError(`--${flag}: expected x0,y0,x1,y1 in fractions of the frame, e.g. 0.6,0.2,0.8,0.4, got "${raw}".`);
+    }
+    return parts;
+  };
   /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N` or `bar:N`, optionally `+s` or `-s`) for the daemon to resolve. */
   const when = (flag: string): number | string | undefined => {
     const raw = values[flag];
@@ -793,7 +807,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = command === "transition set" ? "transition.set" : "transition.remove";
       if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds|marker>, a clip edge.`);
       Object.assign(params, { at: when("at"), tracks, ...snapTo() });
-      if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
+      if (method === "transition.set") {
+        Object.assign(params, { kind: str("kind"), direction: str("direction"), origin: frameRect("origin"), duration: num("duration") });
+      }
       break;
     }
     case "marker add":

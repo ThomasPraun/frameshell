@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 112;
+export const PROTOCOL_VERSION = 113;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3451,26 +3451,32 @@ export const methods = {
       "instead (transparent on upper tracks, silence for sound). `kind: \"wipe\"` (a straight edge uncovers the incoming clip) and " +
       "`kind: \"push\"` (the incoming clip slides in and pushes the outgoing one out) move the picture instead of mixing it; `direction` " +
       "`left` (default), `right`, `up` or `down` is the way the incoming picture travels: `{ at: 12.5, kind: \"push\", direction: \"up\" }`. " +
+      "`kind: \"iris\"` opens the incoming clip in a circle growing from the centre of `origin`, `[x0, y0, x1, y1]` in fractions of the " +
+      "frame (the element that just lit up, from `inspect.point`; default the frame's centre): `{ at: 12.5, kind: \"iris\", origin: [0.6, 0.2, 0.8, 0.4] }`. " +
       "They play on the bottom video track only (the first shown picture track; a video track over a multicam program track is not it): " +
       "any other video track named in `tracks` is refused, and without `tracks` the others are skipped with a warning; audio tracks " +
-      "crossfade. They are refused at an edge of a nested timeline clip. Pick the kind by why the picture changes (see the skill's transitions reference); " +
+      "crossfade. They are refused at an edge of a nested timeline clip. `kind: \"dip-cut\"` makes the edge a hard cut on the bottom " +
+      "video track and darkens the clip ending there by 40 % over its last 3 frames, as `opacity` keys on it (`duration` is ignored; " +
+      "sound and other tracks are not touched; another video track named in `tracks` is refused); `transition.remove` there takes the " +
+      "dip keys away again. Pick the kind by why the picture changes (see the skill's transitions reference); " +
       "a `warnings` entry flags three transitions of one kind in a row, or more than a third hard cuts, on the bottom track. " +
       "`duration` is the total seconds; `tracks` limits it. The clips stay where they are and the timeline length never changes: a " +
       "transition is centered on the cut and borrows source from before the incoming clip's `in` and after the outgoing clip's `out`. " +
       "An edge with no clip butted to it (a clip's start or end) fades in or out for any kind: `{ at: 58, kind: \"fade\", duration: 1 }` " +
       "fades the last clip out. Replaces any transition already on that edge. Multicam program tracks are skipped with a warning (hard " +
       "cuts). Short material never fails: it shortens the transition, or plays a dissolve with no spare source as a dip, and a `warnings` " +
-      "entry says so; a wipe or push with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
+      "entry says so; a wipe, push or iris with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
       "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), `direction` comes " +
-      "with `dissolve` or `fade`, or a wipe or push finds the edge only on video tracks that are not the bottom one; TrackNotFound.",
+      "with another kind than `wipe` or `push`, `origin` with another kind than `iris`, a wipe, push or iris finds the edge only on " +
+      "video tracks that are not the bottom one, or a dip cut finds no clip ending at `at` on the bottom video track; TrackNotFound.",
     params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "transition.remove": {
     mutating: true,
     description:
-      "Clear the transition on the clip edge at `at` (dissolve, fade in, fade out) on every video and audio track that has one, or only " +
-      "`tracks`. Example: `{ at: 12.5 }`. The clips stay where they are. Fails with InvalidOperation when no targeted track has a " +
+      "Clear the transition on the clip edge at `at` (dissolve and its shape, fade in, fade out, a dip cut's keys on the clip ending " +
+      "there) on every video and audio track that has one, or only `tracks`. Example: `{ at: 12.5 }`. The clips stay where they are. Fails with InvalidOperation when no targeted track has a " +
       "clip edge at `at`; an edge without a transition adds a warning.",
     params: operationArgs["transition.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
