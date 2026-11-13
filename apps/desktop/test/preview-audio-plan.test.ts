@@ -41,8 +41,10 @@ describe("sourceWindow", () => {
     expect(sourceWindow({ span: span(), from: 1200, to: 1700 })).toEqual({ first: 50_200, count: 500 });
   });
 
-  it("reads one frame more when speed interpolates between frames", () => {
-    expect(sourceWindow({ span: span({ speed: 1.5 }), from: 1000, to: 1100 })).toEqual({ first: 50_000, count: 150 });
+  it("reads what the time stretch needs at other speeds: a frame and its search on both sides", () => {
+    // Frames -1 to 1 of the span, centred on sidecar frames 48 464, 50 000 and 51 536, half a 2048 window and a 512
+    // search around them: 46 928 to 53 072.
+    expect(sourceWindow({ span: span({ speed: 1.5 }), from: 1000, to: 1100 })).toEqual({ first: 46_928, count: 6145 });
   });
 });
 
@@ -59,10 +61,12 @@ describe("renderRead", () => {
     expect(Array.from(out)).toEqual([0.125, 0.125]);
   });
 
-  it("resamples linearly for sped-up clips", () => {
+  it("plays a sped-up clip's first sample where the speed puts it, stretched instead of resampled", () => {
     const pcm = Int16Array.from([0, 8192, 16384, 24576]);
     const out = renderRead({ span: span({ speed: 1.5 }), from: 1000, to: 1002 }, pcm, 50_000);
-    expect(Array.from(out)).toEqual([0, 0.375]);
+    // Frame 0 is centred on the clip's first source sample and plays on from it at speed 1, at full weight.
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBeCloseTo(0.25, 4);
   });
 
   it("plays silence for frames past the end of the sidecar", () => {

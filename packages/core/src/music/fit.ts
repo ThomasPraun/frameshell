@@ -171,7 +171,7 @@ function exactPlan(request: FitRequest, g: FrameGrid, end: number): FitPlan {
       ? []
       : [
           `Export keeps the pitch with atempo, which starts about ${ATEMPO_LEAD_MS} ms early (measured, ADR 0037): the hit plays that much before ${secs(end)} in the export, a fraction of a frame; ` +
-            "the preview has no such shift but plays the pitch up or down by up to 0.3 semitone until its stretch lands (#499).",
+            "the preview keeps the pitch too (#499) and has no such shift.",
         ];
   return finish("exact", request, after, end, operations, steps, warnings, { introCut: 0, silentBefore: 0, speedChange: speed !== clip.speed ? (speed / clip.speed - 1) * 100 : null });
 }

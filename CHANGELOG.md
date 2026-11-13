@@ -773,6 +773,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The preview keeps the pitch of a clip at speed ≠ 1, like export (#499, epic #451): its program audio stretches a
+  sped-up clip's sound with WSOLA (2048-sample Hann frames, the window of export `atempo` at 48 kHz, each moved by up
+  to 512 samples to line up with the one before) instead of resampling it, so a 1.25x clip no longer sounds higher in
+  the app than in the file. Reads of one clip carry the alignment over from one to the next during a play; speed 1 is
+  sample-for-sample unchanged. A test plays tones at 0.75x, 1.25x and 2x through the preview and the real export mix:
+  the same pitch within 2 Hz, the sound on time within one 128-sample block, sample-accurate fades the same.
 - Voiceover cost dialog (#586, ADR 0034 decision 20; protocol 118): the paid run is bound to what the person saw.
   `voiceover.generate`'s `ConfirmationRequired` carries a `confirmation` token (provider, voice, lines to say and their
   cost), the app sends it back with `yes`, and a paid run whose lines or cost changed since (the script was edited while
