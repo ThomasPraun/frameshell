@@ -198,8 +198,9 @@ mutations print the new revision):
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
                                push move the picture the --direction way (default left), iris opens it in a circle
-                               from the centre of --origin (fractions of the frame, default its centre); these play on
-                               the bottom video track only. dip-cut: a hard cut, the clip ending there darkened 40 %
+                               from the centre of --origin (fractions of the frame, default its centre); on an upper
+                               track the outgoing clip shows only where the incoming one does not, and at a nested
+                               clip's edge its own tracks follow. dip-cut: a hard cut, the clip ending there darkened 40 %
                                over its last 3 frames (opacity keys; bottom video track, sound untouched). A clip's
                                start or end with nothing butted fades in or out. Short material shortens it, with a warning
   transition remove --at s [--track <track>…]

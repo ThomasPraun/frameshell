@@ -51,6 +51,9 @@ import {
   placementAt,
   parseTimeline,
   playedShape,
+  DIP_DEPTH,
+  DIP_FRAMES,
+  dipKeyIndexes,
   programGroup,
   reframePointAt,
   scriptRefPathProblem,
@@ -80,11 +83,6 @@ function restoredKeys(lane: readonly ClipKey[]): ClipKey[] {
     .filter((key) => key.auto !== "duck" || key.base !== undefined)
     .map((key): ClipKey => (key.auto === "duck" ? { at: key.at, value: key.base!, ...(key.ease ? { ease: key.ease } : {}), ...(key.baseAuto ? { auto: key.baseAuto } : {}) } : key));
 }
-
-/** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
-const DIP_DEPTH = 0.4;
-/** Frames a dip cut darkens before the cut (#483: "for 3 frames"). */
-const DIP_FRAMES = 3;
 
 /** What the engine needs to know about a media file. */
 export interface SourceInfo {
@@ -1321,37 +1319,9 @@ class Edit {
     }
     if (kind === "dip-cut") return this.dipCut(args);
     const at = g.snap(args.at);
-    const { bottom, note: bottomNote } = this.bottomVideoTrack();
-    const notBottom = (track: ClipTrack) => track.kind === "video" && track !== bottom;
-    const onlyBottom = {
-      field: "tracks",
-      hint: bottom ? `Use kind dissolve or fade there, or limit \`tracks\` to ${bottom.id} and audio tracks.` : "Use kind dissolve or fade there.",
-    };
-    const listed = (tracks: readonly string[]) => `video track${tracks.length === 1 ? "" : "s"} ${tracks.join(", ")}`;
-    if (shaped) {
-      const named = (args.tracks ?? []).map((id) => this.clipTrack(id)).filter((track): track is ClipTrack => track.kind !== "program" && notBottom(track));
-      if (named.length > 0) {
-        const ids = named.map((t) => t.id);
-        throw this.invalid(`${article(kind)} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
-      }
-    }
-    const skipped: string[] = [];
-    let applied = false;
+    const { bottom } = this.bottomVideoTrack();
     let dipped: Clip | undefined;
     await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
-      if (shaped && notBottom(track)) {
-        skipped.push(track.id);
-        return;
-      }
-      // Flattening does not carry a shape into a nested clip's own clips yet (ADR 0030 slice 3).
-      const nested = shaped && incoming && outgoing ? [outgoing, incoming].find(isNested) : undefined;
-      if (nested) {
-        throw this.invalid(`${article(kind)} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
-          field: "kind",
-          hint: "Use kind dissolve or fade at this edge.",
-        });
-      }
-      applied = true;
       for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
       if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
@@ -1374,16 +1344,8 @@ class Edit {
         this.warnings.push(`${kind} at ${at} s on ${track.id}: no clip is butted there, so it fades ${incoming ? "in" : "out"} instead.`);
       }
     });
-    if (!applied) {
-      throw this.invalid(`${article(kind)} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
-    }
     // Replaces a dip cut there too (ADR 0030 decision 4): its keys would darken under the new transition.
     if (dipped) await this.clearDip(dipped);
-    if (skipped.length > 0) {
-      this.warnings.push(
-        `skipped ${listed(skipped)}: ${article(kind)} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
-      );
-    }
     if (bottom) await this.warnVariety(bottom);
   }
 
@@ -1506,12 +1468,8 @@ class Edit {
   async dipKeys(clip: Clip): Promise<[number, number] | null> {
     if (!clip.keys?.opacity) return null;
     const { lane, from, last } = await this.dipLane(clip);
-    const half = this.halfFrame(clip);
-    const near = (key: ClipKey | undefined, frame: number) => key !== undefined && Math.abs(key.at - this.keyAt(clip, frame)) < half;
-    const end = lane.findIndex((key) => near(key, last));
-    const start = end - 1;
-    if (from === last || end < 1 || !near(lane[start], from)) return null;
-    return Math.abs(lane[end]!.value - round4(lane[start]!.value * (1 - DIP_DEPTH))) < 1e-4 ? [start, end] : null;
+    if (from === last) return null;
+    return dipKeyIndexes(lane, this.keyAt(clip, from), this.keyAt(clip, last), this.halfFrame(clip));
   }
 
   /**

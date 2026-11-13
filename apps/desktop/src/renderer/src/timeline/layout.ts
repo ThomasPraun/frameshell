@@ -162,6 +162,8 @@ export interface TrackRow {
   hidden: boolean;
   /** Video tracks: id of the plate this track sits behind the person of (`track.set` `behind`, ADR 0032); null otherwise. */
   behind: string | null;
+  /** The bottom picture layer, a video track (the first shown picture track): dip cuts play there (ADR 0030). */
+  bottom: boolean;
   /** Program tracks: the group's angles in group order (what the number keys pick); empty otherwise. */
   angles: ShotAngle[];
   /** Top edge in content px (ruler included). */
@@ -260,6 +262,7 @@ export function layoutTimeline(
 
   const byKind = (kind: TrackKind) => view.tracks.filter((track) => track.kind === kind);
   const pictures = view.tracks.filter((track) => track.kind === "video" || track.kind === "program");
+  const bottom = pictures.find((track) => track.hidden !== true);
   const ordered = [...pictures.reverse(), ...byKind("audio"), ...byKind("subtitles")];
 
   const markers = (view.markers ?? []).map((marker): MarkerBox => ({ id: marker.id, at: marker.at, label: marker.label, color: marker.color ?? null }));
@@ -271,7 +274,8 @@ export function layoutTimeline(
   const rows = ordered.map((track): TrackRow => {
     const group = track.kind === "program" ? view.groups?.find((candidate) => candidate.id === track.group) : undefined;
     const pictured = track.kind === "video" || track.kind === "audio";
-    const marks = pictured ? transitionMarks(track.clips as unknown as Clip[], { fps: view.fps, ...transitions }) : new Map<string, TransitionMark[]>();
+    const lowest = track.kind === "video" && track === bottom;
+    const marks = pictured ? transitionMarks(track.clips as unknown as Clip[], { fps: view.fps, ...transitions }, lowest) : new Map<string, TransitionMark[]>();
     const clips = track.clips.map((clip, index) => {
       const box = clipBox(clip, track.clips[index + 1]?.start, problems.get(clip.id) ?? null, group, marks.get(clip.id) ?? []);
       duration = Math.max(duration, box.end);
@@ -306,6 +310,7 @@ export function layoutTimeline(
       muted: track.muted === true,
       hidden: track.hidden === true,
       behind: track.kind === "video" ? (track.behind ?? null) : null,
+      bottom: lowest,
       angles,
       top,
       height,

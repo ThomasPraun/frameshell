@@ -450,8 +450,9 @@ export const operationArgs = {
       .describe(
         "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
           "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the " +
-          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `wipe`, `push` and `iris` play on the " +
-          "bottom video track only; sound crossfades as for a dissolve. A clip edge with nothing butted fades in or out for these kinds. " +
+          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `wipe`, `push` and `iris` play on any " +
+          "video track (on an upper one the outgoing clip shows only where the incoming one does not) and at edges of nested clips; sound " +
+          "crossfades as for a dissolve. A clip edge with nothing butted fades in or out for these kinds. " +
           "`dip-cut`: a hard cut, the outgoing bottom-track clip darkened 40 % over its last 3 frames (opacity keys); sound is not touched.",
       ),
     direction: z

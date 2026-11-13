@@ -25,6 +25,12 @@ export interface NestHost {
   fadeIn?: number;
   /** Seconds of its fade to black before `end`; absent for none. */
   fadeOut?: number;
+  /**
+   * The shaped dissolve it comes in by (ADR 0030), on clips of its extra video tracks: their picture follows `shapeAt`
+   * over `half` seconds each side of `start` instead of fading in by the dissolve. `fadeIn` here is the picture's
+   * fade in (its own `fadeIn`, effective); the host's `fadeIn` above still includes the dissolve for sound.
+   */
+  shapeIn?: { shape: TransitionShape; half: number; fadeIn: number };
 }
 
 /** What flattening records on a clip of a nested timeline (`flattenTimeline`); absent on clips that need none. */
@@ -192,6 +198,11 @@ export interface NestedFades {
    * the half after the cut when a clip ends where it starts, else the whole length (it plays as a fade in).
    */
   dissolveIn: number;
+  /**
+   * Its dissolve's shape when the dissolve plays as one (a clip ends where it starts, {@link playedShape}): its extra
+   * video tracks follow `shapeAt` over `half` (= `dissolveIn`) seconds each side of its start instead of fading in.
+   */
+  shapeIn?: { shape: TransitionShape; half: number };
 }
 
 /**
@@ -206,21 +217,37 @@ export function nestedFades(clip: Clip, track: readonly Clip[], context: Transit
   const room = Number.isFinite(length) ? Math.floor((length / 2) * context.fps + GRID_EPSILON) * frame : length;
   const fade = (seconds: number | undefined) => (seconds === undefined ? 0 : Math.min(quantize(seconds), room));
   let dissolveIn = 0;
+  let shapeIn: NestedFades["shapeIn"];
   if (clip.dissolve !== undefined) {
     const sorted = [...track].sort((a, b) => a.start - b.start);
     const previous = sorted[sorted.indexOf(clip) - 1];
     const butted = previous !== undefined && Math.abs(previous.start + clipLength(previous, context) - clip.start) <= BUTT_EPSILON;
     dissolveIn = fade(butted ? clip.dissolve / 2 : clip.dissolve);
+    const shape = playedShape(clip);
+    if (shape && butted && dissolveIn > 0) shapeIn = { shape, half: dissolveIn };
   }
-  return { fadeIn: fade(clip.fadeIn), fadeOut: fade(clip.fadeOut), dissolveIn };
+  return { fadeIn: fade(clip.fadeIn), fadeOut: fade(clip.fadeOut), dissolveIn, ...(shapeIn ? { shapeIn } : {}) };
 }
 
 /**
- * The shape `clip`'s dissolve plays as (ADR 0030). None on a nested clip: flattening does not carry a shape into
- * its clips yet (slice 3), so it plays as a plain dissolve.
+ * The shape `clip`'s dissolve plays as (ADR 0030), on any video track. On a nested clip flattening carries it to the
+ * clip starting its window on its own track and, through {@link NestHost.shapeIn}, to its extra video tracks.
  */
 export function playedShape(clip: Clip): TransitionShape | undefined {
-  return clip.type === "timeline" ? undefined : clip.shape;
+  return clip.shape;
+}
+
+/** A shaped dissolve a nested clip comes in by, as one of its clips plays it (ADR 0030): `half` seconds each side of `at`. */
+export interface HostShape {
+  shape: TransitionShape;
+  /** Timeline second of the cut: the nested clip's start. */
+  at: number;
+  half: number;
+}
+
+/** Shaped dissolves of the hosts of `clip` ({@link NestHost.shapeIn}), outermost first. */
+export function hostShapes(clip: Clip): HostShape[] {
+  return (nestingOf(clip)?.hosts ?? []).flatMap((host) => (host.shapeIn ? [{ shape: host.shapeIn.shape, at: host.start, half: host.shapeIn.half }] : []));
 }
 
 /** Rectangle in fractions of the frame being rendered: left, top, right, bottom (0 to 1). */
@@ -308,4 +335,24 @@ export function shapeAt(shape: TransitionShape, f: number): ShapeFrame {
   }
   const clip: FrameRect = ux < 0 ? [1 - p, 0, 1, 1] : ux > 0 ? [0, 0, p, 1] : uy < 0 ? [0, 1 - p, 1, 1] : [0, 0, 1, p];
   return { outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 0, dy: 0, clip } };
+}
+
+/** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
+export const DIP_DEPTH = 0.4;
+
+/** Frames a dip cut darkens before the cut (#483: "for 3 frames"). */
+export const DIP_FRAMES = 3;
+
+/**
+ * Indexes in `lane` (a clip's `opacity` keys, sorted, on its own clock) of the two keys a dip cut wrote (ADR 0030
+ * decision 5): one at `from`, the clip-clock second of its first darkened frame, then one at `last`, its last frame,
+ * {@link DIP_DEPTH} lower (4 decimals, as written). Keys within `half` a frame count as on it. Null when it has none.
+ */
+export function dipKeyIndexes(lane: readonly { at: number; value: number }[], from: number, last: number, half: number): [number, number] | null {
+  const near = (key: { at: number } | undefined, at: number) => key !== undefined && Math.abs(key.at - at) < half;
+  const end = lane.findIndex((key) => near(key, last));
+  const start = end - 1;
+  if (end < 1 || !near(lane[start], from)) return null;
+  const darker = Math.round(lane[start]!.value * (1 - DIP_DEPTH) * 10000) / 10000;
+  return Math.abs(lane[end]!.value - darker) < 1e-4 ? [start, end] : null;
 }

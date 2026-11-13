@@ -1,4 +1,15 @@
-import { type Backdrop, type ClipFormatOverride, type ClipKey, type ElementAdjust, clipInFormat, glassOf } from "@frameshell/schema";
+import {
+  type Backdrop,
+  type ClipFormatOverride,
+  type ClipKey,
+  type ElementAdjust,
+  TRANSITION_DIRECTIONS,
+  TRANSITION_SHAPE_KINDS,
+  type TransitionDirection,
+  type TransitionShapeKind,
+  clipInFormat,
+  glassOf,
+} from "@frameshell/schema";
 import type { TimelineView } from "@frameshell/protocol";
 import { type Placement, keyedValueAt } from "@frameshell/schema/composite";
 import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
@@ -161,7 +172,7 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
       {!image && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.transitions}>
           {(["in", "out"] as const).map((side) => (
-            <TransitionEdge key={side} side={side} state={edgeState(row, clip, side)} onSend={send} />
+            <TransitionEdge key={side} side={side} row={row} state={edgeState(row, clip, side)} onSend={send} />
           ))}
         </div>
       )}
@@ -230,44 +241,89 @@ const PROP_LABELS: Record<KeyProp, () => string> = {
 /** Seconds a new transition plays over (the daemon's default). */
 const DEFAULT_TRANSITION_S = 0.5;
 
+/** What an edge can take, as its menu lists it (ADR 0018, ADR 0030). */
+type EdgeChoice = "none" | "dissolve" | TransitionShapeKind | "fade" | "dip-cut";
+
+const SHAPE_LABELS: Record<TransitionShapeKind, () => string> = {
+  wipe: () => t.inspector.transitionWipe,
+  push: () => t.inspector.transitionPush,
+  iris: () => t.inspector.transitionIris,
+};
+
 /**
- * One edge's transition: kind (none, dissolve, fade; a dissolve needs a cut) and length. The daemon applies it to
- * every video and audio track with an edge at that time, as `transition.set` does without `tracks`.
+ * One edge's transition: kind and length, and a wipe's or push's direction. Where clips meet it can dissolve, wipe,
+ * push or iris (on video tracks) or, on the bottom video track, dip cut; any edge can fade. The daemon applies it to
+ * every video and audio track with an edge at that time, as `transition.set` does without `tracks`. An iris keeps the
+ * `origin` it has (the agent sets it, from `inspect.point`); one chosen here opens from the frame's centre.
  */
-function TransitionEdge({ side, state, onSend }: { side: "in" | "out"; state: EdgeState; onSend: (edit: TimelineEdit, options: EditOptions) => void }) {
+function TransitionEdge({
+  side,
+  row,
+  state,
+  onSend,
+}: {
+  side: "in" | "out";
+  row: TrackRow;
+  state: EdgeState;
+  onSend: (edit: TimelineEdit, options: EditOptions) => void;
+}) {
   const edge = EDGE_LABELS[side]();
-  const kinds = [
+  const cut = state.butted || state.kind === "dissolve";
+  const shapes = cut && row.kind === "video" ? TRANSITION_SHAPE_KINDS.map((kind) => ({ id: kind, label: SHAPE_LABELS[kind]() })) : [];
+  const kinds: { id: EdgeChoice; label: string }[] = [
     { id: "none", label: t.inspector.transitionNone },
-    ...(state.butted || state.kind === "dissolve" ? [{ id: "dissolve", label: t.inspector.transitionDissolve }] : []),
+    ...(cut ? [{ id: "dissolve" as const, label: t.inspector.transitionDissolve }] : []),
+    ...shapes,
     { id: "fade", label: t.inspector.transitionFade },
+    ...((state.butted && row.bottom) || state.kind === "dip-cut" ? [{ id: "dip-cut" as const, label: t.inspector.transitionDipCut }] : []),
   ];
-  const set = (kind: "dissolve" | "fade", duration: number, label: string) => onSend({ op: "transition.set", args: { at: state.at, kind, duration } }, { label });
+  const length = state.length > 0 ? state.length : DEFAULT_TRANSITION_S;
+  const set = (args: Record<string, unknown>, label: string) => onSend({ op: "transition.set", args: { at: state.at, ...args } }, { label });
+  const choose = (choice: EdgeChoice) => {
+    if (choice === "none") onSend({ op: "transition.remove", args: { at: state.at } }, { label: "Remove transition" });
+    else if (choice === "dip-cut") set({ kind: choice }, "Add dip cut");
+    else if (choice === "iris") set({ kind: choice, duration: length }, "Add iris");
+    else if (choice === "wipe" || choice === "push") set({ kind: choice, duration: length, direction: state.shape?.direction ?? "left" }, `Add ${choice}`);
+    else set({ kind: choice, duration: length }, choice === "dissolve" ? "Add dissolve" : "Add fade");
+  };
+  const { shape } = state;
   return (
     <span className="transition-edge" data-edge={side}>
       <select
         className="clip-field-select"
         aria-label={t.inspector.transitionEdge(edge)}
         data-tip={t.inspector.transitionEdgeTitle(edge)}
-        value={state.kind ?? "none"}
-        onChange={(event) => {
-          const kind = event.target.value;
-          if (kind === "none") onSend({ op: "transition.remove", args: { at: state.at } }, { label: "Remove transition" });
-          else set(kind as "dissolve" | "fade", state.length > 0 ? state.length : DEFAULT_TRANSITION_S, kind === "dissolve" ? "Add dissolve" : "Add fade");
-        }}
+        value={shape?.kind ?? state.kind ?? "none"}
+        onChange={(event) => choose(event.target.value as EdgeChoice)}
       >
         {kinds.map((kind) => (
           <option key={kind.id} value={kind.id}>{`${edge}: ${kind.label}`}</option>
         ))}
       </select>
-      {state.kind && (
+      {shape && shape.kind !== "iris" && (
+        <select
+          className="clip-field-select"
+          aria-label={t.inspector.transitionDirection(edge)}
+          data-tip={t.inspector.transitionDirectionTitle}
+          value={shape.direction ?? "left"}
+          onChange={(event) =>
+            set({ kind: shape.kind, direction: event.target.value as TransitionDirection, duration: state.length }, "Change transition direction")
+          }
+        >
+          {TRANSITION_DIRECTIONS.map((direction) => (
+            <option key={direction} value={direction}>
+              {t.inspector.transitionDirections[direction]}
+            </option>
+          ))}
+        </select>
+      )}
+      {state.kind && state.kind !== "dip-cut" && (
         <NumberField
           name="length"
           stored={state.length}
           onCommit={(value) =>
-            // A shaped dissolve (ADR 0030) keeps its shape (an iris its origin): the inspector does not edit shapes yet.
-            state.shape
-              ? onSend({ op: "transition.set", args: { at: state.at, ...state.shape, duration: value } }, { label: "Change transition length" })
-              : set(state.kind!, value, "Change transition length")
+            // A shaped dissolve keeps its shape (an iris its origin).
+            set({ ...(shape ?? { kind: state.kind }), duration: value }, "Change transition length")
           }
         />
       )}

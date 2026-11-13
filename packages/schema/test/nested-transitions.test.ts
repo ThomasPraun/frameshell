@@ -8,6 +8,7 @@ import {
   gainAt,
   hasPictureKeys,
   hostFades,
+  hostShapes,
   isKeyed,
   nestingOf,
   placementAt,
@@ -168,6 +169,27 @@ describe("nested clips with keys and edges (ADR 0018 decision 9)", () => {
     );
     expect(part).not.toHaveProperty("dissolve");
     expect(part).not.toHaveProperty("shape");
+  });
+
+  it("carries a shaped dissolve to the clip starting the window and, as a host shape, to the extra video tracks (ADR 0030)", () => {
+    const wipe = { kind: "wipe", direction: "right" } as const;
+    const out = flattenTimeline(timeline("main", [{ id: "v1", kind: "video", clips: [(main.tracks[0] as { clips: Clip[] }).clips[0]!, { ...host, shape: wipe }] }]), resolve, 10);
+    const opener = byId(out, "v1", "n/c1");
+    expect(opener.dissolve).toBe(2);
+    expect(opener.shape).toEqual(wipe);
+    expect(hostShapes(opener)).toEqual([]);
+    // The title rides the shape, 1 s each side of the cut, instead of fading in by the dissolve; its sound still would.
+    const layer = byId(out, "v1/2", "n/title");
+    expect(hostShapes(layer)).toEqual([{ shape: wipe, at: 5, half: 1 }]);
+    const fades = (picture: boolean) => hostFades(layer, picture).map((fade) => Number(fade.fadeIn.toFixed(6)));
+    expect(fades(true)).toEqual([0.3]);
+    expect(fades(false)).toEqual([1]);
+    // Sound tracks have no picture to shape.
+    expect(hostShapes(byId(out, "v1/a1", "n/music"))).toEqual([]);
+    expect(fadesOf(byId(out, "v1/a1", "n/music"))).toEqual([{ start: 5, end: 9, fadeIn: 1, fadeOut: 1 }]);
+    // Without a clip ending where it starts, it plays as a fade in: no shape reaches anything.
+    const alone = flattenTimeline(timeline("main", [{ id: "v1", kind: "video", clips: [{ ...host, shape: wipe }] }]), resolve, 10);
+    expect(hostShapes(byId(alone, "v1/2", "n/title"))).toEqual([]);
   });
 
   it("composes keys without fps, but records edges and handles only when flattening for playback", () => {

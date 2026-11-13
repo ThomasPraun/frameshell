@@ -97,6 +97,37 @@ test("right-clicking a cut adds a fade as two halves; the inspector reads and ed
   await expect.poll(() => saved("c_two")["dissolve"]).toBeUndefined();
 });
 
+test("the inspector picks a wipe and its direction, an iris, and a dip cut at a cut (ADR 0030)", async () => {
+  await page.mouse.click((await at(7)).x, (await at(7)).y);
+  await expect(lanes()).toHaveAttribute("data-selected", "c_two");
+  const kind = inspector().getByRole("combobox", { name: "Start transition", exact: true });
+  await kind.selectOption("wipe");
+  await expect.poll(() => [saved("c_two")["dissolve"], saved("c_two")["shape"]]).toEqual([0.5, { kind: "wipe", direction: "left" }]);
+  await expect(kind).toHaveValue("wipe");
+
+  const direction = inspector().getByRole("combobox", { name: "Start transition direction" });
+  await direction.selectOption("up");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "wipe", direction: "up" });
+  // A push keeps the direction.
+  await kind.selectOption("push");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "push", direction: "up" });
+
+  await kind.selectOption("iris");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "iris" });
+  await expect(direction).toHaveCount(0);
+
+  // A dip cut is a hard cut with the outgoing clip darkened by opacity keys; it has no length.
+  await kind.selectOption("dip-cut");
+  await expect.poll(() => (saved("c_one")["keys"] as { opacity?: unknown[] } | undefined)?.opacity?.length).toBe(2);
+  expect(saved("c_two")["dissolve"]).toBeUndefined();
+  await expect(kind).toHaveValue("dip-cut");
+  await expect(inspector().getByRole("textbox", { name: "Length (s)" })).toHaveCount(0);
+
+  await kind.selectOption("none");
+  await expect.poll(() => saved("c_one")["keys"]).toBeUndefined();
+  expect(journaled().slice(-6).every(({ author }) => author === "ui")).toBe(true);
+});
+
 test("a keyframe at the playhead is added, eased, re-valued and removed from the inspector", async () => {
   await page.keyboard.press("Home");
   for (let i = 0; i < 6; i++) await page.keyboard.press("Shift+ArrowRight");

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Shaped transitions on upper tracks and nested clips, slice 3 of #483 (ADR 0030, epic #451): `transition.set` with
+  `kind` `wipe`, `push` or `iris` now plays on every video track with the edge, like a dissolve, instead of the bottom
+  one only. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not
+  (a wipe's or iris's inverse mask, a `geq` alpha step in export, a canvas clip path in the preview), and neither fades;
+  a render's own alpha is kept. At an edge of a nested timeline clip the shape is no longer refused: the clip starting
+  its window on its own track plays it, and its upper tracks follow the same shape over the half after the cut instead
+  of fading in (their sound still fades in); a test checks that export and preview cut the same pictures at the same
+  progress on every frame. In the app, the clip inspector's edge menu offers wipe, push and iris where clips meet on a
+  video track, with a direction menu for wipe and push, and dip cut on the bottom video track (English and Spanish);
+  the timeline marks a shaped dissolve with its kind's sign and a dip cut as a shaded strip over its clip's last
+  frames. A hand-edited shape on an upper track, which played as a plain dissolve, now plays as its shape. Plans of
+  timelines without shapes on upper tracks or nested clips are unchanged.
 - Sample-accurate audio fades, #585 (ADR 0018 amendment, epic #451; protocol 121): a media clip's `audio` takes
   `fadeInMs` and `fadeOutMs`, an equal-power sound ramp from or to silence in milliseconds, not snapped to frames
   (`clip add`/`clip set --audio-fade-in ms --audio-fade-out ms`, daemon and MCP `audioFadeInMs`/`audioFadeOutMs`; 0

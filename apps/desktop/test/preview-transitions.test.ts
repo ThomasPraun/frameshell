@@ -230,13 +230,14 @@ describe("compileProgram with transitions", () => {
     expect(renderRead({ span: sound, from: sound.start, to: sound.start + 4 }, new Int16Array(0), 0)).toEqual(new Float32Array(4));
   });
 
-  it("mixes a shaped dissolve on an upper track, as export does", () => {
-    const program = compileProgram(
-      view([video("v1", [clip("bg", 0, 0, 5)]), video("v2", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape: { kind: "wipe" } })])]),
-      A,
-    );
-    expect(opacityAt(program, 54, 2)).toBeCloseTo(0.3, 9);
-    expect(spanShape(programAt(program, 54, 2) as PlacedSpan, 54, 30)).toBeNull();
+  it("cuts both pictures of a wipe on an upper track, the outgoing one to the rest of the frame, neither faded", () => {
+    const shape = { kind: "wipe" } as const;
+    const program = compileProgram(view([video("v1", [clip("bg", 0, 0, 5)]), video("v2", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })])]), A);
+    const incoming = spanShape(programAt(program, 54, 2) as PlacedSpan, 54, 30)!;
+    expect(incoming).toEqual(shapeAt(shape, dissolveProgress(2, 0.5, 54 / 30)).incoming);
+    const [x0] = incoming.clip!;
+    expect(spanShape(programAt(program, 54, 1) as PlacedSpan, 54, 30)).toEqual({ dx: 0, dy: 0, clip: [0, 0, x0, 1] });
+    expect([opacityAt(program, 54, 1), opacityAt(program, 54, 2)]).toEqual([1, 1]);
   });
 
   it("evaluates picture keys per frame with placementAt, keys on the clip's own clock", () => {

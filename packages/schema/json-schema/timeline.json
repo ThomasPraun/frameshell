@@ -397,7 +397,7 @@
                             "kind"
                           ],
                           "additionalProperties": false,
-                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades."
+                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`), on any video track: on an upper track the outgoing clip shows only where the incoming one does not. Sound still crossfades."
                         },
                         "fadeIn": {
                           "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
@@ -1225,7 +1225,7 @@
                             "kind"
                           ],
                           "additionalProperties": false,
-                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades."
+                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`), on any video track: on an upper track the outgoing clip shows only where the incoming one does not. Sound still crossfades."
                         },
                         "fadeIn": {
                           "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
@@ -2046,7 +2046,7 @@
                             "kind"
                           ],
                           "additionalProperties": false,
-                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades."
+                          "description": "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`), on any video track: on an upper track the outgoing clip shows only where the incoming one does not. Sound still crossfades."
                         },
                         "fadeIn": {
                           "description": "Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start.",
