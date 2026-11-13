@@ -124,6 +124,8 @@ Optional `credits.json`: where third-party assets came from. `asset_import` reco
 
 `render` also adds a warning for placed assets with no verified provenance, but only in a project whose ledger already holds an entry.
 
+`render` with `loop: true` (ADR 0039) exports a file meant to repeat: audio ends faded, refused with `cover`, warnings for a broken cycle or a black end, and the finished job's `warnings` (`job_list`) says when the last frame repeats frame 0.
+
 ## People (ADR 0020)
 
 Optional `people.json`: who is who across transcripts, multicam angles and faces. Until a tool writes it (`people_add` creates it), the people tools only read (an empty list, suggestions from multicam angles alone): no download, no job, no transcript change.

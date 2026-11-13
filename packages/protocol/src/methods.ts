@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 104;
+export const PROTOCOL_VERSION = 105;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -355,6 +355,9 @@ const JobSchema = z.object({
     .nullable()
     .describe("True when unchanged content reused existing outputs and nothing was re-encoded; null until known."),
   error: z.string().nullable().describe("Why the job failed; null otherwise."),
+  warnings: z
+    .array(z.string())
+    .describe("Problems found while the job ran or in its result, e.g. a loop render whose last frame repeats frame 0 (`render` with `loop`); empty when none."),
   createdAt: z.string().describe("ISO 8601 time the job was queued."),
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
@@ -1152,7 +1155,12 @@ export const methods = {
       "the file of each named `<name>-<format>.<container>`; `renders` lists them, and the top-level fields describe the first. " +
       "In a format other than the primary, untransformed media fills the frame (crop around the centre), generated clips " +
       "render at that size first, and vertical captions are 1.3x larger. A `preset` whose aspect differs from a format " +
-      "rendered fails with InvalidOperation; FormatNotFound names the project's formats.",
+      "rendered fails with InvalidOperation; FormatNotFound names the project's formats. " +
+      "Loop (ADR 0039): `loop: true` makes the file loop without a seam: the last frame must not repeat frame 0 (a loop is a first key " +
+      "identical to the last, with the frame range leaving the duplicate out), MP4 and MOV audio gets a 2 ms half-sine fade at its first " +
+      "and last sample, and `warnings` says when the output frame rate breaks the cycle or an end fades from or to black. Once the file is " +
+      "written the job compares frame 0 with the last frame and puts a warning in the job's `warnings` when they are the same picture. " +
+      "The timeline is never changed. Fails with InvalidOperation when combined with `cover`.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -1178,6 +1186,13 @@ export const methods = {
           "Make frame 0 a finished composition (platforms show it as the thumbnail): the frame chosen like `cover` does, with " +
             "its word over it, replaces the first frame only; no subtitles on it, nothing else changes. Absent: frame 0 is the " +
             "timeline's own, and `warnings` says when that is black. Needs the preset's frame rate to equal the project's.",
+        ),
+      loop: z
+        .boolean()
+        .optional()
+        .describe(
+          "Export a file meant to repeat (title loops, banners): frame 0 to the last frame, 2 ms half-sine audio fades at both ends of " +
+            "MP4 and MOV, warnings for a broken cycle, black ends, and a last frame that repeats frame 0. Refused with `cover`. Default false.",
         ),
     }),
     result: z.object({

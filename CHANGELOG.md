@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Loop-safe export, first slice of #474 (ADR 0039, epic #451; `render` `loop`, CLI `render --loop`, `JobInfo.warnings`,
+  protocol 105): `render --loop` makes a file meant to repeat (title loops, banners). MP4 and MOV audio gets a 2 ms
+  half-sine fade at its first and last sample after loudness (silent exports unchanged); `--loop` with `--cover-frame`
+  is refused, because the cover replaces frame 0; `warnings` say when the output frame rate makes the cycle a fraction
+  of a frame and when frame 0 or the last frame is black. Once the file is written the job compares frame 0 with the
+  last frame at 160 px and, when they are the same picture while the file moves, adds a warning to the job (`warnings`
+  of `job.list`, printed by the CLI after `Rendered`) naming the fix: end the last key one frame earlier or trim one
+  frame. The timeline's length is never changed. Every job now carries `warnings` (empty when none). The GIF preset is
+  the next slice.
 - HyperFrames clips rendered at each format's size, third slice of #469 with the format half of #465 slice 4 (ADR 0027,
   ADR 0033, epic #451; daemon `clip.renders` `format`, MCP `clip_renders`, protocol 104): in a format of the project
   whose aspect differs from the composition's (`9x16` of a 16:9 project), the `hyperframes` adapter sets the copied
