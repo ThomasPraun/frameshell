@@ -2,12 +2,14 @@ import { ErrorCode, MUSIC_FIT_MIN_CONFIDENCE, type MusicFitResult, RpcError } fr
 import { type AnyClip, type ClipTrack, type DuckSettings, type MediaClip, type Timeline, clipLength } from "@frameshell/schema";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
-import { resolveTimeRefArg } from "../timeline/time-ref.js";
+import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";
 
 /** What `music.fit` needs from the project. */
 export interface MusicFitDeps {
+  /** The timeline's beat grid (`tempoGrid`), for `beat:` and `bar:` in `end` and `from`. */
+  loadGrid: GridLoader;
   /** Energy envelope of a project-relative asset; throws when it cannot be decoded. */
   profile(asset: string): Promise<EnergyProfile>;
   /** Hits (source seconds) measured in the asset's beat grid, when there is a grid for this content; else null. */
@@ -50,8 +52,8 @@ const invalid = (message: string, data: Record<string, unknown>) => new RpcError
  */
 export async function planMusicFit(timeline: Timeline, fps: number, request: MusicFitRequest, deps: MusicFitDeps): Promise<MusicFitPlan> {
   const { track, clip } = findMusicClip(timeline, request.clip);
-  const end = resolveTimeRefArg("music.fit", "end", request.end, timeline);
-  const from = request.from === undefined ? undefined : resolveTimeRefArg("music.fit", "from", request.from, timeline);
+  const end = await resolveTimeRefArg("music.fit", "end", request.end, timeline, deps.loadGrid);
+  const from = request.from === undefined ? undefined : await resolveTimeRefArg("music.fit", "from", request.from, timeline, deps.loadGrid);
 
   const warnings: string[] = [];
   let hit: MusicFitResult["hit"];

@@ -22,6 +22,10 @@ export {
   type FormatSource,
   type FormatLayout,
   type ResolvedFormat,
+  type FormatPicture,
+  formatOf,
+  formatCrop,
+  scaledCaptions,
   primaryFormatId,
   projectFormats,
   resolveFormat,
@@ -78,6 +82,7 @@ export {
   MAX_TEMPO_BPM,
   MAX_TEMPO_METER,
   type Tempo,
+  isGridRefLabel,
   markerLabelKey,
   findMarker,
   findMusicClip,
@@ -265,6 +270,18 @@ export {
   parseExportPreset,
 } from "./plugin.js";
 export {
+  BATCH_SCHEMA_URL,
+  BatchFileSchema,
+  BatchRowIdSchema,
+  BatchRowSchema,
+  PROTOTYPE_KEYS,
+  type BatchFile,
+  type BatchRow,
+  type SlotTarget,
+  parseBatchFile,
+  parseSlotTarget,
+} from "./batch.js";
+export {
   BEATS_SCHEMA_URL,
   BeatsEditsSchema,
   BeatsFileSchema,
@@ -408,7 +425,6 @@ export {
   cueTokens,
   subtitleAt,
   subtitleLayout,
-  scaleCaptions,
   subtitleTracks,
 } from "./subtitles.js";
 export {
