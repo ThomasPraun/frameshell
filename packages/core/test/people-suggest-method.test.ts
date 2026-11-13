@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AppDirs, type DaemonConnection, ErrorCode, RpcError, connectToDaemon, methods } from "@frameshell/protocol";
 import { SCHEMA_VERSION } from "@frameshell/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AudioExtractor, type Daemon, FACE_EMBEDDING_DIMS, type FaceTrack, VOICES_DIR, type VoiceEmbedRequest, startDaemon, writeFaceScan } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools } from "./media-tools.js";
@@ -285,6 +285,14 @@ describe("gc", () => {
   it("sweeps the voice prints of an asset that is gone", async () => {
     const { dir, cli, ep2 } = await setup();
     await cli.request("people.suggest", { cwd: dir });
+    // The ingest of each file (it fails: the "video" is text) reads it; Windows refuses to delete a file still open (EBUSY).
+    await vi.waitFor(async () => {
+      const { jobs } = await cli.request("job.list", { cwd: dir });
+      for (const asset of ["assets/ep1.mp4", "assets/ep2.mp4", "assets/ep3.mp4"]) {
+        expect(jobs.filter((job) => job.asset === asset).map((job) => job.state), asset).toEqual(expect.arrayContaining(["failed"]));
+      }
+      expect(jobs.filter((job) => job.state === "queued" || job.state === "running")).toEqual([]);
+    });
     rmSync(join(dir, "assets", "ep2.mp4"));
     const result = await cli.request("gc", { cwd: dir });
     expect(result.removed).toContainEqual(expect.objectContaining({ path: `${VOICES_DIR}/${ep2.slice(0, 16)}.json`, kind: "voice" }));
