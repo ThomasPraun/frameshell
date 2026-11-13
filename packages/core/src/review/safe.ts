@@ -1,4 +1,4 @@
-import type { ReviewSafeFlag, ZoneEdge } from "@frameshell/protocol";
+import { type ReviewCraftWarning, type ReviewSafeFlag, SAFE_SUBJECTS, type ZoneEdge } from "@frameshell/protocol";
 import { type FontMetrics, type ResolvedSubtitleTrack, type SafeZone, type Size, type SubtitleCue, type SubtitleStyle, cueTokens, subtitleLayout } from "@frameshell/schema";
 
 // Where a platform's UI covers the picture and which captions reach into it. Pure: the `safe` sheet of `review`.
@@ -84,8 +84,12 @@ export function cueBox(style: SubtitleStyle, cue: SubtitleCue, frame: Size, metr
   };
 }
 
-/** A cue of a track that reaches into a zone. */
+/** A cue of a track, or a graphic or a face of a clip, that reaches into a zone. */
 export interface CueCrossing {
+  /** Absent: a subtitle cue. */
+  subject?: ReviewSafeFlag["subject"];
+  /** The clip of a graphic or a face. */
+  clip?: string;
   track: string;
   /** Timeline frames `[start, end)`. */
   start: number;
@@ -105,15 +109,29 @@ export function cueCrossings(tracks: readonly ResolvedSubtitleTrack[], insets: I
   return found;
 }
 
-/** `crossings` grouped by track and zone: how many cues, when the first and last start (`fps` converts frames to seconds), the deepest reach. */
+/**
+ * The crossings of the boxes of graphics and faces (`BoxSpan`, timeline seconds) with the zones, as {@link CueCrossing}s
+ * on the frame grid at `fps`: a box shows from the frame its span starts in to the one before its end.
+ */
+export function boxCrossings(spans: readonly { subject: "graphic" | "face"; track: string; clip: string; from: number; to: number; box: Box }[], insets: Insets, frame: Size, fps: number): CueCrossing[] {
+  return spans.flatMap((span) => {
+    const zones = crossings(span.box, insets, frame);
+    if (zones.length === 0) return [];
+    const start = Math.floor(span.from * fps + 1e-6);
+    return [{ subject: span.subject, track: span.track, clip: span.clip, start, end: Math.max(start + 1, Math.ceil(span.to * fps - 1e-6)), zones }];
+  });
+}
+
+/** `crossings` grouped by subject, track, clip and zone: how many, when the first and last start (`fps` converts frames to seconds), the deepest reach. */
 export function safeFlags(crossings: readonly CueCrossing[], fps: number): ReviewSafeFlag[] {
   const groups = new Map<string, ReviewSafeFlag>();
   for (const cue of crossings) {
     for (const { edge, reach } of cue.zones) {
-      const key = `${cue.track}\0${edge}`;
+      const subject = cue.subject ?? "subtitle";
+      const key = `${subject}\0${cue.track}\0${cue.clip ?? ""}\0${edge}`;
       const at = Math.round((cue.start / fps) * 1000) / 1000;
       const flag = groups.get(key);
-      if (!flag) groups.set(key, { subject: "subtitle", track: cue.track, zone: edge, cues: 1, first: at, last: at, reach });
+      if (!flag) groups.set(key, { subject, track: cue.track, ...(cue.clip === undefined ? {} : { clip: cue.clip }), zone: edge, cues: 1, first: at, last: at, reach });
       else {
         flag.cues++;
         flag.first = Math.min(flag.first, at);
@@ -128,4 +146,27 @@ export function safeFlags(crossings: readonly CueCrossing[], fps: number): Revie
 /** Whether a cue of `crossings` shows at timeline frame `frame`. */
 export function crossingAt(crossings: readonly CueCrossing[], frame: number): boolean {
   return crossings.some((cue) => frame >= cue.start && frame < cue.end);
+}
+
+/** The subjects of `crossings` that cross a zone at timeline frame `frame`, each once, in the order of {@link ReviewSafeFlag}. */
+export function subjectsAt(crossings: readonly CueCrossing[], frame: number): NonNullable<CueCrossing["subject"]>[] {
+  const shown = new Set(crossings.filter((cue) => frame >= cue.start && frame < cue.end).map((cue) => cue.subject ?? "subtitle"));
+  return SAFE_SUBJECTS.filter((subject) => shown.has(subject));
+}
+
+/**
+ * Craft warnings for the graphics and faces of `flags` that reach into the zones of `platform`. Captions are not
+ * repeated here: they have their own line in `safeZones`.
+ */
+export function safeWarnings(platform: string, flags: readonly ReviewSafeFlag[]): ReviewCraftWarning[] {
+  return flags
+    .filter((flag) => flag.subject !== "subtitle")
+    .map((flag) => ({
+      check: "safe-zone" as const,
+      from: flag.first,
+      to: flag.last,
+      message:
+        `${flag.subject === "face" ? "a face" : "a graphic"} of clip ${flag.clip} reaches ${flag.reach} px into the ${flag.zone} zone of ${platform} ` +
+        `(${flag.cues} ${flag.cues === 1 ? "sample" : "samples"} from ${flag.first} to ${flag.last} s): the platform's own buttons and text cover it there. Move it inside the zone's edge.`,
+    }));
 }

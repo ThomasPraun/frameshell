@@ -34,7 +34,7 @@ Grain and loops (#500, decision recorded there): grain phase is the timeline fra
 
 1. **`render.loop`**: refusal with `cover`, the cycle and black-end warnings, audio fades in `muxStep`, the post-render duplicate check, `JobInfo.warnings`, golden plan, real-ffmpeg tests, CLI, MCP, skill. Built, see below.
 2. GIF container and preset (`video.fit`, palette passes, caps, GCE delay test). Built, see below.
-3. Seam sheet and jump metric: #457, reusing the frame comparison of slice 1.
+3. Seam sheet and jump metric: #457, reusing the frame comparison of slice 1. Built: the sheet in an earlier slice of #457, the jump as `metrics.seam` of `review` (`review/loop.ts`: `meanAbsDiff` and the 160 px size of `export/seam.ts`, under 10 grey levels reads continuous, `--loop` makes a duplicate or a jump a warning).
 
 ## Slice 1 as built
 

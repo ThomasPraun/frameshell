@@ -29,7 +29,8 @@ export const ReviewOutputSchema = z
   .describe(
     `${ReviewSheetKindSchema.description} ` +
       "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, near-blank frames, " +
-      "whether frame 0 is empty, subtitle cues shorter than they take to read, the loudness of a file (integrated LUFS, loudness range, true peak, phone band 200 Hz to 6 kHz) and craft warnings.",
+      "whether frame 0 is empty, subtitle cues shorter than they take to read, the loudness of a file (integrated LUFS, loudness range, true peak, phone band 200 Hz to 6 kHz), " +
+      "sounds against the picture events they belong to (`sync`), the jump from the last frame to the first (`seam`), a file against its export plan (`delivery`) and craft warnings.",
   );
 
 /** Name in {@link REVIEW_OUTPUTS}. */
@@ -86,12 +87,22 @@ export const ZONE_EDGES = ["top", "right", "bottom", "left"] as const;
 /** One of {@link ZONE_EDGES}. */
 export type ZoneEdge = (typeof ZONE_EDGES)[number];
 
+/** What `review` can tell crosses a platform zone. */
+export const SAFE_SUBJECTS = ["subtitle", "graphic", "face"] as const;
+
 /** Text or a subject that crosses a platform zone, as far as review can measure it. */
 export const ReviewSafeFlagSchema = z.object({
-  subject: z.literal("subtitle").describe("What crosses: the captions of a subtitle track (box measured from the bundled face, the track's style and each cue's words)."),
-  track: z.string().describe("Subtitle track id."),
-  zone: z.enum(ZONE_EDGES).describe("Which zone the captions reach into."),
-  cues: z.int().describe("How many cues reach into it."),
+  subject: z
+    .enum(SAFE_SUBJECTS)
+    .describe(
+      "What crosses: `subtitle`, the captions of a subtitle track (box measured from the bundled face, the track's style and each cue's words); " +
+        "`graphic`, what a generated clip draws (titles included: the box of its alpha at up to 12 frames of the clip, so a render without alpha is not measured); " +
+        "`face`, a face box of a footage clip from its cached `people scan` (no scan, no flag).",
+    ),
+  track: z.string().describe("Subtitle track id; for a `graphic` or a `face`, the video track of the clip."),
+  clip: z.string().optional().describe("Clip id of a `graphic` or a `face`."),
+  zone: z.enum(ZONE_EDGES).describe("Which zone it reaches into."),
+  cues: z.int().describe("How many cues (`subtitle`) or measured samples (`graphic`, `face`) reach into it."),
   first: z.number().describe("Seconds the first of them starts."),
   last: z.number().describe("Seconds the last of them starts."),
   reach: z.int().describe("Most pixels (of the film's frame) any of them reaches into the zone."),
@@ -109,7 +120,7 @@ export const ReviewSafeZoneSchema = z.object({
     .object({ top: z.int(), right: z.int(), bottom: z.int(), left: z.int() })
     .describe("Pixels of the film's frame each edge's zone covers (the platform's reference numbers scaled to the film's size)."),
   sheets: z.array(z.string()).describe("Absolute paths of the `safe` images of this platform."),
-  flags: z.array(ReviewSafeFlagSchema).describe("Captions that cross a zone, by track and zone; empty when none do. Only the timeline's captions are known: a file has no flags."),
+  flags: z.array(ReviewSafeFlagSchema).describe("Captions, graphics and faces that cross a zone, by subject, track, clip and zone; empty when none do. Only a timeline's are known: a file has no flags."),
 });
 
 /** See {@link ReviewSafeZoneSchema}. */
@@ -122,7 +133,7 @@ export const ReviewSpanSchema = z.object({ from: z.number(), to: z.number(), sec
 export type ReviewSpan = z.output<typeof ReviewSpanSchema>;
 
 /** Checks that raise a craft warning in `metrics.craft`. */
-export const REVIEW_CHECKS = ["static", "frame-0", "blank", "reading", "peak", "phone-band", "silent"] as const;
+export const REVIEW_CHECKS = ["static", "frame-0", "blank", "reading", "peak", "phone-band", "silent", "sync", "loop-seam", "delivery", "safe-zone"] as const;
 
 /** A craft warning: a thing a reviewer would flag, with a number behind it. Warnings never fail a run. */
 export const ReviewCraftWarningSchema = z.object({
@@ -130,7 +141,9 @@ export const ReviewCraftWarningSchema = z.object({
     .enum(REVIEW_CHECKS)
     .describe(
       "`static`: nothing changes for over 3 s. `frame-0`: the first frame is empty (it is the thumbnail). `blank`: a near-blank picture after the first frame. " +
-        "`reading`: a subtitle cue is on screen for less than it takes to read. `peak`: the true peak is above -1 dBTP. `phone-band`: the phone band is 6 LU or more under the whole mix. `silent`: over 15 s with no sound.",
+        "`reading`: a subtitle cue is on screen for less than it takes to read. `peak`: the true peak is above -1 dBTP. `phone-band`: the phone band is 6 LU or more under the whole mix. `silent`: over 15 s with no sound. " +
+        "`sync`: a sound lands early or late against its picture event, or the sounds sit no nearer picture events than chance. `loop-seam`: with `loop`, the last frame repeats the first or jumps from it. " +
+        "`delivery`: the file differs from the export plan. `safe-zone`: a graphic or a face reaches into a platform zone.",
     ),
   from: z.number().nullable().describe("Seconds the thing starts; null when it is about the whole film."),
   to: z.number().nullable(),
@@ -163,6 +176,64 @@ export const ReviewLoudnessSchema = z.object({
 /** See {@link ReviewLoudnessSchema}. */
 export type ReviewLoudness = z.output<typeof ReviewLoudnessSchema>;
 
+/** One sound of the sync check against the picture event it belongs to. */
+export const ReviewSyncOffsetSchema = z.object({
+  at: z.number().describe("Seconds the sound starts (its onset or, for a generated take, its anchor)."),
+  kind: z.string().nullable().describe("Generated effect kind (`click`, `pop`, `thump`...); null for a hit found in a file's sound."),
+  picture: z.number().nullable().describe("Seconds of the nearest visual event within 0.12 s; null when there is none."),
+  offset: z.number().nullable().describe("Sound minus picture, seconds: positive = the sound is late. Null with no picture event."),
+  verdict: z.enum(["on", "early", "late", "none"]).describe("`early`: over 45 ms before the picture; `late`: over 75 ms after it; `none`: no picture event near."),
+});
+
+/** Sync of sounds to picture events. */
+export const ReviewSyncSchema = z.object({
+  source: z.enum(["takes", "file"]).describe("`takes`: generated sounds placed on the timeline (`sound.place`), known to the frame; `file`: hits found in the file's sound."),
+  sounds: z.int().describe("Sounds scored."),
+  excluded: z.int().describe("Sounds left out: whooshes, risers and ticks do not land on an event by design."),
+  spacing: z.number().describe("Seconds between the samples of the picture: the finest offset that can be told."),
+  hits: z.int().describe("Scored sounds within 45 ms (plus half a sample) of a visual event."),
+  near: z.number().nullable().describe("Share of the scored sounds with a visual event within 0.1 s; null with no sounds."),
+  chance: z.number().nullable().describe("The same share when the sounds are moved by fixed offsets (0.3 to 1.1 s either way): what random placement scores. Null with no sounds."),
+  offsets: z.array(ReviewSyncOffsetSchema).describe("Every scored sound (at most 60, in time order)."),
+  silentCuts: z.array(z.number()).describe("Seconds of cuts of the timeline with no sound within 0.12 s (at most 20); empty for a file."),
+});
+
+/** See {@link ReviewSyncSchema}. */
+export type ReviewSync = z.output<typeof ReviewSyncSchema>;
+
+/** The seam of a loop: how far the last frame is from the first. */
+export const ReviewSeamSchema = z.object({
+  first: z.number().describe("Seconds of the first frame compared."),
+  last: z.number().describe("Seconds of the last frame compared."),
+  jump: z.number().describe("Mean absolute grey difference between them at 160 px, 0 to 255 (the measure of the render's loop check): a hard cut reads 40 to 80."),
+  verdict: z
+    .enum(["duplicate", "continuous", "cut"])
+    .describe("`duplicate`: under 0.5 while the picture moves elsewhere, so the loop holds two frames; `continuous`: under 10; `cut`: 10 or more, a visible jump."),
+});
+
+/** See {@link ReviewSeamSchema}. */
+export type ReviewSeam = z.output<typeof ReviewSeamSchema>;
+
+/** One thing the delivery check compared. */
+export const ReviewDeliveryCheckSchema = z.object({
+  field: z.enum(["width", "height", "fps", "duration", "codec", "audio", "loudness"]),
+  expected: z.union([z.string(), z.number()]).describe("What the export plan says."),
+  actual: z.union([z.string(), z.number()]).nullable().describe("What the file has; null when it has none."),
+  ok: z.boolean(),
+});
+
+/** An exported file against the export plan. */
+export const ReviewDeliverySchema = z.object({
+  timeline: z.string(),
+  preset: z.string(),
+  format: z.string(),
+  bytes: z.int().describe("Size of the file."),
+  checks: z.array(ReviewDeliveryCheckSchema),
+});
+
+/** See {@link ReviewDeliverySchema}. */
+export type ReviewDelivery = z.output<typeof ReviewDeliverySchema>;
+
 /** The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (draft size) and its sound. */
 export const ReviewMetricsSchema = z.object({
   picture: z.object({
@@ -180,6 +251,9 @@ export const ReviewMetricsSchema = z.object({
     .nullable()
     .describe("Cues of the timeline's subtitle tracks; null for a file or a timeline with none."),
   loudness: ReviewLoudnessSchema.nullable().describe("Of a file's sound; null for a timeline (export it, then review the file) or a file with no sound."),
+  sync: ReviewSyncSchema.nullable().describe("Sounds against the picture events they belong to, with what random placement would score; null when there are no sounds to compare."),
+  seam: ReviewSeamSchema.nullable().describe("Last frame against the first; null for a film of one frame."),
+  delivery: ReviewDeliverySchema.nullable().describe("The file against the export plan; null unless a `file` is reviewed with a `preset`."),
   craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order; empty when none."),
 });
 

@@ -18,6 +18,7 @@ import {
   BUILTIN_FORMAT_IDS,
   type ExportPreset,
   type FormatEntry,
+  type FormatLayout,
   type FormatSource,
   type MulticamGroup,
   type ResolvedFormat,
@@ -502,6 +503,21 @@ export class ExportService {
     const transcripts = await this.#transcripts(root, timeline);
     const { tokens } = await readCaptionTokens(root, timeline);
     return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps, tokens), layout);
+  }
+
+  /**
+   * `loaded` as export lays it out in project format `projectFormat` (the primary when absent): nested timelines
+   * flattened and the format's overrides applied, with the project's resolution (the unit of clip offsets) and the format's layout. What
+   * `review` measures graphics and faces on. Unknown format ids count as the primary, as in {@link ExportService.resolvedSubtitles}.
+   */
+  async resolvedTimeline(root: string, loaded: LoadedTimeline, projectFormat?: string): Promise<{ timeline: Timeline; fps: number; project: Size; layout: FormatLayout }> {
+    const format = (await this.#formatOf(root, projectFormat, loaded.formats)) ?? undefined;
+    const resolved = await this.#resolved(root, loaded.timeline.id, loaded, format);
+    return {
+      ...resolved,
+      project: (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION,
+      layout: { cover: format?.cover ?? false, captionScale: format?.captionScale ?? 1 },
+    };
   }
 
   /**

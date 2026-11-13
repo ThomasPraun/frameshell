@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { runTool } from "../media/ffmpeg.js";
 
 /** Width the frames of a seam check are compared at, px (ADR 0039). */
-const SEAM_WIDTH = 160;
+export const SEAM_WIDTH = 160;
 /** Mean absolute luma difference (0 to 255) below which two frames are the same picture, compression noise included. */
 export const DUPLICATE_DIFF = 0.5;
 /** Mean luma difference from frame 0 that proves the picture moves somewhere in the file: a held title is no defect. */
@@ -16,6 +16,11 @@ export function meanAbsDiff(a: Uint8Array, b: Uint8Array): number {
   let sum = 0;
   for (let index = 0; index < a.length; index++) sum += Math.abs(a[index]! - b[index]!);
   return a.length === 0 ? 0 : sum / a.length;
+}
+
+/** Size the pictures of a seam check are compared at for a film of `size` px: {@link SEAM_WIDTH} wide, the height even. */
+export function seamPictureSize(size: { width: number; height: number }): { width: number; height: number } {
+  return { width: SEAM_WIDTH, height: Math.max(2, 2 * Math.round((size.height * SEAM_WIDTH) / (size.width * 2))) };
 }
 
 /**
@@ -46,7 +51,7 @@ export async function loopSeamWarning(
   signal?: AbortSignal,
 ): Promise<string | null> {
   if (frames < MIN_FRAMES || size.width < 1 || size.height < 1) return null;
-  const height = Math.max(2, 2 * Math.round((size.height * SEAM_WIDTH) / (size.width * 2)));
+  const { height } = seamPictureSize(size);
   const last = frames - 1;
   const wanted = [...new Set([0, 1, Math.floor(frames / 2), last])];
   const raw = join(work, "seam.gray");

@@ -717,6 +717,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
+    // `clips` and `faceScans` are declared below: they are read when a review runs, not now.
+    generated: (dir, timeline, size) => clips.ensure(dir, timeline, undefined, size),
+    faceScans: (dir) => faceScans(dir)(),
   });
   const analyses = new AnalyzeService({
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
@@ -1443,7 +1446,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, view }, caller) => {
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
       return reviews.run(dir, {
@@ -1455,6 +1458,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         platform,
         every,
         projectFormat,
+        preset,
+        loop,
         view: reviewView,
         ...(projectFormat !== undefined ? await viewFormats(dir, reviewView) : {}),
       });

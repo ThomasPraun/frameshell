@@ -113,6 +113,28 @@ describe("frameshell review", () => {
     120_000,
   );
 
+  it(
+    "prints the loop seam and, with --preset, the delivery check of a file against its export plan",
+    () => {
+      const seam = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics", "--loop"]);
+      expect(seam.code, seam.stderr).toBe(0);
+      expect(seam.stdout).toMatch(/loop seam: the last frame \([\d.]+ s\) differs from the first by [\d.]+ of 255 \((continuous|cut|duplicate)\)/);
+      // The clip is 320x240: against the 1080p plan of the project every size check fails.
+      const delivery = frameshell(["review", "--file", "assets/take.mp4", "--preset", "youtube-1080p", "--sheets", "metrics"]);
+      expect(delivery.code, delivery.stderr).toBe(0);
+      expect(delivery.stdout).toContain("delivery against main with youtube-1080p (16x9): differs");
+      expect(delivery.stdout).toContain("BAD width: 320 (plan 1920)");
+      expect(delivery.stdout).toContain("craft delivery: the file differs from the export plan");
+      const json = JSON.parse(frameshell(["review", "--file", "assets/take.mp4", "--preset", "youtube-1080p", "--sheets", "metrics", "--json"]).stdout) as { metrics: { delivery: { checks: { field: string; ok: boolean }[] } } };
+      expect(json.metrics.delivery.checks.find((check) => check.field === "width")).toMatchObject({ ok: false });
+    },
+    120_000,
+  );
+
+  it("rejects --preset without --file", () => {
+    expect(frameshell(["review", "--preset", "youtube-1080p"]).stderr).toContain("--preset checks an exported file against its export plan: pass --file too");
+  });
+
   it("rejects a bad range, sheet or flag before talking to the daemon", () => {
     expect(frameshell(["review", "--platform", "myspace"]).stderr).toContain("--platform takes instagram-reels, tiktok, youtube-shorts, youtube");
     expect(frameshell(["review", "--range", "5"]).stderr).toContain("--range takes two seconds");
