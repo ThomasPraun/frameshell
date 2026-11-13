@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { laidOutBox, launch, sandbox } from "./harness.js";
+import { drawnFrames, framesNeverDrawn, startDrawLog } from "./draw-log.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
@@ -196,10 +197,16 @@ test("plays across shot changes: only whole layouts, in order, one decoder per v
   test.setTimeout(120_000);
   await press("Home");
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
+  await startDrawLog(page);
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
   const seen = await sampleWhilePlaying(15_000);
   await expect(page.getByTestId("playhead")).toHaveText("00:00:03:00");
+  // Frames the page's rAF sampler missed still reached the screen (ADR 0001): what the engine drew says what was dropped.
+  await page.waitForTimeout(500);
+  const drawn = await drawnFrames(page);
+  expect(drawn.every((frame, i) => i === 0 || frame >= drawn[i - 1]!), "frames drawn in order").toBe(true);
+  test.info().annotations.push({ type: "program frames never drawn", description: String(framesNeverDrawn(drawn, 0, 90)) });
 
   const order = [SOLO_RED, TWO_UP, GRID_3];
   const wrong = seen.filter((layout) => !order.includes(layout));
