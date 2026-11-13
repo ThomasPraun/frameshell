@@ -1,5 +1,5 @@
 // Fields the inspectors share: numeric settings, text, and a segmented single choice.
-import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
+import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 import { t } from "../i18n.js";
 
@@ -45,6 +45,17 @@ const point = (label: string, title: string): FieldSpec => ({
   store: (v) => (v >= 0 && v <= 100 ? round(v / 100, 4) : null),
   step: 1,
   decimals: 1,
+});
+
+/** A number of an audio effect (ADR 0031): shown as stored, held to the effect's range. */
+const effect = (label: string, title: string, unit: string, limit: { min: number; max: number }, step: number, decimals: number): FieldSpec => ({
+  label,
+  title,
+  unit,
+  show: (v) => round(v, decimals),
+  store: (v) => (v >= limit.min && v <= limit.max ? round(v, decimals) : null),
+  step,
+  decimals,
 });
 
 const FIELDS = {
@@ -126,6 +137,14 @@ const FIELDS = {
     step: 1,
     decimals: 1,
   },
+  frequency: effect(t.inspector.fieldFrequency, t.inspector.fieldFrequencyTitle, "Hz", AUDIO_EFFECT_LIMITS.highpass.frequency, 5, 0),
+  floor: effect(t.inspector.fieldFloor, t.inspector.fieldFloorTitle, "dB", AUDIO_EFFECT_LIMITS.denoise.floor, 1, 1),
+  reduction: effect(t.inspector.fieldReduction, t.inspector.fieldReductionTitle, "dB", AUDIO_EFFECT_LIMITS.denoise.reduction, 1, 1),
+  threshold: effect(t.inspector.fieldThreshold, t.inspector.fieldThresholdTitle, "dB", AUDIO_EFFECT_LIMITS.compressor.threshold, 1, 1),
+  ratio: effect(t.inspector.fieldRatio, t.inspector.fieldRatioTitle, ":1", AUDIO_EFFECT_LIMITS.compressor.ratio, 0.5, 1),
+  attack: effect(t.inspector.fieldAttack, t.inspector.fieldAttackTitle, "ms", AUDIO_EFFECT_LIMITS.compressor.attack, 1, 1),
+  release: effect(t.inspector.fieldRelease, t.inspector.fieldReleaseTitle, "ms", AUDIO_EFFECT_LIMITS.compressor.release, 10, 0),
+  makeup: effect(t.inspector.fieldMakeup, t.inspector.fieldMakeupTitle, "dB", AUDIO_EFFECT_LIMITS.compressor.makeup, 0.5, 1),
   reframeX: point(t.inspector.fieldReframeX, t.inspector.fieldReframeXTitle),
   reframeY: point(t.inspector.fieldReframeY, t.inspector.fieldReframeYTitle),
 } satisfies Record<string, FieldSpec>;

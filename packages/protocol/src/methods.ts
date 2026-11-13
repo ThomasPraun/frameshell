@@ -7,7 +7,8 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
-import { MusicFitResultSchema } from "./music.js";
+import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
+import { MUSIC_CANDIDATES_MAX, MusicCandidatesResultSchema, MusicFitResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -31,9 +32,9 @@ import {
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
-import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
+import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, MUSIC_BPM_RANGE, MUSIC_CHORD_PATTERN, MUSIC_LIMITS, MUSIC_LUFS, MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_METER_RANGE, MUSIC_PEAK_DBFS, MUSIC_PRESET_DEFAULTS, MUSIC_TAIL_SECONDS, MusicPresetSchema, MusicSectionSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -72,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 105;
+export const PROTOCOL_VERSION = 113;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -228,10 +229,10 @@ const PinsSchema = z
 const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
-    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "beats", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
+    .enum(["proxy", "sidecar", "manifest", "waveform", "thumbnails", "energy", "loudness", "beats", "audio", "audio-fx", "voice", "clip", "context", "proposal", "people", "shoot", "matte", "temp"])
     .describe(
       "`proxy`, `sidecar`, `manifest`, `waveform`, `thumbnails`: ingest outputs of content no asset has now (or of an " +
-        "older recipe or fps). `energy`: cut-snapping envelope. `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
+        "older recipe or fps). `energy`: cut-snapping envelope. `loudness`: EBU R128 reading of an asset in `.frameshell/loudness/` (content no asset has now). `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
         "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
         "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
@@ -317,7 +318,7 @@ const JobSchema = z.object({
         "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
         "`matte`: compute the subject matte of one video asset (`matte.prepare`). " +
         "`beats`: measure the beat grid of one music asset (`beats.measure`). " +
-        "`analyze`: measure a reference video's shots, colours, loudness and tempo (`analyze`).",
+        "`analyze`: measure a reference video's shots, colours, look, rhythm, events, loudness and tempo (`analyze`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -347,7 +348,7 @@ const JobSchema = z.object({
         "effects not baked yet), matte (makes the subject mattes of the plates of tracks `behind` one that are not made yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, loudness, tempo, then the sheets).",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, every frame for look, rhythm and events, loudness, tempo, then the sheets).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -685,6 +686,33 @@ const RenderOutputSchema = z.object({
   height: z.int(),
   segments: z.int().describe("Video segments encoded in parallel."),
   warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
+});
+
+/** One row × format of a batch (ADR 0040), as `batch.render` returns it and `<out>/manifest.json` keeps it. */
+const BatchEntrySchema = z.object({
+  row: z.string().describe("Row id of the batch file."),
+  format: z.string().describe("Format id rendered, e.g. `9x16`."),
+  output: z.string().describe("Absolute file the render writes: `<out>/<row>.<container>`, with `-<format>` when the batch lists formats."),
+  status: z
+    .enum(["planned", "queued", "running", "done", "failed", "canceled"])
+    .describe("`planned` only in a dry run; then `queued` until its row's turn, `running`, and `done`, `failed` or `canceled`."),
+  job: z.string().nullable().describe("Render job id (`job.list`) once the row is queued; null before."),
+  error: z.string().nullable().describe("Why the render failed; null otherwise."),
+  startedAt: z.string().nullable().describe("ISO time the render started; null before."),
+  finishedAt: z.string().nullable().describe("ISO time it ended; null before."),
+  duration: z.number().nullable().describe("Seconds the render took; null until it ended."),
+  warnings: z.array(z.string()).describe("What this render skips, and assets of the row without verified provenance (ADR 0026)."),
+});
+
+/** `<out>/manifest.json` of a batch (ADR 0040): one entry per row × format, rewritten atomically on each job change. */
+export const BatchManifestSchema = z.object({
+  batch: z.string().describe("Absolute path of the batch file."),
+  template: z.string().describe("Template timeline id."),
+  out: z.string().describe("Absolute folder of the outputs and this manifest."),
+  state: z.enum(["running", "done"]).describe("`done` once every entry ended; `running` left behind means the daemon stopped mid-batch."),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  entries: z.array(BatchEntrySchema).describe("Row order, then format order."),
 });
 
 /** Where a checked word sits: shared by lost and uncertain words of `transcribe.verify`. */
@@ -1213,6 +1241,48 @@ export const methods = {
       warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
     }),
   },
+  "batch.render": {
+    mutating: true,
+    description:
+      "Render variants of one template timeline from data rows (ADR 0040): sizes, languages, product rows. The batch file " +
+      "(`*.batch.json`, JSON Schema `batch.json`) names `template` (timeline id, default `main`), `slots` (name → " +
+      "`<clipId>.props.<dot.path>` or `<clipId>.asset`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
+      "used as file names; a slot a row leaves out keeps the template's value), and optional `formats`, `preset`, `quality`. " +
+      "Each row patches the template in memory only, never under `timelines/` (no journal, no proposal): a props value is " +
+      "written at its path over the clip's props and checked by the adapter like `clip.set`; an asset swap keeps the clip's " +
+      "in, out and placement and fails when the new file lacks the stream the track plays, is shorter than `out`, or lacks a " +
+      "transcript a subtitle track follows. Every row × format is validated and compiled first; then the rows render one at a " +
+      "time as ordinary `render` jobs, to `<out>/<row>.<container>` (`-<format>` added with formats), and the call returns at " +
+      "once. `<out>/manifest.json` (default `<project>/exports/<batch file name>/`) holds every row × format with status, " +
+      "output, job, error and timings, rewritten on each job change; follow the jobs with `job.list` or `job.progress`. " +
+      "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover: swap in takes " +
+      "that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
+      "unknown clip, props the adapter refuses, an asset too short or without the stream or transcript; a batch already " +
+      "running into the same `out`), InvalidProjectFile (the batch file), and what `render` fails with, its data naming the `row`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
+      out: AbsolutePath.optional().describe("Absolute folder for the outputs and `manifest.json`. Default `<project>/exports/<batch file name without .batch.json>/`."),
+      formats: z
+        .array(FormatIdSchema)
+        .min(1)
+        .optional()
+        .describe("Format ids to render each row in, instead of the batch file's `formats`; each must be in `format.list`."),
+      dryRun: z.boolean().default(false).describe("Validate every row × format and return the plan; nothing is rendered or written."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      file: z.string().describe("Absolute path of the batch file."),
+      template: z.string().describe("Template timeline id."),
+      out: z.string().describe("Absolute output folder."),
+      manifest: z.string().nullable().describe("Absolute path of `manifest.json`; null in a dry run."),
+      dryRun: z.boolean(),
+      preset: z.string().describe("Preset id every row renders with."),
+      quality: QualityTierSchema.extract(["draft", "final"]).nullable().describe("Tier asked for; null = the preset as written."),
+      entries: z.array(BatchEntrySchema).describe("Every row × format, row order then format order: the manifest as written now."),
+      jobs: z.array(JobSchema).describe("Render jobs queued by this call: the first row's. Later rows queue as the one before ends."),
+    }),
+  },
   frame: {
     description:
       "Capture the composited frame showing at timeline time `at` as a PNG, JPEG or WebP image, rendered by the export " +
@@ -1259,7 +1329,7 @@ export const methods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies and `metrics`): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
@@ -1270,7 +1340,12 @@ export const methods = {
       "can measure; a file has none). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
       "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
-      "`to` limit it to a range (the seam is then the range's ends). The MCP tool returns the sheets as images. " +
+      "`to` limit it to a range (the seam is then the range's ends). `metrics` (default on, or named in `sheets`) writes `metrics.json` and " +
+      "returns `metrics`: numbers a sheet cannot tell, measured on grey frames and the sound: the longest still stretch, the largest gap between " +
+      "visual events, near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
+      "`file` (integrated LUFS, range, true peak, the phone band 200 Hz to 6 kHz; measured after the encode, so export first: a timeline has none) and `craft` warnings " +
+      "(still over 3 s, empty frame 0, a blank picture, a cue too short, a true peak above -1 dBTP, a phone band 6 LU under the mix, over 15 s of silence). " +
+      "The MCP tool returns the sheets as images. " +
       "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",
     params: z.strictObject({
@@ -1286,7 +1361,11 @@ export const methods = {
         ),
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
-      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default contact, phone, motion and seam, plus safe when a platform is given or the style guide names platforms on a vertical film."),
+      sheets: z
+        .array(ReviewOutputSchema)
+        .min(1)
+        .optional()
+        .describe("Outputs to write: the sheets and `metrics`. Default contact, phone, motion, seam and metrics, plus safe when a platform is given or the style guide names platforms on a vertical film."),
       platform: SafeZoneSchema.shape.platform
         .optional()
         .describe(
@@ -1305,19 +1384,22 @@ export const methods = {
   analyze: {
     description:
       "Measure a reference video (#471): what it does, in numbers, so \"make it like this\" works from facts instead of a guess. " +
-      "Take its grammar (rhythm, colour, loudness, tempo), never its content. Writes `.frameshell/analysis/<name>/` " +
+      "Take its grammar (rhythm, colour, look, events, loudness, tempo), never its content. Writes `.frameshell/analysis/<name>/` " +
       "(replaced by a new run with the same name; regenerable, project files are never touched) and returns: the **shot table** " +
       "(cuts found by ffmpeg's scene score on every frame, each shot's start, end and length, the score of the cut that opens it, a JPEG of " +
       "its middle frame and its dominant colours), the **cutting** (shot count, cuts per minute, average, median, shortest and longest shot), " +
-      "the **palette** of the whole film, the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
+      "the **palette** of the whole film, the **look** (brightness 0 to 1, contrast, saturation, warmth from -1 blue to 1 red, and an 8 x 6 grid of mean colours for the film in the result and for every shot in `analysis.json`), " +
+      "the **rhythm** (`shotLengthCv`: spread of the shot lengths over their mean, 0 a metronome; `stillShare`: share of frames in which the picture does not change; `longestStill`; big changes of the picture, their count and per minute; the `largestGap` between them; `bursts`: 3 or more big changes within 1.5 s), " +
+      "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
+      "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
       "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
       "A hard cut is found; a dissolve, a whip pan or a jump cut inside one continuous take is not (lower `threshold` to catch softer ones; " +
-      "events, motion curves, text placement and the mouth-to-voice lag come in later slices). Label what you tell the person: " +
+      "motion curves, the mouth-to-voice lag and a read of the text itself come in later slices; events are hints, so look at the frames they name). Label what you tell the person: " +
       "these numbers are MEASURED; what you read off the sheets by eye is ESTIMATED, and say which frames to check. " +
-      "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 25 seconds. The MCP tool returns the " +
+      "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 35 seconds. The MCP tool returns the " +
       "sheets as images. Example: `{ file: \"references/reel.mp4\" }`. Fails with AssetNotFound (`file` missing), " +
       "InvalidOperation (no picture, or shorter than a frame), the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
@@ -1563,6 +1645,40 @@ export const methods = {
         .array(ClipRenderSchema)
         .describe("Generated clips on video tracks, with those of nested timelines where they play (as export flattens them), in track then time order."),
     }),
+  },
+  "clip.verify": {
+    description:
+      "Check that a generated clip's picture is a pure function of time (ADR 0033), as a motion clip must be: its live page is " +
+      "loaded in headless Chrome at the project resolution and `probes` frames are captured at `(i + 0.37) * duration / probes` " +
+      "of the clip's played part, each twice. Cold: a fresh page seeks straight to the time. Reseek: one page shows an unrelated " +
+      "probe first, then the time. The two captures of a probe must not differ by more than `tolerance` per channel " +
+      "(red, green, blue, alpha; default 2 of 255); a bigger difference means the composition keeps state between frames " +
+      "(a CSS transition, a timer, a clock, unseeded randomness, a composited layer) and its render would depend on the order " +
+      "frames are painted. `ok` is false then, and `worst` names the probe time, the pixel and the page element that paints it. " +
+      "`distinct` counts different cold pictures: 1 with several probes (a `warnings` entry says so) means the clip never moves, " +
+      "for example a composition whose timeline is not bound to the seek. Reads only: never renders, writes no file. Takes " +
+      "seconds to a minute (a page load per probe). Needs the plugin of the clip's type loaded and trusted, and its adapter to " +
+      "have a live preview (`hyperframes` does). Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound, " +
+      "TimelineNotFound, LiveUnavailable (no adapter, no live preview, or the page does not define `window.frameshellLive`), " +
+      "OutsideProject, or the Binary* errors when headless Chrome or ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Generated clip id as `clip.renders` reports it (`<nested clip>/<clip>` inside a nested timeline)."),
+      probes: z
+        .int()
+        .min(2)
+        .max(VERIFY_MAX_PROBES)
+        .default(VERIFY_DEFAULT_PROBES)
+        .describe(`Frames to capture, evenly spread over the clip. Default ${VERIFY_DEFAULT_PROBES}.`),
+      tolerance: z
+        .int()
+        .min(0)
+        .max(255)
+        .default(VERIFY_DEFAULT_TOLERANCE)
+        .describe(`Largest per-channel difference (of 255) that still counts as the same picture. Default ${VERIFY_DEFAULT_TOLERANCE}.`),
+    }),
+    result: ClipVerifyResultSchema,
   },
   "audio.bakes": {
     // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
@@ -2405,6 +2521,125 @@ export const methods = {
       warnings: z.array(z.string()).describe("Crowded frames, short gaps, a take twice in a row, trimmed heads, and the engine's own warnings."),
     }),
   },
+  "sound.music": {
+    mutating: true,
+    description:
+      "Generate a music bed (ADR 0038): a seeded 16-step sequencer synthesized offline, no network and no third-party samples. " +
+      `Presets: \`synthwave\` (${MUSIC_PRESET_DEFAULTS.synthwave.bpm} BPM, ${MUSIC_PRESET_DEFAULTS.synthwave.chords.join("-")}, saw chords, ` +
+      `four on the floor), \`lofi\` (${MUSIC_PRESET_DEFAULTS.lofi.bpm} BPM, ${MUSIC_PRESET_DEFAULTS.lofi.chords.join("-")}, electric piano, swung ` +
+      `hats, vinyl, dark), \`minimal\` (${MUSIC_PRESET_DEFAULTS.minimal.bpm} BPM, FM mallet stabs, plucked bass, metallic hats, no pads). ` +
+      "The track has whole bars (`bars`, or as many as fit `length` seconds, or with `place` and neither, as many as fit from " +
+      "`at` to the end of the timeline) made of `sections`: `intro`, `full`, `dark` (stripped: pad, sub, soft kick, for under a " +
+      "voice or a dense picture), `build` (a climbing motif, a clap roll and a riser that ends 75 ms before the next part), " +
+      "`gap` (one stop-time hit, then silence so the next downbeat lands hard), `drop` (everything, a crash and a big kick on " +
+      "its first beat), `outro` (half time). Without `sections` it is intro, full, build and drop (from 8 bars), outro. A " +
+      "section's `at` (a time on the timeline) starts it on the nearest bar, so a drop can land on a marker. Every track ends " +
+      "on a final hit, the first chord with a crash and a big kick on the downbeat after its last bar, that rings for " +
+      `${MUSIC_TAIL_SECONDS} s; \`accents\` add a crash and a big kick on the nearest beat (a logo, a call to action). The same ` +
+      "arguments always give the same file. The take is a 48 kHz 24-bit stereo WAV at " +
+      `${MUSIC_LUFS} LUFS with its sample peak at most ${MUSIC_PEAK_DBFS} dBFS, written to \`assets/sound/music-<preset>-<key>.wav\` and imported; ` +
+      "beside it the call writes its exact beat grid `beats/<name>.beats.json` (`detector: \"exact\"`, confidence 1, the " +
+      "downbeat at 0, the final hit and accents as `onsets`), so nothing measures it and later calls' `beat:`/`bar:` times, `--snap-to " +
+      "beat` and `music.fit` can use it at once (this call's own `at`, section and accent times take seconds and markers only). With `place` (default) the call also puts the take on the timeline in one " +
+      "transaction `Music: …` (one proposal in review mode; `revert` undoes it): a clip starting at `at` (default 0) on the " +
+      "audio track named `Music` (made when absent; `Music 2`… when the time is taken) or on `track`, with `gain` minus the " +
+      "style's `sound.musicUnderVoice` (12 dB by default), and when the timeline has no `tempo` yet, `tempo` set to follow " +
+      "the new clip; an existing tempo is kept, with a warning. `place: false` only writes and imports the take. When the " +
+      "project keeps a `credits.json`, the take is recorded as `own` work. Fails with InvalidParams (no length to go by, " +
+      "bars and sections that disagree, too long) or InvalidOperation (an unknown marker, a `track` that is not an audio " +
+      "track or is taken at that time, a hand-made file in the way of the take).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      preset: MusicPresetSchema.describe("Genre: instruments, groove, default tempo and chords."),
+      bpm: z
+        .number()
+        .min(MUSIC_BPM_RANGE.min)
+        .max(MUSIC_BPM_RANGE.max)
+        .optional()
+        .describe(`Tempo, ${MUSIC_BPM_RANGE.min} to ${MUSIC_BPM_RANGE.max} BPM. Default: the preset's.`),
+      meter: z.int().min(MUSIC_METER_RANGE.min).max(MUSIC_METER_RANGE.max).default(4).describe("Beats per bar. Default 4."),
+      bars: z.int().min(1).max(MUSIC_MAX_BARS).optional().describe("Length in bars, before the final hit and its ring."),
+      length: z
+        .number()
+        .positive()
+        .max(MUSIC_MAX_SECONDS)
+        .optional()
+        .describe("Length in seconds: the track gets the whole bars whose end (the final hit) is nearest to it. Not with `bars`."),
+      sections: z
+        .array(
+          z.strictObject({
+            kind: MusicSectionSchema,
+            bars: z.int().min(1).max(MUSIC_MAX_BARS).optional().describe("Bars of this part. Default: up to the next part's `at`, or to the end for the last."),
+            at: TimeRefParam("Timeline time this part starts at, moved to the nearest bar of the track. Default: right after the part before.").optional(),
+          }),
+        )
+        .min(1)
+        .max(MUSIC_LIMITS.sections)
+        .optional()
+        .describe("The parts in order; the first starts the track. Default: intro, full, build, drop, outro by length."),
+      chords: z
+        .array(z.string().regex(MUSIC_CHORD_PATTERN, "a root (`A`, `C#`, `Bb`) and a quality (`m`, `7`, `maj7`, `m7`, `9`, `m9`, `13`, `sus4`…)"))
+        .min(1)
+        .max(MUSIC_LIMITS.chords)
+        .optional()
+        .describe("One chord per bar, repeating, e.g. `[\"Am\", \"F\", \"C\", \"G\"]`; the melody uses the minor pentatonic of the first. Default: the preset's."),
+      accents: z
+        .array(TimeRefParam("Timeline time of an accent, moved to the nearest beat."))
+        .min(1)
+        .max(MUSIC_LIMITS.accents)
+        .optional()
+        .describe("Times that get a crash and a big kick (a logo, a call to action)."),
+      seed: z.number().int().min(0).max(SFX_SEED_MAX).default(0).describe("Seed of the melody, grooves and noise: change it for another track with the same settings."),
+      place: z.boolean().default(true).describe("Put the take on the timeline (default). False: only write and import it."),
+      at: TimeRefParam("Timeline time the track starts at. Default 0.").default(0),
+      track: z.string().min(1).optional().describe("Audio track for the clip, from `track.list`. Default: the audio track named `Music`, made when absent."),
+      gain: z.number().min(-60).max(12).optional().describe("Clip gain in dB, replacing minus the style's `sound.musicUnderVoice`."),
+    }),
+    result: z.object({
+      file: z.string().describe("The take, project-relative: `assets/sound/music-<preset>-<key>.wav`."),
+      state: z.enum(["generated", "cached"]).describe("`generated`: written now. `cached`: the file already held this exact take."),
+      preset: MusicPresetSchema,
+      bpm: z.number(),
+      meter: z.int(),
+      bars: z.int().describe("Bars before the final hit."),
+      seed: z.int(),
+      chords: z.array(z.string()).describe("The chords played, one per bar, repeating."),
+      sections: z
+        .array(z.object({ kind: MusicSectionSchema, bars: z.int(), start: z.number().describe("Seconds into the take.") }))
+        .describe("The parts as played."),
+      duration: z.number().describe("Seconds of the take, the ring after the final hit included."),
+      hitAt: z.number().describe("Seconds into the take of the final hit: the downbeat after the last bar. `music.fit` lands it on a cut."),
+      lufs: z.number().describe("Integrated loudness, LUFS."),
+      peakDb: z.number().describe("Sample peak, dBFS."),
+      beats: z
+        .object({
+          file: z.string().describe("The beat grid, project-relative: `beats/<name>.beats.json`."),
+          state: z.enum(["written", "kept"]).describe("`kept`: an exact grid for this take was already there (its `edits` too)."),
+          count: z.int().describe("Beats in the grid, the final hit included."),
+        })
+        .describe("The exact beat grid of the take."),
+      imported: z
+        .array(z.object({ asset: z.string().describe("Project-relative take."), job: JobSchema }))
+        .describe("The take when this call wrote it, imported; empty when `cached`. Follow its ingest with `job.list`."),
+      credited: z.boolean().describe("The project's `credits.json` holds an `own` entry for the take. False when the project keeps no ledger."),
+      timeline: z.string().nullable().describe("Timeline id; null with `place: false`."),
+      revision: z.int().nullable().describe("Revision after the change; null with `place: false`."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null with `place: false`."),
+      track: z
+        .object({ id: z.string(), name: z.string().nullable(), created: z.boolean().describe("This call made the track.") })
+        .nullable()
+        .describe("Audio track of the new clip; null with `place: false`."),
+      clip: z.string().nullable().describe("Id of the new clip; null with `place: false`."),
+      start: z.number().nullable().describe("Timeline second the clip starts, on the frame grid."),
+      gain: z.number().nullable().describe("Clip gain, dB."),
+      tempo: z
+        .enum(["set", "kept"])
+        .nullable()
+        .describe("`set`: the timeline's tempo now follows the new clip. `kept`: the timeline already had a tempo, left as it was. Null with `place: false`."),
+      warnings: z.array(z.string()),
+    }),
+  },
   "shoot.status": {
     description:
       "Where a shoot is (ADR 0023): every scene of the shoot script with its state (`none`, `deviations`, `done`), the " +
@@ -3216,26 +3451,32 @@ export const methods = {
       "instead (transparent on upper tracks, silence for sound). `kind: \"wipe\"` (a straight edge uncovers the incoming clip) and " +
       "`kind: \"push\"` (the incoming clip slides in and pushes the outgoing one out) move the picture instead of mixing it; `direction` " +
       "`left` (default), `right`, `up` or `down` is the way the incoming picture travels: `{ at: 12.5, kind: \"push\", direction: \"up\" }`. " +
+      "`kind: \"iris\"` opens the incoming clip in a circle growing from the centre of `origin`, `[x0, y0, x1, y1]` in fractions of the " +
+      "frame (the element that just lit up, from `inspect.point`; default the frame's centre): `{ at: 12.5, kind: \"iris\", origin: [0.6, 0.2, 0.8, 0.4] }`. " +
       "They play on the bottom video track only (the first shown picture track; a video track over a multicam program track is not it): " +
       "any other video track named in `tracks` is refused, and without `tracks` the others are skipped with a warning; audio tracks " +
-      "crossfade. They are refused at an edge of a nested timeline clip. Pick the kind by why the picture changes (see the skill's transitions reference); " +
+      "crossfade. They are refused at an edge of a nested timeline clip. `kind: \"dip-cut\"` makes the edge a hard cut on the bottom " +
+      "video track and darkens the clip ending there by 40 % over its last 3 frames, as `opacity` keys on it (`duration` is ignored; " +
+      "sound and other tracks are not touched; another video track named in `tracks` is refused); `transition.remove` there takes the " +
+      "dip keys away again. Pick the kind by why the picture changes (see the skill's transitions reference); " +
       "a `warnings` entry flags three transitions of one kind in a row, or more than a third hard cuts, on the bottom track. " +
       "`duration` is the total seconds; `tracks` limits it. The clips stay where they are and the timeline length never changes: a " +
       "transition is centered on the cut and borrows source from before the incoming clip's `in` and after the outgoing clip's `out`. " +
       "An edge with no clip butted to it (a clip's start or end) fades in or out for any kind: `{ at: 58, kind: \"fade\", duration: 1 }` " +
       "fades the last clip out. Replaces any transition already on that edge. Multicam program tracks are skipped with a warning (hard " +
       "cuts). Short material never fails: it shortens the transition, or plays a dissolve with no spare source as a dip, and a `warnings` " +
-      "entry says so; a wipe or push with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
+      "entry says so; a wipe, push or iris with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
       "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), `direction` comes " +
-      "with `dissolve` or `fade`, or a wipe or push finds the edge only on video tracks that are not the bottom one; TrackNotFound.",
+      "with another kind than `wipe` or `push`, `origin` with another kind than `iris`, a wipe, push or iris finds the edge only on " +
+      "video tracks that are not the bottom one, or a dip cut finds no clip ending at `at` on the bottom video track; TrackNotFound.",
     params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   "transition.remove": {
     mutating: true,
     description:
-      "Clear the transition on the clip edge at `at` (dissolve, fade in, fade out) on every video and audio track that has one, or only " +
-      "`tracks`. Example: `{ at: 12.5 }`. The clips stay where they are. Fails with InvalidOperation when no targeted track has a " +
+      "Clear the transition on the clip edge at `at` (dissolve and its shape, fade in, fade out, a dip cut's keys on the clip ending " +
+      "there) on every video and audio track that has one, or only `tracks`. Example: `{ at: 12.5 }`. The clips stay where they are. Fails with InvalidOperation when no targeted track has a " +
       "clip edge at `at`; an edge without a transition adds a warning.",
     params: operationArgs["transition.remove"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -3267,7 +3508,11 @@ export const methods = {
       "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
       "is not heard (a warning says so), nor are multicam angles and mics: a program track in `under` is refused. A voice file " +
       "that cannot be decoded is named in the warnings. A hand key where someone speaks is dipped too and its level comes back on the next run. " +
-      "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8 }`. Fails with InvalidOperation (`track` is not an audio " +
+      "`level` first sets each clip's static gain (`audio.gain`) so the music's integrated loudness (EBU R128, measured once per file and cached) " +
+      "sits `level` dB under the voice's: the voice is every clip of the `under` tracks, its file's loudness plus its gain, averaged by the time it plays " +
+      "(about 12 dB under is a start; the style's `sound.musicUnderVoice`); a clip with gain keys of its own is left alone and named in the warnings. " +
+      "The depth, attack, release, threshold, gap and `level` are kept in `audio.duck` of each clip that gets duck keys, so `music.fit` runs the same duck again after it moves one. " +
+      "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8, level: 12 }`. Fails with InvalidOperation (`track` is not an audio " +
       "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -3279,6 +3524,12 @@ export const methods = {
       releaseMs: z.number().min(1).max(10000).default(450).describe("Milliseconds the level takes to come back after the voice stops. Default 450."),
       threshold: z.number().min(-90).max(0).default(-38).describe("dBFS above which sound counts as speech. Default -38."),
       gap: z.number().min(0).max(30).default(0.6).describe("Seconds: speech stretches closer than this merge, so the music does not pump between words. Default 0.6."),
+      level: z
+        .number()
+        .min(0)
+        .max(40)
+        .optional()
+        .describe("dB the music's integrated loudness sits under the voice's: sets the static gain of each clip of `track` first. Default: the gains stay as they are."),
     }),
     result: TrackDuckResultSchema,
   },
@@ -3309,7 +3560,7 @@ export const methods = {
     description:
       "Add a marker: a named point on the timeline clock (ADR 0029), e.g. `{ at: 12.5, label: \"hook\" }`; `at` snaps to the frame grid. " +
       "Labels are unique in the timeline ignoring case, at most 80 characters, no space at either end, never shaped like an id " +
-      "(`m_1a2b3c`). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
+      "(`m_1a2b3c`) or a grid reference (`beat:8`, `bar:2`, any case). `color`: `red`, `orange`, `yellow`, `green`, `blue` or `purple`. `cut` moves markers after the cut with the " +
       "material and deletes markers strictly inside the removed range (a marker on the range's first frame stays; only when it cuts " +
       "every video, audio and program track, otherwise markers stay); `ripple` inserts and trims move them the same way, and a ripple " +
       "trim deletes markers inside the material it removes. The new id is in `changes.added`. Fails with InvalidOperation (label taken; " +
@@ -3414,7 +3665,7 @@ export const methods = {
     description:
       "Fit a music clip to the cut (ADR 0037): back-time it so the track's own final hit lands on `end` and it plays unspliced " +
       "before it, and report where the music then starts. `end` is a time on the timeline: seconds, or a marker id or label " +
-      "(`end-card`, `outro-1`). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
+      "(`end-card`, `outro-1`) or a beat or bar of the timeline's grid (`bar:16`, read on the clip as it is before the fit). The final hit is `hit` (source seconds of the music file) when given, else found on the track's " +
       "energy: the last sharp jump in level near the end of the part the clip plays, reported with a `confidence` and the other " +
       "`candidates`. Default (`mode: slide`): the clip slides so the hit lands on `end` within half a frame, keeping its speed. " +
       "Where that would start the music before `from` (default 0), the intro is dropped instead (`in` moves later, `introCut`); " +
@@ -3452,6 +3703,43 @@ export const methods = {
       skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; only `duck` can be."),
     }),
     result: MusicFitResultSchema,
+  },
+  "music.candidates": {
+    mutating: true,
+    description:
+      "Place 2 to 7 candidate music tracks under the same picture at the same loudness, so the person picks by ear (ADR 0037). Each file " +
+      "in `assets` goes on its own new audio track `Music 1` to `Music n`, all muted but the first, with a static clip gain that brings its " +
+      "EBU R128 integrated loudness (measured over the whole file, once per file, cached by content) to one target: `loudness` (LUFS) when " +
+      "given, else the quietest file's own, so no candidate is made louder than it is (a warning says when a gain would push a peak over " +
+      "-1 dBTP). The clip starts at `from` (default 0) and plays the whole file. With `end` (seconds, a marker id or label) each is fitted " +
+      "like `music.fit` slides it: its own final hit (found on its energy) lands on `end`, the intro dropped where the file is longer than " +
+      "the picture before it and the music starting late where it is shorter (never looped), and the candidates are ranked: files that " +
+      "cover the picture first, then by how sure the final hit is, ties in the order given. Without `end` the order given is the rank. " +
+      "A file that cannot be placed (silent, no sound, no final hit, undecodable) is listed in `skipped` and the rest go on. `dryRun: true` " +
+      "changes nothing and returns the plan. One transaction labelled `Music candidates: …` (`revert` undoes it whole; with review mode on it is " +
+      "one proposal). To choose: `track.set` `muted: false` on the winner and `track.remove` with `force` on the others, then `music.fit` " +
+      "the clip that stays. Example: `{ assets: [\"assets/music/a.wav\", \"assets/music/b.wav\", \"assets/music/c.wav\"], end: \"end-card\" }`. " +
+      "Fails with InvalidOperation (fewer than 2 or more than 7 files, a file twice, none placeable, `end` not after `from`), AssetNotFound, " +
+      "TimelineNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      assets: z
+        .array(z.string().min(1))
+        .min(2)
+        .max(MUSIC_CANDIDATES_MAX)
+        .describe("Music files inside the project, absolute or relative to `cwd`, e.g. `assets/music/theme.mp3`; 2 to 7, in the order of your preference."),
+      end: TimeRef("Timeline time every final hit lands on, e.g. the cut into the end card.").optional(),
+      from: TimeRef("Timeline time the music may start from (default 0).").optional(),
+      loudness: z
+        .number()
+        .min(-70)
+        .max(0)
+        .optional()
+        .describe("LUFS to bring every candidate to. Default: the quietest candidate's own loudness."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+    }),
+    result: MusicCandidatesResultSchema,
   },
   "tx.begin": {
     mutating: true,
@@ -4404,6 +4692,8 @@ export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 export type SoundSfxResult = MethodResult<"sound.sfx">;
 /** Result of `sound.place`. */
 export type SoundPlaceResult = MethodResult<"sound.place">;
+/** Result of `sound.music`. */
+export type SoundMusicResult = MethodResult<"sound.music">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -4443,6 +4733,12 @@ export type PluginPins = Record<string, string>;
 export type RenderParams = MethodParams<"render">;
 /** Result of `render`. */
 export type RenderResult = MethodResult<"render">;
+/** Result of `batch.render`. */
+export type BatchRenderResult = MethodResult<"batch.render">;
+/** One row × format of a batch; see {@link BatchEntrySchema}. */
+export type BatchEntry = z.output<typeof BatchEntrySchema>;
+/** `<out>/manifest.json` of a batch; see {@link BatchManifestSchema}. */
+export type BatchManifest = z.output<typeof BatchManifestSchema>;
 /** `frame` params. */
 export type FrameParams = MethodParams<"frame">;
 /** Result of `frame`. */
@@ -4501,6 +4797,10 @@ export type ClipRendersResult = MethodResult<"clip.renders">;
 export type ClipLiveParams = MethodParams<"clip.live">;
 /** Result of `clip.live`. */
 export type ClipLiveResult = MethodResult<"clip.live">;
+/** `clip.verify` params. */
+export type ClipVerifyParams = MethodParams<"clip.verify">;
+/** Result of `clip.verify`. */
+export type ClipVerifyResult = MethodResult<"clip.verify">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 /** One entry of `audio.bakes`. */

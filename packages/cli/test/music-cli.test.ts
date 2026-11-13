@@ -39,7 +39,11 @@ beforeAll(() => {
   expect(frameshell(["init", project], parent).code).toBe(0);
   const footage = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-footage-")));
   writeFileSync(join(footage, "song.wav"), wavOf(music(26, [...kicks(19.5), { at: 20.345, amplitude: 0.9, decay: 2.5 }], { rate: 16_000 }), 16_000));
-  expect(frameshell(["import", join(footage, "song.wav")]).code).toBe(0);
+  writeFileSync(
+    join(footage, "soft.wav"),
+    wavOf(music(26, [...kicks(19.5).map((hit) => ({ ...hit, amplitude: hit.amplitude * 0.3 })), { at: 20.345, amplitude: 0.27, decay: 2.5 }], { rate: 16_000 }), 16_000),
+  );
+  expect(frameshell(["import", join(footage, "song.wav"), join(footage, "soft.wav")]).code).toBe(0);
   daemonPid = JSON.parse(frameshell(["status", "--json"]).stdout).daemon.pid;
 }, 120_000);
 
@@ -94,5 +98,38 @@ describe("frameshell music fit", () => {
     const refused = frameshell(["music", "fit", clip, "--end", "24", "--exact"]);
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain("limit is ±1.7 %");
+  }, 120_000);
+});
+
+describe("frameshell music candidates", () => {
+  it("parses its flags into music.candidates params", () => {
+    expect(parseTimelineCommand(["music", "candidates", "assets/a.wav", "assets/b.wav"], { end: "end-card", from: "2", loudness: "-18", "dry-run": true })).toMatchObject({
+      method: "music.candidates",
+      params: { assets: ["assets/a.wav", "assets/b.wav"], end: "end-card", from: 2, loudness: -18, dryRun: true },
+    });
+    expect(parseTimelineCommand(["music", "candidates", "a.wav", "b.wav"], {})!.params).toEqual({ assets: ["a.wav", "b.wav"] });
+    expect(() => parseTimelineCommand(["music", "candidates", "a.wav"], {})).toThrow(/takes 2\+ argument/);
+    expect(() => parseTimelineCommand(["music", "candidates", ...Array.from({ length: 8 }, (_, i) => `${i}.wav`)], {})).toThrow(/takes 2\+ argument/);
+    expect(() => parseTimelineCommand(["music", "candidates", "a.wav", "b.wav"], { exact: true })).toThrow(/does not take --exact/);
+    expect(() => parseTimelineCommand(["music", "candidates", "a.wav", "b.wav"], { loudness: "quiet" })).toThrow(/expected a number/);
+  });
+
+  it("dry-runs, places the tracks muted but the first, and reports each gain", () => {
+    const dry = frameshell(["music", "candidates", "assets/song.wav", "assets/soft.wav", "--end", "11", "--dry-run"]);
+    expect(dry.stderr).toBe("");
+    expect(dry.code).toBe(0);
+    expect(dry.stdout).toMatch(/^Music candidates · 2 tracks at -?\d+(\.\d)? LUFS \(the quietest file's own\) · dry run/);
+    expect(dry.stdout).toContain("1. assets/");
+    expect(dry.stdout).toContain("Ranking: Files that cover the picture");
+
+    const applied = frameshell(["music", "candidates", "assets/song.wav", "assets/soft.wav", "--end", "11"]);
+    expect(applied.code).toBe(0);
+    expect(applied.stdout).toMatch(/tx tx_[0-9a-f]{8}/);
+    const shown = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout) as { tracks: { name?: string; muted?: boolean }[] };
+    const names = shown.tracks.filter((track) => track.name?.startsWith("Music "));
+    expect(names.map((track) => [track.name, track.muted === true])).toEqual([
+      ["Music 1", false],
+      ["Music 2", true],
+    ]);
   }, 120_000);
 });

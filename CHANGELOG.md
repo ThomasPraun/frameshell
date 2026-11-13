@@ -18,6 +18,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   threshold and its shadow is off by default, since the glass would cover a shadow too. Typed props (`label`, `title`,
   `body`, `tint`, `tintOpacity`, `shine`, `shineEvery`, `shadow`, `size`, `place`, `align`), per-format layout with
   `pick()`, empty or too long texts never break the picture. Listed in the plugin skill and the reels page.
+- Iris and dip cut, slice 2 of #483 (ADR 0030, epic #451; protocol 113): `transition set --kind iris --origin
+  x0,y0,x1,y1` opens the incoming clip in a circle growing from the centre of `origin` (fractions of the frame, default
+  its centre) until it covers the frame, on the bottom video track; export masks the incoming piece with a `geq` circle,
+  the preview with a Canvas 2D arc, and a subject of the outgoing plate (ADR 0032) shows outside the circle. `--kind
+  dip-cut` makes the edge a hard cut and darkens the clip ending there by 40 % over its last 3 frames, written as two
+  `opacity` keys on it (bottom video track only; an upper track is refused; sound is not touched); `transition remove`
+  takes those keys away again, another kind set there replaces them, `clip trim` moves them to the clip's new end, a
+  split or cut drops them from the left part, and the variety warnings count dip cuts as their own kind. The clip shape `origin` field
+  is new: older Frameshell versions reject a timeline that carries an iris.
+- UI demo template follow-ups, #549 of #451 (ADR 0033; plugin only, no protocol change): `cursor-click` and `app-window`
+  take `camera: follow` (and `zoom`, 1.1 to 2.4): the frame zooms in with the cursor to the click and pulls back after
+  the last beat, never showing the scene's edge. `app-window` takes `then: copy-paste` (and `keys`, Mac or Windows): an
+  empty slot below the rows, a key chip showing the copy half a second after the click, a click on the slot that lights
+  it on its own frame, then the paste, its chip and the copied row filling the slot on one frame. New template
+  `comment-box`, the comment variant of `typing-field` (a card with an avatar types a comment over a few lines, a cursor
+  presses the button, progress fills and a confirmation appears). Timing guard: a clip too short for the cursor's
+  click, drop or release gives up the hesitation, then moves faster (up to 2.2 times), and a typed line is typed up to 9
+  times faster with a shorter progress line, so the reaction shows before the exit; clips with room are unchanged.
+  The kits write each function on one line to stay under the 300-line lint warning. New opt-in real-Chrome test
+  `ui-demo-real.test.ts` checks, frame by frame, that each click and the beat it causes land on the same frame in every
+  template and variant. The near-1 scale snap stays in the cursor kit (moving it into the runtime needs a version bump).
+- Music beds made offline, third slice of #463 (ADR 0038, epic #451; daemon `sound.music`, CLI `sound music <preset>`,
+  MCP `sound_music`, protocol 112): a seeded 16-step sequencer synthesizes a track with no network and no samples.
+  Presets `synthwave` (118 BPM, Am F C G, saw chords, four on the floor), `lofi` (78 BPM, Dm9 G13 Cmaj7 Am7, electric
+  piano, swung hats, vinyl) and `minimal` (110 BPM, FM mallet stabs, plucked bass, metallic hats); `--bpm`, `--meter`,
+  `--chords`, `--seed`. Whole bars (`--bars`, `--length`, else to the end of the timeline) made of parts (`--sections
+  kind[:bars][@time]`: intro, full, dark, build with a riser that ends 75 ms before the next part, gap, drop, outro; a
+  part's `@time` starts it on the nearest bar, so the drop can land on a marker), `--accents` (a crash and a big kick on
+  the nearest beat), and a final hit that rings 2.5 s; the bass ducks under the kick, a reverb from a synthetic impulse.
+  The take, `assets/sound/music-<preset>-<key>.wav` (48 kHz 24-bit stereo), is brought to -14 LUFS with its sample peak
+  at -1 dBFS by our own BS.1770 meter and limiter (ffmpeg reads the same loudness), and comes with its exact beat grid in
+  `beats/` (`detector: exact`), so `beat:`/`bar:` times, `--snap-to beat` and `music fit` use it without measuring. It is
+  placed in one transaction (`Music: …`, one proposal in review mode) on the audio track `Music` at `--at`, under the
+  voice by the style's `musicUnderVoice`, and the timeline's tempo follows it when it had none; `--no-place` only writes
+  it. Same arguments, same file; recorded as own work when the project keeps `credits.json`.
+- Loudness cache, candidate tracks and `duck --level`, third slice of #485 (ADR 0037, epic #451; daemon
+  `music.candidates` and `track.duck` `level`, CLI `music candidates` and `duck --level`, MCP `music_candidates`,
+  protocol 110): every asset's EBU R128 loudness (integrated LUFS, range, true peak, ffmpeg `ebur128`) is measured once
+  and cached by content under `.frameshell/loudness/` (swept by `gc`, kind `loudness`). `music candidates <asset> <asset>…
+  [--end t] [--from t] [--loudness LUFS] [--dry-run]` puts 2 to 7 files on their own new audio tracks `Music 1..n`, all
+  muted but the first, with the static gain that brings them to one loudness (`--loudness`, else the quietest file's own,
+  so none is made louder); with `--end` each file's final hit is fitted onto it like `music fit` slides a clip and the
+  candidates are ranked (files covering the picture first, then hit confidence). One transaction. `duck <track> --under
+  <track> --level 12` first sets each clip's static gain so the music's loudness sits 12 dB under the voice's, then dips
+  from that level (one transaction). `track.duck` now keeps what it was asked in `audio.duck` of each clip it ducks, and
+  `music fit` runs the same duck again after it moves such a clip (clips ducked before keep getting the defaults); the
+  result's `duck.parameters` says `stored` or `defaults`. Older Frameshell versions reject a timeline whose clips carry
+  `audio.duck`.
+- Determinism verify for motion clips, third slice of #465 (ADR 0033, epic #451; daemon `clip.verify`, CLI `clip verify`,
+  MCP `clip_verify`, protocol 109): `frameshell clip verify <clip> [--probes n] [--tolerance 0-255]` loads the clip's live
+  page in managed headless Chrome at the project resolution and captures `--probes` frames (default 12, 2 to 48) at
+  `(i + 0.37) x duration / n` of the played part, each twice: cold (a fresh page seeks straight to the time) and after a
+  reseek (one page shows an unrelated probe first). A channel (red, green, blue or alpha) that differs by more than
+  `--tolerance` of 255 (default 2) fails the probe and the command exits 1, naming the worst probe time, the pixel and
+  the page element that paints it (the cold picture's element where the reseek left the pixel empty). `distinct` counts
+  different cold pictures, and a warning says when it is 1 (a clip that never moves, or a timeline not bound to the
+  seek). It works for any adapter with a live preview, reads only (no render, no file written) and needs the plugin
+  trusted. The headless page loader of `inspect.point` moved to `inspect/live-page.ts` so both use one.
+- `metrics.json` of `review`, third slice of #457 (epic #451; `review` writes it without `--sheets` or with `--sheets metrics`,
+  MCP `review` `sheets: ["metrics"]`, result `metrics`, protocol 108): numbers a sheet cannot tell, measured on the grey frames
+  `review` already samples for the motion strips (a file up to 15 a second, a timeline at most 90) and, for a `--file`, on its
+  decoded sound. Picture: the longest still stretch (change under 0.35 grey levels), the largest gap between visual events
+  (peaks above the larger of 1 level and 2.5 times the median change, the ends of the range counted), near-blank pictures (luma
+  standard deviation under 4) and whether frame 0, the thumbnail, is empty. Subtitle cues of a timeline on screen for less than
+  their words take to read (0.4 s for one or two words, else 0.75 x (0.5 + 0.3 per word)). Loudness of a file by `ebur128`
+  (integrated LUFS, range, true peak) and in the phone band (200 Hz to 6 kHz), through the same meter as `analyze`; a timeline
+  has none (render a draft and review the file). `craft` lists warnings, never failures, with their thresholds from the
+  launch-film checklist of the ticket: still over 3 s, empty frame 0, a blank picture, a short cue, a true peak above -1 dBTP,
+  a phone band 6 LU under the mix and over 15 s with no sound. The critique loop of the skill reads them in place of a hand-made
+  `ebur128` command. Not yet: sync of sounds to picture events, captions over graphics, the loop seam jump, the delivery check
+  of an export against the plan, assertions and per-clip waivers.
+- Voice section in the clip inspector, app slice of #464 (ADR 0031, epic #451; no wire change): a media clip shows its
+  voice chain. The Voice switch writes the style's voice chain (high-pass, denoise, compressor) or bypasses it, and
+  switching on again brings the bypassed chain back (kept in that window only; the saved clip has no bypass flag).
+  Each effect is a row in processing order with its numbers (cutoff; floor and reduction; threshold, ratio, attack,
+  release, makeup), a move-earlier and a remove button; a menu adds a missing effect and Voice preset puts the style's
+  chain back. Every change is one undoable `clip.set` `audioEffects` by `ui`. Strings in English and Spanish.
+- Batch variants from data rows, slices 1 and 2 of #477 (ADR 0040, epic #451; daemon `batch.render`, MCP
+  `batch_render`, JSON Schema `batch.json`, protocol 106): `frameshell batch <file.batch.json> [--out dir] [--formats
+  id,id] [--dry-run]` renders one template timeline (default `main`) once per row. `slots` name what a row sets:
+  `<clipId>.props.<path>` (written over the clip's props and checked by its adapter, as `clip set` does) or
+  `<clipId>.asset` (a media clip's file swapped, keeping its in, out and placement). Each row's timeline exists only in
+  memory: nothing is written to `timelines/`, journaled or proposed. Every row × format is checked first, so a bad row
+  fails the call with InvalidOperation naming its `row` and `slot` (props the adapter refuses, an unknown clip, a file
+  shorter than the clip's out or without the stream its track plays, a voice file without the transcript a subtitle
+  track follows, two rows writing the same output; slot names and props paths refuse `__proto__`, `prototype` and
+  `constructor`). Then the rows render one at a time as ordinary `render` jobs into `exports/<batch name>/<row>.mp4`
+  (`<row>-<format>.mp4` with formats from `frameshell.json`), and `manifest.json` there keeps each row × format's status,
+  job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
+  generates voiceover. Re-running failed rows (`--rows`, `--failed`, `--force`) comes next.
 - Loop-safe export, first slice of #474 (ADR 0039, epic #451; `render` `loop`, CLI `render --loop`, `JobInfo.warnings`,
   protocol 105): `render --loop` makes a file meant to repeat (title loops, banners). MP4 and MOV audio gets a 2 ms
   half-sine fade at its first and last sample after loudness (silent exports unchanged); `--loop` with `--cover-frame`
@@ -81,6 +171,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once ready; until then the preview keeps showing the word in front. The skill's reels page gains the recipe for a
   big word behind the head: 30 to 55 % covered, never over the face, 1.5 to 4 s, no two-person shots, b-roll above the
   word's track. Strings in English and Spanish; an e2e with the stand-in matte.
+- `analyze` events, look and rhythm (#471 slice 2, epic #451; protocol 111): the result and `analysis.json` of `frameshell analyze` gain
+  - `look`, per shot and for the film: brightness, contrast, saturation and warmth (red minus blue), and an 8 x 6 grid of mean colours
+    (the film's in the result, every shot's in `analysis.json`);
+  - `rhythm`: the spread of the shot lengths (`shotLengthCv`), the share of still frames and the longest hold, the big changes of the
+    picture (a cut, a flash or a jump of the layout: #457's visual event, a frame 4 times the median change of the half second around
+    it, or 15 % of the grey range) with their count, per minute and the largest gap between them, and `bursts` of 3 or more within
+    1.5 s, with constants the metrics of `review` (#457) are to share;
+  - `events` in time order: `flash` (the picture jumps brighter or darker for at most 0.25 s), `appear` / `disappear` (part of the
+    picture gains or loses detail while the rest holds, with its `region` on the 8 x 6 grid: where an element or a caption shows up),
+    `hold` (no change for 0.5 s or more) and `hit` (a sudden rise of the sound, with its `offset` to a big change of the picture
+    within 0.2 s, so a sound effect on a cut tells from music or speech).
+  Measured in one extra pass over every frame at 64 px (a 30 s 720p film takes about 6 s in all), in new files of
+  `packages/core/src/analyze/` (`look.ts`, `rhythm.ts`, `events.ts`, `picture.ts`), after HyperFrames' `measure` (Apache-2.0, #478).
+  Events are hints, capped at 300 of a kind, and say so in the skill page `reference-video.md`, which now explains how to read the
+  numbers. Where large text sits is read from `appear` regions, except over a subject that keeps moving (a talking head), where
+  elements are not found; motion curves, sync, ink and diff against an original remain later slices of #471.
 - Glass under generated clips, backdrop slice of #462 (ADR 0031, epic #451; protocol 102): a generated clip on an upper
   video track takes an optional `backdrop { blur, saturate?, dim? }` (blur = Gaussian sigma in project pixels). Export
   and the preview blur, saturate and dim the picture below the clip wherever the clip's alpha is above about 3 %, fading
@@ -476,6 +582,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `beat:N` and `bar:N` count from the song, not the clip (#550, part of #458, ADR 0029; protocol 107): `beat:1` is the
+  music file's first measured beat and `bar:1` its first downbeat, so trimming the head of the music clip no longer
+  renumbers them (`bar:8` stays the same musical bar). Past the measured part a number continues at the grid's period
+  instead of being refused (a result before 0 still is), and `tempo.show` reports `beatBase` and `barBase`, the entries
+  of the file before the first one the clip shows. With a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; ADR, CLI help
+  and skill say so. `marker add`/`marker set` now refuse a label shaped like `beat:8` or `bar:2` (any case), so
+  a marker cannot shadow a grid reference (projects that stored such a label still load, and the grid wins over it). `music fit --end` and `--from` take `bar:16` and `beat:N` too: they go
+  through the same asynchronous resolver as every other time.
 - The preview's 9:16 toggle is gone (#469 slice 2, ADR 0027): its fixed 1080x1920 frame is replaced by the format
   switcher, which shows only the formats a project declares. A landscape project without `formats` has no 9:16 view any
   more; `frameshell format add 9x16` gives it one.
@@ -528,6 +642,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports
   the previous picture as the new one's frame while the engine still decodes it (#551).
+- Desktop: a detached panel window closed within a moment of being moved, resized or leaving full screen keeps that
+  placement for the next time it opens (#533).
+- CLI: `import --wait`, `render --wait` and other job followers no longer print a step twice when the job list the
+  daemon answers is older than the events already read (#533).
 
 ## [0.18.0] - 2026-11-07
 

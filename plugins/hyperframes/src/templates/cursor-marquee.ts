@@ -134,13 +134,17 @@ export const cursorMarquee: Template = {
       // The cursor rests beside the badge, not on it (the badge is as wide as its longest possible text).
       var badgeMax = ((String(n) + " " + P.selectedLabel).length * 0.58 + 3.6) * px;
       var rest = inFrame({ x: S.width / 2 + badgeMax / 2 + 0.05 * unit, y: gy + gh + 0.045 * unit + bh * 0.8 }, 0.05);
-      var trip = journey(FROM, [
-        { x: from.x, y: from.y, hesitate: P.hesitate, wait: 0.14 },
-        { x: to.x, y: to.y, weight: "heavy", bend: 0.03, wait: 0.55 },
-        { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
-      ], START, { x: 0.004 * unit, y: 0.003 * unit });
+      var made = fitFirst(CURSOR_TRIES, function (hesitate, rate) {
+        var trip = journey(FROM, [
+          { x: from.x, y: from.y, hesitate: P.hesitate * hesitate, wait: 0.14 },
+          { x: to.x, y: to.y, weight: "heavy", bend: 0.03, wait: 0.55 },
+          { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
+        ], START, { x: 0.004 * unit, y: 0.003 * unit }, rate);
+        return { trip: trip, ready: trip.legs[1].arrive + 0.08 };
+      }, latest(0.5));
+      var trip = made.trip;
       var downAt = trip.legs[0].arrive + 0.04;
-      var upAt = trip.legs[1].arrive + 0.08;
+      var upAt = made.ready;
 
       // The rectangle between the press point and the cursor at time t.
       function marqueeAt(t) {

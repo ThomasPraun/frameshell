@@ -209,6 +209,20 @@ export class ChromePage {
     return result.result?.value as T;
   }
 
+  /**
+   * PNG of what the page draws now, at most `timeoutMs`. The page background is transparent, so alpha is part of
+   * the picture and an overlay's empty pixels do not hide a difference against white.
+   */
+  async capture(timeoutMs: number): Promise<Buffer> {
+    await this.#chrome.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } }, this.#session);
+    const shot = (await withTimeout(
+      this.#chrome.send("Page.captureScreenshot", { format: "png", fromSurface: true }, this.#session),
+      timeoutMs,
+      "the live page did not paint",
+    )) as { data: string };
+    return Buffer.from(shot.data, "base64");
+  }
+
   /** Close the page. */
   async close(): Promise<void> {
     this.#off();
