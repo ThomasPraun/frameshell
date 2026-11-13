@@ -1,7 +1,7 @@
 import type { MediaProbe } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { deliveryChecks, deliveryWarnings, rational } from "../src/review/delivery.js";
-import { pictureMoves, seamVerdict } from "../src/review/loop.js";
+import { judgeSeam, seamVerdict } from "../src/review/loop.js";
 
 // The delivery check against the export plan, and the verdicts on a loop's seam (#457).
 
@@ -64,20 +64,22 @@ describe("review delivery", () => {
 });
 
 describe("review loop seam", () => {
-  it("a last frame that repeats the first while the picture moves is a duplicate", () => {
+  const grey = (level: number) => new Uint8Array(100).fill(level);
+
+  it("a last frame that repeats the first while the picture moves is a duplicate, by the render's own test", () => {
+    expect(judgeSeam(grey(10), grey(40), grey(80), grey(10))).toEqual({ jump: 0, duplicate: true });
+    // A picture that never moves has no seam to repeat.
+    expect(judgeSeam(grey(10), grey(10), grey(11), grey(10))).toEqual({ jump: 0, duplicate: false });
+    // 0.5 levels is no longer the same picture.
+    expect(judgeSeam(grey(10), grey(40), grey(80), grey(11)).duplicate).toBe(false);
+  });
+
+  it("a duplicate is a duplicate; otherwise under 10 grey levels reads continuous, 10 or more is a cut", () => {
     expect(seamVerdict(0.1, true)).toBe("duplicate");
     expect(seamVerdict(0.1, false)).toBe("continuous");
-  });
-
-  it("under 10 grey levels reads continuous, 10 or more is a cut", () => {
-    expect(seamVerdict(0.5, true)).toBe("continuous");
-    expect(seamVerdict(9.9, true)).toBe("continuous");
-    expect(seamVerdict(10, true)).toBe("cut");
+    expect(seamVerdict(0.5, false)).toBe("continuous");
+    expect(seamVerdict(9.9, false)).toBe("continuous");
+    expect(seamVerdict(10, false)).toBe("cut");
     expect(seamVerdict(60, false)).toBe("cut");
-  });
-
-  it("the picture moves when some change reaches the render check's 2 levels", () => {
-    expect(pictureMoves([0, 0.3, 1.9])).toBe(false);
-    expect(pictureMoves([0, 0.3, 2])).toBe(true);
   });
 });

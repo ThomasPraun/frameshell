@@ -1,32 +1,37 @@
 import type { ReviewCraftWarning, ReviewSeam } from "@frameshell/protocol";
-import { DUPLICATE_DIFF, MOTION_DIFF, meanAbsDiff, seamPictureSize } from "../export/seam.js";
+import { duplicateSeam, meanAbsDiff, seamPictureSize } from "../export/seam.js";
 import { readRawFrames } from "../media/raw-frames.js";
 import { SEAM_CONTINUOUS } from "./thresholds.js";
 
-// The seam of a loop as a number (#457, ADR 0039 slice 3). The measure is the one the render's loop check uses
-// (`export/seam.ts`: mean absolute grey difference of two pictures at 160 px); this adds the jump between the last and the first frame.
+// The seam of a loop as a number (#457, ADR 0039 slice 3). The duplicate test is the render's loop check
+// itself (`duplicateSeam` in `export/seam.ts`); this adds the jump between the last and the first frame.
 
-/** The verdict on a jump of `jump` grey levels; `moves`: the picture moves elsewhere in the film (a held title has no seam to repeat). */
-export function seamVerdict(jump: number, moves: boolean): ReviewSeam["verdict"] {
-  if (jump < DUPLICATE_DIFF && moves) return "duplicate";
+/** The verdict on a jump of `jump` grey levels; `duplicate`: the last frame repeats the first while the picture moves ({@link duplicateSeam}). */
+export function seamVerdict(jump: number, duplicate: boolean): ReviewSeam["verdict"] {
+  if (duplicate) return "duplicate";
   return jump < SEAM_CONTINUOUS ? "continuous" : "cut";
 }
 
-/** Whether a series of mean grey changes holds one of {@link MOTION_DIFF} levels or more. */
-export function pictureMoves(energy: readonly number[]): boolean {
-  return energy.some((value) => value >= MOTION_DIFF);
+/** The jump between the first and last of four grey pictures, and whether the render's loop check calls the last a duplicate of the first. */
+export function judgeSeam(first: Uint8Array, second: Uint8Array, middle: Uint8Array, last: Uint8Array): { jump: number; duplicate: boolean } {
+  return { jump: meanAbsDiff(first, last), duplicate: duplicateSeam(first, second, middle, last) !== null };
 }
 
-/** The picture of the PNG at `path` as grey pixels at the seam's size. */
+/** The picture of the PNG at `path` as grey pixels at the seam's size, scaled as `export/seam.ts` does. */
 async function grey(ffmpeg: string, path: string, size: { width: number; height: number }): Promise<Uint8Array> {
   const { width, height } = seamPictureSize(size);
-  for await (const frame of readRawFrames(ffmpeg, path, `scale=${width}:${height}:flags=area,format=gray`, width * height)) return frame;
+  for await (const frame of readRawFrames(ffmpeg, path, `scale=${width}:${height},format=gray`, width * height)) return frame;
   throw new Error(`ffmpeg decoded no picture from ${path}`);
 }
 
-/** Mean grey difference, 0 to 255, between the pictures in the PNGs `first` and `last` of a film of `size` px. */
-export async function seamJump(ffmpeg: string, first: string, last: string, size: { width: number; height: number }): Promise<number> {
-  return meanAbsDiff(await grey(ffmpeg, first, size), await grey(ffmpeg, last, size));
+/** The seam of a film of `size` px from the PNGs of its first, second, middle and last frame (the pictures `loopSeamWarning` compares). */
+export async function seamOf(
+  ffmpeg: string,
+  paths: { first: string; second: string; middle: string; last: string },
+  size: { width: number; height: number },
+): Promise<{ jump: number; duplicate: boolean }> {
+  const [first, second, middle, last] = await Promise.all([paths.first, paths.second, paths.middle, paths.last].map((path) => grey(ffmpeg, path, size)));
+  return judgeSeam(first!, second!, middle!, last!);
 }
 
 /** The craft warning of a seam for a film meant to repeat: it holds a frame twice or jumps. */

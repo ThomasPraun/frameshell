@@ -1,3 +1,5 @@
+import type { SfxKind } from "@frameshell/schema";
+
 // The numbers `review` judges a film by, as data (#457, decided in #478). Ported from HyperFrames' `check` and
 // `measure` (Apache-2.0, https://github.com/heygen-com/hyperframes) and from the ranges the owner measured on seven launch
 // films with earshot; every one is a judgment with a number, so each is a warning, never a failure.
@@ -10,8 +12,13 @@ export const SYNC_EARLY_S = 0.045;
 export const SYNC_LATE_S = 0.075;
 /** Seconds within which a sound has a visual event "near" it, for the hit rate and its chance baseline. */
 export const SYNC_NEAR_S = 0.1;
-/** Fixed offsets (seconds) the sounds are moved by to see what random placement scores; all clear of {@link SYNC_NEAR_S} twice over. */
+/**
+ * Fixed offsets (seconds) the sounds are moved by to see what random placement scores. A shift is used only when it is
+ * clear of the near window, which a coarse picture series widens by half its sample spacing (`syncMetrics` drops the rest).
+ */
 export const SYNC_CHANCE_SHIFTS_S = [-1.1, -0.9, -0.7, -0.5, -0.3, 0.3, 0.5, 0.7, 0.9, 1.1] as const;
+/** Effects that do not land on an event by design: a whoosh peaks before it, a riser builds to it, ticks keep time. */
+export const SYNC_EXCLUDED_KINDS: readonly SfxKind[] = ["whoosh", "riser", "tick"];
 /** Fewest scored sounds before the baseline is a warning: three sounds say nothing about chance. */
 export const SYNC_MIN_SOUNDS = 5;
 /** The hit rate must beat chance by this much (a share, 0 to 1) or the sounds sit where random ones would. */

@@ -5,6 +5,7 @@ import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
 import { runTool } from "../media/ffmpeg.js";
 import type { ScannedAsset } from "../people/face-clusters.js";
+import { tileHeight } from "./plan.js";
 import { GRAPHIC_ALPHA, GRAPHIC_HZ, GRAPHIC_SAMPLES, GRAPHIC_WIDTH } from "./thresholds.js";
 import type { Box } from "./safe.js";
 
@@ -105,7 +106,7 @@ export function alphaBox(grey: Uint8Array, width: number, height: number): Fract
 async function alphaSamples(ffmpeg: string, render: GeneratedSource, from: number, span: number, work: string, signal?: AbortSignal): Promise<{ boxes: (FractionBox | null)[]; step: number }> {
   const hz = Math.min(GRAPHIC_HZ, GRAPHIC_SAMPLES / span);
   const width = GRAPHIC_WIDTH;
-  const height = Math.max(2, 2 * Math.round((render.height * width) / (render.width * 2)));
+  const height = tileHeight(width, render.width / render.height);
   const raw = join(work, "alpha.gray");
   await mkdir(work, { recursive: true });
   try {

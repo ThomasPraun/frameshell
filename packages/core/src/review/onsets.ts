@@ -11,9 +11,15 @@ import type { Onset } from "./sync.js";
 // Where sounds start, for the sync check (#457): the anchors of generated takes on the timeline's audio tracks, or the
 // hits found in an exported file's sound. A timeline's sound is mixed only by `render`, so nothing else of it is heard here.
 
-/** The generated takes (`sound.place`) on the audio tracks of `timeline`, at the second their anchor plays. */
+/** The generated takes (`sound.place`) on the audio tracks of `timeline`, at the second their anchor plays; a muted track or clip is not heard, so it is left out. */
 export async function takeOnsets(root: string, timeline: Timeline): Promise<Onset[]> {
-  return (await soundsOn(root, timeline)).map((item) => ({ at: item.at, kind: item.kind }));
+  const heard: Timeline = {
+    ...timeline,
+    tracks: timeline.tracks
+      .filter((track) => !(track.kind === "audio" && track.muted === true))
+      .map((track) => (track.kind === "audio" ? { ...track, clips: track.clips.filter((clip) => clip.audio?.muted !== true) } : track)),
+  };
+  return (await soundsOn(root, heard)).map((item) => ({ at: item.at, kind: item.kind }));
 }
 
 /**

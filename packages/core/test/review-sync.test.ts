@@ -84,4 +84,35 @@ describe("review sync", () => {
     // Three sounds are too few to judge against chance.
     expect(warnings.some((warning) => warning.message.includes("random placement"))).toBe(false);
   });
+
+  it("on a coarse picture series, shifts inside the widened near window are not used as chance", () => {
+    // 0.45 s between samples: events are good to 0.225 s, so the near window is 0.325 s and a 0.3 s shift would find the same event.
+    const events = [4, 8, 12, 16];
+    const sync = syncMetrics(input(events.map(click), events, { spacing: 0.45 }))!;
+    expect(sync.near).toBe(1);
+    expect(sync.chance).toBe(0);
+    // Only the 0.3 s shifts are within the window: the 0.3 s shifts would land within 0.2 s of an event without the drop.
+    const close = syncMetrics(input([4, 8, 12, 16].map(click), [4.1, 8.1, 12.1, 16.1], { spacing: 0.45 }))!;
+    expect(close.chance).toBe(0);
+  });
+
+  it("exact cuts and markers tell early from late on a coarse series, and carry no slack", () => {
+    // Takes at an exact cut: the 90-sample series of a 40 s timeline is 0.45 s apart, yet 60 ms early is early.
+    const sync = syncMetrics(input([click(9.94), click(20.1), click(30)], [10.2, 20.2, 29.8], { spacing: 0.45, exact: [10, 20, 30], range: { from: 0, to: 40 } }))!;
+    expect(sync.offsets.map((entry) => [entry.picture, entry.verdict])).toEqual([
+      [10, "early"],
+      [20, "late"],
+      [30, "on"],
+    ]);
+    expect(sync.hits).toBe(1);
+  });
+
+  it("with exact events, random placement still scores what the exact events give shifted sounds", () => {
+    const exact = [2, 6, 10, 14, 18];
+    const placed = syncMetrics(input(exact.map(click), [], { spacing: 0.45, exact }))!;
+    expect(placed.near).toBe(1);
+    expect(placed.chance).toBe(0);
+    const random = syncMetrics(input([3.1, 7.3, 11.6, 15.2, 18.9].map(click), [], { spacing: 0.45, exact }))!;
+    expect(random.near).toBe(0);
+  });
 });

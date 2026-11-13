@@ -71,7 +71,7 @@ export function deliveryWarnings(delivery: ReviewDelivery): ReviewCraftWarning[]
       check: "delivery",
       from: null,
       to: null,
-      message: `the file differs from the export plan of ${delivery.timeline} with preset ${delivery.preset} (format ${delivery.format}): ${list.join("; ")}. Render it again, or review it against the preset it was made with.`,
+      message: `the file differs from the export plan of ${delivery.timeline} with preset ${delivery.preset} (format ${delivery.format}): ${list.join("; ")}. Render it again, or review it against the preset it was made with (a draft-quality render caps the frame rate by design).`,
     },
   ];
 }

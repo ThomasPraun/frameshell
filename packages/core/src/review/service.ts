@@ -45,13 +45,16 @@ import {
 } from "./plan.js";
 import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
 import { deliveryChecks } from "./delivery.js";
-import { pictureMoves, seamJump, seamVerdict } from "./loop.js";
+import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
 import { fileOnsets, takeOnsets } from "./onsets.js";
 import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt } from "./safe.js";
 import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
 import { syncMetrics } from "./sync.js";
+
+/** A timeline flattened for a format, as `ExportService.resolvedTimeline` gives it. */
+type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
 
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
@@ -134,6 +137,9 @@ export class ReviewService {
       /** The motion of the range, measured once for the `motion` sheet and the metrics. */
       const motion = async () => (measured ??= await source.motion(range, join(scratch, "motion"), signal));
       const safeZones: ReviewSafeZone[] = [];
+      /** The timeline flattened for the format, resolved once for the safe-zone boxes and the sync. */
+      let flattened: Promise<Flat> | undefined;
+      const flat = (): Promise<Flat> => (flattened ??= this.#options.exports.resolvedTimeline(root, loaded!, request.projectFormat));
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
       const write = async (
@@ -169,7 +175,7 @@ export class ReviewService {
           const picks = contactPicks(source.fps, range, critical, request.every, MAX_SAFE_TILES);
           // Every track of a project takes the one caption face of its style.
           const metrics = subtitles[0] ? await captionFontMetrics(root, subtitles[0].style.font) : null;
-          const boxes = loaded ? await this.#boxes(root, request, loaded, source, join(scratch, "boxes"), warnings, signal) : [];
+          const boxes = loaded ? await this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, signal) : [];
           for (const platform of safePlatforms) {
             const zone = SAFE_ZONES[platform];
             const insets = filmInsets(zone, frame);
@@ -204,8 +210,8 @@ export class ReviewService {
         const series = await motion();
         const seconds = { from: frameTime(range.first, source.fps), to: frameTime(range.end, source.fps) };
         const loudness = await this.#loudness(request, source, ffmpeg, warnings, signal);
-        const sync = await this.#sync(root, request, source, loaded, series, critical, seconds, ffmpeg, scratch, warnings, signal);
-        const seam = await this.#seam(source, range, frames, series, ffmpeg, warnings, signal);
+        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, critical, seconds, ffmpeg, scratch, warnings, signal);
+        const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
         const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
         metrics = reviewMetrics({
           fps: source.fps,
@@ -255,12 +261,12 @@ export class ReviewService {
    * Boxes of the film's pixels that graphics (generated clips with an alpha render) and faces (footage with a cached `people scan`)
    * hold, for the safe-zone check. Says in `warnings` what could not be measured; never fails the run.
    */
-  async #boxes(root: string, request: ReviewRequest, loaded: LoadedTimeline, source: FilmSource, work: string, warnings: string[], signal?: AbortSignal): Promise<BoxSpan[]> {
-    const { exports, generated, faceScans } = this.#options;
+  async #boxes(root: string, flat: () => Promise<Flat>, source: FilmSource, work: string, warnings: string[], signal?: AbortSignal): Promise<BoxSpan[]> {
+    const { generated, faceScans } = this.#options;
     const film = { width: source.width, height: source.height };
-    let flat: Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
+    let resolved: Flat;
     try {
-      flat = await exports.resolvedTimeline(root, loaded, request.projectFormat);
+      resolved = await flat();
     } catch (error) {
       warnings.push(`safe: graphics and faces are not placed (${(error as Error).message.split("\n")[0]}).`);
       return [];
@@ -268,16 +274,16 @@ export class ReviewService {
     const found: BoxSpan[] = [];
     if (faceScans) {
       try {
-        found.push(...faceBoxes(flat.timeline, await faceScans(root), film, flat.project, flat.layout));
+        found.push(...faceBoxes(resolved.timeline, await faceScans(root), film, resolved.project, resolved.layout));
       } catch (error) {
         warnings.push(`safe: faces are not placed (${(error as Error).message.split("\n")[0]}).`);
       }
     }
-    if (generated && generatedClips(flat.timeline).length > 0) {
+    if (generated && generatedClips(resolved.timeline).length > 0) {
       try {
-        const otherSize = film.width !== flat.project.width || film.height !== flat.project.height;
-        const renders = await generated(root, flat.timeline, otherSize ? film : undefined);
-        const graphics = await graphicBoxes({ ffmpeg: await this.#options.ffmpeg(root), timeline: flat.timeline, renders, film, project: flat.project, work, signal });
+        const otherSize = film.width !== resolved.project.width || film.height !== resolved.project.height;
+        const renders = await generated(root, resolved.timeline, otherSize ? film : undefined);
+        const graphics = await graphicBoxes({ ffmpeg: await this.#options.ffmpeg(root), timeline: resolved.timeline, renders, film, project: resolved.project, work, signal });
         found.push(...graphics.boxes);
         if (graphics.opaque.length > 0) warnings.push(`safe: ${graphics.opaque.join(", ")} ${graphics.opaque.length === 1 ? "has a render" : "have renders"} with no alpha, so the box of what they draw is not known (it fills the frame).`);
       } catch (error) {
@@ -296,7 +302,7 @@ export class ReviewService {
     root: string,
     request: ReviewRequest,
     source: FilmSource,
-    loaded: LoadedTimeline | null,
+    flat: (() => Promise<Flat>) | null,
     series: MotionSeries,
     critical: readonly Critical[],
     range: { from: number; to: number },
@@ -310,14 +316,15 @@ export class ReviewService {
       if (request.file) {
         if (!source.audio) return null;
         sounds = await fileOnsets(ffmpeg, request.file, join(scratch, "onsets"));
-      } else if (loaded) {
-        sounds = await takeOnsets(root, (await this.#options.exports.resolvedTimeline(root, loaded, request.projectFormat)).timeline);
+      } else if (flat) {
+        sounds = await takeOnsets(root, (await flat()).timeline);
       } else return null;
       const spacing = series.times.length > 1 ? (series.times.at(-1)! - series.times[0]!) / (series.times.length - 1) : 0;
       return syncMetrics({
         source: request.file ? "file" : "takes",
         sounds,
         events: visualEvents(series),
+        exact: critical.filter((item) => item.tag === "cut" || item.tag === "marker").map((item) => item.at),
         cuts: critical.filter((cut) => cut.tag === "cut").map((cut) => cut.at),
         range,
         spacing,
@@ -330,13 +337,15 @@ export class ReviewService {
   }
 
   /** How far the last frame of the range is from the first; null for a range of one frame. */
-  async #seam(source: FilmSource, range: { first: number; end: number }, frames: Frames, series: MotionSeries, ffmpeg: string, warnings: string[], signal?: AbortSignal): Promise<ReviewSeam | null> {
+  async #seam(source: FilmSource, range: { first: number; end: number }, frames: Frames, ffmpeg: string, warnings: string[], signal?: AbortSignal): Promise<ReviewSeam | null> {
     if (range.end - range.first < 2) return null;
     const last = range.end - 1;
     try {
-      await frames.ensure([range.first, last], signal);
-      const jump = await seamJump(ffmpeg, frames.path(range.first), frames.path(last), source);
-      return { first: frameTime(range.first, source.fps), last: frameTime(last, source.fps), jump: Math.round(jump * 100) / 100, verdict: seamVerdict(jump, pictureMoves(series.energy)) };
+      const second = Math.min(range.first + 1, last);
+      const middle = Math.floor((range.first + range.end) / 2);
+      await frames.ensure([...new Set([range.first, second, middle, last])], signal);
+      const { jump, duplicate } = await seamOf(ffmpeg, { first: frames.path(range.first), second: frames.path(second), middle: frames.path(middle), last: frames.path(last) }, source);
+      return { first: frameTime(range.first, source.fps), last: frameTime(last, source.fps), jump: Math.round(jump * 100) / 100, verdict: seamVerdict(jump, duplicate) };
     } catch (error) {
       signal?.throwIfAborted();
       warnings.push(`seam: the first and last frame could not be compared (${(error as Error).message.split("\n")[0]}).`);
@@ -346,12 +355,14 @@ export class ReviewService {
 
   /**
    * `request.file` against the export plan of the timeline with `request.preset` (in `projectFormat`): size, frame rate, length,
-   * codecs and loudness. Null, with a warning, when the plan cannot be made or the file cannot be read.
+   * codecs and loudness. The plan is the preset's own: a file rendered with `--quality draft` differs in frame rate by design. Null, with a warning, when the plan cannot be made or the file cannot be read.
    */
   async #delivery(root: string, request: ReviewRequest, ffmpeg: string, loudness: ReviewLoudness | null, warnings: string[], signal?: AbortSignal): Promise<ReviewDelivery | null> {
     const { exports } = this.#options;
     try {
-      const planned = await exports.planRender(root, { timeline: request.timeline, preset: request.preset, ...(request.projectFormat ? { formats: [request.projectFormat] } : {}) });
+      // The plan of the version `view` shows, like the rest of the run; made without `--quality`, as the preset says.
+      const viewed = await this.#options.timelines.viewTimeline(root, request.timeline, request.view);
+      const planned = await exports.planRender(root, { timeline: request.timeline, preset: request.preset, ...(request.projectFormat ? { formats: [request.projectFormat] } : {}) }, viewed);
       const found = (await exports.presets(root)).find((candidate) => candidate.id === planned.result.preset);
       if (!found) return null;
       const { plugin: _plugin, ...rest } = found;

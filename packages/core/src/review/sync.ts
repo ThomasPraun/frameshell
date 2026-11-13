@@ -1,8 +1,10 @@
 import type { ReviewCraftWarning, ReviewSync } from "@frameshell/protocol";
+import type { SfxKind } from "@frameshell/schema";
 import {
   SYNC_CHANCE_MARGIN,
   SYNC_CHANCE_SHIFTS_S,
   SYNC_EARLY_S,
+  SYNC_EXCLUDED_KINDS,
   SYNC_LATE_S,
   SYNC_LISTED,
   SYNC_LISTED_CUTS,
@@ -20,18 +22,17 @@ export interface Onset {
   /** Seconds. */
   at: number;
   /** Generated effect kind; null for a hit found in a file. */
-  kind: string | null;
+  kind: SfxKind | null;
 }
-
-/** Effects that do not land on an event by design: a whoosh peaks before it, a riser builds to it, ticks keep time. */
-export const SYNC_EXCLUDED_KINDS: readonly string[] = ["whoosh", "riser", "tick"];
 
 /** What {@link syncMetrics} reads. */
 export interface SyncInput {
   source: ReviewSync["source"];
   sounds: readonly Onset[];
-  /** Seconds of the visual events of the picture (`visualEvents`). */
+  /** Seconds of the visual events found on the picture samples (`visualEvents`): good to half `spacing`. */
   events: readonly number[];
+  /** Seconds of events known to the frame, with no sampling in them: a timeline's cuts and markers. Absent for a file. */
+  exact?: readonly number[];
   /** Seconds of the cuts of the timeline; empty for a file. */
   cuts: readonly number[];
   range: { from: number; to: number };
@@ -51,19 +52,28 @@ function nearest(events: readonly number[], at: number, reach: number): number |
 /** The sync of `input`; null when the range holds no sound at all. */
 export function syncMetrics(input: SyncInput): ReviewSync | null {
   const { range, events } = input;
+  const exact = input.exact ?? [];
   const inside = input.sounds.filter((sound) => sound.at >= range.from && sound.at < range.to);
   if (inside.length === 0) return null;
   const scored = inside.filter((sound) => sound.kind === null || !SYNC_EXCLUDED_KINDS.includes(sound.kind));
   // An event is found between two samples: the finest offset that can be told is half the spacing.
   const slack = input.spacing / 2;
-  const offsets = scored.map((sound): ReviewSync["offsets"][number] => {
-    const picture = nearest(events, sound.at, SYNC_MATCH_S + slack);
-    if (picture === null) return { at: round(sound.at), kind: sound.kind, picture: null, offset: null, verdict: "none" };
-    const offset = sound.at - picture;
-    const verdict = offset < -(SYNC_EARLY_S + slack) ? "early" : offset > SYNC_LATE_S + slack ? "late" : "on";
-    return { at: round(sound.at), kind: sound.kind, picture: round(picture), offset: round(offset), verdict };
+  /** The event `at` belongs to within `reach`: a known one first, else one found on the samples (which carries `slack`). */
+  const find = (at: number, reach: number): { event: number; slack: number } | null => {
+    const known = nearest(exact, at, reach);
+    if (known !== null) return { event: known, slack: 0 };
+    const sampled = nearest(events, at, reach + slack);
+    return sampled === null ? null : { event: sampled, slack };
+  };
+  const found = scored.map((sound) => find(sound.at, SYNC_MATCH_S));
+  const offsets = scored.map((sound, i): ReviewSync["offsets"][number] => {
+    const match = found[i]!;
+    if (match === null) return { at: round(sound.at), kind: sound.kind, picture: null, offset: null, verdict: "none" };
+    const offset = sound.at - match.event;
+    const verdict = offset < -(SYNC_EARLY_S + match.slack) ? "early" : offset > SYNC_LATE_S + match.slack ? "late" : "on";
+    return { at: round(sound.at), kind: sound.kind, picture: round(match.event), offset: round(offset), verdict };
   });
-  const hits = offsets.filter((entry) => entry.offset !== null && Math.abs(entry.offset) <= SYNC_EARLY_S + slack).length;
+  const hits = found.filter((match, i) => match !== null && Math.abs(scored[i]!.at - match.event) <= SYNC_EARLY_S + match.slack).length;
 
   const nearShare = (shift: number): { near: number; total: number } => {
     let near = 0;
@@ -72,14 +82,17 @@ export function syncMetrics(input: SyncInput): ReviewSync | null {
       const at = sound.at + shift;
       if (at < range.from || at >= range.to) continue;
       total++;
-      if (nearest(events, at, SYNC_NEAR_S + slack) !== null) near++;
+      if (find(at, SYNC_NEAR_S) !== null) near++;
     }
     return { near, total };
   };
   const observed = nearShare(0);
   let near = 0;
   let total = 0;
+  // A shift inside the widened near window would find the same event again: it measures nothing about chance.
+  const clear = SYNC_NEAR_S + (events.length > 0 ? slack : 0);
   for (const shift of SYNC_CHANCE_SHIFTS_S) {
+    if (Math.abs(shift) <= clear) continue;
     const shifted = nearShare(shift);
     near += shifted.near;
     total += shifted.total;
