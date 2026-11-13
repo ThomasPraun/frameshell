@@ -71,6 +71,7 @@ import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { musicCandidatesLabel, planMusicCandidates } from "./music/candidates.js";
+import { MUSIC_ENTRY_FADE_MS } from "./music/entry-fade.js";
 import { musicFitLabel, planMusicFit } from "./music/run.js";
 import { musicShapeLabel, planMusicShape } from "./music/shape-run.js";
 import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
@@ -2242,7 +2243,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
-      const { operation, duckAgain, noop, ...report } = await planMusicShape(
+      const { operation, duckAgain, entryFade, noop, ...report } = await planMusicShape(
         loaded,
         { clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun },
         (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
@@ -2252,6 +2253,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await assertFresh(dir, timeline, caller, "music.shape", loaded.revision, "the shaping");
       const warnings = new Set(report.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicShapeLabel(report), revision: loaded.revision, warnings }, async (write) => {
+        if (entryFade) await write({ op: "clip.set", args: { clip: operation.clip, audioFadeInMs: MUSIC_ENTRY_FADE_MS } } as OperationRequest);
         await write({ op: "music.shape", args: { clip: operation.clip, curve: operation.curve, ...(operation.settings ? { settings: operation.settings } : {}) } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });
@@ -2293,6 +2295,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
               start: candidate.place.start,
               in: candidate.place.in,
               ...(candidate.gain !== 0 ? { gain: candidate.gain } : {}),
+              audioFadeInMs: MUSIC_ENTRY_FADE_MS,
             },
           } as OperationRequest);
           const clipId = clipAdded.changes.added.find((id) => id.startsWith("c_"));
