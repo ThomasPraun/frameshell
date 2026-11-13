@@ -160,7 +160,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `constructor`). Then the rows render one at a time as ordinary `render` jobs into `exports/<batch name>/<row>.mp4`
   (`<row>-<format>.mp4` with formats from `frameshell.json`), and `manifest.json` there keeps each row × format's status,
   job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
-  generates voiceover. Re-running failed rows (`--rows`, `--failed`, `--force`) comes next.
+  generates voiceover.
+- Re-run batch rows and batch skill text, slices 3 and 4 of #477 (ADR 0040, epic #451; `batch.render` params `rows`,
+  `failed`, `force`, result `skipped`, `preset` null when no row was chosen, MCP `batch_render`, protocol 119):
+  `frameshell batch <file> --rows es,fr` (ids, or `en..fr` for the rows between two in file order) renders only those
+  rows, `--failed` the rows `manifest.json` lists as not done (failed, canceled, or left `queued` or `running` by a
+  daemon that stopped, which the manifest now shows as `canceled`), and both together the failed ones among the named.
+  A chosen row whose renders are all `done` with the files in place is skipped, listed as `skipped`, unless `--force`.
+  Only the chosen rows are checked and queued, so a bad row elsewhere does not block the re-run, and the other rows
+  keep their manifest entries. `--failed` without the manifest of this batch file is refused. The skill gets
+  `reference/batch.md`: when to batch and when not, the caution that episodes need an original story, voice and visuals
+  each time (batch is for sizes, languages and product rows), the manifest and re-runs, and per-language voiceover rows
+  (swap the take, transcribe it first, never paid generation from batch).
 - Per-format overrides and editing in a format, fourth slice of #469 (ADR 0027, epic #451; `clip.set` `format`,
   `hidden`, `reset`, `clip.key` `format`, `track.set` `format`, `reset`, MCP `clip_set`, `clip_key`, `track_set`,
   protocol 116): where a format's automatic layout is wrong, a clip can be placed, keyed, hidden (its sound,

@@ -1436,7 +1436,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
-    "batch.render": async ({ cwd, file, out, formats: ids, dryRun }) => batches.render(await root(cwd), cwd, { file, out, formats: ids, dryRun }),
+    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, dryRun }) =>
+      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
