@@ -11,14 +11,19 @@ import {
   easeFraction,
   edgeTransitions,
   fadeWeight,
+  GRID_RANKS,
   gainAt,
+  gridRank,
+  gridRows,
   irisCentre,
   keyedValueAt,
   parseTimeline,
   placementAt,
   shapeAt,
   shapeProgress,
+  slatRects,
   soundCurve,
+  zoomFactor,
 } from "../src/index.js";
 
 const media = (id: string, start: number, from: number, to: number, extra: Partial<Clip> = {}): Clip =>
@@ -265,6 +270,76 @@ describe("shapeAt", () => {
   });
 });
 
+describe("zoom, slats and grid shapes (ADR 0030 slice 4)", () => {
+  it("zooms the outgoing picture about the centre of its origin and grows the incoming one out of it", () => {
+    const origin: [number, number, number, number] = [0.6, 0.2, 0.8, 0.4];
+    expect(zoomFactor({ kind: "zoom", origin })).toBe(4);
+    const start = shapeAt({ kind: "zoom", origin }, 0);
+    expect(start.outgoing.zoom).toEqual({ s: 1, tx: 0, ty: 0 });
+    expect(start.incoming.zoom).toEqual({ s: 0, tx: expect.closeTo(0.7), ty: expect.closeTo(0.3) });
+    const half = shapeAt({ kind: "zoom", origin }, 0.5);
+    expect(half.outgoing.zoom!.s).toBeCloseTo(2.5);
+    expect(half.incoming.zoom!.s).toBeCloseTo(0.5);
+    // The pivot stays where it is.
+    for (const part of [half.outgoing, half.incoming]) {
+      const { s, tx, ty } = part.zoom!;
+      expect([s * 0.7 + tx, s * 0.3 + ty]).toEqual([expect.closeTo(0.7), expect.closeTo(0.3)]);
+    }
+    const end = shapeAt({ kind: "zoom", origin }, 1);
+    expect(end.outgoing.zoom!.s).toBeCloseTo(4);
+    expect(end.incoming.zoom).toEqual({ s: 1, tx: 0, ty: 0 });
+  });
+
+  it("sizes a zoom by the larger side of its origin, from 1 to 4, the middle half by default", () => {
+    expect(zoomFactor({ kind: "zoom" })).toBe(2);
+    expect(zoomFactor({ kind: "zoom", origin: [0, 0, 0.5, 0.25] })).toBe(2);
+    expect(zoomFactor({ kind: "zoom", origin: [0.5, 0.5, 0.5, 0.5] })).toBe(4);
+    expect(zoomFactor({ kind: "zoom", origin: [0, 0, 1, 1] })).toBe(1);
+    expect(shapeAt({ kind: "zoom" }, 1).outgoing.zoom!.s).toBe(2);
+  });
+
+  it("opens slats in each strip from the edge the incoming picture enters by", () => {
+    expect(shapeAt({ kind: "slats" }, 0.5).incoming.slats).toEqual({ count: 8, axis: "x", from: "end", r: 0.5 });
+    expect(shapeAt({ kind: "slats", direction: "right", count: 4 }, 1).incoming.slats).toEqual({ count: 4, axis: "x", from: "start", r: 1 });
+    expect(shapeAt({ kind: "slats", direction: "up" }, 0).incoming.slats).toMatchObject({ axis: "y", from: "end", r: 0 });
+    expect(shapeAt({ kind: "slats", direction: "down" }, 0).incoming.slats).toMatchObject({ axis: "y", from: "start" });
+    expect(slatRects({ count: 2, axis: "x", from: "end", r: 0.5 })).toEqual([[0.25, 0, 0.5, 1], [0.75, 0, 1, 1]]);
+    expect(slatRects({ count: 2, axis: "y", from: "start", r: 0.5 })).toEqual([[0, 0, 1, 0.25], [0, 0.5, 1, 0.75]]);
+  });
+
+  it("switches grid cells on in a fixed scattered order, none at the start and all at the end", () => {
+    expect(shapeAt({ kind: "grid" }, 0.5).incoming.grid).toEqual({ count: 12, r: 0.5 });
+    expect(shapeAt({ kind: "grid", count: 20 }, 0).incoming.grid).toEqual({ count: 20, r: 0 });
+    expect(gridRows(16, 1920, 1080)).toBe(9);
+    expect(gridRows(12, 1080, 1920)).toBe(21);
+    const ranks = new Set<number>();
+    for (let row = 0; row < 9; row++) for (let column = 0; column < 16; column++) ranks.add(gridRank(column, row));
+    expect(ranks.size).toBeGreaterThan(100);
+    expect([...ranks].every((rank) => Number.isInteger(rank) && rank >= 0 && rank < GRID_RANKS)).toBe(true);
+    expect(gridRank(3, 2)).toBe(gridRank(3, 2));
+  });
+
+  it("takes the fields each new kind has and refuses the others", () => {
+    const base = { id: "c_1", type: "media", asset: "assets/a.mp4", start: 0, in: 0, out: 5, dissolve: 0.5 };
+    const shaped = (shape: unknown) => parseTimeline({ ...createTimeline("main"), tracks: [{ id: "t_1", kind: "video", clips: [{ ...base, shape }] }] });
+    for (const shape of [{ kind: "zoom" }, { kind: "zoom", origin: [0.2, 0.2, 0.4, 0.4] }, { kind: "slats", direction: "down", count: 5 }, { kind: "grid", count: 24 }, { kind: "grid" }]) {
+      expect(shaped(shape).ok, JSON.stringify(shape)).toBe(true);
+    }
+    for (const shape of [
+      { kind: "zoom", direction: "left" },
+      { kind: "slats", origin: [0, 0, 1, 1] },
+      { kind: "grid", direction: "up" },
+      { kind: "wipe", count: 4 },
+      { kind: "slats", count: 1 },
+      { kind: "slats", count: 65 },
+      { kind: "grid", count: 2.5 },
+      { kind: "zoom", origin: [0.6, 0, 0.4, 1] },
+    ]) {
+      expect(shaped(shape).ok, JSON.stringify(shape)).toBe(false);
+    }
+  });
+});
+
 describe("clip transition fields (timeline model)", () => {
   const timeline = (clips: unknown[], kind = "video") => ({ ...createTimeline("main"), tracks: [{ id: "t_1", kind, clips }] });
   const base = { id: "c_1", type: "media", asset: "assets/a.mp4", start: 0, in: 0, out: 5 };
@@ -309,7 +384,7 @@ describe("clip transition fields (timeline model)", () => {
     const audio = parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "wipe" } }], "audio"));
     expect(audio.ok).toBe(false);
     if (!audio.ok) expect(audio.error).toContain("no picture to shape");
-    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "zoom" } }])).ok).toBe(false);
+    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "spiral" } }])).ok).toBe(false);
     expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "push", direction: "diagonal" } }])).ok).toBe(false);
   });
 
@@ -323,8 +398,8 @@ describe("clip transition fields (timeline model)", () => {
       expect(result.ok, JSON.stringify(shape)).toBe(false);
       if (!result.ok) expect(result.error).toContain(message);
     };
-    refused({ kind: "iris", direction: "left" }, "takes no `direction`");
-    refused({ kind: "wipe", origin: [0, 0, 1, 1] }, "`origin` is for an iris");
+    refused({ kind: "iris", direction: "left" }, "`direction` is for wipe, push, slats; `iris` does not take it");
+    refused({ kind: "wipe", origin: [0, 0, 1, 1] }, "`origin` is for iris, zoom; `wipe` does not take it");
     refused({ kind: "iris", origin: [0.6, 0, 0.4, 1] }, "x0 <= x1");
     expect(shaped({ kind: "iris", origin: [0, 0, 1.2, 1] }).ok).toBe(false);
     expect(shaped({ kind: "iris", origin: [0, 0, 1] }).ok).toBe(false);

@@ -349,12 +349,15 @@
                               "enum": [
                                 "wipe",
                                 "push",
-                                "iris"
+                                "iris",
+                                "zoom",
+                                "slats",
+                                "grid"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`. `zoom`: the outgoing clip dives into `origin` while the incoming one grows out of it. `slats`: `count` strips each uncover the incoming clip the `direction` way, like blinds. `grid`: the incoming clip shows in square cells that switch on one by one, `count` across."
                             },
                             "direction": {
-                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe`, `push` and `slats` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -364,7 +367,7 @@
                               ]
                             },
                             "origin": {
-                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "description": "`iris` and `zoom` only: the element it opens from or dives into, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1). An iris grows from its centre; a zoom dives into its centre by the factor that makes its larger side fill the frame (at most 4). Default: the whole frame for an iris, the middle half for a zoom.",
                               "type": "array",
                               "prefixItems": [
                                 {
@@ -391,6 +394,12 @@
                               "items": false,
                               "minItems": 4,
                               "maxItems": 4
+                            },
+                            "count": {
+                              "description": "`slats` and `grid` only: how many slats cross the frame (default 8) or how many cells the grid has across (default 12).",
+                              "type": "integer",
+                              "minimum": 2,
+                              "maximum": 64
                             }
                           },
                           "required": [
@@ -1177,12 +1186,15 @@
                               "enum": [
                                 "wipe",
                                 "push",
-                                "iris"
+                                "iris",
+                                "zoom",
+                                "slats",
+                                "grid"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`. `zoom`: the outgoing clip dives into `origin` while the incoming one grows out of it. `slats`: `count` strips each uncover the incoming clip the `direction` way, like blinds. `grid`: the incoming clip shows in square cells that switch on one by one, `count` across."
                             },
                             "direction": {
-                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe`, `push` and `slats` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -1192,7 +1204,7 @@
                               ]
                             },
                             "origin": {
-                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "description": "`iris` and `zoom` only: the element it opens from or dives into, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1). An iris grows from its centre; a zoom dives into its centre by the factor that makes its larger side fill the frame (at most 4). Default: the whole frame for an iris, the middle half for a zoom.",
                               "type": "array",
                               "prefixItems": [
                                 {
@@ -1219,6 +1231,12 @@
                               "items": false,
                               "minItems": 4,
                               "maxItems": 4
+                            },
+                            "count": {
+                              "description": "`slats` and `grid` only: how many slats cross the frame (default 8) or how many cells the grid has across (default 12).",
+                              "type": "integer",
+                              "minimum": 2,
+                              "maximum": 64
                             }
                           },
                           "required": [
@@ -1998,12 +2016,15 @@
                               "enum": [
                                 "wipe",
                                 "push",
-                                "iris"
+                                "iris",
+                                "zoom",
+                                "slats",
+                                "grid"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`. `zoom`: the outgoing clip dives into `origin` while the incoming one grows out of it. `slats`: `count` strips each uncover the incoming clip the `direction` way, like blinds. `grid`: the incoming clip shows in square cells that switch on one by one, `count` across."
                             },
                             "direction": {
-                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe`, `push` and `slats` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -2013,7 +2034,7 @@
                               ]
                             },
                             "origin": {
-                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "description": "`iris` and `zoom` only: the element it opens from or dives into, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1). An iris grows from its centre; a zoom dives into its centre by the factor that makes its larger side fill the frame (at most 4). Default: the whole frame for an iris, the middle half for a zoom.",
                               "type": "array",
                               "prefixItems": [
                                 {
@@ -2040,6 +2061,12 @@
                               "items": false,
                               "minItems": 4,
                               "maxItems": 4
+                            },
+                            "count": {
+                              "description": "`slats` and `grid` only: how many slats cross the frame (default 8) or how many cells the grid has across (default 12).",
+                              "type": "integer",
+                              "minimum": 2,
+                              "maximum": 64
                             }
                           },
                           "required": [

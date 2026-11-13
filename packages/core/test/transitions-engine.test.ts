@@ -305,7 +305,7 @@ describe("shaped transitions (ADR 0030)", () => {
     expect(clip(faded, "v2")).not.toHaveProperty("shape");
     const error = await rejection(apply(butted(), "transition.set", { at: 4, kind: "fade", direction: "up" }));
     expect(error.code).toBe(ErrorCode.InvalidOperation);
-    expect(error.message).toContain("`direction` is for `wipe` and `push`");
+    expect(error.message).toContain("`direction` is for `wipe`, `push`, `slats`");
   });
 
   it("plays on every video track with the edge, upper ones too (slice 3); `tracks` limits it", async () => {
@@ -387,6 +387,10 @@ describe("shaped transitions (ADR 0030)", () => {
     expect(fourth.warnings).toEqual([expect.stringContaining("the cuts at 1, 2, 3 s on t_v are all pushes")]);
     const jumps = { ...createTimeline("main"), tracks: [{ id: "t_v", kind: "video" as const, clips: Array.from({ length: 5 }, (_, i) => media(`j${i + 1}`, i, i, i + 1)) }] };
     expect((await apply(jumps, "transition.set", { at: 1 })).warnings).toEqual([]);
+    // The new kinds count as kinds of their own: three slats in a row are slats, never "slatses".
+    let slatted = first.timeline;
+    for (const at of [1, 2, 3]) slatted = (await apply(slatted, "transition.set", { at, kind: "slats" })).timeline;
+    expect((await apply(slatted, "transition.set", { at: 4, kind: "zoom" })).warnings).toEqual([expect.stringContaining("the cuts at 1, 2, 3 s on t_v are all slats;")]);
   });
 
   it("an iris takes `origin` and no `direction`; other kinds refuse an `origin`", async () => {
@@ -399,9 +403,40 @@ describe("shaped transitions (ADR 0030)", () => {
     const direction = await rejection(apply(butted(), "transition.set", { at: 4, kind: "iris", direction: "up" }));
     expect(direction.message).toContain("an iris has none");
     const origin = await rejection(apply(butted(), "transition.set", { at: 4, kind: "wipe", origin: [0, 0, 1, 1] }));
-    expect(origin.message).toContain("`origin` is for `iris`; a wipe has none");
+    expect(origin.message).toContain("`origin` is for `iris`, `zoom`; a wipe has none");
     const unordered = await rejection(apply(butted(), "transition.set", { at: 4, kind: "iris", origin: [0.8, 0, 0.2, 1] }));
     expect(unordered.message).toContain("x0 <= x1");
+  });
+});
+
+describe("zoom, slats and grid (ADR 0030 slice 4)", () => {
+  it("writes a zoom with its origin, slats with a direction and count, a grid with a count; the others get none", async () => {
+    const zoom = await apply(butted(), "transition.set", { at: 4, kind: "zoom", origin: [0.6, 0.2, 0.8, 0.4] });
+    expect(clip(zoom.timeline, "v2")).toMatchObject({ dissolve: 0.5, shape: { kind: "zoom", origin: [0.6, 0.2, 0.8, 0.4] } });
+    expect(clip((await apply(butted(), "transition.set", { at: 4, kind: "zoom" })).timeline, "v2").shape).toEqual({ kind: "zoom" });
+    const slats = await apply(butted(), "transition.set", { at: 4, kind: "slats", count: 6 });
+    expect(clip(slats.timeline, "v2").shape).toEqual({ kind: "slats", direction: "left", count: 6 });
+    expect(clip((await apply(butted(), "transition.set", { at: 4, kind: "slats", direction: "down" })).timeline, "v2").shape).toEqual({ kind: "slats", direction: "down" });
+    const grid = await apply(butted(), "transition.set", { at: 4, kind: "grid", count: 20 });
+    expect(clip(grid.timeline, "v2").shape).toEqual({ kind: "grid", count: 20 });
+    expect(clip(grid.timeline, "a2")).not.toHaveProperty("shape");
+    for (const done of [zoom, slats, grid]) expect(parseTimeline(done.timeline).ok).toBe(true);
+  });
+
+  it("refuses a field the kind does not take, and a count out of range", async () => {
+    const refused = async (args: Record<string, unknown>, message: string) => expect((await rejection(apply(butted(), "transition.set", { at: 4, ...args }))).message).toContain(message);
+    await refused({ kind: "zoom", direction: "up" }, "`direction` is for `wipe`, `push`, `slats`; a zoom has none");
+    await refused({ kind: "grid", direction: "up" }, "a grid has none");
+    await refused({ kind: "slats", origin: [0, 0, 1, 1] }, "`origin` is for `iris`, `zoom`; a slats shape has none");
+    await refused({ kind: "wipe", count: 4 }, "`count` is for `slats`, `grid`; a wipe has none");
+    await refused({ kind: "zoom", origin: [0.8, 0, 0.2, 1] }, "x0 <= x1");
+    expect(() => apply(butted(), "transition.set", { at: 4, kind: "slats", count: 1 })).toThrow(/params\.count/);
+    expect(() => apply(butted(), "transition.set", { at: 4, kind: "grid", count: 100 })).toThrow(/params\.count/);
+  });
+
+  it("clears the shape with a later dissolve and counts the new kinds in the variety warning", async () => {
+    const dissolved = await apply((await apply(butted(), "transition.set", { at: 4, kind: "zoom" })).timeline, "transition.set", { at: 4 });
+    expect(clip(dissolved.timeline, "v2")).not.toHaveProperty("shape");
   });
 });
 

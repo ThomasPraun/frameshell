@@ -193,12 +193,16 @@ mutations print the new revision):
                                and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
                                keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
                                music fit runs the same duck again after it moves one. Revert undoes it
-  transition set --at s [--kind dissolve|fade|wipe|push|iris|dip-cut] [--direction left|right|up|down]
-           [--origin x0,y0,x1,y1] [--duration s] [--track <track>…]
+  transition set --at s [--kind dissolve|fade|wipe|push|iris|zoom|slats|grid|dip-cut] [--direction left|right|up|down]
+           [--origin x0,y0,x1,y1] [--count n] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
-                               (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
-                               push move the picture the --direction way (default left), iris opens it in a circle
-                               from the centre of --origin (fractions of the frame, default its centre); on an upper
+                               (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe,
+                               push and slats move or cut the picture the --direction way (default left); slats
+                               uncovers it in --count strips at once (default 8, 2 to 64); iris opens it in a circle
+                               from the centre of --origin (fractions of the frame, default its centre); zoom dives
+                               the outgoing clip into --origin (up to 4 times larger, by its size; default the middle
+                               half) while the next one grows out of it; grid shows it in square cells switching on,
+                               --count across (default 12). On an upper
                                track the outgoing clip shows only where the incoming one does not, and at a nested
                                clip's edge its own tracks follow. dip-cut: a hard cut, the clip ending there darkened 40 %
                                over its last 3 frames (opacity keys; bottom video track, sound untouched). A clip's
@@ -363,6 +367,7 @@ export const TIMELINE_OPTIONS = {
   kind: { type: "string" },
   direction: { type: "string" },
   origin: { type: "string" },
+  count: { type: "string" },
   prop: { type: "string" },
   ease: { type: "string" },
   value: { type: "string" },
@@ -507,7 +512,7 @@ const ALLOWED: Record<string, string[]> = {
     "shown",
     "reset",
   ],
-  "transition set": ["at", "kind", "direction", "origin", "duration", "track", "snap-to"],
+  "transition set": ["at", "kind", "direction", "origin", "count", "duration", "track", "snap-to"],
   "transition remove": ["at", "track", "snap-to"],
   "marker add": ["at", "label", "color", "snap-to"],
   "marker set": ["at", "label", "color", "clear-color", "snap-to"],
@@ -862,7 +867,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds|marker>, a clip edge.`);
       Object.assign(params, { at: when("at"), tracks, ...snapTo() });
       if (method === "transition.set") {
-        Object.assign(params, { kind: str("kind"), direction: str("direction"), origin: frameRect("origin"), duration: num("duration") });
+        Object.assign(params, { kind: str("kind"), direction: str("direction"), origin: frameRect("origin"), count: num("count"), duration: num("duration") });
       }
       break;
     }

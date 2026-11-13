@@ -1,7 +1,7 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
 import type { ClipDiff } from "@frameshell/protocol";
 import type { MarkerColor, TransitionShape } from "@frameshell/schema";
-import { irisCentre, shapeStep } from "@frameshell/schema/transitions";
+import { irisCentre, shapeOrigin, shapeStep } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import type { CueBox } from "../subtitles/model.js";
 import {
@@ -527,7 +527,8 @@ function paintTransitions<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: T
 /**
  * The sign of a shaped dissolve's kind (ADR 0030) inside its band at `x`, `y` (`w` x `h` px), as a path to stroke: a
  * wipe is its straight edge with an arrowhead the way it travels, a push two arrowheads, an iris a diamond around the
- * point it opens from. Signs fit the smaller side of the band, so a short band still reads.
+ * point it opens from, a zoom a square inside a larger one around its origin's centre, slats three parallel edges
+ * with an arrowhead, a grid a hash. Signs fit the smaller side of the band, so a short band still reads.
  */
 function shapeSign<Img>(ctx: Paint2D<Img>, shape: TransitionShape, x: number, y: number, w: number, h: number): void {
   const size = Math.max(2, Math.min(w, h) / 2 - 2);
@@ -540,6 +541,29 @@ function shapeSign<Img>(ctx: Paint2D<Img>, shape: TransitionShape, x: number, y:
     ctx.lineTo(cx, cy + size);
     ctx.lineTo(cx - size, cy);
     ctx.closePath();
+    return;
+  }
+  if (shape.kind === "zoom") {
+    const [x0, y0, x1, y1] = shapeOrigin(shape);
+    const cx = x + (w * (x0 + x1)) / 2;
+    const cy = y + (h * (y0 + y1)) / 2;
+    for (const half of [size, size / 2]) {
+      ctx.moveTo(cx - half, cy - half);
+      ctx.lineTo(cx + half, cy - half);
+      ctx.lineTo(cx + half, cy + half);
+      ctx.lineTo(cx - half, cy + half);
+      ctx.closePath();
+    }
+    return;
+  }
+  if (shape.kind === "grid") {
+    const third = size / 3;
+    for (const at of [-third, third]) {
+      ctx.moveTo(x + w / 2 + at, y + h / 2 - size);
+      ctx.lineTo(x + w / 2 + at, y + h / 2 + size);
+      ctx.moveTo(x + w / 2 - size, y + h / 2 + at);
+      ctx.lineTo(x + w / 2 + size, y + h / 2 + at);
+    }
     return;
   }
   const [ux, uy] = shapeStep(shape);
@@ -559,13 +583,16 @@ function shapeSign<Img>(ctx: Paint2D<Img>, shape: TransitionShape, x: number, y:
     head(0);
     return;
   }
-  // A wipe: its edge across the band, the arrowhead on the side it moves to.
-  if (ux !== 0) {
-    ctx.moveTo(cx, y);
-    ctx.lineTo(cx, y + h);
-  } else {
-    ctx.moveTo(x, cy);
-    ctx.lineTo(x + w, cy);
+  // A wipe: its edge across the band, the arrowhead on the side it moves to; slats: three edges side by side.
+  const edges = shape.kind === "slats" ? [-size / 2, 0, size / 2] : [0];
+  for (const at of edges) {
+    if (ux !== 0) {
+      ctx.moveTo(cx + at, y);
+      ctx.lineTo(cx + at, y + h);
+    } else {
+      ctx.moveTo(x, cy + at);
+      ctx.lineTo(x + w, cy + at);
+    }
   }
   head(size);
 }

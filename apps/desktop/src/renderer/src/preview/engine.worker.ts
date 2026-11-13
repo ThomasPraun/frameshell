@@ -810,11 +810,11 @@ class Engine implements LayerHost {
       if (part.placement.opacity <= 0) continue;
       const { cover } = part;
       const placed = cover ? { left: 0, top: 0, width: output.width, height: output.height } : layerRect(part.size, output, project, part.placement);
-      // A shaped dissolve (ADR 0030) moves the picture and cuts it to a frame rectangle or an iris's circle; its own
-      // alpha still applies.
+      // A shaped dissolve (ADR 0030) moves or scales the picture and cuts it to a frame rectangle, an iris's circle or
+      // the cells of slats or a grid; its own alpha still applies.
       const shaped = part.shape ? shapedRect(part.shape, placed, output) : null;
-      const rect = shaped ? { ...placed, left: shaped.left, top: shaped.top } : placed;
-      const cut = shaped !== null && (shaped.clip !== null || shaped.circle !== undefined);
+      const rect = shaped ? { ...placed, left: shaped.left, top: shaped.top, width: shaped.width, height: shaped.height } : placed;
+      const cut = shaped !== null && (shaped.clip !== null || shaped.circle !== undefined || shaped.cells !== undefined);
       if (cut) {
         context.save();
         if (shaped.clip) {
@@ -828,6 +828,14 @@ class Engine implements LayerHost {
           // Outside: the frame with the circle cut out of it (even-odd).
           if (outside) context.rect(0, 0, output.width, output.height);
           context.arc(x, y, radius, 0, 2 * Math.PI);
+          context.clip(outside ? "evenodd" : "nonzero");
+        }
+        if (shaped.cells) {
+          const { rects, outside } = shaped.cells;
+          context.beginPath();
+          if (outside) context.rect(0, 0, output.width, output.height);
+          for (const cell of rects) context.rect(cell.left, cell.top, cell.width, cell.height);
+          // The cells never overlap, so even-odd cuts them out of the frame exactly.
           context.clip(outside ? "evenodd" : "nonzero");
         }
       }

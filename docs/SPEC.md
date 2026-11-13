@@ -575,7 +575,7 @@ frameshell clip reframe <clip> [--format 9x16] [--person p | --anchor 0-1]   # f
 frameshell shot set <shot> [--layout solo|two-up|grid|screen|pip] [--angles a,b] [--corner c]   # change a shot
 frameshell multicam turns <group>                        # who speaks when, from each angle's mic (ADR 0016)
 frameshell direct <group> [--template id] [--rules file] [--from s --to s] [--replace-human]   # shots from turns by director.json rules
-frameshell transition set --at <s> [--kind dissolve|fade|wipe|push|iris|dip-cut] [--direction left|right|up|down] [--origin x0,y0,x1,y1] [--duration <s>] [--track <id>…]   # dissolve (default, 0.5 s), fade, a wipe, push or iris, or a dip cut (bottom video track) at a clip edge; default: all video and audio tracks (ADR 0018, ADR 0030)
+frameshell transition set --at <s> [--kind dissolve|fade|wipe|push|iris|zoom|slats|grid|dip-cut] [--direction left|right|up|down] [--origin x0,y0,x1,y1] [--count n] [--duration <s>] [--track <id>…]   # dissolve (default, 0.5 s), fade, a wipe, push, iris, zoom, slats or grid, or a dip cut (bottom video track) at a clip edge; default: all video and audio tracks (ADR 0018, ADR 0030)
 frameshell transition remove --at <s> [--track <id>…]
 frameshell marker add --at <s> --label <l> [--color c]   # named point on the timeline clock; ripples with cut (ADR 0029)
 frameshell marker set <marker> [--at s] [--label l] [--color c | --clear-color] | remove <marker> | list   # <marker>: id or label

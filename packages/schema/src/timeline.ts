@@ -228,7 +228,7 @@ export const ClipKeysSchema = z
 const TransitionSeconds = z.number().positive();
 
 /** Shapes a dissolve can take instead of mixing the pictures (ADR 0030). */
-export const TRANSITION_SHAPE_KINDS = ["wipe", "push", "iris"] as const;
+export const TRANSITION_SHAPE_KINDS = ["wipe", "push", "iris", "zoom", "slats", "grid"] as const;
 
 /** Name of a shape in {@link TRANSITION_SHAPE_KINDS}. */
 export type TransitionShapeKind = (typeof TRANSITION_SHAPE_KINDS)[number];
@@ -252,6 +252,15 @@ export function orderedFrameRect([x0, y0, x1, y1]: readonly [number, number, num
   return x0 <= x1 && y0 <= y1;
 }
 
+/** Fewest and most slats of a `slats` shape, or columns of a `grid` shape. */
+export const SHAPE_COUNT_RANGE = { min: 2, max: 64 } as const;
+
+/** Slats of a `slats` shape when `count` is not given. */
+export const DEFAULT_SLATS = 8;
+
+/** Columns of a `grid` shape when `count` is not given. */
+export const DEFAULT_GRID_COLUMNS = 12;
+
 /** How a clip's `dissolve` moves the pictures instead of mixing them (ADR 0030); `shapeAt` evaluates it. */
 export const TransitionShapeSchema = z
   .strictObject({
@@ -259,16 +268,26 @@ export const TransitionShapeSchema = z
       .enum(TRANSITION_SHAPE_KINDS)
       .describe(
         "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. " +
-          "`iris`: the incoming clip opens in a growing circle from the centre of `origin`.",
+          "`iris`: the incoming clip opens in a growing circle from the centre of `origin`. " +
+          "`zoom`: the outgoing clip dives into `origin` while the incoming one grows out of it. " +
+          "`slats`: `count` strips each uncover the incoming clip the `direction` way, like blinds. " +
+          "`grid`: the incoming clip shows in square cells that switch on one by one, `count` across.",
       ),
     direction: z
       .enum(TRANSITION_DIRECTIONS)
       .optional()
-      .describe("`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`."),
+      .describe("`wipe`, `push` and `slats` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`."),
     origin: FrameRectSchema.optional().describe(
-      "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. " +
-        "Default: the whole frame.",
+      "`iris` and `zoom` only: the element it opens from or dives into, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1). An iris grows from its centre; " +
+        "a zoom dives into its centre by the factor that makes its larger side fill the frame (at most 4). Default: the whole frame for an iris, the middle half for a zoom.",
     ),
+    count: z
+      .number()
+      .int()
+      .min(SHAPE_COUNT_RANGE.min)
+      .max(SHAPE_COUNT_RANGE.max)
+      .optional()
+      .describe(`\`slats\` and \`grid\` only: how many slats cross the frame (default ${DEFAULT_SLATS}) or how many cells the grid has across (default ${DEFAULT_GRID_COLUMNS}).`),
   })
   .describe(
     "Shape of this clip's `dissolve` instead of a mix (needs `dissolve`), on any video track: on an upper track the outgoing clip shows " +
@@ -843,13 +862,13 @@ export const TimelineSchema = z
           const path = ["tracks", t, "clips", c, "shape"];
           if (track.kind === "audio") ctx.addIssue({ code: "custom", message: "audio tracks have no picture to shape: `shape` is for video tracks", path });
           else if (clip.dissolve === undefined) ctx.addIssue({ code: "custom", message: "`shape` shapes a dissolve: give the clip a `dissolve` too, or remove `shape`", path });
-          const { kind, direction, origin } = clip.shape;
-          if (kind === "iris" && direction !== undefined) {
-            ctx.addIssue({ code: "custom", message: "an iris opens from `origin`: it takes no `direction`", path: [...path, "direction"] });
-          }
-          if (kind !== "iris" && origin !== undefined) {
-            ctx.addIssue({ code: "custom", message: `\`origin\` is for an iris; a ${kind} takes \`direction\``, path: [...path, "origin"] });
-          }
+          const { kind, direction, origin, count } = clip.shape;
+          const takes = (field: string, kinds: readonly string[]) => {
+            if (!kinds.includes(kind)) ctx.addIssue({ code: "custom", message: `\`${field}\` is for ${kinds.join(", ")}; \`${kind}\` does not take it`, path: [...path, field] });
+          };
+          if (direction !== undefined) takes("direction", ["wipe", "push", "slats"]);
+          if (origin !== undefined) takes("origin", ["iris", "zoom"]);
+          if (count !== undefined) takes("count", ["slats", "grid"]);
           if (origin !== undefined && !orderedFrameRect(origin)) {
             ctx.addIssue({ code: "custom", message: "`origin` is `[x0, y0, x1, y1]` with x0 <= x1 and y0 <= y1", path: [...path, "origin"] });
           }
