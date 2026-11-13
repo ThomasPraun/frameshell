@@ -64,13 +64,15 @@ describe("agent sessions", () => {
   });
 
   it("drops tags when the connection that set them closes", async () => {
-    const { connect, addTrack } = await setup();
+    const { dir, connect, addTrack } = await setup();
     const tagger = await connect("desktop/0.1.0");
     await tagger.request("session.tag", { session: "term-1a2b", agent: "claude" });
     const shell = await connect("cli/test", { session: "term-1a2b" });
     expect((await addTrack(shell, "A")).author).toBe("agent:claude:term-1a2b");
     tagger.close();
-    await expect.poll(async () => (await addTrack(shell, `B${Date.now()}`)).author).toBe("cli:term-1a2b");
+    // Poll the cheap read: a journaled write per poll is slow on Windows and ate the poll's whole budget.
+    await expect.poll(async () => (await shell.request("status", { cwd: dir })).caller.agent).toBeNull();
+    expect((await addTrack(shell, "B")).author).toBe("cli:term-1a2b");
   });
 
   it("lets the shell end a transaction its agent began after the agent quit", async () => {
