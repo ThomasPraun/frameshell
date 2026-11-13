@@ -1,6 +1,6 @@
 import { type Backdrop, type ClipFormatOverride, type ClipKey, type ElementAdjust, clipInFormat, glassOf } from "@frameshell/schema";
 import type { TimelineView } from "@frameshell/protocol";
-import { keyedValueAt } from "@frameshell/schema/composite";
+import { type Placement, keyedValueAt } from "@frameshell/schema/composite";
 import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { useEffect, useMemo, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
@@ -34,8 +34,10 @@ import { ShotInspector } from "./ShotInspector.js";
  * With `format` (the preview shows a format other than the primary, ADR 0027)
  * placement and keys show and set the clip in that format, which it can also
  * be hidden in or set back to the primary; sound and transitions are shared.
+ * `fillOf` gives the placement that fills the format's frame for footage
+ * covering it, which has no placement of its own there yet.
  */
-export function ClipInspector({ format = null }: { format?: string | null }) {
+export function ClipInspector({ format = null, fillOf = null }: { format?: string | null; fillOf?: ((clip: string) => Placement | null) | null }) {
   const { view: stored } = useTimelineView(SELECTION_TIMELINE);
   const { clips } = useSelection();
   const { time: playhead, fps } = useTransport();
@@ -61,7 +63,10 @@ export function ClipInspector({ format = null }: { format?: string | null }) {
     setError(null);
     sendClipEdit(edit, options).catch((failure: unknown) => setError((failure as Error).message));
   };
-  const transform = clip.transform ?? { x: 0, y: 0, scale: 1, opacity: 1 };
+  // Covering footage shows, and its first edit stores, the whole placement that fills the frame: one field alone
+  // would make it a placed clip, fitted (letterboxed) with that one value.
+  const fill = format !== null && fillOf ? fillOf(clip.id) : null;
+  const transform = fill ?? clip.transform ?? { x: 0, y: 0, scale: 1, opacity: 1 };
   // Placement and picture keys go to the format shown; gain and everything else is every format's.
   const inFormat = (prop: KeyProp) => (format !== null && prop !== "gain" ? { format } : {});
   // A keyed property follows its keys, so an entry there keys it at the playhead instead of changing the unused static value.
@@ -69,12 +74,12 @@ export function ClipInspector({ format = null }: { format?: string | null }) {
   const setKeyed = (prop: KeyProp, value: number) =>
     send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, value, ...inFormat(prop) } }, { label: "Change keyframe" });
   const setTransform = (name: "x" | "y" | "scale" | "opacity", value: number) =>
-    clip.keys[name] ? setKeyed(name, value) : send({ op: "clip.set", args: { clip: clip.id, transform: { [name]: value }, ...inFormat(name) } });
+    clip.keys[name] ? setKeyed(name, value) : send({ op: "clip.set", args: { clip: clip.id, transform: { ...fill, [name]: value }, ...inFormat(name) } });
   const placed = row.kind === "video";
   const override = format !== null ? storedOverride(stored, clip.id, format) : null;
   // An image project has no sound (ADR 0017).
   const audible = clip.kind === "media" && !image;
-  const moved = transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1;
+  const moved = fill === null && (transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1);
 
   return (
     <div className="clip-inspector" role="group" aria-label={t.inspector.settingsOfClip(clip.name)} data-clip={clip.id}>
@@ -202,7 +207,7 @@ function find(rows: readonly TrackRow[], id: string): { row: TrackRow; clip: Cli
   return null;
 }
 
-/** `view` with every clip as it shows in `format` (`clipInFormat`); hidden clips stay on their track, unlike in the preview. */
+/** `view` with every clip as it shows in `format` (`clipInFormat`); hidden clips keep their own opacity, unlike in the preview. */
 function clipsInFormat(view: TimelineView, format: string): TimelineView {
   return { ...view, tracks: view.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => clipInFormat(clip, format)) })) };
 }

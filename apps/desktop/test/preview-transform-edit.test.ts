@@ -192,8 +192,10 @@ describe("in a project format (ADR 0027)", () => {
 
   it("gives covering footage the placement that fills the frame, for its handles to start from", () => {
     const covered = layerBox(vertical, 60, "c_cam", TALL)!;
-    expect(covered).toMatchObject({ covered: true, placement: { x: 0, y: 0, scale: 3.16, opacity: 1 } });
+    // 1920 / 608 = 3.1605, rounded up: stored, it still fills the 1920 px height.
+    expect(covered).toMatchObject({ covered: true, placement: { x: 0, y: 0, scale: 3.161, opacity: 1 } });
     // Full height; the 16:9 picture reaches past both sides of the 9:16 frame, centred.
+    expect(covered.box.height).toBeGreaterThanOrEqual(1);
     expect(covered.box.height).toBeCloseTo(1, 2);
     expect(covered.box.width).toBeCloseTo(1920 / 608, 2);
     expect(covered.box.left + covered.box.width / 2).toBeCloseTo(0.5, 2);

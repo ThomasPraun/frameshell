@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  HIDDEN_IN_FORMAT_TRACK,
   type Timeline,
   clipInFormat,
   createProjectConfig,
@@ -119,23 +118,47 @@ describe("per-format overrides (ADR 0027 decision 5)", () => {
     expect(title!.keys).toEqual({ opacity: [{ at: 0, value: 0 }, { at: 0.5, value: 1 }], x: [{ at: 0, value: 0 }] });
   });
 
-  it("moves a clip hidden in the format onto a hidden track above its own, with the same mute, so its sound plays", () => {
+  it("keeps a clip hidden in the format on its track at opacity 0, so its sound, transitions and captions stay", () => {
     const { timeline: shown } = resolveFormat(overridden(), config, "9x16")!;
-    expect(shown.tracks.map((track) => track.id)).toEqual(["t_base", "t_top", `t_top${HIDDEN_IN_FORMAT_TRACK}`, "t_subs"]);
-    const hidden = shown.tracks[2]!;
-    expect(hidden).toMatchObject({ kind: "video", hidden: true, muted: true });
-    expect(hidden.kind === "video" && hidden.clips.map((clip) => clip.id)).toEqual(["c_logo"]);
+    expect(shown.tracks.map((track) => track.id)).toEqual(["t_base", "t_top", "t_subs"]);
+    const top = shown.tracks[1]!;
+    expect(top).toMatchObject({ kind: "video", muted: true });
+    const logo = top.kind === "video" ? top.clips[1]! : null;
+    expect(logo).toMatchObject({ id: "c_logo", start: 2, transform: { opacity: 0 } });
+    expect(logo).not.toHaveProperty("keys");
+  });
+
+  it("drops a hidden clip's opacity keys and keeps its others", () => {
+    const stored = overridden();
+    const title = (stored.tracks[1] as { clips: Record<string, unknown>[] }).clips[0]!;
+    title["formats"] = { "9x16": { hidden: true } };
+    const { timeline: shown } = resolveFormat(stored, config, "9x16")!;
+    const top = shown.tracks[1]!;
+    const hidden = top.kind === "video" ? top.clips[0]! : null;
+    expect(hidden).toMatchObject({ transform: { x: 200, y: 300, scale: 0.5, opacity: 0 } });
+    expect(hidden!.keys).toEqual({ y: [{ at: 0, value: 300 }, { at: 1, value: 250 }] });
   });
 
   it("gives a subtitle track the format's style fields over its own", () => {
     const { timeline: shown } = resolveFormat(overridden(), config, "9x16")!;
-    expect(shown.tracks[3]).toMatchObject({ style: { preset: "clean", position: "center" } });
+    expect(shown.tracks[2]).toMatchObject({ style: { preset: "clean", position: "center" } });
   });
 
   it("works on a timeline view, whose clips carry derived fields", () => {
     const view = { tracks: [{ id: "t_top", kind: "video", name: null, clips: [{ id: "c_a", end: 2, transform: { x: 5 }, formats: { "9x16": { transform: { x: 9 } } } }] }] };
     expect(formatTimeline(view, "9x16").tracks[0]!.clips[0]).toMatchObject({ end: 2, transform: { x: 9 } });
     expect(clipInFormat(view.tracks[0]!.clips[0]!, "1x1")).toBe(view.tracks[0]!.clips[0]);
+  });
+
+  it("gives a view's subtitle track, which carries `clips: []`, the format's style", () => {
+    const view = {
+      tracks: [
+        { id: "t_v", kind: "video", name: null, clips: [] },
+        { id: "t_subs", kind: "subtitles", name: null, follows: "t_v", clips: [], style: { preset: "clean", position: "bottom" }, formats: { "9x16": { style: { position: "center" } } } },
+      ],
+    };
+    expect(formatTimeline(view, "9x16").tracks[1]).toMatchObject({ clips: [], style: { preset: "clean", position: "center" } });
+    expect(formatTimeline(view, "1x1")).toBe(view);
   });
 
   it("is refused on audio tracks, as are props or elements on footage and gain keys", () => {

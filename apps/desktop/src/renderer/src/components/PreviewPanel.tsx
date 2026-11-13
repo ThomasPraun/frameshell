@@ -306,7 +306,17 @@ export function PreviewPanel({
           <PickLayer active={pickTool && !empty && !variant} fps={fps} frame={frame} program={program} timeline={view?.timeline ?? null} alphaAt={alphaAt} photos={still} />
         </div>
       </div>
-      <Inspector format={variant ? shown.id : null} />
+      <Inspector
+        format={variant ? shown.id : null}
+        fillOf={
+          variant && program
+            ? (clip) => {
+                const box = layerBox(program, frame, clip, shown);
+                return box?.covered ? box.placement : null;
+              }
+            : null
+        }
+      />
       <TransportBar
         still={still}
         playing={playing}
@@ -359,15 +369,16 @@ function leaveFullScreen(doc: Document): void {
 /**
  * Settings of the selection: a subtitle track's style, a program track's
  * angles, else the selected clip's placement and sound (or a shot's layout).
- * `format`: the format the preview shows when not the primary (ADR 0027), whose overrides placement and style edit.
+ * `format`: the format the preview shows when not the primary (ADR 0027), whose overrides placement and style edit;
+ * `fillOf`: there, the placement that fills the frame of a clip whose picture covers it at the playhead, else null.
  */
-function Inspector({ format }: { format: string | null }) {
+function Inspector({ format, fillOf }: { format: string | null; fillOf: ((clip: string) => Placement | null) | null }) {
   const { track, clips } = useSelection();
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const kind = track === null ? undefined : view?.tracks.find((candidate) => candidate.id === track)?.kind;
   if (track !== null && kind === "subtitles") return <SubtitleInspector track={track} format={format} />;
   if (track !== null && kind === "program" && clips.length === 0) return <GroupInspector track={track} />;
-  return <ClipInspector format={format} />;
+  return <ClipInspector format={format} fillOf={fillOf} />;
 }
 
 /**

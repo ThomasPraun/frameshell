@@ -31,7 +31,6 @@ export {
   resolveFormat,
   clipInFormat,
   formatTimeline,
-  HIDDEN_IN_FORMAT_TRACK,
   sameAspect,
   formatProblems,
 } from "./formats.js";

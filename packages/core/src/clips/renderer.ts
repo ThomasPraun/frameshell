@@ -213,7 +213,7 @@ export class ClipRenderer {
   async status(root: string, id: string, size?: FormatEntry): Promise<ClipRendersResult> {
     const { timeline } = await this.#options.load(root, id);
     const hosts = timeline.tracks.map((track) => track.id);
-    // Flattening adds layers `<track>/<n>` (and a format's hidden clips `<track>/hidden`): report the root track that shows them.
+    // Flattening adds layers `<track>/<n>`: report the root track that shows them.
     const host = (track: string) => (hosts.includes(track) ? track : (hosts.find((candidate) => track.startsWith(`${candidate}/`)) ?? track));
     const flat = await resolveNestedIn(root, timeline, size?.id, this.#options.readNested);
     const placed = generatedClips(flat).map((p) => ({ ...p, track: host(p.track) }));

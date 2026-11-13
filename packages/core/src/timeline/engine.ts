@@ -396,7 +396,9 @@ class Edit {
         hint: "Per format, a subtitle track takes `style` (and `reset`).",
       });
     }
-    if (args.style === undefined && args.reset === undefined) {
+    // An empty `style`, or `reset` with no style there, would change nothing.
+    const styled = args.style !== undefined && Object.keys(defined(args.style)).length > 0;
+    if (!styled && (args.reset === undefined || track.formats?.[format] === undefined)) {
       throw this.invalid(`nothing to set in format ${format}.`, { hint: "Pass `style` fields, or `reset: true` to show the captions there as in the primary." });
     }
     const formats = { ...track.formats };
@@ -1013,7 +1015,9 @@ class Edit {
       });
     }
     const { transform, props, elements, hidden, reset } = args;
-    if ([transform, props, elements, hidden, reset].every((value) => value === undefined)) {
+    // An empty `transform`, or `reset` with no override there, would change nothing.
+    const moved = transform !== undefined && Object.keys(defined(transform)).length > 0;
+    if (!moved && [props, elements, hidden].every((value) => value === undefined) && (reset === undefined || !("formats" in clip) || clip.formats?.[format] === undefined)) {
       throw this.invalid(`nothing to set in format ${format}.`, { hint: "Pass `transform`, `props`, `elements` or `hidden`, or `reset: true`." });
     }
     if (isShotClip(clip)) {

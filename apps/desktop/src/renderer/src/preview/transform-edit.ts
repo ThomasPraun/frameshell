@@ -84,10 +84,11 @@ function spanBox(program: Program, span: VideoSpan, layer: number, frame: number
   const size = span.size ?? (span.kind === "generated" ? resolution : null);
   if (!size) return null;
   if (span.kind !== "generated" && span.cover) {
-    // Covering is the fitted picture scaled until it fills the frame: its handles start from that scale.
+    // Covering is the fitted picture scaled until it fills the frame: its handles start from that scale, rounded up
+    // to 3 decimals so a stored placement still fills it (3.1605 rounded down leaves a pixel row bare).
     const fit = Math.min(output.width / size.width, output.height / size.height);
     const fill = Math.max(output.width / size.width, output.height / size.height);
-    const placement = { ...span.placement, scale: Math.round(((span.placement.scale * fill) / fit) * 1000) / 1000 };
+    const placement = { ...span.placement, scale: Math.ceil(((span.placement.scale * fill) / fit) * 1000 - 1e-6) / 1000 };
     return { layer, size, placement, covered: true, box: frameBox(resolution, size, placement, output) };
   }
   return { layer, size, placement: span.placement, box: frameBox(resolution, size, spanPlacement(span, frame, program.fps), output) };

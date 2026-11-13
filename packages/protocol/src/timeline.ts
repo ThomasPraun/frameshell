@@ -466,7 +466,8 @@ export const operationArgs = {
     clear: z.boolean().optional().describe("True removes every key of `prop`: its static value plays again. Takes no other field."),
     format: formatArg(
       "`x`, `y`, `scale` and `opacity` only, the key is set or removed in that format (its first key there starts from the " +
-        "clip's own keys of `prop`); `clear` drops that format's keys of `prop`, so it moves there as in the primary again.",
+        "clip's own keys of `prop`); `clear` drops that format's keys of `prop`, so it follows the clip's own keys of `prop` " +
+        "there again (unless that format's `transform` sets `prop`).",
     ),
   }),
   "track.duck": z.strictObject({

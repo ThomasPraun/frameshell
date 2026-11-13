@@ -122,6 +122,13 @@ describe("clip.set with format (ADR 0027 decision 5)", () => {
     expect(loose.message).toMatch(/`hidden` belongs to one format: give `format` too/);
     const empty = await rejection(apply(reel(), "clip.set", { clip: "c_talk", format: "9x16" }));
     expect(empty.message).toMatch(/nothing to set in format 9x16/);
+    const unmoved = await rejection(apply(reel(), "clip.set", { clip: "c_talk", format: "9x16", transform: {} }));
+    expect(unmoved.message).toMatch(/nothing to set in format 9x16/);
+    const nothingToReset = await rejection(apply(reel(), "clip.set", { clip: "c_talk", format: "9x16", reset: true }));
+    expect(nothingToReset.message).toMatch(/nothing to set in format 9x16/);
+    const unstyled = await rejection(apply(reel(), "track.set", { track: "t_s", format: "9x16", reset: true }));
+    expect(unstyled.message).toMatch(/nothing to set in format 9x16/);
+    expect((await rejection(apply(reel(), "track.set", { track: "t_s", format: "9x16", style: {} }))).message).toMatch(/nothing to set in format 9x16/);
   });
 });
 

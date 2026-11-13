@@ -3328,7 +3328,8 @@ export const methods = {
       "frames of the clip's picture through trim, split and cut. Example, a slow zoom over a clip at 10 to 20 s: " +
       "`{ clip, prop: \"scale\", time: 10, value: 1 }` then `{ clip, prop: \"scale\", time: 20, value: 1.2 }`. " +
       "`format` (ADR 0027) keys `x`, `y`, `scale` or `opacity` in that format only (its first key there starts from the clip's own " +
-      "keys of `prop`); `clear` with `format` makes it move as in the primary again. Fails with " +
+      "keys of `prop`); `clear` with `format` drops that format's keys of `prop`, so it follows the clip's own keys there " +
+      "again (unless that format's `transform` sets `prop`). Fails with " +
       "InvalidOperation (time outside the clip, no key to remove, audio track with a picture property, shots, `gain` with `format`, the primary format) or FormatNotFound.",
     params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

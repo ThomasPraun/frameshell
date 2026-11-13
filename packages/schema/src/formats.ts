@@ -90,9 +90,6 @@ export function resolveFormat(timeline: Timeline, config: FormatSource, id?: str
   return format ? { timeline: format.primary ? timeline : formatTimeline(timeline, format.id), format } : null;
 }
 
-/** Id suffix of the track {@link formatTimeline} moves a track's hidden clips onto: `<track>/hidden`. */
-export const HIDDEN_IN_FORMAT_TRACK = "/hidden";
-
 /** What {@link clipInFormat} reads of a clip: a timeline clip, or one of a `timeline.show` view. */
 interface FormattableClip {
   transform?: Record<string, number | undefined> | undefined;
@@ -138,33 +135,33 @@ export function clipInFormat<C extends object>(clip: C, id: string): C {
 
 /**
  * `timeline` as it plays in format `id` (ADR 0027): each clip {@link clipInFormat}, a subtitle track's override
- * style over its own, and clips hidden there moved onto a hidden track right above theirs (id
- * `<track>/hidden`, same mute), so their sound still plays. Works on a timeline file and on a `timeline.show`
- * view alike. `timeline` itself when nothing in it is overridden in `id`. Call it for formats other than the primary only.
+ * style over its own, and clips hidden there kept in place at opacity 0 (their opacity keys dropped), so their
+ * sound, transitions and captions are the primary's. Works on a timeline file and on a `timeline.show` view alike.
+ * `timeline` itself when nothing in it is overridden in `id`. Call it for formats other than the primary only.
  */
 export function formatTimeline<T extends { tracks: readonly object[] }>(timeline: T, id: string): T {
   const tracks = timeline.tracks as readonly FormattableTrack[];
   const touched = tracks.some((track) => track.formats?.[id] !== undefined || track.clips?.some((clip) => (clip as FormattableClip).formats?.[id] !== undefined));
   if (!touched) return timeline;
-  const shown: FormattableTrack[] = [];
-  for (const track of tracks) {
-    const style = track.formats?.[id]?.style;
-    if (!track.clips) {
-      shown.push(style ? { ...track, style: { ...track.style, ...style } } : track);
-      continue;
+  const shown = tracks.map((track): FormattableTrack => {
+    // A view's subtitle track carries `clips: []`, a file's none: the kind decides.
+    if (track.kind === "subtitles" || !track.clips) {
+      const style = track.formats?.[id]?.style;
+      return style ? { ...track, style: { ...track.style, ...style } } : track;
     }
-    const kept: object[] = [];
-    const hidden: object[] = [];
-    for (const clip of track.clips) {
-      const into = (clip as FormattableClip).formats?.[id]?.hidden === true ? hidden : kept;
-      into.push(clipInFormat(clip, id));
-    }
-    shown.push({ ...track, clips: kept });
-    if (hidden.length === 0) continue;
-    const { behind: _plate, ...host } = track as FormattableTrack & { behind?: unknown };
-    shown.push({ ...host, id: `${track.id}${HIDDEN_IN_FORMAT_TRACK}`, hidden: true, clips: hidden } as FormattableTrack);
-  }
+    return { ...track, clips: track.clips.map((clip) => ((clip as FormattableClip).formats?.[id]?.hidden === true ? pictureOff(clipInFormat(clip, id)) : clipInFormat(clip, id))) };
+  });
   return { ...timeline, tracks: shown };
+}
+
+/** `clip` drawn at opacity 0 throughout: export leaves the layer out, the preview draws nothing of it. */
+function pictureOff<C extends object>(clip: C): C {
+  const own = clip as FormattableClip;
+  const { opacity: _opacity, ...keys } = own.keys ?? {};
+  const shown: FormattableClip = { ...own, transform: { ...own.transform, opacity: 0 } };
+  if (Object.keys(keys).length > 0) shown.keys = keys;
+  else delete shown.keys;
+  return shown as C;
 }
 
 /** `value` without its `undefined` members. */
