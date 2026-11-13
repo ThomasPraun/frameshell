@@ -1218,7 +1218,7 @@ export const methods = {
       "Capture the composited frame showing at timeline time `at` as a PNG, JPEG or WebP image, rendered by the export " +
       "compiler (single-frame plan), so it matches `render` and works with the app closed. This is how an image project " +
       "(ADR 0017) is exported: `at: 0`. `projectFormat` captures the frame as that format of the project lays it out " +
-      "(ADR 0027), e.g. `9x16`. Size: the preset's when `preset` is given (it must have the format's aspect), else the " +
+      "(ADR 0027), e.g. `9x16`; with `view: proposal` that includes a format only an open review proposal adds (ADR 0036). Size: the preset's when `preset` is given (it must have the format's aspect), else the " +
       "format's (default: the primary, i.e. the project resolution). Fails with InvalidOperation (`at` outside the " +
       "timeline, data.valid has the range; a preset of another aspect), ExportUnsupported, PresetNotFound, " +
       "FormatNotFound, TimelineNotFound.",

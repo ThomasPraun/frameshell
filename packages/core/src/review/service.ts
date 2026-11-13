@@ -13,7 +13,7 @@ import {
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES } from "@frameshell/schema";
+import { type FormatEntry, type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES } from "@frameshell/schema";
 import { bundledFontMetrics } from "../export/font-metrics.js";
 import type { ExportService } from "../export/service.js";
 import type { TimelineService } from "../timeline/service.js";
@@ -61,6 +61,8 @@ export interface ReviewRequest {
   projectFormat?: string | undefined;
   /** Which version of the timeline to look at. */
   view: TimelineViewName;
+  /** The project's format list as `view` shows it, when a proposal changes it (ADR 0036); absent: the file's. */
+  formats?: readonly FormatEntry[] | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
@@ -202,7 +204,7 @@ export class ReviewService {
       return { source, critical: [], subtitles: [], viewed: { view: "current", proposal: null }, warnings };
     }
     const { timelines, exports } = this.#options;
-    const loaded = await timelines.viewTimeline(root, request.timeline, request.view);
+    const loaded = { ...(await timelines.viewTimeline(root, request.timeline, request.view)), ...(request.formats ? { formats: request.formats } : {}) };
     const shown = await timelines.show(root, request.timeline, request.view);
     if (shown.duration === null) {
       throw new RpcError(ErrorCode.InvalidOperation, `review: timeline ${request.timeline} has a clip whose end is unknown (${shown.problems[0]?.message ?? "nested timeline problem"}); fix it first.`, {

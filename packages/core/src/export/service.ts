@@ -17,6 +17,7 @@ import {
   BUILTIN_FORMATS,
   BUILTIN_FORMAT_IDS,
   type ExportPreset,
+  type FormatEntry,
   type FormatSource,
   type MulticamGroup,
   type ResolvedFormat,
@@ -152,6 +153,16 @@ export interface CoverChoice {
   at?: number | undefined;
   /** `#rrggbb`. */
   color?: string | undefined;
+}
+
+/**
+ * A timeline as a read with a `view` shows it. `formats`: the project's format list when a review-mode
+ * proposal changes it (ADR 0036); absent, the file's.
+ */
+export interface LoadedTimeline {
+  timeline: Timeline;
+  fps: number;
+  formats?: readonly FormatEntry[] | undefined;
 }
 
 /** Options for {@link ExportService}. */
@@ -397,9 +408,9 @@ export class ExportService {
       format?: FrameFormat | undefined;
       quality?: number | undefined;
     },
-    loaded?: { timeline: Timeline; fps: number },
+    loaded?: LoadedTimeline,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
-    return this.#capture(root, params, await this.#resolved(root, params.timeline, loaded));
+    return this.#capture(root, params, { ...(await this.#resolved(root, params.timeline, loaded)), ...(loaded?.formats ? { formats: loaded.formats } : {}) });
   }
 
   /**
@@ -409,13 +420,14 @@ export class ExportService {
    */
   async resolvedSubtitles(
     root: string,
-    loaded: { timeline: Timeline; fps: number },
+    loaded: LoadedTimeline,
     projectFormat?: string,
   ): Promise<ResolvedSubtitleTrack[]> {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
     const config = (await readEnclosingProject(root))?.config;
-    const layout = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format;
+    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
+    const layout = resolveFormat(timeline, loaded.formats ? { ...project, formats: loaded.formats } : project, projectFormat)?.format;
     return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), layout);
   }
 
@@ -521,12 +533,12 @@ export class ExportService {
       format?: FrameFormat | undefined;
       quality?: number | undefined;
     },
-    resolved: { timeline: Timeline; fps: number },
+    resolved: LoadedTimeline,
     cover?: CoverLayout | null,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
     const format = params.format ?? frameFormatOf(params.out);
     const config = (await readEnclosingProject(root))?.config;
-    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
+    const project: FormatSource = { ...(config ?? { resolution: DEFAULT_RESOLUTION }), ...(resolved.formats ? { formats: resolved.formats } : {}) };
     const resolution = project.resolution;
     const { timeline, fps } = resolved;
     const found = resolveFormat(timeline, project, params.projectFormat);

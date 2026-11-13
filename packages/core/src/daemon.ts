@@ -37,6 +37,7 @@ import {
   type CaptionPhrase,
   type MulticamGroup,
   type ProgramTrack,
+  type FormatEntry,
   type ProjectConfig,
   type ShotClip,
   type Timeline,
@@ -111,6 +112,7 @@ import { fileUses } from "./file-uses.js";
 import { FormatService, builtinFormatInfos, formatInfos, formatNotFound, projectConfigDocument } from "./formats.js";
 import { ConfigJournal, readConfigJournal } from "./config/journal.js";
 import { applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
+import { ConfigWatcher, DirectConfigEdits } from "./config/direct-edits.js";
 import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
 import { configReverted } from "./config/revert.js";
 import { PROJECT_FILE, ProjectRegistry, readEnclosingProject } from "./projects.js";
@@ -350,6 +352,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }),
   });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
+  // ADR 0036 slice 5: hand edits of `formats` and of `style.json` become config operations.
+  const configWatcher = new ConfigWatcher({ onChange: (dir, doc): Promise<void> => directConfigEdits.reconcile(dir, doc) });
   // ADR 0029 slice 3: a beats file written, hand-edited or removed changes the grid of every timeline following that asset.
   const beatsWatcher = new BeatsWatcher({
     onChange: ({ root: dir, file, change, message }) => publishFor("beats.changed", dir, { project: dir, file, change, ...(message !== undefined ? { message } : {}) }),
@@ -367,6 +371,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       );
       media.attach(dir);
       timelineWatcher.attach(dir);
+      configWatcher.attach(dir);
       beatsWatcher.attach(dir);
       const key = canonicalPathSync(dir);
       if (!openedRoots.has(key)) openedRoots.set(key, dir);
@@ -405,6 +410,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       style: styleConfigDocument(),
     },
   });
+  const directConfigEdits = new DirectConfigEdits({ journal: configJournal, sink: { directConfigEdit: (dir, doc, edit) => timelines.directConfigEdit(dir, doc, edit) } });
   const formats = new FormatService({
     readConfig: readProjectConfig,
     journal: configJournal,
@@ -1118,6 +1124,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const open = await timelines.proposal(dir);
     return open && transactionKey(open.author) === authorOf(caller) ? "proposal" : "current";
   };
+  /** The project's formats as a read with `view` shows them: the open proposal's list when it changes them, else absent (the file's). */
+  const viewFormats = async (dir: string, view: TimelineViewName): Promise<{ formats?: FormatEntry[] }> => {
+    if (view !== "proposal") return {};
+    const { config } = (await readEnclosingProject(dir))!;
+    const shown = await timelines.viewConfig(dir, "project", view);
+    return shown.proposal ? { formats: formatsFromState(projectFormats(config)[0]!, shown.state) } : {};
+  };
   /** Timeline `id` as `caller` sees it by default: its own proposal's version while it builds one. */
   const loadFor = async (dir: string, id: string, caller: Caller) => timelines.viewTimeline(dir, id, await viewOf(dir, caller, undefined));
   /** ProposalState `forbidden` unless `caller` is the app (ADR 0019 §2, §8). */
@@ -1340,10 +1353,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
-      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, loaded)) };
+      const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
+      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
     },
     review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, view }, caller) => {
       const dir = await root(cwd);
+      const reviewView = await viewOf(dir, caller, view);
       return reviews.run(dir, {
         timeline,
         ...(file ? { file: resolve(cwd, file) } : {}),
@@ -1353,7 +1368,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         platform,
         every,
         projectFormat,
-        view: await viewOf(dir, caller, view),
+        view: reviewView,
+        ...(projectFormat !== undefined ? await viewFormats(dir, reviewView) : {}),
       });
     },
     analyze: async ({ cwd, file, name, threshold }, _caller, request) => {
@@ -2935,6 +2951,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await media.close();
       await segmentation.close();
       await timelineWatcher.close();
+      await configWatcher.close();
       await beatsWatcher.close();
       await clips.close();
       await clipJobs.close();
