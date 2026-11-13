@@ -5,7 +5,8 @@ import { type LayerRect, flattenTimeline } from "@frameshell/schema/composite";
 import { type FormatSource, formatOf, projectFormats, resolveFormat, scaledCaptions } from "@frameshell/schema/formats";
 import { SUBTITLE_FONT, subtitleLayout, subtitleTracks } from "@frameshell/schema/subtitles";
 import { describe, expect, it } from "vitest";
-import { type Program, compileProgram, programAt } from "../src/renderer/src/preview/program.js";
+import { type Program, compileProgram, flattenView, programAt } from "../src/renderer/src/preview/program.js";
+import { viewsInFormat } from "../src/renderer/src/preview/useProgram.js";
 
 // Seam under test: the preview's format switcher (ADR 0027 slice 2) lays a timeline out in each project format with
 // the helpers export uses (`formatOf`, `formatCrop`, `scaledCaptions`): the same source pixels cover the frame, the
@@ -127,6 +128,8 @@ function previewed(program: Program, frame: number): string[] {
   return program.layers.flatMap((_, layer) => {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder" || span.kind === "angle") return [];
+    // Drawn at opacity 0 throughout (a clip hidden in the format): export leaves such a layer out.
+    if (span.placement.opacity === 0 && !span.motion?.keyed) return [];
     return [`${span.clip} ${"cover" in span && span.cover ? crop(span.cover) : "fit"}`];
   });
 }
@@ -238,5 +241,46 @@ describe("the preview in a project format (ADR 0027)", () => {
     expect(by["9x16"]! / by["1x1"]!).toBeCloseTo(1.3, 1);
     expect(by["4x5"]! / by["1x1"]!).toBeCloseTo(1.3, 1);
     expect(by["16x9"]).toBe(by["1x1"]);
+  });
+
+  it("lays each clip out by its override in that format as export does (ADR 0027 decision 5)", () => {
+    // In 9:16 only: b-roll placed small (so fitted, not cut), the logo hidden, the base keyed in from the left.
+    const overridden = stack("assets/talk.mp4", [
+      media("c_broll", "assets/broll.mp4", 0, { formats: { "9x16": { transform: { y: 400, scale: 0.8 } } } }),
+      media("c_logo", "assets/logo.png", 2, { transform: { x: 600 }, formats: { "9x16": { hidden: true } } }),
+      media("c_keyed", "assets/keyed.mp4", 4, { formats: { "1x1": { keys: { x: [{ at: 0, value: -200 }, { at: 1, value: 0 }] } } } }),
+    ]);
+    for (const { id } of projectFormats(PROJECT)) {
+      const format = formatOf(PROJECT, id)!;
+      const { view } = viewsInFormat(viewOf(overridden), new Map(), format.primary ? undefined : id);
+      const shown = compileProgram(view!, ASSETS, { resolution: PROJECT.resolution, renders: RENDERS, format });
+      const resolved = resolveFormat(overridden, PROJECT, id)!.timeline;
+      for (const frame of [15, 75, 135]) expect.soft(previewed(shown, frame), `${id} frame ${frame}`).toEqual(exported(resolved, id, frame));
+    }
+    const vertical = compileProgram(viewsInFormat(viewOf(overridden), new Map(), "9x16").view!, ASSETS, { resolution: PROJECT.resolution, renders: RENDERS, format: formatOf(PROJECT, "9x16")! });
+    expect(previewed(vertical, 15)).toEqual(["c_base crop=608:1080:656:0", "c_broll fit"]);
+    expect(programAt(vertical, 15, 1)).toMatchObject({ clip: "c_broll", placement: { x: 0, y: 400, scale: 0.8, opacity: 1 } });
+    expect(previewed(vertical, 75)).toEqual(["c_base crop=608:1080:656:0"]);
+    // In the primary the same timeline shows as stored.
+    expect(previewed(preview(overridden, "16x9"), 75)).toEqual(["c_base fit", "c_logo fit"]);
+  });
+
+  it("styles captions by the format's override as export does, from a view whose subtitle track carries `clips: []`", () => {
+    const captioned: Timeline = {
+      ...stack("assets/talk.mp4", []),
+      tracks: [
+        { id: "v1", kind: "video", clips: [media("c_base", "assets/talk.mp4", 0)] },
+        { id: "s1", kind: "subtitles", follows: "v1", style: { preset: "big-keyword", position: "bottom" }, formats: { "9x16": { style: { position: "top", preset: "plain" } } } },
+      ],
+    };
+    const style = (timeline: Timeline) => subtitleTracks(timeline, () => null, FPS)[0]!.style;
+    for (const { id } of projectFormats(PROJECT)) {
+      const format = formatOf(PROJECT, id)!;
+      const { view } = viewsInFormat(viewOf(captioned), new Map(), format.primary ? undefined : id);
+      expect.soft(style(flattenView(view!)), id).toEqual(style(resolveFormat(captioned, PROJECT, id)!.timeline));
+    }
+    const vertical = viewsInFormat(viewOf(captioned), new Map(), "9x16").view!;
+    expect(style(flattenView(vertical))).toMatchObject({ preset: "plain", position: "top" });
+    expect(style(flattenView(viewOf(captioned)))).toMatchObject({ preset: "big-keyword", position: "bottom" });
   });
 });

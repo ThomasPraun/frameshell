@@ -649,3 +649,33 @@ describe("tempo and --snap-to (ADR 0029)", () => {
     expect(frameshell(["clip", "add", "v1", "assets/take.mp4", "--bpm", "100", ...on]).code).toBe(2);
   });
 });
+
+describe("per-format overrides (ADR 0027)", () => {
+  it("clip set, clip key and track set with --format change one format only; --reset drops it", () => {
+    expect(frameshell(["format", "add", "9x16"]).code).toBe(0);
+    try {
+      const track = json<{ changes: { added: string[] } }>(["track", "add", "video", "--name", "Lower thirds"]).changes.added[0]!;
+      const clip = json<{ changes: { added: string[] } }>(["clip", "add", track, "assets/take.mp4", "--start", "40", "--in", "0", "--out", "1", "--y", "300"]).changes.added[0]!;
+      const stored = () => onDisk().tracks.find((t: { id: string }) => t.id === track).clips[0];
+
+      expect(frameshell(["clip", "set", clip, "--format", "9x16", "--y", "700", "--hidden"]).code).toBe(0);
+      expect(stored()).toMatchObject({ transform: { y: 300 }, formats: { "9x16": { transform: { y: 700 }, hidden: true } } });
+      expect(frameshell(["clip", "key", clip, "--format", "9x16", "--prop", "x", "--at", "40.5", "--value", "12"]).code).toBe(0);
+      expect(stored().formats["9x16"].keys).toEqual({ x: [{ at: 0.5, value: 12 }] });
+      expect(frameshell(["clip", "set", clip, "--format", "9x16", "--reset", "--shown"]).code).toBe(0);
+      expect(stored()).not.toHaveProperty("formats");
+
+      expect(frameshell(["clip", "set", clip, "--reset"]).stderr).toMatch(/--reset drops a format's override: pass --format/);
+      expect(frameshell(["clip", "set", clip, "--format", "9x16", "--gain=-3"]).stderr).toMatch(/`gain` is shared by every format/);
+      expect(frameshell(["clip", "set", clip, "--format", "4x5", "--y", "1"]).stderr).toMatch(/no format "4x5"/);
+
+      const subs = json<{ changes: { added: string[] } }>(["track", "add", "subtitles", "--follows", track]).changes.added[0]!;
+      expect(frameshell(["track", "set", subs, "--format", "9x16", "--position", "center"]).code).toBe(0);
+      expect(onDisk().tracks.find((t: { id: string }) => t.id === subs)).toMatchObject({ formats: { "9x16": { style: { position: "center" } } } });
+      expect(frameshell(["track", "remove", subs]).code).toBe(0);
+      expect(frameshell(["track", "remove", track, "--force"]).code).toBe(0);
+    } finally {
+      frameshell(["format", "remove", "9x16"]);
+    }
+  });
+});

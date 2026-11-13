@@ -167,4 +167,37 @@ describe("placementEdit", () => {
     });
     expect(placementEdit("c_logo", IDENTITY, IDENTITY)).toBeNull();
   });
+
+  it("sets a format's override when given one (ADR 0027)", () => {
+    expect(placementEdit("c_logo", IDENTITY, { ...IDENTITY, y: 700 }, "9x16")).toEqual({ op: "clip.set", args: { clip: "c_logo", transform: { y: 700 }, format: "9x16" } });
+  });
+});
+
+describe("in a project format (ADR 0027)", () => {
+  const TALL = { width: 1080, height: 1920 };
+  /** The same layers as the preview shows them in 9:16: the footage covers the frame (its centre 608x1080). */
+  const vertical: Program = {
+    ...program,
+    layers: [[{ ...program.layers[0]![0]!, cover: { left: 656, top: 0, width: 608, height: 1080 } } as Program["layers"][number][number]], program.layers[1]!],
+  };
+
+  it("boxes placed layers in the format's frame, offsets scaled from project pixels as the engine draws them", () => {
+    // 500 px square fitted into 1080 wide, a quarter: 270 px; x 600 of 1920 is 337.5 of 1080, y -300 of 1080 is -533.3 of 1920.
+    const box = layerBox(vertical, 60, "c_logo", TALL)!.box;
+    expect(Math.abs(box.width * TALL.width - 270)).toBeLessThanOrEqual(1);
+    expect(Math.abs((box.left + box.width / 2) * TALL.width - (540 + 337.5))).toBeLessThanOrEqual(1);
+    expect(Math.abs((box.top + box.height / 2) * TALL.height - (960 - 533.3))).toBeLessThanOrEqual(1);
+    expect(layerAt(vertical, 60, { x: box.left + box.width / 2, y: box.top + box.height / 2 }, undefined, TALL)).toBe("c_logo");
+  });
+
+  it("gives covering footage the placement that fills the frame, for its handles to start from", () => {
+    const covered = layerBox(vertical, 60, "c_cam", TALL)!;
+    // 1920 / 608 = 3.1605, rounded up: stored, it still fills the 1920 px height.
+    expect(covered).toMatchObject({ covered: true, placement: { x: 0, y: 0, scale: 3.161, opacity: 1 } });
+    // Full height; the 16:9 picture reaches past both sides of the 9:16 frame, centred.
+    expect(covered.box.height).toBeGreaterThanOrEqual(1);
+    expect(covered.box.height).toBeCloseTo(1, 2);
+    expect(covered.box.width).toBeCloseTo(1920 / 608, 2);
+    expect(covered.box.left + covered.box.width / 2).toBeCloseTo(0.5, 2);
+  });
 });

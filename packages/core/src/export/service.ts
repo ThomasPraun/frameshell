@@ -25,6 +25,8 @@ import {
   type Size,
   type Timeline,
   type Transcript,
+  formatOf,
+  formatTimeline,
   subjectOf,
   programGroup,
   resolveFormat,
@@ -37,7 +39,7 @@ import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
 import { readEnclosingProject } from "../projects.js";
-import { readNestedFile, resolveNested, transformedProgram } from "../timeline/nested.js";
+import { readNestedFile, resolveNestedIn, transformedProgram } from "../timeline/nested.js";
 import { resolveTranscript } from "../transcripts/transcriber.js";
 import {
   type ExportSource,
@@ -307,7 +309,9 @@ export class ExportService {
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
     // A GIF always repeats (ADR 0039): it gets the loop rules without being asked.
     const loop = params.loop === true || preset.container === "gif";
-    const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
+    // Read once: each format resolves its overrides on the same version.
+    const source = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
+    const { timeline, fps } = await this.#resolved(root, params.timeline, source);
     const resolution = project.resolution;
     const formats = (params.formats ? [...new Set(params.formats)] : [undefined]).map((id) => {
       const found = resolveFormat(timeline, project, id);
@@ -341,9 +345,12 @@ export class ExportService {
     const base = params.out ?? `${params.stem ?? join(root, "exports", `${params.timeline}-${preset.id}`)}.${preset.container}`;
     const planned = await Promise.all(formats.map(async (format) => {
       const size = outputSize(preset, format, params.preset !== undefined, "render");
-      const cover = params.cover ? await this.#coverFrame(root, timeline, fps, size, params.cover) : null;
+      // The edit as it plays in this format (its overrides); sources, transcripts and sound are every format's.
+      const own = format.primary ? timeline : (await this.#resolved(root, params.timeline, source, format)).timeline;
+      const cover = params.cover ? await this.#coverFrame(root, own, fps, size, params.cover) : null;
       const input = {
         ...shared,
+        timeline: own,
         preset: { ...preset, video: { ...preset.video, ...size } },
         variant: { cover: format.cover, captionScale: format.captionScale },
         ...(cover ? { cover: { at: cover.at, layout: cover.layout } } : {}),
@@ -408,7 +415,7 @@ export class ExportService {
               let audioFx: ReadonlyMap<string, string> = new Map();
               if (layered.length > 0 && this.#options.clips) {
                 ctx.update({ step: "clips", progress: 0 });
-                generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
+                generated = await this.#options.clips.ensure(root, input.timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
               }
               if (baked.length > 0 && this.#options.audioFx) {
                 ctx.update({ step: "audio-fx", progress: 0 });
@@ -467,7 +474,17 @@ export class ExportService {
     },
     loaded?: LoadedTimeline,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
-    return this.#capture(root, params, { ...(await this.#resolved(root, params.timeline, loaded)), ...(loaded?.formats ? { formats: loaded.formats } : {}) });
+    const format = (await this.#formatOf(root, params.projectFormat, loaded?.formats)) ?? undefined;
+    return this.#capture(root, params, { ...(await this.#resolved(root, params.timeline, loaded, format)), ...(loaded?.formats ? { formats: loaded.formats } : {}) });
+  }
+
+  /**
+   * Format `id` of the project at `root` (the primary when absent); null when it has none such (callers refuse it).
+   * `formats`: the format list of a review-mode version, in place of the file's.
+   */
+  async #formatOf(root: string, id: string | undefined, formats?: readonly FormatEntry[]): Promise<ResolvedFormat | null> {
+    const config = (await readEnclosingProject(root))?.config;
+    return formatOf({ ...(config ?? { resolution: DEFAULT_RESOLUTION }), ...(formats ? { formats } : {}) }, id);
   }
 
   /**
@@ -480,11 +497,9 @@ export class ExportService {
     loaded: LoadedTimeline,
     projectFormat?: string,
   ): Promise<ResolvedSubtitleTrack[]> {
-    const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
+    const layout = (await this.#formatOf(root, projectFormat, loaded.formats)) ?? undefined;
+    const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded, layout);
     const transcripts = await this.#transcripts(root, timeline);
-    const config = (await readEnclosingProject(root))?.config;
-    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
-    const layout = resolveFormat(timeline, loaded.formats ? { ...project, formats: loaded.formats } : project, projectFormat)?.format;
     const { tokens } = await readCaptionTokens(root, timeline);
     return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps, tokens), layout);
   }
@@ -675,15 +690,19 @@ export class ExportService {
   /**
    * The timeline with its nested timelines flattened (SPEC §3.5 step 1).
    * Unreadable nested files stay as `timeline` clips; the compiler refuses
-   * them by name.
+   * them by name. `format`: as it plays in that format other than the primary (ADR 0027 overrides).
    */
-  async #resolved(root: string, id: string, loaded?: { timeline: Timeline; fps: number }): Promise<{ timeline: Timeline; fps: number }> {
-    const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, id));
+  async #resolved(root: string, id: string, loaded?: { timeline: Timeline; fps: number }, format?: ResolvedFormat): Promise<{ timeline: Timeline; fps: number }> {
+    const { timeline: stored, fps } = loaded ?? (await this.#options.loadTimeline(root, id));
     const read = this.#options.readNested ?? readNestedFile;
     const seen = new Map<string, Timeline | null>();
-    const flat = await resolveNested(
+    const shownIn = format && !format.primary ? format.id : undefined;
+    const shown = (found: Timeline) => (shownIn === undefined ? found : formatTimeline(found, shownIn));
+    const timeline = shown(stored);
+    const flat = await resolveNestedIn(
       root,
-      timeline,
+      stored,
+      shownIn,
       async (at, source) => {
         const found = await read(at, source);
         seen.set(source, found);
@@ -691,7 +710,7 @@ export class ExportService {
       },
       fps,
     );
-    const hit = transformedProgram(timeline, (source) => seen.get(source) ?? null, [`timelines/${timeline.id}.json`]);
+    const hit = transformedProgram(timeline, (source) => { const found = seen.get(source); return found ? shown(found) : null; }, [`timelines/${timeline.id}.json`]);
     if (hit) {
       const where = hit.timeline === timeline.id ? "" : ` --timeline ${hit.timeline}`;
       throw new RpcError(

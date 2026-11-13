@@ -996,6 +996,41 @@ describe("formats (ADR 0027)", () => {
     expect([...new Set(graph.match(/crop=[^,]+/g))]).toEqual(["crop=608:1080:656:0"]);
   });
 
+  it("keeps the sound and captions of a dissolving clip hidden in a format: only its picture goes (ADR 0027 decision 5)", () => {
+    const dissolving = (hidden: boolean): Timeline => ({
+      ...timeline,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            { id: "c_a", type: "media", asset: "assets/talk.mp4", start: 0, in: 3.2, out: 6.2, ...(hidden ? { formats: { "9x16": { hidden: true } } } : {}) },
+            { id: "c_b", type: "media", asset: "assets/talk.mp4", start: 3, in: 10, out: 12, dissolve: 0.5 },
+          ],
+        },
+        { id: "s1", kind: "subtitles", follows: "v1" },
+      ],
+    });
+    const sized = new Map([...sources].map(([asset, source]) => [asset, { ...source, duration: 20 }]));
+    const vertical = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+    const compile = (stored: Timeline, id: string) => {
+      const { timeline: shown, format } = resolveFormat(stored, project, id)!;
+      return compileRender({ timeline: shown, fps: 30, preset: id === "9x16" ? vertical : youtube1080, loudness: -17, sources: sized, resolution, transcripts, variant: format });
+    };
+    const primary = compile(dissolving(true), "16x9");
+    const hidden = compile(dissolving(true), "9x16");
+    const shown = compile(dissolving(false), "9x16");
+    // The crossfade into c_b and c_a's words are the primary's.
+    expect(hidden.audio).toEqual(primary.audio);
+    expect(mixStep(hidden)!.files).toEqual(mixStep(primary)!.files);
+    const cues = (plan: ReturnType<typeof compileRender>) => plan.files["subtitles.ass"]!.split("\n").filter((line) => line.startsWith("Dialogue:"));
+    expect(cues(hidden)).toEqual(cues(shown));
+    expect(cues(hidden).some((line) => line.includes("HOLA"))).toBe(true);
+    // c_a's picture is gone: only c_b's (head and body) reads the talk.
+    const graph = (plan: ReturnType<typeof compileRender>) => Object.entries(plan.files).filter(([name]) => name.endsWith(".filter") && name.startsWith("seg-")).map(([, text]) => text).join("\n");
+    expect(graph(hidden).match(/crop=/g)!.length).toBeLessThan(graph(shown).match(/crop=/g)!.length);
+  });
+
   it("crops to even sizes and edges, as ffmpeg cuts a 4:2:0 picture", () => {
     const small: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_s", type: "media", asset: "assets/small.mp4", start: 0, in: 0, out: 1 }] }] };
     const withSmall = new Map<string, ExportSource>([...sources, ["assets/small.mp4", { path: "/project/assets/small.mp4", video: { codec: "h264", still: false, width: 1280, height: 720 }, audio: false }]]);

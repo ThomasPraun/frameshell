@@ -2,7 +2,7 @@ import { type CaptionTokens, type ResolvedSubtitleTrack, SUBTITLE_FONT, subtitle
 import fontUrl from "@expo-google-fonts/archivo-black/400Regular/ArchivoBlack_400Regular.ttf?url";
 import { type RefObject, useEffect, useMemo, useState } from "react";
 import { flattenView } from "../preview/program.js";
-import { useNestedViews } from "../preview/useProgram.js";
+import { useNestedViews, viewsInFormat } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
@@ -20,19 +20,21 @@ export interface SubtitlesState {
  * Cues of every subtitle track of {@link SELECTION_TIMELINE}, live: from the
  * shared timeline feed (nested timelines flattened, as export does) and the
  * shared transcripts feed, so a cut or a transcript correction shows at once.
+ * `format`: a project format other than the primary (ADR 0027), whose caption styles apply.
  * `tokens`: the project style's caption values (`useCaptionStyle`); they change looks, never cue timing.
  */
-export function useSubtitles(tokens?: CaptionTokens): SubtitlesState {
-  const { view } = useTimelineView(SELECTION_TIMELINE);
-  const nested = useNestedViews(view);
+export function useSubtitles(format?: string, tokens?: CaptionTokens): SubtitlesState {
+  const { view: stored } = useTimelineView(SELECTION_TIMELINE);
+  const storedNested = useNestedViews(stored);
   const { sources } = useTranscripts();
   return useMemo(() => {
     const byAsset = new Map(sources.map((source) => [source.transcript.asset, source] as const));
     const transcriptOf = (asset: string) => byAsset.get(asset)?.path ?? null;
+    const { view, nested } = viewsInFormat(stored, storedNested, format);
     if (!view) return { tracks: [], fps: 30, transcriptOf };
     const tracks = subtitleTracks(flattenView(view, nested), (asset) => byAsset.get(asset)?.transcript ?? null, view.fps, tokens);
     return { tracks, fps: view.fps, transcriptOf };
-  }, [view, nested, sources, tokens]);
+  }, [stored, storedNested, sources, format, tokens]);
 }
 
 const fontLoads = new WeakMap<Document, Promise<void>>();

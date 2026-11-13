@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
+import { FormatIdSchema } from "./format-id.js";
 import { TakeIdSchema } from "./shoot.js";
 
 /** Canonical `$schema` URL for `timelines/*.json`. */
@@ -234,6 +235,35 @@ export const TransitionShapeSchema = z
   })
   .describe("Shape of this clip's `dissolve` instead of a mix (needs `dissolve`); plays on the bottom video track only. Sound still crossfades.");
 
+/**
+ * What a clip looks like in one format other than the primary (ADR 0027 decision 5): placement, picture keys,
+ * hidden, and a generated clip's props and element adjustments. Never timing or sound, which every format shares.
+ */
+export const ClipFormatOverrideSchema = z
+  .strictObject({
+    transform: TransformSchema.optional().describe(
+      "Placement in this format, field by field over the clip's `transform`; a field given here also drops the clip's own keys of it.",
+    ),
+    keys: ClipKeysSchema.omit({ gain: true })
+      .optional()
+      .describe("Picture keys in this format (`x`, `y`, `scale`, `opacity`), each list replacing the clip's own keys of that property."),
+    hidden: z.literal(true).optional().describe("True: the clip shows no picture in this format; its sound still plays."),
+    props: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe("Generated (adapter) clips: props in this format, key by key over the clip's `props`; the clip renders again for it."),
+    elements: ElementsSchema.optional().describe("Generated clips: element adjustments in this format, selector by selector over the clip's `elements`."),
+  })
+  .describe("The clip in one format other than the primary.");
+
+const ClipFormatsSchema = z
+  .record(FormatIdSchema, ClipFormatOverrideSchema)
+  .optional()
+  .describe(
+    "Per-format overrides by format id (ADR 0027): how the clip shows in that format of `frameshell.json` instead of as in the " +
+      "primary. Video tracks only. Ignored in the primary format and for a format the project no longer declares.",
+  );
+
 const ClipIdSchema = Id.describe("Stable, core-generated (`c_…`); reference clips by it.");
 const ClipStartSchema = Seconds.describe("Timeline seconds of the first frame.");
 const ScriptRefSchema = z
@@ -260,6 +290,7 @@ const clipBase = {
   fadeIn: TransitionSeconds.optional().describe("Seconds: fade in from black (transparent on upper tracks; silence for sound) at the clip's start."),
   fadeOut: TransitionSeconds.optional().describe("Seconds: fade out to black (transparent on upper tracks; silence for sound) at the clip's end."),
   keys: ClipKeysSchema.optional(),
+  formats: ClipFormatsSchema,
 };
 
 /** Footage, audio or image file. Duration on the timeline = `(out - in) / speed`. */
@@ -592,6 +623,21 @@ export const CaptionGapSchema = z.strictObject({
   to: z.number().positive().describe("Timeline seconds; greater than `from`."),
 });
 
+/** Style of a subtitle track as stored: a preset and fields over it; see `resolveSubtitleStyle`. */
+const SubtitleTrackStyleSchema = z.looseObject({
+  preset: z.string().optional(),
+  position: z.enum(["top", "center", "bottom"]).optional(),
+  speakerNames: z.boolean().optional().describe("Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false."),
+  keywordColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .nullable()
+    .optional()
+    .describe("Colour of a phrase's keyword (`#rrggbb`); null: the keyword keeps the text colour. Default: the preset's."),
+  keywordScale: z.number().min(1).max(2).optional().describe("Keyword size at the start of its entry, as a multiple of its size; it settles to 1. Default: the preset's."),
+  entry: z.enum(SUBTITLE_ENTRIES).optional().describe("How cues enter: `none`, `chars`, `words` or `line`. Default `none`."),
+});
+
 /**
  * Subtitle track. Holds no clips: its words are the transcript words inside
  * each clip of the `follows` track, mapped to timeline time (SPEC §5.3).
@@ -601,21 +647,14 @@ export const SubtitleTrackSchema = z.strictObject({
   kind: z.literal("subtitles"),
   name: z.string().optional(),
   follows: Id.describe("Id of the video or audio track whose clips supply the words."),
-  style: z
-    .looseObject({
-      preset: z.string().optional(),
-      position: z.enum(["top", "center", "bottom"]).optional(),
-      speakerNames: z.boolean().optional().describe("Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false."),
-      keywordColor: z
-        .string()
-        .regex(/^#[0-9a-fA-F]{6}$/)
-        .nullable()
-        .optional()
-        .describe("Colour of a phrase's keyword (`#rrggbb`); null: the keyword keeps the text colour. Default: the preset's."),
-      keywordScale: z.number().min(1).max(2).optional().describe("Keyword size at the start of its entry, as a multiple of its size; it settles to 1. Default: the preset's."),
-      entry: z.enum(SUBTITLE_ENTRIES).optional().describe("How cues enter: `none`, `chars`, `words` or `line`. Default `none`."),
-    })
-    .optional(),
+  style: SubtitleTrackStyleSchema.optional(),
+  formats: z
+    .record(FormatIdSchema, z.strictObject({ style: SubtitleTrackStyleSchema.describe("Fields in this format, field by field over the track's `style`.") }))
+    .optional()
+    .describe(
+      "Per-format caption style by format id (ADR 0027): in that format of `frameshell.json` the captions take these style fields. " +
+        "A vertical format still draws them 1.3x larger. Ignored in the primary format and for a format the project no longer declares.",
+    ),
   phrases: z.array(CaptionPhraseSchema).optional().describe("Hand-chunked phrases with their keywords (`captions.set`); words no phrase holds are grouped by the style."),
   gaps: z.array(CaptionGapSchema).optional().describe("Ranges in which no cue shows: a cue overlapping one is hidden."),
 });
@@ -758,6 +797,7 @@ export const TimelineSchema = z
       claim(track.id, ["tracks", t, "id"]);
       if (track.kind !== "subtitles") track.clips.forEach((clip, c) => claim(clip.id, ["tracks", t, "clips", c, "id"]));
       if (track.kind === "video" || track.kind === "audio") {
+        track.clips.forEach((clip, c) => checkClipFormats(track.kind, clip, ["tracks", t, "clips", c, "formats"], ctx));
         track.clips.forEach((clip, c) => {
           if (clip.shape === undefined) return;
           const path = ["tracks", t, "clips", c, "shape"];
@@ -825,6 +865,21 @@ export const TimelineSchema = z
       }
     });
   });
+
+/** Per-format overrides belong to pictures: none on audio tracks; `props` and `elements` only on generated clips. */
+function checkClipFormats(kind: "video" | "audio", clip: Clip, path: (string | number)[], ctx: z.RefinementCtx): void {
+  if (clip.formats === undefined) return;
+  if (kind === "audio") {
+    ctx.addIssue({ code: "custom", message: "audio tracks have no picture to change per format: `formats` is for video tracks", path });
+    return;
+  }
+  if (clip.type !== "media" && clip.type !== "timeline") return;
+  for (const [id, override] of Object.entries(clip.formats)) {
+    for (const field of ["props", "elements"] as const) {
+      if (override[field] !== undefined) ctx.addIssue({ code: "custom", message: `only generated clips take \`${field}\`; this is a ${clip.type} clip`, path: [...path, id, field] });
+    }
+  }
+}
 
 /** Phrases hold each word once and add up; gaps run forward. */
 function checkCaptions(track: SubtitleTrack, t: number, ctx: z.RefinementCtx): void {
@@ -946,6 +1001,10 @@ export type PaintedTurn = z.infer<typeof PaintedTurnSchema>;
 export type ReframeKey = z.infer<typeof ReframeKeySchema>;
 /** Keyframes of a clip; see {@link ClipKeysSchema}. */
 export type ClipKeys = z.infer<typeof ClipKeysSchema>;
+/** See {@link ClipFormatOverrideSchema}. */
+export type ClipFormatOverride = z.infer<typeof ClipFormatOverrideSchema>;
+/** A subtitle track's stored `style`, also the `style` of its per-format overrides. */
+export type SubtitleTrackStyle = NonNullable<SubtitleTrack["style"]>;
 /** One key of a clip property. */
 export type ClipKey = NonNullable<ClipKeys["x"]>[number];
 /** Shape of a clip's dissolve; see {@link TransitionShapeSchema}. */

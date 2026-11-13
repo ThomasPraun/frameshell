@@ -57,7 +57,11 @@ import {
   shotSound,
   showsPicture,
   splitScriptRef,
+  type ClipFormatOverride,
+  type FormatEntry,
+  clipInFormat,
 } from "@frameshell/schema";
+import { formatNotFound } from "../formats.js";
 import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
@@ -152,6 +156,11 @@ export interface EditContext {
    * project (ADR 0017). Absent: they need one.
    */
   defaultStillDuration?: number;
+  /**
+   * The project's formats, primary first (`projectFormats`, ADR 0027): an operation's `format` must name one other
+   * than the primary. Absent: any format id is taken.
+   */
+  formats?: readonly FormatEntry[];
 }
 
 /** Prefix of a core-generated id: `c` clip, `t` track, `g` multicam group, `m` marker. */
@@ -317,6 +326,8 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
+    if (args.format !== undefined) return this.trackSetInFormat(track, args.format, args);
+    if (args.reset !== undefined) throw this.invalid("`reset` drops a format's override: give `format` too.", { field: "reset" });
     const { name, follows, style, gaps, index, muted, hidden, behind } = args;
     if (
       name === undefined &&
@@ -374,6 +385,50 @@ class Edit {
       if (snapped.length > 0) track.gaps = snapped.sort((a, b) => a.from - b.from);
       else delete track.gaps;
     }
+  }
+
+  /** `track.set` with `format` (ADR 0027 decision 5): a subtitle track's style in that format, merged field by field. */
+  trackSetInFormat(track: Track, format: string, args: OperationArgs<"track.set">): void {
+    this.checkFormat(format);
+    if (track.kind !== "subtitles") {
+      throw this.invalid(`${track.id} is a ${track.kind} track: per format, tracks take only a subtitle \`style\`; set clips with \`clip.set\` and \`format\`.`, {
+        field: "format",
+      });
+    }
+    const shared = (["name", "follows", "gaps", "index", "muted", "hidden", "behind"] as const).filter((field) => args[field] !== undefined);
+    if (shared.length > 0) {
+      throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
+        field: shared[0]!,
+        hint: "Per format, a subtitle track takes `style` (and `reset`).",
+      });
+    }
+    // An empty `style`, or `reset` with no style there, would change nothing.
+    const styled = args.style !== undefined && Object.keys(defined(args.style)).length > 0;
+    if (!styled && (args.reset === undefined || track.formats?.[format] === undefined)) {
+      throw this.invalid(`nothing to set in format ${format}.`, { hint: "Pass `style` fields, or `reset: true` to show the captions there as in the primary." });
+    }
+    const formats = { ...track.formats };
+    const style = { ...(args.reset ? {} : formats[format]?.style), ...defined(args.style ?? {}) };
+    if (Object.keys(style).length > 0) formats[format] = { style };
+    else delete formats[format];
+    if (Object.keys(formats).length > 0) track.formats = formats;
+    else delete track.formats;
+  }
+
+  /**
+   * `format` of an operation names a format of the project other than the primary (ADR 0027): FormatNotFound for
+   * one the project does not declare, InvalidOperation for the primary, which is the clip or track itself.
+   */
+  checkFormat(format: string): void {
+    const declared = this.context.formats;
+    if (!declared) return;
+    if (declared[0]?.id === format) {
+      throw this.invalid(`${format} is the primary format: change the clip or track itself, without \`format\`.`, {
+        field: "format",
+        hint: `Other formats: ${declared.slice(1).map((entry) => entry.id).join(", ") || "none, add one with `frameshell format add <id>`"}.`,
+      });
+    }
+    if (!declared.some((entry) => entry.id === format)) throw formatNotFound(format, { resolution: declared[0]!, formats: declared });
   }
 
   /**
@@ -882,6 +937,14 @@ class Edit {
 
   async clipSet(args: OperationArgs<"clip.set">): Promise<void> {
     const { track, clip } = this.clip(args.clip);
+    if (args.format !== undefined) return this.clipSetInFormat(track, clip, args.format, args);
+    const loose = (["hidden", "reset"] as const).find((field) => args[field] !== undefined);
+    if (loose) {
+      throw this.invalid(`\`${loose}\` belongs to one format: give \`format\` too.`, {
+        field: loose,
+        hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
+      });
+    }
     const { speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef } = args;
     if ([speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef].every((value) => value === undefined)) {
       throw this.invalid("nothing to set.", {
@@ -948,6 +1011,66 @@ class Edit {
     }
     if (scriptRef === null) delete clip.scriptRef;
     else if (scriptRef !== undefined) clip.scriptRef = scriptRef;
+  }
+
+  /**
+   * `clip.set` with `format` (ADR 0027 decision 5): `transform` (merged field by field), `props` (replaced, checked
+   * over the clip's own), `elements` (merged per selector) and `hidden` of the clip in that format, after `reset`.
+   * Timing and sound are every format's, so they are refused here.
+   */
+  async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
+    this.checkFormat(format);
+    const shared = (["speed", "gain", "muted", "audioEffects", "backdrop", "scriptRef"] as const).filter((field) => args[field] !== undefined);
+    if (shared.length > 0) {
+      throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
+        field: shared[0]!,
+        hint: "Per format: `transform`, `props`, `elements`, `hidden`, and keys with `clip.key` and `format`.",
+      });
+    }
+    const { transform, props, elements, hidden, reset } = args;
+    // An empty `transform`, or `reset` with no override there, would change nothing.
+    const moved = transform !== undefined && Object.keys(defined(transform)).length > 0;
+    if (!moved && [props, elements, hidden].every((value) => value === undefined) && (reset === undefined || !("formats" in clip) || clip.formats?.[format] === undefined)) {
+      throw this.invalid(`nothing to set in format ${format}.`, { hint: "Pass `transform`, `props`, `elements` or `hidden`, or `reset: true`." });
+    }
+    if (isShotClip(clip)) {
+      throw this.invalid(`${clip.id} is a multicam shot: shots lay out per format by themselves (angle \`reframe\` keys) and take no per-format override.`, {
+        field: "format",
+      });
+    }
+    if (track.kind !== "video") throw this.invalid("audio tracks have no picture to change per format; `format` is for clips on video tracks.", { field: "format" });
+    const override: ClipFormatOverride = reset ? {} : { ...clip.formats?.[format] };
+    if (transform !== undefined && Object.keys(defined(transform)).length > 0) override.transform = { ...override.transform, ...defined(transform) };
+    if (props !== undefined || elements !== undefined) {
+      const field = props !== undefined ? "props" : "elements";
+      if (isMedia(clip) || isNested(clip)) throw this.invalid(`only adapter clips take \`${field}\`; ${clip.id} is ${clip.type}.`, { field });
+      const generated = clip as AdapterClip;
+      const adapter = await this.adapter(generated.type);
+      if (props !== undefined) {
+        const problem = await adapter.validateProps({ ...generated.props, ...props });
+        if (problem) throw this.invalid(`invalid props for ${generated.type} in format ${format}: ${problem}`, { field: "props" });
+        override.props = props;
+      }
+      if (elements !== undefined) {
+        // The same merge and checks as the clip's own elements, on the format's.
+        const holder = { ...generated, elements: override.elements } as AdapterClip;
+        this.setElements(holder, elements, adapter);
+        if (holder.elements) override.elements = holder.elements;
+        else delete override.elements;
+      }
+    }
+    if (hidden === true) override.hidden = true;
+    else if (hidden === false) delete override.hidden;
+    this.writeOverride(clip, format, override);
+  }
+
+  /** Store `override` as `clip`'s in `format`; an empty one drops out, and so does an empty `formats`. */
+  writeOverride(clip: Clip, format: string, override: ClipFormatOverride): void {
+    const formats: Record<string, ClipFormatOverride> = { ...clip.formats };
+    if (Object.keys(override).length > 0) formats[format] = override;
+    else delete formats[format];
+    if (Object.keys(formats).length > 0) clip.formats = formats;
+    else delete clip.formats;
   }
 
   /**
@@ -1425,7 +1548,7 @@ class Edit {
   }
 
   async clipKey(args: OperationArgs<"clip.key">): Promise<void> {
-    const { clip: id, prop, time, value, ease, remove, clear } = args;
+    const { clip: id, prop, time, value, ease, remove, clear, format } = args;
     const { track, clip } = this.clip(id);
     if (isShotClip(clip)) {
       throw this.invalid(`${clip.id} is a shot; shots take no keyframes yet.`, { field: "clip", hint: "Key a clip on a video or audio track." });
@@ -1433,11 +1556,18 @@ class Edit {
     if (track.kind === "audio" && prop !== "gain") {
       throw this.invalid(`audio tracks take only \`gain\` keys, not \`${prop}\`.`, { field: "prop" });
     }
+    if (format !== undefined) {
+      this.checkFormat(format);
+      if (prop === "gain") throw this.invalid("sound is shared by every format: key `gain` without `format`.", { field: "prop" });
+    }
+    // In a format the keys read and written are that format's (ADR 0027): its own, else the clip's.
+    const shown = format === undefined ? clip : clipInFormat(clip, format);
     if (clear === true) {
       if ([time, value, ease, remove].some((given) => given !== undefined)) {
         throw this.invalid("`clear` removes every key of the property and takes no other field.", { field: "clear" });
       }
-      if (clip.keys) {
+      if (format !== undefined && prop !== "gain") this.writeFormatKeys(clip, format, prop, []);
+      else if (clip.keys) {
         delete clip.keys[prop];
         if (Object.keys(clip.keys).length === 0) delete clip.keys;
       }
@@ -1452,7 +1582,7 @@ class Edit {
     }
     const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
     const at = Math.round(clipTime(clip, t) * 1000) / 1000;
-    const keys: ClipKey[] = [...(clip.keys?.[prop] ?? [])];
+    const keys: ClipKey[] = [...(shown.keys?.[prop] ?? [])];
     // Half a frame of timeline time, on the clip's own clock.
     const half = (0.5 / this.context.fps) * speed;
     const found = keys.findIndex((key) => Math.abs(key.at - at) < half);
@@ -1467,7 +1597,7 @@ class Edit {
       }
       keys.splice(found, 1);
     } else {
-      const now = prop === "gain" ? gainAt(clip, t) : placementAt(clip, t)[prop];
+      const now = prop === "gain" ? gainAt(clip, t) : placementAt(shown, t)[prop];
       const next = Math.round((value ?? now) * 10000) / 10000;
       if (prop === "scale" && next <= 0) throw this.invalid("`scale` must be above 0.", { field: "value" });
       if (prop === "opacity" && (next < 0 || next > 1)) throw this.invalid("`opacity` is 0 to 1.", { field: "value" });
@@ -1476,11 +1606,23 @@ class Edit {
       if (found >= 0) keys[found] = key;
       else keys.splice(keys.filter((other) => other.at < at).length, 0, key);
     }
+    if (format !== undefined && prop !== "gain") return this.writeFormatKeys(clip, format, prop, keys);
     const all: ClipKeys = { ...clip.keys };
     if (keys.length === 0) delete all[prop];
     else all[prop] = keys as [ClipKey, ...ClipKey[]];
     if (Object.keys(all).length === 0) delete clip.keys;
     else clip.keys = all;
+  }
+
+  /** `keys` as `clip`'s picture keys of `prop` in `format`; none: the format follows the clip's own keys of it again. */
+  writeFormatKeys(clip: Clip, format: string, prop: "x" | "y" | "scale" | "opacity", keys: readonly ClipKey[]): void {
+    const override: ClipFormatOverride = { ...clip.formats?.[format] };
+    const picture: NonNullable<ClipFormatOverride["keys"]> = { ...override.keys };
+    if (keys.length === 0) delete picture[prop];
+    else picture[prop] = keys as [ClipKey, ...ClipKey[]];
+    if (Object.keys(picture).length > 0) override.keys = picture;
+    else delete override.keys;
+    this.writeOverride(clip, format, override);
   }
 
   /**
@@ -2958,6 +3100,11 @@ function isMedia(clip: AnyClip): clip is MediaClip {
 
 function isNested(clip: AnyClip): clip is TimelineClip {
   return clip.type === "timeline";
+}
+
+/** `value` without its `undefined` members: what a merge of given fields keeps. */
+function defined<V extends object>(value: V): { [K in keyof V]?: Exclude<V[K], undefined> } {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as { [K in keyof V]?: Exclude<V[K], undefined> };
 }
 
 /** Source seconds per timeline second; shots run at 1. */

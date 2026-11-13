@@ -179,6 +179,12 @@ const en = {
   removeKeyTitle: "Remove the key at the playhead",
   clearKeys: "Center",
   clearKeysTitle: "Remove every key of this angle: its picture is cut centered again",
+  inFormat: (format: string) => `In ${format}`,
+  inFormatTitle: (format: string) => `Placement, keys and caption style set here change ${format} only; timing and sound are every format's`,
+  hideInFormat: (format: string) => `Hide in ${format}`,
+  hideInFormatTitle: (format: string) => `Show no picture of this clip in ${format}; its sound still plays`,
+  usePrimary: "Use primary",
+  usePrimaryTitle: (format: string) => `Drop what was changed in ${format}: it shows as in the primary format again`,
 };
 
 const es: typeof en = {
@@ -361,6 +367,12 @@ const es: typeof en = {
   removeKeyTitle: "Quitar la clave del cabezal",
   clearKeys: "Centrar",
   clearKeysTitle: "Quitar todas las claves de este ángulo: su imagen se recorta centrada otra vez",
+  inFormat: (format) => `En ${format}`,
+  inFormatTitle: (format) => `La ubicación, las claves y el estilo de subtítulos que cambies aquí cambian solo ${format}; el tiempo y el sonido son de todos los formatos`,
+  hideInFormat: (format) => `Ocultar en ${format}`,
+  hideInFormatTitle: (format) => `No mostrar la imagen de este clip en ${format}; su sonido se sigue oyendo`,
+  usePrimary: "Usar el principal",
+  usePrimaryTitle: (format) => `Descartar lo cambiado en ${format}: se ve otra vez como en el formato principal`,
 };
 
 export const inspector = { en, es };

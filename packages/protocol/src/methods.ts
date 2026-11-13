@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 115;
+export const PROTOCOL_VERSION = 116;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2911,9 +2911,12 @@ export const methods = {
       "track through each asset's subject matte (`matte.prepare`), waiting for a matte that is not made yet (about 1.5 min " +
       "per min of video); the preview does not show it yet. Keep the word 30-55 % covered and never over the face. " +
       "`behind: null` clears it; removing or moving the plate track so it is no longer below clears it too, with a warning. " +
-      "Fails with TrackNotFound or InvalidOperation (style or follows on a clip track, muted on a subtitle track, hidden on an " +
+      "`format` (ADR 0027, a format other than the primary) with `style` sets a subtitle track's captions in that format only, " +
+      "e.g. `{ track, format: \"9x16\", style: { position: \"center\" } }` (a vertical format still draws them 1.3x larger); " +
+      "`reset: true` drops that format's style first. " +
+      "Fails with TrackNotFound, FormatNotFound or InvalidOperation (style or follows on a clip track, muted on a subtitle track, hidden on an " +
       "audio or subtitle track, behind on a track that is not video, a plate that is not a lower video track, or in an image " +
-      "project, nothing to change).",
+      "project, `format` on a clip track or with another field than `style`, nothing to change).",
     params: operationArgs["track.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
@@ -3452,6 +3455,11 @@ export const methods = {
       "its render does not change. Merged field by field, `null` clears. Glass is a style choice, never a default: use it when the " +
       "style's `glass.cards` is true, with the style's `glass` numbers (`style_show`), else only when asked. On the bottom video track " +
       "nothing is below: stored with a warning, not drawn. " +
+      "`format` (ADR 0027, a format of `format.list` other than the primary) sets the clip in that format only, stored in its " +
+      "`formats` override: `transform`, `props` (checked over the clip's own), `elements` and `hidden` (no picture there, the sound " +
+      "still plays); `reset: true` drops the override first. Use it where the automatic layout of a format is wrong, e.g. a lower " +
+      "third that sits too low in 9:16: `{ clip, format: \"9x16\", transform: { y: 520 } }`. Timing and sound are every format's: " +
+      "with `format`, speed, gain, muted, audioEffects, backdrop and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -3503,8 +3511,11 @@ export const methods = {
       "`ease` (`in`, `out`, `in-out`); before the first key and after the last it holds. A keyed property ignores its static " +
       "value (`clip.set`). `remove: true` deletes the key at `time`; `clear: true` deletes every key of `prop`. Keys stay on the same " +
       "frames of the clip's picture through trim, split and cut. Example, a slow zoom over a clip at 10 to 20 s: " +
-      "`{ clip, prop: \"scale\", time: 10, value: 1 }` then `{ clip, prop: \"scale\", time: 20, value: 1.2 }`. Fails with " +
-      "InvalidOperation (time outside the clip, no key to remove, audio track with a picture property, shots).",
+      "`{ clip, prop: \"scale\", time: 10, value: 1 }` then `{ clip, prop: \"scale\", time: 20, value: 1.2 }`. " +
+      "`format` (ADR 0027) keys `x`, `y`, `scale` or `opacity` in that format only (its first key there starts from the clip's own " +
+      "keys of `prop`); `clear` with `format` drops that format's keys of `prop`, so it follows the clip's own keys there " +
+      "again (unless that format's `transform` sets `prop`). Fails with " +
+      "InvalidOperation (time outside the clip, no key to remove, audio track with a picture property, shots, `gain` with `format`, the primary format) or FormatNotFound.",
     params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

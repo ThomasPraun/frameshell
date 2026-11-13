@@ -32,7 +32,7 @@ import {
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
-import { type BeatsFile, type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { type BeatsFile, type Marker, type ParseResult, type Timeline, parseTimeline, projectFormats } from "@frameshell/schema";
 import {
   type ConfigChanged,
   type ConfigEdit,
@@ -91,7 +91,7 @@ import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
 /** Project settings an operation's {@link EditContext} takes from `frameshell.json`. */
-type EditSettings = Pick<EditContext, "snapWindow" | "defaultStillDuration">;
+type EditSettings = Pick<EditContext, "snapWindow" | "defaultStillDuration" | "formats">;
 
 /** Options for {@link TimelineService}. */
 export interface TimelineServiceOptions {
@@ -1571,6 +1571,7 @@ export class TimelineService {
         ...(track.kind === "subtitles" && track.style ? { style: track.style } : {}),
         ...(track.kind === "subtitles" && track.phrases ? { phrases: track.phrases } : {}),
         ...(track.kind === "subtitles" && track.gaps ? { gaps: track.gaps } : {}),
+        ...(track.kind === "subtitles" && track.formats ? { formats: track.formats } : {}),
         ...(track.kind !== "subtitles" && track.muted === true ? { muted: true as const } : {}),
         ...(track.kind !== "subtitles" && track.kind !== "audio" && track.hidden === true ? { hidden: true as const } : {}),
         ...(track.kind === "video" && track.behind !== undefined ? { behind: track.behind } : {}),
@@ -1732,6 +1733,7 @@ export class TimelineService {
     const snap: EditSettings = {
       ...(window !== undefined ? { snapWindow: window } : {}),
       ...(project?.config.kind === "image" ? { defaultStillDuration: 1 / fps } : {}),
+      ...(project ? { formats: projectFormats(project.config) } : {}),
     };
     const path = timelinePath(root, id);
     const key = await this.#key(root, id);

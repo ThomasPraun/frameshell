@@ -13,13 +13,13 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
-import { type AdapterClip, type Timeline, elementStyles } from "@frameshell/schema";
+import { type AdapterClip, type FormatEntry, type Timeline, clipInFormat, elementStyles } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
-import { type NestedReader, resolveNested } from "../timeline/nested.js";
 import { readStyleTokens } from "../style/tokens.js";
+import { type NestedReader, resolveNested, resolveNestedIn } from "../timeline/nested.js";
 import { clipCacheKey } from "./cache-key.js";
 
 /** Project-relative directory of the clip render cache (SPEC §5.1, §6.5). */
@@ -81,10 +81,10 @@ export interface ClipRendererOptions {
   /** Project fps and resolution from `frameshell.json`. */
   format(root: string): Promise<ClipFormat>;
   /**
-   * Frame sizes of the project's formats other than the primary one (ADR 0027): `gc` keeps their renders.
-   * Background renders stay at the project resolution. Default: none.
+   * The project's formats other than the primary one (ADR 0027): `gc` keeps their renders, each clip keyed with
+   * its override there (`props`, `elements`). Background renders stay at the project resolution. Default: none.
    */
-  formatSizes?(root: string): Promise<{ width: number; height: number }[]>;
+  formatSizes?(root: string): Promise<FormatEntry[]>;
   /** Size and length of a finished render (ffprobe). */
   probe(root: string, file: string, signal: AbortSignal): Promise<RenderProbe>;
   /** Managed or overridden native tool for adapters; see `RenderContext.ensureBinary`. */
@@ -208,15 +208,16 @@ export class ClipRenderer {
    * Render state of every generated clip timeline `id` shows, nested ones
    * included under their flattened id (`<nested clip>/<clip>`, as export and
    * the preview name them) and their root track; queues renders that are due.
-   * `size`: at that frame size instead of the project resolution (a format of
-   * the project, ADR 0027), as {@link ensure} takes it.
+   * `size`: in that format of the project other than the primary (ADR 0027), at its size and with each clip's
+   * override there, as export renders it.
    */
-  async status(root: string, id: string, size?: { width: number; height: number }): Promise<ClipRendersResult> {
+  async status(root: string, id: string, size?: FormatEntry): Promise<ClipRendersResult> {
     const { timeline } = await this.#options.load(root, id);
     const hosts = timeline.tracks.map((track) => track.id);
     // Flattening adds layers `<track>/<n>`: report the root track that shows them.
     const host = (track: string) => (hosts.includes(track) ? track : (hosts.find((candidate) => track.startsWith(`${candidate}/`)) ?? track));
-    const placed = generatedClips(await resolveNested(root, timeline, this.#options.readNested)).map((p) => ({ ...p, track: host(p.track) }));
+    const flat = await resolveNestedIn(root, timeline, size?.id, this.#options.readNested);
+    const placed = generatedClips(flat).map((p) => ({ ...p, track: host(p.track) }));
     const adapters = placed.length > 0 ? await this.#options.adapters(root) : new Map<string, RegisteredClipType>();
     const project = await this.#options.format(root);
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
@@ -426,10 +427,10 @@ export class ClipRenderer {
     const adapters = await this.#options.adapters(root);
     const project = await this.#options.format(root);
     const sizes = (await this.#options.formatSizes?.(root)) ?? [];
-    const formats = [project, ...sizes.map((size) => ({ fps: project.fps, width: size.width, height: size.height }))];
+    const formats = [{ id: undefined, ...project }, ...sizes.map((size) => ({ id: size.id, fps: project.fps, width: size.width, height: size.height }))];
     for (const { clip } of placed) {
-      for (const format of formats) {
-        const keyed = await this.#keyOf(root, clip, adapters, format);
+      for (const { id, ...format } of formats) {
+        const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format);
         if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
         keys.add(keyed.key);
       }

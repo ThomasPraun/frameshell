@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { type LayerRect, type Size, coverCrop, fixedPlacement, hasPictureKeys, isIdentityPlacement } from "./composite.js";
-import type { Clip, Timeline } from "./timeline.js";
+import { FormatIdSchema } from "./format-id.js";
+import type { Clip, ClipFormatOverride, Timeline } from "./timeline.js";
+
+export { FormatIdSchema, RESERVED_FORMAT_IDS } from "./format-id.js";
 
 /**
  * Formats of a project (ADR 0027): one edit delivered at several frame sizes (16:9, 1:1, 4:5, 9:16…).
@@ -21,21 +24,11 @@ export const BUILTIN_FORMATS: Readonly<Record<string, Size>> = Object.freeze({
 /** Ids of {@link BUILTIN_FORMATS}, in the order the docs list them. */
 export const BUILTIN_FORMAT_IDS = Object.freeze(Object.keys(BUILTIN_FORMATS));
 
-/** Image types `frameshell frame --format` also takes, so no format may be named after one. */
-export const RESERVED_FORMAT_IDS = Object.freeze(["png", "jpg", "jpeg", "webp"]);
-
 /**
  * Caption size factor in a vertical format other than the primary: vertical type reads at about
  * 1.3-1.35 x the landscape size (measured in #469); the low end keeps two-line cues inside 1080 px.
  */
 export const VERTICAL_CAPTION_SCALE = 1.3;
-
-/** Format id: lowercase letters, digits and `-`, e.g. `9x16` or `web-1600x900`. */
-export const FormatIdSchema = z
-  .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "must be lowercase letters, digits and `-`, up to 40, e.g. `9x16` or `web-1600x900`")
-  .refine((id) => !RESERVED_FORMAT_IDS.includes(id), { message: `must not be an image type (${RESERVED_FORMAT_IDS.join(", ")})` })
-  .describe("Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp.");
 
 /** One format of a project: an id and the frame size it renders at. */
 export const FormatEntrySchema = z
@@ -90,12 +83,90 @@ export function projectFormats(config: FormatSource): FormatEntry[] {
 
 /**
  * Format `id` of the project (the primary when `id` is absent) with its layout, and the timeline as it plays
- * there. The timeline comes back as given: per-format overrides are a later slice of ADR 0027. Null when the
- * project has no format `id`.
+ * there ({@link formatTimeline}; in the primary, `timeline` itself). Null when the project has no format `id`.
  */
 export function resolveFormat(timeline: Timeline, config: FormatSource, id?: string): { timeline: Timeline; format: ResolvedFormat } | null {
   const format = formatOf(config, id);
-  return format ? { timeline, format } : null;
+  return format ? { timeline: format.primary ? timeline : formatTimeline(timeline, format.id), format } : null;
+}
+
+/** What {@link clipInFormat} reads of a clip: a timeline clip, or one of a `timeline.show` view. */
+interface FormattableClip {
+  transform?: Record<string, number | undefined> | undefined;
+  keys?: Record<string, unknown> | undefined;
+  props?: Record<string, unknown> | undefined;
+  elements?: Record<string, unknown> | undefined;
+  formats?: Record<string, ClipFormatOverride> | undefined;
+}
+
+/** What {@link formatTimeline} reads of a track. */
+interface FormattableTrack {
+  id: string;
+  kind: string;
+  clips?: readonly object[] | undefined;
+  style?: object | undefined;
+  formats?: Record<string, { style?: object | undefined }> | undefined;
+}
+
+/**
+ * `clip` as it shows in format `id` (ADR 0027 decision 5): its override's `transform` fields over its own (each
+ * one dropping the clip's own keys of that property), the override's picture `keys` replacing the clip's per
+ * property, `props` and `elements` merged key by key. `hidden` is left to {@link formatTimeline}; `formats` stays.
+ * `clip` itself when it has no override there. Call it for formats other than the primary only.
+ */
+export function clipInFormat<C extends object>(clip: C, id: string): C {
+  const own = clip as FormattableClip;
+  const override = own.formats?.[id];
+  if (!override) return clip;
+  const shown: FormattableClip = { ...own };
+  const keys: Record<string, unknown> = { ...own.keys };
+  if (override.transform) {
+    const given = defined(override.transform);
+    shown.transform = { ...own.transform, ...given };
+    for (const prop of Object.keys(given)) delete keys[prop];
+  }
+  if (override.keys) Object.assign(keys, defined(override.keys));
+  if (Object.keys(keys).length > 0) shown.keys = keys;
+  else delete shown.keys;
+  if (override.props) shown.props = { ...own.props, ...override.props };
+  if (override.elements) shown.elements = { ...own.elements, ...override.elements };
+  return shown as C;
+}
+
+/**
+ * `timeline` as it plays in format `id` (ADR 0027): each clip {@link clipInFormat}, a subtitle track's override
+ * style over its own, and clips hidden there kept in place at opacity 0 (their opacity keys dropped), so their
+ * sound, transitions and captions are the primary's. Works on a timeline file and on a `timeline.show` view alike.
+ * `timeline` itself when nothing in it is overridden in `id`. Call it for formats other than the primary only.
+ */
+export function formatTimeline<T extends { tracks: readonly object[] }>(timeline: T, id: string): T {
+  const tracks = timeline.tracks as readonly FormattableTrack[];
+  const touched = tracks.some((track) => track.formats?.[id] !== undefined || track.clips?.some((clip) => (clip as FormattableClip).formats?.[id] !== undefined));
+  if (!touched) return timeline;
+  const shown = tracks.map((track): FormattableTrack => {
+    // A view's subtitle track carries `clips: []`, a file's none: the kind decides.
+    if (track.kind === "subtitles" || !track.clips) {
+      const style = track.formats?.[id]?.style;
+      return style ? { ...track, style: { ...track.style, ...style } } : track;
+    }
+    return { ...track, clips: track.clips.map((clip) => ((clip as FormattableClip).formats?.[id]?.hidden === true ? pictureOff(clipInFormat(clip, id)) : clipInFormat(clip, id))) };
+  });
+  return { ...timeline, tracks: shown };
+}
+
+/** `clip` drawn at opacity 0 throughout: export leaves the layer out, the preview draws nothing of it. */
+function pictureOff<C extends object>(clip: C): C {
+  const own = clip as FormattableClip;
+  const { opacity: _opacity, ...keys } = own.keys ?? {};
+  const shown: FormattableClip = { ...own, transform: { ...own.transform, opacity: 0 } };
+  if (Object.keys(keys).length > 0) shown.keys = keys;
+  else delete shown.keys;
+  return shown as C;
+}
+
+/** `value` without its `undefined` members. */
+function defined<V extends object>(value: V): Partial<V> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<V>;
 }
 
 /** Format `id` of the project (the primary when `id` is absent) with its layout; null when the project has no format `id`. */

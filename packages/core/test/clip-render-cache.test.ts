@@ -239,6 +239,23 @@ describe("clip render cache", () => {
   );
 
   it(
+    "renders a clip with its props override in that format only (ADR 0027 decision 5), and gc keeps that render",
+    async () => {
+      const primary = (await renders()).get(red)!.key;
+      const plain = (await until(red, (info) => info.state === "ready", "tall")).key!;
+      await conn.request("clip.set", { cwd: project, clip: red, format: "tall", props: { label: "Tall" } });
+      const tall = await until(red, (info) => info.state === "ready" && info.key !== plain, "tall");
+      expect(tall).toMatchObject({ width: 36, height: 64 });
+      expect((await renders()).get(red)!.key).toBe(primary);
+      const { removed } = await conn.request("gc", { cwd: project, dryRun: true });
+      expect(removed.some((entry) => entry.path.includes(tall.key!))).toBe(false);
+      await conn.request("clip.set", { cwd: project, clip: red, format: "tall", reset: true });
+      expect((await renders("tall")).get(red)!.key).toBe(plain);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "reports generated clips inside nested timelines under their composed id (`<nested clip>/<clip>`), from the same cache",
     async () => {
       writeCard("inner", { color: "blue", seconds: 3 });

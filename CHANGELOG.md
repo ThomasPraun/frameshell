@@ -150,6 +150,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`<row>-<format>.mp4` with formats from `frameshell.json`), and `manifest.json` there keeps each row × format's status,
   job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
   generates voiceover. Re-running failed rows (`--rows`, `--failed`, `--force`) comes next.
+- Per-format overrides and editing in a format, fourth slice of #469 (ADR 0027, epic #451; `clip.set` `format`,
+  `hidden`, `reset`, `clip.key` `format`, `track.set` `format`, `reset`, MCP `clip_set`, `clip_key`, `track_set`,
+  protocol 116): where a format's automatic layout is wrong, a clip can be placed, keyed, hidden (its sound,
+  transitions and captions stay) or given other generated-clip props and element adjustments in that format only,
+  and a subtitle track another style. Stored as the clip's or track's `formats` map in the timeline file; timing and
+  sound stay every format's and are refused there. CLI `frameshell clip set <clip> --format 9x16 --y 520`, `--hidden`/`--shown`, `--reset`,
+  `clip key --format`, `track set --format`. One resolver (`formatTimeline`) feeds export, `frame`, clip renders,
+  `gc` and the preview, so the primary format exports exactly as before. In the app, with the preview switched to
+  another format, the handles move a clip there and the inspector edits that format, with "Hide in <format>" and "Use
+  primary". Pick and element mode stay in the primary format.
 - Loop-safe export, first slice of #474 (ADR 0039, epic #451; `render` `loop`, CLI `render --loop`, `JobInfo.warnings`,
   protocol 105): `render --loop` makes a file meant to repeat (title loops, banners). MP4 and MOV audio gets a 2 ms
   half-sine fade at its first and last sample after loudness (silent exports unchanged); `--loop` with `--cover-frame`
@@ -685,6 +695,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preview: in a short window the clip inspector takes at most half the panel and scrolls, instead of squeezing the
+  picture, and its handles, to nothing (#581).
 - Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports
   the previous picture as the new one's frame while the engine still decodes it (#551).
 - Desktop: a detached panel window closed within a moment of being moved, resized or leaving full screen keeps that

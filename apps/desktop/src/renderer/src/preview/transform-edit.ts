@@ -22,6 +22,11 @@ export interface LayerBox {
   placement: Placement;
   /** Where it shows at the frame, in fractions of the frame; may reach outside [0, 1]. */
   box: FrameBox;
+  /**
+   * The picture covers a format's frame (ADR 0027) with no placement of its own: `placement` is the one that fills the
+   * frame, and a drag stores all of it, since covering stops once the clip has a placement there.
+   */
+  covered?: true;
 }
 
 /**
@@ -29,13 +34,14 @@ export interface LayerBox {
  * it shows no movable picture then (gap, placeholder, other clip, media of
  * unknown size, a multicam shot: shots fill their tiles). A generated clip
  * whose render is not ready yet takes the project format, the size its
- * render will have, so it can be hit and moved while it renders.
+ * render will have, so it can be hit and moved while it renders. `output`:
+ * the frame shown, a project format's (ADR 0027); default the project's.
  */
-export function layerBox(program: Program, frame: number, clip: string): LayerBox | null {
+export function layerBox(program: Program, frame: number, clip: string, output: Size = program.resolution): LayerBox | null {
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.clip !== clip || span.kind === "angle") continue;
-    const found = spanBox(program, span, layer, frame);
+    const found = spanBox(program, span, layer, frame, output);
     if (found) return found;
   }
   return null;
@@ -61,20 +67,31 @@ export function pictureBox(program: Program, frame: number, clip: string, point:
   return fallback;
 }
 
-/** Where `span` (on `layer`) shows; null for a placeholder or media of unknown size. A shot's angle shows in its tile. */
-function spanBox(program: Program, span: VideoSpan, layer: number, frame: number): LayerBox | null {
+/**
+ * Where `span` (on `layer`) shows in an `output` frame; null for a placeholder or media of unknown size. A shot's
+ * angle shows in its tile; a picture that covers a format's frame (`cover`, ADR 0027) fills it.
+ */
+function spanBox(program: Program, span: VideoSpan, layer: number, frame: number, output: Size = program.resolution): LayerBox | null {
   if (span.kind === "placeholder") return null;
   const { resolution } = program;
   if (span.kind === "angle") {
-    const shown = angleLayer(span, resolution);
+    const shown = angleLayer(span, output);
     if (!shown) return null;
     const { tile } = shown;
-    const box = { left: tile.left / resolution.width, top: tile.top / resolution.height, width: tile.width / resolution.width, height: tile.height / resolution.height };
+    const box = { left: tile.left / output.width, top: tile.top / output.height, width: tile.width / output.width, height: tile.height / output.height };
     return { layer, size: shown.source, placement: IDENTITY_PLACEMENT, box };
   }
   const size = span.size ?? (span.kind === "generated" ? resolution : null);
   if (!size) return null;
-  return { layer, size, placement: span.placement, box: frameBox(resolution, size, spanPlacement(span, frame, program.fps)) };
+  if (span.kind !== "generated" && span.cover) {
+    // Covering is the fitted picture scaled until it fills the frame: its handles start from that scale, rounded up
+    // to 3 decimals so a stored placement still fills it (3.1605 rounded down leaves a pixel row bare).
+    const fit = Math.min(output.width / size.width, output.height / size.height);
+    const fill = Math.max(output.width / size.width, output.height / size.height);
+    const placement = { ...span.placement, scale: Math.ceil(((span.placement.scale * fill) / fit) * 1000 - 1e-6) / 1000 };
+    return { layer, size, placement, covered: true, box: frameBox(resolution, size, placement, output) };
+  }
+  return { layer, size, placement: span.placement, box: frameBox(resolution, size, spanPlacement(span, frame, program.fps), output) };
 }
 
 /** Opacity `span` shows with at `frame`: its keys and transitions applied (ADR 0018); a shot's angle is opaque. */
@@ -89,14 +106,17 @@ function hitKind(span: Exclude<VideoSpan, { kind: "placeholder" }>): Pick<LayerH
   return { kind: span.kind, type: "media" };
 }
 
-/** Box of a `size` picture placed with `placement`, in fractions of a `resolution` frame. */
-export function frameBox(resolution: Size, size: Size, placement: Placement): FrameBox {
-  const rect = layerRect(size, resolution, resolution, placement);
+/**
+ * Box of a `size` picture placed with `placement` (offsets in `resolution` pixels), in fractions of an `output`
+ * frame: a project format's (ADR 0027), default the project's.
+ */
+export function frameBox(resolution: Size, size: Size, placement: Placement, output: Size = resolution): FrameBox {
+  const rect = layerRect(size, output, resolution, placement);
   return {
-    left: rect.left / resolution.width,
-    top: rect.top / resolution.height,
-    width: rect.width / resolution.width,
-    height: rect.height / resolution.height,
+    left: rect.left / output.width,
+    top: rect.top / output.height,
+    width: rect.width / output.width,
+    height: rect.height / output.height,
   };
 }
 
@@ -128,18 +148,20 @@ export const PAINT_MIN = 0.05;
  * topmost first. `alphaOf` gives a layer's alpha at the point, 0-1, when the
  * engine knows it (pictures with alpha); absent means opaque inside its box.
  * The target the user points at is the first hit that {@link LayerHit.paints}.
+ * `output`: the frame shown, as {@link layerBox} takes it.
  */
 export function layersAt(
   program: Program,
   frame: number,
   point: { x: number; y: number },
   alphaOf: (layer: number) => number | undefined = () => undefined,
+  output: Size = program.resolution,
 ): LayerHit[] {
   const hits: LayerHit[] = [];
   for (let layer = program.layers.length - 1; layer >= 0; layer--) {
     const span = programAt(program, frame, layer);
     if (!span || span.kind === "placeholder") continue;
-    const found = spanBox(program, span, layer, frame);
+    const found = spanBox(program, span, layer, frame, output);
     if (!found) continue;
     const { left, top, width, height } = found.box;
     if (point.x < left || point.x >= left + width || point.y < top || point.y >= top + height) continue;
@@ -155,8 +177,9 @@ export function layerAt(
   frame: number,
   point: { x: number; y: number },
   alphaOf?: (layer: number) => number | undefined,
+  output?: Size,
 ): string | null {
-  return layersAt(program, frame, point, alphaOf).find((hit) => hit.paints)?.clip ?? null;
+  return layersAt(program, frame, point, alphaOf, output).find((hit) => hit.paints)?.clip ?? null;
 }
 
 /**
@@ -213,9 +236,12 @@ export function dragPlacement(drag: PlacementDrag): Placement {
   return { ...start, scale };
 }
 
-/** The `clip.set` that turns `before` into `after`, naming only changed fields; null when nothing changed. */
-export function placementEdit(clip: string, before: Placement, after: Placement): TimelineEdit | null {
+/**
+ * The `clip.set` that turns `before` into `after`, naming only changed fields; null when nothing changed. `format`:
+ * a project format other than the primary (ADR 0027), whose override it sets instead of the clip.
+ */
+export function placementEdit(clip: string, before: Placement, after: Placement, format?: string): TimelineEdit | null {
   const transform: Partial<Placement> = {};
   for (const key of ["x", "y", "scale", "opacity"] as const) if (after[key] !== before[key]) transform[key] = after[key];
-  return Object.keys(transform).length === 0 ? null : { op: "clip.set", args: { clip, transform } };
+  return Object.keys(transform).length === 0 ? null : { op: "clip.set", args: { clip, transform, ...(format !== undefined ? { format } : {}) } };
 }
