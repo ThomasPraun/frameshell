@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - GIF preset, second slice of #474 (ADR 0039, ADR 0027 decision 13, epic #451; `render` with `preset: "gif"`, CLI `render --preset gif`,
-  protocol 106): `render --preset gif` writes a silent GIF that loops forever. Each format is fitted inside 1200 x 1200
+  protocol 107): `render --preset gif` writes a silent GIF that loops forever. Each format is fitted inside 1200 x 1200
   (16:9 is 1200 x 675, 9:16 is 675 x 1200, never scaled up) through the new preset field `video.fit: "inside"`, which
   ADR 0027's aspect check honours. The frames render as lossless RGB temps, one palette (`palettegen stats_mode=diff`)
   covers the whole file, and `paletteuse` dithers with bayer scale 5 and diff rectangles; the frame rate is capped at
@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--loop` (a cover frame is refused, the cycle and black-end warnings, the repeated last frame check) and ignores
   `--quality`. Export presets may now be silent (container `gif`, no `audio`): in the plugin contract `ExportPreset.audio`
   is optional. The skill documents the preset in `loops.md`.
+- Batch variants from data rows, slices 1 and 2 of #477 (ADR 0040, epic #451; daemon `batch.render`, MCP
+  `batch_render`, JSON Schema `batch.json`, protocol 106): `frameshell batch <file.batch.json> [--out dir] [--formats
+  id,id] [--dry-run]` renders one template timeline (default `main`) once per row. `slots` name what a row sets:
+  `<clipId>.props.<path>` (written over the clip's props and checked by its adapter, as `clip set` does) or
+  `<clipId>.asset` (a media clip's file swapped, keeping its in, out and placement). Each row's timeline exists only in
+  memory: nothing is written to `timelines/`, journaled or proposed. Every row × format is checked first, so a bad row
+  fails the call with InvalidOperation naming its `row` and `slot` (props the adapter refuses, an unknown clip, a file
+  shorter than the clip's out or without the stream its track plays, a voice file without the transcript a subtitle
+  track follows, two rows writing the same output; slot names and props paths refuse `__proto__`, `prototype` and
+  `constructor`). Then the rows render one at a time as ordinary `render` jobs into `exports/<batch name>/<row>.mp4`
+  (`<row>-<format>.mp4` with formats from `frameshell.json`), and `manifest.json` there keeps each row × format's status,
+  job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
+  generates voiceover. Re-running failed rows (`--rows`, `--failed`, `--force`) comes next.
 - Loop-safe export, first slice of #474 (ADR 0039, epic #451; `render` `loop`, CLI `render --loop`, `JobInfo.warnings`,
   protocol 105): `render --loop` makes a file meant to repeat (title loops, banners). MP4 and MOV audio gets a 2 ms
   half-sine fade at its first and last sample after loudness (silent exports unchanged); `--loop` with `--cover-frame`

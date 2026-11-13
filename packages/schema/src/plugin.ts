@@ -90,7 +90,8 @@ export const ExportPresetSchema = z
       height: z.int().positive(),
       /**
        * `inside`: `width` x `height` is a box, not a frame size. The format's frame is scaled down to fit it with its
-       * own aspect (never up), so one preset serves every aspect (ADR 0039, ADR 0027). Absent: the size is the frame's.
+       * own aspect (never up), so one preset serves every aspect (ADR 0039, ADR 0027). Only a `gif` preset may set it:
+       * the other codecs need even sizes, which a fitted box does not give. Absent: the size is the frame's.
        */
       fit: z.enum(["inside"]).optional(),
       fps: z.number().positive().optional(),
@@ -110,6 +111,9 @@ export const ExportPresetSchema = z
     const gif = preset.container === "gif";
     if (gif !== (preset.video.codec === "gif")) {
       ctx.addIssue({ code: "custom", path: ["video", "codec"], message: 'container "gif" and video codec "gif" go together' });
+    }
+    if (!gif && preset.video.fit !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["video", "fit"], message: 'video.fit "inside" is only for a gif preset (other codecs need even sizes)' });
     }
     if (gif && preset.audio) ctx.addIssue({ code: "custom", path: ["audio"], message: "a gif preset has no audio" });
     if (!gif && !preset.audio) ctx.addIssue({ code: "custom", path: ["audio"], message: "audio is required" });

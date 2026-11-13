@@ -268,6 +268,20 @@ _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 One journaled change of project config (a format added or removed, a `revert` of one), as keyed before/after values in `.frameshell/history/project.config.jsonl`; it belongs to a transaction like a timeline operation and is listed in every timeline's history.
 _Avoid_: config edit, settings change
 
+## Batch variants (ADR 0040)
+
+**Batch file**:
+A `*.batch.json` naming a template timeline, its slots and the rows to render; each row is one variant of the same edit (a size, a language, a product), never an episode.
+_Avoid_: job file, template file, data file
+
+**Slot**:
+A named place a row fills: `<clipId>.props.<path>` (a value in a generated clip's props) or `<clipId>.asset` (a media clip's file, in/out kept).
+_Avoid_: field, variable, placeholder
+
+**Row**:
+One variant of a batch: an `id` (its output file name) and a value per slot it sets.
+_Avoid_: record, entry (the manifest's per row × format line is an entry)
+
 ## Photo segmentation (ADR 0022)
 
 **Mask**:

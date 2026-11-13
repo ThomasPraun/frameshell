@@ -64,7 +64,7 @@ import {
 } from "./cover.js";
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
-import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, GIF_WARN_BYTES, fitInside, loudnessTarget } from "./presets.js";
+import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
 import { loopSeamWarning } from "./seam.js";
 
@@ -152,6 +152,31 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     await rm(partial, { force: true });
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+/** Params of {@link ExportService.render}; see the daemon method `render`. */
+export interface RenderRequest {
+  timeline: string;
+  preset?: string | undefined;
+  quality?: "draft" | "final" | undefined;
+  /** Absolute output file; with `formats`, `-<format>` goes before its extension. */
+  out?: string | undefined;
+  /** Absolute output path without extension, used when `out` is absent: the preset's container is added. Default `exports/<timeline>-<preset>`. */
+  stem?: string | undefined;
+  cover?: CoverChoice | undefined;
+  formats?: readonly string[] | undefined;
+  /** A file meant to repeat (ADR 0039); refused with `cover`. */
+  loop?: boolean | undefined;
+}
+
+/** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
+export interface PlannedRender {
+  /** What `start` returns, without the jobs. */
+  result: Omit<RenderResult, "job" | "renders"> & { renders: Omit<RenderResult["renders"][number], "job">[] };
+  /** Placed assets without verified provenance (ADR 0026), also at the end of `result.warnings`. */
+  provenance: string[];
+  /** Queue one job per format; synchronous. */
+  start(): RenderResult;
 }
 
 /** How a cover picks its frame and word; see the `cover` method. */
@@ -253,25 +278,22 @@ export class ExportService {
    * Validate and compile, then queue one render job per format (`formats`, ADR 0027; default the primary only).
    * Every format is checked and compiled before any job is queued. Returns at once.
    */
-  async render(
-    root: string,
-    params: {
-      timeline: string;
-      preset?: string | undefined;
-      quality?: "draft" | "final" | undefined;
-      out?: string | undefined;
-      cover?: CoverChoice | undefined;
-      formats?: readonly string[] | undefined;
-      /** A file meant to repeat (ADR 0039); refused with `cover`. */
-      loop?: boolean | undefined;
-    },
-  ): Promise<RenderResult> {
+  async render(root: string, params: RenderRequest): Promise<RenderResult> {
+    return (await this.planRender(root, params)).start();
+  }
+
+  /**
+   * {@link ExportService.render} up to the queue: every format checked and compiled, nothing queued until `start`,
+   * which queues the jobs synchronously (a job watcher can queue the next renders). `loaded`: the timeline to render
+   * instead of the file (a batch row's variant, ADR 0040); formats still come from `frameshell.json` on disk.
+   */
+  async planRender(root: string, params: RenderRequest, loaded?: { timeline: Timeline; fps: number }): Promise<PlannedRender> {
     const config = (await readEnclosingProject(root))?.config;
     const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
     // A GIF always repeats (ADR 0039): it gets the loop rules without being asked.
     const loop = params.loop === true || preset.container === "gif";
-    const { timeline, fps } = await this.#resolved(root, params.timeline);
+    const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
     const resolution = project.resolution;
     const formats = (params.formats ? [...new Set(params.formats)] : [undefined]).map((id) => {
       const found = resolveFormat(timeline, project, id);
@@ -300,7 +322,7 @@ export class ExportService {
     };
     const baked = this.#options.audioFx?.needs(timeline) ?? [];
     const standInBakes = new Map(baked.map(({ ref }) => [ref, "stand-in.pcm"]));
-    const base = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
+    const base = params.out ?? `${params.stem ?? join(root, "exports", `${params.timeline}-${preset.id}`)}.${preset.container}`;
     const planned = await Promise.all(formats.map(async (format) => {
       const size = outputSize(preset, format, params.preset !== undefined, "render");
       const cover = params.cover ? await this.#coverFrame(root, timeline, fps, size, params.cover) : null;
@@ -328,73 +350,86 @@ export class ExportService {
           : [];
       return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...plan.warnings] };
     }));
-    const renders = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
-      const job = this.#options.jobs.enqueue({
-        kind: "render",
-        project: root,
-        asset: `timelines/${params.timeline}.json`,
+    const provenance = (await this.#options.provenance?.(root, [...sources.keys()])) ?? [];
+    const first = planned[0]!;
+    const result: PlannedRender["result"] = {
+      format: first.format.id,
+      renders: planned.map(({ format, plan, output, warnings }) => ({
+        format: format.id,
         output,
-        run: async (ctx) => {
-          let final = plan;
-          let generated: ReadonlyMap<string, GeneratedSource> = new Map();
-          let audioFx: ReadonlyMap<string, string> = new Map();
-          if (layered.length > 0 && this.#options.clips) {
-            ctx.update({ step: "clips", progress: 0 });
-            generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
-          }
-          if (baked.length > 0 && this.#options.audioFx) {
-            ctx.update({ step: "audio-fx", progress: 0 });
-            audioFx = await this.#options.audioFx.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), ctx.signal);
-          }
-          let mattes: ReadonlyMap<string, MatteSource> = new Map();
-          if (makeMattes) {
-            ctx.update({ step: "matte", progress: 0 });
-            mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
-          }
-          if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
-          const ffmpeg = await this.#options.ffmpeg(root);
-          const cache = join(root, ".frameshell", "cache", "render");
-          await executeRender(final, {
-            ffmpeg,
-            workDir: join(cache, randomBytes(6).toString("hex")),
-            output,
-            signal: ctx.signal,
-            onProgress: (update: JobUpdate) => ctx.update(update),
-            ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
-          });
-          const bytes = preset.container === "gif" ? await stat(output).then((info) => info.size, () => 0) : 0;
-          if (bytes > GIF_WARN_BYTES) {
-            ctx.update({ warning: `The GIF is ${(bytes / 1024 / 1024).toFixed(1)} MB (over ${GIF_WARN_BYTES / 1024 / 1024} MB): many places stop previewing it. Shorten the timeline, or render a smaller format.` });
-          }
-          if (loop) {
-            // A diagnostic: a check that cannot run must not fail a render that succeeded.
-            const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
-              (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
-            );
-            if (warning) ctx.update({ warning });
-          }
-        },
-      });
-      return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
-    });
-    const first = renders[0]!;
-    const plan = planned[0]!.plan;
-    return {
-      format: first.format,
-      renders,
-      job: first.job,
+        preset: preset.id,
+        width: plan.width,
+        height: plan.height,
+        segments: plan.segments.length,
+        warnings,
+      })),
       output: first.output,
       preset: preset.id,
       quality: params.quality ?? null,
       encoder: encoder && preset.video.codec === "h264" ? encoder : presetEncoder(preset),
       timeline: params.timeline,
-      duration: plan.duration,
-      width: plan.width,
-      height: plan.height,
-      fps: plan.fps,
-      loudness: plan.loudness,
-      segments: plan.segments.length,
-      warnings: [...first.warnings, ...((await this.#options.provenance?.(root, [...sources.keys()])) ?? [])],
+      duration: first.plan.duration,
+      width: first.plan.width,
+      height: first.plan.height,
+      fps: first.plan.fps,
+      loudness: first.plan.loudness,
+      segments: first.plan.segments.length,
+      warnings: [...first.warnings, ...provenance],
+    };
+    return {
+      result,
+      provenance,
+      start: () => {
+        const queued = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
+          const job = this.#options.jobs.enqueue({
+            kind: "render",
+            project: root,
+            asset: `timelines/${params.timeline}.json`,
+            output,
+            run: async (ctx) => {
+              let final = plan;
+              let generated: ReadonlyMap<string, GeneratedSource> = new Map();
+              let audioFx: ReadonlyMap<string, string> = new Map();
+              if (layered.length > 0 && this.#options.clips) {
+                ctx.update({ step: "clips", progress: 0 });
+                generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
+              }
+              if (baked.length > 0 && this.#options.audioFx) {
+                ctx.update({ step: "audio-fx", progress: 0 });
+                audioFx = await this.#options.audioFx.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), ctx.signal);
+              }
+              let mattes: ReadonlyMap<string, MatteSource> = new Map();
+              if (makeMattes) {
+                ctx.update({ step: "matte", progress: 0 });
+                mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
+              }
+              if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
+              const ffmpeg = await this.#options.ffmpeg(root);
+              const cache = join(root, ".frameshell", "cache", "render");
+              await executeRender(final, {
+                ffmpeg,
+                workDir: join(cache, randomBytes(6).toString("hex")),
+                output,
+                signal: ctx.signal,
+                onProgress: (update: JobUpdate) => ctx.update(update),
+                ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
+              });
+              const bytes = preset.container === "gif" ? await stat(output).then((info) => info.size, () => 0) : 0;
+              const sizeWarning = gifSizeWarning(bytes);
+              if (sizeWarning) ctx.update({ warning: sizeWarning });
+              if (loop) {
+                // A diagnostic: a check that cannot run must not fail a render that succeeded.
+                const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
+                  (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
+                );
+                if (warning) ctx.update({ warning });
+              }
+            },
+          });
+          return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
+        });
+        return { ...result, renders: queued, job: queued[0]!.job };
+      },
     };
   }
 
@@ -785,7 +820,7 @@ function withSuffix(path: string, suffix: string): string {
 const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
 
 /** The asset's transcript file (the one `transcribe` writes); null when missing, broken or owned by another asset. */
-async function readTranscriptFile(root: string, asset: string): Promise<Transcript | null> {
+export async function readTranscriptFile(root: string, asset: string): Promise<Transcript | null> {
   try {
     return (await resolveTranscript(root, asset)).previous;
   } catch (error) {

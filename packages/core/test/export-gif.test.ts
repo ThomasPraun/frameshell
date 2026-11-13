@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
 import { type ExportPreset, type MediaClip, type Timeline, parseExportPreset } from "@frameshell/schema";
-import { BUILTIN_PRESETS, type Daemon, type ExportSource, compileRender, executeRender, startDaemon } from "../src/index.js";
+import { BUILTIN_PRESETS, type Daemon, type ExportSource, compileRender, executeRender, gifSizeWarning, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
@@ -102,6 +102,17 @@ describe("gif preset", () => {
     const mp4 = BUILTIN_PRESETS.find((preset) => preset.id === "youtube-1080p")!;
     const { audio: _audio, ...silent } = mp4;
     expect(parseExportPreset(silent)).toMatchObject({ ok: false, error: expect.stringContaining("audio is required") });
+  });
+
+  it("allows video.fit only on a gif preset: a fitted box has odd sizes the other codecs refuse", () => {
+    const mp4 = BUILTIN_PRESETS.find((preset) => preset.id === "youtube-1080p")!;
+    expect(parseExportPreset({ ...mp4, video: { ...mp4.video, fit: "inside" } })).toMatchObject({ ok: false, error: expect.stringContaining("only for a gif preset") });
+  });
+
+  it("warns above 15 000 000 bytes, naming the size in MB, and not at the limit", () => {
+    expect(gifSizeWarning(15_000_000)).toBeNull();
+    expect(gifSizeWarning(15_000_001)).toContain("15.0 MB (over 15 MB)");
+    expect(gifSizeWarning(21_300_000)).toContain("The GIF is 21.3 MB");
   });
 });
 

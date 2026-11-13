@@ -288,9 +288,10 @@ export {
   GIF_MAX_FRAMES,
   GIF_WARN_BYTES,
   fitInside,
+  gifSizeWarning,
   loudnessTarget,
 } from "./export/presets.js";
-export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
+export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,
   ENERGY_HOP_S,

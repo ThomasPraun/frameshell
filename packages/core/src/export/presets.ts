@@ -51,7 +51,13 @@ export const GIF_MAX_FPS = 30;
 export const GIF_MAX_FRAMES = 350;
 
 /** Size above which a finished GIF gets a warning, bytes: platforms and READMEs stop previewing around here. */
-export const GIF_WARN_BYTES = 15 * 1024 * 1024;
+export const GIF_WARN_BYTES = 15_000_000;
+
+/** The job warning for a finished GIF of `bytes`, or null when it is small enough. */
+export function gifSizeWarning(bytes: number): string | null {
+  if (bytes <= GIF_WARN_BYTES) return null;
+  return `The GIF is ${(bytes / 1e6).toFixed(1)} MB (over ${GIF_WARN_BYTES / 1e6} MB): many places stop previewing it. Shorten the timeline, or render a smaller format.`;
+}
 
 /**
  * Size of `frame` fitted inside the `box` of a `fit: "inside"` preset: the frame's aspect, scaled down to fit the box
