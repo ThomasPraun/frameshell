@@ -7,6 +7,8 @@ import {
   type ClipKeys,
   type NestHost,
   type TransitionShape,
+  circleReach,
+  irisCentre,
   nestingOf,
   placementAt,
   placementOf,
@@ -218,4 +220,17 @@ export function wipeAlpha(shape: TransitionShape, p: string, left: string, top: 
           ? `if(lt(${y},${num(height)}*(1-(${p}))),${low},${high})`
           : `if(lt(${y},${num(height)}*(${p})),${high},${low})`;
   return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${alpha}'`;
+}
+
+/**
+ * {@link wipeAlpha}'s twin for an `iris`: keeps the layer only where the pixel centre lies inside `shapeAt`'s circle, its
+ * radius shape progress `p` times {@link circleReach} of the `width` x `height` frame. `outgoing`: outside it instead.
+ */
+export function irisAlpha(shape: TransitionShape, p: string, left: string, top: string, width: number, height: number, outgoing = false): string {
+  const [cx, cy] = irisCentre(shape);
+  const reach = circleReach({ cx, cy }, width, height);
+  const distance = `hypot(X+${left}+0.5-${num(cx * width)},Y+${top}+0.5-${num(cy * height)})`;
+  const keep = "alpha(X,Y)";
+  const [inside, outside] = outgoing ? ["0", keep] : [keep, "0"];
+  return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(${distance},${num(reach)}*(${p})),${inside},${outside})'`;
 }

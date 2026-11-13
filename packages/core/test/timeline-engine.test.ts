@@ -973,6 +973,21 @@ describe("markers (ADR 0029)", () => {
     expect((await apply(t, "marker.add", { at: 3, label: "m_1 drop" })).timeline.markers).toHaveLength(4);
   });
 
+  it("a label shaped like beat:<number> or bar:<number> is refused on add and set, in any case", async () => {
+    const t = await marked();
+    for (const label of ["beat:8", "BAR:2", "Beat: 3", "bar:2.5", "bar:8-0.2"]) {
+      expect((await rejection(apply(t, "marker.add", { at: 3, label }))).message, label).toMatch(/must not look like a beat or bar reference/);
+      expect((await rejection(apply(t, "marker.set", { marker: "m_b", label }))).message, label).toMatch(/must not look like a beat or bar reference/);
+    }
+    expect((await apply(t, "marker.add", { at: 3, label: "beat:drop" })).timeline.markers).toHaveLength(4);
+    expect((await apply(t, "marker.add", { at: 4, label: "bar" })).timeline.markers).toHaveLength(4);
+  });
+
+  it("a timeline saved with a marker labelled like a grid reference still loads", () => {
+    const loaded = parseTimeline({ ...base(), markers: [{ id: "m_a", at: 1, label: "bar:2" }] });
+    expect(loaded).toMatchObject({ ok: true });
+  });
+
   it("timeline.patch refuses a marker off the frame grid and accepts one on it", async () => {
     const t = await marked();
     const off = await rejection(apply(t, "timeline.patch", { markers: [{ id: "m_a", marker: { id: "m_a", at: 1.015, label: "intro" } }] }));

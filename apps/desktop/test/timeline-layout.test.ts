@@ -136,6 +136,33 @@ describe("layoutTimeline", () => {
   });
 });
 
+describe("audio effects of a clip", () => {
+  it("fills every omitted number and keeps the order; none for a clip without effects or a generated one", () => {
+    const layout = layoutTimeline(
+      view([
+        {
+          id: "t_a1",
+          kind: "audio",
+          name: null,
+          follows: null,
+          clips: [
+            { ...media("c_fx", 0, 4), audio: { effects: [{ kind: "compressor", ratio: 4 }, { kind: "highpass" }] } },
+            media("c_dry", 4, 8),
+          ],
+        },
+        { id: "t_v1", kind: "video", name: null, follows: null, clips: [{ id: "c_card", type: "hyperframes", source: "compositions/card.html", start: 0, end: 2 }] },
+      ]),
+    );
+    const clip = (id: string) => layout.rows.flatMap((row) => row.clips).find((candidate) => candidate.id === id)!;
+    expect(clip("c_fx").audioEffects).toEqual([
+      { kind: "compressor", threshold: -20, ratio: 4, attack: 8, release: 140, makeup: 2 },
+      { kind: "highpass", frequency: 85 },
+    ]);
+    expect(clip("c_dry").audioEffects).toEqual([]);
+    expect(clip("c_card").audioEffects).toEqual([]);
+  });
+});
+
 describe("visibleClips", () => {
   const clips = layoutTimeline(
     view([

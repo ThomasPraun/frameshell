@@ -19,16 +19,17 @@ import {
   TRANSITION_DIRECTIONS,
   TRANSITION_SHAPE_KINDS,
   type TransitionShape,
+  circleReach,
 } from "@frameshell/schema";
 import { BUILTIN_PRESETS, type ExportSource, compileRender } from "../src/index.js";
-import { keyExpression, shapeOffsets, shapeProgressExpression, wipeAlpha } from "../src/export/animation.js";
+import { irisAlpha, keyExpression, shapeOffsets, shapeProgressExpression, wipeAlpha } from "../src/export/animation.js";
 
 // Parity of the export's ffmpeg expressions and ramps with the schema evaluator (ADR 0018 decision 9): every
 // expression the compiler writes is evaluated here numerically and sampled against `composite.ts`.
 
 /**
- * Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, min, pow,
- * sin; `geq`'s `alpha(X,Y)` reads an opaque picture (1).
+ * Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, min, hypot,
+ * pow, sin; `geq`'s `alpha(X,Y)` reads an opaque picture (1).
  */
 function evaluate(expression: string, variables: Record<string, number>): number {
   const tokens = expression.match(/\d+(?:\.\d+)?|[A-Za-z_][A-Za-z_0-9]*|[-+*/(),]/g)!;
@@ -48,6 +49,7 @@ function evaluate(expression: string, variables: Record<string, number>): number
     pow: (a, b) => a! ** b!,
     sin: (a) => Math.sin(a!),
     min: (a, b) => Math.min(a!, b!),
+    hypot: (a, b) => Math.hypot(a!, b!),
     alpha: () => 1,
   };
   const primary = (): number => {
@@ -512,7 +514,8 @@ describe("nested clip parity (ADR 0018 decision 9)", () => {
 });
 
 describe("shape parity (ADR 0030)", () => {
-  const SHAPES: TransitionShape[] = TRANSITION_SHAPE_KINDS.flatMap((kind) => TRANSITION_DIRECTIONS.map((direction) => ({ kind, direction })));
+  const SHAPES: TransitionShape[] = TRANSITION_SHAPE_KINDS.filter((kind) => kind !== "iris").flatMap((kind) => TRANSITION_DIRECTIONS.map((direction) => ({ kind, direction })));
+  const IRISES: TransitionShape[] = [{ kind: "iris" }, { kind: "iris", origin: [0.6, 0.1, 0.9, 0.3] }, { kind: "iris", origin: [0, 1, 0, 1] }];
   const width = 64;
   const height = 36;
 
@@ -545,6 +548,29 @@ describe("shape parity (ADR 0030)", () => {
             // Pixel centres exactly on the edge may round either way.
             const onEdge = [cx - x0, cx - x1, cy - y0, cy - y1].some((d) => Math.abs(d) < 1e-9);
             if (!onEdge) expect(evaluate(alpha, { X: x, Y: y, T: t }), `${label} pixel ${x},${y}`).toBe(inside ? 1 : 0);
+          }
+        }
+      }
+    }
+  });
+
+  it("the iris's alpha equals shapeAt's circle at every sampled time, inside for the incoming layer, outside for an outgoing subject", () => {
+    const cut = 3;
+    const half = 0.4;
+    for (const shape of IRISES) {
+      for (let i = -4; i <= 44; i += 4) {
+        const t = cut - half + (2 * half * i) / 40;
+        const { circle } = shapeAt(shape, dissolveProgress(cut, half, t)).incoming;
+        const radius = circle!.r * circleReach(circle!, width, height);
+        for (const outgoing of [false, true]) {
+          const alpha = /:a='([^']+)'$/.exec(irisAlpha(shape, shapeProgressExpression(cut, half, "T"), "8", "4", width, height, outgoing))![1]!;
+          for (let y = 0; y < height - 8; y += 4) {
+            for (let x = 0; x < width - 16; x += 4) {
+              const distance = Math.hypot(x + 8.5 - circle!.cx * width, y + 4.5 - circle!.cy * height);
+              // Pixel centres on the circle may round either way.
+              if (Math.abs(distance - radius) < 1e-6) continue;
+              expect(evaluate(alpha, { X: x, Y: y, T: t }), `${JSON.stringify(shape)} t ${t} pixel ${x},${y}`).toBe(distance < radius !== outgoing ? 1 : 0);
+            }
           }
         }
       }

@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { classifyContext } from "../src/context.js";
 import { encodeGrayPng } from "../src/segment/png.js";
 import type { PhotoPoint } from "../src/segment/segmenter.js";
-import { type InspectOptions, InspectService, injectProbeHead } from "../src/inspect/service.js";
+import { injectProbeHead } from "../src/inspect/live-page.js";
+import { type InspectOptions, InspectService } from "../src/inspect/service.js";
 import { tempDir } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 

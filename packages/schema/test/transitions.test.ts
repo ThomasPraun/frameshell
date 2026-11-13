@@ -3,6 +3,7 @@ import {
   type Clip,
   type ClipEdges,
   type TransitionContext,
+  circleReach,
   clipHandles,
   createTimeline,
   dissolveProgress,
@@ -11,6 +12,7 @@ import {
   edgeTransitions,
   fadeWeight,
   gainAt,
+  irisCentre,
   keyedValueAt,
   parseTimeline,
   placementAt,
@@ -245,6 +247,23 @@ describe("shapeAt", () => {
     expect(shapeAt({ kind: "wipe", direction: "up" }, 1).incoming.clip).toEqual([0, 0, 1, 1]);
     expect(shapeAt({ kind: "wipe", direction: "down" }, 0).incoming.clip).toEqual([0, 0, 1, 0]);
   });
+
+  it("opens an iris from the centre of its origin until it covers the frame, the outgoing picture still", () => {
+    expect(shapeAt({ kind: "iris" }, 0.5)).toEqual({
+      outgoing: { dx: 0, dy: 0, clip: null },
+      incoming: { dx: 0, dy: 0, clip: null, circle: { cx: 0.5, cy: 0.5, r: 0.5 } },
+    });
+    const origin: [number, number, number, number] = [0.1, 0.2, 0.3, 0.6];
+    expect(shapeAt({ kind: "iris", origin }, 0.25).incoming.circle).toEqual({ cx: 0.2, cy: 0.4, r: 0.15625 });
+    expect(shapeAt({ kind: "iris", origin }, 0).incoming.circle!.r).toBe(0);
+    expect(shapeAt({ kind: "iris", origin }, 1).incoming.circle!.r).toBe(1);
+  });
+
+  it("measures a circle's reach to the farthest frame corner, in pixels", () => {
+    expect(circleReach({ cx: 0.5, cy: 0.5 }, 1920, 1080)).toBeCloseTo(Math.hypot(960, 540));
+    expect(circleReach({ cx: 0.25, cy: 1 }, 100, 50)).toBeCloseTo(Math.hypot(75, 50));
+    expect(irisCentre({ kind: "iris" })).toEqual([0.5, 0.5]);
+  });
 });
 
 describe("clip transition fields (timeline model)", () => {
@@ -291,8 +310,25 @@ describe("clip transition fields (timeline model)", () => {
     const audio = parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "wipe" } }], "audio"));
     expect(audio.ok).toBe(false);
     if (!audio.ok) expect(audio.error).toContain("no picture to shape");
-    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "iris" } }])).ok).toBe(false);
+    expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "zoom" } }])).ok).toBe(false);
     expect(parseTimeline(timeline([{ ...base, dissolve: 0.5, shape: { kind: "push", direction: "diagonal" } }])).ok).toBe(false);
+  });
+
+  it("takes an iris with an ordered origin in frame fractions, and no direction", () => {
+    const shaped = (shape: unknown) => parseTimeline(timeline([{ ...base, dissolve: 0.5, shape }]));
+    expect(shaped({ kind: "iris" }).ok).toBe(true);
+    expect(shaped({ kind: "iris", origin: [0.1, 0.2, 0.3, 0.4] }).ok).toBe(true);
+    expect(shaped({ kind: "iris", origin: [0.5, 0.5, 0.5, 0.5] }).ok).toBe(true);
+    const refused = (shape: unknown, message: string) => {
+      const result = shaped(shape);
+      expect(result.ok, JSON.stringify(shape)).toBe(false);
+      if (!result.ok) expect(result.error).toContain(message);
+    };
+    refused({ kind: "iris", direction: "left" }, "takes no `direction`");
+    refused({ kind: "wipe", origin: [0, 0, 1, 1] }, "`origin` is for an iris");
+    refused({ kind: "iris", origin: [0.6, 0, 0.4, 1] }, "x0 <= x1");
+    expect(shaped({ kind: "iris", origin: [0, 0, 1.2, 1] }).ok).toBe(false);
+    expect(shaped({ kind: "iris", origin: [0, 0, 1] }).ok).toBe(false);
   });
 
   it("gives shots no transition fields", () => {

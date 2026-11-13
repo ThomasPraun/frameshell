@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import {
@@ -17,6 +17,7 @@ import {
   BUILTIN_FORMATS,
   BUILTIN_FORMAT_IDS,
   type ExportPreset,
+  type FormatEntry,
   type FormatSource,
   type MulticamGroup,
   type ResolvedFormat,
@@ -46,9 +47,11 @@ import {
   type RenderPlan,
   compileFrame,
   compileRender,
+  gifStep,
   loudnessAnalysis,
   mixStep,
   muxStep,
+  paletteStep,
   parseLoudnessStats,
 } from "./compiler.js";
 import {
@@ -63,7 +66,7 @@ import {
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { readCaptionTokens } from "../style/captions.js";
-import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
+import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
 import { loopSeamWarning } from "./seam.js";
 
@@ -135,16 +138,49 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     const measured = analysis ? parseLoudnessStats(await readFile(join(workDir, LOUDNESS_STATS_FILE), "utf8")) : null;
 
     report({ step: "mux", progress: VIDEO_SHARE });
-    const mux = muxStep(plan, measured, partial);
-    await writeFiles(workDir, mux.files);
     await mkdir(dirname(output), { recursive: true });
-    await run(mux.args, (seconds) => report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * Math.min(1, seconds / plan.duration) }));
+    const muxProgress = (from: number, to: number) => (seconds: number) =>
+      report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * (from + (to - from) * Math.min(1, seconds / plan.duration)) });
+    if (plan.container === "gif") {
+      // No sound to mix: the palette over every segment, then the GIF through it (ADR 0039).
+      await run(paletteStep().args, muxProgress(0, 0.4));
+      await run(gifStep(partial).args, muxProgress(0.4, 1));
+    } else {
+      const mux = muxStep(plan, measured, partial);
+      await writeFiles(workDir, mux.files);
+      await run(mux.args, muxProgress(0, 1));
+    }
     await renameRetrying(partial, output);
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
     await rm(partial, { force: true });
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+/** Params of {@link ExportService.render}; see the daemon method `render`. */
+export interface RenderRequest {
+  timeline: string;
+  preset?: string | undefined;
+  quality?: "draft" | "final" | undefined;
+  /** Absolute output file; with `formats`, `-<format>` goes before its extension. */
+  out?: string | undefined;
+  /** Absolute output path without extension, used when `out` is absent: the preset's container is added. Default `exports/<timeline>-<preset>`. */
+  stem?: string | undefined;
+  cover?: CoverChoice | undefined;
+  formats?: readonly string[] | undefined;
+  /** A file meant to repeat (ADR 0039); refused with `cover`. */
+  loop?: boolean | undefined;
+}
+
+/** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
+export interface PlannedRender {
+  /** What `start` returns, without the jobs. */
+  result: Omit<RenderResult, "job" | "renders"> & { renders: Omit<RenderResult["renders"][number], "job">[] };
+  /** Placed assets without verified provenance (ADR 0026), also at the end of `result.warnings`. */
+  provenance: string[];
+  /** Queue one job per format; synchronous. */
+  start(): RenderResult;
 }
 
 /** How a cover picks its frame and word; see the `cover` method. */
@@ -155,6 +191,16 @@ export interface CoverChoice {
   at?: number | undefined;
   /** `#rrggbb`. */
   color?: string | undefined;
+}
+
+/**
+ * A timeline as a read with a `view` shows it. `formats`: the project's format list when a review-mode
+ * proposal changes it (ADR 0036); absent, the file's.
+ */
+export interface LoadedTimeline {
+  timeline: Timeline;
+  fps: number;
+  formats?: readonly FormatEntry[] | undefined;
 }
 
 /** Options for {@link ExportService}. */
@@ -246,23 +292,22 @@ export class ExportService {
    * Validate and compile, then queue one render job per format (`formats`, ADR 0027; default the primary only).
    * Every format is checked and compiled before any job is queued. Returns at once.
    */
-  async render(
-    root: string,
-    params: {
-      timeline: string;
-      preset?: string | undefined;
-      quality?: "draft" | "final" | undefined;
-      out?: string | undefined;
-      cover?: CoverChoice | undefined;
-      formats?: readonly string[] | undefined;
-      /** A file meant to repeat (ADR 0039); refused with `cover`. */
-      loop?: boolean | undefined;
-    },
-  ): Promise<RenderResult> {
+  async render(root: string, params: RenderRequest): Promise<RenderResult> {
+    return (await this.planRender(root, params)).start();
+  }
+
+  /**
+   * {@link ExportService.render} up to the queue: every format checked and compiled, nothing queued until `start`,
+   * which queues the jobs synchronously (a job watcher can queue the next renders). `loaded`: the timeline to render
+   * instead of the file (a batch row's variant, ADR 0040); formats still come from `frameshell.json` on disk.
+   */
+  async planRender(root: string, params: RenderRequest, loaded?: { timeline: Timeline; fps: number }): Promise<PlannedRender> {
     const config = (await readEnclosingProject(root))?.config;
     const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
     const preset = await this.#preset(root, params.preset ?? config?.export?.defaultPreset ?? DEFAULT_PRESET_ID);
-    const { timeline, fps } = await this.#resolved(root, params.timeline);
+    // A GIF always repeats (ADR 0039): it gets the loop rules without being asked.
+    const loop = params.loop === true || preset.container === "gif";
+    const { timeline, fps } = await this.#resolved(root, params.timeline, loaded);
     const resolution = project.resolution;
     const formats = (params.formats ? [...new Set(params.formats)] : [undefined]).map((id) => {
       const found = resolveFormat(timeline, project, id);
@@ -283,7 +328,7 @@ export class ExportService {
       timeline,
       fps,
       ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
-      ...(params.loop ? { loop: true } : {}),
+      ...(loop ? { loop: true } : {}),
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources,
@@ -293,7 +338,7 @@ export class ExportService {
     };
     const baked = this.#options.audioFx?.needs(timeline) ?? [];
     const standInBakes = new Map(baked.map(({ ref }) => [ref, "stand-in.pcm"]));
-    const base = params.out ?? join(root, "exports", `${params.timeline}-${preset.id}.${preset.container}`);
+    const base = params.out ?? `${params.stem ?? join(root, "exports", `${params.timeline}-${preset.id}`)}.${preset.container}`;
     const planned = await Promise.all(formats.map(async (format) => {
       const size = outputSize(preset, format, params.preset !== undefined, "render");
       const cover = params.cover ? await this.#coverFrame(root, timeline, fps, size, params.cover) : null;
@@ -312,7 +357,7 @@ export class ExportService {
       const output = params.formats ? withSuffix(base, format.id) : base;
       // Before formats a configured default preset of another aspect letterboxed the project into its size.
       const overridden =
-        params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && !sameAspect(preset.video, format)
+        params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && preset.video.fit === undefined && !sameAspect(preset.video, format)
           ? [
               `Default preset ${preset.id} (export.defaultPreset) is ${preset.video.width}x${preset.video.height}, another aspect than format ` +
                 `${format.id}: rendered at ${size.width}x${size.height} with its codec, bitrate and loudness (ADR 0027). For the preset's ` +
@@ -321,70 +366,87 @@ export class ExportService {
           : [];
       return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...captions.warnings, ...plan.warnings] };
     }));
-    const renders = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
-      const job = this.#options.jobs.enqueue({
-        kind: "render",
-        project: root,
-        asset: `timelines/${params.timeline}.json`,
+    const provenance = (await this.#options.provenance?.(root, [...sources.keys()])) ?? [];
+    const first = planned[0]!;
+    const result: PlannedRender["result"] = {
+      format: first.format.id,
+      renders: planned.map(({ format, plan, output, warnings }) => ({
+        format: format.id,
         output,
-        run: async (ctx) => {
-          let final = plan;
-          let generated: ReadonlyMap<string, GeneratedSource> = new Map();
-          let audioFx: ReadonlyMap<string, string> = new Map();
-          if (layered.length > 0 && this.#options.clips) {
-            ctx.update({ step: "clips", progress: 0 });
-            generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
-          }
-          if (baked.length > 0 && this.#options.audioFx) {
-            ctx.update({ step: "audio-fx", progress: 0 });
-            audioFx = await this.#options.audioFx.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), ctx.signal);
-          }
-          let mattes: ReadonlyMap<string, MatteSource> = new Map();
-          if (makeMattes) {
-            ctx.update({ step: "matte", progress: 0 });
-            mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
-          }
-          if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
-          const ffmpeg = await this.#options.ffmpeg(root);
-          const cache = join(root, ".frameshell", "cache", "render");
-          await executeRender(final, {
-            ffmpeg,
-            workDir: join(cache, randomBytes(6).toString("hex")),
-            output,
-            projectDir: root,
-            signal: ctx.signal,
-            onProgress: (update: JobUpdate) => ctx.update(update),
-            ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
-          });
-          if (params.loop) {
-            // A diagnostic: a check that cannot run must not fail a render that succeeded.
-            const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
-              (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
-            );
-            if (warning) ctx.update({ warning });
-          }
-        },
-      });
-      return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
-    });
-    const first = renders[0]!;
-    const plan = planned[0]!.plan;
-    return {
-      format: first.format,
-      renders,
-      job: first.job,
+        preset: preset.id,
+        width: plan.width,
+        height: plan.height,
+        segments: plan.segments.length,
+        warnings,
+      })),
       output: first.output,
       preset: preset.id,
       quality: params.quality ?? null,
       encoder: encoder && preset.video.codec === "h264" ? encoder : presetEncoder(preset),
       timeline: params.timeline,
-      duration: plan.duration,
-      width: plan.width,
-      height: plan.height,
-      fps: plan.fps,
-      loudness: plan.loudness,
-      segments: plan.segments.length,
-      warnings: [...first.warnings, ...((await this.#options.provenance?.(root, [...sources.keys()])) ?? [])],
+      duration: first.plan.duration,
+      width: first.plan.width,
+      height: first.plan.height,
+      fps: first.plan.fps,
+      loudness: first.plan.loudness,
+      segments: first.plan.segments.length,
+      warnings: [...first.warnings, ...provenance],
+    };
+    return {
+      result,
+      provenance,
+      start: () => {
+        const queued = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
+          const job = this.#options.jobs.enqueue({
+            kind: "render",
+            project: root,
+            asset: `timelines/${params.timeline}.json`,
+            output,
+            run: async (ctx) => {
+              let final = plan;
+              let generated: ReadonlyMap<string, GeneratedSource> = new Map();
+              let audioFx: ReadonlyMap<string, string> = new Map();
+              if (layered.length > 0 && this.#options.clips) {
+                ctx.update({ step: "clips", progress: 0 });
+                generated = await this.#options.clips.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
+              }
+              if (baked.length > 0 && this.#options.audioFx) {
+                ctx.update({ step: "audio-fx", progress: 0 });
+                audioFx = await this.#options.audioFx.ensure(root, timeline, (fraction) => ctx.update({ progress: fraction }), ctx.signal);
+              }
+              let mattes: ReadonlyMap<string, MatteSource> = new Map();
+              if (makeMattes) {
+                ctx.update({ step: "matte", progress: 0 });
+                mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
+              }
+              if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
+              const ffmpeg = await this.#options.ffmpeg(root);
+              const cache = join(root, ".frameshell", "cache", "render");
+              await executeRender(final, {
+                ffmpeg,
+                workDir: join(cache, randomBytes(6).toString("hex")),
+                output,
+                projectDir: root,
+                signal: ctx.signal,
+                onProgress: (update: JobUpdate) => ctx.update(update),
+                ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
+              });
+              const bytes = preset.container === "gif" ? await stat(output).then((info) => info.size, () => 0) : 0;
+              const sizeWarning = gifSizeWarning(bytes);
+              if (sizeWarning) ctx.update({ warning: sizeWarning });
+              if (loop) {
+                // A diagnostic: a check that cannot run must not fail a render that succeeded.
+                const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
+                  (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
+                );
+                if (warning) ctx.update({ warning });
+              }
+            },
+          });
+          return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
+        });
+        return { ...result, renders: queued, job: queued[0]!.job };
+      },
     };
   }
 
@@ -403,9 +465,9 @@ export class ExportService {
       format?: FrameFormat | undefined;
       quality?: number | undefined;
     },
-    loaded?: { timeline: Timeline; fps: number },
+    loaded?: LoadedTimeline,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
-    return this.#capture(root, params, await this.#resolved(root, params.timeline, loaded));
+    return this.#capture(root, params, { ...(await this.#resolved(root, params.timeline, loaded)), ...(loaded?.formats ? { formats: loaded.formats } : {}) });
   }
 
   /**
@@ -415,13 +477,14 @@ export class ExportService {
    */
   async resolvedSubtitles(
     root: string,
-    loaded: { timeline: Timeline; fps: number },
+    loaded: LoadedTimeline,
     projectFormat?: string,
   ): Promise<ResolvedSubtitleTrack[]> {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
     const config = (await readEnclosingProject(root))?.config;
-    const layout = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format;
+    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
+    const layout = resolveFormat(timeline, loaded.formats ? { ...project, formats: loaded.formats } : project, projectFormat)?.format;
     const { tokens } = await readCaptionTokens(root, timeline);
     return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps, tokens), layout);
   }
@@ -528,12 +591,12 @@ export class ExportService {
       format?: FrameFormat | undefined;
       quality?: number | undefined;
     },
-    resolved: { timeline: Timeline; fps: number },
+    resolved: LoadedTimeline,
     cover?: CoverLayout | null,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
     const format = params.format ?? frameFormatOf(params.out);
     const config = (await readEnclosingProject(root))?.config;
-    const project: FormatSource = config ?? { resolution: DEFAULT_RESOLUTION };
+    const project: FormatSource = { ...(config ?? { resolution: DEFAULT_RESOLUTION }), ...(resolved.formats ? { formats: resolved.formats } : {}) };
     const resolution = project.resolution;
     const { timeline, fps } = resolved;
     const found = resolveFormat(timeline, project, params.projectFormat);
@@ -693,7 +756,7 @@ export class ExportService {
 
 /** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */
 function presetEncoder(preset: ExportPreset): string {
-  return { h264: "libx264", h265: "libx265", vp9: "libvpx-vp9", prores: "prores_ks" }[preset.video.codec];
+  return { h264: "libx264", h265: "libx265", vp9: "libvpx-vp9", prores: "prores_ks", gif: "gif" }[preset.video.codec];
 }
 
 /** Files of a multicam group: the cameras and the separate mics. */
@@ -753,6 +816,7 @@ function generatedClipIds(timeline: Timeline): string[] {
  */
 function outputSize(preset: ExportPreset, format: ResolvedFormat, explicit: boolean, op: "render" | "frame"): Size {
   const presetSize = { width: preset.video.width, height: preset.video.height };
+  if (preset.video.fit === "inside") return fitInside(presetSize, format);
   if (sameAspect(presetSize, format)) return explicit || format.primary ? presetSize : { width: format.width, height: format.height };
   if (!explicit) return { width: format.width, height: format.height };
   const id = BUILTIN_FORMAT_IDS.find((builtin) => sameAspect(BUILTIN_FORMATS[builtin]!, presetSize)) ?? `${presetSize.width}x${presetSize.height}`;
@@ -777,7 +841,7 @@ function withSuffix(path: string, suffix: string): string {
 const DEFAULT_RESOLUTION: Size = { width: 1920, height: 1080 };
 
 /** The asset's transcript file (the one `transcribe` writes); null when missing, broken or owned by another asset. */
-async function readTranscriptFile(root: string, asset: string): Promise<Transcript | null> {
+export async function readTranscriptFile(root: string, asset: string): Promise<Transcript | null> {
   try {
     return (await resolveTranscript(root, asset)).previous;
   } catch (error) {

@@ -7,6 +7,7 @@ import {
   applyEvent,
   barOf,
   configLines,
+  styleLines,
   dismissStale,
   readStatus,
   viewOf,
@@ -57,6 +58,21 @@ describe("review state", () => {
       { kind: "resized", id: "web", from: "1600x900", to: "1280x720" },
     ]);
     expect(configLines(ready.proposal!)).toEqual([]);
+  });
+
+  it("lists the style values a proposal sets, changes or clears (ADR 0036)", () => {
+    const config = [
+      { doc: "style" as const, key: "style:colors.accent", before: "#1A1A1A", after: "#FF5A00" },
+      { doc: "style" as const, key: "style:notes", before: null, after: ["short", "plain"] },
+      { doc: "style" as const, key: "style:type.scale", before: 1.2, after: null },
+      { doc: "project" as const, key: "format:9x16", before: null, after: { id: "9x16", width: 1080, height: 1920, index: 1 } },
+    ];
+    const open = applyEvent(INITIAL_REVIEW, change("ready", { timelines: [], operations: 3, config })).proposal!;
+    expect(styleLines(open)).toEqual([
+      { path: "colors.accent", from: "#1A1A1A", to: "#FF5A00" },
+      { path: "notes", from: null, to: "short, plain" },
+      { path: "type.scale", from: "1.2", to: null },
+    ]);
   });
 
   it("returns to Before and drops the bar when the proposal is accepted, rejected or aborted", () => {

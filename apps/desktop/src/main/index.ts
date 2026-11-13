@@ -100,7 +100,7 @@ import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoic
 import { LayoutStore } from "./layout-store.js";
 import { LIVE_SCHEME, LivePages, serveLive } from "./live-protocol.js";
 import { MEDIA_SCHEME, MediaRoots, serveMedia } from "./media-protocol.js";
-import { PANEL_WINDOW_MIN, PanelWindowStore, cascade, placeOnDisplays, panelWindowRequest } from "./panel-windows.js";
+import { PANEL_WINDOW_MIN, type PanelPlacement, PanelWindowStore, cascade, placeOnDisplays, panelWindowRequest } from "./panel-windows.js";
 import { type ProjectFiles, openProjectFiles } from "./project-files.js";
 import { terminalLaunch } from "./terminal-launch.js";
 import { projectBinaries, terminalToolPaths } from "./terminal-tools.js";
@@ -412,20 +412,27 @@ function adoptPanelWindow(state: WindowState, panel: DetachablePanel, child: Bro
   });
   child.webContents.on("will-navigate", (event) => event.preventDefault());
 
+  // The newest placement waits PLACEMENT_SAVE_MS for the window to settle. It is taken when the window changes, since
+  // a closed window can no longer be read, and written at once when the window closes inside that delay.
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const save = () => {
+  let pending: PanelPlacement | undefined;
+  const write = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (child.isDestroyed() || child.isMinimized()) return;
-      void panelWindows.place(panel, screen.getAllDisplays(), { bounds: child.getNormalBounds(), fullScreen: child.isFullScreen() });
-    }, PLACEMENT_SAVE_MS);
+    if (pending) void panelWindows.place(panel, screen.getAllDisplays(), pending);
+    pending = undefined;
+  };
+  const save = () => {
+    if (child.isDestroyed() || child.isMinimized()) return;
+    pending = { bounds: child.getNormalBounds(), fullScreen: child.isFullScreen() };
+    clearTimeout(timer);
+    timer = setTimeout(write, PLACEMENT_SAVE_MS);
   };
   child.on("move", save);
   child.on("resize", save);
   child.on("enter-full-screen", save);
   child.on("leave-full-screen", save);
   child.on("closed", () => {
-    clearTimeout(timer);
+    write();
     panelOwners.delete(childId);
     state.panels.delete(child);
     // A newer window of the same panel may have replaced this one (a quick dock and detach): the panel stays detached.

@@ -80,6 +80,7 @@ import {
   type EditPointResolver,
   type IdPrefix,
   type OperationRequest,
+  type SourceInfo,
   applyOperation,
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
@@ -364,6 +365,15 @@ export class TimelineService {
       call.onApplied?.(applied.timeline);
       return result;
     });
+  }
+
+  /**
+   * Apply `request` to `loaded` (a timeline of `root` with id `id`) in memory with the project's edit context: the
+   * same validation as {@link TimelineService.apply} (adapter props schemas included), but nothing is written,
+   * journaled or proposed. Batch rows (ADR 0040) are made this way. Throws the engine's errors.
+   */
+  async applyInMemory(root: string, id: string, loaded: { timeline: Timeline; fps: number }, request: OperationRequest): Promise<AppliedOperation> {
+    return applyOperation(loaded.timeline, request, this.#context(root, id, loaded.fps, request.op));
   }
 
   /**
@@ -702,6 +712,50 @@ export class TimelineService {
       if (!synced) return this.proposalDiff(root, tx);
     }
     return { tx: proposal.tx, timelines, config: this.#configChanges(proposal) };
+  }
+
+  /**
+   * A hand edit of config document `doc` that is already in its file (ADR 0036 slice 5): `edit.base` is the keyed
+   * state the journal last recorded, `edit.next` the file's. With no review mode it is journaled as a `file.edit`
+   * operation of author `file`, the file left as it is. In review mode it waits in a ready proposal of author
+   * `file` and the document goes back to `edit.base`; when another proposal is open the edit is not taken in:
+   * `edit.keep` saves the edited file aside, the document goes back to `edit.base`, and the result is null (the
+   * `timeline.patch` rule of {@link TimelineService.reconcile}). Caller holds `ConfigJournal.serial(root)`.
+   */
+  async directConfigEdit(
+    root: string,
+    doc: ConfigDoc,
+    edit: { file: string; base: ConfigState; next: ConfigState; keep(): Promise<void> },
+  ): Promise<ConfigChanged | null> {
+    const journal = this.#journal();
+    const saver = this.#fileSaver();
+    const who = { author: saver.author, tx: { ...saver.tx, label: `Edit ${edit.file}` } };
+    const [op, args] = ["file.edit", { path: edit.file }] as const;
+    let route: Route | null;
+    try {
+      route = await this.#route(root, who.author, who.tx);
+    } catch (error) {
+      if (!(error instanceof RpcError)) throw error;
+      await edit.keep();
+      await journal.write(root, doc, edit.base);
+      return null;
+    }
+    if (!route) {
+      const record = { op, args, author: who.author, tx: who.tx };
+      const entry = await journal.commit(root, doc, record, edit.base, edit.next, async () => {});
+      return { operation: configOperation(entry), state: edit.next, proposal: null };
+    }
+    // Only the proposal's base is needed: the change itself is made below, on the file as it was.
+    route.release();
+    await journal.write(root, doc, edit.base);
+    try {
+      const changed = await this.changeConfig(root, doc, who, async () => ({ op, args, after: edit.next }));
+      await this.ready(who.tx.id);
+      return changed;
+    } catch (error) {
+      await journal.write(root, doc, edit.next).catch(() => {});
+      throw error;
+    }
   }
 
   /**
@@ -1584,39 +1638,45 @@ export class TimelineService {
     return normalizeArgs(call, timeline, loadGrid);
   }
 
+  /**
+   * The engine's view of project-relative `asset` (length, streams), as every operation `op` that places media sees
+   * it. Throws AssetNotFound, or InvalidOperation for a file that is not media or has no stream.
+   */
+  async source(root: string, asset: string, op: string): Promise<SourceInfo> {
+    const refused = nonMediaError(asset, { op, field: "asset" });
+    if (refused) throw refused;
+    let probe: MediaProbe;
+    try {
+      probe = await this.#options.probe(root, asset);
+    } catch (error) {
+      if (!(error instanceof ToolError)) throw error;
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        `${asset} is not a media file ffprobe can read. Use a video, audio or image file.`,
+        { op, reason: "unreadable media", field: "asset" },
+      );
+    }
+    if (!probe.video && !probe.audio) {
+      throw new RpcError(ErrorCode.InvalidOperation, `${asset} has no audio or video stream.`, {
+        op,
+        reason: "no streams",
+        field: "asset",
+      });
+    }
+    return {
+      duration: probe.video?.still ? null : probe.duration,
+      video: probe.video !== null,
+      audio: probe.audio !== null,
+    };
+  }
+
   #context(root: string, id: string, fps: number, op: string, settings: EditSettings = {}): EditContext {
     const grid = new FrameGrid(fps);
     const newId = this.#options.newId ?? ((prefix: IdPrefix) => `${prefix}_${randomBytes(3).toString("hex")}`);
     const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
     return {
       fps,
-      source: async (asset) => {
-        const refused = nonMediaError(asset, { op, field: "asset" });
-        if (refused) throw refused;
-        let probe: MediaProbe;
-        try {
-          probe = await this.#options.probe(root, asset);
-        } catch (error) {
-          if (!(error instanceof ToolError)) throw error;
-          throw new RpcError(
-            ErrorCode.InvalidOperation,
-            `${asset} is not a media file ffprobe can read. Use a video, audio or image file.`,
-            { op, reason: "unreadable media", field: "asset" },
-          );
-        }
-        if (!probe.video && !probe.audio) {
-          throw new RpcError(ErrorCode.InvalidOperation, `${asset} has no audio or video stream.`, {
-            op,
-            reason: "no streams",
-            field: "asset",
-          });
-        }
-        return {
-          duration: probe.video?.still ? null : probe.duration,
-          video: probe.video !== null,
-          audio: probe.audio !== null,
-        };
-      },
+      source: (asset) => this.source(root, asset, op),
       nestedDuration: this.#nestedDurations(root, [timelineRel(id)], grid),
       clipTypes: async () => {
         const adapters = await this.#options.clipTypes(root);
