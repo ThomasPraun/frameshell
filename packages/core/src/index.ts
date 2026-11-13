@@ -279,7 +279,7 @@ export {
   layoutCover,
 } from "./export/cover.js";
 export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
-export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
+export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,
   ENERGY_HOP_S,
@@ -489,6 +489,8 @@ export { COMMAND_SPEECH_PROVIDER, commandSpeechProvider, readCommandSpeechProvid
 export { STAND_IN_SPEECH_PROVIDER, standInSpeechProvider } from "./voiceover/stand-in.js";
 export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
 export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";
+export { PHRASE_FADE_S, type Phrase, SPLIT_HOP_S, SPLIT_LEAD_S, SPLIT_MIN_SILENCE_S, SPLIT_RANGE_DB, SPLIT_TAIL_S, splitPhrases } from "./voiceover/split.js";
+export { type LineCheck, type TakeToCheck, type Verification, type VerifyOutcome, type VerifyRequest, checkLine, textInRanges, verifyTakes } from "./voiceover/verify.js";
 export {
   type AnalyzeHooks,
   type AnalyzeRequest,

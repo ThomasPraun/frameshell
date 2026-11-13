@@ -1,6 +1,6 @@
-// Ready subject mattes (ADR 0032) for the preview's program; `matte.status` also queues the missing ones.
-import type { AssetInfo, TimelineView } from "@frameshell/protocol";
-import { useEffect, useMemo, useState } from "react";
+// Subject mattes (ADR 0032) of a timeline: the preview's ready ones, and the status the track headers show; `matte.status` also queues the missing ones.
+import type { AssetInfo, MatteStateInfo, TimelineView } from "@frameshell/protocol";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { reviewView } from "../review/store.js";
 import { readyMattes } from "./program.js";
 
@@ -12,17 +12,17 @@ const EMPTY: ReadonlyMap<string, string> = new Map();
 const hasBehind = (view: TimelineView) => view.tracks.some((track) => track.kind === "video" && track.behind !== undefined);
 
 /**
- * Ready subject mattes of the plates `view` and the timelines it nests play, by asset: re-read on every revision of
- * any of them, when an asset's content or proxy changes (a new matte key), and every {@link MATTE_POLL_MS} while one
- * is pending. Empty (no daemon call) while no track is `behind`
- * one; a subject whose matte is not ready shows a note, the plate as it is.
+ * The `matte.status` list of the plates `view` and the timelines it nests play; null while none is read, and while no
+ * track is `behind` one (no daemon call then). Re-read on every revision of any of them, when an asset's content or
+ * proxy changes (a new matte key), and every {@link MATTE_POLL_MS} while one is pending. The preview and the timeline
+ * panel each keep their own (either may be in a detached window): the daemon queues a matte once however often it is asked.
  */
-export function useSubjectMattes(
+export function useMatteStatus(
   view: TimelineView | null,
   nested: ReadonlyMap<string, TimelineView>,
   assets: ReadonlyMap<string, AssetInfo> | null,
-): ReadonlyMap<string, string> {
-  const [mattes, setMattes] = useState<{ key: string; map: ReadonlyMap<string, string> }>({ key: "", map: EMPTY });
+): readonly MatteStateInfo[] | null {
+  const [state, setState] = useState<{ key: string; list: readonly MatteStateInfo[] | null }>({ key: "", list: null });
   const timeline = view?.timeline ?? null;
   const revision = view?.revision ?? null;
   const nestedRevisions = useMemo(() => [...nested.values()].map((v) => `${v.timeline}@${v.revision}`).join(","), [nested]);
@@ -31,7 +31,7 @@ export function useSubjectMattes(
 
   useEffect(() => {
     if (!timeline || !affected) {
-      setMattes((current) => (current.key === "" ? current : { key: "", map: EMPTY }));
+      setState((current) => (current.list === null ? current : { key: "", list: null }));
       return;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -40,15 +40,14 @@ export function useSubjectMattes(
       try {
         const { mattes: list } = await window.frameshell.media.mattes(timeline, reviewView());
         if (disposed) return;
-        const map = readyMattes(list);
-        // Same ready set, same map: the program is not recompiled.
-        const key = JSON.stringify([...map.entries()]);
-        setMattes((current) => (current.key === key ? current : { key, map }));
+        // Same list, same state: nothing downstream renders again.
+        const key = JSON.stringify(list);
+        setState((current) => (current.key === key ? current : { key, list }));
         if (list.some((matte) => matte.state === "queued" || matte.state === "making" || matte.state === "waiting")) {
           timer = setTimeout(() => void read(), MATTE_POLL_MS);
         }
       } catch {
-        // Daemon unreachable or timeline invalid: keep the last mattes; the next revision re-reads.
+        // Daemon unreachable or timeline invalid: keep the last list; the next revision re-reads.
       }
     };
     void read();
@@ -58,5 +57,25 @@ export function useSubjectMattes(
     };
   }, [timeline, revision, nestedRevisions, affected, contents]);
 
-  return mattes.map;
+  return state.list;
+}
+
+/**
+ * Ready subject mattes of the plates `view` and the timelines it nests play, by asset ({@link useMatteStatus} reads
+ * them). The same map while the ready set is the same, so a matte's progress does not recompile the program; a subject
+ * whose matte is not ready shows a note, the plate as it is.
+ */
+export function useSubjectMattes(
+  view: TimelineView | null,
+  nested: ReadonlyMap<string, TimelineView>,
+  assets: ReadonlyMap<string, AssetInfo> | null,
+): ReadonlyMap<string, string> {
+  const list = useMatteStatus(view, nested, assets);
+  const last = useRef<{ key: string; map: ReadonlyMap<string, string> }>({ key: "", map: EMPTY });
+  return useMemo(() => {
+    const map = list === null ? EMPTY : readyMattes(list);
+    const key = JSON.stringify([...map.entries()]);
+    if (last.current.key !== key) last.current = { key, map: map.size === 0 ? EMPTY : map };
+    return last.current.map;
+  }, [list]);
 }
