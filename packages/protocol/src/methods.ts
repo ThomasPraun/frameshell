@@ -8,7 +8,7 @@ import {
   CleanupResultSchema,
 } from "./cleanup.js";
 import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
-import { MUSIC_CANDIDATES_MAX, MusicCandidatesResultSchema, MusicFitResultSchema } from "./music.js";
+import { MUSIC_CANDIDATES_MAX, MusicCandidatesResultSchema, MusicFitResultSchema, MusicShapeResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 119;
+export const PROTOCOL_VERSION = 120;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3822,7 +3822,8 @@ export const methods = {
       "confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
       "If the clip carries duck keys (`track.duck`), they sit on the clip's clock and would no longer match the voice: duck runs " +
       "again in the same transaction over the other video and audio tracks with its defaults (`skip: [\"duck\"]` leaves them and " +
-      "says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
+      "says so). Music keys (`music.shape`) are run again first with the settings kept on the clip, so the steps down stay on the hits of the picture " +
+      "(`skip: [\"shape\"]` leaves them and says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
       "(`revert` undoes it whole; with review mode on it is one proposal). Example: `{ clip: \"c_1a2b3c\", end: \"end-card\" }`. " +
       "Fails with InvalidOperation (not a music clip of an audio track, `end` not after `from`, a `hit` outside the played part, " +
       "no hit found, more than ±1.7 % needed, low confidence with `exact`, the new place overlaps another clip), " +
@@ -3845,7 +3846,7 @@ export const methods = {
         .default(false)
         .describe("Keep the start and land the hit exactly on `end` with a small change of speed (at most ±1.7 %). Default false: slide the clip, keep its speed."),
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
-      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; only `duck` can be."),
+      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; `duck` and `shape` can be."),
     }),
     result: MusicFitResultSchema,
   },
@@ -3885,6 +3886,42 @@ export const methods = {
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
     }),
     result: MusicCandidatesResultSchema,
+  },
+  "music.shape": {
+    mutating: true,
+    description:
+      "Shape a music clip's level around the picture (ADR 0037): the music steps down BEFORE a hit instead of ducking after it, and fades out at the ending. " +
+      "`drop` lists the times of the hits (timeline seconds, a marker id or label, `beat:N`/`bar:N`; the cut into the end card, a title slam, a sound effect). For each, " +
+      "the music is `depth` dB down (default 9) over a quick step that is complete `lead` seconds before the hit (default 0.4), stays down until `hold` seconds after it (0.3) " +
+      "and comes back over `release` (0.6). `ending` is where the closing fade begins (e.g. the end of the last word, or `bar:17` with a short `fade` to stop on a bar line): " +
+      "the music fades straight down over `fade` seconds (default 2.5) to inaudible and stays there to the clip's end. The result is gain keys " +
+      "(`clip.key` `gain`) on the clip, marked `auto: \"music\"`: running it again replaces those and keeps the keys you set by hand (a hand key inside a dip stays as set and " +
+      "a warning names it); `clear: true` removes them. The level they dip from is the clip's `audio.gain` or its own keys. The times of the hits are kept in the clip's `audio.shape`, " +
+      "so `music.fit` runs the same shaping again after it moves the clip (`skip: [\"shape\"]` leaves the keys and says so). The keys replace the clip's duck keys (`track.duck`): " +
+      "duck runs again in the same transaction with its stored parameters, so the voice still ducks the shaped music. Not done here: the rising high-pass build before a drop. " +
+      "`dryRun: true` changes nothing and returns the `curve` and `steps`. One transaction labelled `Music shape: …` (`revert` undoes it whole; with review mode on it is one proposal). " +
+      "Example: `{ clip: \"c_1a2b3c\", drop: [\"hit\"], ending: 28 }`. Fails with InvalidOperation (not a music clip of an audio track, nothing to shape, `clear` with `drop` or `ending`, " +
+      "no time falls on the clip), ClipNotFound or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Music clip: a media clip of an audio track, id from `timeline.show`, e.g. `c_1a2b3c`."),
+      drop: z
+        .array(TimeRef("Timeline time of a hit the music steps down before."))
+        .min(1)
+        .max(32)
+        .optional()
+        .describe("Hits of the picture, as timeline times. The music is complete down `lead` seconds before each."),
+      ending: TimeRef("Timeline time the closing fade begins.").optional(),
+      lead: z.number().min(0.05).max(3).default(0.4).describe("Seconds before a hit that the step down is complete. Default 0.4."),
+      depth: z.number().positive().max(40).default(9).describe("dB the music steps down by. Default 9."),
+      hold: z.number().min(0).max(5).default(0.3).describe("Seconds after a hit the music stays down. Default 0.3."),
+      release: z.number().min(0.05).max(5).default(0.6).describe("Seconds the level takes to come back after the hold. Default 0.6."),
+      fade: z.number().min(0.05).max(15).default(2.5).describe("Seconds of the closing fade from `ending`. Default 2.5."),
+      clear: z.boolean().default(false).describe("Remove the clip's `music` keys instead; takes no `drop` or `ending`."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+    }),
+    result: MusicShapeResultSchema,
   },
   "tx.begin": {
     mutating: true,

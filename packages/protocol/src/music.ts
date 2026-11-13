@@ -11,8 +11,11 @@ export const MUSIC_FIT_MIN_CONFIDENCE = 0.5;
 /** One thing a fit does, so a dry run can be read and a step dropped with `skip`. */
 export const MusicFitStepSchema = z.object({
   id: z
-    .enum(["place", "intro", "speed", "duck"])
-    .describe("`place`: move the clip. `intro`: drop the start of the track (`in` later). `speed`: varispeed (`exact`). `duck`: run `track.duck` again on the clip's track."),
+    .enum(["place", "intro", "speed", "duck", "shape"])
+    .describe(
+      "`place`: move the clip. `intro`: drop the start of the track (`in` later). `speed`: varispeed (`exact`). `duck`: run `track.duck` again on the clip's track. " +
+        "`shape`: run `music.shape` again with the settings stored on the clip (`audio.shape`).",
+    ),
   detail: z.string().describe("One sentence the person can read, e.g. `start 4.2 s -> 6 s`."),
   skippable: z.boolean().describe("True when `skip` may name this id."),
 });
@@ -126,6 +129,57 @@ export const MusicCandidatesResultSchema = z.object({
   skipped: z.array(z.object({ asset: z.string(), reason: z.string() })).describe("Files left out, and why (silent, no sound, no final hit, cannot be decoded)."),
   warnings: z.array(z.string()),
 });
+
+// `music.shape` (#485 slice 4, ADR 0037 decision 6): the music steps down before a hit and fades at the ending.
+
+/** One thing a shaping does. */
+export const MusicShapeStepSchema = z.object({
+  id: z.enum(["shape", "duck"]).describe("`shape`: write the `music` keys. `duck`: run `track.duck` again on the clip's track, since the keys replace its duck keys."),
+  detail: z.string().describe("One sentence the person can read."),
+});
+
+/** Result of `music.shape`. */
+export const MusicShapeResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  revision: z.int().describe("Revision after the change; the revision it was planned from when nothing was written."),
+  dryRun: z.boolean(),
+  applied: z.boolean().describe("True when the clip was changed (a review-mode proposal counts: it waits for the person)."),
+  tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
+  clip: z.string().describe("The music clip."),
+  track: z.string().describe("Its audio track."),
+  asset: z.string().describe("Project-relative music file."),
+  cleared: z.boolean().describe("True when the call removed the clip's music keys (`clear`)."),
+  drops: z.array(z.number()).describe("Timeline seconds of the hits the music steps down before, resolved and sorted; hits outside the clip are left out (a warning says so)."),
+  ending: z.number().nullable().describe("Timeline seconds the closing fade begins; null when none."),
+  settings: z
+    .object({
+      drops: z.array(z.number()).optional(),
+      lead: z.number().describe("Seconds before a hit that the step down is complete."),
+      depth: z.number().describe("dB the music steps down by."),
+      hold: z.number().describe("Seconds after a hit that the music stays down."),
+      release: z.number().describe("Seconds the level takes to come back."),
+      ending: z.number().optional(),
+      fade: z.number().describe("Seconds of the closing fade."),
+    })
+    .nullable()
+    .describe("What was written to the clip's `audio.shape`; null for `clear`."),
+  curve: z
+    .array(z.object({ time: z.number().describe("Timeline seconds."), dip: z.number().describe("dB under the clip's level.") }))
+    .describe("The dip over time the keys follow: straight lines between these points, 0 before the first and after the last. Empty for `clear`."),
+  duck: z
+    .object({
+      under: z.array(z.string()).describe("Tracks listened to for speech."),
+      rerun: z.boolean().describe("True when duck ran again in the same transaction."),
+      parameters: z.enum(["stored", "defaults"]).describe("`stored`: the parameters of the duck that wrote the clip's keys (its `audio.duck`). `defaults`: none stored."),
+    })
+    .nullable()
+    .describe("Set when the clip carried `auto: \"duck\"` keys, which the new keys replace; null otherwise."),
+  steps: z.array(MusicShapeStepSchema).describe("What the call does or did, in order."),
+  warnings: z.array(z.string()),
+});
+
+/** See {@link MusicShapeResultSchema}. */
+export type MusicShapeResult = z.output<typeof MusicShapeResultSchema>;
 
 /** See {@link MusicCandidatesResultSchema}. */
 export type MusicCandidatesResult = z.output<typeof MusicCandidatesResultSchema>;
