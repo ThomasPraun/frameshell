@@ -14,6 +14,8 @@ export interface ClipKeyInput {
   inputs: readonly { path: string; hash: string | null }[];
   /** Project frame rate and resolution. */
   format: { fps: number; width: number; height: number };
+  /** Hash of the project's style token sheet (ADR 0028), for an adapter that applies it; absent otherwise. */
+  style?: string;
 }
 
 /**
@@ -33,6 +35,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     elements: Object.keys(input.clip.elements ?? {}).length > 0 ? input.clip.elements : undefined,
     inputs,
     format: input.format,
+    // Absent drops out, so clips of adapters without style tokens, and projects without a style, keep their keys.
+    style: input.style,
   });
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
 }

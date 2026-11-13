@@ -1,6 +1,8 @@
 // Subtitle tracks (SPEC §3.4, §5.3): which words show when, in which style. Pure and shared: the export compiler
 // burns exactly these cues (as ASS), the preview draws exactly these cues over the picture.
 import type { Size } from "./composite.js";
+import type { FontMetrics } from "./font-file.js";
+import type { ResolvedStyle, StyleFont } from "./style.js";
 import { type CaptionGap, type CaptionPhrase, type Clip, SUBTITLE_ENTRIES, type SubtitleEntry, type SubtitleTrack, type Timeline } from "./timeline.js";
 import { type Transcript, wordSpeaker } from "./transcript.js";
 
@@ -101,38 +103,173 @@ export const SUBTITLE_PRESET_IDS = Object.keys(SUBTITLE_PRESETS) as SubtitlePres
 /** Preset of a subtitle track whose `style` names none. */
 export const DEFAULT_SUBTITLE_PRESET: SubtitlePresetId = "big-keyword";
 
+/** A face captions are drawn and burned with (ADR 0028): the bundled one or a font file of the project. */
+export interface CaptionFont {
+  /** Family name inside the file: the name libass matches and the preview registers the face under. */
+  family: string;
+  /** Project-relative font file under `assets/fonts/`; null: the bundled face ({@link SUBTITLE_FONT}). */
+  file: string | null;
+  /** Line metrics in em, read from the file; see {@link SUBTITLE_FONT}. */
+  ascent: number;
+  descent: number;
+}
+
+/** The bundled face as a {@link CaptionFont}: captions use it unless the style names another. */
+export const BUNDLED_CAPTION_FONT: CaptionFont = Object.freeze({
+  family: SUBTITLE_FONT.family,
+  file: null,
+  ascent: SUBTITLE_FONT.ascent,
+  descent: SUBTITLE_FONT.descent,
+});
+
+/** Font files captions take: libass and the preview read both; WOFF and WOFF2 must be converted first. */
+const CAPTION_FONT_FILE = /\.(?:ttf|otf)$/i;
+
+/**
+ * Where the caption face of a style's `fonts.captions` comes from (ADR 0028 decision 7): a project font file to read
+ * (`file`); else the bundled face, with `problem` saying why the named one cannot be used (null when none was named,
+ * or the bundled family was). Shared by export and the preview, so both pick the same face.
+ */
+export function captionFontSource(font: StyleFont | null): { file: string } | { file: null; problem: string | null } {
+  if (font === null) return { file: null, problem: null };
+  if (font.file !== undefined) {
+    if (CAPTION_FONT_FILE.test(font.file)) return { file: font.file };
+    return { file: null, problem: `fonts.captions.file ${font.file} is not a .ttf or .otf file, which captions need: captions use ${SUBTITLE_FONT.family}. Convert it.` };
+  }
+  if (font.family.trim().toLowerCase() === SUBTITLE_FONT.family.toLowerCase()) return { file: null, problem: null };
+  return {
+    file: null,
+    problem:
+      `fonts.captions names ${font.family}, which Frameshell does not bundle, without a file: captions use ${SUBTITLE_FONT.family}. ` +
+      "Import the font into assets/fonts/ and set fonts.captions.file.",
+  };
+}
+
+/**
+ * The face of project font file `file`, `metrics` read from it; `family` names it when the file has no family name.
+ * Throws for a family an ASS `Style:` field cannot hold as is, so export and preview fall back to the same face.
+ */
+function captionFontOf(file: string, family: string, metrics: Pick<FontMetrics, "family" | "ascent" | "descent">): CaptionFont {
+  const name = metrics.family ?? family;
+  if (/[,"\\]/.test(name)) throw new Error(`its family name "${name}" holds a comma, quote or backslash`);
+  return { family: name, file, ascent: metrics.ascent, descent: metrics.descent };
+}
+
+/**
+ * {@link captionTokens} of `style` with the face {@link captionFontSource} picks, its metrics read by `metricsOf`
+ * (project-relative file → metrics); a face that cannot be used becomes the bundled one with a `warning`. One
+ * definition for export (Node reads the file) and the preview (it fetches the bytes).
+ */
+export async function styleCaptionTokens(
+  style: ResolvedStyle,
+  metricsOf: (file: string) => Promise<Pick<FontMetrics, "family" | "ascent" | "descent">>,
+): Promise<{ tokens: CaptionTokens; warning: string | null }> {
+  const named = style.fonts.captions.value;
+  const source = captionFontSource(named);
+  if (source.file === null) return { tokens: captionTokens(style), warning: source.problem };
+  try {
+    return { tokens: captionTokens(style, captionFontOf(source.file, named!.family, await metricsOf(source.file))), warning: null };
+  } catch (error) {
+    const why = (error as { code?: unknown }).code === "ENOENT" ? "it does not exist" : (error as Error).message;
+    return { tokens: captionTokens(style), warning: `fonts.captions.file ${source.file} cannot be used (${why}): captions use ${SUBTITLE_FONT.family}.` };
+  }
+}
+
+/** Preset fields a project style can set (ADR 0028 decision 11). */
+type StyledField = "color" | "outlineColor" | "highlight" | "keywordColor" | "size";
+
+/** What a project style gives captions: the base a subtitle track's preset and own fields override (ADR 0028 decision 11). */
+export interface CaptionTokens {
+  /** Preset fields the style sets. */
+  values: Partial<Pick<SubtitlePreset, StyledField>>;
+  /** The caption face. */
+  font: CaptionFont;
+  /** Style path behind each field of `values`, and behind `font` when the style chose it, e.g. `colors.ink`. */
+  paths: Partial<Record<StyledField | "font", string>>;
+}
+
+/**
+ * Caption values of a resolved style: text in `colors.ink` outlined in `colors.bg`, the keyword in `colors.keyword`
+ * (else the accent), the spoken word in `colors.highlight` (else the accent), the font size `type.caption` (px on a
+ * 1080 short side), and neither mark when `motion.highlight` is false (the `calm` personality). A colour's alpha is
+ * dropped: libass burns opaque text. Values the style leaves null are not set. `font` is the face
+ * {@link captionFontSource} led to.
+ */
+export function captionTokens(style: ResolvedStyle, font: CaptionFont = BUNDLED_CAPTION_FONT): CaptionTokens {
+  const values: CaptionTokens["values"] = {};
+  const paths: CaptionTokens["paths"] = {};
+  const set = <K extends StyledField>(field: K, value: SubtitlePreset[K], path: string) => {
+    values[field] = value;
+    paths[field] = path;
+  };
+  const opaque = (value: string | null) => (value === null ? null : value.slice(0, 7).toLowerCase());
+  const { colors } = style;
+  const ink = opaque(colors.ink.value);
+  if (ink) set("color", ink, "colors.ink");
+  const bg = opaque(colors.bg.value);
+  if (bg) set("outlineColor", bg, "colors.bg");
+  const accent = opaque(colors.accent.value);
+  const keyword = opaque(colors.keyword.value);
+  if (keyword) set("keywordColor", keyword, "colors.keyword");
+  else if (accent) set("keywordColor", accent, "colors.accent");
+  const highlight = opaque(colors.highlight.value);
+  if (highlight) set("highlight", highlight, "colors.highlight");
+  else if (accent) set("highlight", accent, "colors.accent");
+  if (style.type.caption.value !== null) set("size", style.type.caption.value / 1080, "type.caption");
+  if (!style.motion.highlight.value) {
+    set("highlight", null, "motion.highlight");
+    set("keywordColor", null, "motion.highlight");
+  }
+  const named = style.fonts.captions.value;
+  const source = named === null ? null : captionFontSource(named);
+  // A project face, or the bundled family named on purpose; a face that fell back is not the style's.
+  if (font.file !== null || (source !== null && source.file === null && source.problem === null)) paths.font = "fonts.captions";
+  return { values, font, paths };
+}
+
 /** A preset with the track's overrides applied. */
 export interface SubtitleStyle extends SubtitlePreset {
   preset: SubtitlePresetId;
   /** Cues start a speaker's turn with their name and never span two speakers (ADR 0020). */
   speakerNames: boolean;
+  /** The face lines are drawn and burned with. */
+  font: CaptionFont;
+  /** Paths of the `style.json` values this look takes (e.g. `colors.ink`); empty without a style. */
+  styled: string[];
 }
 
 /**
- * The style a track's `style` field asks for: its preset (default
- * {@link DEFAULT_SUBTITLE_PRESET}) with `position`, `speakerNames` (default false), `keywordColor`,
- * `keywordScale` and `entry` overridden. An unknown
- * preset name (hand-edited file) falls back to the default and is returned
- * in `unknownPreset` for a warning; an invalid override is ignored.
+ * The style a track's `style` field asks for (ADR 0028 decision 11, the most specific wins): the default preset,
+ * then the project style's `tokens`, then every value of the preset the track names, then the track's own
+ * `position`, `speakerNames` (default false), `keywordColor`, `keywordScale` and `entry`. The face is the style's
+ * whatever the preset. An unknown preset name (hand-edited file) counts as none and is returned in `unknownPreset`
+ * for a warning; an invalid override is ignored.
  */
-export function resolveSubtitleStyle(style: SubtitleTrack["style"]): { style: SubtitleStyle; unknownPreset: string | null } {
+export function resolveSubtitleStyle(style: SubtitleTrack["style"], tokens?: CaptionTokens): { style: SubtitleStyle; unknownPreset: string | null } {
   const asked = style?.preset;
   const known = asked !== undefined && Object.hasOwn(SUBTITLE_PRESETS, asked);
   const preset = known ? (asked as SubtitlePresetId) : DEFAULT_SUBTITLE_PRESET;
-  const position = style?.position ?? SUBTITLE_PRESETS[preset].position;
-  const base: SubtitlePreset = SUBTITLE_PRESETS[preset];
+  const fromStyle = tokens && !known ? tokens.values : {};
+  const base: SubtitlePreset = { ...SUBTITLE_PRESETS[preset], ...fromStyle };
+  const position = style?.position ?? base.position;
   const keywordColor = style?.keywordColor;
   const keywordScale = style?.keywordScale;
   const entry = style?.entry;
+  const ownKeyword = keywordColor === null || (typeof keywordColor === "string" && HEX.test(keywordColor));
+  const fields = (Object.keys(fromStyle) as StyledField[]).filter((field) => !(field === "keywordColor" && ownKeyword));
+  const paths = tokens?.paths ?? {};
+  const styled = [...new Set([...fields.map((field) => paths[field]!), ...(paths.font ? [paths.font] : [])])];
   return {
     style: {
       ...base,
       preset,
       position,
       speakerNames: style?.speakerNames === true,
-      keywordColor: keywordColor === null || (typeof keywordColor === "string" && HEX.test(keywordColor)) ? keywordColor : base.keywordColor,
+      keywordColor: ownKeyword ? keywordColor : base.keywordColor,
       keywordScale: typeof keywordScale === "number" && keywordScale >= 1 && keywordScale <= 2 ? keywordScale : base.keywordScale,
       entry: entry !== undefined && SUBTITLE_ENTRIES.includes(entry) ? entry : base.entry,
+      font: tokens?.font ?? BUNDLED_CAPTION_FONT,
+      styled,
     },
     unknownPreset: asked !== undefined && !known ? asked : null,
   };
@@ -456,13 +593,13 @@ export interface SubtitleLayout {
 
 /**
  * Layout of `style` in a `frame`-sized picture: font sized on the short
- * side, line box (font ascent + descent) at the style's margin from the top
+ * side, line box (the face's ascent + descent) at the style's margin from the top
  * or bottom edge, or centered.
  */
 export function subtitleLayout(style: SubtitleStyle, frame: Size): SubtitleLayout {
   const fontSize = Math.max(1, Math.round(style.size * Math.min(frame.width, frame.height)));
-  const ascent = fontSize * SUBTITLE_FONT.ascent;
-  const descent = fontSize * SUBTITLE_FONT.descent;
+  const ascent = fontSize * style.font.ascent;
+  const descent = fontSize * style.font.descent;
   const margin = style.margin * frame.height;
   const baseline =
     style.position === "top" ? margin + ascent : style.position === "center" ? frame.height / 2 + (ascent - descent) / 2 : frame.height - margin - descent;
@@ -483,12 +620,15 @@ export interface ResolvedSubtitleTrack {
   missing: string[];
 }
 
-/** Every subtitle track of flattened `timeline`, in track order, with its cues. */
-export function subtitleTracks(timeline: Timeline, transcripts: TranscriptLookup, fps: number): ResolvedSubtitleTrack[] {
+/**
+ * Every subtitle track of flattened `timeline`, in track order, with its cues; `tokens`: the project style's
+ * caption values (see {@link resolveSubtitleStyle}).
+ */
+export function subtitleTracks(timeline: Timeline, transcripts: TranscriptLookup, fps: number, tokens?: CaptionTokens): ResolvedSubtitleTrack[] {
   const out: ResolvedSubtitleTrack[] = [];
   for (const track of timeline.tracks) {
     if (track.kind !== "subtitles") continue;
-    const { style, unknownPreset } = resolveSubtitleStyle(track.style);
+    const { style, unknownPreset } = resolveSubtitleStyle(track.style, tokens);
     const followed = timeline.tracks.find((candidate) => candidate.id === track.follows);
     const assets = followed && followed.kind !== "subtitles" ? followed.clips.flatMap((clip) => ("asset" in clip && clip.type === "media" ? [clip.asset] : [])) : [];
     const missing = [...new Set(assets)].filter((asset) => transcripts(asset) === null);
