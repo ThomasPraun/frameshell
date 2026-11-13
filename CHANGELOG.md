@@ -162,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   job, error and timings, rewritten on each job change. `gc` keeps clip renders while a batch runs. Batch never
   generates voiceover.
 - Re-run batch rows and batch skill text, slices 3 and 4 of #477 (ADR 0040, epic #451; `batch.render` params `rows`,
-  `failed`, `force`, result `skipped`, `preset` null when no row was chosen, MCP `batch_render`, protocol 118):
+  `failed`, `force`, result `skipped`, `preset` null when no row was chosen, MCP `batch_render`, protocol 119):
   `frameshell batch <file> --rows es,fr` (ids, or `en..fr` for the rows between two in file order) renders only those
   rows, `--failed` the rows `manifest.json` lists as not done (failed, canceled, or left `queued` or `running` by a
   daemon that stopped, which the manifest now shows as `canceled`), and both together the failed ones among the named.
