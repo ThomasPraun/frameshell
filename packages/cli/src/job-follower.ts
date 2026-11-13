@@ -10,6 +10,12 @@ export interface JobFollower {
    * Rejects when the connection closes first.
    */
   wait(ids: readonly string[], onChange?: (job: JobInfo) => void): Promise<Map<string, JobInfo>>;
+  /**
+   * Resolve with the last snapshot per file once a job writing each of `outputs` (absolute) has ended. For jobs
+   * queued after the request that returned (a batch queues its rows in turn, ADR 0040), so only jobs seen since
+   * {@link followJobs} count. Rejects when the connection closes first.
+   */
+  waitOutputs(outputs: readonly string[], onChange?: (job: JobInfo) => void): Promise<Map<string, JobInfo>>;
 }
 
 const active = (job: JobInfo) => job.state === "queued" || job.state === "running";
@@ -57,6 +63,23 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
           snapshotTaken = true;
           settleIfDone();
         }, reject);
+        void conn.closed.then(() => reject(new Error("frameshelld closed the connection before the jobs finished")));
+      }),
+    waitOutputs: (outputs, onChange) =>
+      new Promise((resolve, reject) => {
+        const wanted = new Set(outputs);
+        const latest = new Map<string, JobInfo>();
+        const take = (job: JobInfo) => {
+          if (job.output === null || !wanted.has(job.output)) return;
+          const seen = latest.get(job.output);
+          if (seen?.id === job.id && stage(job) < stage(seen)) return;
+          latest.set(job.output, job);
+          onChange?.(job);
+          if (latest.size === wanted.size && [...latest.values()].every((one) => !active(one))) resolve(latest);
+        };
+        for (const job of history.splice(0)) take(job);
+        listener = take;
+        if (wanted.size === 0) resolve(latest);
         void conn.closed.then(() => reject(new Error("frameshelld closed the connection before the jobs finished")));
       }),
   };

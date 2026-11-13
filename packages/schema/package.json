@@ -29,6 +29,10 @@
       "types": "./dist/effects.d.ts",
       "default": "./dist/effects.js"
     },
+    "./formats": {
+      "types": "./dist/formats.d.ts",
+      "default": "./dist/formats.js"
+    },
     "./json-schema/*": "./json-schema/*"
   },
   "files": [

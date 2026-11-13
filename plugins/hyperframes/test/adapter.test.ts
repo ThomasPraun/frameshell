@@ -139,6 +139,46 @@ describe("hyperframes adapter", () => {
       expect(readFileSync(join(project, entry), "utf8")).toBe(html);
     });
 
+    it("a render of another aspect sets the size of the copy's root, with the element sheet", async () => {
+      const html = '<html><head></head><body><div data-composition-id="intro" data-width="2560" data-height="1440"></div></body></html>';
+      writeFileSync(join(project, entry), html);
+      let seen = "";
+      const producer: Producer = {
+        createRenderJob: (config) => ({ config }),
+        async executeRenderJob(_job, dir, output) {
+          seen = readFileSync(join(dir, "index.html"), "utf8");
+          writeFileSync(output, "webm");
+        },
+      };
+      const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+      const { ctx } = context(tempDir());
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, width: 1080, height: 1920, elementCss: "#t { scale: 2 !important; }" });
+      expect(seen).toContain('data-width="1080" data-height="1920"');
+      expect(seen.indexOf("data-frameshell-elements")).toBeLessThan(seen.indexOf("</head>"));
+      expect(readFileSync(join(project, entry), "utf8")).toBe(html);
+      // The project's own aspect (2560x1440 is 16:9 like 1920x1080): the copy stays as written.
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, width: 1920, height: 1080 });
+      expect(seen).toBe(html);
+    });
+
+    it("a composition of another shape than the project (a square card) renders as written, primary or 9:16", async () => {
+      const html = '<html><head></head><body><div data-composition-id="card" data-width="1080" data-height="1080"></div></body></html>';
+      writeFileSync(join(project, entry), html);
+      const seen: string[] = [];
+      const producer: Producer = {
+        createRenderJob: (config) => ({ config }),
+        async executeRenderJob(_job, dir, output) {
+          seen.push(readFileSync(join(dir, "index.html"), "utf8"));
+          writeFileSync(output, "webm");
+        },
+      };
+      const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+      const { ctx } = context(tempDir());
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, width: 2560, height: 1440 });
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, width: 1080, height: 1920 });
+      expect(seen).toEqual([html, html]);
+    });
+
     it("prepends the sheet when the entry has no head, and cannot close its own style tag", async () => {
       const seen = await renderedEntry("<div id=t></div>", '#t[x="</style>"] { scale: 2 !important; }');
       expect(seen.startsWith("<style data-frameshell-elements>\n")).toBe(true);
