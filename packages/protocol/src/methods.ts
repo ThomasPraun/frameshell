@@ -2539,8 +2539,8 @@ export const methods = {
       "arguments always give the same file. The take is a 48 kHz 24-bit stereo WAV at " +
       `${MUSIC_LUFS} LUFS with its sample peak at most ${MUSIC_PEAK_DBFS} dBFS, written to \`assets/sound/music-<preset>-<key>.wav\` and imported; ` +
       "beside it the call writes its exact beat grid `beats/<name>.beats.json` (`detector: \"exact\"`, confidence 1, the " +
-      "downbeat at 0, the final hit and accents as `onsets`), so nothing measures it and `beat:`/`bar:` times, `--snap-to " +
-      "beat` and `music.fit` can use it at once. With `place` (default) the call also puts the take on the timeline in one " +
+      "downbeat at 0, the final hit and accents as `onsets`), so nothing measures it and later calls' `beat:`/`bar:` times, `--snap-to " +
+      "beat` and `music.fit` can use it at once (this call's own `at`, section and accent times take seconds and markers only). With `place` (default) the call also puts the take on the timeline in one " +
       "transaction `Music: …` (one proposal in review mode; `revert` undoes it): a clip starting at `at` (default 0) on the " +
       "audio track named `Music` (made when absent; `Music 2`… when the time is taken) or on `track`, with `gain` minus the " +
       "style's `sound.musicUnderVoice` (12 dB by default), and when the timeline has no `tempo` yet, `tempo` set to follow " +
