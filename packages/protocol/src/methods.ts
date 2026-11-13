@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 110;
+export const PROTOCOL_VERSION = 111;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -318,7 +318,7 @@ const JobSchema = z.object({
         "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
         "`matte`: compute the subject matte of one video asset (`matte.prepare`). " +
         "`beats`: measure the beat grid of one music asset (`beats.measure`). " +
-        "`analyze`: measure a reference video's shots, colours, loudness and tempo (`analyze`).",
+        "`analyze`: measure a reference video's shots, colours, look, rhythm, events, loudness and tempo (`analyze`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -348,7 +348,7 @@ const JobSchema = z.object({
         "effects not baked yet), matte (makes the subject mattes of the plates of tracks `behind` one that are not made yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, loudness, tempo, then the sheets).",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, every frame for look, rhythm and events, loudness, tempo, then the sheets).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1384,19 +1384,22 @@ export const methods = {
   analyze: {
     description:
       "Measure a reference video (#471): what it does, in numbers, so \"make it like this\" works from facts instead of a guess. " +
-      "Take its grammar (rhythm, colour, loudness, tempo), never its content. Writes `.frameshell/analysis/<name>/` " +
+      "Take its grammar (rhythm, colour, look, events, loudness, tempo), never its content. Writes `.frameshell/analysis/<name>/` " +
       "(replaced by a new run with the same name; regenerable, project files are never touched) and returns: the **shot table** " +
       "(cuts found by ffmpeg's scene score on every frame, each shot's start, end and length, the score of the cut that opens it, a JPEG of " +
       "its middle frame and its dominant colours), the **cutting** (shot count, cuts per minute, average, median, shortest and longest shot), " +
-      "the **palette** of the whole film, the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
+      "the **palette** of the whole film, the **look** (brightness 0 to 1, contrast, saturation, warmth from -1 blue to 1 red, and an 8 x 6 grid of mean colours for the film in the result and for every shot in `analysis.json`), " +
+      "the **rhythm** (`shotLengthCv`: spread of the shot lengths over their mean, 0 a metronome; `stillShare`: share of frames in which the picture does not change; `longestStill`; big changes of the picture, their count and per minute; the `largestGap` between them; `bursts`: 3 or more big changes within 1.5 s), " +
+      "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
+      "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
       "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
       "A hard cut is found; a dissolve, a whip pan or a jump cut inside one continuous take is not (lower `threshold` to catch softer ones; " +
-      "events, motion curves, text placement and the mouth-to-voice lag come in later slices). Label what you tell the person: " +
+      "motion curves, the mouth-to-voice lag and a read of the text itself come in later slices; events are hints, so look at the frames they name). Label what you tell the person: " +
       "these numbers are MEASURED; what you read off the sheets by eye is ESTIMATED, and say which frames to check. " +
-      "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 25 seconds. The MCP tool returns the " +
+      "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 35 seconds. The MCP tool returns the " +
       "sheets as images. Example: `{ file: \"references/reel.mp4\" }`. Fails with AssetNotFound (`file` missing), " +
       "InvalidOperation (no picture, or shorter than a frame), the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
