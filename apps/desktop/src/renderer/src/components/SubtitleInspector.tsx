@@ -21,9 +21,10 @@ const POSITION_LABELS: Record<SubtitlePosition, string> = { top: t.inspector.pos
  * Settings of the selected subtitle track (SPEC §5.3): the track whose words
  * it shows, its style preset, position and speaker names. Each change is one `track.set` by
  * `ui`, saved at once and undoable from the timeline; the preview and export
- * both follow it.
+ * both follow it. With `format` (the preview shows a format other than the
+ * primary, ADR 0027) the style shown and set is that format's.
  */
-export function SubtitleInspector({ track }: { track: string }) {
+export function SubtitleInspector({ track, format = null }: { track: string; format?: string | null }) {
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const { tracks } = useSubtitles();
@@ -33,12 +34,15 @@ export function SubtitleInspector({ track }: { track: string }) {
   const row = layout?.rows.find((candidate) => candidate.id === track);
   const stored = view?.tracks.find((candidate) => candidate.id === track);
   if (!row || !stored || stored.kind !== "subtitles" || !layout) return null;
-  const { style } = resolveSubtitleStyle(stored.style);
+  const override = format !== null ? stored.formats?.[format]?.style : undefined;
+  const { style } = resolveSubtitleStyle(override ? { ...stored.style, ...override } : stored.style);
   const missing = tracks.find((candidate) => candidate.track === track)?.missing ?? [];
   const send = (args: Extract<TimelineEdit, { op: "track.set" }>["args"]) => {
     setError(null);
     sendClipEdit({ op: "track.set", args }).catch((failure: unknown) => setError((failure as Error).message));
   };
+  /** A style change, in the format shown. */
+  const restyle = (change: NonNullable<Extract<TimelineEdit, { op: "track.set" }>["args"]["style"]>) => send({ track, style: change, ...(format !== null ? { format } : {}) });
   const sources = layout.rows.filter((candidate) => candidate.kind === "video" || candidate.kind === "audio");
 
   return (
@@ -61,18 +65,33 @@ export function SubtitleInspector({ track }: { track: string }) {
         label={t.inspector.style}
         options={Object.entries(PRESET_LABELS).map(([id, { label, title }]) => ({ id, label, title }))}
         value={style.preset}
-        onPick={(preset) => send({ track, style: { preset: preset as SubtitlePresetId } })}
+        onPick={(preset) => restyle({ preset: preset as SubtitlePresetId })}
       />
       <Choice
         label={t.inspector.position}
         options={SUBTITLE_POSITIONS.map((id) => ({ id, label: POSITION_LABELS[id], title: t.inspector.positionTitle(POSITION_LABELS[id].toLowerCase()) }))}
         value={style.position}
-        onPick={(position) => send({ track, style: { position: position as SubtitlePosition } })}
+        onPick={(position) => restyle({ position: position as SubtitlePosition })}
       />
       <label className="clip-field" data-tip={t.inspector.speakerNamesTitle}>
-        <input type="checkbox" aria-label={t.inspector.speakerNames} checked={style.speakerNames} onChange={(event) => send({ track, style: { speakerNames: event.target.checked } })} />
+        <input type="checkbox" aria-label={t.inspector.speakerNames} checked={style.speakerNames} onChange={(event) => restyle({ speakerNames: event.target.checked })} />
         <span className="clip-field-label is-static">{t.inspector.speakerNames}</span>
       </label>
+      {format !== null && (
+        <>
+          <span className="clip-inspector-format" data-testid="inspector-format" data-tip={t.inspector.inFormatTitle(format)}>
+            {t.inspector.inFormat(format)}
+          </span>
+          <button
+            className="clip-inspector-button"
+            disabled={override === undefined}
+            data-tip={t.inspector.usePrimaryTitle(format)}
+            onClick={() => send({ track, format, reset: true })}
+          >
+            {t.inspector.usePrimary}
+          </button>
+        </>
+      )}
       {missing.length > 0 && (
         <span className="clip-inspector-hint" title={missing.join("\n")}>
           {t.inspector.noTranscript(missing.length === 1 ? missing[0]! : t.inspector.clipsAssets(missing.length))}

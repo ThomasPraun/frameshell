@@ -44,6 +44,7 @@ import {
   isGridRefLabel,
   markerLabelKey,
   findMarker,
+  orderedFrameRect,
   describeMarkers,
   keyedValueAt,
   paintStretches,
@@ -56,7 +57,11 @@ import {
   shotSound,
   showsPicture,
   splitScriptRef,
+  type ClipFormatOverride,
+  type FormatEntry,
+  clipInFormat,
 } from "@frameshell/schema";
+import { formatNotFound } from "../formats.js";
 import { dipAt } from "../media/duck.js";
 import { DEFAULT_SNAP_WINDOW_S } from "../media/energy.js";
 import { directShots } from "../multicam/director.js";
@@ -65,6 +70,11 @@ import { applyPatch, diffTimelines, sortClips, sortMarkers } from "./patch.js";
 import { NestedTimelineError, clipEnd, nestedClipError } from "./timing.js";
 
 const round4 = (value: number) => Math.round(value * 10000) / 10000;
+
+/** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
+const DIP_DEPTH = 0.4;
+/** Frames a dip cut darkens before the cut (#483: "for 3 frames"). */
+const DIP_FRAMES = 3;
 
 /** What the engine needs to know about a media file. */
 export interface SourceInfo {
@@ -146,6 +156,11 @@ export interface EditContext {
    * project (ADR 0017). Absent: they need one.
    */
   defaultStillDuration?: number;
+  /**
+   * The project's formats, primary first (`projectFormats`, ADR 0027): an operation's `format` must name one other
+   * than the primary. Absent: any format id is taken.
+   */
+  formats?: readonly FormatEntry[];
 }
 
 /** Prefix of a core-generated id: `c` clip, `t` track, `g` multicam group, `m` marker. */
@@ -311,6 +326,8 @@ class Edit {
 
   trackSet(args: OperationArgs<"track.set">): void {
     const track = this.track(args.track);
+    if (args.format !== undefined) return this.trackSetInFormat(track, args.format, args);
+    if (args.reset !== undefined) throw this.invalid("`reset` drops a format's override: give `format` too.", { field: "reset" });
     const { name, follows, style, gaps, index, muted, hidden, behind } = args;
     if (
       name === undefined &&
@@ -368,6 +385,50 @@ class Edit {
       if (snapped.length > 0) track.gaps = snapped.sort((a, b) => a.from - b.from);
       else delete track.gaps;
     }
+  }
+
+  /** `track.set` with `format` (ADR 0027 decision 5): a subtitle track's style in that format, merged field by field. */
+  trackSetInFormat(track: Track, format: string, args: OperationArgs<"track.set">): void {
+    this.checkFormat(format);
+    if (track.kind !== "subtitles") {
+      throw this.invalid(`${track.id} is a ${track.kind} track: per format, tracks take only a subtitle \`style\`; set clips with \`clip.set\` and \`format\`.`, {
+        field: "format",
+      });
+    }
+    const shared = (["name", "follows", "gaps", "index", "muted", "hidden", "behind"] as const).filter((field) => args[field] !== undefined);
+    if (shared.length > 0) {
+      throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
+        field: shared[0]!,
+        hint: "Per format, a subtitle track takes `style` (and `reset`).",
+      });
+    }
+    // An empty `style`, or `reset` with no style there, would change nothing.
+    const styled = args.style !== undefined && Object.keys(defined(args.style)).length > 0;
+    if (!styled && (args.reset === undefined || track.formats?.[format] === undefined)) {
+      throw this.invalid(`nothing to set in format ${format}.`, { hint: "Pass `style` fields, or `reset: true` to show the captions there as in the primary." });
+    }
+    const formats = { ...track.formats };
+    const style = { ...(args.reset ? {} : formats[format]?.style), ...defined(args.style ?? {}) };
+    if (Object.keys(style).length > 0) formats[format] = { style };
+    else delete formats[format];
+    if (Object.keys(formats).length > 0) track.formats = formats;
+    else delete track.formats;
+  }
+
+  /**
+   * `format` of an operation names a format of the project other than the primary (ADR 0027): FormatNotFound for
+   * one the project does not declare, InvalidOperation for the primary, which is the clip or track itself.
+   */
+  checkFormat(format: string): void {
+    const declared = this.context.formats;
+    if (!declared) return;
+    if (declared[0]?.id === format) {
+      throw this.invalid(`${format} is the primary format: change the clip or track itself, without \`format\`.`, {
+        field: "format",
+        hint: `Other formats: ${declared.slice(1).map((entry) => entry.id).join(", ") || "none, add one with `frameshell format add <id>`"}.`,
+      });
+    }
+    if (!declared.some((entry) => entry.id === format)) throw formatNotFound(format, { resolution: declared[0]!, formats: declared });
   }
 
   /**
@@ -675,8 +736,14 @@ class Edit {
     const { track, clip } = this.clip(args.clip);
     const rippled = this.rippleScope(args, track);
     const before = { start: clip.start, end: args.ripple === true ? (await this.span(clip)).end : 0 };
+    const dip = isShotClip(clip) ? null : await this.dipKeys(clip);
     await this.trimEdges(clip, args);
     if (args.ripple === true) await this.rippleTrim(clip, before, rippled);
+    // A dip cut lives at the clip's end (ADR 0030): it moves with a trimmed tail.
+    if (dip && !isShotClip(clip)) {
+      this.dropDip(clip, dip);
+      if (!(await this.writeDip(clip))) this.warnings.push(`${clip.id} is one frame long now: its dip cut is gone.`);
+    }
   }
 
   /**
@@ -848,6 +915,7 @@ class Edit {
     }
     const right = structuredClone(clip);
     right.id = this.newId("c");
+    await this.dropTailDip(clip);
     this.trimTail(clip, at);
     this.trimHead(right, at);
     this.dropCutEdgeFields(clip, "tail");
@@ -869,6 +937,14 @@ class Edit {
 
   async clipSet(args: OperationArgs<"clip.set">): Promise<void> {
     const { track, clip } = this.clip(args.clip);
+    if (args.format !== undefined) return this.clipSetInFormat(track, clip, args.format, args);
+    const loose = (["hidden", "reset"] as const).find((field) => args[field] !== undefined);
+    if (loose) {
+      throw this.invalid(`\`${loose}\` belongs to one format: give \`format\` too.`, {
+        field: loose,
+        hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
+      });
+    }
     const { speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef } = args;
     if ([speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef].every((value) => value === undefined)) {
       throw this.invalid("nothing to set.", {
@@ -935,6 +1011,66 @@ class Edit {
     }
     if (scriptRef === null) delete clip.scriptRef;
     else if (scriptRef !== undefined) clip.scriptRef = scriptRef;
+  }
+
+  /**
+   * `clip.set` with `format` (ADR 0027 decision 5): `transform` (merged field by field), `props` (replaced, checked
+   * over the clip's own), `elements` (merged per selector) and `hidden` of the clip in that format, after `reset`.
+   * Timing and sound are every format's, so they are refused here.
+   */
+  async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
+    this.checkFormat(format);
+    const shared = (["speed", "gain", "muted", "audioEffects", "backdrop", "scriptRef"] as const).filter((field) => args[field] !== undefined);
+    if (shared.length > 0) {
+      throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
+        field: shared[0]!,
+        hint: "Per format: `transform`, `props`, `elements`, `hidden`, and keys with `clip.key` and `format`.",
+      });
+    }
+    const { transform, props, elements, hidden, reset } = args;
+    // An empty `transform`, or `reset` with no override there, would change nothing.
+    const moved = transform !== undefined && Object.keys(defined(transform)).length > 0;
+    if (!moved && [props, elements, hidden].every((value) => value === undefined) && (reset === undefined || !("formats" in clip) || clip.formats?.[format] === undefined)) {
+      throw this.invalid(`nothing to set in format ${format}.`, { hint: "Pass `transform`, `props`, `elements` or `hidden`, or `reset: true`." });
+    }
+    if (isShotClip(clip)) {
+      throw this.invalid(`${clip.id} is a multicam shot: shots lay out per format by themselves (angle \`reframe\` keys) and take no per-format override.`, {
+        field: "format",
+      });
+    }
+    if (track.kind !== "video") throw this.invalid("audio tracks have no picture to change per format; `format` is for clips on video tracks.", { field: "format" });
+    const override: ClipFormatOverride = reset ? {} : { ...clip.formats?.[format] };
+    if (transform !== undefined && Object.keys(defined(transform)).length > 0) override.transform = { ...override.transform, ...defined(transform) };
+    if (props !== undefined || elements !== undefined) {
+      const field = props !== undefined ? "props" : "elements";
+      if (isMedia(clip) || isNested(clip)) throw this.invalid(`only adapter clips take \`${field}\`; ${clip.id} is ${clip.type}.`, { field });
+      const generated = clip as AdapterClip;
+      const adapter = await this.adapter(generated.type);
+      if (props !== undefined) {
+        const problem = await adapter.validateProps({ ...generated.props, ...props });
+        if (problem) throw this.invalid(`invalid props for ${generated.type} in format ${format}: ${problem}`, { field: "props" });
+        override.props = props;
+      }
+      if (elements !== undefined) {
+        // The same merge and checks as the clip's own elements, on the format's.
+        const holder = { ...generated, elements: override.elements } as AdapterClip;
+        this.setElements(holder, elements, adapter);
+        if (holder.elements) override.elements = holder.elements;
+        else delete override.elements;
+      }
+    }
+    if (hidden === true) override.hidden = true;
+    else if (hidden === false) delete override.hidden;
+    this.writeOverride(clip, format, override);
+  }
+
+  /** Store `override` as `clip`'s in `format`; an empty one drops out, and so does an empty `formats`. */
+  writeOverride(clip: Clip, format: string, override: ClipFormatOverride): void {
+    const formats: Record<string, ClipFormatOverride> = { ...clip.formats };
+    if (Object.keys(override).length > 0) formats[format] = override;
+    else delete formats[format];
+    if (Object.keys(formats).length > 0) clip.formats = formats;
+    else delete clip.formats;
   }
 
   /**
@@ -1037,6 +1173,7 @@ class Edit {
           this.warnInsideGenerated(clip);
           const right = structuredClone(clip);
           right.id = this.newId("c");
+          await this.dropTailDip(clip);
           this.trimTail(clip, from);
           this.trimHead(right, to);
           this.dropCutEdgeFields(clip, "tail");
@@ -1045,6 +1182,7 @@ class Edit {
           for (const part of [clip, right]) if (!this.isEmpty(part)) kept.push(part);
         } else if (S < F) {
           this.warnInsideGenerated(clip);
+          await this.dropTailDip(clip);
           this.trimTail(clip, from);
           this.dropCutEdgeFields(clip, "tail");
           if (!this.isEmpty(clip)) kept.push(clip);
@@ -1145,17 +1283,23 @@ class Edit {
     const frames = g.frame(length);
     const outgoingHalf = Math.floor(frames / 2);
     const { kind } = args;
-    const shaped = kind === "wipe" || kind === "push";
-    if (!shaped && args.direction !== undefined) {
-      throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; a ${kind} has none.`, { field: "direction" });
+    const shaped = kind === "wipe" || kind === "push" || kind === "iris";
+    if (args.direction !== undefined && kind !== "wipe" && kind !== "push") {
+      throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; ${article(kind)} has none.`, {
+        field: "direction",
+        ...(kind === "iris" ? { hint: "An iris opens from `origin`." } : {}),
+      });
     }
+    if (args.origin !== undefined && kind !== "iris") {
+      throw this.invalid(`\`origin\` is for \`iris\`; ${article(kind)} has none.`, { field: "origin" });
+    }
+    if (args.origin !== undefined && !orderedFrameRect(args.origin)) {
+      throw this.invalid("`origin` is `[x0, y0, x1, y1]` in fractions of the frame, with x0 <= x1 and y0 <= y1.", { field: "origin" });
+    }
+    if (kind === "dip-cut") return this.dipCut(args);
     const at = g.snap(args.at);
-    // ADR 0030 slice 1: shapes play on the bottom picture layer only, picked as export and preview pick it: the first
-    // shown picture track, when it is a video track (a program track there leaves none).
-    const first = this.draft.tracks.find(showsPicture);
-    const bottom = first?.kind === "video" ? first : undefined;
+    const { bottom, note: bottomNote } = this.bottomVideoTrack();
     const notBottom = (track: ClipTrack) => track.kind === "video" && track !== bottom;
-    const bottomNote = bottom ? `the bottom one is ${bottom.id}` : first ? `program track ${first.id} is the bottom picture layer` : "no video track shows a picture";
     const onlyBottom = {
       field: "tracks",
       hint: bottom ? `Use kind dissolve or fade there, or limit \`tracks\` to ${bottom.id} and audio tracks.` : "Use kind dissolve or fade there.",
@@ -1165,11 +1309,12 @@ class Edit {
       const named = (args.tracks ?? []).map((id) => this.clipTrack(id)).filter((track): track is ClipTrack => track.kind !== "program" && notBottom(track));
       if (named.length > 0) {
         const ids = named.map((t) => t.id);
-        throw this.invalid(`a ${kind} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
+        throw this.invalid(`${article(kind)} plays on the bottom video track only for now; ${listed(ids)} ${ids.length === 1 ? "is" : "are"} not it: ${bottomNote}.`, onlyBottom);
       }
     }
     const skipped: string[] = [];
     let applied = false;
+    let dipped: Clip | undefined;
     await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
       if (shaped && notBottom(track)) {
         skipped.push(track.id);
@@ -1178,7 +1323,7 @@ class Edit {
       // Flattening does not carry a shape into a nested clip's own clips yet (ADR 0030 slice 3).
       const nested = shaped && incoming && outgoing ? [outgoing, incoming].find(isNested) : undefined;
       if (nested) {
-        throw this.invalid(`a ${kind} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
+        throw this.invalid(`${article(kind)} cannot play at an edge of nested clip ${nested.id} yet; nested clips take a dissolve or a fade for now.`, {
           field: "kind",
           hint: "Use kind dissolve or fade at this edge.",
         });
@@ -1187,13 +1332,16 @@ class Edit {
       for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
       if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
+      if (outgoing && track === bottom) dipped = outgoing;
       if (incoming && outgoing) {
         if (kind === "fade") {
           if (outgoingHalf > 0) outgoing.fadeOut = g.seconds(outgoingHalf);
           incoming.fadeIn = g.seconds(frames - outgoingHalf);
         } else {
           incoming.dissolve = length;
-          if (shaped && track.kind === "video") incoming.shape = { kind, direction: args.direction ?? "left" };
+          if (shaped && track.kind === "video") {
+            incoming.shape = kind === "iris" ? { kind, ...(args.origin ? { origin: args.origin } : {}) } : { kind, direction: args.direction ?? "left" };
+          }
         }
         return;
       }
@@ -1204,14 +1352,143 @@ class Edit {
       }
     });
     if (!applied) {
-      throw this.invalid(`a ${kind} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
+      throw this.invalid(`${article(kind)} plays on the bottom video track only for now; the edge at ${at} s is only on ${listed(skipped)}: ${bottomNote}.`, onlyBottom);
     }
+    // Replaces a dip cut there too (ADR 0030 decision 4): its keys would darken under the new transition.
+    if (dipped) await this.clearDip(dipped);
     if (skipped.length > 0) {
       this.warnings.push(
-        `skipped ${listed(skipped)}: a ${kind} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
+        `skipped ${listed(skipped)}: ${article(kind)} plays on the bottom video track only for now (${bottomNote}); set a dissolve or fade there with \`tracks\`.`,
       );
     }
     if (bottom) await this.warnVariety(bottom);
+  }
+
+  /**
+   * The bottom picture layer as export and preview stack the tracks (ADR 0030): the first shown picture track, when it
+   * is a video track (a program track there leaves none); `note` names it for messages.
+   */
+  bottomVideoTrack(): { bottom?: ClipTrack; note: string } {
+    const first = this.draft.tracks.find(showsPicture);
+    const bottom = first?.kind === "video" ? first : undefined;
+    const note = bottom ? `the bottom one is ${bottom.id}` : first ? `program track ${first.id} is the bottom picture layer` : "no video track shows a picture";
+    return { ...(bottom ? { bottom } : {}), note };
+  }
+
+  /**
+   * `transition.set kind: "dip-cut"` (ADR 0030 decision 5): a hard cut on the bottom video track, the clip ending at
+   * `at` darkened over black by {@link DIP_DEPTH} across its last {@link DIP_FRAMES} frames, written as `opacity` keys.
+   * Running it again writes the same keys; sound and other tracks are not touched.
+   */
+  async dipCut(args: OperationArgs<"transition.set">): Promise<void> {
+    const g = this.grid;
+    const at = g.snap(args.at);
+    const { bottom, note } = this.bottomVideoTrack();
+    const named = (args.tracks ?? []).map((id) => this.clipTrack(id));
+    const upper = named.filter((track) => track.kind === "video" && track !== bottom).map((track) => track.id);
+    if (upper.length > 0) {
+      throw this.invalid(
+        `a dip cut darkens the bottom video track over black; on ${upper.join(", ")} lowering opacity would show the track below instead (${note}).`,
+        { field: "tracks", hint: "Use kind fade on an upper track, or leave `tracks` out." },
+      );
+    }
+    if (!bottom || (named.length > 0 && !named.includes(bottom))) {
+      throw this.invalid(`a dip cut plays on the bottom video track: ${bottom ? `${note}, and \`tracks\` leaves it out` : note}.`, { field: "tracks" });
+    }
+    const ignored = named.filter((track) => track.kind !== "video").map((track) => track.id);
+    if (ignored.length > 0) this.warnings.push(`a dip cut leaves sound as it is: ${ignored.join(", ")} not changed.`);
+    const { incoming, outgoing } = await this.edgeAt(bottom, at);
+    if (!outgoing) {
+      throw this.invalid(`no clip ends at ${at} s on ${bottom.id}: a dip cut darkens the clip that ends at the cut.`, {
+        field: "at",
+        hint: await this.edgeTimes([bottom]),
+      });
+    }
+    for (const clip of [incoming, outgoing]) if (clip) this.#touched.add(clip.id);
+    if (incoming) clearIncoming(incoming);
+    delete outgoing.fadeOut;
+    if (!(await this.writeDip(outgoing))) throw this.invalid(`${outgoing.id} is one frame long: too short to darken before the cut.`, { field: "at" });
+    await this.warnVariety(bottom);
+  }
+
+  /**
+   * Writes a dip cut's two `opacity` keys at `clip`'s current end, replacing keys between them: its level at the first
+   * darkened frame, then {@link DIP_DEPTH} less at its last frame. False when the clip is one frame long (nothing written).
+   */
+  async writeDip(clip: Clip): Promise<boolean> {
+    const g = this.grid;
+    const { lane, from, last } = await this.dipLane(clip);
+    if (from === last) return false;
+    const level = placementAt(clip, g.seconds(from)).opacity;
+    const half = this.halfFrame(clip);
+    const kept = lane.filter((key) => key.at < this.keyAt(clip, from) - half || key.at > this.keyAt(clip, last) + half);
+    const dip: ClipKey[] = [
+      { at: this.keyAt(clip, from), value: round4(level) },
+      { at: this.keyAt(clip, last), value: round4(level * (1 - DIP_DEPTH)) },
+    ];
+    clip.keys = { ...clip.keys, opacity: [...kept, ...dip].sort((a, b) => a.at - b.at) as [ClipKey, ...ClipKey[]] };
+    return true;
+  }
+
+  /** Removes the dip cut keys at indexes `dip` ({@link Edit.dipKeys}) from `clip`, dropping empty key lanes. */
+  dropDip(clip: Clip, dip: readonly [number, number]): void {
+    const lane = clip.keys!.opacity!.filter((_, index) => !dip.includes(index));
+    const keys: ClipKeys = { ...clip.keys };
+    if (lane.length > 0) keys.opacity = lane as [ClipKey, ...ClipKey[]];
+    else delete keys.opacity;
+    if (Object.keys(keys).length === 0) delete clip.keys;
+    else clip.keys = keys;
+  }
+
+  /** Removes the dip cut at `clip`'s end, if it has one; true when it did. */
+  async clearDip(clip: Clip): Promise<boolean> {
+    const dip = await this.dipKeys(clip);
+    if (dip) this.dropDip(clip, dip);
+    return dip !== null;
+  }
+
+  /**
+   * Before a split or cut gives `clip` a new tail: removes the dip cut at its old end. A right part cloned before keeps
+   * it, at the same source seconds; the left part's new tail is no cut.
+   */
+  async dropTailDip(clip: AnyClip): Promise<void> {
+    if (!isShotClip(clip)) await this.clearDip(clip);
+  }
+
+  /** True when `clip` has `opacity` keys on the frames a dip cut keys (its last {@link DIP_FRAMES} + 1). */
+  async endKeys(clip: Clip): Promise<boolean> {
+    const { lane, from } = await this.dipLane(clip);
+    const start = this.keyAt(clip, from) - this.halfFrame(clip);
+    return lane.some((key) => key.at >= start);
+  }
+
+  /** Clip-clock second of timeline frame `frame` of `clip`, rounded as `clip.key` rounds a key's `at`. */
+  keyAt(clip: Clip, frame: number): number {
+    return Math.round(clipTime(clip, this.grid.seconds(frame)) * 1000) / 1000;
+  }
+
+  /** Half a frame of timeline time on `clip`'s own clock: keys this close are at one frame. */
+  halfFrame(clip: Clip): number {
+    return (0.5 / this.context.fps) * (isMedia(clip) ? (clip.speed ?? 1) : 1);
+  }
+
+  /** `clip`'s `opacity` keys and the frames a dip cut keys: `from` (full level) and `last`, the clip's last frame. */
+  async dipLane(clip: Clip): Promise<{ lane: ClipKey[]; from: number; last: number }> {
+    const g = this.grid;
+    const last = g.frame((await this.span(clip)).end) - 1;
+    return { lane: [...(clip.keys?.opacity ?? [])], from: Math.max(g.frame(clip.start), last - DIP_FRAMES), last };
+  }
+
+  /** Indexes in `clip`'s `opacity` keys of the two keys a dip cut wrote at its end; null when it has none. */
+  async dipKeys(clip: Clip): Promise<[number, number] | null> {
+    if (!clip.keys?.opacity) return null;
+    const { lane, from, last } = await this.dipLane(clip);
+    const half = this.halfFrame(clip);
+    const near = (key: ClipKey | undefined, frame: number) => key !== undefined && Math.abs(key.at - this.keyAt(clip, frame)) < half;
+    const end = lane.findIndex((key) => near(key, last));
+    const start = end - 1;
+    if (from === last || end < 1 || !near(lane[start], from)) return null;
+    return Math.abs(lane[end]!.value - round4(lane[start]!.value * (1 - DIP_DEPTH))) < 1e-4 ? [start, end] : null;
   }
 
   /**
@@ -1228,14 +1505,16 @@ class Edit {
       const end = await this.end(before);
       if (end === null || g.frame(end) !== g.frame(clip.start)) continue;
       if ("asset" in before && "asset" in clip && before.asset === clip.asset) continue;
-      const kind = clip.shape?.kind ?? (clip.dissolve !== undefined ? "dissolve" : clip.fadeIn !== undefined || before.fadeOut !== undefined ? "fade" : "cut");
+      const mixed = clip.shape?.kind ?? (clip.dissolve !== undefined ? "dissolve" : clip.fadeIn !== undefined || before.fadeOut !== undefined ? "fade" : null);
+      const kind = mixed ?? ((await this.dipKeys(before)) ? "dip cut" : "cut");
       cuts.push({ at: clip.start, kind });
     }
     for (let i = 2; i < cuts.length; i++) {
       const run = cuts.slice(i - 2, i + 1);
       if (run[0]!.kind === "cut" || !run.every((cut) => cut.kind === run[0]!.kind)) continue;
+      const kind = run[0]!.kind;
       this.warnings.push(
-        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${run[0]!.kind === "push" ? "pushes" : `${run[0]!.kind}s`}; ` +
+        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${/(sh|s)$/.test(kind) ? `${kind}es` : `${kind}s`}; ` +
           "never three of a kind in a row. Pick each by why the picture changes.",
       );
       break;
@@ -1249,17 +1528,27 @@ class Edit {
   async transitionRemove(args: OperationArgs<"transition.remove">): Promise<void> {
     const at = this.grid.snap(args.at);
     let cleared = false;
-    await this.eachEdge(at, args.tracks, ({ incoming, outgoing }) => {
+    const { bottom } = this.bottomVideoTrack();
+    let dipped: Clip | undefined;
+    await this.eachEdge(at, args.tracks, ({ incoming, outgoing }, track) => {
       if (incoming && (incoming.dissolve !== undefined || incoming.fadeIn !== undefined || incoming.shape !== undefined)) cleared = true;
       if (outgoing && outgoing.fadeOut !== undefined) cleared = true;
       if (incoming) clearIncoming(incoming);
       if (outgoing) delete outgoing.fadeOut;
+      if (outgoing && track === bottom) dipped = outgoing;
     });
-    if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
+    // A dip cut is keys on the clip ending at the cut (ADR 0030 decision 5): they go with it.
+    if (dipped && (await this.clearDip(dipped))) cleared = true;
+    if (!cleared && dipped && (await this.endKeys(dipped))) {
+      this.warnings.push(
+        `no transition at ${at} s; the opacity keys at the end of ${dipped.id} are no dip cut (edited after it, or set by hand) and stay: ` +
+          "change them with `clip.key`.",
+      );
+    } else if (!cleared) this.warnings.push(`no transition at ${at} s: nothing to remove.`);
   }
 
   async clipKey(args: OperationArgs<"clip.key">): Promise<void> {
-    const { clip: id, prop, time, value, ease, remove, clear } = args;
+    const { clip: id, prop, time, value, ease, remove, clear, format } = args;
     const { track, clip } = this.clip(id);
     if (isShotClip(clip)) {
       throw this.invalid(`${clip.id} is a shot; shots take no keyframes yet.`, { field: "clip", hint: "Key a clip on a video or audio track." });
@@ -1267,11 +1556,18 @@ class Edit {
     if (track.kind === "audio" && prop !== "gain") {
       throw this.invalid(`audio tracks take only \`gain\` keys, not \`${prop}\`.`, { field: "prop" });
     }
+    if (format !== undefined) {
+      this.checkFormat(format);
+      if (prop === "gain") throw this.invalid("sound is shared by every format: key `gain` without `format`.", { field: "prop" });
+    }
+    // In a format the keys read and written are that format's (ADR 0027): its own, else the clip's.
+    const shown = format === undefined ? clip : clipInFormat(clip, format);
     if (clear === true) {
       if ([time, value, ease, remove].some((given) => given !== undefined)) {
         throw this.invalid("`clear` removes every key of the property and takes no other field.", { field: "clear" });
       }
-      if (clip.keys) {
+      if (format !== undefined && prop !== "gain") this.writeFormatKeys(clip, format, prop, []);
+      else if (clip.keys) {
         delete clip.keys[prop];
         if (Object.keys(clip.keys).length === 0) delete clip.keys;
       }
@@ -1286,7 +1582,7 @@ class Edit {
     }
     const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
     const at = Math.round(clipTime(clip, t) * 1000) / 1000;
-    const keys: ClipKey[] = [...(clip.keys?.[prop] ?? [])];
+    const keys: ClipKey[] = [...(shown.keys?.[prop] ?? [])];
     // Half a frame of timeline time, on the clip's own clock.
     const half = (0.5 / this.context.fps) * speed;
     const found = keys.findIndex((key) => Math.abs(key.at - at) < half);
@@ -1301,7 +1597,7 @@ class Edit {
       }
       keys.splice(found, 1);
     } else {
-      const now = prop === "gain" ? gainAt(clip, t) : placementAt(clip, t)[prop];
+      const now = prop === "gain" ? gainAt(clip, t) : placementAt(shown, t)[prop];
       const next = Math.round((value ?? now) * 10000) / 10000;
       if (prop === "scale" && next <= 0) throw this.invalid("`scale` must be above 0.", { field: "value" });
       if (prop === "opacity" && (next < 0 || next > 1)) throw this.invalid("`opacity` is 0 to 1.", { field: "value" });
@@ -1310,6 +1606,7 @@ class Edit {
       if (found >= 0) keys[found] = key;
       else keys.splice(keys.filter((other) => other.at < at).length, 0, key);
     }
+    if (format !== undefined && prop !== "gain") return this.writeFormatKeys(clip, format, prop, keys);
     const all: ClipKeys = { ...clip.keys };
     if (keys.length === 0) delete all[prop];
     else all[prop] = keys as [ClipKey, ...ClipKey[]];
@@ -1317,11 +1614,22 @@ class Edit {
     else clip.keys = all;
   }
 
+  /** `keys` as `clip`'s picture keys of `prop` in `format`; none: the format follows the clip's own keys of it again. */
+  writeFormatKeys(clip: Clip, format: string, prop: "x" | "y" | "scale" | "opacity", keys: readonly ClipKey[]): void {
+    const override: ClipFormatOverride = { ...clip.formats?.[format] };
+    const picture: NonNullable<ClipFormatOverride["keys"]> = { ...override.keys };
+    if (keys.length === 0) delete picture[prop];
+    else picture[prop] = keys as [ClipKey, ...ClipKey[]];
+    if (Object.keys(picture).length > 0) override.keys = picture;
+    else delete override.keys;
+    this.writeOverride(clip, format, override);
+  }
+
   /**
    * `track.duck`: write the dip `curve` into the `gain` keys of every clip of audio track `args.track` (ADR 0018).
    * Keys marked `auto: "duck"` from an earlier run go; keys without the mark stay and set the level the dip is
    * taken from, and a hand key inside a dip is dipped too (it keeps its level in `base` for the next run). A clip the
-   * dip never touches ends with no duck keys.
+   * dip never touches ends with no duck keys. `args.settings` (what the method was asked) goes to `audio.duck` of each clip that gets duck keys.
    */
   async trackDuck(args: OperationArgs<"track.duck">): Promise<void> {
     const track = this.clipTrack(args.track);
@@ -1343,7 +1651,15 @@ class Edit {
       const speed = isMedia(clip) ? (clip.speed ?? 1) : 1;
       const end = (await this.span(clip)).end;
       const lane = clip.audio?.muted === true ? hand : this.duckLane(clip, hand, curve, end, speed);
-      if (lane.some((key) => key.auto === "duck")) ducked++;
+      const keyed = lane.some((key) => key.auto === "duck");
+      if (keyed) ducked++;
+      // The settings stay with the keys they wrote: a clip no dip touches ends with neither.
+      if (keyed && args.settings) clip.audio = { ...clip.audio, duck: structuredClone(args.settings) };
+      else if (clip.audio?.duck) {
+        const { duck: _duck, ...rest } = clip.audio;
+        if (Object.keys(rest).length > 0) clip.audio = rest;
+        else delete clip.audio;
+      }
       if (lane.length > 0) kept.gain = lane as [ClipKey, ...ClipKey[]];
       if (Object.keys(kept).length === 0) delete clip.keys;
       else clip.keys = kept;
@@ -2772,6 +3088,11 @@ function clearIncoming(clip: Clip): void {
   delete clip.fadeIn;
 }
 
+/** `kind` of `transition.set` with its article, for messages: "a wipe", "an iris". */
+function article(kind: string): string {
+  return `${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind === "dip-cut" ? "dip cut" : kind}`;
+}
+
 /** Adapter `type` is any string, so `clip.type === "media"` alone does not narrow. */
 function isMedia(clip: AnyClip): clip is MediaClip {
   return clip.type === "media";
@@ -2779,6 +3100,11 @@ function isMedia(clip: AnyClip): clip is MediaClip {
 
 function isNested(clip: AnyClip): clip is TimelineClip {
   return clip.type === "timeline";
+}
+
+/** `value` without its `undefined` members: what a merge of given fields keeps. */
+function defined<V extends object>(value: V): { [K in keyof V]?: Exclude<V[K], undefined> } {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as { [K in keyof V]?: Exclude<V[K], undefined> };
 }
 
 /** Source seconds per timeline second; shots run at 1. */

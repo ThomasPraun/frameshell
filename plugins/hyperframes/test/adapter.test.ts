@@ -161,6 +161,28 @@ describe("hyperframes adapter", () => {
       expect(seen).toBe(html);
     });
 
+    it("takes style tokens (ADR 0028): the sheet goes first in the copy's head, before the composition's own styles", async () => {
+      expect(createHyperframesAdapter({ projectDir: project }).styleTokens).toBe(true);
+      const html = '<!doctype html><html><head lang="en"><style>:root { --fs-color-accent: red; }</style></head><body></body></html>';
+      writeFileSync(join(project, entry), html);
+      let seen = "";
+      const producer: Producer = {
+        createRenderJob: (config) => ({ config }),
+        async executeRenderJob(_job, dir, output) {
+          seen = readFileSync(join(dir, "index.html"), "utf8");
+          writeFileSync(output, "webm");
+        },
+      };
+      const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
+      const { ctx } = context(tempDir());
+      await adapter.render({ id: "c_1", source: SOURCE }, { ...ctx, styleCss: ":root {\n  --fs-color-accent: #ff5a1f;\n}\n</style>" });
+      expect(seen).toBe(
+        '<!doctype html><html><head lang="en"><style data-frameshell-style>\n:root {\n  --fs-color-accent: #ff5a1f;\n}\n<\\/style>\n</style>' +
+          "<style>:root { --fs-color-accent: red; }</style></head><body></body></html>",
+      );
+      expect(readFileSync(join(project, entry), "utf8")).toBe(html);
+    });
+
     it("a composition of another shape than the project (a square card) renders as written, primary or 9:16", async () => {
       const html = '<html><head></head><body><div data-composition-id="card" data-width="1080" data-height="1080"></div></body></html>';
       writeFileSync(join(project, entry), html);

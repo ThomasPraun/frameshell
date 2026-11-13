@@ -201,8 +201,12 @@ A dissolve (plain or shaped) or a fade at a clip edge, stored on the clip (`diss
 _Avoid_: effect
 
 **Shaped transition**:
-A dissolve whose `shape` moves the pictures instead of mixing them: a wipe (a straight edge uncovers the incoming clip) or a push (the incoming clip slides in and pushes the outgoing one out), in a `direction`; `shapeAt` gives its geometry. Picked by why the picture changes.
+A dissolve whose `shape` moves or cuts the pictures instead of mixing them: a wipe (a straight edge uncovers the incoming clip) or a push (the incoming clip slides in and pushes the outgoing one out), in a `direction`, or an iris (the incoming clip opens in a circle from the centre of its `origin`); `shapeAt` gives its geometry. Picked by why the picture changes.
 _Avoid_: slide, transition effect, xfade
+
+**Dip cut**:
+A hard cut with the outgoing clip darkened 40 % over black across its last 3 frames, written by `transition.set` as two `opacity` keys on that clip (bottom video track only). Not a shape: no `dissolve` is stored.
+_Avoid_: dip to black (that is a `fade`)
 
 **Hold** (of a shaped transition):
 Where a shaped transition runs past a clip's handle, the clip's edge frame (the outgoing clip's last, the incoming clip's first) shows still instead of a dip through black.
@@ -268,6 +272,10 @@ _Avoid_: master, main format, default format
 How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
 _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 
+**Format override**:
+What a clip or subtitle track looks like in one non-primary format instead of as in the primary (a clip's `formats.<id>`: placement, picture keys, hidden, a generated clip's props and elements; a subtitle track's style); never timing or sound.
+_Avoid_: variant clip, per-format copy, fork
+
 **Config operation** (ADR 0036):
 One journaled change of project config (a format added or removed, a `revert` of one), as keyed before/after values in `.frameshell/history/project.config.jsonl`; it belongs to a transaction like a timeline operation and is listed in every timeline's history.
 _Avoid_: config edit, settings change
@@ -321,7 +329,7 @@ One `review` of a timeline or an exported file: contact, phone, motion-strip and
 _Avoid_: review (alone, it reads as Review mode), audit
 
 **Analysis**:
-One `analyze` of a reference video: its shot table, contact and shots sheets, palette, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
+One `analyze` of a reference video: its shot table, contact and shots sheets, palette, look, rhythm, events, loudness and tempo in `.frameshell/analysis/<name>/` with an `analysis.json` manifest, so an agent takes its grammar (rhythm, colour, level) and never its content (#471). A run of the same name replaces the folder; not a Review run, which looks at a film of this project.
 _Avoid_: reference report, scan
 
 ## Video from audio (ADR 0015)

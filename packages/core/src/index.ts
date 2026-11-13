@@ -256,14 +256,18 @@ export {
   SUBTITLES_FILE,
   COVER_FILE,
   FONTS_DIR,
+  gifStep,
   loudnessAnalysis,
   mixStep,
   muxStep,
+  paletteStep,
   parseLoudnessStats,
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
-export { type FontMetrics, bundledFontMetrics, parseFontMetrics } from "./export/font-metrics.js";
+export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";
+export { bundledFontMetrics, captionFontMetrics, fontFileMetrics } from "./export/font-metrics.js";
+export { readCaptionTokens } from "./style/captions.js";
 export {
   COVER_MAX_CHARS,
   type CoverLayout,
@@ -278,7 +282,17 @@ export {
   hookWordTime,
   layoutCover,
 } from "./export/cover.js";
-export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
+export {
+  BUILTIN_PRESETS,
+  DEFAULT_LOUDNESS_LUFS,
+  DEFAULT_PRESET_ID,
+  GIF_MAX_FPS,
+  GIF_MAX_FRAMES,
+  GIF_WARN_BYTES,
+  fitInside,
+  gifSizeWarning,
+  loudnessTarget,
+} from "./export/presets.js";
 export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,
@@ -294,6 +308,7 @@ export {
   snapToPause,
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
+export { LOUDNESS_DIR, LoudnessStore, type LoudnessStoreOptions } from "./media/loudness-store.js";
 export {
   ANALYSIS_RATE as BEAT_ANALYSIS_RATE,
   BEAT_DETECTOR,
@@ -346,6 +361,7 @@ export {
   type RenderProbe,
   type RenderedClip,
 } from "./clips/renderer.js";
+export { ClipVerifier, type ClipVerifyOptions } from "./clips/verify.js";
 export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, resolveSoundOf, syncReport } from "./multicam/measure.js";
 export { type GroupTurns, type SpeakerSource, type TurnsSource, type TurnsTranscript, groupTurns } from "./multicam/group-turns.js";
 export {
@@ -502,8 +518,14 @@ export {
 export { DEFAULT_CUT_THRESHOLD, type Cut, type Shot, type ShotStats, detectCuts, frameStart, shotStats, shotsOf } from "./analyze/shots.js";
 export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palette.js";
 export { type LoudnessReading, measureLoudness, parseLoudness } from "./analyze/loudness.js";
+export { type Look, LookBuilder, frameLook } from "./analyze/look.js";
+export { type Burst, type Rhythm, bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "./analyze/rhythm.js";
+export { type SoundHit, elementEvents, flashes, holds, hitEvents, soundHits } from "./analyze/events.js";
 export { type SfxRender, type SfxSpec, synthesizeSfx } from "./sound/sfx.js";
 export { SFX_TRACK_NAME, type SoundItem, type SoundWish, soundWarnings } from "./sound/place.js";
-export { SFX_KEY_VERSION, SOUND_DIR, type SoundMark, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";
+export { MUSIC_KEY_VERSION, type MusicMark, SFX_KEY_VERSION, SOUND_DIR, type SoundMark, musicFile, musicKey, musicMarkOf, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";
+export { type MusicGrid, type MusicRender, type MusicSpec, defaultSections, musicGrid, parseChord, scoreOf, sectionStarts, synthesizeMusic } from "./sound/music.js";
+export { type AskedSection, MUSIC_TRACK_NAME, arrangeSections } from "./sound/music-place.js";
+export { integratedLoudness, limitPeaks, normaliseLoudness } from "./sound/loudness.js";
 export { REVIEW_DIR, type ReviewRequest, ReviewService, type ReviewServiceOptions } from "./review/service.js";
 export { type SheetOptions, type SheetSize, type SheetTile, writeSheet } from "./review/sheet.js";

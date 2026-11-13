@@ -217,12 +217,13 @@ describe("music.fit", () => {
   it(
     "runs duck again over the voice in the same transaction when the clip carries duck keys, or leaves them with skip",
     async () => {
-      await conn.request("track.duck", { cwd: project, track: musicTrack, under: [voiceTrack] });
+      await conn.request("track.duck", { cwd: project, track: musicTrack, under: [voiceTrack], depth: 12 });
       const ducked = await clipOf(clip);
       expect(ducked.keys?.gain?.some((key) => key.auto === "duck")).toBe(true);
+      expect(ducked.audio?.duck).toMatchObject({ under: [voiceTrack], depth: 12, attackMs: 40, releaseMs: 450 });
 
       const kept = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card", skip: ["duck"] });
-      expect(kept.duck).toEqual({ under: [voiceTrack], rerun: false });
+      expect(kept.duck).toEqual({ under: [voiceTrack], rerun: false, parameters: "stored" });
       expect(kept.warnings.join(" ")).toContain("skipped");
       expect((await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === kept.tx)!.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move"]);
       await conn.request("revert", { cwd: project, target: kept.tx! });
@@ -230,13 +231,15 @@ describe("music.fit", () => {
       const dry = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card", dryRun: true });
       expect(dry.steps.map((step) => step.id)).toEqual(["intro", "duck"]);
       const result = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card" });
-      expect(result.duck).toEqual({ under: [voiceTrack], rerun: true });
+      expect(result.duck).toEqual({ under: [voiceTrack], rerun: true, parameters: "stored" });
       const tx = (await conn.request("history", { cwd: project })).transactions.find((entry) => entry.tx === result.tx)!;
       expect(tx.operations.map((op) => op.op)).toEqual(["clip.trim", "clip.move", "track.duck"]);
-      // The dips sit under the speech again (2-4 s and 7-9 s of the film), not where the song's own clock put them.
+      // The dips sit under the speech again (2-4 s and 7-9 s of the film), not where the song's own clock put them,
+      // as deep as the first duck asked (12 dB, not the 7 dB default).
       const fitted = await clipOf(clip);
-      expect(gainAt(fitted, 3)).toBe(-7);
-      expect(gainAt(fitted, 8)).toBe(-7);
+      expect(gainAt(fitted, 3)).toBe(-12);
+      expect(gainAt(fitted, 8)).toBe(-12);
+      expect(fitted.audio?.duck).toMatchObject({ depth: 12 });
       expect(gainAt(fitted, 5.5)).toBe(0);
       await conn.request("revert", { cwd: project, target: result.tx! });
     },

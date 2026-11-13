@@ -20,7 +20,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 - **Vertical canvas.** A reel project is 1080×1920: set `resolution` in `frameshell.json` (see [project-model.md](project-model.md)) before placing clips, and export with `--preset vertical-1080x1920`.
 - **Loudness.** Set `export.loudness` to `-14` in `frameshell.json`: the level Instagram, TikTok and Shorts normalize to. Export keeps true peak under −1 dBTP.
 - **Horizontal footage.** A 16:9 take is fitted (letterboxed) into the vertical frame. Look at a frame first (`frameshell frame --at 1 --out <file.png>`): if the person lies on their side, the phone was held sideways and Frameshell cannot rotate a clip yet: tell them. If they stand upright, `frameshell clip reframe <clip> --json` fills the frame and follows their face (see [transitions.md](transitions.md)); `--anchor 0-1` fixes the position when no face is found. Do it before the zooms: it replaces the clip's `x`, `y` and `scale`.
-- **More formats.** The same edit can also go out as 16:9, 4:5 or 1:1: `frameshell format add 4x5`, then `render --formats <ids>` with the ids `format list` prints. Check each format's frames: captions and cards placed for 9:16 may sit differently.
+- **More formats.** The same edit can also go out as 16:9, 4:5 or 1:1: `frameshell format add 4x5`, then `render --formats <ids>` with the ids `format list` prints. Check each format's frames: captions and cards placed for 9:16 may sit differently. Fix one format without touching the others: `frameshell clip set <clip> --format 4x5 --y 380` (or `--hidden` for a card that does not fit there), `frameshell track set <subtitles> --format 4x5 --position center`; `--reset` with `--format` undoes it there.
 - **Voice.** A phone or laptop recording gets `frameshell clip set <clip> --voice` (high-pass, light denoise, gentle compression), before any music goes under it.
 
 ## Passes
@@ -37,6 +37,7 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 - **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. `frameshell review --platform <instagram|tiktok|shorts>` draws the zones over the frames and flags captions that cross them ([critique.md](critique.md)); check each graphic in a frame, not in its file.
 - **Face first:** nothing covers the face or chin, also at the deepest zoom: cards start below the chin at the zoom they appear in.
+- **Glass cards:** only when `style.json` `glass.cards` is true or the person asks. Use the `glass-card` template (see the `hyperframes` skill), add it above the footage, then `frameshell clip set <clip> --glass` (`--backdrop-dim 0.72` over bright footage); without it the card is a pale pane.
 - **One idea on screen:** when a graphic says what the caption says, the caption is noise; leave the caption and drop the graphic, or move the graphic to a moment the caption does not cover.
 - **Text:** no caption on screen under 0.4 s; type at least 28 px at 1080 wide; one display face and one text face; one accent colour, on the key word only.
 

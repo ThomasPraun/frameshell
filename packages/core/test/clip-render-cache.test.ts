@@ -239,6 +239,23 @@ describe("clip render cache", () => {
   );
 
   it(
+    "renders a clip with its props override in that format only (ADR 0027 decision 5), and gc keeps that render",
+    async () => {
+      const primary = (await renders()).get(red)!.key;
+      const plain = (await until(red, (info) => info.state === "ready", "tall")).key!;
+      await conn.request("clip.set", { cwd: project, clip: red, format: "tall", props: { label: "Tall" } });
+      const tall = await until(red, (info) => info.state === "ready" && info.key !== plain, "tall");
+      expect(tall).toMatchObject({ width: 36, height: 64 });
+      expect((await renders()).get(red)!.key).toBe(primary);
+      const { removed } = await conn.request("gc", { cwd: project, dryRun: true });
+      expect(removed.some((entry) => entry.path.includes(tall.key!))).toBe(false);
+      await conn.request("clip.set", { cwd: project, clip: red, format: "tall", reset: true });
+      expect((await renders("tall")).get(red)!.key).toBe(plain);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "reports generated clips inside nested timelines under their composed id (`<nested clip>/<clip>`), from the same cache",
     async () => {
       writeCard("inner", { color: "blue", seconds: 3 });
@@ -417,4 +434,70 @@ describe("clip.live", () => {
       message: expect.stringContaining("frameshell plugin install @frameshell/hyperframes"),
     });
   });
+});
+
+// Style tokens (ADR 0028): an adapter with `styleTokens` gets the sheet of style.json, and its key counts it.
+describe("style tokens in generated clips", () => {
+  let styled = "";
+  let tokenTrack = "";
+  const own = () => tempDir();
+
+  beforeAll(async () => {
+    styled = own();
+    await conn.request("project.init", { dir: styled });
+    const configPath = join(styled, "frameshell.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
+    installLocalPlugin(styled, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: styled, decision: "trust" });
+    mkdirSync(join(styled, "compositions", "cards"), { recursive: true });
+    writeFileSync(join(styled, "compositions", "cards", "tokens.json"), JSON.stringify({ color: "blue", seconds: 1, requireStyle: "--fs-color-accent: #ff5a1f;" }));
+    writeFileSync(join(styled, "compositions", "cards", "plain.json"), JSON.stringify({ color: "blue", seconds: 1 }));
+    writeFileSync(join(styled, "compositions", "cards", "live.html"), "<!doctype html><title>card</title>");
+    tokenTrack = (await conn.request("track.add", { cwd: styled, kind: "video" })).changes.added[0]!;
+  }, TIMEOUT);
+
+  const states = async () => {
+    const { clips } = await conn.request("clip.renders", { cwd: styled, timeline: "main" });
+    return new Map(clips.map((clip) => [clip.clip, clip]));
+  };
+  const settled = async (id: string) => {
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+      const info = (await states()).get(id)!;
+      if (info.state === "ready" || info.state === "failed") return info;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`clip ${id} never settled`);
+  };
+
+  it(
+    "renders with the sheet once style.json sets the value, re-keying only the clips whose adapter takes tokens",
+    async () => {
+      const add = async (type: string, name: string, start: number) =>
+        (await conn.request("clip.add", { cwd: styled, track: tokenTrack, type, source: `compositions/cards/${name}.json`, start, duration: 1 })).changes.added[0]!;
+      const token = await add("token-card", "tokens", 0);
+      const plain = await add("token-card", "plain", 1);
+      const card = await add("card", "plain", 2);
+      // No style.json: no sheet, so the card that needs one fails and the others keep the recipe's keys.
+      expect(await settled(token)).toMatchObject({ state: "failed", error: expect.stringContaining("got no style sheet") });
+      const before = await states();
+      expect(before.get(plain)!.key).not.toBe(before.get(token)!.key);
+      await expect(conn.request("clip.live", { cwd: styled, timeline: "main", clip: plain })).resolves.not.toHaveProperty("styleCss");
+
+      await conn.request("style.set", { cwd: styled, path: "colors.accent", value: "#FF5A1F" });
+      expect(await settled(token)).toMatchObject({ state: "ready" });
+      const after = await states();
+      expect(after.get(plain)!.key).not.toBe(before.get(plain)!.key);
+      expect(after.get(card)!.key).toBe(before.get(card)!.key);
+      const page = await conn.request("clip.live", { cwd: styled, timeline: "main", clip: plain });
+      expect(page.styleCss).toContain("--fs-color-accent: #ff5a1f;");
+      expect(page.styleCss).toContain("--fs-motion-standard: 0.3s;");
+      expect(await conn.request("clip.live", { cwd: styled, timeline: "main", clip: card })).not.toHaveProperty("styleCss");
+
+      // A value outside the sheet (a brand note) keeps the keys.
+      await conn.request("style.set", { cwd: styled, path: "notes", value: ["Calm voice."] });
+      expect((await states()).get(plain)!.key).toBe(after.get(plain)!.key);
+    },
+    TIMEOUT,
+  );
 });

@@ -13,12 +13,13 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
-import { type AdapterClip, type Timeline, elementStyles } from "@frameshell/schema";
+import { type AdapterClip, type FormatEntry, type Timeline, clipInFormat, elementStyles } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
-import { type NestedReader, resolveNested } from "../timeline/nested.js";
+import { readStyleTokens } from "../style/tokens.js";
+import { type NestedReader, resolveNested, resolveNestedIn } from "../timeline/nested.js";
 import { clipCacheKey } from "./cache-key.js";
 
 /** Project-relative directory of the clip render cache (SPEC §5.1, §6.5). */
@@ -80,10 +81,10 @@ export interface ClipRendererOptions {
   /** Project fps and resolution from `frameshell.json`. */
   format(root: string): Promise<ClipFormat>;
   /**
-   * Frame sizes of the project's formats other than the primary one (ADR 0027): `gc` keeps their renders.
-   * Background renders stay at the project resolution. Default: none.
+   * The project's formats other than the primary one (ADR 0027): `gc` keeps their renders, each clip keyed with
+   * its override there (`props`, `elements`). Background renders stay at the project resolution. Default: none.
    */
-  formatSizes?(root: string): Promise<{ width: number; height: number }[]>;
+  formatSizes?(root: string): Promise<FormatEntry[]>;
   /** Size and length of a finished render (ffprobe). */
   probe(root: string, file: string, signal: AbortSignal): Promise<RenderProbe>;
   /** Managed or overridden native tool for adapters; see `RenderContext.ensureBinary`. */
@@ -100,8 +101,8 @@ interface Placed {
   track: string;
 }
 
-/** Key of a clip, or why it has none. */
-type Keyed = { key: string; registered: RegisteredClipType } | { key: null; error: string };
+/** Key of a clip, or why it has none; `styleCss`: the token sheet the key counts, which the render gets (ADR 0028). */
+type Keyed = { key: string; registered: RegisteredClipType; styleCss?: string } | { key: null; error: string };
 
 interface Pending {
   job: string;
@@ -207,15 +208,16 @@ export class ClipRenderer {
    * Render state of every generated clip timeline `id` shows, nested ones
    * included under their flattened id (`<nested clip>/<clip>`, as export and
    * the preview name them) and their root track; queues renders that are due.
-   * `size`: at that frame size instead of the project resolution (a format of
-   * the project, ADR 0027), as {@link ensure} takes it.
+   * `size`: in that format of the project other than the primary (ADR 0027), at its size and with each clip's
+   * override there, as export renders it.
    */
-  async status(root: string, id: string, size?: { width: number; height: number }): Promise<ClipRendersResult> {
+  async status(root: string, id: string, size?: FormatEntry): Promise<ClipRendersResult> {
     const { timeline } = await this.#options.load(root, id);
     const hosts = timeline.tracks.map((track) => track.id);
     // Flattening adds layers `<track>/<n>`: report the root track that shows them.
     const host = (track: string) => (hosts.includes(track) ? track : (hosts.find((candidate) => track.startsWith(`${candidate}/`)) ?? track));
-    const placed = generatedClips(await resolveNested(root, timeline, this.#options.readNested)).map((p) => ({ ...p, track: host(p.track) }));
+    const flat = await resolveNestedIn(root, timeline, size?.id, this.#options.readNested);
+    const placed = generatedClips(flat).map((p) => ({ ...p, track: host(p.track) }));
     const adapters = placed.length > 0 ? await this.#options.adapters(root) : new Map<string, RegisteredClipType>();
     const project = await this.#options.format(root);
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
@@ -253,7 +255,7 @@ export class ClipRenderer {
         clips.push({ ...info, state: "failed", error: failed });
         continue;
       }
-      const pending = this.#render(root, keyed.key, clip, keyed.registered, format);
+      const pending = this.#render(root, keyed, clip, format);
       const job = this.#options.jobs.get(pending.job);
       clips.push({ ...info, state: job?.state === "running" ? "rendering" : "queued", job: pending.job, progress: job?.progress ?? 0 });
     }
@@ -315,7 +317,7 @@ export class ClipRenderer {
     if (!(await stat(join(root, ...entry.split("/"))).then((info) => info.isFile(), () => false))) {
       throw unavailable(`its live page ${entry} does not exist.`);
     }
-    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key, ...elementCssOf(clip) };
+    return { clip: clipId, root: dir, entry, head: page.head, key: keyed.key, ...elementCssOf(clip), ...(keyed.styleCss ? { styleCss: keyed.styleCss } : {}) };
   }
 
   /**
@@ -348,7 +350,7 @@ export class ClipRenderer {
         continue;
       }
       this.#failed.delete(entryId(root, keyed.key));
-      waits.push({ clip, done: this.#render(root, keyed.key, clip, keyed.registered, format).done });
+      waits.push({ clip, done: this.#render(root, keyed, clip, format).done });
     }
     let done = rendered.size;
     onProgress?.(done / placed.length);
@@ -425,10 +427,10 @@ export class ClipRenderer {
     const adapters = await this.#options.adapters(root);
     const project = await this.#options.format(root);
     const sizes = (await this.#options.formatSizes?.(root)) ?? [];
-    const formats = [project, ...sizes.map((size) => ({ fps: project.fps, width: size.width, height: size.height }))];
+    const formats = [{ id: undefined, ...project }, ...sizes.map((size) => ({ id: size.id, fps: project.fps, width: size.width, height: size.height }))];
     for (const { clip } of placed) {
-      for (const format of formats) {
-        const keyed = await this.#keyOf(root, clip, adapters, format);
+      for (const { id, ...format } of formats) {
+        const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format);
         if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
         keys.add(keyed.key);
       }
@@ -475,7 +477,7 @@ export class ClipRenderer {
       const keyed = await this.#keyOf(root, clip, adapters, format);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
       if (await this.#ready(root, keyed.key)) continue;
-      this.#render(root, keyed.key, clip, keyed.registered, format);
+      this.#render(root, keyed, clip, format);
     }
   }
 
@@ -494,7 +496,16 @@ export class ClipRenderer {
       return { key: null, error: `${registered.plugin.name} could not list the inputs of ${clip.id}: ${(error as Error)?.message ?? error}` };
     }
     const inputs = await Promise.all(paths.map(async (path) => ({ path, hash: await this.#hashInput(root, path) })));
-    return { key: clipCacheKey({ plugin: registered.plugin, clip, inputs, format }), registered };
+    let sheet: Awaited<ReturnType<typeof readStyleTokens>> = null;
+    if (registered.adapter.styleTokens) {
+      try {
+        sheet = await readStyleTokens(root);
+      } catch (error) {
+        return { key: null, error: (error as Error).message };
+      }
+    }
+    const key = clipCacheKey({ plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}) });
+    return { key, registered, ...(sheet ? { styleCss: sheet.css } : {}) };
   }
 
   /** Content hash of a project-relative input; null when missing or outside the project. */
@@ -525,8 +536,9 @@ export class ClipRenderer {
     return { path, file: `${CLIP_CACHE_DIR}/${meta.file}`, hasAlpha: meta.hasAlpha, width: meta.width, height: meta.height, duration: meta.duration };
   }
 
-  /** The pending render of `key`, queueing one when none runs. */
-  #render(root: string, key: string, clip: AdapterClip, registered: RegisteredClipType, format: ClipFormat): Pending {
+  /** The pending render of `keyed`, queueing one when none runs. */
+  #render(root: string, keyed: Extract<Keyed, { key: string }>, clip: AdapterClip, format: ClipFormat): Pending {
+    const { key, registered, styleCss } = keyed;
     const id = entryId(root, key);
     const running = this.#pending.get(id);
     if (running) return running;
@@ -539,7 +551,7 @@ export class ClipRenderer {
       project: root,
       asset: clip.source ?? `${clip.type}:${clip.id}`,
       output: join(dir, key),
-      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx),
+      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx, styleCss),
     });
     const done = (async () => {
       const job = info.state === "canceled" ? info : await finished;
@@ -572,6 +584,7 @@ export class ClipRenderer {
     registered: RegisteredClipType,
     format: ClipFormat,
     ctx: JobContext,
+    styleCss?: string,
   ): Promise<void> {
     ctx.update({ step: "render", progress: 0 });
     const outDir = join(dir, `.tmp-${key}-${randomBytes(4).toString("hex")}`);
@@ -584,6 +597,7 @@ export class ClipRenderer {
         signal: ctx.signal,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
         ...elementCssOf(clip),
+        ...(styleCss ? { styleCss } : {}),
         progress: ({ fraction }) => {
           if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
         },

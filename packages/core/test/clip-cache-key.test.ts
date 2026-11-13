@@ -87,3 +87,13 @@ describe("clip render cache key with elements (ADR 0021)", () => {
     expect(clipCacheKey(base)).toBe("860bfe02caf248cce3c57980b63d9441");
   });
 });
+
+describe("clip render cache key with style tokens (ADR 0028)", () => {
+  it("is the old key without a token sheet, and changes with the sheet's hash", () => {
+    expect(clipCacheKey(base)).toBe("860bfe02caf248cce3c57980b63d9441");
+    const styled = clipCacheKey({ ...base, style: "a".repeat(32) });
+    expect(styled).not.toBe(clipCacheKey(base));
+    expect(clipCacheKey({ ...base, style: "b".repeat(32) })).not.toBe(styled);
+    expect(clipCacheKey({ ...base, style: "a".repeat(32) })).toBe(styled);
+  });
+});

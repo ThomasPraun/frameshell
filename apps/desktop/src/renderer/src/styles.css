@@ -1383,9 +1383,12 @@ code {
 /* ---------- Clip inspector (under the preview) ---------- */
 
 /* Wraps into rows when the preview column is narrow: every field stays reachable. */
+/* Capped so a tall inspector (many wrapped groups in a short window) scrolls instead of squeezing the picture to 0. */
 .clip-inspector {
   flex: none;
   min-height: 32px;
+  max-height: 50%;
+  overflow-y: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1578,6 +1581,13 @@ code {
 .clip-inspector-hint {
   color: var(--text-faint);
   font-size: 11.5px;
+}
+
+/* Edits go to one format only (ADR 0027): marked like the format switcher when it shows another format. */
+.clip-inspector-format {
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .clip-inspector-button.is-open {
@@ -3305,6 +3315,36 @@ button.track-head:focus-visible {
 }
 
 .element-note.is-warning {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Voice chain of a media clip: a head row, then one row per effect in processing order. */
+.voice-chain {
+  flex: 1 0 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.voice-chain-head,
+.voice-effect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.voice-chain-head .clip-inspector-hint {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.voice-effect-name {
+  min-width: 72px;
+}
+
+.clip-inspector-switch.on {
   border-color: var(--accent);
   color: var(--accent);
 }

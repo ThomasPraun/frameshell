@@ -1,6 +1,7 @@
 import type {
   CaptionsSetResult,
   ClipReframeResult,
+  ClipVerifyResult,
   CleanupResult,
   ConfigOperation,
   DaemonConnection,
@@ -11,6 +12,7 @@ import type {
   MulticamFacesResult,
   MulticamGalleryResult,
   MulticamTurnsResult,
+  MusicCandidatesResult,
   MusicFitResult,
   MethodName,
   MethodResult,
@@ -34,10 +36,13 @@ mutations print the new revision):
   track set <track> [--name n | --clear-name] [--index n] [--follows <track>] [--preset p] [--position pos]
            [--entry none|chars|words|line] [--keyword-color #rrggbb|none] [--keyword-scale 1-2]
            [--gap from-to … | --clear-gaps] [--muted | --unmuted] [--hidden | --shown] [--behind <plate track> | none]
+           [--format <id> [--reset]]
                                --muted silences a video, audio or program track; --hidden leaves a video or
                                program track's pictures out of export and preview (its sound still plays);
                                --behind puts a video track's pictures behind the person in front on a lower video
-                               track (export makes the plate's subject matte when missing; not in the preview yet)
+                               track (export makes the plate's subject matte when missing; not in the preview yet).
+                               --format <id> (a format other than the primary) sets a subtitle track's style
+                               fields in that format only; --reset first drops that format's style
   track remove <track> [--force]
   captions set <track> (--text "…" | --file path) [--from s] [--to s] [--replace]
                                Hand-chunked captions on a subtitle track: one phrase per line, chunks (one cue each)
@@ -55,8 +60,11 @@ mutations print the new revision):
   clip split <clip> --at s
   clip remove <clip>
   clip key <clip> --prop x|y|scale|opacity|gain --at s [--value v] [--ease linear|in|out|in-out] [--remove] [--clear]
+           [--format <id>]
                                Keyframe: --at is timeline seconds inside the clip; --value defaults to what plays
-                               there now. --remove deletes the key at --at; --clear (no --at) every key of --prop
+                               there now. --remove deletes the key at --at; --clear (no --at) every key of --prop.
+                               --format <id> keys x, y, scale or opacity in that format only; with --clear the
+                               clip moves there as in the primary again
   clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]
                                Frame a video clip for another aspect (default 9x16, for reels), keeping a face in
                                it: scales the picture to cover the frame and positions it so the face sits centered,
@@ -67,10 +75,24 @@ mutations print the new revision):
                                people scan instead; --anchor (0 left edge, 1 right edge) fixes the picture's
                                horizontal position with no face detection. Replaces the clip's x, y and scale; one
                                transaction, revert undoes it. Correct the keys with clip key or in the app
+  clip verify <clip> [--probes n] [--tolerance 0-255]
+                               Check that a generated clip (a motion clip, any adapter with a live preview) paints
+                               a pure function of time: captures --probes frames (default 12, 2 to 48) at
+                               (i + 0.37) x duration / n of the clip, each twice, cold (a fresh page seeks to the
+                               time) and after a reseek (the page shows an unrelated probe first), and compares
+                               the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
+                               naming the worst frame, pixel and element. Also warns when every probe is the same
+                               picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
+           [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
+           [--hidden | --shown] [--reset]]
+                               --format <id> (a format other than the primary, see format list) sets the clip in
+                               that format only, where its automatic layout is wrong: placement, a generated clip's
+                               props and elements, --hidden (no picture there, its sound still plays); --reset
+                               first drops what that format had. Timing and sound are every format's
                                --voice writes the style's voice chain (style.json sound.voice; by default high-pass
                                85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
                                release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
@@ -155,7 +177,7 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
-  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s]
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB]
                                Music under a voice: writes gain keys on the clips of audio track <track> that dip
                                while someone speaks on the --under tracks (video or audio; speech = sound above
                                --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
@@ -163,13 +185,20 @@ mutations print the new revision):
                                gone --release ms after it ends (default 450). The keys are the clip's level minus
                                the dip, marked as the duck's: run it again after an edit and they are replaced, keys
                                you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
-                               like any gain key; a key you set is a level, not a dip. Revert undoes it
-  transition set --at s [--kind dissolve|fade|wipe|push] [--direction left|right|up|down] [--duration s] [--track <track>…]
+                               like any gain key; a key you set is a level, not a dip. --level dB first sets the
+                               static gain of each clip so the music's loudness (EBU R128, measured once per file
+                               and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
+                               keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
+                               music fit runs the same duck again after it moves one. Revert undoes it
+  transition set --at s [--kind dissolve|fade|wipe|push|iris|dip-cut] [--direction left|right|up|down]
+           [--origin x0,y0,x1,y1] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
                                (default, sound crossfades) or fade (dip through black), 0.5 s by default. wipe and
-                               push move the picture the --direction way (default left) on the bottom video track
-                               only. A clip's start or end with nothing butted fades in or out. Short material
-                               shortens it, with a warning
+                               push move the picture the --direction way (default left), iris opens it in a circle
+                               from the centre of --origin (fractions of the frame, default its centre); these play on
+                               the bottom video track only. dip-cut: a hard cut, the clip ending there darkened 40 %
+                               over its last 3 frames (opacity keys; bottom video track, sound untouched). A clip's
+                               start or end with nothing butted fades in or out. Short material shortens it, with a warning
   transition remove --at s [--track <track>…]
   marker add --at s --label l [--color red|orange|yellow|green|blue|purple]
                                A named point on the timeline clock (a hook, a beat to land on); labels are unique
@@ -214,8 +243,18 @@ mutations print the new revision):
                                --exact keeps the start (the clip's, or --from) and changes the speed so the hit lands
                                on --end: at most 1.7 %, refused beyond it with the ends that fit; a doubtful hit
                                never does. --dry-run changes nothing. If the clip carries duck keys, duck runs again
-                               in the same transaction over the other tracks (--skip duck leaves them). One transaction
-                               (revert it)
+                               in the same transaction over the other tracks with the settings the duck was run with
+                               (--skip duck leaves them). One transaction (revert it)
+  music candidates <asset> <asset>… [--end <time>] [--from <time>] [--loudness LUFS] [--dry-run]
+                               Put 2 to 7 candidate tracks under the same picture to pick by ear: each file on its own
+                               new audio track Music 1..n, all muted but the first, at one loudness (EBU R128 over the
+                               whole file, measured once and cached): --loudness LUFS, default the quietest file's own,
+                               so none is made louder than it is. They start at --from (default 0) and play whole;
+                               with --end each is fitted like music fit slides a clip (its own final hit lands on
+                               --end) and they are ranked: files that cover the picture first, then by how sure the
+                               hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
+                               Choose with track set <track> --unmuted, then track remove <others> --force. One
+                               transaction (revert it)
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -309,6 +348,7 @@ export const TIMELINE_OPTIONS = {
   track: { type: "string", multiple: true },
   kind: { type: "string" },
   direction: { type: "string" },
+  origin: { type: "string" },
   prop: { type: "string" },
   ease: { type: "string" },
   value: { type: "string" },
@@ -365,6 +405,7 @@ export const TIMELINE_OPTIONS = {
   gap: { type: "string", multiple: true },
   "clear-gaps": { type: "boolean" },
   format: { type: "string" },
+  reset: { type: "boolean" },
   person: { type: "string" },
   anchor: { type: "string" },
   pauses: { type: "string" },
@@ -376,6 +417,10 @@ export const TIMELINE_OPTIONS = {
   "dry-run": { type: "boolean" },
   hit: { type: "string" },
   exact: { type: "boolean" },
+  level: { type: "string" },
+  loudness: { type: "string" },
+  probes: { type: "string" },
+  tolerance: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -403,7 +448,7 @@ const ALLOWED: Record<string, string[]> = {
   "timeline show": [],
   "track list": [],
   "track add": ["name", "follows", "index", "preset", "position", "entry", "keyword-color", "keyword-scale"],
-  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind"],
+  "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind", "format", "reset"],
   "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
   "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
@@ -411,8 +456,9 @@ const ALLOWED: Record<string, string[]> = {
   "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window", "snap-to"],
   "clip split": ["at", "snap-to"],
   "clip remove": [],
-  "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to"],
+  "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to", "format"],
   "clip reframe": ["format", "person", "anchor"],
+  "clip verify": ["probes", "tolerance"],
   "clip set": [
     "speed",
     "gain",
@@ -435,8 +481,12 @@ const ALLOWED: Record<string, string[]> = {
     "clear-backdrop",
     "script-ref",
     "clear-script-ref",
+    "format",
+    "hidden",
+    "shown",
+    "reset",
   ],
-  "transition set": ["at", "kind", "direction", "duration", "track", "snap-to"],
+  "transition set": ["at", "kind", "direction", "origin", "duration", "track", "snap-to"],
   "transition remove": ["at", "track", "snap-to"],
   "marker add": ["at", "label", "color", "snap-to"],
   "marker set": ["at", "label", "color", "clear-color", "snap-to"],
@@ -457,10 +507,11 @@ const ALLOWED: Record<string, string[]> = {
   "image cutout": ["mask"],
   "multicam turns": [],
   "direct ": ["template", "rules", "from", "to", "replace-human"],
-  "duck ": ["under", "depth", "attack", "release", "threshold", "gap"],
+  "duck ": ["under", "depth", "attack", "release", "threshold", "gap", "level"],
   cut: ["from", "to", "no-snap", "snap-window", "snap-to"],
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
+  "music candidates": ["end", "from", "loudness", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -492,6 +543,7 @@ const ARITY: Record<string, [number, number]> = {
   "tempo clear": [0, 0],
   "tempo show": [0, 0],
   "clip reframe": [1, 1],
+  "clip verify": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -509,6 +561,7 @@ const ARITY: Record<string, [number, number]> = {
   cut: [0, Number.POSITIVE_INFINITY],
   cleanup: [0, 0],
   "music fit": [1, 1],
+  "music candidates": [2, 7],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -562,6 +615,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     return value;
   };
   const str = (flag: string) => values[flag] as string | undefined;
+  /** A rectangle in fractions of the frame: four numbers `x0,y0,x1,y1`. */
+  const frameRect = (flag: string): number[] | undefined => {
+    const raw = str(flag);
+    if (raw === undefined) return undefined;
+    const parts = raw.split(",").map((part) => Number(part.trim()));
+    if (parts.length !== 4 || raw.split(",").some((part) => part.trim() === "") || parts.some((part) => !Number.isFinite(part))) {
+      throw new UsageError(`--${flag}: expected x0,y0,x1,y1 in fractions of the frame, e.g. 0.6,0.2,0.8,0.4, got "${raw}".`);
+    }
+    return parts;
+  };
   /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N` or `bar:N`, optionally `+s` or `-s`) for the daemon to resolve. */
   const when = (flag: string): number | string | undefined => {
     const raw = values[flag];
@@ -637,6 +700,11 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     if (values["no-snap"] === true && values["snap-window"] !== undefined) throw new UsageError("Pass --no-snap or --snap-window, not both.");
     return { snap: values["no-snap"] === true ? false : undefined, snapWindow: num("snap-window") };
   };
+  /** `--format <id>` and `--reset` of `clip set`, `clip key` and `track set` (ADR 0027 overrides), as `format` / `reset`. */
+  const inFormat = () => {
+    if (values["reset"] === true && str("format") === undefined) throw new UsageError("--reset drops a format's override: pass --format <id> too.");
+    return { format: str("format"), reset: values["reset"] === true ? true : undefined };
+  };
   /** `--ripple` and its `--ripple-track` scope, as `ripple` / `rippleTracks` params. */
   const ripple = () => {
     const tracks = values["ripple-track"] as string[] | undefined;
@@ -677,6 +745,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
         hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
         behind: str("behind") === "none" ? null : str("behind"),
+        ...inFormat(),
       });
       break;
     }
@@ -752,6 +821,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         ease: str("ease"),
         remove: values["remove"] === true ? true : undefined,
         clear: values["clear"] === true ? true : undefined,
+        format: str("format"),
         ...snapTo(),
       });
       break;
@@ -761,7 +831,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = command === "transition set" ? "transition.set" : "transition.remove";
       if (values["at"] === undefined) throw new UsageError(`\`frameshell ${command}\` needs --at <seconds|marker>, a clip edge.`);
       Object.assign(params, { at: when("at"), tracks, ...snapTo() });
-      if (method === "transition.set") Object.assign(params, { kind: str("kind"), direction: str("direction"), duration: num("duration") });
+      if (method === "transition.set") {
+        Object.assign(params, { kind: str("kind"), direction: str("direction"), origin: frameRect("origin"), duration: num("duration") });
+      }
       break;
     }
     case "marker add":
@@ -797,6 +869,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "clip set": {
       method = "clip.set";
       if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
+      if (values["hidden"] === true && values["shown"] === true) throw new UsageError("Pass --hidden or --shown, not both.");
       if (str("script-ref") !== undefined && values["clear-script-ref"] === true) {
         throw new UsageError("Pass --script-ref or --clear-script-ref, not both.");
       }
@@ -827,6 +900,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
         scriptRef: values["clear-script-ref"] === true ? null : str("script-ref"),
+        hidden: values["hidden"] === true ? true : values["shown"] === true ? false : undefined,
+        ...inFormat(),
       });
       break;
     }
@@ -961,6 +1036,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("person") !== undefined && str("anchor") !== undefined) throw new UsageError("Pass --person or --anchor, not both: they are two ways to place the picture.");
       Object.assign(params, { clip: args[0], format: str("format"), person: str("person"), anchor: num("anchor") });
       break;
+    case "clip verify": {
+      method = "clip.verify";
+      const probes = num("probes");
+      if (probes !== undefined && (!Number.isInteger(probes) || probes < 2 || probes > 48)) throw new UsageError("--probes: expected a whole number from 2 to 48.");
+      const tolerance = num("tolerance");
+      if (tolerance !== undefined && (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255)) throw new UsageError("--tolerance: expected a whole number from 0 to 255.");
+      Object.assign(params, { clip: args[0], probes, tolerance });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -999,6 +1083,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         releaseMs: num("release"),
         threshold: num("threshold"),
         gap: duckGap(),
+        level: num("level"),
       });
       break;
     }
@@ -1025,6 +1110,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         hit: num("hit"),
         exact: values["exact"] === true ? true : undefined,
         skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
+    case "music candidates":
+      method = "music.candidates";
+      Object.assign(params, {
+        assets: args,
+        end: when("end"),
+        from: when("from"),
+        loudness: num("loudness"),
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
@@ -1065,6 +1160,7 @@ export async function executeTimeline(
   cwd: string,
   json: boolean,
   onProgress?: (progress: Progress) => void,
+  exit?: { code: number },
 ): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
   if (inv.voiceFromStyle || inv.glassFromStyle) {
@@ -1079,6 +1175,7 @@ export async function executeTimeline(
     // Compact on purpose: agents read this, and indentation roughly doubles its tokens.
     return json ? `${JSON.stringify(result)}\n` : formatTimeline(result as TimelineView);
   }
+  if (inv.method === "clip.verify" && !(result as ClipVerifyResult).ok && exit) exit.code = 1;
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
   if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
@@ -1110,6 +1207,7 @@ export async function executeTimeline(
   }
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
+  if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -1117,12 +1215,36 @@ export async function executeTimeline(
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
   if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
+  if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
   }
   return formatOperation(result as OperationResult);
+}
+
+/** `clip verify` for people: the verdict, one line per probe, then the worst frame and element. */
+export function formatClipVerify(result: ClipVerifyResult): string {
+  const { probes, worst } = result;
+  const failed = probes.filter((probe) => !probe.ok).length;
+  const lines = [
+    `${result.ok ? "OK" : "FAIL"} · ${result.type} clip ${result.clip} of ${result.timeline} · ${probes.length} probes at ${result.size.width}x${result.size.height}, ` +
+      `${result.distinct} different pictures · tolerance ${result.tolerance}/255` +
+      (result.ok ? "" : ` · ${failed} of ${probes.length} probes differ after a reseek`),
+  ];
+  for (const probe of probes) {
+    lines.push(`  ${probe.at.toFixed(3).padStart(8)} s  after ${probe.reseekFrom.toFixed(3)} s  max ${String(probe.max).padStart(3)}/255  ${probe.pixels} px over  ${probe.ok ? "ok" : "DIFFERS"}`);
+  }
+  if (worst) {
+    const element = worst.element ? `${worst.element.selector}${worst.element.text === "" ? "" : ` "${worst.element.text}"`}` : "nothing paints there (transparent)";
+    lines.push(`Worst: ${worst.at.toFixed(3)} s, pixel ${worst.pixel.x},${worst.pixel.y}, ${worst.max}/255 · ${element}`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (!result.ok) {
+    lines.push("The picture depends on the order frames are painted. Look for CSS transitions, timers, requestAnimationFrame, Date, unseeded random, will-change or 3D transforms on that element.");
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function formatCaptions(result: CaptionsSetResult): string {
@@ -1150,6 +1272,26 @@ function formatMusicFit(result: MusicFitResult): string {
   if (hit.candidates.length > 1) lines.push(`Other strong hits (--hit): ${hit.candidates.slice(0, -1).map((candidate) => s(candidate.at)).join(", ")}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicCandidates(result: MusicCandidatesResult): string {
+  const s = (value: number) => `${value.toFixed(2)} s`;
+  const db = (value: number) => `${value > 0 ? "+" : ""}${value} dB`;
+  const lines = [`Music candidates · ${result.candidates.length} track${result.candidates.length === 1 ? "" : "s"} at ${result.loudness.target} LUFS (${result.loudness.source === "given" ? "asked" : "the quietest file's own"})${result.dryRun ? " · dry run" : ""}`];
+  for (const c of result.candidates) {
+    const where = c.track ? `${c.name} (${c.track}, clip ${c.clip})` : c.name;
+    lines.push(`  ${c.rank}. ${c.asset}  ${where}${c.muted ? "" : "  unmuted"}`);
+    const fit = c.hit && c.landsAt !== null ? `, final hit ${c.hit.source === "given" ? "" : `${Math.round(c.hit.confidence * 100)} % sure `}lands on ${s(c.landsAt)}` : "";
+    lines.push(`     ${c.loudness} LUFS, gain ${db(c.gain)}; plays ${s(c.place.start)}–${s(c.place.end)} from ${s(c.place.in)} of the file${fit}`);
+    if (c.introCut > 0) lines.push(`     intro dropped: ${s(c.introCut)}`);
+    if (c.silentBefore > 0) lines.push(`     nothing plays in the first ${s(c.silentBefore)}: the file is shorter than the picture before the hit`);
+    for (const warning of c.warnings) lines.push(`     warning: ${warning}`);
+  }
+  for (const skip of result.skipped) lines.push(`Left out ${skip.asset}: ${skip.reason}`);
+  lines.push(`Ranking: ${result.ranking}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -1208,7 +1350,10 @@ function formatClipReframe(result: ClipReframeResult): string {
 function formatTrackDuck(result: TrackDuckResult): string {
   const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
   const written = result.changes.updated.length;
-  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${formatOperation(result)}`;
+  const level = result.level
+    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
+    : "";
+  return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${level}${formatOperation(result)}`;
 }
 
 function formatMulticamFaces(result: MulticamFacesResult): string {

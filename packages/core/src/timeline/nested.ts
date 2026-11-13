@@ -1,5 +1,5 @@
 import { RpcError } from "@frameshell/protocol";
-import { type Timeline, flattenTimeline, movesPicture } from "@frameshell/schema";
+import { type Timeline, flattenTimeline, formatTimeline, movesPicture } from "@frameshell/schema";
 import { readTimelineFile } from "./service.js";
 
 /** Reads a nested timeline by clip `source` (project-relative); null when missing or invalid. */
@@ -38,6 +38,19 @@ export async function resolveNested(root: string, timeline: Timeline, read: Nest
     }
   }
   return flattenTimeline(timeline, (source) => nested.get(source) ?? null, fps);
+}
+
+/**
+ * {@link resolveNested} of `timeline` as it plays in project format `format` (ADR 0027): that format's overrides
+ * applied to it and to every nested timeline before flattening (`formatTimeline`). Absent: as stored, the primary.
+ */
+export function resolveNestedIn(root: string, timeline: Timeline, format: string | undefined, read: NestedReader = readNestedFile, fps?: number): Promise<Timeline> {
+  if (format === undefined) return resolveNested(root, timeline, read, fps);
+  const formatted: NestedReader = async (at, source) => {
+    const found = await read(at, source);
+    return found && formatTimeline(found, format);
+  };
+  return resolveNested(root, formatTimeline(timeline, format), formatted, fps);
 }
 
 /** A transformed nested clip whose timeline shows multicam shots. */

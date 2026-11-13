@@ -1,5 +1,6 @@
-import { type Backdrop, type ClipKey, type ElementAdjust, parseStyleFile, resolveStyle, STYLE_FILE, glassOf } from "@frameshell/schema";
-import { keyedValueAt } from "@frameshell/schema/composite";
+import { type Backdrop, type ClipFormatOverride, type ClipKey, type ElementAdjust, clipInFormat, glassOf } from "@frameshell/schema";
+import type { TimelineView } from "@frameshell/protocol";
+import { type Placement, keyedValueAt } from "@frameshell/schema/composite";
 import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { useEffect, useMemo, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
@@ -9,9 +10,11 @@ import { useElementMode } from "../preview/element-mode.js";
 import { useTransport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
+import { VoiceControl } from "./VoiceControl.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "../timeline/layout.js";
 import { type EdgeState, KEY_PROPS, type KeyBox, type KeyProp, clipClock, edgeState, keyAt } from "../timeline/transitions.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
+import { projectStyle } from "../project-style.js";
 import { t } from "../i18n.js";
 import { sendClipEdit } from "./clip-edits.js";
 import { NumberField } from "./inspector-fields.js";
@@ -23,17 +26,24 @@ import { ShotInspector } from "./ShotInspector.js";
  * shot's layout and angles in {@link ShotInspector}. Each
  * change is one `clip.set` by `ui`, saved at once and undoable from the
  * timeline; values shown are the saved ones, from the shared timeline feed.
+ * A media clip's voice chain (ADR 0031) is edited in {@link VoiceControl}.
  * Video projects add the clip's edge transitions and keyframes (ADR 0018):
  * a keyed property shows its value at the playhead, and editing it keys it there.
  * A generated clip lists its element adjustments (ADR 0021) while it has any
  * or the preview edits its elements.
+ * With `format` (the preview shows a format other than the primary, ADR 0027)
+ * placement and keys show and set the clip in that format, which it can also
+ * be hidden in or set back to the primary; sound and transitions are shared.
+ * `fillOf` gives the placement that fills the format's frame for footage
+ * covering it, which has no placement of its own there yet.
  */
-export function ClipInspector() {
-  const { view } = useTimelineView(SELECTION_TIMELINE);
+export function ClipInspector({ format = null, fillOf = null }: { format?: string | null; fillOf?: ((clip: string) => Placement | null) | null }) {
+  const { view: stored } = useTimelineView(SELECTION_TIMELINE);
   const { clips } = useSelection();
   const { time: playhead, fps } = useTransport();
   const image = useProjectKind() === "image";
   const mode = useElementMode();
+  const view = useMemo(() => (stored && format ? clipsInFormat(stored, format) : stored), [stored, format]);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const [error, setError] = useState<string | null>(null);
   const target = clips.length === 1 && layout ? find(layout.rows, clips[0]!) : null;
@@ -53,16 +63,23 @@ export function ClipInspector() {
     setError(null);
     sendClipEdit(edit, options).catch((failure: unknown) => setError((failure as Error).message));
   };
-  const transform = clip.transform ?? { x: 0, y: 0, scale: 1, opacity: 1 };
+  // Covering footage shows, and its first edit stores, the whole placement that fills the frame: one field alone
+  // would make it a placed clip, fitted (letterboxed) with that one value.
+  const fill = format !== null && fillOf ? fillOf(clip.id) : null;
+  const transform = fill ?? clip.transform ?? { x: 0, y: 0, scale: 1, opacity: 1 };
+  // Placement and picture keys go to the format shown; gain and everything else is every format's.
+  const inFormat = (prop: KeyProp) => (format !== null && prop !== "gain" ? { format } : {});
   // A keyed property follows its keys, so an entry there keys it at the playhead instead of changing the unused static value.
   const keyed = (prop: KeyProp) => keyedValueAt(clip.keys[prop] as ClipKey[] | undefined, clipClock(clip, playhead));
-  const setKeyed = (prop: KeyProp, value: number) => send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, value } }, { label: "Change keyframe" });
+  const setKeyed = (prop: KeyProp, value: number) =>
+    send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, value, ...inFormat(prop) } }, { label: "Change keyframe" });
   const setTransform = (name: "x" | "y" | "scale" | "opacity", value: number) =>
-    clip.keys[name] ? setKeyed(name, value) : send({ op: "clip.set", args: { clip: clip.id, transform: { [name]: value } } });
+    clip.keys[name] ? setKeyed(name, value) : send({ op: "clip.set", args: { clip: clip.id, transform: { ...fill, [name]: value }, ...inFormat(name) } });
   const placed = row.kind === "video";
+  const override = format !== null ? storedOverride(stored, clip.id, format) : null;
   // An image project has no sound (ADR 0017).
   const audible = clip.kind === "media" && !image;
-  const moved = transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1;
+  const moved = fill === null && (transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1);
 
   return (
     <div className="clip-inspector" role="group" aria-label={t.inspector.settingsOfClip(clip.name)} data-clip={clip.id}>
@@ -79,10 +96,35 @@ export function ClipInspector() {
             className="clip-inspector-button"
             disabled={!moved}
             data-tip={t.inspector.resetTitle}
-            onClick={() => send({ op: "clip.set", args: { clip: clip.id, transform: { x: 0, y: 0, scale: 1, opacity: 1 } } })}
+            onClick={() => send({ op: "clip.set", args: { clip: clip.id, transform: { x: 0, y: 0, scale: 1, opacity: 1 }, ...inFormat("x") } })}
           >
             {t.inspector.reset}
           </button>
+          {format !== null && !clip.id.includes("/") && (
+            <>
+              <span className="clip-inspector-format" data-testid="inspector-format" data-tip={t.inspector.inFormatTitle(format)}>
+                {t.inspector.inFormat(format)}
+              </span>
+              <button
+                className={`clip-inspector-button${override?.hidden === true ? " on" : ""}`}
+                aria-pressed={override?.hidden === true}
+                data-testid="inspector-hide-in-format"
+                data-tip={t.inspector.hideInFormatTitle(format)}
+                onClick={() => send({ op: "clip.set", args: { clip: clip.id, format, hidden: override?.hidden !== true } })}
+              >
+                {t.inspector.hideInFormat(format)}
+              </button>
+              <button
+                className="clip-inspector-button"
+                disabled={override === null}
+                data-testid="inspector-use-primary"
+                data-tip={t.inspector.usePrimaryTitle(format)}
+                onClick={() => send({ op: "clip.set", args: { clip: clip.id, format, reset: true } })}
+              >
+                {t.inspector.usePrimary}
+              </button>
+            </>
+          )}
           {clip.type === "media" && (
             <button
               className="clip-inspector-button clip-inspector-replace"
@@ -115,6 +157,7 @@ export function ClipInspector() {
           </button>
         </div>
       )}
+      {audible && <VoiceControl clip={clip.id} effects={clip.audioEffects} onSend={send} onError={setError} />}
       {!image && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.transitions}>
           {(["in", "out"] as const).map((side) => (
@@ -131,7 +174,7 @@ export function ClipInspector() {
               keyed={clip.keys[prop] !== undefined}
               atKey={keyAt(clip, clip.keys[prop], playhead, fps)}
               outside={playhead < clip.start || playhead > clip.end}
-              onSend={(args, label) => send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, ...args } }, { label })}
+              onSend={(args, label) => send({ op: "clip.key", args: { clip: clip.id, prop, time: playhead, ...args, ...inFormat(prop) } }, { label })}
             />
           ))}
         </div>
@@ -162,6 +205,18 @@ function find(rows: readonly TrackRow[], id: string): { row: TrackRow; clip: Cli
     if (clip) return { row, clip };
   }
   return null;
+}
+
+/** `view` with every clip as it shows in `format` (`clipInFormat`); hidden clips keep their own opacity, unlike in the preview. */
+function clipsInFormat(view: TimelineView, format: string): TimelineView {
+  return { ...view, tracks: view.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => clipInFormat(clip, format)) })) };
+}
+
+/** Stored override of clip `id` in `format` (ADR 0027); null when it has none there. */
+function storedOverride(view: TimelineView | null, id: string, format: string): ClipFormatOverride | null {
+  const clip = view?.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === id);
+  const formats = clip?.["formats"] as Record<string, ClipFormatOverride> | undefined;
+  return formats?.[format] ?? null;
 }
 
 const EDGE_LABELS = { in: () => t.inspector.transitionStart, out: () => t.inspector.transitionEnd };
@@ -209,9 +264,9 @@ function TransitionEdge({ side, state, onSend }: { side: "in" | "out"; state: Ed
           name="length"
           stored={state.length}
           onCommit={(value) =>
-            // A shaped dissolve (ADR 0030) keeps its shape: the inspector does not edit shapes yet.
+            // A shaped dissolve (ADR 0030) keeps its shape (an iris its origin): the inspector does not edit shapes yet.
             state.shape
-              ? onSend({ op: "transition.set", args: { at: state.at, kind: state.shape.kind, direction: state.shape.direction ?? "left", duration: value } }, { label: "Change transition length" })
+              ? onSend({ op: "transition.set", args: { at: state.at, ...state.shape, duration: value } }, { label: "Change transition length" })
               : set(state.kind!, value, "Change transition length")
           }
         />
@@ -275,11 +330,7 @@ function KeyControl({
 
 /** The project's glass numbers (`style.json` `glass`, ADR 0028), the motion kit's without a style file. */
 async function styleGlass(): Promise<Required<Backdrop>> {
-  const text = await window.frameshell.files.read(STYLE_FILE).catch(() => null);
-  if (text === null) return glassOf(resolveStyle(null).glass);
-  const parsed = parseStyleFile(JSON.parse(text));
-  if (!parsed.ok) throw new Error(`${STYLE_FILE}: ${parsed.error}`);
-  return glassOf(resolveStyle(parsed.value).glass);
+  return glassOf((await projectStyle()).glass);
 }
 
 /**

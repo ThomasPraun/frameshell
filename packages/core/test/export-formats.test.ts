@@ -113,6 +113,25 @@ describe("formats of a project", () => {
     MEDIA_TIMEOUT,
   );
 
+  it(
+    "lays a clip out by its override in that format only (ADR 0027 decision 5): hidden in 9:16, untouched in 16:9",
+    async () => {
+      const clip = (await conn.request("timeline.show", { cwd: project })).tracks[0]!.clips[0]!.id;
+      await expect(conn.request("clip.set", { cwd: project, clip, format: "16x9", hidden: true })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+      await expect(conn.request("clip.set", { cwd: project, clip, format: "4x5", hidden: true })).rejects.toMatchObject({ code: ErrorCode.FormatNotFound });
+      const hidden = await conn.request("clip.set", { cwd: project, clip, format: "9x16", hidden: true });
+      const vertical = join(tempDir(), "hidden.png");
+      await conn.request("frame", { cwd: project, at: 0.5, out: vertical, projectFormat: "9x16" });
+      expect(await topRowMean(vertical, 1080)).toBeLessThan(5);
+      const wide = join(tempDir(), "shown.png");
+      await conn.request("frame", { cwd: project, at: 0.5, out: wide });
+      expect(await topRowMean(wide, 1920)).toBeGreaterThan(20);
+      await conn.request("revert", { cwd: project, target: hidden.operation.tx });
+      expect((await conn.request("timeline.show", { cwd: project })).tracks[0]!.clips[0]).not.toHaveProperty("formats");
+    },
+    MEDIA_TIMEOUT,
+  );
+
   it("refuses a preset of another aspect than the format (the format owns the frame)", async () => {
     await expect(conn.request("frame", { cwd: project, at: 0.5, out: join(tempDir(), "x.png"), preset: "vertical-1080x1920" })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,

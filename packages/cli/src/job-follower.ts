@@ -52,13 +52,15 @@ export async function followJobs(conn: DaemonConnection, cwd: string): Promise<J
         listener = take;
         // Covers jobs that changed before the subscription (a reused queued job). The reply may be older than
         // events already read: a job finishing while the daemon writes it sends `done` first. Never step back, also
-        // within a run, where progress only grows: an older step after a newer one would print out of order.
+        // within a run, where progress only grows: an older step after a newer one would print out of order. A step
+        // starts at the progress where the last one ended (hash 100 % = probe 0 %), so an equal progress is not new:
+        // if it is, its event is still on the way.
         conn.request("job.list", { cwd }).then(({ jobs }) => {
           for (const job of jobs) {
             if (!wanted.has(job.id)) continue;
             const seen = latest.get(job.id);
-            if (seen && (stage(job) < stage(seen) || (stage(job) === stage(seen) && job.progress < seen.progress))) continue;
-            if (!seen || seen.state !== job.state || seen.step !== job.step || seen.progress !== job.progress) take(job);
+            if (seen && (stage(job) < stage(seen) || (stage(job) === stage(seen) && job.progress <= seen.progress))) continue;
+            take(job);
           }
           snapshotTaken = true;
           settleIfDone();

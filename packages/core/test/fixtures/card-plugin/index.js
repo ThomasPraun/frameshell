@@ -1,7 +1,8 @@
 // Test fixture: a clip adapter that renders a flat colour card with ffmpeg, like a HyperFrames clip but in
 // milliseconds. The composition is a JSON file: { color, alpha, seconds, delayMs, fail }. Props: { label? }.
 // Live preview (ADR 0010): the page is `live.html` next to the card; the card's { liveRoot, liveEntry, liveFail }
-// override or break it. `still` renders the same cards but has no live preview.
+// override or break it. `still` renders the same cards but has no live preview. `token-card` takes the style's token
+// sheet (ADR 0028); a card's { requireStyle } fails the render unless the sheet it got contains that text.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -38,6 +39,7 @@ export function activate(api) {
     async render(clip, ctx) {
       const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
+      if (card.requireStyle && !ctx.styleCss?.includes(card.requireStyle)) throw new Error(`card ${clip.source} got no style sheet with ${card.requireStyle}`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
         await new Promise((resolve) => setTimeout(resolve, (card.delayMs ?? 0) / steps));
@@ -63,7 +65,7 @@ export function activate(api) {
     },
   };
   api.registerClipType(still);
-  api.registerClipType({
+  const card = {
     ...still,
     type: "card",
     // Takes `elements` (ADR 0021); its flat render ignores the sheet, the live bridge applies it.
@@ -77,5 +79,7 @@ export function activate(api) {
         `document.documentElement.style.background = ${JSON.stringify(card.color ?? "white")}; window.cardFormat = ${JSON.stringify([ctx.width, ctx.height, ctx.fps])};`;
       return { root: card.liveRoot ?? dir, entry: card.liveEntry ?? `${dir}/live.html`, head };
     },
-  });
+  };
+  api.registerClipType(card);
+  api.registerClipType({ ...card, type: "token-card", styleTokens: true });
 }

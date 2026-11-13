@@ -206,6 +206,18 @@ describe("frameshell render and frame", () => {
     120_000,
   );
 
+  it("refuses --preset gif with --cover-frame, and renders a GIF that loops", () => {
+    const refused = frameshell(["render", "--preset", "gif", "--cover-frame", "--out", "out/never.gif"]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toMatch(/A GIF cannot have a cover frame/);
+    const result = frameshell(["render", "--preset", "gif", "--out", "out/clip.gif"]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/^Rendered .*clip\.gif\n/);
+    const bytes = readFileSync(join(project, "out", "clip.gif"));
+    expect(bytes.subarray(0, 6).toString("latin1")).toBe("GIF89a");
+    expect(bytes.includes(Buffer.from("NETSCAPE2.0"))).toBe(true);
+  }, 120_000);
+
   it("makes an image project with init --kind image", () => {
     const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-image-"))), "poster");
     const result = frameshell(["init", dir, "--kind", "image", "--no-skill"], tmpdir());

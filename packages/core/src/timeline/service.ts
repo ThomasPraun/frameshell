@@ -32,7 +32,7 @@ import {
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
-import { type BeatsFile, type Marker, type ParseResult, type Timeline, parseTimeline } from "@frameshell/schema";
+import { type BeatsFile, type Marker, type ParseResult, type Timeline, parseTimeline, projectFormats } from "@frameshell/schema";
 import {
   type ConfigChanged,
   type ConfigEdit,
@@ -91,7 +91,7 @@ import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
 /** Project settings an operation's {@link EditContext} takes from `frameshell.json`. */
-type EditSettings = Pick<EditContext, "snapWindow" | "defaultStillDuration">;
+type EditSettings = Pick<EditContext, "snapWindow" | "defaultStillDuration" | "formats">;
 
 /** Options for {@link TimelineService}. */
 export interface TimelineServiceOptions {
@@ -712,6 +712,50 @@ export class TimelineService {
       if (!synced) return this.proposalDiff(root, tx);
     }
     return { tx: proposal.tx, timelines, config: this.#configChanges(proposal) };
+  }
+
+  /**
+   * A hand edit of config document `doc` that is already in its file (ADR 0036 slice 5): `edit.base` is the keyed
+   * state the journal last recorded, `edit.next` the file's. With no review mode it is journaled as a `file.edit`
+   * operation of author `file`, the file left as it is. In review mode it waits in a ready proposal of author
+   * `file` and the document goes back to `edit.base`; when another proposal is open the edit is not taken in:
+   * `edit.keep` saves the edited file aside, the document goes back to `edit.base`, and the result is null (the
+   * `timeline.patch` rule of {@link TimelineService.reconcile}). Caller holds `ConfigJournal.serial(root)`.
+   */
+  async directConfigEdit(
+    root: string,
+    doc: ConfigDoc,
+    edit: { file: string; base: ConfigState; next: ConfigState; keep(): Promise<void> },
+  ): Promise<ConfigChanged | null> {
+    const journal = this.#journal();
+    const saver = this.#fileSaver();
+    const who = { author: saver.author, tx: { ...saver.tx, label: `Edit ${edit.file}` } };
+    const [op, args] = ["file.edit", { path: edit.file }] as const;
+    let route: Route | null;
+    try {
+      route = await this.#route(root, who.author, who.tx);
+    } catch (error) {
+      if (!(error instanceof RpcError)) throw error;
+      await edit.keep();
+      await journal.write(root, doc, edit.base);
+      return null;
+    }
+    if (!route) {
+      const record = { op, args, author: who.author, tx: who.tx };
+      const entry = await journal.commit(root, doc, record, edit.base, edit.next, async () => {});
+      return { operation: configOperation(entry), state: edit.next, proposal: null };
+    }
+    // Only the proposal's base is needed: the change itself is made below, on the file as it was.
+    route.release();
+    await journal.write(root, doc, edit.base);
+    try {
+      const changed = await this.changeConfig(root, doc, who, async () => ({ op, args, after: edit.next }));
+      await this.ready(who.tx.id);
+      return changed;
+    } catch (error) {
+      await journal.write(root, doc, edit.next).catch(() => {});
+      throw error;
+    }
   }
 
   /**
@@ -1527,6 +1571,7 @@ export class TimelineService {
         ...(track.kind === "subtitles" && track.style ? { style: track.style } : {}),
         ...(track.kind === "subtitles" && track.phrases ? { phrases: track.phrases } : {}),
         ...(track.kind === "subtitles" && track.gaps ? { gaps: track.gaps } : {}),
+        ...(track.kind === "subtitles" && track.formats ? { formats: track.formats } : {}),
         ...(track.kind !== "subtitles" && track.muted === true ? { muted: true as const } : {}),
         ...(track.kind !== "subtitles" && track.kind !== "audio" && track.hidden === true ? { hidden: true as const } : {}),
         ...(track.kind === "video" && track.behind !== undefined ? { behind: track.behind } : {}),
@@ -1688,6 +1733,7 @@ export class TimelineService {
     const snap: EditSettings = {
       ...(window !== undefined ? { snapWindow: window } : {}),
       ...(project?.config.kind === "image" ? { defaultStillDuration: 1 / fps } : {}),
+      ...(project ? { formats: projectFormats(project.config) } : {}),
     };
     const path = timelinePath(root, id);
     const key = await this.#key(root, id);

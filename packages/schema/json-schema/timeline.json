@@ -118,6 +118,59 @@
                               "description": "Default false.",
                               "type": "boolean"
                             },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
+                            },
                             "effects": {
                               "description": "Audio effects applied in order (at most 8), e.g. the voice chain highpass, denoise, compressor. Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
                               "minItems": 1,
@@ -233,12 +286,13 @@
                               "type": "string",
                               "enum": [
                                 "wipe",
-                                "push"
+                                "push",
+                                "iris"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
                             },
                             "direction": {
-                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -246,6 +300,35 @@
                                 "up",
                                 "down"
                               ]
+                            },
+                            "origin": {
+                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 4,
+                              "maxItems": 4
                             }
                           },
                           "required": [
@@ -483,6 +566,266 @@
                           },
                           "additionalProperties": false,
                           "description": "Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`)."
+                        },
+                        "formats": {
+                          "description": "Per-format overrides by format id (ADR 0027): how the clip shows in that format of `frameshell.json` instead of as in the primary. Video tracks only. Ignored in the primary format and for a format the project no longer declares.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+                            "description": "Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp."
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "transform": {
+                                "description": "Placement in this format, field by field over the clip's `transform`; a field given here also drops the clip's own keys of it.",
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "description": "Horizontal offset in project pixels from the centered position. Default 0.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Vertical offset in project pixels from the centered position. Default 0.",
+                                    "type": "number"
+                                  },
+                                  "scale": {
+                                    "description": "Uniform scale factor. Default 1.",
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "opacity": {
+                                    "description": "0 (invisible) to 1 (opaque). Default 1.",
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "keys": {
+                                "description": "Picture keys in this format (`x`, `y`, `scale`, `opacity`), each list replacing the clip's own keys of that property.",
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number"
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "y": {
+                                    "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number"
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "scale": {
+                                    "description": "Keys of this property (factor), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "opacity": {
+                                    "description": "Keys of this property (0 to 1), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "hidden": {
+                                "description": "True: the clip shows no picture in this format; its sound still plays.",
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "props": {
+                                "description": "Generated (adapter) clips: props in this format, key by key over the clip's `props`; the clip renders again for it.",
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "elements": {
+                                "description": "Generated clips: element adjustments in this format, selector by selector over the clip's `elements`.",
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "x": {
+                                      "description": "Horizontal move in composition CSS px. Default 0.",
+                                      "type": "number"
+                                    },
+                                    "y": {
+                                      "description": "Vertical move in composition CSS px. Default 0.",
+                                      "type": "number"
+                                    },
+                                    "scale": {
+                                      "description": "Uniform factor about the element's centre. Default 1.",
+                                      "type": "number",
+                                      "exclusiveMinimum": 0
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "The clip in one format other than the primary."
+                          }
                         },
                         "type": {
                           "type": "string",
@@ -578,6 +921,59 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -594,12 +990,13 @@
                               "type": "string",
                               "enum": [
                                 "wipe",
-                                "push"
+                                "push",
+                                "iris"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
                             },
                             "direction": {
-                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -607,6 +1004,35 @@
                                 "up",
                                 "down"
                               ]
+                            },
+                            "origin": {
+                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 4,
+                              "maxItems": 4
                             }
                           },
                           "required": [
@@ -844,6 +1270,266 @@
                           },
                           "additionalProperties": false,
                           "description": "Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`)."
+                        },
+                        "formats": {
+                          "description": "Per-format overrides by format id (ADR 0027): how the clip shows in that format of `frameshell.json` instead of as in the primary. Video tracks only. Ignored in the primary format and for a format the project no longer declares.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+                            "description": "Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp."
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "transform": {
+                                "description": "Placement in this format, field by field over the clip's `transform`; a field given here also drops the clip's own keys of it.",
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "description": "Horizontal offset in project pixels from the centered position. Default 0.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Vertical offset in project pixels from the centered position. Default 0.",
+                                    "type": "number"
+                                  },
+                                  "scale": {
+                                    "description": "Uniform scale factor. Default 1.",
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "opacity": {
+                                    "description": "0 (invisible) to 1 (opaque). Default 1.",
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "keys": {
+                                "description": "Picture keys in this format (`x`, `y`, `scale`, `opacity`), each list replacing the clip's own keys of that property.",
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number"
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "y": {
+                                    "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number"
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "scale": {
+                                    "description": "Keys of this property (factor), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "opacity": {
+                                    "description": "Keys of this property (0 to 1), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "hidden": {
+                                "description": "True: the clip shows no picture in this format; its sound still plays.",
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "props": {
+                                "description": "Generated (adapter) clips: props in this format, key by key over the clip's `props`; the clip renders again for it.",
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "elements": {
+                                "description": "Generated clips: element adjustments in this format, selector by selector over the clip's `elements`.",
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "x": {
+                                      "description": "Horizontal move in composition CSS px. Default 0.",
+                                      "type": "number"
+                                    },
+                                    "y": {
+                                      "description": "Vertical move in composition CSS px. Default 0.",
+                                      "type": "number"
+                                    },
+                                    "scale": {
+                                      "description": "Uniform factor about the element's centre. Default 1.",
+                                      "type": "number",
+                                      "exclusiveMinimum": 0
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "The clip in one format other than the primary."
+                          }
                         },
                         "type": {
                           "type": "string",
@@ -932,6 +1618,59 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -948,12 +1687,13 @@
                               "type": "string",
                               "enum": [
                                 "wipe",
-                                "push"
+                                "push",
+                                "iris"
                               ],
-                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out."
+                              "description": "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the outgoing one out. `iris`: the incoming clip opens in a growing circle from the centre of `origin`."
                             },
                             "direction": {
-                              "description": "Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
+                              "description": "`wipe` and `push` only. Way the incoming picture travels: `left` (default: it enters from the right edge), `right`, `up` (enters from the bottom) or `down`.",
                               "type": "string",
                               "enum": [
                                 "left",
@@ -961,6 +1701,35 @@
                                 "up",
                                 "down"
                               ]
+                            },
+                            "origin": {
+                              "description": "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1); the circle grows from its centre. Default: the whole frame.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                },
+                                {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 1
+                                }
+                              ],
+                              "items": false,
+                              "minItems": 4,
+                              "maxItems": 4
                             }
                           },
                           "required": [
@@ -1198,6 +1967,266 @@
                           },
                           "additionalProperties": false,
                           "description": "Keyframes per property, on the clip's own clock. A keyed property ignores its static value (`transform`, `audio.gain`)."
+                        },
+                        "formats": {
+                          "description": "Per-format overrides by format id (ADR 0027): how the clip shows in that format of `frameshell.json` instead of as in the primary. Video tracks only. Ignored in the primary format and for a format the project no longer declares.",
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+                            "description": "Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp."
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "transform": {
+                                "description": "Placement in this format, field by field over the clip's `transform`; a field given here also drops the clip's own keys of it.",
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "description": "Horizontal offset in project pixels from the centered position. Default 0.",
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "description": "Vertical offset in project pixels from the centered position. Default 0.",
+                                    "type": "number"
+                                  },
+                                  "scale": {
+                                    "description": "Uniform scale factor. Default 1.",
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "opacity": {
+                                    "description": "0 (invisible) to 1 (opaque). Default 1.",
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "keys": {
+                                "description": "Picture keys in this format (`x`, `y`, `scale`, `opacity`), each list replacing the clip's own keys of that property.",
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number"
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "y": {
+                                    "description": "Keys of this property (project pixels), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number"
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "scale": {
+                                    "description": "Keys of this property (factor), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "exclusiveMinimum": 0
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "opacity": {
+                                    "description": "Keys of this property (0 to 1), sorted by `at`; held before the first and after the last. Replaces the static value.",
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "at": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "description": "Clip-clock second of the key: the seconds the clip's `in` counts (source, composition or nested-timeline seconds)."
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "ease": {
+                                          "description": "How the value moves from this key to the next: `linear` (default), `in` (slow start), `out` (slow end), `in-out`.",
+                                          "type": "string",
+                                          "enum": [
+                                            "linear",
+                                            "in",
+                                            "out",
+                                            "in-out"
+                                          ]
+                                        },
+                                        "auto": {
+                                          "description": "Set by the command that wrote this key (`duck`: `track.duck`). Running that command again replaces keys with this mark and keeps the others; setting or moving a key by hand (`clip.key`) clears it.",
+                                          "type": "string",
+                                          "const": "duck"
+                                        },
+                                        "base": {
+                                          "description": "Only on an `auto` key written over a key set by hand: the level that key was set to, before the dip. Running the command again puts that level back as the hand key and takes the dip from it.",
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [
+                                        "at",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "hidden": {
+                                "description": "True: the clip shows no picture in this format; its sound still plays.",
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "props": {
+                                "description": "Generated (adapter) clips: props in this format, key by key over the clip's `props`; the clip renders again for it.",
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "elements": {
+                                "description": "Generated clips: element adjustments in this format, selector by selector over the clip's `elements`.",
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "x": {
+                                      "description": "Horizontal move in composition CSS px. Default 0.",
+                                      "type": "number"
+                                    },
+                                    "y": {
+                                      "description": "Vertical move in composition CSS px. Default 0.",
+                                      "type": "number"
+                                    },
+                                    "scale": {
+                                      "description": "Uniform factor about the element's centre. Default 1.",
+                                      "type": "number",
+                                      "exclusiveMinimum": 0
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "The clip in one format other than the primary."
+                          }
                         },
                         "type": {
                           "type": "string",
@@ -1502,6 +2531,74 @@
                 },
                 "additionalProperties": {}
               },
+              "formats": {
+                "description": "Per-format caption style by format id (ADR 0027): in that format of `frameshell.json` the captions take these style fields. A vertical format still draws them 1.3x larger. Ignored in the primary format and for a format the project no longer declares.",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+                  "description": "Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp."
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "style": {
+                      "type": "object",
+                      "properties": {
+                        "preset": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "string",
+                          "enum": [
+                            "top",
+                            "center",
+                            "bottom"
+                          ]
+                        },
+                        "speakerNames": {
+                          "description": "Start the first cue of each speaker turn with the speaker's name (ADR 0020). Default false.",
+                          "type": "boolean"
+                        },
+                        "keywordColor": {
+                          "description": "Colour of a phrase's keyword (`#rrggbb`); null: the keyword keeps the text colour. Default: the preset's.",
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^#[0-9a-fA-F]{6}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "keywordScale": {
+                          "description": "Keyword size at the start of its entry, as a multiple of its size; it settles to 1. Default: the preset's.",
+                          "type": "number",
+                          "minimum": 1,
+                          "maximum": 2
+                        },
+                        "entry": {
+                          "description": "How cues enter: `none`, `chars`, `words` or `line`. Default `none`.",
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "chars",
+                            "words",
+                            "line"
+                          ]
+                        }
+                      },
+                      "additionalProperties": {},
+                      "description": "Fields in this format, field by field over the track's `style`."
+                    }
+                  },
+                  "required": [
+                    "style"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "phrases": {
                 "description": "Hand-chunked phrases with their keywords (`captions.set`); words no phrase holds are grouped by the style.",
                 "type": "array",
@@ -1708,6 +2805,59 @@
                     "muted": {
                       "description": "Default false.",
                       "type": "boolean"
+                    },
+                    "duck": {
+                      "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "under": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the clip dips below its level while someone speaks."
+                        },
+                        "attackMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the dip takes to reach full depth."
+                        },
+                        "releaseMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the level takes to come back after the voice stops."
+                        },
+                        "threshold": {
+                          "type": "number",
+                          "description": "dBFS above which sound counted as speech."
+                        },
+                        "gap": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds under which two stretches of speech merged."
+                        },
+                        "level": {
+                          "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "under",
+                        "depth",
+                        "attackMs",
+                        "releaseMs",
+                        "threshold",
+                        "gap"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -1780,6 +2930,59 @@
                     "muted": {
                       "description": "Default false.",
                       "type": "boolean"
+                    },
+                    "duck": {
+                      "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "under": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the clip dips below its level while someone speaks."
+                        },
+                        "attackMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the dip takes to reach full depth."
+                        },
+                        "releaseMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the level takes to come back after the voice stops."
+                        },
+                        "threshold": {
+                          "type": "number",
+                          "description": "dBFS above which sound counted as speech."
+                        },
+                        "gap": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds under which two stretches of speech merged."
+                        },
+                        "level": {
+                          "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "under",
+                        "depth",
+                        "attackMs",
+                        "releaseMs",
+                        "threshold",
+                        "gap"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false

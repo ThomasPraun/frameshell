@@ -112,3 +112,43 @@ test("the switcher shows the declared formats; 9:16 covers the frame with the cl
   await expect.poll(() => colours(0.5)).toBe("RG");
   await expect(page.getByRole("button", { name: "Pick" })).toBeEnabled();
 });
+
+// Editing in a format (ADR 0027 slice 4): what the handles and the inspector change in 9:16 lands in the clip's
+// `formats["9x16"]` override; the clip itself, and so the primary format, stays as it was.
+test("in 9:16 the handles and the inspector edit the clip there only", async () => {
+  test.setTimeout(120_000);
+  const frame = page.getByTestId("preview-frame");
+  const stored = () => JSON.parse(readFileSync(mainFile, "utf8")).tracks[0].clips[0];
+  await page.getByTestId("preview-format").selectOption("9x16");
+  await expect(frame).toHaveAttribute("data-variant", "true");
+  await expect.poll(() => colours(0.05)).toBe("RG");
+
+  const area = (await frame.boundingBox())!;
+  const centre = { x: area.x + area.width / 2, y: area.y + area.height / 2 };
+  await page.mouse.click(centre.x, centre.y);
+  await expect(page.getByTestId("layer-handles")).toHaveAttribute("data-clip", "c_split");
+  await expect(page.getByTestId("inspector-format")).toHaveText("In 9x16");
+
+  // A move of the covering clip keeps its size: the drag stores the placement that fills the frame, moved. The
+  // inspector that opened with the selection resized the frame: measured again.
+  const resized = (await frame.boundingBox())!;
+  const from = { x: resized.x + resized.width / 2, y: resized.y + resized.height / 2 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + resized.width * 0.25, from.y, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => stored().formats?.["9x16"]?.transform?.x ?? 0).toBeGreaterThan(100);
+  expect(stored().formats["9x16"].transform.scale).toBeCloseTo(3.16, 1);
+  expect(stored().transform).toBeUndefined();
+
+  await page.getByTestId("inspector-hide-in-format").click();
+  await expect.poll(() => stored().formats?.["9x16"]?.hidden).toBe(true);
+  await expect.poll(() => colours(0.5)).toBe("KK");
+
+  await page.getByTestId("inspector-use-primary").click();
+  await expect.poll(() => stored().formats).toBeUndefined();
+  await expect.poll(() => colours(0.05)).toBe("RG");
+
+  await page.getByTestId("preview-format").selectOption("landscape");
+  await expect.poll(() => colours(0.5)).toBe("RG");
+});

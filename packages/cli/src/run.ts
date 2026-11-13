@@ -105,7 +105,7 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                how many talk, when known. First run downloads the engine (about 95 MB)
 ${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop]
                                Export a timeline to video (default preset: export.defaultPreset,
-                               else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
+                               else youtube-1080p; default file: exports/<timeline>-<preset>.<container>).
                                --quality draft: 30 fps at most, fast encode for review rounds; final:
                                slow, bt709, AAC 320k. Both use the machine's best working encoder.
                                --formats: one file per format of the project (format list), named
@@ -118,6 +118,9 @@ ${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draf
                                output fps breaks the cycle, when an end is black, and, once written,
                                when the last frame repeats frame 0 (end the last key a frame earlier).
                                Refused with --cover-frame. Never changes the timeline
+                               --preset gif: a silent looping GIF (loop rules always on), each format
+                               fitted inside 1200x1200, 30 fps at most, over 350 frames refused,
+                               over 15 MB warned; --quality does not apply
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp|<format id>] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, image type from the
                                extension of <file> unless --format png|jpg|webp. --format <format id> (e.g.
@@ -176,7 +179,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -361,6 +364,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           which: { type: "string" },
           typing: { type: "boolean", default: false },
           rate: { type: "string" },
+          bars: { type: "string" },
+          sections: { type: "string" },
+          chords: { type: "string" },
+          accents: { type: "string" },
+          "no-place": { type: "boolean", default: false },
           "reset-edits": { type: "boolean", default: false },
           // A switch on `clip set` (voice chain), a voice id on `voiceover generate`.
           voice: { type: firstWord === "voiceover" ? "string" : "boolean" },
@@ -538,6 +546,12 @@ function parseBuiltin(
     which?: string | undefined;
     typing?: boolean | undefined;
     rate?: string | undefined;
+    bars?: string | undefined;
+    sections?: string | undefined;
+    chords?: string | undefined;
+    accents?: string | undefined;
+    meter?: string | undefined;
+    "no-place"?: boolean | undefined;
     from?: string | undefined;
     to?: string | undefined;
     offset?: string | undefined;
@@ -905,6 +919,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       });
     case "sound.sfx":
     case "sound.place":
+    case "sound.music":
       return executeSound(conn, inv, cwd, flags.json);
     case "beats.measure":
     case "beats.show":
@@ -952,11 +967,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "timeline": {
       // Adapter clips need the project's plugins loaded, which may need a trust decision.
       const { type, props } = inv.params;
-      if (props !== undefined || (typeof type === "string" && type !== "media" && type !== "timeline")) {
+      if (props !== undefined || inv.method === "clip.verify" || (typeof type === "string" && type !== "media" && type !== "timeline")) {
         await settleTrust(conn, flags, io);
       }
       const long = (inv.method === "multicam.faces" || inv.method === "clip.reframe") && !flags.json;
-      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined);
+      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined, outcome);
     }
     case "render": {
       // Plugin presets load only for trusted projects.

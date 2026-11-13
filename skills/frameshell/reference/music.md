@@ -1,6 +1,6 @@
 # Music on the cut
 
-Fit a music track to the picture so its last hit lands on the cut (ADR 0037). Commands assume the session rule of [SKILL.md](../SKILL.md). Music is a media clip on an audio track; put it there with `frameshell clip add`, set its level (about 12 dB under the voice is a start), then fit it.
+Fit a music track to the picture so its last hit lands on the cut (ADR 0037). Commands assume the session rule of [SKILL.md](../SKILL.md). Music is a media clip on an audio track; put it there with `frameshell clip add`, set its level (about 12 dB under the voice is a start), then fit it. No track to use: `frameshell sound music` makes one and places it ([sound.md](sound.md#music-bed)); its final hit is exact, so fitting it is reliable.
 
 ## Land the last hit on a cut
 
@@ -17,8 +17,24 @@ frameshell music fit <music clip> --end end-card --exact
 - **`--exact`.** Keeps the start (where the clip is, or `--from`) and changes the speed a little so the hit lands on `--end` exactly. At most 1.7 % of the clip's speed: beyond it the command refuses with the ends that would fit; move the end by a beat, trim the intro (`clip trim --in`), or drop `--exact`. A doubtful hit (confidence under 0.5) never changes the speed: pass `--hit`. Export keeps the pitch (atempo) but plays the music about 21 ms early at the changed speed, a fraction of a frame; the preview plays the pitch up or down by up to 0.3 semitone until its stretch lands. Prefer sliding when the intro can move.
 - **`--dry-run`** prints the plan and changes nothing. `steps` lists what it would do.
 - **One transaction** labelled `Music fit: …` (`frameshell revert <tx>` undoes it whole; in review mode it is one proposal). It writes only `start`, `in` and `speed` of the clip (and the duck keys below).
-- **Duck keys.** Gain keys written by `duck` sit on the clip's own clock; after a move or a speed change they no longer match the voice. When the clip carries them, `music fit` runs `duck` again in the same transaction over every other unmuted video and audio track, with its defaults, and says so in `warnings` (`--skip duck` leaves the keys; run `duck` yourself with your own `--under` and `--depth`). Mute or avoid other music tracks before fitting a ducked clip, or the duck listens to them as speech.
+- **Duck keys.** Gain keys written by `duck` sit on the clip's own clock; after a move or a speed change they no longer match the voice. When the clip carries them, `music fit` runs `duck` again in the same transaction with the settings the duck was run with (`--under`, `--depth`, `--attack`, `--release`, `--threshold`, `--gap`, kept in the clip's `audio.duck`) and says so in `warnings`. A clip ducked before the settings were kept gets the defaults over every other unmuted video and audio track: mute or avoid other music tracks first, or the duck listens to them as speech. `--skip duck` leaves the keys.
 - MCP: `music_fit`.
+
+## Candidates: several tracks at one loudness
+
+```sh
+frameshell music candidates assets/music/a.wav assets/music/b.wav assets/music/c.wav --end end-card --dry-run
+frameshell music candidates assets/music/a.wav assets/music/b.wav assets/music/c.wav --end end-card
+```
+
+Puts 2 to 7 files under the same picture so the person can pick by ear (MCP `music_candidates`). Each file goes on its own new audio track `Music 1` to `Music n`, all muted but the first, with a static clip gain that brings every file to one loudness: the EBU R128 integrated loudness of the whole file, measured once per file and cached under `.frameshell/loudness/`. The target is `--loudness <LUFS>`, else the quietest file's own, so no file is made louder than it is (a warning says when a raise would push a peak over -1 dBTP).
+
+- **Without `--end`** the files start at `--from` (default 0), play whole, and the order you gave is the rank.
+- **With `--end`** each is fitted like `music fit` slides a clip: its own final hit lands on `--end`. The rank puts files that cover the picture before the hit first, then the files whose final hit is surer (`hit.confidence`); ties keep your order. Read each candidate's `warnings`: a doubtful hit, a dropped intro, a late start.
+- A file that cannot be placed (silent, no sound, no final hit, undecodable) is in `skipped`; the rest go on. `--dry-run` changes nothing.
+- One transaction labelled `Music candidates: …`; `revert <tx>` undoes it whole.
+- **Choose:** the person listens, then `track set <track> --unmuted` on the winner and `track remove <track> --force` on the others. Run `music fit` on the clip that stays (its start is already fitted when `--end` was given), then `duck`.
+- Loudness is matched over the whole file, not over the part that plays: a track whose played part is quieter or louder than its average sits off by that much. Check by ear.
 
 ## Order
 
