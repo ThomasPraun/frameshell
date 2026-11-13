@@ -124,6 +124,8 @@ Optional `credits.json`: where third-party assets came from. `asset_import` reco
 
 `render` also adds a warning for placed assets with no verified provenance, but only in a project whose ledger already holds an entry.
 
+`render` with `loop: true` (ADR 0039) exports a file meant to repeat: audio ends faded, refused with `cover`, warnings for a broken cycle or a black end, and the finished job's `warnings` (`job_list`) says when the last frame repeats frame 0.
+
 ## People (ADR 0020)
 
 Optional `people.json`: who is who across transcripts, multicam angles and faces. Until a tool writes it (`people_add` creates it), the people tools only read (an empty list, suggestions from multicam angles alone): no download, no job, no transcript change.
@@ -157,6 +159,12 @@ People changes are not timeline operations: review mode does not hold them, `his
 | Tool | Does |
 |---|---|
 | `music_fit(timeline?, clip, end, from?, hit?, exact?, dryRun?, skip?)` | Fit a music clip (a media clip of an audio track) so the track's own final hit lands on `end` (seconds, or a marker id or label) and it plays unspliced before it. The hit is `hit` (source seconds) or the last sharp jump in level near the end of the part the clip plays, with a `confidence` and the other `candidates`. Slides the clip at its speed (the intro is dropped before `from`, default 0; a track too short starts late, never looped); `exact` keeps the start and changes the speed by at most 1.7 % to land the hit exactly (a doubtful hit never does). `dryRun` returns the plan and its `steps`. A clip with duck keys gets duck again in the same transaction (`skip: ["duck"]` leaves them). One transaction `Music fit: …` (one proposal in review mode). |
+
+## Batch variants (ADR 0040)
+
+| Tool | Does |
+|---|---|
+| `batch_render(file, out?, formats?, dryRun?)` | Render one template timeline once per row of a batch file (`*.batch.json`): each row sets adapter clip props (`<clipId>.props.<path>`) or swaps a media clip's asset (`<clipId>.asset`, in/out kept) in memory, never under `timelines/`. Every row × format is checked first (a bad row fails with InvalidOperation naming `row` and `slot`); then rows render one at a time as `render` jobs into `exports/<batch name>/`, with `manifest.json` there rewritten on each job change. `dryRun` returns the plan only. Never generates voiceover. Idempotent per `idempotencyKey`. |
 
 ## Beat grid (ADR 0029)
 

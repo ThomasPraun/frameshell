@@ -263,7 +263,8 @@ code {
   color: var(--text-muted);
 }
 
-.welcome-field input {
+.welcome-field input,
+.welcome-field select {
   font: inherit;
   color: var(--text);
   background: var(--bg-panel);
@@ -272,7 +273,8 @@ code {
   padding: 6px 9px;
 }
 
-.welcome-field input:focus-visible {
+.welcome-field input:focus-visible,
+.welcome-field select:focus-visible {
   outline: none;
   border-color: var(--accent);
 }
@@ -323,6 +325,10 @@ code {
 
 .welcome-mode input {
   accent-color: var(--accent);
+}
+
+.welcome-field .welcome-hint {
+  font-size: 12px;
 }
 
 .welcome-check {
@@ -2481,6 +2487,22 @@ button.track-head:focus-visible {
   height: 12px;
 }
 
+/* Track behind a person (ADR 0032): the icon, plus the matte's percentage while it is made or a "!" when it failed. */
+.track-matte {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+}
+
+.track-matte[data-state="preparing"] {
+  color: var(--accent);
+}
+
+.track-matte[data-state="failed"] {
+  color: var(--danger);
+}
+
 .timeline-lanes {
   flex: 1;
   position: relative;
@@ -3027,7 +3049,7 @@ button.track-head:focus-visible {
   color: #f0c068;
 }
 
-/* Frame tools left of the transport buttons: the pick tool and the 9:16 view. */
+/* Frame tools left of the transport buttons: the pick tool and the format switcher. */
 .preview-transport-tools {
   grid-column: 1;
   grid-row: 1;
@@ -3037,16 +3059,16 @@ button.track-head:focus-visible {
   gap: 2px;
 }
 
-.preview-vertical {
-  width: auto;
-  padding: 0 5px;
+.preview-format {
+  max-width: 180px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-.preview-vertical.on {
+/* A format other than the primary: handles and picking are off, so it reads as a mode. */
+.preview-format.on {
   color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .region-toggle.on {

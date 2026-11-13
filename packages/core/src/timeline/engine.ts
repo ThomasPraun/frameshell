@@ -41,6 +41,7 @@ import {
   elementStyles,
   gainAt,
   isShotClip,
+  isGridRefLabel,
   markerLabelKey,
   findMarker,
   describeMarkers,
@@ -2155,6 +2156,12 @@ class Edit {
 
   /** Refuse `label` when another marker than `self` holds it, ignoring case. */
   claimLabel(label: string, self: string | null): void {
+    if (isGridRefLabel(label)) {
+      throw this.invalid(`label "${label}" must not look like a beat or bar reference (\`beat:8\`, \`bar:2\`): it would shadow the grid.`, {
+        field: "label",
+        hint: "Pick another label.",
+      });
+    }
     const holder = this.draft.markers?.find((marker) => marker.id !== self && markerLabelKey(marker.label) === markerLabelKey(label));
     if (!holder) return;
     throw this.invalid(`label "${label}" is already marker ${holder.id} ("${holder.label}" at ${holder.at} s); labels are unique ignoring case.`, {

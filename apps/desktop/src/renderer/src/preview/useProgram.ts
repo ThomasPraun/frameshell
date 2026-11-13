@@ -1,4 +1,6 @@
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
+import type { Size } from "@frameshell/schema/composite";
+import { type FormatEntry, FormatEntrySchema, type FormatLayout, type ResolvedFormat, formatOf, formatProblems, projectFormats } from "@frameshell/schema/formats";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SELECTION_TIMELINE } from "../selection.js";
 import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
@@ -17,9 +19,10 @@ const NESTED_SOURCE = /^timelines\/([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/;
  * The {@link Program} of the timeline the timeline panel shows, live: from
  * the shared timeline feeds (one read per change for every panel; nested
  * timelines on their own feeds) and `asset.list`, re-read on each revision
- * and while proxies are being built. Null until both are known.
+ * and while proxies are being built. Null until both are known. `format`: the project format shown (ADR 0027), absent
+ * for the primary.
  */
-export function useProgram(): Program | null {
+export function useProgram(format?: FormatLayout & Size): Program | null {
   const { view } = useTimelineView(SELECTION_TIMELINE);
   const assets = useAssets(view?.revision ?? null);
   const resolution = useResolution();
@@ -28,8 +31,8 @@ export function useProgram(): Program | null {
   const bakes = useAudioBakes(view, nested);
   const mattes = useSubjectMattes(view, nested, assets);
   return useMemo(
-    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes }) : null),
-    [view, assets, resolution, nested, renders, bakes, mattes],
+    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes, ...(format ? { format } : {}) }) : null),
+    [view, assets, resolution, nested, renders, bakes, mattes, format],
   );
 }
 
@@ -120,13 +123,15 @@ export type ProjectKind = "video" | "image";
 interface ProjectConfigView {
   resolution: { width: number; height: number };
   kind: ProjectKind;
+  /** Delivery formats (ADR 0027); absent: one, the resolution. */
+  formats?: FormatEntry[];
 }
 
 const DEFAULT_CONFIG: ProjectConfigView = { resolution: { width: 1920, height: 1080 }, kind: "video" };
 
 /**
- * `resolution` and `kind` of `frameshell.json`, followed live; the defaults
- * (1920x1080, video) until read or when unset. A bad field keeps its last good value.
+ * `resolution`, `kind` and `formats` of `frameshell.json`, followed live; the defaults
+ * (1920x1080, video, one format) until read or when unset. A bad field keeps its last good value.
  */
 function useProjectConfig(): ProjectConfigView {
   const [config, setConfig] = useState(DEFAULT_CONFIG);
@@ -134,14 +139,23 @@ function useProjectConfig(): ProjectConfigView {
     let disposed = false;
     const read = async () => {
       try {
-        const raw = JSON.parse(await window.frameshell.files.read("frameshell.json")) as { resolution?: { width?: unknown; height?: unknown }; kind?: unknown };
+        const raw = JSON.parse(await window.frameshell.files.read("frameshell.json")) as {
+          resolution?: { width?: unknown; height?: unknown };
+          kind?: unknown;
+          formats?: unknown;
+        };
         if (disposed) return;
         const { width, height } = raw.resolution ?? {};
         const sized = typeof width === "number" && typeof height === "number" && width > 0 && height > 0;
         const kind: ProjectKind = raw.kind === "image" ? "image" : "video";
         setConfig((current) => {
           const resolution = sized && (current.resolution.width !== width || current.resolution.height !== height) ? { width, height } : current.resolution;
-          return resolution === current.resolution && kind === current.kind ? current : { resolution, kind };
+          const parsed = raw.formats === undefined ? undefined : FormatEntrySchema.array().safeParse(raw.formats);
+          const listed = parsed === undefined ? undefined : parsed.success ? parsed.data : null;
+          const bad = listed === null || formatProblems({ kind, resolution, formats: listed }).length > 0;
+          const formats = bad || JSON.stringify(listed) === JSON.stringify(current.formats) ? current.formats : (listed ?? undefined);
+          if (resolution === current.resolution && kind === current.kind && formats === current.formats) return current;
+          return { resolution, kind, ...(formats ? { formats } : {}) };
         });
       } catch {
         // Unreadable or mid-save: keep the last good values.
@@ -167,4 +181,13 @@ export function useResolution(): { width: number; height: number } {
 /** Project kind from `frameshell.json` `kind`, followed live; `video` until read or when unset. */
 export function useProjectKind(): ProjectKind {
   return useProjectConfig().kind;
+}
+
+/**
+ * Formats of the project with their layouts (ADR 0027, `formatOf`), primary first, from `frameshell.json` `formats`,
+ * followed live; one, the resolution, when it declares none.
+ */
+export function useProjectFormats(): ResolvedFormat[] {
+  const config = useProjectConfig();
+  return useMemo(() => projectFormats(config).map((format) => formatOf(config, format.id)!), [config]);
 }

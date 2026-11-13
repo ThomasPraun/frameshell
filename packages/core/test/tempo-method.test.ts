@@ -154,12 +154,11 @@ describe("tempo.show and tempo.set", () => {
     await request("marker.remove", { marker: "lead" });
   });
 
-  it("beat:N refuses a number past the music, a LOW grid and a missing tempo like --snap-to does", async () => {
-    await expect(request("marker.add", { at: "beat:30", label: "late" })).rejects.toMatchObject({
-      code: ErrorCode.InvalidOperation,
-      message: expect.stringContaining("past the end of the grid, which has 19 beats"),
-      data: expect.objectContaining({ reason: "time reference", field: "at", value: "beat:30" }),
-    });
+  it("beat:N carries on past the music at the tempo, and refuses a missing tempo like --snap-to does", async () => {
+    // The clip shows file beats 1..19 (source 0.5–9.5 s); beat 30 is source 15 s, timeline 17.
+    const late = (await request("marker.add", { at: "beat:30", label: "late" })) as { operation: { args: Record<string, unknown> } };
+    expect(late.operation.args).toMatchObject({ at: 17 });
+    await request("marker.remove", { marker: "late" });
     await request("tempo.set", { clear: true });
     await expect(request("marker.add", { at: "bar:2", label: "x" })).rejects.toMatchObject({ message: expect.stringContaining("the timeline has no tempo") });
     await request("tempo.set", { clip: music });

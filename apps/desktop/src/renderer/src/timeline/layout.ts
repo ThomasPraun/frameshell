@@ -160,6 +160,8 @@ export interface TrackRow {
   muted: boolean;
   /** The track shows no picture (`track.set` `hidden`); its sound still plays. */
   hidden: boolean;
+  /** Video tracks: id of the plate this track sits behind the person of (`track.set` `behind`, ADR 0032); null otherwise. */
+  behind: string | null;
   /** Program tracks: the group's angles in group order (what the number keys pick); empty otherwise. */
   angles: ShotAngle[];
   /** Top edge in content px (ruler included). */
@@ -303,6 +305,7 @@ export function layoutTimeline(
       group: track.kind === "program" ? (track.group ?? null) : null,
       muted: track.muted === true,
       hidden: track.hidden === true,
+      behind: track.kind === "video" ? (track.behind ?? null) : null,
       angles,
       top,
       height,

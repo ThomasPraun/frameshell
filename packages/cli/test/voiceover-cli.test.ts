@@ -61,21 +61,35 @@ describe("frameshell voiceover generate", () => {
     expect(result.code).toBe(0);
     const [head, ...rows] = result.stdout.trimEnd().split("\n");
     expect(head).toBe("Voiceover scripts/vo.md -> assets/voiceover/vo/ (stand-in, voice tone): 2 generated");
-    expect(rows).toEqual([expect.stringMatching(/^ {2}hook-1 {2}generated {2}\d\.\d\d s {2}"Stop scrolling\."$/), expect.stringMatching(/^ {2}why-1 {2}generated .*"Because 3 reasons\."$/)]);
+    expect(rows).toEqual([
+      expect.stringMatching(/^ {2}hook-1 {2}generated {2}\d\.\d\d s {2}2 phrases {2}"Stop scrolling\."$/),
+      expect.stringMatching(/^ {2}why-1 {2}generated .*"Because 3 reasons\."$/),
+      // No transcription plugin in this project: the check says so, and how to get one.
+      expect.stringMatching(/^Verification skipped: No transcription provider "whisper-cpp" .*frameshell plugin install @frameshell\/whisper-cpp/),
+    ]);
     expect(existsSync(join(project, "assets", "voiceover", "vo", "why-1.wav"))).toBe(true);
   });
 
   it("reports cached lines as JSON and rejects an empty --lines", () => {
     const result = frameshell(["voiceover", "generate", "scripts/vo.md", "--provider", "stand-in", "--json"]);
     expect(result.code).toBe(0);
-    const parsed = JSON.parse(result.stdout) as { lines: { id: string; state: string; spoken: string }[] };
+    const parsed = JSON.parse(result.stdout) as { lines: { id: string; state: string; spoken: string }[]; [key: string]: unknown };
     expect(parsed.lines.map((line) => [line.id, line.state])).toEqual([
       ["hook-1", "cached"],
       ["why-1", "cached"],
     ]);
     expect(parsed.lines[1]!.spoken).toBe("Because three reasons.");
+    expect(parsed.lines[0]).toMatchObject({ check: null, phrases: [{ from: 0, to: expect.any(Number), heard: null }, expect.anything()] });
+    expect(parsed).toMatchObject({ phraseFade: 0.012, verification: { status: "skipped", provider: "whisper-cpp" } });
     expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--lines", ","]).code).toBe(2);
     expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--speakers", "2"]).code).toBe(2);
+  });
+
+  it("skips the misread check with --no-verify", () => {
+    const result = frameshell(["voiceover", "generate", "scripts/vo.md", "--provider", "stand-in", "--no-verify"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Verification was not asked for (`verify: false`).");
+    expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--provider", "stand-in", "--no-verify", "--json"]).stdout).toContain('"reason": "Verification was not asked for');
   });
 
   it("takes --voice with a voice id, while clip set --voice stays a switch", () => {

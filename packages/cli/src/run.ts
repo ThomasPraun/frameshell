@@ -39,6 +39,7 @@ import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoic
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
+import { BATCH_FLAGS, BATCH_USAGE, type BatchInvocation, batchOutcome, batchLabel, describeBatch, parseBatch } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
@@ -102,7 +103,7 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]]
+${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.mp4).
                                --quality draft: 30 fps at most, fast encode for review rounds; final:
@@ -112,6 +113,11 @@ ${MODEL_USAGE}${FORMAT_USAGE}  render [--preset p] [--quality draft|final] [--fo
                                --cover-frame makes frame 0 (the thumbnail platforms show) a finished
                                composition: the frame \`cover\` would pick, with its word over it,
                                replaces the first frame only; a warning says when frame 0 is black
+                               --loop: a file meant to repeat (title loops, banners). Frames 0 to the
+                               last, 2 ms half-sine audio fades at both ends (MP4, MOV); warns when the
+                               output fps breaks the cycle, when an end is black, and, once written,
+                               when the last frame repeats frame 0 (end the last key a frame earlier).
+                               Refused with --cover-frame. Never changes the timeline
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp|<format id>] [--quality 1-100]
                                Write the frame showing at <s> seconds as an image, image type from the
                                extension of <file> unless --format png|jpg|webp. --format <format id> (e.g.
@@ -164,13 +170,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "skill", "model", "format", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "skill", "model", "format", "batch", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -184,7 +190,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin remove": [],
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
-  render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color"],
+  render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color", "loop"],
   frame: ["at", "out", "timeline", "preset", "format", "quality"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   ...REVIEW_FLAGS,
@@ -204,6 +210,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   matte: [],
   ...STYLE_FLAGS,
   ...FORMAT_FLAGS,
+  ...BATCH_FLAGS,
   "skill update": ["force"],
   ask: ASK_FLAGS,
   "setup claude-code": SETUP_FLAGS,
@@ -245,7 +252,7 @@ type Invocation =
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
-  | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string } }
+  | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string }; loop?: true }
   | { kind: "cover"; text?: string; at?: number; color?: string; out?: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
   | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; projectFormat?: string; format?: FrameFormat; quality?: number }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
@@ -266,6 +273,7 @@ type Invocation =
   | BeatsInvocation
   | { kind: "matte"; asset: string }
   | FormatInvocation
+  | BatchInvocation
   | { kind: "skill.update"; force: boolean }
   | TimelineInvocation;
 
@@ -315,6 +323,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           "dry-run": { type: "boolean", default: false },
           name: { type: "string", multiple: true },
           "no-skill": { type: "boolean", default: false },
+          "no-verify": { type: "boolean", default: false },
           kind: { type: "string" },
           format: { type: "string" },
           quality: { type: "string" },
@@ -366,6 +375,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           text: { type: "string" },
           color: { type: "string" },
           "cover-frame": { type: "boolean", default: false },
+          loop: { type: "boolean", default: false },
           "cover-text": { type: "string" },
           "cover-at": { type: "string" },
           "cover-color": { type: "string" },
@@ -475,6 +485,7 @@ function parseBuiltin(
   options: {
     name?: string | undefined;
     "no-skill"?: boolean | undefined;
+    "no-verify"?: boolean | undefined;
     kind?: string | undefined;
     format?: string | undefined;
     quality?: string | undefined;
@@ -544,6 +555,7 @@ function parseBuiltin(
     text?: string | undefined;
     color?: string | undefined;
     "cover-frame"?: boolean | undefined;
+    loop?: boolean | undefined;
     "cover-text"?: string | undefined;
     "cover-at"?: string | undefined;
     "cover-color"?: string | undefined;
@@ -565,6 +577,7 @@ function parseBuiltin(
   if (command === "matte") return rest.length === 1 ? { kind: "matte", asset: rest[0]! } : null;
   if (command === "style") return parseStyle(rest, options);
   if (command === "format") return parseFormat(rest, options);
+  if (command === "batch") return parseBatch(rest, options);
   if (command === "review") return parseReview(rest, options);
   if (command === "analyze") return parseAnalyze(rest, options);
   if (command === "skill") return rest.length === 1 && rest[0] === "update" ? { kind: "skill.update", force: options.force === true } : null;
@@ -633,7 +646,7 @@ function parseBuiltin(
       if (quality !== undefined && quality !== "draft" && quality !== "final") {
         throw new UsageError(`--quality: expected draft or final, got "${quality}".`);
       }
-      return { kind: "render", ...common, ...(quality ? { quality } : {}), ...(formats ? { formats } : {}), ...(out ? { out } : {}), ...(cover ? { cover } : {}) };
+      return { kind: "render", ...common, ...(quality ? { quality } : {}), ...(formats ? { formats } : {}), ...(out ? { out } : {}), ...(cover ? { cover } : {}), ...(options.loop ? { loop: true as const } : {}) };
     }
     const at = Number(options.at);
     if (options.at === undefined || options.at.trim() === "" || !Number.isFinite(at) || at < 0) {
@@ -964,8 +977,34 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       if (renders.some((render) => render.job.state !== "done")) outcome.code = 1;
       if (flags.json) return json({ ...result, job: renders[0]!.job, renders });
       return renders
-        .map((render) => (render.job.state === "done" ? `Rendered ${render.output}\n` : `Render failed: ${render.output}: ${render.job.error ?? render.job.state}\n`))
+        .map((render) => (render.job.state === "done" ? `Rendered ${render.output}\n${render.job.warnings.map((warning) => `  warning: ${warning}\n`).join("")}` : `Render failed: ${render.output}: ${render.job.error ?? render.job.state}\n`))
         .join("");
+    }
+    case "batch": {
+      // Plugin presets and adapter props schemas load only for trusted projects.
+      await settleTrust(conn, flags, io);
+      const params = { cwd, file: resolve(cwd, inv.file), ...(inv.out ? { out: resolve(cwd, inv.out) } : {}), ...(inv.formats ? { formats: inv.formats } : {}) };
+      if (inv.dryRun) {
+        const result = await conn.request("batch.render", { ...params, dryRun: true });
+        return flags.json ? json(result) : describeBatch(result);
+      }
+      const follower = await followJobs(conn, cwd);
+      const result = await conn.request("batch.render", { ...params, dryRun: false });
+      if (!flags.json) io.stderr(describeBatch(result));
+      const rows = new Map(result.entries.map((entry) => [entry.output, entry]));
+      const last = new Map<string, string>();
+      const finished = await follower.waitOutputs([...rows.keys()], (job) => {
+        if (flags.json) return;
+        const line = `${batchLabel(rows.get(job.output!)!)}: ${formatJob(job)}`;
+        if (last.get(job.id) !== line) io.stderr(`${line}\n`);
+        last.set(job.id, line);
+      });
+      const entries = result.entries.map((entry) => {
+        const job = finished.get(entry.output);
+        return job ? { ...entry, job: job.id, status: job.state, error: job.error, startedAt: job.startedAt, finishedAt: job.finishedAt, duration: seconds(job) } : entry;
+      });
+      if (entries.some((entry) => entry.status !== "done")) outcome.code = 1;
+      return flags.json ? json({ ...result, entries }) : `${batchOutcome(entries)}Manifest: ${result.manifest}\n`;
     }
     case "cover": {
       const { kind: _kind, out, ...params } = inv;
@@ -1147,6 +1186,11 @@ function duration(ms: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   if (s < 86_400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
   return `${Math.floor(s / 86_400)}d ${Math.floor((s % 86_400) / 3600)}h`;
+}
+
+/** Seconds a job ran; null until it ended. */
+function seconds(job: JobInfo): number | null {
+  return job.startedAt && job.finishedAt ? (Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 1000 : null;
 }
 
 function formatJob(job: JobInfo): string {

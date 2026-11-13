@@ -45,6 +45,15 @@ frameshell voiceover generate scripts/launch-vo.md --lines hook-1 --voice em_ale
 - `SpeechProviderNotFound`: no such provider here; `error.data.available` lists the ones there are. `SpeechFailed`: the provider failed on one line; the lines finished before it are kept and reused by the next call.
 - MCP: `voiceover_generate` with `yes` under the same rule.
 
+## Phrases and misreads
+
+Every line in the result carries both, for the lines it asked for, cached ones included.
+
+- **`phrases`**: the take cut where it falls silent for 60 ms or more, as `{ from, to, heard }` ranges of the take in seconds (`heard`: the words inside, when the line was checked). They are the cuts of phrase clips: `frameshell clip add <track> assets/voiceover/<script slug>/hook-1.wav --in <from> --out <to> --start <t>`, one per phrase, so a person corrects a cut by trimming that clip. Nothing is placed for you. `phraseFade` (12 ms) is the fade each phrase edge gets when placed; a clip fade sits on the frame grid, so a 12 ms fade is not something `clip add` can apply yet.
+- **`check`**: the take transcribed by the project's transcription provider and compared with the line's spoken text. `status` is `clean`, `doubtful` (every difference may be the transcription's: a number, a close spelling, a short word it dropped) or `misread` (the voice said something else); `misreads` lists each `missing`, `changed`, `added`, `moved`, `restart` or `pause` with what was `expected` and `heard` and where (`at`, take seconds). A line with respellings also passes when heard as written (`Frameshell` for `{Frameshell|freim shel}`). Fix a `misread` by respelling the term or rewording the line, then generate again: only that line is said again. A `doubtful` line is worth one listen, not a rewrite.
+- **`verification`** says whether the check ran. It is `skipped` (never an error, the takes are still written) when the project is not trusted (its plugins do not load until the person agrees to trust it and you re-run with `--trust`), has no transcription plugin (`frameshell plugin install @frameshell/whisper-cpp`), `--no-verify`/`verify: false` was passed or the transcription failed; `reason` says which. Tell the person when it was skipped: the lines are unchecked. The first check may download the transcription model.
+- Re-run `voiceover generate` after editing a take by hand to check it again: cached lines say nothing and cost nothing.
+
 ## The `command` provider
 
 `--provider command` (or `provider: command` in the frontmatter) runs the TTS program the person installed on this machine. It is free (no `--yes`) and works in any project, trusted or not. It exists only when the person set it up in the global config, `<configDir>/config.json` (macOS: `~/Library/Application Support/Frameshell/config.json`); a project's `frameshell.json` cannot define it and is refused if it tries. Without it the call fails with `SpeechProviderNotFound` naming that file. Never write the program into the project: ask the person to add it.

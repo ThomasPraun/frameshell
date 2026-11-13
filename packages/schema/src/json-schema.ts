@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BATCH_SCHEMA_URL, BatchFileSchema } from "./batch.js";
 import { BEATS_SCHEMA_URL, BeatsFileSchema } from "./beats.js";
 import { CREDITS_SCHEMA_URL, CreditsFileSchema } from "./credits.js";
 import { DIRECTOR_SCHEMA_URL, DirectorFileSchema } from "./director.js";
@@ -31,5 +32,6 @@ export function generateJsonSchemas(): Record<string, object> {
     "style.json": toJson(StyleFileSchema, STYLE_SCHEMA_URL),
     "credits.json": toJson(CreditsFileSchema, CREDITS_SCHEMA_URL),
     "beats.json": toJson(BeatsFileSchema, BEATS_SCHEMA_URL),
+    "batch.json": toJson(BatchFileSchema, BATCH_SCHEMA_URL),
   };
 }
