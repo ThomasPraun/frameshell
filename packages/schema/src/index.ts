@@ -410,7 +410,6 @@ export {
   cueTokens,
   subtitleAt,
   subtitleLayout,
-  scaleCaptions,
   subtitleTracks,
 } from "./subtitles.js";
 export {
