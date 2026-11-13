@@ -202,7 +202,8 @@ export async function runDiff(tools: AnalyzeDiffTools, request: AnalyzeDiffReque
     },
     sheets,
     warnings,
-    labels: { ...ANALYZE_DIFF_LABELS },
+    // A lag the caller gave, or the 0 the run fell back to, is a choice, not an estimate.
+    labels: { ...ANALYZE_DIFF_LABELS, ...(alignment.source === "activity" ? {} : { "alignment.lag": "DECISION" as const }) },
   };
   await writeFile(join(dir, DIFF_MANIFEST), `${JSON.stringify(result, null, 2)}\n`);
   hooks.progress?.(1);

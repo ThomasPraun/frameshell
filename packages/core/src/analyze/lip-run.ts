@@ -34,7 +34,7 @@ export async function measureSync(root: string, ffmpeg: string, file: string, fi
   const size = mouthViewSize(film.width, film.height);
   const count = Math.min(film.frames, Math.floor(MAX_PICTURE_S * film.fps + 1e-6));
   const grey = readRawFrames(ffmpeg, file, `fps=${film.fps},scale=${size.width}:${size.height}:flags=area,format=gray`, size.width * size.height);
-  const motion = await mouthMotion(grey, size, film.fps, track, count);
+  const motion = await mouthMotion(grey, size, film.fps, track, count, signal);
   const voice = voiceLevel(db, ENERGY_HOP_S, film.fps, count);
   const from = Math.max(1, Math.floor(track.start * film.fps));
   const to = Math.min(count, Math.ceil(track.end * film.fps));

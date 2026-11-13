@@ -73,13 +73,14 @@ function areaChange(previous: Uint8Array, current: Uint8Array, width: number, ar
 /**
  * Motion of the mouth of `track` in every frame of a film at `fps`: `motion[i]` is how much the mouth area changed between
  * frame `i - 1` and `i` (0 for the first and for a frame outside the track). `frames` are grey, `width` x `height`, one per
- * film frame in order.
+ * film frame in order. Throws when `signal` aborts.
  */
-export async function mouthMotion(frames: AsyncIterable<Uint8Array>, size: { width: number; height: number }, fps: number, track: FaceTrack, count: number): Promise<Float32Array> {
+export async function mouthMotion(frames: AsyncIterable<Uint8Array>, size: { width: number; height: number }, fps: number, track: FaceTrack, count: number, signal?: AbortSignal): Promise<Float32Array> {
   const motion = new Float32Array(count);
   let previous: Uint8Array | undefined;
   let index = 0;
   for await (const frame of frames) {
+    signal?.throwIfAborted();
     if (index >= count) break;
     const time = index / fps;
     if (previous && time >= track.start && time <= track.end) motion[index] = areaChange(previous, frame, size.width, mouthPixels(boxAt(track, time), size.width, size.height));

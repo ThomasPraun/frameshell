@@ -127,7 +127,7 @@ describe("frameshell analyze diff", () => {
       expect(result.code, result.stderr).toBe(0);
       const diff = JSON.parse(result.stdout) as { name: string; alignment: { lag: number; source: string }; diff: { every: number }; labels: Record<string, string> };
       expect(diff).toMatchObject({ name: "mine", alignment: { lag: 0.5, source: "forced" }, diff: { every: 1 } });
-      expect(diff.labels["alignment.lag"]).toBe("ESTIMATED");
+      expect(diff.labels["alignment.lag"]).toBe("DECISION");
     },
     120_000,
   );

@@ -128,6 +128,7 @@ describe("analyze.diff", () => {
   it("takes the lag the caller gives, and then reads the wrong moment when it is wrong", async () => {
     const forced = await conn.request("analyze.diff", { cwd: project, file: join(footage, "film.mp4"), reference: join(footage, "reference.mp4"), name: "forced", lag: 1, snapshots: 2 });
     expect(forced.alignment).toMatchObject({ lag: 1, source: "forced" });
+    expect(labelOf(forced.labels, "alignment.lag")).toBe("DECISION");
     expect(forced.diff.mean).toBeGreaterThan(0.9);
     const wrong = await conn.request("analyze.diff", { cwd: project, file: join(footage, "film.mp4"), reference: join(footage, "reference.mp4"), name: "wrong", lag: 0, snapshots: 2 });
     expect(wrong.alignment).toMatchObject({ lag: 0, source: "forced" });
