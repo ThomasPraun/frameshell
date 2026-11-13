@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- UI demo template follow-ups, #549 of #451 (ADR 0033; plugin only, no protocol change): `cursor-click` and `app-window`
+  take `camera: follow` (and `zoom`, 1.1 to 2.4): the frame zooms in with the cursor to the click and pulls back after
+  the last beat, never showing the scene's edge. `app-window` takes `then: copy-paste` (and `keys`, Mac or Windows): an
+  empty slot below the rows, a key chip showing the copy half a second after the click, a click on the slot that lights
+  it on its own frame, then the paste, its chip and the copied row filling the slot on one frame. New template
+  `comment-box`, the comment variant of `typing-field` (a card with an avatar types a comment over a few lines, a cursor
+  presses the button, progress fills and a confirmation appears). Timing guard: a clip too short for the cursor's
+  click, drop or release gives up the hesitation, then moves faster (up to 2.2 times), and a typed line is typed up to 9
+  times faster with a shorter progress line, so the reaction shows before the exit; clips with room are unchanged.
+  The kits write each function on one line to stay under the 300-line lint warning. New opt-in real-Chrome test
+  `ui-demo-real.test.ts` checks, frame by frame, that each click and the beat it causes land on the same frame in every
+  template and variant. The near-1 scale snap stays in the cursor kit (moving it into the runtime needs a version bump).
 - Music beds made offline, third slice of #463 (ADR 0038, epic #451; daemon `sound.music`, CLI `sound music <preset>`,
   MCP `sound_music`, protocol 112): a seeded 16-step sequencer synthesizes a track with no network and no samples.
   Presets `synthwave` (118 BPM, Am F C G, saw chords, four on the floor), `lofi` (78 BPM, Dm9 G13 Cmaj7 Am7, electric

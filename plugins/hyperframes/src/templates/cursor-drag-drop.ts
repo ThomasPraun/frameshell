@@ -138,14 +138,18 @@ export const cursorDragDrop: Template = {
       var offset = { x: cardAt.x - grab.x, y: cardAt.y - grab.y };
       var drop = { x: zoneAt.x - offset.x, y: zoneAt.y - offset.y };
       var rest = inFrame({ x: zoneAt.x + zw * 0.3, y: zoneAt.y + zh / 2 + 0.07 * unit }, 0.06);
-      var trip = journey(FROM, [
-        { x: grab.x, y: grab.y, hesitate: P.hesitate, wait: 0.3 },
-        { x: drop.x, y: drop.y, weight: "heavy", bend: 0.12, wait: 0.5 },
-        { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
-      ], START, { x: 0.004 * unit, y: 0.003 * unit });
       // Pressed from the grab to the drop; the release is the beat the zone answers.
+      var made = fitFirst(CURSOR_TRIES, function (hesitate, rate) {
+        var trip = journey(FROM, [
+          { x: grab.x, y: grab.y, hesitate: P.hesitate * hesitate, wait: 0.3 },
+          { x: drop.x, y: drop.y, weight: "heavy", bend: 0.12, wait: 0.5 },
+          { x: rest.x, y: rest.y, weight: "light", bend: 0.2 }
+        ], START, { x: 0.004 * unit, y: 0.003 * unit }, rate);
+        return { trip: trip, ready: trip.legs[1].arrive + 0.1 };
+      }, latest(0.5));
+      var trip = made.trip;
       var grabAt = trip.legs[0].arrive + 0.04;
-      var dropAt = trip.legs[1].arrive + 0.1;
+      var dropAt = made.ready;
 
       var world = document.getElementById("world");
       var D = S.duration;
