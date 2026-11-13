@@ -22,9 +22,13 @@ const MOVE_COST = 0.05;
 // Periodic Hann: two frames half a window apart sum to exactly 1.
 const HANN = Float64Array.from({ length: STRETCH_WINDOW }, (_, n) => 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / STRETCH_WINDOW));
 
-/** What the stretch needs of an `AudioSpan`: program sample `start` plays source sample `in`, `speed` source samples per program sample. */
+/**
+ * What the stretch needs of an `AudioSpan`: program samples `[start, end)` play source samples from `in` on, `speed`
+ * source samples per program sample.
+ */
 export interface StretchSpan {
   start: number;
+  end: number;
   in: number;
   speed: number;
 }
@@ -62,23 +66,27 @@ export class StretchChain {
 export function stretchWindow(span: StretchSpan, from: number, to: number): { first: number; count: number } {
   if (to <= from) return { first: 0, count: 0 };
   const { lo, hi } = bounds(span, from, to);
-  const first = Math.max(0, lo);
-  return { first, count: Math.max(0, hi - first) };
+  const range = played(span);
+  const first = Math.max(0, lo, range.lo);
+  return { first, count: Math.max(0, Math.min(hi, range.hi) - first) };
 }
 
 /**
  * Program samples `[from, to)` of `span`, stretched to keep the pitch. `source` holds mono source samples from
- * `first` on (the {@link stretchWindow} of the same samples); positions it lacks are silence. `chain` carries the
+ * `first` on (the {@link stretchWindow} of the same samples); positions it lacks, and source outside the part the
+ * span plays (export trims before `atempo`, so a cut word never bleeds in), are silence. `chain` carries the
  * alignment over from the read before (the same span's samples up to `from`); without one the read starts its own.
  */
 export function stretch(span: StretchSpan, from: number, to: number, source: Float32Array, first: number, chain = new StretchChain()): Float32Array {
   const out = new Float32Array(Math.max(0, to - from));
   if (out.length === 0) return out;
   const { lo, hi, head, last } = bounds(span, from, to);
-  // The window as one array, silent where the source has nothing: every index below stays inside it.
+  // The window as one array, silent where the source has nothing or the span plays nothing: every index below stays
+  // inside it.
   const window = new Float32Array(hi - lo);
-  const a = Math.max(lo, first);
-  const b = Math.min(hi, first + source.length);
+  const range = played(span);
+  const a = Math.max(lo, first, range.lo);
+  const b = Math.min(hi, first + source.length, range.hi);
   if (b > a) window.set(source.subarray(a - first, b - first), a - lo);
   const centres = chain.centres(head, last, (k) => nominal(span, k), (previous, base) => offset(window, previous - lo, base - lo));
   for (let i = 0; i < out.length; i++) {
@@ -100,6 +108,11 @@ function bounds(span: StretchSpan, from: number, to: number): { head: number; la
   // From the frame before `head`: a chain carried over aligns the first new frame to it.
   const lo = nominal(span, head - 1) - HOP - SEARCH;
   return { head, last, lo, hi: nominal(span, last) + HOP + SEARCH + 1 };
+}
+
+/** Source samples `[lo, hi)` the span plays: its frames may reach past them, by up to HOP * speed + SEARCH. */
+function played(span: StretchSpan): { lo: number; hi: number } {
+  return { lo: Math.ceil(span.in), hi: Math.ceil(span.in + (span.end - span.start) * span.speed) };
 }
 
 /** Source sample the speed puts at the centre of frame `k`. */

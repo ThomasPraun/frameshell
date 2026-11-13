@@ -58,7 +58,12 @@ export function renderRead(read: AudioRead, pcm: Int16Array, first: number, chai
     for (let c = 0; c < channels; c++) sum += pcm[frame * channels + c]!;
     return sum / channels / 32768;
   };
-  const stretched = span.speed === 1 ? null : stretch(span, read.from, read.to, Float32Array.from({ length: frames }, (_, frame) => at(frame)), first, chain);
+  let stretched: Float32Array | null = null;
+  if (span.speed !== 1) {
+    const mono = new Float32Array(frames);
+    for (let frame = 0; frame < frames; frame++) mono[frame] = at(frame);
+    stretched = stretch(span, read.from, read.to, mono, first, chain);
+  }
   for (let i = 0; i < out.length; i++) {
     const value = stretched ? stretched[i]! : at(position(span, read.from + i) - first);
     const gain = span.envelope ? envelopeGain(span, read.from + i) : span.gain;

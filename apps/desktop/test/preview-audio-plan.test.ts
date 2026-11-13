@@ -42,9 +42,11 @@ describe("sourceWindow", () => {
   });
 
   it("reads what the time stretch needs at other speeds: a frame and its search on both sides", () => {
-    // Frames -1 to 1 of the span, centred on sidecar frames 48 464, 50 000 and 51 536, half a 2048 window and a 512
-    // search around them: 46 928 to 53 072.
-    expect(sourceWindow({ span: span({ speed: 1.5 }), from: 1000, to: 1100 })).toEqual({ first: 46_928, count: 6145 });
+    // Inside the span: frames 2 to 5, centred on sidecar frames 53 072 to 57 680, half a 2048 window and a 512 search
+    // around them: 51 536 to 59 217.
+    expect(sourceWindow({ span: span({ speed: 1.5, end: 21_000 }), from: 5000, to: 5100 })).toEqual({ first: 51_536, count: 7681 });
+    // At the span's edges the frames would reach 46 928 to 53 072; only the 1 500 frames it plays (50 000 to 51 500) are read.
+    expect(sourceWindow({ span: span({ speed: 1.5 }), from: 1000, to: 1100 })).toEqual({ first: 50_000, count: 1500 });
   });
 });
 
