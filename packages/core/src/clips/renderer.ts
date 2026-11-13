@@ -207,15 +207,18 @@ export class ClipRenderer {
    * Render state of every generated clip timeline `id` shows, nested ones
    * included under their flattened id (`<nested clip>/<clip>`, as export and
    * the preview name them) and their root track; queues renders that are due.
+   * `size`: at that frame size instead of the project resolution (a format of
+   * the project, ADR 0027), as {@link ensure} takes it.
    */
-  async status(root: string, id: string): Promise<ClipRendersResult> {
+  async status(root: string, id: string, size?: { width: number; height: number }): Promise<ClipRendersResult> {
     const { timeline } = await this.#options.load(root, id);
     const hosts = timeline.tracks.map((track) => track.id);
     // Flattening adds layers `<track>/<n>`: report the root track that shows them.
     const host = (track: string) => (hosts.includes(track) ? track : (hosts.find((candidate) => track.startsWith(`${candidate}/`)) ?? track));
     const placed = generatedClips(await resolveNested(root, timeline, this.#options.readNested)).map((p) => ({ ...p, track: host(p.track) }));
     const adapters = placed.length > 0 ? await this.#options.adapters(root) : new Map<string, RegisteredClipType>();
-    const format = await this.#options.format(root);
+    const project = await this.#options.format(root);
+    const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const clips: ClipRenderInfo[] = [];
     for (const { clip, track } of placed) {
       const keyed = await this.#keyOf(root, clip, adapters, format);

@@ -1,4 +1,4 @@
-import type { ClipDiff, OperationResult } from "@frameshell/protocol";
+import type { ClipDiff, MatteStateInfo, OperationResult } from "@frameshell/protocol";
 import { type Clip, MARKER_LABEL_MAX } from "@frameshell/schema";
 import {
   type KeyboardEvent,
@@ -28,6 +28,7 @@ import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
 import { useAssets, useNestedViews, useProjectKind } from "../preview/useProgram.js";
+import { useMatteStatus } from "../preview/useSubjectMattes.js";
 import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
 import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
 import { type SubtitlesState, useSubtitles } from "../subtitles/useSubtitles.js";
@@ -65,6 +66,7 @@ import {
   zoomAround,
   zoomLimits,
 } from "../timeline/layout.js";
+import { type MatteBadge, matteBadge, plateChoices } from "../timeline/matte.js";
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
@@ -189,6 +191,7 @@ export function TimelinePanel({
   const transitions = useMemo(() => ({ sourceDuration: (clip: Clip) => (assets ? sourceSeconds(clip, assets, nested) : undefined) }), [assets, nested]);
   const layout = useMemo(() => (view ? layoutTimeline(view, scenes, turnLanes, transitions) : null), [view, scenes, turnLanes, transitions]);
   const empty = layout !== null && layout.clipCount === 0;
+  const mattes = useMatteStatus(view ?? null, nested, assets);
   const toggleLanes = useCallback(
     (track: string) =>
       setLanesOpen((open) => {
@@ -319,6 +322,7 @@ export function TimelinePanel({
           run={run}
           lanesOpen={lanesOpen}
           onToggleLanes={toggleLanes}
+          mattes={mattes}
           overlay={
             error && !view ? (
               <p className="timeline-error">{error}</p>
@@ -345,6 +349,7 @@ function TimelineCanvas({
   run,
   lanesOpen,
   onToggleLanes,
+  mattes,
 }: {
   layout: TimelineLayout | null;
   fps: number;
@@ -358,6 +363,8 @@ function TimelineCanvas({
   /** Program tracks whose turn lanes are open (already in `layout`). */
   lanesOpen: ReadonlySet<string>;
   onToggleLanes: (track: string) => void;
+  /** `matte.status` of the tracks `behind` a plate (ADR 0032); null before the first read or when no track is. */
+  mattes: readonly MatteStateInfo[] | null;
 }) {
   const image = useProjectKind() === "image";
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -1092,6 +1099,21 @@ function TimelineCanvas({
     { label: t.timeline.addAudioTrack, run: () => send([{ op: "track.add", args: { kind: "audio" } }]) },
   ];
 
+  /**
+   * A video track's "behind the person" entries (ADR 0032): one per lower video track with a media clip that it is not
+   * behind already, and one to stop. Image projects have no timeline to put anything behind a person on.
+   */
+  const behindItems = (row: TrackRow): MenuItem[] => {
+    const current = latest.current.layout;
+    if (image || !current) return [];
+    const set = (behind: string | null) => send([{ op: "track.set", args: { track: row.id, behind } }]);
+    const plates = plateChoices(current, row).filter((plate) => plate.id !== row.behind);
+    return [
+      ...plates.map((plate, index): MenuItem => ({ label: t.timeline.behindPerson(plate.label), separated: index === 0, run: () => set(plate.id) })),
+      ...(row.behind !== null ? [{ label: t.timeline.stopBehindPerson, separated: plates.length === 0, run: () => set(null) }] : []),
+    ];
+  };
+
   /** Right-click on a track header: rename it, add subtitles of it or another track, delete it (with its clips). */
   const openTrackMenu = (event: MouseEvent, row: TrackRow) => {
     event.preventDefault();
@@ -1110,6 +1132,7 @@ function TimelineCanvas({
         ...(row.kind === "video" || row.kind === "program"
           ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => send([{ op: "track.set", args: { track: row.id, hidden: !row.hidden } }]) }]
           : []),
+        ...behindItems(row),
         ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
         ...(image ? [] : addTrackItems(true)),
         {
@@ -1297,7 +1320,7 @@ function TimelineCanvas({
                     >
                       <span className="track-id">{row.label}</span>
                       <span className="track-label">{row.name ?? ""}</span>
-                      <TrackState row={row} />
+                      <TrackState row={row} matte={layout ? matteBadge(layout, row, mattes) : null} />
                     </button>
                   )}
                   {row.angles.length > 0 && (
@@ -1357,7 +1380,7 @@ function TimelineCanvas({
                 >
                   <span className="track-id">{row.label}</span>
                   <span className="track-label">{row.name ?? ""}</span>
-                  <TrackState row={row} />
+                  <TrackState row={row} matte={layout ? matteBadge(layout, row, mattes) : null} />
                 </div>
               ),
             )}
@@ -1423,11 +1446,34 @@ function TimelineCanvas({
   );
 }
 
-/** Marks at the end of a track header: muted, hidden, or both; nothing for a track that plays and shows. */
-function TrackState({ row }: { row: TrackRow }) {
-  if (!row.muted && !row.hidden) return null;
+/** The person icon of a track `behind` a plate, with the matte's progress while it is made and a mark when it failed (ADR 0032). */
+function MatteChip({ matte }: { matte: MatteBadge }) {
+  const label =
+    matte.state === "preparing"
+      ? t.timeline.matteMaking(matte.plate, matte.progress)
+      : matte.state === "failed"
+        ? t.timeline.matteFailed(matte.plate, matte.error)
+        : matte.state === "ready"
+          ? t.timeline.matteReady(matte.plate)
+          : t.timeline.behindPlate(matte.plate);
+  return (
+    <span className="track-matte" data-testid="track-matte" data-state={matte.state} data-plate={matte.plate} role="img" aria-label={label} data-tip={label}>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="5.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M3 14c0-3 2.3-4.8 5-4.8s5 1.8 5 4.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+      {matte.state === "preparing" && matte.progress !== null && <span className="track-matte-text">{Math.round(matte.progress * 100)}%</span>}
+      {matte.state === "failed" && <span className="track-matte-text">!</span>}
+    </span>
+  );
+}
+
+/** Marks at the end of a track header: muted, hidden, or both, and the matte of a track behind a person; nothing for a plain track. */
+function TrackState({ row, matte }: { row: TrackRow; matte: MatteBadge | null }) {
+  if (!row.muted && !row.hidden && !matte) return null;
   return (
     <span className="track-state" data-testid="track-state" data-muted={row.muted} data-hidden={row.hidden}>
+      {matte && <MatteChip matte={matte} />}
       {row.muted && (
         <svg viewBox="0 0 16 16" role="img" aria-label={t.timeline.trackMuted}>
           <title>{t.timeline.trackMuted}</title>

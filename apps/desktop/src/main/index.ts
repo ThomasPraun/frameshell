@@ -58,6 +58,7 @@ import {
   type TimelineEdit,
   type ProjectSetup,
   type AudioOrientation,
+  type IdeaBrief,
   type VideoProjectPlan,
 } from "../shared/api.js";
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
@@ -127,6 +128,7 @@ import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
+import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
 import { planVideoProject, projectName } from "./video-project.js";
 import { replaceClipImage } from "./replace-image.js";
 import { type FrameSize, addAudioBackground, renderBackgroundTo } from "./audio-background.js";
@@ -696,6 +698,32 @@ async function createFromVideos(
       void setUpTranscription(plan.dir, assets, background);
     }
     return opened;
+  } catch (error) {
+    return { status: "error", message: (error as Error).message };
+  }
+}
+
+/** Briefs of projects made from an idea (#472), by project folder, until the project's window takes them. */
+const ideas = new Map<string, IdeaBrief>();
+
+/** Folder new ideas go in unless the person picks another: the OS videos folder. */
+function ideaParent(parent?: string): string {
+  return parent ?? app.getPath("videos");
+}
+
+/**
+ * Create the empty project of an idea (#472) and open it. The first format sets the project's size, the other
+ * ones go in with `format.add`, so they are journaled like any format change (ADR 0027, 0036).
+ */
+async function createFromIdea(state: WindowState, raw: IdeaBrief, parent?: string): Promise<OpenOutcome> {
+  try {
+    const brief = checkIdea(raw);
+    const plan = await planIdeaProject({ parent: ideaParent(parent), name: brief.name });
+    const [primary, ...others] = brief.formats;
+    await daemon.request("project.init", { dir: plan.dir, name: plan.name, resolution: formatSize(primary ?? "16x9") });
+    for (const id of others) await daemon.request("format.add", { cwd: plan.dir, id });
+    ideas.set(plan.dir, brief);
+    return await openFromWindow(state, plan.dir);
   } catch (error) {
     return { status: "error", message: (error as Error).message };
   }
@@ -1412,6 +1440,16 @@ function registerIpc(): void {
         options?.orientation === "portrait" ? "portrait" : "landscape",
       ),
   );
+  ipcMain.handle(Channel.projectPlanIdea, (_event, place?: { parent?: string; name?: string }) =>
+    outcome(() => planIdeaProject({ parent: ideaParent(place?.parent), name: place?.name ?? "" })),
+  );
+  ipcMain.handle(Channel.projectFromIdea, (event, brief: IdeaBrief, parent?: string) => createFromIdea(stateOf(event.sender), brief, parent));
+  ipcMain.handle(Channel.projectTakeIdea, (event) => {
+    const dir = stateOf(event.sender).project?.dir;
+    const brief = dir ? (ideas.get(dir) ?? null) : null;
+    if (dir) ideas.delete(dir);
+    return brief;
+  });
   ipcMain.handle(Channel.projectSetup, async (event) => {
     const { project } = await requireProject(stateOf(event.sender));
     return setups.get(project.dir) ?? null;

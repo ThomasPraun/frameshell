@@ -99,11 +99,26 @@ describe("frameshell review", () => {
     120_000,
   );
 
+  it(
+    "prints the metrics and the loudness of a file, writes metrics.json, and metrics alone write no sheets",
+    () => {
+      const result = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(/Metrics \(\d+ samples, [\d.]+ s apart\): longest still /);
+      expect(result.stdout).toMatch(/loudness: -?[\d.]+ LUFS, range [\d.]+ LU, true peak -?[\d.]+ dBTP, phone band -?[\d.]+ LUFS/);
+      const run = /Review (\d+) of/.exec(result.stdout)![1]!;
+      expect(existsSync(join(project, ".frameshell", "review", run, "metrics.json"))).toBe(true);
+      expect(existsSync(join(project, ".frameshell", "review", run, "contact.png"))).toBe(false);
+    },
+    120_000,
+  );
+
   it("rejects a bad range, sheet or flag before talking to the daemon", () => {
     expect(frameshell(["review", "--platform", "myspace"]).stderr).toContain("--platform takes instagram-reels, tiktok, youtube-shorts, youtube");
     expect(frameshell(["review", "--range", "5"]).stderr).toContain("--range takes two seconds");
     expect(frameshell(["review", "--range", "5,2"]).code).toBe(2);
     expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("unknown: poster");
+    expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("seam, metrics");
     expect(frameshell(["review", "--every", "0"]).stderr).toContain("--every takes seconds above 0");
     expect(frameshell(["review", "--at", "1"]).stderr).toContain("`frameshell review` does not take --at");
     expect(frameshell(["review", "extra"]).code).toBe(2);

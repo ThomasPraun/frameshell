@@ -72,10 +72,16 @@ export interface LayerAlpha {
 
 /** Engine worker to page. */
 export type FromEngine =
-  /** Program frame now on the canvas; -1 for black (gap, placeholder, nothing decoded yet). */
-  | { type: "shown"; frame: number }
+  /**
+   * Program frame now on the canvas; -1 for black (gap, placeholder, nothing decoded yet). `program` counts the
+   * `program` messages the engine had when it drew it (1 = the first), so the page can tell a previous program's picture.
+   */
+  | { type: "shown"; frame: number; program: number }
   | { type: "stats"; stats: EngineStats }
-  /** Reply to `alphaAt` `id`: the alpha of the pictures with alpha on the canvas now, at program frame `frame` (-1: black). */
+  /**
+   * Reply to `alphaAt` `id`: the alpha of the pictures with alpha on the canvas now, at program frame `frame` (-1: black).
+   * After a new program, until its first draw: `frame` NaN and no layers.
+   */
   | { type: "alpha"; id: number; frame: number; layers: LayerAlpha[] }
   | { type: "error"; message: string };
 

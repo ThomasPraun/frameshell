@@ -33,6 +33,7 @@ const job = (overrides: Partial<JobInfo> = {}): JobInfo => ({
   progress: 0.25,
   cached: null,
   error: null,
+  warnings: [],
   createdAt: "2026-09-30T00:00:00.000Z",
   startedAt: "2026-09-30T00:00:01.000Z",
   finishedAt: null,

@@ -118,6 +118,59 @@
                               "description": "Default false.",
                               "type": "boolean"
                             },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
+                            },
                             "effects": {
                               "description": "Audio effects applied in order (at most 8), e.g. the voice chain highpass, denoise, compressor. Baked once per asset and chain into `.frameshell/audio-fx/`; export and preview play the bake.",
                               "minItems": 1,
@@ -578,6 +631,59 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -932,6 +1038,59 @@
                             "muted": {
                               "description": "Default false.",
                               "type": "boolean"
+                            },
+                            "duck": {
+                              "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                              "type": "object",
+                              "properties": {
+                                "under": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                                },
+                                "depth": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "dB the clip dips below its level while someone speaks."
+                                },
+                                "attackMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the dip takes to reach full depth."
+                                },
+                                "releaseMs": {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "description": "Milliseconds the level takes to come back after the voice stops."
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "description": "dBFS above which sound counted as speech."
+                                },
+                                "gap": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "Seconds under which two stretches of speech merged."
+                                },
+                                "level": {
+                                  "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "under",
+                                "depth",
+                                "attackMs",
+                                "releaseMs",
+                                "threshold",
+                                "gap"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false
@@ -1708,6 +1867,59 @@
                     "muted": {
                       "description": "Default false.",
                       "type": "boolean"
+                    },
+                    "duck": {
+                      "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "under": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the clip dips below its level while someone speaks."
+                        },
+                        "attackMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the dip takes to reach full depth."
+                        },
+                        "releaseMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the level takes to come back after the voice stops."
+                        },
+                        "threshold": {
+                          "type": "number",
+                          "description": "dBFS above which sound counted as speech."
+                        },
+                        "gap": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds under which two stretches of speech merged."
+                        },
+                        "level": {
+                          "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "under",
+                        "depth",
+                        "attackMs",
+                        "releaseMs",
+                        "threshold",
+                        "gap"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -1780,6 +1992,59 @@
                     "muted": {
                       "description": "Default false.",
                       "type": "boolean"
+                    },
+                    "duck": {
+                      "description": "Set by `track.duck` on clips that carry its `auto: \"duck\"` keys: what it was asked, so the same duck can run again. Leave it as it is.",
+                      "type": "object",
+                      "properties": {
+                        "under": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": "Ids of the video or audio tracks whose speech the music dipped under."
+                        },
+                        "depth": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "dB the clip dips below its level while someone speaks."
+                        },
+                        "attackMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the dip takes to reach full depth."
+                        },
+                        "releaseMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Milliseconds the level takes to come back after the voice stops."
+                        },
+                        "threshold": {
+                          "type": "number",
+                          "description": "dBFS above which sound counted as speech."
+                        },
+                        "gap": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Seconds under which two stretches of speech merged."
+                        },
+                        "level": {
+                          "description": "`duck --level`: dB under the voice's loudness the clip's static gain was set to, when it was asked.",
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "under",
+                        "depth",
+                        "attackMs",
+                        "releaseMs",
+                        "threshold",
+                        "gap"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "additionalProperties": false
@@ -1865,7 +2130,7 @@
                 "pattern": "^(?!m_[0-9a-f]+$)"
               }
             ],
-            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters, never shaped like an id (`m_1a2b3c`)."
+            "description": "Name, e.g. `hook`; unique in the timeline ignoring case, at most 80 characters, never shaped like an id (`m_1a2b3c`); `marker.add` and `marker.set` also refuse a grid reference (`beat:8`, `bar:2`, any case)."
           },
           "color": {
             "description": "`red`, `orange`, `yellow`, `green`, `blue` or `purple`. Absent: the app's accent colour.",

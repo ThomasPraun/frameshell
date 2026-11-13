@@ -80,6 +80,7 @@ import {
   type EditPointResolver,
   type IdPrefix,
   type OperationRequest,
+  type SourceInfo,
   applyOperation,
 } from "./engine.js";
 import { FrameGrid } from "./grid.js";
@@ -364,6 +365,15 @@ export class TimelineService {
       call.onApplied?.(applied.timeline);
       return result;
     });
+  }
+
+  /**
+   * Apply `request` to `loaded` (a timeline of `root` with id `id`) in memory with the project's edit context: the
+   * same validation as {@link TimelineService.apply} (adapter props schemas included), but nothing is written,
+   * journaled or proposed. Batch rows (ADR 0040) are made this way. Throws the engine's errors.
+   */
+  async applyInMemory(root: string, id: string, loaded: { timeline: Timeline; fps: number }, request: OperationRequest): Promise<AppliedOperation> {
+    return applyOperation(loaded.timeline, request, this.#context(root, id, loaded.fps, request.op));
   }
 
   /**
@@ -1584,39 +1594,45 @@ export class TimelineService {
     return normalizeArgs(call, timeline, loadGrid);
   }
 
+  /**
+   * The engine's view of project-relative `asset` (length, streams), as every operation `op` that places media sees
+   * it. Throws AssetNotFound, or InvalidOperation for a file that is not media or has no stream.
+   */
+  async source(root: string, asset: string, op: string): Promise<SourceInfo> {
+    const refused = nonMediaError(asset, { op, field: "asset" });
+    if (refused) throw refused;
+    let probe: MediaProbe;
+    try {
+      probe = await this.#options.probe(root, asset);
+    } catch (error) {
+      if (!(error instanceof ToolError)) throw error;
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        `${asset} is not a media file ffprobe can read. Use a video, audio or image file.`,
+        { op, reason: "unreadable media", field: "asset" },
+      );
+    }
+    if (!probe.video && !probe.audio) {
+      throw new RpcError(ErrorCode.InvalidOperation, `${asset} has no audio or video stream.`, {
+        op,
+        reason: "no streams",
+        field: "asset",
+      });
+    }
+    return {
+      duration: probe.video?.still ? null : probe.duration,
+      video: probe.video !== null,
+      audio: probe.audio !== null,
+    };
+  }
+
   #context(root: string, id: string, fps: number, op: string, settings: EditSettings = {}): EditContext {
     const grid = new FrameGrid(fps);
     const newId = this.#options.newId ?? ((prefix: IdPrefix) => `${prefix}_${randomBytes(3).toString("hex")}`);
     const resolveEditPoint = this.#options.resolveEditPoint?.(root, fps);
     return {
       fps,
-      source: async (asset) => {
-        const refused = nonMediaError(asset, { op, field: "asset" });
-        if (refused) throw refused;
-        let probe: MediaProbe;
-        try {
-          probe = await this.#options.probe(root, asset);
-        } catch (error) {
-          if (!(error instanceof ToolError)) throw error;
-          throw new RpcError(
-            ErrorCode.InvalidOperation,
-            `${asset} is not a media file ffprobe can read. Use a video, audio or image file.`,
-            { op, reason: "unreadable media", field: "asset" },
-          );
-        }
-        if (!probe.video && !probe.audio) {
-          throw new RpcError(ErrorCode.InvalidOperation, `${asset} has no audio or video stream.`, {
-            op,
-            reason: "no streams",
-            field: "asset",
-          });
-        }
-        return {
-          duration: probe.video?.still ? null : probe.duration,
-          video: probe.video !== null,
-          audio: probe.audio !== null,
-        };
-      },
+      source: (asset) => this.source(root, asset, op),
       nestedDuration: this.#nestedDurations(root, [timelineRel(id)], grid),
       clipTypes: async () => {
         const adapters = await this.#options.clipTypes(root);
