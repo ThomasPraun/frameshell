@@ -600,6 +600,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Motion film playbook uses the commands that landed after it (#453; skill only): `sound music` or `music candidates`
+  for the bed, `music fit --end bar:N`, `duck --level`, `analyze` numbers as storyboard targets, `clip verify` per shot,
+  `review` metrics in the critique loop, iris and dip-cut, `glass-card` with `clip set --glass`, `render --loop` and `batch`.
+
 - `beat:N` and `bar:N` count from the song, not the clip (#550, part of #458, ADR 0029; protocol 107): `beat:1` is the
   music file's first measured beat and `bar:1` its first downbeat, so trimming the head of the music clip no longer
   renumbers them (`bar:8` stays the same musical bar). Past the measured part a number continues at the grid's period
