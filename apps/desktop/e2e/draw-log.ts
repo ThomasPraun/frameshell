@@ -1,10 +1,12 @@
 // page.evaluate bodies run in the renderer.
 /// <reference lib="dom" />
 import type { Page } from "@playwright/test";
+import type { PlayDrops } from "../src/renderer/src/preview/drop-log.js";
 
 // Program frames the engine drew, from every `data-shown` change of the preview frame. The engine worker draws without
 // the page's main thread (ADR 0001): a page rAF that runs late misses frames that did reach the screen, so drops are
-// counted from these draws (#567, #573); canvas reads only check what a frame showed and in which order.
+// counted from these draws (#567, #573); canvas reads only check what a frame showed and in which order. The engine
+// says why each one was dropped (`dropsIn`).
 
 interface DrawLog {
   values: (string | null)[];
@@ -46,10 +48,42 @@ export async function drawnFrames(page: Page): Promise<number[]> {
   return values.flatMap((value) => (value === null ? [] : [Number(value)]));
 }
 
-/** How many program frames in `[from, to)` are not in `drawn`. */
-export function framesNeverDrawn(drawn: readonly number[], from: number, to: number): number {
+/** Program frames never drawn, by kind (the engine's `PlayDrops`, `src/renderer/src/preview/drop-log.ts`). */
+export interface Drops {
+  /** Not decoded when a tick wanted them, or skipped after an engine tick overran a frame: 0 under ADR 0001 threshold 3. */
+  starved: number[];
+  /** No tick while they were due and the engine was idle: host scheduling, reported only (ADR 0001 amendment, #567). */
+  cadence: number[];
+}
+
+/**
+ * Dropped program frames `missing` by the engine's kind. The engine posts at most `DROP_SAMPLE` frames per kind: a
+ * frame in neither sample is cadence only when the cadence sample is cut and the starved one complete. Any other
+ * frame the engine did not classify (stats missing or stale, a play that stopped early) counts as starved.
+ */
+export function classifyDrops(missing: Iterable<number>, engine: PlayDrops | null | undefined): Drops {
+  const starved = new Set(engine?.starved.frames ?? []);
+  const cadence = new Set(engine?.cadence.frames ?? []);
+  const restIsCadence =
+    engine !== null && engine !== undefined && engine.cadence.count > engine.cadence.frames.length && engine.starved.count === engine.starved.frames.length;
+  const drops: Drops = { starved: [], cadence: [] };
+  for (const frame of missing) {
+    const isCadence = cadence.has(frame) || (!starved.has(frame) && restIsCadence);
+    (isCadence ? drops.cadence : drops.starved).push(frame);
+  }
+  return drops;
+}
+
+/** Program frames in `[from, to)` not in `drawn`, by kind from the engine's `dropped` stats of the play. */
+export function dropsIn(drawn: readonly number[], engine: PlayDrops | null | undefined, from: number, to: number): Drops {
   const seen = new Set(drawn);
-  let missing = 0;
-  for (let frame = from; frame < to; frame++) if (!seen.has(frame)) missing++;
-  return missing;
+  const missing: number[] = [];
+  for (let frame = from; frame < to; frame++) if (!seen.has(frame)) missing.push(frame);
+  return classifyDrops(missing, engine);
+}
+
+/** `drops` for an annotation: counts and frames of each kind, then the engine's tick times when known. */
+export function describeDrops(drops: Drops, engine?: PlayDrops | null): string {
+  const busy = engine ? `; engine tick max ${engine.busyMaxMs} ms, p95 ${engine.busyP95Ms} ms` : "";
+  return `starved ${drops.starved.length} [${drops.starved.join(",")}], cadence ${drops.cadence.length} [${drops.cadence.join(",")}]${busy}`;
 }

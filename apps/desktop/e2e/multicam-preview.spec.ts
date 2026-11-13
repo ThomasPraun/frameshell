@@ -4,9 +4,9 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { laidOutBox, launch, sandbox } from "./harness.js";
-import { drawnFrames, framesNeverDrawn, startDrawLog } from "./draw-log.js";
+import { describeDrops, drawnFrames, dropsIn, startDrawLog } from "./draw-log.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
-import { waitForIngest } from "./preview-probe.js";
+import { engineStats, statsDelta, waitForIngest } from "./preview-probe.js";
 
 // Multicam shots in the preview (#238, ADR 0016): a program track's shots are laid out by `shotLayers` (as export
 // lays them out), one decoder per visible angle, every angle's sound under every shot. Each angle is a flat colour, so
@@ -115,9 +115,6 @@ const GRID_4 = "RGBY";
 
 const readLayout = () => page.evaluate((points) => (window as unknown as { readLayout: (p: [number, number][]) => string }).readLayout(points), POINTS);
 
-const engineStats = () =>
-  page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats: () => Record<string, number> | null } }).frameshellPreviewProbe.stats());
-
 /** Layouts on the canvas on every display frame until playback stops (at most `ms`). */
 async function sampleWhilePlaying(ms: number): Promise<string[]> {
   return page.evaluate(
@@ -206,7 +203,6 @@ test("plays across shot changes: only whole layouts, in order, one decoder per v
   await page.waitForTimeout(500);
   const drawn = await drawnFrames(page);
   expect(drawn.every((frame, i) => i === 0 || frame >= drawn[i - 1]!), "frames drawn in order").toBe(true);
-  test.info().annotations.push({ type: "program frames never drawn", description: String(framesNeverDrawn(drawn, 0, 90)) });
 
   const order = [SOLO_RED, TWO_UP, GRID_3];
   const wrong = seen.filter((layout) => !order.includes(layout));
@@ -217,7 +213,8 @@ test("plays across shot changes: only whole layouts, in order, one decoder per v
 
   // Stats are posted once a second.
   await page.waitForTimeout(1_200);
-  const stats = await engineStats();
+  const stats = await engineStats(page);
+  test.info().annotations.push({ type: "program frames never drawn", description: describeDrops(dropsIn(drawn, stats?.dropped, 0, 90), stats?.dropped) });
   test.info().annotations.push({ type: "3 angles", description: JSON.stringify(stats) });
   expect(stats?.["decoders"]).toBe(3);
   expect(stats?.["audioChunks"]).toBeGreaterThan(0);
@@ -228,7 +225,7 @@ test("a 4-angle grid plays with four decoders", async () => {
   setShots(["red", "lime", "blue", "yellow"], [{ start: 0, shot: "grid", angles: ["red", "lime", "yellow", "blue"], seconds: 3 }]);
   await press("Home");
   await expect.poll(() => layoutAt(0)).toBe(GRID_4);
-  const before = await engineStats();
+  const before = await engineStats(page);
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
   const seen = await sampleWhilePlaying(15_000);
@@ -236,8 +233,7 @@ test("a 4-angle grid plays with four decoders", async () => {
   expect(seen.filter((layout) => layout !== GRID_4)).toEqual([]);
 
   await page.waitForTimeout(1_200);
-  const after = await engineStats();
-  const delta = Object.fromEntries(Object.entries(after ?? {}).map(([key, value]) => [key, key === "decoders" ? value : value - (before?.[key] ?? 0)]));
-  test.info().annotations.push({ type: "4 angles", description: JSON.stringify(delta) });
+  const after = await engineStats(page);
+  test.info().annotations.push({ type: "4 angles", description: JSON.stringify(statsDelta(before, after)) });
   expect(after?.["decoders"]).toBe(4);
 });

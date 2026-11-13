@@ -15,7 +15,7 @@ import { type Sandbox, isWindows, launch } from "./harness.js";
 import { makeSource, testFfmpeg } from "./media.js";
 import { drawnFrames, startDrawLog } from "./draw-log.js";
 import { type RunLog, analyze, checkThresholds, spikeCutList } from "./preview-analysis.js";
-import { installFrameReader, waitForIngest } from "./preview-probe.js";
+import { engineStats, installFrameReader, waitForIngest } from "./preview-probe.js";
 
 const ENABLED = process.env["FRAMESHELL_PREVIEW_MEASURE"] === "1";
 const MINUTES = Number(process.env["FRAMESHELL_PREVIEW_MEASURE_MINUTES"] || 30);
@@ -117,7 +117,7 @@ test("preview meets the ADR 0001 pass thresholds on the spike's cut list", async
     await drain();
     const probes = await page.evaluate(() => (window as unknown as { probes: [number, number][] }).probes);
     const drawn = await drawnFrames(page);
-    const stats = await page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats(): unknown } }).frameshellPreviewProbe.stats());
+    const stats = await engineStats(page);
 
     // Recorded blocks into one buffer on the context-frame axis.
     blocks.sort((a, b) => a.start - b.start);
@@ -150,7 +150,7 @@ test("preview meets the ADR 0001 pass thresholds on the spike's cut list", async
       return ((pcm[s.inF * hz + i] ?? 0) / 32768) * Math.max(0, Math.min(1, i / 96, (n - 1 - i) / 96));
     };
 
-    const run: RunLog = { fps: FPS, sampleRate: SR, segments, probes, drawn, anchor, audioStart, audio, audioGaps: gaps, timestamps, expected };
+    const run: RunLog = { fps: FPS, sampleRate: SR, segments, probes, drawn, dropped: stats?.dropped ?? null, anchor, audioStart, audio, audioGaps: gaps, timestamps, expected };
     const summary = analyze(run);
     const verdicts = checkThresholds(summary);
     const name = `real-app-${MINUTES}min-${segments.length - 1}cuts`;

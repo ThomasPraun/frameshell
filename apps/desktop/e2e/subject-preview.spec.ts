@@ -7,8 +7,8 @@ import type { FrameshellApi } from "../src/shared/api.js";
 import { laidOutBox, launch, sandbox } from "./harness.js";
 import { blockDiff, blockMean, exportedPixels, previewPixels } from "./frames.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
-import { drawnFrames, framesNeverDrawn, startDrawLog } from "./draw-log.js";
-import { addBarcodeAsset, installFrameReader, waitForIngest } from "./preview-probe.js";
+import { describeDrops, drawnFrames, dropsIn, startDrawLog } from "./draw-log.js";
+import { addBarcodeAsset, engineStats, installFrameReader, statsDelta, waitForIngest } from "./preview-probe.js";
 
 // A track behind a plate (ADR 0032) in the preview: the subject layer draws the plate's proxy through its matte (the
 // stand-in matte, FRAMESHELL_MATTE_STAND_IN: brighter than mid-gray is the subject) over the word, as export does.
@@ -35,9 +35,6 @@ async function addWord(): Promise<void> {
 
 const mattes = () =>
   page.evaluate(async () => (await (window as unknown as { frameshell: FrameshellApi }).frameshell.media.mattes("main")).mattes.map((m) => `${m.asset}:${m.state}`));
-
-const engineStats = () =>
-  page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats: () => Record<string, number> | null } }).frameshellPreviewProbe.stats());
 
 /**
  * The preview at 2 s once it draws the subject: the app reads `matte.status` on its own clock, so the matte may reach
@@ -106,7 +103,7 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   test.setTimeout(120_000);
   await page.keyboard.press("Home");
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
-  const before = await engineStats();
+  const before = await engineStats(page);
   await startDrawLog(page);
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
@@ -127,7 +124,7 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   // The engine reports a draw after it: let the report of the last frame read arrive.
   await page.waitForTimeout(1_200);
   const drawn = await drawnFrames(page);
-  const after = await engineStats();
+  const after = await engineStats(page);
 
   const shown = [...new Set(read.filter((frame) => frame >= 0))];
   expect(shown.every((frame, i) => i === 0 || frame > shown[i - 1]!), "frames in order").toBe(true);
@@ -135,12 +132,13 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   const announced = new Set(drawn);
   expect(shown.filter((frame) => !announced.has(frame)), "canvas frames the engine never reported").toEqual([]);
   // Inside the word (1 s to 5 s): source frames never drawn are dropped frames.
-  const dropped = framesNeverDrawn(drawn, 30, 150);
+  const drops = dropsIn(drawn, after?.dropped, 30, 150);
   const unread = 120 - shown.filter((frame) => frame >= 30 && frame < 150).length;
-  const delta = Object.fromEntries(Object.entries(after ?? {}).map(([key, value]) => [key, key === "decoders" ? value : value - (before?.[key] ?? 0)]));
-  test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ dropped, unread, ...delta }) });
-  // ADR 0001 threshold 3 allows 0.1 % of program frames: none of 120.
-  expect(dropped).toBe(0);
+  const { dropped: _played, ...delta } = statsDelta(before, after);
+  test.info().annotations.push({ type: "subject playback drops", description: describeDrops(drops, after?.dropped) });
+  test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ unread, ...delta }) });
+  // ADR 0001 threshold 3 allows 0.1 % of program frames: none of 120 starved. Cadence drops are host scheduling.
+  expect(drops.starved, describeDrops(drops, after?.dropped)).toEqual([]);
   // The plate and the subject's colour and matte decoders (the word is a still).
   expect(after?.["decoders"]).toBe(3);
 });
