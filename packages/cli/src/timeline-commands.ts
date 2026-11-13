@@ -1,6 +1,7 @@
 import type {
   CaptionsSetResult,
   ClipReframeResult,
+  ClipVerifyResult,
   CleanupResult,
   ConfigOperation,
   DaemonConnection,
@@ -67,6 +68,14 @@ mutations print the new revision):
                                people scan instead; --anchor (0 left edge, 1 right edge) fixes the picture's
                                horizontal position with no face detection. Replaces the clip's x, y and scale; one
                                transaction, revert undoes it. Correct the keys with clip key or in the app
+  clip verify <clip> [--probes n] [--tolerance 0-255]
+                               Check that a generated clip (a motion clip, any adapter with a live preview) paints
+                               a pure function of time: captures --probes frames (default 12, 2 to 48) at
+                               (i + 0.37) x duration / n of the clip, each twice, cold (a fresh page seeks to the
+                               time) and after a reseek (the page shows an unrelated probe first), and compares
+                               the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
+                               naming the worst frame, pixel and element. Also warns when every probe is the same
+                               picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
            [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -376,6 +385,8 @@ export const TIMELINE_OPTIONS = {
   "dry-run": { type: "boolean" },
   hit: { type: "string" },
   exact: { type: "boolean" },
+  probes: { type: "string" },
+  tolerance: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -413,6 +424,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to"],
   "clip reframe": ["format", "person", "anchor"],
+  "clip verify": ["probes", "tolerance"],
   "clip set": [
     "speed",
     "gain",
@@ -492,6 +504,7 @@ const ARITY: Record<string, [number, number]> = {
   "tempo clear": [0, 0],
   "tempo show": [0, 0],
   "clip reframe": [1, 1],
+  "clip verify": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -961,6 +974,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("person") !== undefined && str("anchor") !== undefined) throw new UsageError("Pass --person or --anchor, not both: they are two ways to place the picture.");
       Object.assign(params, { clip: args[0], format: str("format"), person: str("person"), anchor: num("anchor") });
       break;
+    case "clip verify": {
+      method = "clip.verify";
+      const probes = num("probes");
+      if (probes !== undefined && (!Number.isInteger(probes) || probes < 2 || probes > 48)) throw new UsageError("--probes: expected a whole number from 2 to 48.");
+      const tolerance = num("tolerance");
+      if (tolerance !== undefined && (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255)) throw new UsageError("--tolerance: expected a whole number from 0 to 255.");
+      Object.assign(params, { clip: args[0], probes, tolerance });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -1065,6 +1087,7 @@ export async function executeTimeline(
   cwd: string,
   json: boolean,
   onProgress?: (progress: Progress) => void,
+  exit?: { code: number },
 ): Promise<string> {
   const params = inv.withCwd ? { cwd, ...inv.params } : inv.params;
   if (inv.voiceFromStyle || inv.glassFromStyle) {
@@ -1079,6 +1102,7 @@ export async function executeTimeline(
     // Compact on purpose: agents read this, and indentation roughly doubles its tokens.
     return json ? `${JSON.stringify(result)}\n` : formatTimeline(result as TimelineView);
   }
+  if (inv.method === "clip.verify" && !(result as ClipVerifyResult).ok && exit) exit.code = 1;
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
   if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
@@ -1117,12 +1141,36 @@ export async function executeTimeline(
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
   if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
+  if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
     return `Cut-out ${asset} · layer ${clip} on new track ${track}\n${formatOperation(result as OperationResult)}`;
   }
   return formatOperation(result as OperationResult);
+}
+
+/** `clip verify` for people: the verdict, one line per probe, then the worst frame and element. */
+export function formatClipVerify(result: ClipVerifyResult): string {
+  const { probes, worst } = result;
+  const failed = probes.filter((probe) => !probe.ok).length;
+  const lines = [
+    `${result.ok ? "OK" : "FAIL"} · ${result.type} clip ${result.clip} of ${result.timeline} · ${probes.length} probes at ${result.size.width}x${result.size.height}, ` +
+      `${result.distinct} different pictures · tolerance ${result.tolerance}/255` +
+      (result.ok ? "" : ` · ${failed} of ${probes.length} probes differ after a reseek`),
+  ];
+  for (const probe of probes) {
+    lines.push(`  ${probe.at.toFixed(3).padStart(8)} s  after ${probe.reseekFrom.toFixed(3)} s  max ${String(probe.max).padStart(3)}/255  ${probe.pixels} px over  ${probe.ok ? "ok" : "DIFFERS"}`);
+  }
+  if (worst) {
+    const element = worst.element ? `${worst.element.selector}${worst.element.text === "" ? "" : ` "${worst.element.text}"`}` : "nothing paints there (transparent)";
+    lines.push(`Worst: ${worst.at.toFixed(3)} s, pixel ${worst.pixel.x},${worst.pixel.y}, ${worst.max}/255 · ${element}`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (!result.ok) {
+    lines.push("The picture depends on the order frames are painted. Look for CSS transitions, timers, requestAnimationFrame, Date, unseeded random, will-change or 3D transforms on that element.");
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function formatCaptions(result: CaptionsSetResult): string {

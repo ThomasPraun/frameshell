@@ -24,6 +24,7 @@ Look after every change the viewer would see: an overlay, a transform, a title, 
 - `analyze { file: "references/reel.mp4" }`: measure a reference video (#471): contact and shots sheets as images, then the shot table, cuts per minute, palette, loudness and tempo as JSON; written to `.frameshell/analysis/<name>/`. See [reference-video.md](reference-video.md). Without MCP: `frameshell analyze <video>`.
 - Without MCP: `frameshell frame --at 12.5 --out /tmp/f.png`, then open the PNG with your image-reading tool.
 - `inspect_point { at: 12.5, x: 0.71, y: 0.14 }` (or `unit: "pixel"` with project pixels): the clips under that point, topmost first, the one seen there (`target`), and in a generated clip the DOM element painting it, as the user's Pick tool reports it (`elements[0]`, then its ancestors). CLI: `frameshell inspect --at 12.5 --point 0.71,0.14`. `segment: true` (CLI `--segment`) on a photo of an image project also returns `segment` (see [image-projects.md](image-projects.md)).
+- `clip_verify { timeline, clip, probes?, tolerance? }`: whether a generated (motion) clip paints the same picture cold and after a reseek, within 2/255 per channel; `ok` false names the worst time, pixel and element. CLI: `frameshell clip verify <clip>`.
 
 Done = you looked at a frame inside every changed visual element's time span and it shows what the user asked for.
 

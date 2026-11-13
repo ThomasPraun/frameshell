@@ -346,6 +346,7 @@ export {
   type RenderProbe,
   type RenderedClip,
 } from "./clips/renderer.js";
+export { ClipVerifier, type ClipVerifyOptions } from "./clips/verify.js";
 export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, resolveSoundOf, syncReport } from "./multicam/measure.js";
 export { type GroupTurns, type SpeakerSource, type TurnsSource, type TurnsTranscript, groupTurns } from "./multicam/group-turns.js";
 export {
