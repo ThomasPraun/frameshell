@@ -28,6 +28,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `audio.shape`. Schema: `auto` takes `music`, a duck key over a music key carries `baseAuto`, clips take `audio.shape`;
   older Frameshell versions reject such a timeline. The 5 ms entry fade waits for sample-accurate audio fades (#585);
   `duck --level` from the style's `sound.musicUnderVoice` is not done.
+- Sound sync, loop seam, delivery check and safe-zone placement of `review`, fourth slice of #457 (epic #451, ADR 0039 slice 3;
+  protocol 122; `metrics.sync`, `metrics.seam`, `metrics.delivery`, CLI `review --preset p --loop`, MCP `review` `preset`, `loop`):
+  `metrics.sync` sets sounds against the picture events they belong to. For a timeline the sounds are the generated takes
+  `sound.place` put on its audio tracks (exact to the frame), for a `--file` the hits found in its sound (the `analyze` hit
+  detector); whooshes, risers and ticks are counted as `excluded`, since they do not land on an event by design. Each sound gets
+  its offset to the nearest visual event within 0.12 s (sound minus picture): over 45 ms before it reads `early`, over 75 ms
+  after it `late`, widened by half the picture sampling. Because a hit on every cut proves nothing, `near` (share of sounds with
+  an event within 0.1 s) is set beside `chance`, the same share with the sounds moved by fixed offsets of 0.3 to 1.1 s, and
+  `silentCuts` lists the cuts with no sound (sounds with verdict `none` are the other half). `metrics.seam` is the mean grey
+  difference of the last frame and the first at 160 px (the measure of the render's loop check, `export/seam.ts`, now also giving its
+  picture size; under 10 reads `continuous`, a hard cut 40 to 80, under 0.5 while the picture moves is a `duplicate`); `--loop`
+  turns a duplicate or a jump into a `loop-seam` craft warning. `--file` with `--preset <id>` reads the file back with ffprobe against
+  the export plan of `--timeline` (and `--format`) with that preset (`metrics.delivery`: width, height, frame rate, length within 2
+  frames, video codec, audio, and loudness within 1.5 LU of the target; a difference is a `delivery` craft warning). The safe-zone sheet
+  and `safeZones` now also flag graphics (a generated clip's alpha box at up to 12 frames of the clip, titles included; a render with
+  no alpha is named in `warnings` and not measured) and faces (boxes of the cached `people scan`, placed through the clip's layer
+  and the format's cover crop) that reach into a zone: `!graphic` and `!face` on the tile, `subject`, `clip` in the flags and a
+  `safe-zone` craft warning. Thresholds are data in `review/thresholds.ts` with HyperFrames and earshot attribution (#478), and the
+  warnings never fail a run. Not yet: assertions and per-clip waivers, the sound review list (voice over bed, repeated whooshes),
+  multicam shots against zones, the mechanical audio QA of the third-pass comment.
 - Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 117): `frameshell voiceover place <script>`
   (daemon `voiceover.place`, MCP `voiceover_place`) puts the takes of a voiceover script on the timeline as phrase clips
   in one transaction: each take is cut at its silences, every phrase becomes a clip on the audio track `Voiceover`
@@ -159,8 +179,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has none (render a draft and review the file). `craft` lists warnings, never failures, with their thresholds from the
   launch-film checklist of the ticket: still over 3 s, empty frame 0, a blank picture, a short cue, a true peak above -1 dBTP,
   a phone band 6 LU under the mix and over 15 s with no sound. The critique loop of the skill reads them in place of a hand-made
-  `ebur128` command. Not yet: sync of sounds to picture events, captions over graphics, the loop seam jump, the delivery check
-  of an export against the plan, assertions and per-clip waivers.
+  `ebur128` command. Sync of sounds to picture, the loop seam jump and the delivery check follow in the fourth slice;
+  not yet: assertions and per-clip waivers.
 - Voice section in the clip inspector, app slice of #464 (ADR 0031, epic #451; no wire change): a media clip shows its
   voice chain. The Voice switch writes the style's voice chain (high-pass, denoise, compressor) or bypasses it, and
   switching on again brings the bypassed chain back (kept in that window only; the saved clip has no bypass flag).
@@ -328,7 +348,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`captionScale`, 1.3 in a vertical non-primary format). `--platform` adds the sheet to the default ones; a vertical film
   whose `style.json` names platforms gets it without the flag. A file shows the zones without flags. Sheet labels
   are now also sized by the tile's width, so a narrow tile of a vertical film does not clip them (`review` and `analyze`). Titles, graphics
-  and faces are not measured yet.
+  and faces follow in the fourth slice.
 - `beat:N` and `bar:N` as times, fourth slice of #458 (ADR 0029, epic #451; protocol 97): every time argument that takes
   a TimeRef (`--at`, `--from`/`--to`, `--start`/`--end` of `cut`, `clip add|move|trim|split|key`, `transition`, `marker`;
   the same arguments over MCP) now also takes a beat or a bar start of the timeline's grid, counting from 1, with the

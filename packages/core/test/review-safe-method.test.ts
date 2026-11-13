@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, type ReviewResult, connectToDaemon } from "@frameshell/protocol";
 import { SAFE_ZONES, type Transcript, VERTICAL_CAPTION_SCALE, parseTimeline, scaledCaptions, subtitleTracks } from "@frameshell/schema";
-import { type Daemon, bundledFontMetrics, startDaemon } from "../src/index.js";
+import { type Daemon, bundledFontMetrics, startDaemon, writeFaceScan } from "../src/index.js";
 import { cueCrossings, filmInsets, safeFlags } from "../src/review/safe.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
@@ -158,6 +160,29 @@ describe("review safe sheet", () => {
       expect(file.warnings.join("\n")).toContain("vertical platform and the film is not");
       const ignored = await conn.request("review", { cwd: project, platform: "tiktok", sheets: ["seam"], from: 0, to: 0.3 });
       expect(ignored.warnings.join("\n")).toContain("is ignored");
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("review safe sheet: faces", () => {
+  it(
+    "flags a face of the cached people scan that sits in a zone, on the sheet, in safeZones and as a craft warning",
+    async () => {
+      const hash = `sha256:${createHash("sha256").update(await readFile(footage)).digest("hex")}`;
+      // A face in the lower tenth of a 320x240 picture, at 0.5 s and again at 1 s.
+      const boxes = [0.5, 1].map((time) => ({ time, x: 0.5, y: 0.9, width: 0.1, height: 0.1, score: 0.9 }));
+      await writeFaceScan(project, hash, { width: 320, height: 240, samples: 2, tracks: [{ id: "t1", start: 0.5, end: 1, boxes, embeddings: [] }] });
+      const result = await conn.request("review", { cwd: project, projectFormat: "9x16", platform: "instagram-reels", sheets: ["safe", "metrics"], every: 0.25 });
+      const faces = result.safeZones[0]!.flags.filter((flag) => flag.subject === "face");
+      expect(faces).toEqual([expect.objectContaining({ subject: "face", zone: "bottom", cues: 1, first: 0.5, reach: expect.any(Number) })]);
+      expect(faces[0]!.clip).toEqual(expect.any(String));
+      expect(faces[0]!.reach).toBeGreaterThan(100);
+      const marked = result.sheets[0]!.tiles.filter((tile) => tile.flags?.includes("face"));
+      expect(marked.map((tile) => tile.at)).toContain(0.5);
+      expect(marked.every((tile) => tile.label.includes("!face"))).toBe(true);
+      expect(result.metrics!.craft.filter((warning) => warning.check === "safe-zone")).toEqual([expect.objectContaining({ message: expect.stringContaining("a face of clip") })]);
+      expect(result.warnings).toEqual([]);
     },
     MEDIA_TIMEOUT,
   );
