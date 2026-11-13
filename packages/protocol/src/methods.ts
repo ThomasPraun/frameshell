@@ -31,7 +31,7 @@ import {
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeResultSchema } from "./analyze.js";
-import { ReviewResultSchema, ReviewSheetKindSchema } from "./review.js";
+import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VoiceoverLineSchema } from "@frameshell/schema";
 import {
@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 107;
+export const PROTOCOL_VERSION = 108;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1328,7 +1328,7 @@ export const methods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies and `metrics`): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
@@ -1339,7 +1339,12 @@ export const methods = {
       "can measure; a file has none). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
       "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
-      "`to` limit it to a range (the seam is then the range's ends). The MCP tool returns the sheets as images. " +
+      "`to` limit it to a range (the seam is then the range's ends). `metrics` (default on, or named in `sheets`) writes `metrics.json` and " +
+      "returns `metrics`: numbers a sheet cannot tell, measured on grey frames and the sound: the longest still stretch, the largest gap between " +
+      "visual events, near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
+      "`file` (integrated LUFS, range, true peak, the phone band 200 Hz to 6 kHz; measured after the encode, so export first: a timeline has none) and `craft` warnings " +
+      "(still over 3 s, empty frame 0, a blank picture, a cue too short, a true peak above -1 dBTP, a phone band 6 LU under the mix, over 15 s of silence). " +
+      "The MCP tool returns the sheets as images. " +
       "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",
     params: z.strictObject({
@@ -1355,7 +1360,11 @@ export const methods = {
         ),
       from: z.number().nonnegative().optional().describe("Start of the range, seconds. Default 0."),
       to: z.number().positive().optional().describe("End of the range, seconds. Default the end of the film."),
-      sheets: z.array(ReviewSheetKindSchema).min(1).optional().describe("Sheets to write. Default contact, phone, motion and seam, plus safe when a platform is given or the style guide names platforms on a vertical film."),
+      sheets: z
+        .array(ReviewOutputSchema)
+        .min(1)
+        .optional()
+        .describe("Outputs to write: the sheets and `metrics`. Default contact, phone, motion, seam and metrics, plus safe when a platform is given or the style guide names platforms on a vertical film."),
       platform: SafeZoneSchema.shape.platform
         .optional()
         .describe(

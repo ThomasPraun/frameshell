@@ -170,6 +170,84 @@ describe("review method", () => {
   );
 
   it(
+    "writes metrics.json with the sheets by default: still stretches of the three steps, no frame 0 problem, and no loudness for a timeline",
+    async () => {
+      expect(result.metrics).not.toBeNull();
+      const metrics = result.metrics!;
+      expect(JSON.parse(readFileSync(join(result.dir, "metrics.json"), "utf8"))).toEqual(metrics);
+      expect(Object.keys(JSON.parse(readFileSync(join(result.dir, "review.json"), "utf8")) as object)).not.toContain("metrics");
+      // Black, white and grey are each still for a second; the picture jumps at 1 s and 2 s.
+      expect(metrics.picture.samples).toBe(90);
+      expect(metrics.picture.events).toBe(2);
+      expect(near(metrics.picture.longestStatic!.seconds, 1, 0.1)).toBe(true);
+      expect(metrics.picture.staticRuns).toEqual([]);
+      expect(metrics.picture.firstFrameEmpty).toBe(true);
+      expect(metrics.picture.blank[0]).toMatchObject({ from: 0 });
+      expect(near(metrics.picture.blank[0]!.to, 1, 0.1)).toBe(true);
+      expect(metrics.craft.map((warning) => warning.check)).toEqual(["frame-0"]);
+      expect(metrics.subtitles).toBeNull();
+      expect(metrics.loudness).toBeNull();
+    },
+  );
+
+  it(
+    "metrics alone write no sheets; sheets alone write no metrics",
+    async () => {
+      const only = await conn.request("review", { cwd: project, sheets: ["metrics"], from: 0, to: 1 });
+      expect(only.sheets).toEqual([]);
+      expect(only.metrics).not.toBeNull();
+      expect(readdirSync(only.dir).sort()).toEqual(["metrics.json", "review.json"]);
+      const none = await conn.request("review", { cwd: project, sheets: ["seam"], from: 0, to: 1 });
+      expect(none.metrics).toBeNull();
+      expect(existsSync(join(none.dir, "metrics.json"))).toBe(false);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "measures the loudness of a file's sound after the encode, whole and in the phone band, and flags a phone band far under the mix",
+    async () => {
+      const { ffmpeg } = await mediaTools();
+      const tone = join(tempDir(), "tone.mp4");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=3"],
+        ...["-f", "lavfi", "-i", "sine=f=1000:r=48000:d=3"],
+        ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", tone],
+      ]);
+      const bass = join(tempDir(), "bass.mp4");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=3"],
+        ...["-f", "lavfi", "-i", "sine=f=60:r=48000:d=3"],
+        ...["-f", "lavfi", "-i", "sine=f=1000:r=48000:d=3"],
+        ...["-filter_complex", "[1:a]volume=6[a];[2:a]volume=0.5[b];[a][b]amix=inputs=2:duration=first[mix]", "-map", "0:v", "-map", "[mix]"],
+        ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", bass],
+      ]);
+      const plain = (await conn.request("review", { cwd: project, file: tone, sheets: ["metrics"] })).metrics!;
+      expect(plain.loudness!.integrated).toBeLessThan(-10);
+      expect(plain.loudness!.integrated).toBeGreaterThan(-35);
+      expect(Math.abs(plain.loudness!.integrated! - plain.loudness!.phoneBand!)).toBeLessThan(1);
+      expect(plain.loudness!.truePeak).toBeLessThan(0);
+      expect(plain.craft).toEqual([]);
+      const heavy = (await conn.request("review", { cwd: project, file: bass, sheets: ["metrics"] })).metrics!;
+      expect(heavy.loudness!.integrated! - heavy.loudness!.phoneBand!).toBeGreaterThan(10);
+      expect(heavy.craft.map((warning) => warning.check)).toContain("phone-band");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "says a file has no sound instead of failing",
+    async () => {
+      const mute = await conn.request("review", { cwd: project, file: footage, sheets: ["metrics"] });
+      expect(mute.metrics!.loudness).toBeNull();
+      expect(mute.warnings).toContain("loudness: the file has no sound.");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
     "fails with InvalidOperation outside the film and AssetNotFound for a file that is not there",
     async () => {
       const outside = await conn.request("review", { cwd: project, from: 10, sheets: ["seam"] }).catch((error: unknown) => error);
