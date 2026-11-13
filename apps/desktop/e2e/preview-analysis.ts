@@ -1,6 +1,7 @@
 // ADR 0001 measurement analysis for the real preview, ported from spikes/gapless-preview/scripts (analyze.mjs,
 // audio-residual.mjs, repeated-quanta.mjs, check-thresholds.mjs). Pure: raw logs in, metrics and verdicts out.
-import { type Drops, classifyDrops } from "./draw-log.js";
+import type { PlayDrops } from "../src/renderer/src/preview/drop-log.js";
+import { classifyDrops } from "./draw-log.js";
 
 /** Kept segment of the cut list: source frames `[inF, outF)` play from program frame `pF`. */
 export interface Segment {
@@ -22,7 +23,7 @@ export interface RunLog {
    */
   drawn: number[];
   /** The engine's `dropped` stats of the play: which frames not in `drawn` were starved, which were cadence. */
-  dropped: Drops | null;
+  dropped: PlayDrops | null;
   /** Program sample `sample` played at context frame `frame`. */
   anchor: { frame: number; sample: number };
   /** Context frame of `audio[0]`; audio is the graph output as the recorder heard it (mono). */

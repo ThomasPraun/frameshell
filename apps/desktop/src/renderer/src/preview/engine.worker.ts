@@ -503,8 +503,8 @@ class Engine implements LayerHost {
   #audioFadeFloor = 0;
   readonly #audioJobs = new Set<AudioJob>();
 
-  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0, dropped: { starved: [], cadence: [] } };
   readonly #drops = new DropLog();
+  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0, dropped: this.#drops.drops };
 
   constructor(canvas: OffscreenCanvas, mediaUrl: string) {
     this.#canvas = canvas;
@@ -601,7 +601,7 @@ class Engine implements LayerHost {
     this.#moveTo(from);
     this.#anchor = anchor;
     this.#playFrom = from;
-    this.#drops.start(from);
+    this.#drops.start(from, program.fps);
     this.#audioUntil = anchor.sample;
     this.#audioFadeFloor = anchor.sample;
     this.#scheduleAudio();
@@ -684,6 +684,7 @@ class Engine implements LayerHost {
     this.#tickQueued = false;
     const program = this.#program;
     if (!program) return;
+    const started = performance.now();
     const playing = this.#anchor !== null && this.#clock !== null;
     if (program.frames > 0) {
       const want = this.#wantFrame();
@@ -692,6 +693,7 @@ class Engine implements LayerHost {
     } else this.#drawBlack();
     if (playing) this.#scheduleAudio();
     for (const layer of this.#layers) void layer.pump();
+    if (playing) this.#drops.busy(performance.now() - started);
     if (playing || this.#drawn === "") this.queueTick();
   }
 

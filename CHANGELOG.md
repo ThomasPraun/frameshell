@@ -634,10 +634,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Preview playback tests count two kinds of dropped frames (#567, ADR 0001 amendment): the engine reports, per play,
-  the frames it passed over that a display tick wanted but were not decoded (starved) and those no tick wanted
-  (cadence: the host gave the engine no tick while they were due). The playback e2e tests and the ADR 0001 harness fail
-  on starved drops only, still none allowed; cadence drops are listed in the annotations.
-
+  the frames it passed over that a display tick wanted but were not decoded, or that followed a tick of its own longer
+  than a frame (starved), and those no tick wanted while it was idle (cadence: the host gave it no tick in time), with
+  the longest and 95th-percentile tick times. The playback e2e tests and the ADR 0001 harness fail on starved drops
+  only, still none allowed; cadence drops are listed in the annotations. Frame lists are posted capped at 50 per kind.
 - Motion film playbook uses the commands that landed after it (#453; skill only): `sound music` or `music candidates`
   for the bed, `music fit --end bar:N`, `duck --level`, `analyze` numbers as storyboard targets, `clip verify` per shot,
   `review` metrics in the critique loop, iris and dip-cut, `glass-card` with `clip set --glass`, `render --loop` and `batch`.

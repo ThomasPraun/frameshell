@@ -45,7 +45,7 @@ export interface EngineStats {
   audioChunks: number;
   /** `VideoDecoder`s open now: one per layer that decoded something, plus one per alpha stream (a multicam shot: one per angle slot). */
   decoders: number;
-  /** Program frames the current (or last) play passed over, starved or cadence (ADR 0001: CI fails on starved only). */
+  /** Frames the current (or last) play passed over by kind, and its tick times (ADR 0001: CI fails on starved only). */
   dropped: PlayDrops;
 }
 

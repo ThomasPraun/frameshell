@@ -135,10 +135,10 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   const drops = dropsIn(drawn, after?.dropped, 30, 150);
   const unread = 120 - shown.filter((frame) => frame >= 30 && frame < 150).length;
   const { dropped: _played, ...delta } = statsDelta(before, after);
-  test.info().annotations.push({ type: "subject playback drops", description: describeDrops(drops) });
+  test.info().annotations.push({ type: "subject playback drops", description: describeDrops(drops, after?.dropped) });
   test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ unread, ...delta }) });
   // ADR 0001 threshold 3 allows 0.1 % of program frames: none of 120 starved. Cadence drops are host scheduling.
-  expect(drops.starved, describeDrops(drops)).toEqual([]);
+  expect(drops.starved, describeDrops(drops, after?.dropped)).toEqual([]);
   // The plate and the subject's colour and matte decoders (the word is a still).
   expect(after?.["decoders"]).toBe(3);
 });

@@ -214,7 +214,7 @@ test("plays across shot changes: only whole layouts, in order, one decoder per v
   // Stats are posted once a second.
   await page.waitForTimeout(1_200);
   const stats = await engineStats(page);
-  test.info().annotations.push({ type: "program frames never drawn", description: describeDrops(dropsIn(drawn, stats?.dropped, 0, 90)) });
+  test.info().annotations.push({ type: "program frames never drawn", description: describeDrops(dropsIn(drawn, stats?.dropped, 0, 90), stats?.dropped) });
   test.info().annotations.push({ type: "3 angles", description: JSON.stringify(stats) });
   expect(stats?.["decoders"]).toBe(3);
   expect(stats?.["audioChunks"]).toBeGreaterThan(0);
