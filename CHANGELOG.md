@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sample-accurate audio fades, #585 (ADR 0018 amendment, epic #451; protocol 118): a media clip's `audio` takes
+  `fadeInMs` and `fadeOutMs`, an equal-power sound ramp from or to silence in milliseconds, not snapped to frames
+  (`clip add`/`clip set --audio-fade-in ms --audio-fade-out ms`, daemon and MCP `audioFadeInMs`/`audioFadeOutMs`; 0
+  removes one). At most half the clip, none at an edge a dissolve crossfades, multiplied with the frame fades. Export
+  writes them as `afade` sample counts and the preview evaluates the same ramp per sample (`audioFadeGain`), checked
+  against the real export mix. `voiceover place` now gives every phrase clip the 12 ms phrase fade at both ends. Older
+  projects and export plans are unchanged.
 - Voiceover, slice 4 of #470 (ADR 0034 decisions 19 and 20, epic #451; protocol 117): `frameshell voiceover place <script>`
   (daemon `voiceover.place`, MCP `voiceover_place`) puts the takes of a voiceover script on the timeline as phrase clips
   in one transaction: each take is cut at its silences, every phrase becomes a clip on the audio track `Voiceover`

@@ -47,3 +47,13 @@ Moves "Transitions and keyframes" from v0.3 to v0.13. A cut may dissolve into th
 - `--verify` may hear a word from a handle under a crossfade; a 0.5 s crossfade at a snapped cut rarely holds one.
 - Export of animated opacity costs more per frame than a constant; only keyed and transition pieces pay it.
 - Not covered: transitions between shots, keys on crop or rotation, speed ramps. Wipes, pushes and other shaped transitions: ADR 0030 (a `shape` on the dissolve, drawn with Canvas 2D clip paths, no WebGL).
+
+
+## Amendment: sample-accurate audio fades (#585, as built)
+
+`fadeIn`/`fadeOut` are whole frames (`edgeTransitions` quantizes), so a fade shorter than a frame (12 ms is a frame only from about 42 fps) cannot be stored as one. A media clip's `audio` takes two more optional fields, milliseconds, not snapped to frames: `fadeInMs` and `fadeOutMs`, an equal-power (`qsin`) ramp from or to silence over the clip's own sound. They are sound only, with the same curve as decision 8, and multiply with the frame fades.
+
+- **Length.** Whole samples of the milliseconds at the output rate, at most half the clip's samples. An edge a dissolve crossfades takes none: the crossfade already ramps it, and a ramp to silence there would dip the middle of the crossfade. Program sound placed on exact samples (multicam angles, ADR 0016) takes none either.
+- **One evaluator.** `audioFades` and `audioFadeGain` (`packages/schema/src/composite.ts`) work in timeline samples from the clip's first frame. Export writes the two ramps as `afade=t=in|out:ss=…:ns=…:curve=qsin` in the clip's item (`soundRamps`); the preview's `envelopeGain` multiplies `audioFadeGain` into each sample the engine worker renders for the worklet. A test runs the export mix on real ffmpeg and compares it with the preview's samples; golden `audio-fades-plan` pins the graph, and every older golden is unchanged.
+- **Operations.** `clip.add` and `clip.set` take `audioFadeInMs`/`audioFadeOutMs` (media clips only; 0 removes; shared by every format), CLI `--audio-fade-in`/`--audio-fade-out`. A split or cut drops them at the new edge, as it drops `fadeIn`/`fadeOut`; a nested clip cut by its window loses them there. The generic inverse (`timeline.patch`) undoes them.
+- **Users.** `voiceover.place` puts the 12 ms phrase fade on both ends of every phrase clip (ADR 0034 decision 19). A 5 ms fade in for music keys (#485) can use the same field later.

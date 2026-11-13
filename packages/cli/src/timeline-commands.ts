@@ -52,8 +52,8 @@ mutations print the new revision):
                                track's other phrases (alone: clears them)
   clip add <track> [asset] [--start s] [--in s] [--out s | --duration s] [--speed x]
            [--type media|timeline|<adapter>] [--source path] [--props json]
-           [--gain dB] [--muted] [--x px] [--y px] [--scale k] [--opacity 0-1] [--script-ref ref]
-           [--ripple [--ripple-track <track>…]] [--snap] [--snap-window s]
+           [--gain dB] [--muted] [--audio-fade-in ms] [--audio-fade-out ms] [--x px] [--y px] [--scale k]
+           [--opacity 0-1] [--script-ref ref] [--ripple [--ripple-track <track>…]] [--snap] [--snap-window s]
   clip move <clip> [--start s] [--track <track>]
   clip trim <clip> [--in s | --start s] [--out s | --end s] [--ripple [--ripple-track <track>…]]
            [--no-snap] [--snap-window s]
@@ -83,8 +83,8 @@ mutations print the new revision):
                                the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
                                naming the worst frame, pixel and element. Also warns when every probe is the same
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
-  clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--x px] [--y px] [--scale k]
-           [--opacity 0-1] [--props json] [--elements json | --clear-elements]
+  clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
+           [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
@@ -93,6 +93,8 @@ mutations print the new revision):
                                that format only, where its automatic layout is wrong: placement, a generated clip's
                                props and elements, --hidden (no picture there, its sound still plays); --reset
                                first drops what that format had. Timing and sound are every format's
+                               --audio-fade-in/--audio-fade-out ms: equal-power sound ramps at a media clip's
+                               start/end, sample-accurate (not whole frames), e.g. 12 to de-click a cut; 0 removes
                                --voice writes the style's voice chain (style.json sound.voice; by default high-pass
                                85 Hz, denoise floor -30 dB reduction 8 dB, compressor -20 dB 2.5:1 attack 8 ms
                                release 140 ms makeup +2 dB) as explicit audio effects; --audio-effects replaces the list, e.g.
@@ -323,6 +325,8 @@ export const TIMELINE_OPTIONS = {
   duration: { type: "string" },
   speed: { type: "string" },
   gain: { type: "string" },
+  "audio-fade-in": { type: "string" },
+  "audio-fade-out": { type: "string" },
   muted: { type: "boolean" },
   unmuted: { type: "boolean" },
   hidden: { type: "boolean" },
@@ -451,7 +455,7 @@ const ALLOWED: Record<string, string[]> = {
   "track set": ["name", "clear-name", "index", "follows", "preset", "position", "entry", "keyword-color", "keyword-scale", "gap", "clear-gaps", "muted", "unmuted", "hidden", "shown", "behind", "format", "reset"],
   "captions set": ["text", "file", "from", "to", "replace"],
   "track remove": ["force"],
-  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
+  "clip add": ["type", "source", "start", "in", "out", "duration", "speed", "gain", "muted", "audio-fade-in", "audio-fade-out", "x", "y", "scale", "opacity", "props", "script-ref", "ripple", "ripple-track", "snap", "snap-window", "snap-to"],
   "clip move": ["start", "track", "snap-to"],
   "clip trim": ["in", "out", "start", "end", "ripple", "ripple-track", "no-snap", "snap-window", "snap-to"],
   "clip split": ["at", "snap-to"],
@@ -464,6 +468,8 @@ const ALLOWED: Record<string, string[]> = {
     "gain",
     "muted",
     "unmuted",
+    "audio-fade-in",
+    "audio-fade-out",
     "x",
     "y",
     "scale",
@@ -775,6 +781,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         speed: num("speed"),
         gain: num("gain"),
         muted: values["muted"] === true ? true : undefined,
+        audioFadeInMs: num("audio-fade-in"),
+        audioFadeOutMs: num("audio-fade-out"),
         transform: transform(),
         props: json("props"),
         scriptRef: str("script-ref"),
@@ -893,6 +901,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         speed: num("speed"),
         gain: num("gain"),
         muted: values["muted"] === true ? true : values["unmuted"] === true ? false : undefined,
+        audioFadeInMs: num("audio-fade-in"),
+        audioFadeOutMs: num("audio-fade-out"),
         audioEffects:
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         backdrop,

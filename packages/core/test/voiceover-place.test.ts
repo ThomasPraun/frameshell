@@ -85,6 +85,8 @@ describe("voiceover.place", () => {
     expect(track.clips).toHaveLength(7);
     expect(track.clips[0]).toMatchObject({ type: "media", asset: "assets/voiceover/launch-vo/hook-1.wav", scriptRef: "scripts/launch-vo.md#hook" });
     expect(track.clips.at(-1)).toMatchObject({ scriptRef: "scripts/launch-vo.md#fix" });
+    // The 12 ms phrase fade of #470 on both ends of every phrase, sample-accurate (#585).
+    expect(track.clips.map((clip) => clip.audio)).toEqual(Array(7).fill({ fadeInMs: 12, fadeOutMs: 12 }));
 
     // One transaction: reverting it takes the track and every clip away.
         const { transactions } = await conn.request("history", { cwd: root, timeline: "main" });

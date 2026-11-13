@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 117;
+export const PROTOCOL_VERSION = 118;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2287,7 +2287,7 @@ export const methods = {
       "line id is copied (`copied`). Head and tail silence are trimmed with a little air kept. Each line also reports " +
       "its `phrases`: where the take falls silent for 60 ms or more (5 ms RMS, 38 dB under its peak), as ranges of the " +
       "take in seconds, the cuts of phrase clips (`clip add --in from --out to`); `phraseFade` is the 12 ms fade #470 asks for at each phrase edge, " +
-      "reported only: `voiceover.place` does not apply it yet (clip fades are whole frames). A person corrects the phrases by trimming the clips. With `verify` (default) each line's take is also " +
+      "which `voiceover.place` applies as the clips' audio fades. A person corrects the phrases by trimming the clips. With `verify` (default) each line's take is also " +
       "transcribed by the project's transcription provider and compared with the line's spoken text: `check` lists the " +
       "misreads, and `verification` says whether that ran. It is skipped, never a failure, when the project is not " +
       "trusted, has no transcription plugin or the transcription fails; the takes stay as they are. Nothing is placed " +
@@ -2380,7 +2380,7 @@ export const methods = {
           }),
         )
         .describe("The lines asked for, in script order."),
-      phraseFade: z.number().describe("The 12 ms fade at each phrase edge that #470 asks for, in seconds; reported, not applied by `voiceover.place` (clip fades are whole frames)."),
+      phraseFade: z.number().describe("The 12 ms fade at each phrase edge that #470 asks for, in seconds; `voiceover.place` applies it as each clip's `audio.fadeInMs`/`fadeOutMs`."),
       verification: z
         .object({
           status: z.enum(["checked", "skipped"]).describe("`skipped`: the misread check did not run; `reason` says why."),
@@ -2418,8 +2418,9 @@ export const methods = {
       "and names both, so move the anchor or drop it. Anchors must run in script order: an `at` earlier than the phrase before it " +
       "fails the same way even when nothing else is there. A line whose take is already on a timeline clip fails naming the clips unless " +
       "`replace` is true, which removes those clips first (use it after `voiceover.generate` changed a take: the old phrase " +
-      "ranges no longer fit it). `dryRun` plans without writing. No fade is applied yet: a clip fade is whole frames (ADR 0018), so the 12 ms of #470 " +
-      "waits for a sub-frame ramp; meanwhile the phrase edges keep 20 ms before and 30 ms after their sound. A take said from older text than the line has now " +
+      "ranges no longer fit it). `dryRun` plans without writing. Every phrase clip gets the 12 ms phrase fade at both ends as sample-accurate " +
+      "audio fades (`audio.fadeInMs`/`fadeOutMs`, as `clip.set` `audioFadeInMs`/`audioFadeOutMs` sets them), on top of the 20 ms before and 30 ms after " +
+      "its sound each phrase keeps. A take said from older text than the line has now " +
       "is placed with a warning. Per-phrase tempo is not here (it waits for the preview pitch fix, #499). Fails with ScriptNotFound, " +
       "InvalidParams (unknown line id, `at` key or phrase number), InvalidOperation (not a voiceover script, a line with no take, an unknown " +
       "marker, a `track` that is not an audio track, overlap, clips already placed) or TimelineNotFound.",
@@ -3529,7 +3530,9 @@ export const methods = {
   "clip.set": {
     mutating: true,
     description:
-      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioEffects` (media; replaces the effect list, " +
+      "Change clip properties: `speed` (media; end moves), `gain` (dB), `muted`, `audioFadeInMs`/`audioFadeOutMs` (media; sample-accurate " +
+      "equal-power sound ramps at the clip's edges in ms, e.g. 12 to de-click a cut, 0 removes; a split drops them at the new cut), " +
+      "`audioEffects` (media; replaces the effect list, " +
       "`null` clears; see below), `backdrop` (generated clips; see below), `transform` (merged field by field), " +
       "`props` (adapter clips; replaced), `elements` (adapter clips whose plugin supports it: move or scale an element inside a generated " +
       "clip by CSS selector, e.g. `{ \"#title\": { y: -40, scale: 1.2 } }`; merged per selector, `null` for a selector removes it, `null` for " +
@@ -3549,7 +3552,7 @@ export const methods = {
       "`formats` override: `transform`, `props` (checked over the clip's own), `elements` and `hidden` (no picture there, the sound " +
       "still plays); `reset: true` drops the override first. Use it where the automatic layout of a format is wrong, e.g. a lower " +
       "third that sits too low in 9:16: `{ clip, format: \"9x16\", transform: { y: 520 } }`. Timing and sound are every format's: " +
-      "with `format`, speed, gain, muted, audioEffects, backdrop and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
+      "with `format`, speed, gain, muted, audio fades, audioEffects, backdrop and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

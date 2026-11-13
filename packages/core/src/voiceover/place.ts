@@ -9,11 +9,14 @@ import { FrameGrid } from "../timeline/grid.js";
 import { TimeRefError } from "../timeline/time-ref.js";
 import { pcmOfWav } from "../transcripts/window.js";
 import { invalidParam, pickLines, readVoiceoverScript } from "./script.js";
-import { splitPhrases } from "./split.js";
+import { PHRASE_FADE_S, splitPhrases } from "./split.js";
 import { VOICEOVER_DIR, readTakes } from "./takes.js";
 
 /** Params of `voiceover.place`. */
 export type VoiceoverPlaceParams = ValidatedParams<"voiceover.place">;
+
+/** Milliseconds of the sample-accurate sound fade at both ends of every phrase clip (`audio.fadeInMs`/`fadeOutMs`). */
+export const PHRASE_FADE_MS = Math.round(PHRASE_FADE_S * 1000);
 
 /** Name of the audio track the voice goes on, made when absent. */
 export const VOICE_TRACK_NAME = "Voiceover";
@@ -258,12 +261,18 @@ function labelOf(script: string, lines: number): string {
 export type VoiceoverStep =
   | { op: "clip.remove"; args: { clip: string } }
   | { op: "track.add"; args: { kind: "audio"; name: string } }
-  | { op: "clip.add"; args: { track: string; type: "media"; asset: string; start: number; in: number; out: number; scriptRef: string } };
+  | {
+      op: "clip.add";
+      args: { track: string; type: "media"; asset: string; start: number; in: number; out: number; scriptRef: string; audioFadeInMs: number; audioFadeOutMs: number };
+    };
 
 /** What writing a plan produced: the parts of the result that only a write knows. */
 export type VoiceoverWritten = Pick<VoiceoverPlaceResult, "revision" | "warnings"> & { track: string; clipIds: string[] };
 
-/** Write `plan` with `apply`, one step at a time: the old clips out, the track in when it is missing, then a clip per phrase. */
+/**
+ * Write `plan` with `apply`, one step at a time: the old clips out, the track in when it is missing, then a clip per
+ * phrase with {@link PHRASE_FADE_MS} fades at both ends.
+ */
 export async function runVoiceoverPlan(plan: VoiceoverPlan, apply: (step: VoiceoverStep) => Promise<StepResult>): Promise<VoiceoverWritten> {
   const warnings: string[] = [];
   let revision = plan.revision;
@@ -281,7 +290,20 @@ export async function runVoiceoverPlan(plan: VoiceoverPlan, apply: (step: Voiceo
   }
   const clipIds: string[] = [];
   for (const clip of plan.clips) {
-    const done = await apply({ op: "clip.add", args: { track, type: "media", asset: clip.file, start: clip.start, in: clip.in, out: clip.out, scriptRef: clip.scriptRef } });
+    const done = await apply({
+      op: "clip.add",
+      args: {
+        track,
+        type: "media",
+        asset: clip.file,
+        start: clip.start,
+        in: clip.in,
+        out: clip.out,
+        scriptRef: clip.scriptRef,
+        audioFadeInMs: PHRASE_FADE_MS,
+        audioFadeOutMs: PHRASE_FADE_MS,
+      },
+    });
     note(done);
     clipIds.push(done.added[0] ?? "");
   }

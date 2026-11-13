@@ -270,6 +270,16 @@
                                   }
                                 ]
                               }
+                            },
+                            "fadeInMs": {
+                              "description": "Milliseconds: equal-power sound ramp from silence at the clip's start, sample-accurate (not snapped to frames), e.g. 12 to de-click a phrase. At most half the clip; none where a dissolve crossfades the edge. Multiplies with `fadeIn`.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "fadeOutMs": {
+                              "description": "Milliseconds: the same ramp to silence at the clip's end. At most half the clip; none under a crossfade. Multiplies with `fadeOut`.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
                             }
                           },
                           "additionalProperties": false
