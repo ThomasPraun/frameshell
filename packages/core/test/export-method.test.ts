@@ -48,13 +48,14 @@ describe("render and frame methods", () => {
       ["youtube-1080p", null, expect.objectContaining({ codec: "h264", width: 1920, height: 1080 })],
       ["youtube-1440p", null, expect.objectContaining({ width: 2560, height: 1440 })],
       ["vertical-1080x1920", null, expect.objectContaining({ width: 1080, height: 1920 })],
+      ["gif", null, expect.objectContaining({ codec: "gif", fit: "inside" })],
     ]);
   });
 
   it("rejects an unknown preset before queuing anything, listing the available ones", async () => {
     await expect(conn.request("render", { cwd: project, preset: "dvd" })).rejects.toMatchObject({
       code: ErrorCode.PresetNotFound,
-      data: { preset: "dvd", available: ["youtube-1080p", "youtube-1440p", "vertical-1080x1920"] },
+      data: { preset: "dvd", available: ["youtube-1080p", "youtube-1440p", "vertical-1080x1920", "gif"] },
     });
     expect((await conn.request("job.list", { cwd: project })).jobs.filter((j) => j.kind === "render")).toEqual([]);
   });

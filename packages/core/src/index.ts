@@ -256,9 +256,11 @@ export {
   SUBTITLES_FILE,
   COVER_FILE,
   FONTS_DIR,
+  gifStep,
   loudnessAnalysis,
   mixStep,
   muxStep,
+  paletteStep,
   parseLoudnessStats,
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
@@ -278,7 +280,16 @@ export {
   hookWordTime,
   layoutCover,
 } from "./export/cover.js";
-export { BUILTIN_PRESETS, DEFAULT_LOUDNESS_LUFS, DEFAULT_PRESET_ID, loudnessTarget } from "./export/presets.js";
+export {
+  BUILTIN_PRESETS,
+  DEFAULT_LOUDNESS_LUFS,
+  DEFAULT_PRESET_ID,
+  GIF_MAX_FPS,
+  GIF_MAX_FRAMES,
+  GIF_WARN_BYTES,
+  fitInside,
+  loudnessTarget,
+} from "./export/presets.js";
 export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,

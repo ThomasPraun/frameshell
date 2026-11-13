@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 105;
+export const PROTOCOL_VERSION = 106;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -605,10 +605,10 @@ const PresetParam = z
   .min(1)
   .optional()
   .describe(
-    "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`. " +
+    "Export preset id from `export.presets`, e.g. `youtube-1080p`, `youtube-1440p`, `vertical-1080x1920`, `gif`. " +
       "Default: `export.defaultPreset` in `frameshell.json`, else `youtube-1080p`. A preset given here must have the " +
-      "aspect of every format rendered and sets the output size; a default preset only gives codec, bitrate and loudness " +
-      "when its aspect differs (ADR 0027).",
+      "aspect of every format rendered and sets the output size (a `fit: \"inside\"` preset such as `gif` fits every format inside its box); " +
+      "a default preset only gives codec, bitrate and loudness when its aspect differs (ADR 0027).",
   );
 
 /** Quality tiers a `render` can ask for; the other tiers (`master`, `preview`) are for intermediates. */
@@ -1080,7 +1080,8 @@ export const methods = {
   "export.presets": {
     description:
       "List the export presets available in the enclosing project: the built-in ones (`youtube-1080p`, `youtube-1440p`, " +
-      "`vertical-1080x1920`) and those contributed by its trusted plugins.",
+      "`vertical-1080x1920`, `gif`) and those contributed by its trusted plugins. A preset's `container` is `mp4`, `mov`, `webm` or " +
+      "`gif`; a `gif` preset (codec `gif`) has no `audio`, and `video.fit: \"inside\"` makes its `width` x `height` a box the format's frame is fitted inside.",
     params: z.strictObject({ cwd: CwdParam }),
     result: z.object({
       presets: z
@@ -1160,7 +1161,12 @@ export const methods = {
       "identical to the last, with the frame range leaving the duplicate out), MP4 and MOV audio gets a 2 ms half-sine fade at its first " +
       "and last sample, and `warnings` says when the output frame rate breaks the cycle or an end fades from or to black. Once the file is " +
       "written the job compares frame 0 with the last frame and puts a warning in the job's `warnings` when they are the same picture. " +
-      "The timeline is never changed. Fails with InvalidOperation when combined with `cover`.",
+      "The timeline is never changed. Fails with InvalidOperation when combined with `cover`. " +
+      "GIF (ADR 0039): `preset: \"gif\"` writes a looping GIF (`exports/<timeline>-gif.gif`): no sound, each format fitted inside 1200x1200 " +
+      "(16:9 is 1200x675, 9:16 is 675x1200, never scaled up), at most 30 fps (24 and 25 keep their rate), one palette over the whole file with " +
+      "bayer dither, ~4 centisecond frame delays. A GIF always has the loop rules (refused with `cover`, the black-end and cycle warnings, the " +
+      "repeated-last-frame warning on the job) and ignores `quality` (a warning says so). More than 350 output frames fails with InvalidOperation " +
+      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

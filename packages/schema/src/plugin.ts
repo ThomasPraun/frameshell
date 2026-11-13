@@ -77,26 +77,43 @@ export function parsePluginManifest(input: unknown): ParseResult<PluginManifest>
 /**
  * Declarative export preset (SPEC §8.2). Aspect ratio follows from
  * `video.width`/`video.height`; `loudness` is the integrated LUFS target.
+ * A `gif` preset (ADR 0039) is silent: it has no `audio` and every other container needs one.
  */
-export const ExportPresetSchema = z.strictObject({
-  id: Id,
-  label: z.string().optional(),
-  container: z.enum(["mp4", "mov", "webm"]),
-  video: z.strictObject({
-    codec: z.enum(["h264", "h265", "vp9", "prores"]),
-    width: z.int().positive(),
-    height: z.int().positive(),
-    fps: z.number().positive().optional(),
-    bitrateKbps: z.int().positive().optional(),
-    crf: z.int().min(0).max(63).optional(),
-  }),
-  audio: z.strictObject({
-    codec: z.enum(["aac", "opus", "pcm"]),
-    bitrateKbps: z.int().positive().optional(),
-    sampleRate: z.int().positive().optional(),
-  }),
-  loudness: z.number().max(0).optional(),
-});
+export const ExportPresetSchema = z
+  .strictObject({
+    id: Id,
+    label: z.string().optional(),
+    container: z.enum(["mp4", "mov", "webm", "gif"]),
+    video: z.strictObject({
+      codec: z.enum(["h264", "h265", "vp9", "prores", "gif"]),
+      width: z.int().positive(),
+      height: z.int().positive(),
+      /**
+       * `inside`: `width` x `height` is a box, not a frame size. The format's frame is scaled down to fit it with its
+       * own aspect (never up), so one preset serves every aspect (ADR 0039, ADR 0027). Absent: the size is the frame's.
+       */
+      fit: z.enum(["inside"]).optional(),
+      fps: z.number().positive().optional(),
+      bitrateKbps: z.int().positive().optional(),
+      crf: z.int().min(0).max(63).optional(),
+    }),
+    audio: z
+      .strictObject({
+        codec: z.enum(["aac", "opus", "pcm"]),
+        bitrateKbps: z.int().positive().optional(),
+        sampleRate: z.int().positive().optional(),
+      })
+      .optional(),
+    loudness: z.number().max(0).optional(),
+  })
+  .superRefine((preset, ctx) => {
+    const gif = preset.container === "gif";
+    if (gif !== (preset.video.codec === "gif")) {
+      ctx.addIssue({ code: "custom", path: ["video", "codec"], message: 'container "gif" and video codec "gif" go together' });
+    }
+    if (gif && preset.audio) ctx.addIssue({ code: "custom", path: ["audio"], message: "a gif preset has no audio" });
+    if (!gif && !preset.audio) ctx.addIssue({ code: "custom", path: ["audio"], message: "audio is required" });
+  });
 
 /** Validated export preset. */
 export type ExportPreset = z.infer<typeof ExportPresetSchema>;
