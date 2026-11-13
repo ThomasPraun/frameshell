@@ -94,6 +94,15 @@ function placeholderVariables(template: (typeof TEMPLATES)[number]): TemplateVar
   return template.variables({ id: "spot", width: 1920, height: 1080, duration: template.defaultDuration, tokens: { colors: {}, brand: {}, used: [], problem: null } });
 }
 
+describe("template cursor-text-select", () => {
+  it("falls back to the default paragraph when the text prop has no word, so the page script never reads a missing span", async () => {
+    await scaffold(["spot", "--template", "cursor-text-select"]);
+    const html = read("spot");
+    expect(html).toMatch(/if \(!words\.length\) words = "Editing a video should feel like editing a document\."\.split\(" "\);/);
+    expect(html).toContain("split(/\\s+/)");
+  });
+});
+
 describe("the plugin skill", () => {
   const skill = readFileSync(fileURLToPath(new URL("../skills/hyperframes/SKILL.md", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
 

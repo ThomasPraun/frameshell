@@ -125,6 +125,11 @@ export const COLOR_HELPERS = String.raw`
           return ("0" + Math.round(x[i] + (y[i] - x[i]) * amount).toString(16)).slice(-2);
         }).join("");
       }
+      // Colour with alpha, for hairlines and washes.
+      function alpha(hex, a) {
+        var c = rgb(hex);
+        return "rgba(" + c[0] + ", " + c[1] + ", " + c[2] + ", " + a + ")";
+      }
       // Black or white text, whichever reads on the colour (relative luminance, sRGB).
       function onColor(hex) {
         var lin = rgb(hex).map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });

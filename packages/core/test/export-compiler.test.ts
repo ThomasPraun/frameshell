@@ -395,6 +395,45 @@ describe("export compiler", () => {
       expect(layeredPlan.audio.tracks).toHaveLength(1);
       expect(layeredPlan.audio.tracks[0]!.reduce((sum, item) => sum + item.samples, 0)).toBe(240_000);
     });
+
+    describe("backdrop (ADR 0031, #462)", () => {
+      const glass = { blur: 46, saturate: 1.45, dim: 0.55 };
+      const withGlass = (clipId: string, backdrop: object): Timeline => ({
+        ...layered,
+        tracks: layered.tracks.map((track) =>
+          track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (clip.id === clipId ? ({ ...clip, backdrop } as Clip) : clip)) } : track,
+        ),
+      });
+      const glassPlan = compileRender({ ...input, timeline: withGlass("c_title", glass) });
+      const filters = (plan: typeof glassPlan) => Object.values(plan.files).join("\n");
+
+      it("blurs, saturates and dims what is below a generated clip, masked by its alpha, before the clip (golden)", () => {
+        golden("backdrop-plan", {
+          segments: glassPlan.segments,
+          files: glassPlan.files,
+          frame: compileFrame({ ...input, timeline: withGlass("c_title", glass), width: 1280, height: 720, at: 2, output: "/out/frame.png" }),
+        });
+        const graph = filters(glassPlan);
+        expect(graph).toContain("gblur=sigma=46");
+        expect(graph).toContain("lutrgb=a='gt(val,8)*255'");
+        // The mask fades with the card: it takes the clip's opacity too.
+        expect(graph.match(/colorchannelmixer=aa=0\.8/g)).toHaveLength(2);
+        expect(glassPlan.warnings).toEqual([]);
+      });
+
+      it("scales the sigma with the output, and draws nothing on the bottom track, with a warning", () => {
+        const small = compileFrame({ ...input, timeline: withGlass("c_title", glass), width: 960, height: 540, at: 2, output: "/out/frame.png" });
+        expect(small.args.join(" ")).toContain("gblur=sigma=23");
+        const bottom = compileRender({ ...input, timeline: withGlass("c_end", glass) });
+        expect(bottom.files).toEqual(layeredPlan.files);
+        expect(bottom.warnings).toEqual(["Clip c_end is on the bottom picture track: nothing is below it, so its backdrop was not drawn."]);
+      });
+
+      it("leaves the colour step out when it changes nothing, and a zero blur out", () => {
+        const graph = filters(compileRender({ ...input, timeline: withGlass("c_title", { blur: 0 }) }));
+        expect(graph).toContain("[bb0]format=gbrp,format=rgba[bg0]");
+      });
+    });
   });
 
   describe("loop (ADR 0039)", () => {

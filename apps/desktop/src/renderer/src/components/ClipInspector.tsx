@@ -1,5 +1,6 @@
-import type { ClipKey, ElementAdjust } from "@frameshell/schema";
+import { type Backdrop, type ClipKey, type ElementAdjust, parseStyleFile, resolveStyle, STYLE_FILE, glassOf } from "@frameshell/schema";
 import { keyedValueAt } from "@frameshell/schema/composite";
+import { BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { useEffect, useMemo, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
 import { askAgent } from "../ask/ask-agent.js";
@@ -135,6 +136,7 @@ export function ClipInspector() {
           ))}
         </div>
       )}
+      {clip.kind === "generated" && placed && !image && <GlassControl clip={clip.id} backdrop={clip.backdrop} onSend={send} onError={setError} />}
       {clip.kind === "generated" && (mode.clip === clip.id || Object.keys(clip.elements).length > 0) && (
         <ElementAdjustments
           clip={clip.id}
@@ -268,6 +270,55 @@ function KeyControl({
         </select>
       )}
     </span>
+  );
+}
+
+/** The project's glass numbers (`style.json` `glass`, ADR 0028), the motion kit's without a style file. */
+async function styleGlass(): Promise<Required<Backdrop>> {
+  const text = await window.frameshell.files.read(STYLE_FILE).catch(() => null);
+  if (text === null) return glassOf(resolveStyle(null).glass);
+  const parsed = parseStyleFile(JSON.parse(text));
+  if (!parsed.ok) throw new Error(`${STYLE_FILE}: ${parsed.error}`);
+  return glassOf(resolveStyle(parsed.value).glass);
+}
+
+/**
+ * A generated clip's glass (ADR 0031): a switch that sets the style's glass numbers or removes the backdrop, and the
+ * three numbers while it has one. Glass is a style choice, never a default: the switch starts off.
+ */
+function GlassControl({
+  clip,
+  backdrop,
+  onSend,
+  onError,
+}: {
+  clip: string;
+  backdrop: Backdrop | null;
+  onSend: (edit: TimelineEdit, options?: EditOptions) => void;
+  onError: (message: string) => void;
+}) {
+  const set = (fields: Partial<Backdrop>) => onSend({ op: "clip.set", args: { clip, backdrop: fields } }, { label: "Change glass" });
+  return (
+    <div className="clip-inspector-group" role="group" aria-label={t.inspector.glass}>
+      <button
+        className={`clip-inspector-button${backdrop ? " on" : ""}`}
+        aria-pressed={backdrop !== null}
+        data-tip={backdrop ? t.inspector.glassOffTitle : t.inspector.glassOnTitle}
+        onClick={() => {
+          if (backdrop) onSend({ op: "clip.set", args: { clip, backdrop: null } }, { label: "Remove glass" });
+          else styleGlass().then((glass) => onSend({ op: "clip.set", args: { clip, backdrop: glass } }, { label: "Add glass" }), (failure: unknown) => onError((failure as Error).message));
+        }}
+      >
+        {t.inspector.glass}
+      </button>
+      {backdrop && (
+        <>
+          <NumberField name="blur" stored={backdrop.blur} onCommit={(value) => set({ blur: value })} />
+          <NumberField name="saturate" stored={backdrop.saturate ?? BACKDROP_LIMITS.saturate.default} onCommit={(value) => set({ saturate: value })} />
+          <NumberField name="dim" stored={backdrop.dim ?? BACKDROP_LIMITS.dim.default} onCommit={(value) => set({ dim: value })} />
+        </>
+      )}
+    </div>
   );
 }
 

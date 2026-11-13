@@ -31,6 +31,8 @@ export const MAX_CONTACT_TILES = 120;
 export const MAX_PHONE_TILES = 60;
 /** Tiles per image of the contact sheet. */
 export const TILES_PER_CONTACT = 30;
+/** Most tiles of the safe-zone sheet in all images. */
+export const MAX_SAFE_TILES = 36;
 /** Tiles per image of the phone sheet. */
 export const TILES_PER_PHONE = 15;
 /** Consecutive frames of a motion strip. */
@@ -193,6 +195,8 @@ export function sheetLayout(kind: ReviewSheetKind, aspect: number): SheetLayout 
   switch (kind) {
     case "contact":
       return tall ? { columns: 10, perImage: TILES_PER_CONTACT, tileWidth: 160 } : { columns: 6, perImage: TILES_PER_CONTACT, tileWidth: 270 };
+    case "safe":
+      return tall ? { columns: 6, perImage: 18, tileWidth: 200 } : { columns: 4, perImage: 12, tileWidth: 360 };
     case "phone":
       return { columns: 5, perImage: TILES_PER_PHONE, tileWidth: 360 };
     case "motion":

@@ -38,6 +38,22 @@ const mattes = () =>
 const engineStats = () =>
   page.evaluate(() => (window as unknown as { frameshellPreviewProbe: { stats: () => Record<string, number> | null } }).frameshellPreviewProbe.stats());
 
+/**
+ * The preview at 2 s once it draws the subject: the app reads `matte.status` on its own clock, so the matte may reach
+ * the program only after the daemon says ready. Placeholder gone first, then `data-shown` of that program's draw.
+ */
+async function showSubjectAt2s(): Promise<void> {
+  const stage = await laidOutBox(page.locator(".preview-stage"));
+  await page.mouse.click(stage.x + 4, stage.y + 4);
+  await page.keyboard.press("Home");
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect(page.getByTestId("playhead")).toHaveText("00:00:02:00");
+  await expect(page.getByTestId("preview-layer-placeholder")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "60");
+}
+
 test.beforeAll(async () => {
   test.setTimeout(300_000);
   await addBarcodeAsset(box, "take.mp4", SECONDS);
@@ -54,6 +70,8 @@ test.beforeAll(async () => {
   // The preview's read queues the matte; the stand-in makes it in seconds.
   await expect.poll(mattes, { timeout: 180_000, intervals: [500, 1000] }).toEqual([`${TAKE}:ready`]);
   await installFrameReader(page);
+  // Before either test, so playback never starts while the program still swaps the placeholder for the subject.
+  await showSubjectAt2s();
 });
 
 test.afterAll(async () => {
@@ -61,13 +79,7 @@ test.afterAll(async () => {
 });
 
 test("the subject layer draws the person over the word behind them: the preview frame matches `frameshell frame`", async () => {
-  const stage = await laidOutBox(page.locator(".preview-stage"));
-  await page.mouse.click(stage.x + 4, stage.y + 4);
-  await page.keyboard.press("Shift+ArrowRight");
-  await page.keyboard.press("Shift+ArrowRight");
-  await expect(page.getByTestId("playhead")).toHaveText("00:00:02:00");
-  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "60");
-  await expect(page.getByTestId("preview-layer-placeholder")).toHaveCount(0);
+  await showSubjectAt2s();
 
   const preview = await previewPixels(page, SIZE);
   const exported = await exportedPixels(box, 2);
@@ -96,30 +108,44 @@ test("plays through the word with the subject layer: frames drawn in order, one 
   const before = await engineStats();
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
-  // The source frame on the canvas at every display frame until playback stops.
-  const seen = await page.evaluate(async (limit) => {
-    const read = () => (window as unknown as { readShownFrame: () => number }).readShownFrame();
-    const frames: number[] = [];
+  // Until playback stops: every program frame the engine drew (`data-shown`), and the source frame read off the canvas
+  // at each page display frame. The worker draws without the page's main thread (ADR 0001), so a late page rAF misses
+  // frames that did reach the screen (#567): drops are counted from the draws, the canvas reads check what they showed.
+  const { drawn, read } = await page.evaluate(async (limit) => {
+    const readShown = (window as unknown as { readShownFrame: () => number }).readShownFrame;
+    const box = document.querySelector('[data-testid="preview-frame"]')!;
+    // Each record holds the value before its change: those, then the last value, are every value it had.
+    const values: (string | null)[] = [];
+    const observer = new MutationObserver((records) => values.push(...records.map((record) => record.oldValue)));
+    observer.observe(box, { attributes: true, attributeFilter: ["data-shown"], attributeOldValue: true });
+    const read: number[] = [];
     const start = performance.now();
     while (performance.now() - start < limit) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      frames.push(read());
-      if (!document.querySelector('[data-testid="preview-frame"]')?.hasAttribute("data-playing")) break;
+      read.push(readShown());
+      if (!box.hasAttribute("data-playing")) break;
     }
-    return frames;
+    // The engine reports a draw after it: let the report of the last frame read arrive.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    values.push(...observer.takeRecords().map((record) => record.oldValue), box.getAttribute("data-shown"));
+    observer.disconnect();
+    return { drawn: values.flatMap((value) => (value === null ? [] : [Number(value)])), read };
   }, 15_000);
   await page.waitForTimeout(1_200);
   const after = await engineStats();
 
-  const shown = [...new Set(seen.filter((frame) => frame >= 0))];
+  const shown = [...new Set(read.filter((frame) => frame >= 0))];
   expect(shown.every((frame, i) => i === 0 || frame > shown[i - 1]!), "frames in order").toBe(true);
-  // Inside the word (1 s to 5 s): source frames never shown are dropped frames (ADR 0001 threshold 3).
-  const inside = shown.filter((frame) => frame >= 30 && frame < 150);
-  const dropped = 120 - inside.length;
+  expect(drawn.every((frame, i) => i === 0 || frame >= drawn[i - 1]!), "frames drawn in order").toBe(true);
+  const announced = new Set(drawn);
+  expect(shown.filter((frame) => !announced.has(frame)), "canvas frames the engine never reported").toEqual([]);
+  // Inside the word (1 s to 5 s): source frames never drawn are dropped frames.
+  const dropped = 120 - new Set(drawn.filter((frame) => frame >= 30 && frame < 150)).size;
+  const unread = 120 - shown.filter((frame) => frame >= 30 && frame < 150).length;
   const delta = Object.fromEntries(Object.entries(after ?? {}).map(([key, value]) => [key, key === "decoders" ? value : value - (before?.[key] ?? 0)]));
-  test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ dropped, ...delta }) });
-  // Threshold 3 allows 0.1 % (none of 120); 2 leaves room for a late rAF of the sampler, not the preview.
-  expect(dropped).toBeLessThanOrEqual(2);
+  test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ dropped, unread, ...delta }) });
+  // ADR 0001 threshold 3 allows 0.1 % of program frames: none of 120.
+  expect(dropped).toBe(0);
   // The plate and the subject's colour and matte decoders (the word is a still).
   expect(after?.["decoders"]).toBe(3);
 });

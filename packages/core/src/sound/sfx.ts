@@ -9,6 +9,9 @@ import {
 } from "@frameshell/schema";
 import { Biquad, type Rng, SR, TAU, frames, noise, peakOf, rngOf, saturate } from "./dsp.js";
 
+/** Shortest take in seconds: a tick (35 ms) is padded with silence to it, so the engine, which keeps whole frames of a file, still has a frame to play at 20 fps and up. */
+export const SFX_MIN_LENGTH = 0.05;
+
 /** What makes one take; its {@link sfxKey} is its cache key. */
 export interface SfxSpec {
   kind: SfxKind;
@@ -65,11 +68,19 @@ export function synthesizeSfx(spec: SfxSpec): SfxRender {
   const bright = 0.9 + 0.2 * rngOf("family", spec.seed)();
   const layered = RECIPES[spec.kind]({ variant: spec.variant, pitch, bright, rng, length: spec.length });
 
-  // Fade the last samples so a cut tail never clicks, then bring the peak to the fixed level plus the jitter.
+  // Fade the last samples so a cut tail never clicks, then pad with silence so every take is a clip at 20 fps and up (a frame is 50 ms there).
   const fade = Math.min(frames(0.01), Math.floor((layered.channels[0]?.length ?? 0) / 4));
   for (const channel of layered.channels) {
     for (let i = 0; i < fade; i++) channel[channel.length - 1 - i]! *= i / fade;
   }
+  const padded = Math.max(layered.channels[0]?.length ?? 0, frames(SFX_MIN_LENGTH));
+  layered.channels = layered.channels.map((channel) => {
+    if (channel.length >= padded) return channel;
+    const out = new Float64Array(padded);
+    out.set(channel);
+    return out;
+  });
+  // Bring the peak to the fixed level plus the jitter.
   const peak = peakOf(layered.channels);
   const gain = peak > 0 ? Math.exp(((SFX_PEAK_DBFS + levelDb) / 20) * Math.LN10) / peak : 0;
   const channels = layered.channels.map((channel) => Int16Array.from(channel, (x) => Math.max(-32767, Math.min(32767, Math.round(x * gain * 32767)))));

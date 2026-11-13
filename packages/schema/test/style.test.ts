@@ -14,6 +14,8 @@ import {
   parseStyleFile,
   resolveStyle,
   voiceChainOf,
+  GLASS,
+  glassOf,
   type StyleFile,
 } from "../src/index.js";
 
@@ -155,5 +157,17 @@ describe("voiceChainOf (#464)", () => {
     const chain = voiceChainOf(resolveStyle(style).sound.voice);
     expect(chain.map((effect) => effect.kind)).toEqual(["highpass", "compressor"]);
     expect(chain[1]).toMatchObject({ attack: 0.01, release: 1 });
+  });
+});
+
+describe("glassOf (#462)", () => {
+  it("is off by default with the motion kit's numbers, and takes the style's numbers over them", () => {
+    const glass = resolveStyle(null).glass;
+    expect(glass.cards).toEqual({ value: false, source: "default" });
+    expect(glassOf(glass)).toEqual(GLASS);
+    const style = parse({ glass: { cards: true, dim: 0.72 } });
+    expect(resolveStyle(style).glass.cards).toEqual({ value: true, source: "file" });
+    expect(glassOf(resolveStyle(style).glass)).toEqual({ blur: 46, saturate: 1.45, dim: 0.72 });
+    expect(errorOf({ glass: { dim: 2 } })).toMatch(/glass\.dim/);
   });
 });
