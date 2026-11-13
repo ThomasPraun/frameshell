@@ -869,14 +869,17 @@ class Edit {
 
   async clipSet(args: OperationArgs<"clip.set">): Promise<void> {
     const { track, clip } = this.clip(args.clip);
-    const { speed, gain, muted, audioEffects, transform, props, elements, scriptRef } = args;
-    if ([speed, gain, muted, audioEffects, transform, props, elements, scriptRef].every((value) => value === undefined)) {
-      throw this.invalid("nothing to set.", { hint: "Pass at least one of speed, gain, muted, audioEffects, transform, props, elements, scriptRef." });
+    const { speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef } = args;
+    if ([speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+      throw this.invalid("nothing to set.", {
+        hint: "Pass at least one of speed, gain, muted, audioEffects, backdrop, transform, props, elements, scriptRef.",
+      });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
-    if (isShotClip(clip) && audioEffects !== undefined) {
+    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined)) {
       // ADR 0031 decision 5: no effects on shots or angles in v1, skipped like transitions on program tracks.
-      this.warnings.push(`${clip.id} is a multicam shot: shots take no audio effects in this version; audioEffects skipped.`);
+      const skipped = [audioEffects !== undefined ? "audioEffects" : null, backdrop !== undefined ? "backdrop" : null].filter(Boolean).join(" and ");
+      this.warnings.push(`${clip.id} is a multicam shot: shots take no effects in this version; ${skipped} skipped.`);
       if ([speed, gain, muted, transform, props, elements, scriptRef].every((value) => value === undefined)) return;
     }
     if (isShotClip(clip)) {
@@ -911,6 +914,7 @@ class Edit {
       if (Object.keys(audio).length === 0) delete clip.audio;
       else clip.audio = audio;
     }
+    if (backdrop !== undefined) this.setBackdrop(track, clip, backdrop);
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
       clip.transform = { ...clip.transform, ...transform };
@@ -931,6 +935,33 @@ class Edit {
     }
     if (scriptRef === null) delete clip.scriptRef;
     else if (scriptRef !== undefined) clip.scriptRef = scriptRef;
+  }
+
+  /**
+   * Merge `backdrop` field by field into the clip's (ADR 0031; `null` clears). Only generated clips take one; on the
+   * timeline's bottom picture track it is stored with a warning, since nothing is below to blur.
+   */
+  setBackdrop(track: AnyClipTrack, clip: Clip, backdrop: NonNullable<OperationArgs<"clip.set">["backdrop"]> | null): void {
+    if (isMedia(clip) || isNested(clip)) {
+      throw this.invalid(`only generated clips take \`backdrop\`; ${clip.id} is ${clip.type}.`, {
+        field: "backdrop",
+        hint: "Put the glass on the generated card above the footage, not on the footage.",
+      });
+    }
+    if (track.kind === "audio") throw this.invalid("audio tracks take no `backdrop`.", { field: "backdrop" });
+    if (backdrop === null) {
+      delete clip.backdrop;
+      return;
+    }
+    const merged = { ...clip.backdrop, ...backdrop };
+    if (merged.blur === undefined) {
+      throw this.invalid(`${clip.id} has no backdrop yet: give \`blur\` too.`, { field: "backdrop", hint: "Glass of the motion kit: { blur: 46, saturate: 1.45, dim: 0.55 }." });
+    }
+    clip.backdrop = { blur: merged.blur, ...(merged.saturate !== undefined ? { saturate: merged.saturate } : {}), ...(merged.dim !== undefined ? { dim: merged.dim } : {}) };
+    const bottom = this.draft.tracks.find((candidate) => candidate.kind === "video" || candidate.kind === "program");
+    if (bottom === track) {
+      this.warnings.push(`${clip.id} is on the bottom picture track ${track.id}: nothing is below it, so its backdrop is not drawn until it moves to an upper track.`);
+    }
   }
 
   /** Merge `elements` per selector (`null` removes one, `null` for all clears); empty ends up absent. */

@@ -22,6 +22,10 @@ export {
   type FormatSource,
   type FormatLayout,
   type ResolvedFormat,
+  type FormatPicture,
+  formatOf,
+  formatCrop,
+  scaledCaptions,
   primaryFormatId,
   projectFormats,
   resolveFormat,
@@ -64,6 +68,7 @@ export {
   ClipAudioSchema,
   MediaClipAudioSchema,
   AudioEffectSchema,
+  BackdropSchema,
   MARKER_COLORS,
   MARKER_LABEL_MAX,
   MarkerIdSchema,
@@ -110,6 +115,7 @@ export {
   type ClipAudio,
   type MediaClipAudio,
   type AudioEffect,
+  type Backdrop,
   type CaptionPhrase,
   type CaptionGap,
   type SubtitleEntry,
@@ -180,6 +186,7 @@ export {
   StyleFontsSchema,
   StyleTypeSchema,
   StyleSoundSchema,
+  StyleGlassSchema,
   ResolvedStyleSchema,
   type MotionPersonalityId,
   type StyleFile,
@@ -193,6 +200,7 @@ export {
   parseStyleFile,
   resolveStyle,
   voiceChainOf,
+  glassOf,
 } from "./style.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {
@@ -213,12 +221,19 @@ export { type PaintChange, paintStretches } from "./painted.js";
 export {
   AUDIO_EFFECT_KINDS,
   AUDIO_EFFECT_LIMITS,
+  BACKDROP_ALPHA_THRESHOLD,
+  BACKDROP_LIMITS,
+  GLASS,
   MAX_AUDIO_EFFECTS,
   VOICE_CHAIN,
+  type BackdropLayer,
   type EffectParamLimit,
   type NormalizedAudioEffect,
   audioEffectsKey,
   audioEffectsOf,
+  backdropLayer,
+  backdropMatrix,
+  backdropOf,
   bakeRef,
   normalizeAudioEffects,
 } from "./effects.js";
@@ -252,6 +267,18 @@ export {
   type ExportPreset,
   parseExportPreset,
 } from "./plugin.js";
+export {
+  BATCH_SCHEMA_URL,
+  BatchFileSchema,
+  BatchRowIdSchema,
+  BatchRowSchema,
+  PROTOTYPE_KEYS,
+  type BatchFile,
+  type BatchRow,
+  type SlotTarget,
+  parseBatchFile,
+  parseSlotTarget,
+} from "./batch.js";
 export {
   BEATS_SCHEMA_URL,
   BeatsEditsSchema,
@@ -396,7 +423,6 @@ export {
   cueTokens,
   subtitleAt,
   subtitleLayout,
-  scaleCaptions,
   subtitleTracks,
 } from "./subtitles.js";
 export {

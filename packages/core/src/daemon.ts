@@ -59,7 +59,8 @@ import { runDoctor } from "./binaries/doctor.js";
 import { CreditsService, readCredits } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import type { MatteSource } from "./export/compiler.js";
-import { ExportService, subjectAssets } from "./export/service.js";
+import { ExportService, readTranscriptFile, subjectAssets } from "./export/service.js";
+import { BatchService } from "./batch/service.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
@@ -108,7 +109,7 @@ import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
 import { fileUses } from "./file-uses.js";
-import { FormatService, builtinFormatInfos, formatInfos, projectConfigDocument } from "./formats.js";
+import { FormatService, builtinFormatInfos, formatInfos, formatNotFound, projectConfigDocument } from "./formats.js";
 import { ConfigJournal, readConfigJournal } from "./config/journal.js";
 import { applyConfigPatch, configHash, diffConfig } from "./config/patch.js";
 import { FORMAT_RULES, formatState, formatsFromState } from "./config/project-doc.js";
@@ -676,6 +677,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     ...(options.renderParallelism !== undefined ? { parallelism: options.renderParallelism } : {}),
     ...(options.renderSegmentSeconds !== undefined ? { segmentSeconds: options.renderSegmentSeconds } : {}),
+  });
+  const batches = new BatchService({
+    jobs,
+    loadTimeline: (dir, id) => timelines.load(dir, id),
+    applyInMemory: (dir, id, loaded, request) => timelines.applyInMemory(dir, id, loaded, request),
+    source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
+    hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
+    planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
   });
   const reviews = new ReviewService({
     timelines,
@@ -1335,8 +1344,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return changeConfig(dir, caller, "project", (author, tx) => formats.remove(dir, id, author, tx));
     },
-    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids }) =>
-      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids }),
+    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
+      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
+    "batch.render": async ({ cwd, file, out, formats: ids, dryRun }) => batches.render(await root(cwd), cwd, { file, out, formats: ids, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
@@ -1512,13 +1522,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const clipDir = clipRoot(dir);
       const active = [...jobs.list({ project: dir, active: true }), ...clipJobs.list({ project: clipDir, active: true })];
-      const temps = active.length === 0;
-      const busy = active.some((job) => job.kind === "clip" || job.kind === "render");
+      // A batch between two rows still needs the clip renders of the rows to come (ADR 0040).
+      const batching = batches.active(dir);
+      const temps = active.length === 0 && !batching;
+      const busy = batching || active.some((job) => job.kind === "clip" || job.kind === "render");
       const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)) });
       const cache = await clips.gc(clipDir, { dryRun, temps, busy });
       const proposals = await timelines.gcProposals(dir, dryRun);
       const shootCache = await shoots.gc(dir, { dryRun, temps });
-      const baked = await audioFx.gc(dir, { dryRun, temps, busy: active.some((job) => job.kind === "render") });
+      const baked = await audioFx.gc(dir, { dryRun, temps, busy: batching || active.some((job) => job.kind === "render") });
       const removed = [...derived.removed, ...cache.removed, ...proposals, ...shootCache, ...baked.removed].sort((a, b) =>
         a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
       );
@@ -1527,7 +1539,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const bytes = removed.reduce((sum, entry) => sum + entry.bytes, 0);
       return { dir, dryRun, removed, bytes, forgotten: derived.forgotten, skipped };
     },
-    "clip.renders": async ({ cwd, timeline }) => clips.status(clipRoot(await root(cwd)), timeline),
+    "clip.renders": async ({ cwd, timeline, format }) => {
+      const dir = await root(cwd);
+      if (format === undefined) return clips.status(clipRoot(dir), timeline);
+      const config = await readProjectConfig(dir);
+      const found = projectFormats(config).find((entry) => entry.id === format);
+      if (!found) throw formatNotFound(format, config);
+      return clips.status(clipRoot(dir), timeline, { width: found.width, height: found.height });
+    },
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
@@ -1609,8 +1628,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       );
       return checkScript(dir, cwd, file, names);
     },
-    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes }, _caller, request) => {
+    "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes, verify }, _caller, request) => {
       const dir = await root(cwd);
+      // The misread check goes through the project's own transcription provider, like `transcribe`.
+      const config = await readProjectConfig(dir);
+      const transcriptionId = config.transcription?.provider ?? "whisper-cpp";
+      const verifyServices = verify
+        ? {
+            providerId: transcriptionId,
+            provider: () => plugins.transcriptionProvider(dir, transcriptionId),
+            model: config.transcription?.model ?? (await models.defaultFor(transcriptionId)),
+            language: config.transcription?.language ?? null,
+            tools: transcriberTools({ dir, binaries: config.binaries }),
+            extractAudio: options.extractAudio,
+          }
+        : null;
       // Built in: the daemon's own list, then this machine's `command` provider (global config only, ADR 0034).
       const command = await readCommandSpeechProvider(dirs.configDir);
       const builtIn = new Map([...(options.speechProviders ?? []), ...(command ? [command] : [])].map((speech) => [speech.id, speech] as const));
@@ -1628,7 +1660,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       };
       const work = () =>
-        generateVoiceover({
+        transcribing(dir, () => generateVoiceover({
           root: dir,
           cwd,
           script,
@@ -1636,6 +1668,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           ...(provider ? { provider } : {}),
           ...(voice ? { voice } : {}),
           yes,
+          verify: verifyServices,
           speechProvider,
           speechProviders: async () => [
             ...builtIn.keys(),
@@ -1651,7 +1684,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             }
           },
           signal: voiceoverAbort.signal,
-        });
+        }));
       // One run per project at a time: two runs over one script would write the same takes.
       const key = canonicalPathSync(dir);
       const run = (voiceoverRuns.get(key) ?? Promise.resolve()).then(work);

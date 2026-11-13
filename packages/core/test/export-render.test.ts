@@ -1,6 +1,8 @@
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ExportPreset, MediaClip, Timeline, Transcript } from "@frameshell/schema";
+import { backdropBlur } from "../src/export/compiler.js";
 import { type ExportSource, compileFrame, compileRender, executeRender } from "../src/index.js";
 import { runTool } from "../src/media/ffmpeg.js";
 import { tempDir } from "./helpers.js";
@@ -213,6 +215,94 @@ describe("export render (real ffmpeg)", () => {
         expect(Math.abs(left - footage), `frame ${frame} left ${left} vs footage ${footage}`).toBeLessThan(STEP / 2);
         if (frame >= 6 && frame < 9) expect(right, `frame ${frame} right`).toBeGreaterThan(230);
         else expect(Math.abs(right - footage), `frame ${frame} right ${right} vs footage ${footage}`).toBeLessThan(STEP / 2);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "draws glass under a translucent render: what is below blurred and dimmed where the render shows, only while it is on (ADR 0031)",
+    async () => {
+      // Footage: 2 px vertical stripes, luma 16 / 235. Render: right half white at 15 % alpha (a pane of glass), left half transparent.
+      const stripes = join(dir, "stripes.mp4");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"],
+        ...["-i", "color=c=black:s=64x64:r=30:d=1,geq=lum='if(lt(mod(X\\,4)\\,2)\\,16\\,235)':cb=128:cr=128"],
+        ...["-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p", stripes],
+      ]);
+      const pane = join(dir, "pane.webm");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "color=c=white@0.15:s=32x64:r=30:d=1,format=rgba,pad=64:64:32:0:color=black@0"],
+        ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-crf", "10", "-b:v", "0", pane],
+      ]);
+      const timeline: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [{ id: "s", type: "media", asset: "assets/stripes.mp4", start: 0, in: 0, out: 0.4 }] },
+          { id: "v2", kind: "video", clips: [{ id: "g", type: "hyperframes", start: 0.2, duration: 0.2, backdrop: { blur: 4, dim: 0.5 } }] },
+        ],
+      };
+      const sources = new Map<string, ExportSource>([["assets/stripes.mp4", { path: stripes, video: { codec: "h264", still: false, width: 64, height: 64 }, audio: false }]]);
+      const generated = new Map([["g", { path: pane, hasAlpha: true, width: 64, height: 64 }]]);
+      const plan = compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, generated, resolution, segmentSeconds: 1 });
+      const output = join(dir, "glass.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-glass"), output });
+
+      const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-vf", "format=gray", "-f", "rawvideo", "-"]);
+      const frames = raw.length / (64 * 64);
+      expect(frames).toBe(12);
+      /** Mean and standard deviation of luma over columns [from, to) of frame `n`, away from the top and bottom edges. */
+      const stats = (n: number, from: number, to: number) => {
+        const values: number[] = [];
+        for (let y = 8; y < 56; y++) for (let x = from; x < to; x++) values.push(raw[n * 4096 + y * 64 + x]!);
+        const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+        return { mean, deviation: Math.sqrt(values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length) };
+      };
+      for (let n = 0; n < frames; n++) {
+        const left = stats(n, 4, 24);
+        const right = stats(n, 40, 60);
+        // Away from the pane the stripes stay sharp.
+        expect(left.deviation, `frame ${n} left`).toBeGreaterThan(60);
+        if (n < 6) {
+          expect(right.deviation, `frame ${n} right before the clip`).toBeGreaterThan(60);
+          continue;
+        }
+        // Under the pane: blurred flat, at half the footage's level (dim 0.5), 15 % white on top.
+        expect(right.deviation, `frame ${n} right`).toBeLessThan(12);
+        const expected = 0.85 * (16 + (left.mean - 16) * 0.5) + 0.15 * 235;
+        expect(Math.abs(right.mean - expected), `frame ${n} right ${right.mean} vs ${expected}`).toBeLessThan(12);
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "blurs glass with a Gaussian kernel like the preview's canvas blur(), not only the same sigma",
+    async () => {
+      const width = 801;
+      const centre = 400;
+      for (const sigma of [20, 46]) {
+        const impulse = new Float32Array(width);
+        impulse[centre] = 1;
+        const input = join(dir, `impulse-${sigma}.raw`);
+        await writeFile(input, impulse);
+        const raw = await runBuffer(ffmpeg, [
+          ...["-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "grayf32le", "-s", `${width}x1`, "-i", input],
+          ...["-vf", backdropBlur(sigma), "-f", "rawvideo", "-pix_fmt", "grayf32le", "-"],
+        ]);
+        const row = Array.from({ length: width }, (_, i) => raw.readFloatLE(i * 4));
+        const total = row.reduce((sum, v) => sum + v, 0);
+        const deviation = Math.sqrt(row.reduce((sum, v, i) => sum + (i - centre) ** 2 * v, 0) / total);
+        const peak = Math.max(...row) / total;
+        const tail = row.reduce((sum, v, i) => (Math.abs(i - centre) > 3 * sigma ? sum + v : sum), 0) / total;
+        const gaussianPeak = 1 / (sigma * Math.sqrt(2 * Math.PI));
+        expect(deviation / sigma, `sigma ${sigma}: deviation ${deviation}`).toBeCloseTo(1, 1);
+        // gblur's default single pass peaks 1.77x a Gaussian and leaves 1.4 % beyond 3 sigma (a Gaussian: 0.27 %).
+        expect(peak / gaussianPeak, `sigma ${sigma}: peak`).toBeLessThan(1.2);
+        expect(tail, `sigma ${sigma}: tail beyond 3 sigma`).toBeLessThan(0.01);
       }
     },
     MEDIA_TIMEOUT,

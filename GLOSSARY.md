@@ -42,6 +42,14 @@ _Avoid_: narration script, TTS script
 The generated audio of one voiceover script line, `assets/voiceover/<script slug>/<line id>.wav`, carrying the cache key it was made from.
 _Avoid_: take (alone: a shoot recording), clip (until placed on a timeline)
 
+**Phrase**:
+One stretch of a voiceover take between silences of 60 ms or more, as a range of the take in seconds; the cuts of the phrase clips a person corrects by trimming. Derived from the file, never stored.
+_Avoid_: segment, chunk
+
+**Misread**:
+A difference between what a voiceover take was heard to say (through the project's transcription provider) and the line it was asked to read: `missing`, `changed`, `added`, `moved`, `restart` or `pause`; the line is `clean`, `doubtful` (the transcription may have made it) or `misread`.
+_Avoid_: error (too broad), mispronunciation (the check hears words, not sounds)
+
 ## Synthesized sound (ADR 0038)
 
 **Sound effect**:
@@ -178,6 +186,10 @@ _Avoid_: voice preset, voice polish, mastering
 An asset's sound processed once through one chain of audio effects and cached in `.frameshell/audio-fx/`; preview and export both play it. One bake serves every clip of that asset and chain.
 _Avoid_: render (that is a generated clip's), proxy, sidecar (that is the dry sound)
 
+**Glass** (`backdrop`):
+The picture below a generated clip, blurred, saturated and dimmed wherever the clip's alpha shows, drawn just before the clip; the render itself is unchanged. A style choice (`style.json` `glass`), never a default.
+_Avoid_: frosted glass, backdrop-filter (that is the CSS inside a composition, which blurs nothing in a render), blur effect
+
 ## Transitions and keyframes (ADR 0018, ADR 0030)
 
 **Transition**:
@@ -255,6 +267,20 @@ _Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
 **Config operation** (ADR 0036):
 One journaled change of project config (a format added or removed, a `revert` of one), as keyed before/after values in `.frameshell/history/project.config.jsonl`; it belongs to a transaction like a timeline operation and is listed in every timeline's history.
 _Avoid_: config edit, settings change
+
+## Batch variants (ADR 0040)
+
+**Batch file**:
+A `*.batch.json` naming a template timeline, its slots and the rows to render; each row is one variant of the same edit (a size, a language, a product), never an episode.
+_Avoid_: job file, template file, data file
+
+**Slot**:
+A named place a row fills: `<clipId>.props.<path>` (a value in a generated clip's props) or `<clipId>.asset` (a media clip's file, in/out kept).
+_Avoid_: field, variable, placeholder
+
+**Row**:
+One variant of a batch: an `id` (its output file name) and a value per slot it sets.
+_Avoid_: record, entry (the manifest's per row × format line is an entry)
 
 ## Photo segmentation (ADR 0022)
 

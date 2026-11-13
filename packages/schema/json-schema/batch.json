@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "template": {
+      "default": "main",
+      "description": "Timeline id the rows patch; default `main`. A single generated clip is a timeline holding that one clip.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "slots": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^([^.\\s]+)\\.(?:(asset)|props\\.([^.\\s]+(?:\\.[^.\\s]+)*))$",
+        "description": "`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props) or `<clipId>.asset` (a media clip's asset)."
+      },
+      "description": "Slot name → what it sets: `<clipId>.props.<dot.path>` or `<clipId>.asset`."
+    },
+    "rows": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+            "description": "Row id, used as the output file name: lowercase letters, digits and `-`, up to 64, e.g. `es` or `product-12`."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": {},
+        "description": "`id` plus one value per slot it sets, e.g. `{ \"id\": \"es\", \"title\": \"Hola\", \"voice\": \"assets/vo-es.wav\" }`."
+      },
+      "description": "One render per row (times each format), in order."
+    },
+    "formats": {
+      "description": "Formats of the project each row renders in (`format.list`); default the primary only.",
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+        "description": "Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp."
+      }
+    },
+    "preset": {
+      "description": "Export preset id; default the project's `export.defaultPreset`, else the built-in default.",
+      "type": "string",
+      "minLength": 1
+    },
+    "quality": {
+      "description": "Quality tier, as `render` takes it.",
+      "type": "string",
+      "enum": [
+        "draft",
+        "final"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "slots",
+    "rows"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/batch.json"
+}
