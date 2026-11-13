@@ -35,16 +35,16 @@ async function addCard(name: string, start: number, extra: Record<string, unknow
   return result.changes.added[0]!;
 }
 
-async function renders(): Promise<Map<string, ClipRenderInfo>> {
-  const { clips } = await conn.request("clip.renders", { cwd: project, timeline: "main" });
+async function renders(format?: string): Promise<Map<string, ClipRenderInfo>> {
+  const { clips } = await conn.request("clip.renders", { cwd: project, timeline: "main", ...(format ? { format } : {}) });
   return new Map(clips.map((clip) => [clip.clip, clip]));
 }
 
-/** Poll `clip.renders` until `check` holds for clip `id`; returns that state. */
-async function until(id: string, check: (info: ClipRenderInfo) => boolean): Promise<ClipRenderInfo> {
+/** Poll `clip.renders` (in `format`) until `check` holds for clip `id`; returns that state. */
+async function until(id: string, check: (info: ClipRenderInfo) => boolean, format?: string): Promise<ClipRenderInfo> {
   let last: ClipRenderInfo | undefined;
   for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
-    last = (await renders()).get(id);
+    last = (await renders(format)).get(id);
     if (last && check(last)) return last;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -213,6 +213,32 @@ describe("clip render cache", () => {
   );
 
   it(
+    "renders another format only when asked: clip.renders with `format` reports and queues it, background renders stay primary",
+    async () => {
+      const tall = await renders("tall");
+      expect([...tall.values()].every((info) => info.state === "ready" && info.width === 36 && info.height === 64)).toBe(true);
+      expect([...tall.values()].every((info) => tallKeys().has(info.key!))).toBe(true);
+
+      const before = { primary: (await renders()).get(red)!.key, tall: tall.get(red)!.key, cached: tallKeys().size };
+      await conn.request("clip.set", { cwd: project, clip: red, props: { label: "Vertical" } });
+      await until(red, (info) => info.state === "ready" && info.key !== before.primary);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(tallKeys().size).toBe(before.cached);
+
+      const asked = await until(red, (info) => info.state === "ready" && info.key !== before.tall, "tall");
+      expect(asked).toMatchObject({ width: 36, height: 64 });
+      expect(tallKeys().has(asked.key!)).toBe(true);
+      // The primary format by id is the same as no format.
+      const primary = (await conn.request("format.list", { cwd: project })).formats[0]!.id;
+      expect((await renders(primary)).get(red)!.key).toBe((await renders()).get(red)!.key);
+      await expect(conn.request("clip.renders", { cwd: project, timeline: "main", format: "nope" })).rejects.toMatchObject({
+        code: ErrorCode.FormatNotFound,
+      });
+    },
+    TIMEOUT,
+  );
+
+  it(
     "reports generated clips inside nested timelines under their composed id (`<nested clip>/<clip>`), from the same cache",
     async () => {
       writeCard("inner", { color: "blue", seconds: 3 });
@@ -236,6 +262,14 @@ describe("clip render cache", () => {
   it(
     "gc deletes renders no clip keys any more and keeps every current one, nested ones included",
     async () => {
+      const { formats } = await conn.request("format.list", { cwd: project });
+      if (!formats.some((format) => format.id === "tall")) await conn.request("format.add", { cwd: project, id: "tall", width: 36, height: 64 });
+      // A render of the declared format that a props change made stale.
+      const stale = (await until(red, (info) => info.state === "ready", "tall")).key!;
+      await conn.request("clip.set", { cwd: project, clip: red, props: { label: "Swept" } });
+      await until(red, (info) => info.state === "ready" && info.key !== stale, "tall");
+      // Current renders of the declared format (asking queues the nested clip's).
+      const tall = new Set([...(await renders("tall")).values()].map((info) => info.key!));
       for (const deadline = Date.now() + 60_000; ; ) {
         const { jobs } = await conn.request("job.list", { cwd: project, active: true });
         if (jobs.length === 0) break;
@@ -250,7 +284,7 @@ describe("clip render cache", () => {
       writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.webm`), "x");
       writeFileSync(join(project, ".frameshell", "cache", "clips", `${orphan}.json`), "{}");
 
-      const tall = tallKeys();
+      expect(tallKeys().has(stale)).toBe(true);
       const { removed, skipped } = await conn.request("gc", { cwd: project });
       expect(skipped).toEqual([]);
       const keyOf = (path: string) => path.split("/").at(-1)!.split(".")[0]!;
@@ -258,6 +292,7 @@ describe("clip render cache", () => {
       expect(keys).toContain(orphan);
       // Renders of a declared format stay (background renders never make them again); once it is removed they go.
       for (const key of tall) expect(keys).not.toContain(key);
+      expect(keys).toContain(stale);
       await conn.request("format.remove", { cwd: project, id: "tall" });
       const unused = (await conn.request("gc", { cwd: project, dryRun: true })).removed.map((entry) => keyOf(entry.path));
       for (const key of tall) expect(unused).toContain(key);

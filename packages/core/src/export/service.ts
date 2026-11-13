@@ -28,7 +28,7 @@ import {
   programGroup,
   resolveFormat,
   sameAspect,
-  scaleCaptions,
+  scaledCaptions,
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
@@ -402,8 +402,8 @@ export class ExportService {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
     const config = (await readEnclosingProject(root))?.config;
-    const captionScale = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format.captionScale ?? 1;
-    return subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) => scaleCaptions(track, captionScale));
+    const layout = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format;
+    return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), layout);
   }
 
   /**
