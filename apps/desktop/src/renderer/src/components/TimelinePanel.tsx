@@ -27,7 +27,7 @@ import { showSide } from "../review/store.js";
 import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
-import { useAssets, useNestedViews, useProjectKind } from "../preview/useProgram.js";
+import { useAssets, useNestedViews, useProjectFormats, useProjectKind } from "../preview/useProgram.js";
 import { useMatteStatus } from "../preview/useSubjectMattes.js";
 import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
 import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
@@ -60,6 +60,7 @@ import {
   formatDuration,
   formatTimecode,
   layoutTimeline,
+  markedFormats,
   markerAt,
   onMarkerLane,
   sceneAt,
@@ -379,6 +380,9 @@ function TimelineCanvas({
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
   const { clips: selectedClips, range, spans, reveal, track: selectedTrack, scene: selectedScene } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
+  const projectFormats = useProjectFormats();
+  /** Formats other than the primary: a clip with an override in one is marked (ADR 0027). */
+  const formats = useMemo(() => new Set(projectFormats.slice(1).map((format) => format.id)), [projectFormats]);
   const subtitles = useSubtitles();
   const cues = useMemo(() => new Map(subtitles.tracks.map((track) => [track.track, cueBoxes(track, subtitles.fps)] as const)), [subtitles]);
   const [snapping, setSnapping] = useState(true);
@@ -394,8 +398,8 @@ function TimelineCanvas({
    * are pending, and the latest revision they produced.
    */
   const inFlight = useRef<{ starts: Map<string, number>; pending: number; until: number } | null>(null);
-  const latest = useRef({ layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene });
-  latest.current = { layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene };
+  const latest = useRef({ layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene, formats });
+  latest.current = { layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene, formats };
   const lanesEl = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
   /** Track whose header shows a name input (track menu "Rename track"). */
@@ -414,7 +418,7 @@ function TimelineCanvas({
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen, range: words, spans: personSpans, diff: marks, cues: subtitleCues, selectedTrack: track, selectedScene: chosenScene } = latest.current;
+    const { layout: current, fps: rate, selected: chosen, range: words, spans: personSpans, diff: marks, cues: subtitleCues, selectedTrack: track, selectedScene: chosenScene, formats: marked } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
@@ -446,6 +450,7 @@ function TimelineCanvas({
       selectedScene: chosenScene,
       ...(drag ? { drag } : {}),
       stroke: stroke.current?.stroke ?? null,
+      formats: marked,
     });
     performance.measure(PAINT_MEASURE, { start: started });
     // User Timing buffers are unbounded: keep only recent paints.
@@ -516,7 +521,7 @@ function TimelineCanvas({
     settle();
     if (frame.current) frameView.current.cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, range, spans, diff, cues, selectedTrack, selectedScene, settle, settleNudges, draw]);
+  }, [layout, revision, selected, range, spans, diff, cues, selectedTrack, selectedScene, formats, settle, settleNudges, draw]);
 
   // `ui_state.visible`: read from the live scroll and zoom when published, null once the lanes unmount.
   useEffect(() => {
@@ -1439,7 +1444,7 @@ function TimelineCanvas({
             }}
           />
         )}
-        {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} />}
+        {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} formats={formats} />}
         <ClipList layout={layout} fps={fps} selected={selected} cues={cues} scene={selectedScene} />
       </div>
     </div>
@@ -1581,8 +1586,9 @@ function nothingToDo(command: EditCommand, anySelected: boolean): string {
   }
 }
 
-function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x: number; y: number }; fps: number }) {
+function ClipTooltip({ hover, fps, formats }: { hover: { row: TrackRow; clip: ClipBox; x: number; y: number }; fps: number; formats: ReadonlySet<string> }) {
   const { row, clip } = hover;
+  const adjusted = markedFormats(clip, formats);
   return (
     <div className="clip-tooltip" style={{ left: hover.x + 12, top: hover.y + 14 }} role="tooltip">
       <strong>{clip.name}</strong>
@@ -1592,6 +1598,7 @@ function ClipTooltip({ hover, fps }: { hover: { row: TrackRow; clip: ClipBox; x:
       <span className="clip-tooltip-faint">
         {clip.problem ? clip.problem : t.timeline.clipDetail(formatDuration(clip.end - clip.start), row.label, clip.type)}
       </span>
+      {adjusted.length > 0 && <span data-testid="clip-tooltip-formats">{t.timeline.formatOverrides(adjusted.join(", "))}</span>}
       <span className="clip-tooltip-faint">{clip.id}</span>
     </div>
   );

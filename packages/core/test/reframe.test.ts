@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layerRect } from "@frameshell/schema";
-import { REFRAME_FACE_AT, type ReframePlacement, parseFrameFormat, planReframe, reframeBounds, reframePlacement } from "../src/index.js";
+import { REFRAME_FACE_AT, type ReframePlacement, parseFrameFormat, planReframe, reframeBounds, reframePlacement, reframeTarget } from "../src/index.js";
 
 const PROJECT = { width: 1080, height: 1920 };
 const LANDSCAPE = { source: { width: 1920, height: 1080 }, project: PROJECT, format: { width: 9, height: 16 } };
@@ -18,6 +18,26 @@ describe("parseFrameFormat", () => {
     expect(parseFrameFormat("9x16")).toEqual({ width: 9, height: 16 });
     expect(parseFrameFormat(" 4:5 ")).toEqual({ width: 4, height: 5 });
     for (const bad of ["", "vertical", "0x16", "9x", "9x16x1", "-9x16"]) expect(parseFrameFormat(bad)).toBeNull();
+  });
+});
+
+describe("reframeTarget", () => {
+  const declared = [
+    { id: "16x9", width: 1920, height: 1080 },
+    { id: "9x16", width: 1080, height: 1920 },
+    { id: "web-1600x900", width: 1600, height: 900 },
+  ];
+
+  it("takes a declared format other than the primary as that format's override, with its own aspect", () => {
+    expect(reframeTarget("9x16", declared)).toEqual({ frame: { width: 1080, height: 1920 }, aspect: "9x16", format: "9x16" });
+    expect(reframeTarget("web-1600x900", declared)).toEqual({ frame: { width: 1600, height: 900 }, aspect: "16x9", format: "web-1600x900" });
+  });
+
+  it("frames the clip itself for the primary, an aspect, or a project without formats", () => {
+    expect(reframeTarget("16x9", declared)).toMatchObject({ aspect: "16x9", format: null });
+    expect(reframeTarget("9:16", declared)).toEqual({ frame: { width: 9, height: 16 }, aspect: "9x16", format: null });
+    expect(reframeTarget("8x10", [])).toMatchObject({ aspect: "4x5", format: null });
+    expect(reframeTarget("vertical", declared)).toBeNull();
   });
 });
 

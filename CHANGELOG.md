@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 123):
+  `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`
+  too, once declared) writes the face-following framing into the clip's override there, so the clip, the primary and
+  every other format keep theirs and each format can follow the face its own way; the result says where
+  (`inFormat`). An aspect (`9:16`) still frames the clip itself. Its warning no longer suggests the
+  `vertical-1080x1920` preset, refused in a 16:9 project since slice 1, but `format add`. In the app, the timeline
+  marks a clip with an override in a declared format with a small frame in its corner, and its tooltip names the
+  formats (English and Spanish); switching the preview to a format asks the daemon for that format's generated-clip
+  renders (queued when missing), so generated clips show at the format's size with their props there, as export
+  draws them.
+
 - Shaped transitions on upper tracks and nested clips, slice 3 of #483 (ADR 0030, epic #451): `transition.set` with
   `kind` `wipe`, `push` or `iris` now plays on every video track with the edge, like a dissolve, instead of the bottom
   one only. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not

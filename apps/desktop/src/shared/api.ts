@@ -580,8 +580,11 @@ export interface FrameshellApi {
     onProgress(listener: (progress: ModelProgress) => void): () => void;
   };
   clips: {
-    /** `clip.renders` of a timeline of the window's project: render cache state per generated clip. Rejects with the daemon's message. */
-    renders(timeline: string): Promise<ClipRendersResult>;
+    /**
+     * `clip.renders` of a timeline of the window's project: render cache state per generated clip, in project format
+     * `format` when given (ADR 0027; the daemon queues that format's missing renders). Rejects with the daemon's message.
+     */
+    renders(timeline: string, format?: string): Promise<ClipRendersResult>;
     /**
      * Called on every change of a `clip` render job of the project (daemon
      * `job.progress`); `null` after a daemon reconnect, when changes may have

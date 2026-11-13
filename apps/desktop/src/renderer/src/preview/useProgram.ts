@@ -19,14 +19,14 @@ const NESTED_SOURCE = /^timelines\/([A-Za-z0-9][A-Za-z0-9_-]*)\.json$/;
  * the shared timeline feeds (one read per change for every panel; nested
  * timelines on their own feeds) and `asset.list`, re-read on each revision
  * and while proxies are being built. Null until both are known. `format`: the project format shown (ADR 0027), absent
- * for the primary: its layout, and the clips with their overrides there.
+ * for the primary: its layout, the clips with their overrides there, and its generated-clip renders.
  */
 export function useProgram(format?: ResolvedFormat): Program | null {
   const { view: stored } = useTimelineView(SELECTION_TIMELINE);
   const assets = useAssets(stored?.revision ?? null);
   const resolution = useResolution();
   const storedNested = useNestedViews(stored);
-  const renders = useClipRenders(stored, storedNested);
+  const renders = useClipRenders(stored, storedNested, format?.id);
   const bakes = useAudioBakes(stored, storedNested);
   const mattes = useSubjectMattes(stored, storedNested, assets);
   const { view, nested } = useMemo(() => viewsInFormat(stored, storedNested, format?.id), [stored, storedNested, format?.id]);

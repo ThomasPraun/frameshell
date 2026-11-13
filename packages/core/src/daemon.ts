@@ -33,6 +33,7 @@ import {
   writeMessage,
 } from "@frameshell/protocol";
 import {
+  BUILTIN_FORMATS,
   CREDITS_FILE,
   type CaptionPhrase,
   type DuckSettings,
@@ -53,6 +54,7 @@ import {
   parseTimeline,
   projectFormats,
   resolveStyle,
+  sameAspect,
   subtitleTracks,
   subtitleWords,
 } from "@frameshell/schema";
@@ -89,7 +91,7 @@ import { historyElsewhere } from "./history/revert.js";
 import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
-import { parseFrameFormat, planReframe } from "./reframe.js";
+import { planReframe, reframeTarget } from "./reframe.js";
 import {
   FACE_DETECTION_MODEL,
   FACE_RECOGNITION_MODEL,
@@ -2539,8 +2541,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.reframe": async ({ cwd, timeline, clip: clipId, format: formatText, person: personRef, anchor }, caller, request) => {
       const dir = await root(cwd);
       const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `clip.reframe: ${reason}`, { op: "clip.reframe", reason, field });
-      const format = parseFrameFormat(formatText ?? "9x16");
-      if (!format) throw invalid(`format "${formatText}" is not <width>x<height>, e.g. 9x16.`, "format");
+      const config = (await readEnclosingProject(dir))?.config;
+      const declared = config ? projectFormats(config) : [];
+      const target = reframeTarget(formatText ?? "9x16", declared);
+      if (!target) {
+        const others = declared.slice(1).map((entry) => entry.id);
+        throw invalid(`format "${formatText}" is neither an aspect <width>x<height> (e.g. 9x16) nor a format of the project${others.length > 0 ? ` (${others.join(", ")})` : ""}.`, "format");
+      }
+      const { frame: format, format: inFormat } = target;
       if (personRef !== undefined && anchor !== undefined) throw invalid("`person` and `anchor` are two ways to place the picture: give one.", "anchor");
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
       const place = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips.map((clip) => ({ track, clip })) : [])).find(({ clip }) => clip.id === clipId);
@@ -2556,7 +2564,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const end = clip.start + (clip.out - clip.in) / speed;
       const toTimeline = (source: number) => clip.start + (source - clip.in) / speed;
       const range = still ? undefined : { from: clip.in, to: clip.out };
-      const project = (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 };
+      const project = config?.resolution ?? { width: 1920, height: 1080 };
       const warnings: string[] = [];
       let samples = 0;
       let faces = 0;
@@ -2619,7 +2627,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         timeline,
         revision: loaded.revision,
         clip: clip.id,
-        format: `${format.width}x${format.height}`,
+        format: target.aspect,
+        inFormat,
         follows,
         samples,
         faces,
@@ -2631,13 +2640,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       if (points.length === 0) return nothing();
       const plan = planReframe({ source: { width: probe.video.width, height: probe.video.height }, project, format }, points, toTimeline);
-      if (Math.abs(project.width / project.height - format.width / format.height) > 0.01) {
+      if (inFormat === null && !sameAspect(project, format)) {
+        // Framed into the clip itself, so the project frame shows it zoomed; a declared format of this aspect frames it alone.
+        const shaped = declared.slice(1).find((entry) => sameAspect(entry, format));
         warnings.push(
-          `The project is ${project.width}x${project.height}: its preview shows the clip zoomed, and an export in ${format.width}:${format.height} (e.g. the vertical-1080x1920 preset) shows the framing.`,
+          shaped
+            ? `The project is ${project.width}x${project.height} and the framing went into ${clip.id} itself, so every format shows it (the project frame zoomed). To frame the clip in format ${shaped.id} only, reframe with format ${shaped.id}.`
+            : `The project is ${project.width}x${project.height}: its preview shows ${clip.id} zoomed, and only an export in ${target.aspect} shows the framing. To frame it there alone, add a format of that aspect (frameshell format add ${BUILTIN_FORMATS[target.aspect] ? target.aspect : `<id> --size <w>x<h>`}) and reframe with that format id.`,
         );
       }
-      const had = clip.keys?.x || clip.keys?.y || clip.keys?.scale || clip.transform?.x !== undefined || clip.transform?.y !== undefined || clip.transform?.scale !== undefined;
-      if (had) warnings.push(`${clip.id} had its own x, y or scale (static or keys): replaced.`);
+      const override = inFormat === null ? undefined : clip.formats?.[inFormat];
+      const own = inFormat === null ? clip : { transform: override?.transform, keys: override?.keys };
+      const had = own.keys?.x || own.keys?.y || own.keys?.scale || own.transform?.x !== undefined || own.transform?.y !== undefined || own.transform?.scale !== undefined;
+      if (had) warnings.push(`${clip.id} had its own x, y or scale${inFormat === null ? "" : ` in format ${inFormat}`} (static or keys): replaced.`);
+      const there = inFormat === null ? {} : { format: inFormat };
       // Every write joins one transaction, so one revert undoes the framing even from a sessionless client.
       const key = authorOf(caller);
       const next = transactions.next(key, { standalone: true });
@@ -2653,15 +2669,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       };
       await transactions.touching(key, tx, { root: dir, timeline });
       try {
+        // In a format the override's transform drops the clip's own keys of x, y and scale there, so only the
+        // override's keys are cleared; the clip and the other formats keep their framing.
         for (const prop of ["x", "y", "scale"] as const) {
-          if (clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: clip.id, prop, clear: true } } as OperationRequest);
+          if (own.keys?.[prop]) await apply({ op: "clip.key", args: { clip: clip.id, prop, clear: true, ...there } } as OperationRequest);
         }
-        await apply({ op: "clip.set", args: { clip: clip.id, transform: { scale: plan.scale, x: plan.x, y: plan.y } } } as OperationRequest);
+        await apply({ op: "clip.set", args: { clip: clip.id, transform: { scale: plan.scale, x: plan.x, y: plan.y }, ...there } } as OperationRequest);
         for (const prop of ["x", "y"] as const) {
           if (!plan.moves[prop]) continue;
           for (const point of plan.keys) {
             const time = Math.min(end, Math.max(clip.start, point.time));
-            await apply({ op: "clip.key", args: { clip: clip.id, prop, time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
+            await apply({ op: "clip.key", args: { clip: clip.id, prop, time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}), ...there } } as OperationRequest);
           }
         }
       } catch (error) {

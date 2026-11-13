@@ -1188,7 +1188,11 @@ export const ClipReframeResultSchema = z.object({
   timeline: z.string(),
   revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
   clip: z.string(),
-  format: z.string().describe("Aspect framed for, `<w>x<h>` (`9x16`)."),
+  format: z.string().describe("Aspect framed for, `<w>x<h>` in lowest terms (`9x16`)."),
+  inFormat: z
+    .string()
+    .nullable()
+    .describe("Project format whose override of the clip took the framing (ADR 0027); null when it went into the clip itself."),
   follows: z.enum(["face", "person", "anchor"]).describe("What placed the picture: the largest face found, the named person's face, or the fixed `anchor`."),
   samples: z.int().describe("Frames looked at (2 per second of the clip's source); 0 for `anchor`, and for `person` the samples of the cached scan used."),
   faces: z.int().describe("Of those, frames where the face was found; 0 for `anchor`."),

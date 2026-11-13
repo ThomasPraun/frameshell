@@ -97,6 +97,8 @@ export interface ClipBox {
   elements: Readonly<Record<string, ElementAdjust>>;
   /** Stored `backdrop` of a generated clip (ADR 0031); null without one. */
   backdrop: Backdrop | null;
+  /** Ids of the formats the clip has a stored override in (ADR 0027 `formats`), sorted; empty without any. */
+  formats: string[];
 }
 
 /** One angle a shot shows. */
@@ -394,7 +396,16 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     keys: keyBoxes(fields["keys"]),
     elements: elementsOf(fields["elements"]),
     backdrop: kind === "generated" && typeof fields["backdrop"] === "object" && fields["backdrop"] !== null ? (fields["backdrop"] as Backdrop) : null,
+    formats: typeof fields["formats"] === "object" && fields["formats"] !== null ? Object.keys(fields["formats"]).sort() : [],
   };
+}
+
+/**
+ * Formats of `declared` (ids of the project's formats other than the primary) in which `clip` has an override: the
+ * ones the timeline marks. Overrides of the primary or of a removed format are kept but ignored, so not marked.
+ */
+export function markedFormats(clip: Pick<ClipBox, "formats">, declared: ReadonlySet<string>): string[] {
+  return clip.formats.filter((id) => declared.has(id));
 }
 
 /** A stored `elements` map as the daemon sent it (already validated); empty when absent. */

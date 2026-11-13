@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 122;
+export const PROTOCOL_VERSION = 123;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3265,9 +3265,12 @@ export const methods = {
       "horizontal position of the picture (0 left edge, 1 right edge) in the middle of the frame, for footage with no face. " +
       "Rotation metadata is applied to the picture first. One transaction labelled `Reframe <file name>` (yours when one is open): " +
       "`revert` undoes it, the person edits the keys in the inspector or with `clip.key`, and in review mode it is one proposal. " +
-      "It replaces the clip's `x`, `y` and `scale` (static and keys; a warning says so) and leaves its other fields. The frame is " +
-      "the export's: with a project not in `format`, the preview shows the project frame and an export with a matching preset " +
-      "(`vertical-1080x1920`) shows the framing; a warning says so. For landscape footage with no face, look at a frame " +
+      "It replaces the clip's `x`, `y` and `scale` (static and keys; a warning says so) and leaves its other fields. When " +
+      "`format` is the id of a format of the project other than the primary (`format.list`, ADR 0027), the framing goes into " +
+      "the clip's override there (`formats.<id>`, as `clip.set`/`clip.key` with `format` write it; `inFormat` in the result) " +
+      "and the clip itself, the primary and every other format keep theirs, so each format can follow the face its own way. " +
+      "Otherwise `format` is an aspect and the framing goes into the clip, for every format: with a project of another " +
+      "aspect the preview shows the project frame zoomed; a warning says so. `9:16` always means the aspect. For landscape footage with no face, look at a frame " +
       "(`frame.capture`) and pick `anchor`. A clip with no face found is left as it was, with a warning. Runs as a background " +
       "job of kind `faces` (`job.list`) with `progress` notifications. " +
       "Example: `{ clip: \"c_0003\", format: \"9x16\" }`. Fails with InvalidOperation (not a media clip on a video track, " +
@@ -3277,7 +3280,14 @@ export const methods = {
       cwd: CwdParam,
       timeline: TimelineIdSchema,
       clip: z.string().min(1).describe("Id of a media clip on a video track, from `timeline.show`."),
-      format: z.string().min(1).optional().describe("Aspect of the frame, `<w>x<h>` or `<w>:<h>`: `9x16` (default), `1x1`, `4x5`, `16x9`…"),
+      format: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "A format id of the project (`format.list`; one other than the primary takes the framing in its override), else the aspect " +
+            "of the frame, `<w>x<h>` or `<w>:<h>`: `9x16` (default), `1x1`, `4x5`, `16x9`…",
+        ),
       person: z.string().min(1).optional().describe("Follow this person's face (id or exact name from `people.list`) from the cached scan of the clip's file."),
       anchor: z.number().min(0).max(1).optional().describe("Fixed horizontal position of the picture in the frame, 0 (left edge) to 1 (right edge); no face detection."),
     }),

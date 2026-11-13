@@ -145,9 +145,23 @@ test("in 9:16 the handles and the inspector edit the clip there only", async () 
   await expect.poll(() => stored().formats?.["9x16"]?.hidden).toBe(true);
   await expect.poll(() => colours(0.5)).toBe("KK");
 
+  // The timeline marks a clip adjusted in a format; its tooltip names the format. Over the ruler first, so the
+  // tooltip is read again from the clip as it is now; 10 px in, so the 2 s clip is under the pointer at any zoom.
+  const lanes = (await page.locator(".timeline-scroller").boundingBox())!;
+  const hoverClip = async () => {
+    await page.mouse.move(lanes.x + 10, lanes.y + 8);
+    await expect(page.locator(".clip-tooltip")).toHaveCount(0);
+    await page.mouse.move(lanes.x + 10, lanes.y + 22 + 22);
+    await expect(page.locator(".clip-tooltip")).toBeVisible();
+  };
+  await hoverClip();
+  await expect(page.getByTestId("clip-tooltip-formats")).toHaveText("Adjusted in 9x16");
+
   await page.getByTestId("inspector-use-primary").click();
   await expect.poll(() => stored().formats).toBeUndefined();
   await expect.poll(() => colours(0.05)).toBe("RG");
+  await hoverClip();
+  await expect(page.getByTestId("clip-tooltip-formats")).toHaveCount(0);
 
   await page.getByTestId("preview-format").selectOption("landscape");
   await expect.poll(() => colours(0.5)).toBe("RG");

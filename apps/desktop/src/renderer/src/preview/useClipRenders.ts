@@ -13,9 +13,12 @@ const hasGenerated = (view: TimelineView) =>
  * (by flattened id `<nested clip>/<clip>`, as `clip.renders` reports them),
  * live: re-read on every revision of `view` or of a timeline it nests, and
  * whenever a render finishes; progress follows `clip` job events. Empty
- * while none of them has generated clips (no daemon call).
+ * while none of them has generated clips (no daemon call). `format`: a project
+ * format other than the primary (ADR 0027 decision 12): the renders at its size,
+ * with its overrides, which the daemon queues when they are missing; until they
+ * are read, the states of the format shown before stay.
  */
-export function useClipRenders(view: TimelineView | null, nested: ReadonlyMap<string, TimelineView>): ClipRenders {
+export function useClipRenders(view: TimelineView | null, nested: ReadonlyMap<string, TimelineView>, format?: string): ClipRenders {
   const [renders, setRenders] = useState<ClipRenders>(EMPTY);
   const [reads, setReads] = useState(0);
   // Events arrive outside React renders: fold them into the newest state, not a stale closure.
@@ -31,18 +34,18 @@ export function useClipRenders(view: TimelineView | null, nested: ReadonlyMap<st
       return;
     }
     let disposed = false;
-    window.frameshell.clips.renders(timeline).then(
+    window.frameshell.clips.renders(timeline, format).then(
       ({ clips }) => {
         if (!disposed) setRenders(new Map(clips.map((info) => [info.clip, info])));
       },
       () => {
-        // Daemon unreachable or timeline invalid: keep the last states; the next revision re-reads.
+        // Daemon unreachable, timeline invalid or format just removed: keep the last states; the next revision re-reads.
       },
     );
     return () => {
       disposed = true;
     };
-  }, [timeline, revision, nestedRevisions, generated, reads]);
+  }, [timeline, revision, nestedRevisions, generated, reads, format]);
 
   useEffect(() => {
     if (!generated) return;

@@ -403,3 +403,37 @@ describe("scene band", () => {
     expect(strokes.filter((stroke) => stroke.color === DEFAULT_THEME.accent && stroke.width === 2)).toHaveLength(1);
   });
 });
+
+describe("paintTimeline format-override marks (ADR 0027)", () => {
+  /** Three clips: c_0 overridden in 9x16, c_1 only in a format the project no longer declares, c_2 not at all. */
+  function overridden(): TimelineView {
+    const view = longTimeline(3);
+    const clips = view.tracks[0]!.clips as Record<string, unknown>[];
+    clips[0]!["formats"] = { "9x16": { hidden: true } };
+    clips[1]!["formats"] = { gone: { transform: { x: 10 } } };
+    return view;
+  }
+
+  /** Left edges of the marks drawn: 6x9 px frames. */
+  function marks(formats?: ReadonlySet<string>): number[] {
+    const found: number[] = [];
+    const ctx = Object.assign(recorder(), {
+      strokeRect: (x: number, _y: number, w: number, h: number) => {
+        if (w === 6 && h === 9) found.push(x);
+      },
+    });
+    const input = { layout: layoutTimeline(overridden()), viewport: viewport(20), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia };
+    paintTimeline(ctx, formats ? { ...input, formats } : input);
+    return found;
+  }
+
+  it("marks the clips with an override in a declared format, in their top-right corner", () => {
+    // c_0 ends at 2.5 s: 50 px less the half-pixel gap, the 4 px inset and the mark's 6 px, on the pixel grid.
+    expect(marks(new Set(["9x16"]))).toEqual([40.5]);
+  });
+
+  it("marks nothing without declared formats, nor overrides of formats the project dropped", () => {
+    expect(marks()).toEqual([]);
+    expect(marks(new Set(["1x1"]))).toEqual([]);
+  });
+});
