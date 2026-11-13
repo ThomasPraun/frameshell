@@ -65,7 +65,7 @@ const INSTRUCTIONS =
   "start/end/at/from/to, source seconds for in/out), snapped to the frame grid. Read the timeline (resource " +
   "`frameshell://timelines/main` or `timeline_show`) before editing and use the ids it returns. Every mutating tool " +
   "returns the new `revision` and `operation.tx`; `revert` with that tx id undoes your change, `tx_begin`/`tx_commit` " +
-  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets); measure a reference video with `analyze` (shots, palette, loudness, tempo). `history` with `since` " +
+  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets, and safe-zone sheets with `platform`); measure a reference video with `analyze` (shots, palette, loudness, tempo). `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
   "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +
@@ -323,12 +323,28 @@ async function capture(conn: DaemonConnection, args: Record<string, unknown>): P
 }
 
 /**
- * `review` and `analyze`: the sheets as images (the first {@link REVIEW_MAX_IMAGES}), then the run's facts with each sheet's
+ * Up to {@link REVIEW_MAX_IMAGES} of `sheets`, in their order: the first image of every sheet (the numbered images of one
+ * sheet share a name stem) before the second of any, so a long film's many contact images cannot push out the other sheets.
+ */
+function imagesToSend<T extends { path: string }>(sheets: readonly T[]): T[] {
+  const seen = new Map<string, number>();
+  const ranked = sheets.map((sheet) => {
+    const stem = sheet.path.replace(/-\d+\.png$/, ".png");
+    const n = seen.get(stem) ?? 0;
+    seen.set(stem, n + 1);
+    return { sheet, n };
+  });
+  const chosen = new Set([...ranked].sort((a, b) => a.n - b.n).slice(0, REVIEW_MAX_IMAGES).map(({ sheet }) => sheet));
+  return sheets.filter((sheet) => chosen.has(sheet));
+}
+
+/**
+ * `review` and `analyze`: the sheets as images (at most {@link REVIEW_MAX_IMAGES}, see {@link imagesToSend}), then the run's facts with each sheet's
  * tiles reduced to their labels, which name the frame and why it is there.
  */
 async function withSheets(result: ReviewResult | AnalyzeResult): Promise<CallToolResult> {
   const content: CallToolResult["content"] = [];
-  for (const sheet of result.sheets.slice(0, REVIEW_MAX_IMAGES)) {
+  for (const sheet of imagesToSend<{ path: string }>(result.sheets)) {
     const image = pngForModel(await readFile(sheet.path), REVIEW_MAX_SIDE, REVIEW_MAX_SIDE);
     content.push({ type: "image", data: image.data.toString("base64"), mimeType: "image/png" });
   }

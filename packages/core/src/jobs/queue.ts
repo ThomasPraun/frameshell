@@ -6,6 +6,8 @@ export interface JobUpdate {
   /** Overall fraction, clamped to 0..1. */
   progress?: number;
   cached?: boolean;
+  /** A problem found on the way; appended to the job's `warnings` and reported to watchers. */
+  warning?: string;
 }
 
 /** Handed to a job's `run`. */
@@ -133,6 +135,7 @@ export class JobQueue {
       progress: 0,
       cached: null,
       error: null,
+      warnings: [],
       createdAt: new Date().toISOString(),
       startedAt: null,
       finishedAt: null,
@@ -198,11 +201,12 @@ export class JobQueue {
       signal: entry.abort.signal,
       update: (update) => {
         if (info.state !== "running") return;
-        const before = { step: info.step, progress: info.progress, cached: info.cached };
+        const before = { step: info.step, progress: info.progress, cached: info.cached, warnings: info.warnings.length };
         if (update.step !== undefined) info.step = update.step;
         if (update.progress !== undefined) info.progress = Math.min(1, Math.max(0, update.progress));
         if (update.cached !== undefined) info.cached = update.cached;
-        if (info.step !== before.step || info.cached !== before.cached) this.#report(entry, false);
+        if (update.warning !== undefined) info.warnings = [...info.warnings, update.warning];
+        if (info.step !== before.step || info.cached !== before.cached || info.warnings.length !== before.warnings) this.#report(entry, false);
         else if (info.progress !== before.progress && Date.now() - entry.reportedAt >= this.#progressIntervalMs) {
           this.#report(entry, false);
         }

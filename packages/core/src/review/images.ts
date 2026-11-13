@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ReviewSheet } from "@frameshell/protocol";
 import { pool } from "../export/service.js";
 import { type FramePick, type SheetLayout, frameTime, splitImages, tileHeight, tileLabel } from "./plan.js";
-import { writeSheet } from "./sheet.js";
+import { type ShadeFractions, writeSheet } from "./sheet.js";
 import { type FilmSource, captureParallelism } from "./source.js";
 
 // From picked frames to labelled sheet images. Shared by `review` and #471 `analyze`.
@@ -58,6 +58,10 @@ export interface SheetImagesOptions {
   scratch: string;
   /** Text of a tile; default {@link tileLabel} of the frame's time and tag. */
   label?: (pick: FramePick, at: number) => string;
+  /** Zones shaded on every tile; see `SheetOptions.shade`. */
+  shade?: ShadeFractions | undefined;
+  /** What is wrong with a frame (`subtitle`…): marked `!name` on its tile and listed in the tile's `flags`. */
+  flags?: (pick: FramePick, at: number) => string[];
   signal?: AbortSignal | undefined;
 }
 
@@ -67,7 +71,9 @@ export interface SheetImagesOptions {
  */
 export async function writeSheetImages(options: SheetImagesOptions): Promise<SheetImage[]> {
   const { ffmpeg, fps, aspect, frames, layout, picks, dir, stem, signal } = options;
-  const label = options.label ?? ((pick: FramePick, at: number) => tileLabel(at, pick.tag));
+  const named = options.label ?? ((pick: FramePick, at: number) => tileLabel(at, pick.tag));
+  const flagsOf = (pick: FramePick, at: number) => options.flags?.(pick, at) ?? [];
+  const label = (pick: FramePick, at: number) => [named(pick, at), ...flagsOf(pick, at).map((flag) => `!${flag}`)].join(" ");
   const tile = { width: layout.tileWidth, height: tileHeight(layout.tileWidth, aspect) };
   const parts = splitImages(picks, layout.perImage);
   await frames.ensure(picks.map((pick) => pick.frame), signal);
@@ -78,7 +84,7 @@ export async function writeSheetImages(options: SheetImagesOptions): Promise<She
     const size = await writeSheet(
       ffmpeg,
       labelled.map(({ pick, at }) => ({ path: frames.path(pick.frame), label: label(pick, at) })),
-      { out: path, columns: layout.columns, tile, scratch: join(options.scratch, `sheet-${stem}-${i}`), ...(signal ? { signal } : {}) },
+      { out: path, columns: layout.columns, tile, scratch: join(options.scratch, `sheet-${stem}-${i}`), ...(options.shade ? { shade: options.shade } : {}), ...(signal ? { signal } : {}) },
     );
     images.push({
       path,
@@ -92,6 +98,7 @@ export async function writeSheetImages(options: SheetImagesOptions): Promise<She
         frame: pick.frame,
         tag: pick.tag,
         label: label(pick, at),
+        ...(flagsOf(pick, at).length > 0 ? { flags: flagsOf(pick, at) } : {}),
         row: Math.floor(t / size.columns),
         column: t % size.columns,
       })),

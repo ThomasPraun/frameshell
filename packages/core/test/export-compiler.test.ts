@@ -395,6 +395,99 @@ describe("export compiler", () => {
       expect(layeredPlan.audio.tracks).toHaveLength(1);
       expect(layeredPlan.audio.tracks[0]!.reduce((sum, item) => sum + item.samples, 0)).toBe(240_000);
     });
+
+    describe("backdrop (ADR 0031, #462)", () => {
+      const glass = { blur: 46, saturate: 1.45, dim: 0.55 };
+      const withGlass = (clipId: string, backdrop: object): Timeline => ({
+        ...layered,
+        tracks: layered.tracks.map((track) =>
+          track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (clip.id === clipId ? ({ ...clip, backdrop } as Clip) : clip)) } : track,
+        ),
+      });
+      const glassPlan = compileRender({ ...input, timeline: withGlass("c_title", glass) });
+      const filters = (plan: typeof glassPlan) => Object.values(plan.files).join("\n");
+
+      it("blurs, saturates and dims what is below a generated clip, masked by its alpha, before the clip (golden)", () => {
+        golden("backdrop-plan", {
+          segments: glassPlan.segments,
+          files: glassPlan.files,
+          frame: compileFrame({ ...input, timeline: withGlass("c_title", glass), width: 1280, height: 720, at: 2, output: "/out/frame.png" }),
+        });
+        const graph = filters(glassPlan);
+        expect(graph).toContain("gblur=sigma=46");
+        expect(graph).toContain("lutrgb=a='gt(val,8)*255'");
+        // The mask fades with the card: it takes the clip's opacity too.
+        expect(graph.match(/colorchannelmixer=aa=0\.8/g)).toHaveLength(2);
+        expect(glassPlan.warnings).toEqual([]);
+      });
+
+      it("scales the sigma with the output, and draws nothing on the bottom track, with a warning", () => {
+        const small = compileFrame({ ...input, timeline: withGlass("c_title", glass), width: 960, height: 540, at: 2, output: "/out/frame.png" });
+        expect(small.args.join(" ")).toContain("gblur=sigma=23");
+        const bottom = compileRender({ ...input, timeline: withGlass("c_end", glass) });
+        expect(bottom.files).toEqual(layeredPlan.files);
+        expect(bottom.warnings).toEqual(["Clip c_end is on the bottom picture track: nothing is below it, so its backdrop was not drawn."]);
+      });
+
+      it("leaves the colour step out when it changes nothing, and a zero blur out", () => {
+        const graph = filters(compileRender({ ...input, timeline: withGlass("c_title", { blur: 0 }) }));
+        expect(graph).toContain("[bb0]format=gbrp,format=rgba[bg0]");
+      });
+    });
+  });
+
+  describe("loop (ADR 0039)", () => {
+    const looped = (over: Partial<Parameters<typeof compileRender>[0]> = {}) =>
+      compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4, loop: true, ...over });
+
+    /** The shared timeline with every clip passed through `edit`. */
+    const editClips = (edit: (clip: Record<string, unknown>) => Record<string, unknown>): Timeline =>
+      ({ ...timeline, tracks: timeline.tracks.map((track) => ("clips" in track ? { ...track, clips: track.clips.map((clip) => edit({ ...clip })) } : track)) }) as unknown as Timeline;
+
+    it("fades the first and last 96 samples of the mixed audio with a half sine, nothing else changes (golden)", () => {
+      const plan = looped();
+      expect(plan.loop).toBe(true);
+      expect(plan.warnings).toEqual([]);
+      const { loop: _loop, ...rest } = plan;
+      expect(rest).toEqual(compileRender({ timeline, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4 }));
+      golden("loop-plan", { loop: plan.loop, mux: muxStep(plan, MEASURED, "/out/main.mp4.partial") });
+    });
+
+    it("leaves a plan without loop as it was: no field, no fade", () => {
+      expect(plan).not.toHaveProperty("loop");
+      expect(muxStep(plan, MEASURED, "/out.mp4").args.join(" ")).not.toContain("afade");
+    });
+
+    it("sizes the fades from the sample rate and leaves a silent export alone", () => {
+      const rate44 = looped({ preset: { ...youtube1080, audio: { ...youtube1080.audio, sampleRate: 44_100 } } });
+      const filter = muxStep(rate44, null, "/out.mp4").args.find((arg) => arg.includes("afade"))!;
+      expect(filter).toContain("afade=t=in:curve=hsin:nb_samples=88,afade=t=out:curve=hsin:start_sample=352712:nb_samples=88");
+      const silent: Timeline = { ...timeline, tracks: [timeline.tracks[0]!] };
+      const quiet = new Map([...sources].map(([key, source]) => [key, { ...source, audio: false }]));
+      const silentPlan = looped({ timeline: silent, sources: quiet });
+      expect(muxStep(silentPlan, null, "/out.mp4").args).toContain("anullsrc=r=48000:cl=stereo,atrim=end_sample=384000[a]");
+    });
+
+    it("refuses a cover frame: it replaces frame 0 and breaks the seam", () => {
+      expect(() => looped({ cover: { at: 1, layout: null } })).toThrow(expect.objectContaining({ code: ErrorCode.InvalidOperation, data: expect.objectContaining({ field: "loop" }) }));
+    });
+
+    it("warns when the output frame rate makes the cycle a fraction of a frame, and not when it is whole", () => {
+      const rate = (fps: number) => ({ ...youtube1080, video: { ...youtube1080.video, fps } });
+      // 240 frames at 30 fps are 192 at 24 fps: whole.
+      expect(looped({ preset: rate(24) }).warnings).toEqual([]);
+      const shorter = editClips((clip) => (clip.id === "c_logo" ? { ...clip, out: 1 - 1 / 30 } : clip.id === "c_music" ? { ...clip, out: 8 - 1 / 30 } : clip));
+      const warnings = looped({ timeline: shorter, preset: rate(24) }).warnings;
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/239 frames at 30 fps are 191\.2 frames at 24 fps: the cycle is not whole/);
+    });
+
+    it("warns when the first or the last frame is black, naming the frame", () => {
+      const fadeIn = editClips((clip) => (clip.id === "c_talk1" ? { ...clip, fadeIn: 0.5 } : clip));
+      expect(looped({ timeline: fadeIn }).warnings).toEqual([expect.stringMatching(/^Loop: frame 0 is black \(the first clip fades in from black\), so every pass restarts from black/)]);
+      const fadeOut = editClips((clip) => (clip.id === "c_logo" ? { ...clip, fadeOut: 1 } : clip));
+      expect(looped({ timeline: fadeOut }).warnings).toEqual([expect.stringMatching(/^Loop: the last frame \(239\) is black \(.*fading in or out\), so every pass ends on black/)]);
+    });
   });
 
   it("refuses an empty timeline", () => {

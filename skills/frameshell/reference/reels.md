@@ -35,16 +35,27 @@ Write the answers into the first transaction's label or a `scripts/reel-brief.md
 
 ## Layout rules (1080×1920)
 
-- **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. Check each graphic in a frame, not in its file.
+- **Safe zones:** keep text and graphics out of the top ~220 px, the bottom ~380 px and the right ~140 px (the platform's buttons and caption); `style show` gives each platform's own zone when `style.json` names it. `frameshell review --platform <instagram|tiktok|shorts>` draws the zones over the frames and flags captions that cross them ([critique.md](critique.md)); check each graphic in a frame, not in its file.
 - **Face first:** nothing covers the face or chin, also at the deepest zoom: cards start below the chin at the zoom they appear in.
 - **One idea on screen:** when a graphic says what the caption says, the caption is noise; leave the caption and drop the graphic, or move the graphic to a moment the caption does not cover.
 - **Text:** no caption on screen under 0.4 s; type at least 28 px at 1080 wide; one display face and one text face; one accent colour, on the key word only.
+
+## A word behind the head
+
+A big word between the background and the person, so they stand in front of it. It is the strongest graphic a reel can have and the easiest to get wrong: use it for the hook word or the one idea of the video, 1.5–4 s, two or three times in a reel at most.
+
+1. **Pick the shot.** One person, upper body, not moving across the frame, no held object or mic arm near the body (the matte drops thin parts and flickers on held things). Skip two-person shots: they get one merged matte.
+2. **Build it.** Make the word with the `big-word` template (props in the `hyperframes` skill) on its own video track above the footage, then `frameshell track set <word track> --behind <footage track>`. Run `frameshell matte <asset>` first: it takes about 1.5 minutes per minute of video, once per file, and `render` and `frame` wait for it otherwise (the app's preview shows the word in front until it is ready). The app shows the matte on the word track's header: a percentage while it is made, `!` when it failed (the track menu's "Stop going behind the person" or `--behind none` puts the word back on top).
+3. **Cover.** The head should hide **30–55 %** of the word: under 15 % the word floats beside them, over 65 % they eat it. Measure on frames, not by eye on the file: `frameshell frame --at <s>` at the start, middle and end of the word's time on screen (the person moves). Fix with the template's `place` and `size`, or the clip's `transform`; at 80 % or more covered on any of the three frames, lay it out again.
+4. **Never over the face.** Until the matte is ready the preview shows the word in front of the person, and a miss of the matte does the same at a frame. At every frame you checked, the face must be clear of the word; if one is not, move or shrink the word or drop it.
+5. **Cutaways.** B-roll goes above the word's track or below the footage. A track between them covers the person, and the word then shows in front for as long as it is on screen.
+6. **Keep it honest.** Do not blur or darken the background around the person to hide an edge; the real background stays.
 
 ## Notes from the person
 
 - **A note is a rule for the whole video**, not one moment: "it covers my chin" means check every graphic at its deepest zoom; "the effects are loud" means lower all of them.
 - **Redo only what they name:** "redo 0:04 to 0:07" changes that range and leaves the rest exactly as it was.
-- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake.
+- Notes that apply to future reels (their colours, fonts, "never bounce text") go into `style.json` with `frameshell style set` (`rules`, `banned`, or the value itself) once they agree; `style show` reads it back at the next intake, and `style save <name>` keeps it for their next project.
 
 ## Before you hand it over
 

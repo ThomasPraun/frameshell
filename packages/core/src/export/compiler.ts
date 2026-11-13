@@ -1,6 +1,7 @@
 import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, RpcError } from "@frameshell/protocol";
 import {
   type AdapterClip,
+  type Backdrop,
   type Clip,
   type ClipEdges,
   type ClipTrack,
@@ -18,13 +19,16 @@ import {
   type Timeline,
   type Transcript,
   audioEffectsOf,
+  backdropLayer,
+  backdropMatrix,
+  backdropOf,
   bakeRef,
   type TransitionContext,
   type TransitionShape,
   clipHandles,
-  coverCrop,
   edgeTransitions,
   fixedPlacement,
+  formatCrop,
   hasPictureKeys,
   hostFades,
   isKeyed,
@@ -39,6 +43,7 @@ import {
   shotLayers,
   showsPicture,
   soundSamples,
+  scaledCaptions,
   staticGain,
   subtitleTracks,
   withTrackMutes,
@@ -146,6 +151,11 @@ export interface RenderInput {
    * tier also caps the frame rate (draft: 30) and sets AAC 320k (final). Other codecs ignore it, with a warning.
    */
   encode?: { encoder: EncoderName; tier: "draft" | "final" };
+  /**
+   * Export a file meant to repeat (ADR 0039): MP4 and MOV audio gets a {@link LOOP_FADE_SECONDS} half-sine fade at its
+   * first and last sample, and the warnings name what weakens the seam. Refused with `cover`, which replaces frame 0.
+   */
+  loop?: boolean;
 }
 
 /** One video segment: encoded on its own, joined by the concat demuxer. */
@@ -200,6 +210,8 @@ export interface RenderPlan {
   container: ExportPreset["container"];
   /** Things the timeline holds that this export does not render. */
   warnings: string[];
+  /** True for a loop export: {@link muxStep} fades the audio ends. Absent otherwise, so other plans stay as they were. */
+  loop?: true;
   /** Files to write into the work directory before any step runs. */
   files: Record<string, string>;
   /**
@@ -291,6 +303,8 @@ export interface FramePlan {
 export const DEFAULT_SEGMENT_SECONDS = 10;
 /** Edge fade at every audio cut; same length as the preview's (SPEC §3.4). */
 export const EDGE_FADE_SECONDS = 0.002;
+/** Half-sine audio fade at both ends of a loop export (ADR 0039); the fade at every cut, {@link EDGE_FADE_SECONDS}, is equal-power. */
+export const LOOP_FADE_SECONDS = 0.002;
 /** Decode this much source before a clip's first frame, so the nearest frame is always available. */
 const SEEK_PREROLL_SECONDS = 1;
 /** Extra source seconds read past a sped-up clip's out point; see `audioGraph`. */
@@ -368,6 +382,8 @@ interface Placed {
   matte?: ExportSource;
   /** On a subject layer: the only timeline frames [from, to) it is drawn on (`SubjectMark.windows`), sorted. */
   windows?: [number, number][];
+  /** A generated clip's glass on an upper track (ADR 0031): what is below it is blurred where it shows, then it is drawn. */
+  glass?: Backdrop;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -429,13 +445,22 @@ export function compileRender(input: RenderInput): RenderPlan {
   const target = { fps, width, height, pixFmt: "yuv420p", project: input.resolution };
   const warnings = [...layout.warnings];
   if (input.encode && !tiered) warnings.push(`Quality "${input.encode.tier}" only applies to H.264 presets; ${preset.id} renders as written.`);
+  if (input.loop && input.cover) {
+    throw new RpcError(
+      ErrorCode.InvalidOperation,
+      "A loop cannot have a cover frame: the cover replaces frame 0 and breaks the seam. Render without `cover` (`--cover-frame`), or without `loop`.",
+      { op: "render", field: "loop", reason: "cover replaces frame 0" },
+    );
+  }
+  if (input.loop) warnings.push(...loopWarnings(layout, fps, outFps));
   const requested = input.cover ?? null;
   const choosable = requested !== null && outFps === fps;
   const coverFrame = choosable ? frameAt(input.timeline.id, requested.at, fps, layout.frames) : 0;
   // A cover with no word on frame 0 itself changes nothing.
   const cover = choosable && !(requested.layout === null && coverFrame === 0) ? { frame: coverFrame, layout: requested.layout } : null;
   if (requested && !choosable) warnings.push("The first-frame cover needs the preset's frame rate to equal the project's: frame 0 is left as it is.");
-  const empty = emptyFrame(layout, coverFrame, fps);
+  // A loop refuses a cover, so its black first frame has its own warning.
+  const empty = input.loop ? null : emptyFrame(layout, coverFrame, fps);
   if (empty) {
     const hint = !requested
       ? "Export with a cover frame (`frameshell render --cover-frame`) or start a picture at 0."
@@ -490,6 +515,7 @@ export function compileRender(input: RenderInput): RenderPlan {
     loudness: input.loudness,
     container: preset.container,
     warnings,
+    ...(input.loop ? { loop: true as const } : {}),
     files,
     fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
     segments,
@@ -537,10 +563,11 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
       `:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}` +
       `:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true,`
     : "";
+  const fade = plan.loop && !silent && (plan.container === "mp4" || plan.container === "mov") ? loopFades(rate, samples) : "";
   // loudnorm works at 192 kHz: resample back, then cut to the exact length.
   const audio = silent
     ? `anullsrc=r=${rate}:cl=stereo,atrim=end_sample=${samples}[a]`
-    : `[1:a:0]${normalize}aresample=${rate},atrim=end_sample=${samples}[a]`;
+    : `[1:a:0]${normalize}aresample=${rate},atrim=end_sample=${samples}${fade}[a]`;
   return {
     files: {},
     args: [
@@ -554,6 +581,34 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
       output,
     ],
   };
+}
+
+/** Half-sine (`hsin`) fades over the first and last `S = round(0.002 x rate)` samples: the tail of a loop's audio chain. */
+function loopFades(rate: number, samples: number): string {
+  const length = Math.min(Math.round(LOOP_FADE_SECONDS * rate), Math.floor(samples / 2));
+  if (length < 1) return "";
+  return `,afade=t=in:curve=hsin:nb_samples=${length},afade=t=out:curve=hsin:start_sample=${samples - length}:nb_samples=${length}`;
+}
+
+/**
+ * What weakens a loop's seam, as warnings: an output rate that makes the cycle a fraction of a frame, and a first or
+ * last frame that is black (a fade from or to black, or no picture), so every pass jumps through it.
+ */
+function loopWarnings(layout: Layout, fps: number, outFps: number): string[] {
+  const warnings: string[] = [];
+  const output = (layout.frames * outFps) / fps;
+  if (Math.abs(output - Math.round(output)) > 1e-6) {
+    warnings.push(
+      `Loop: ${layout.frames} frames at ${fps} fps are ${Number(output.toFixed(3))} frames at ${outFps} fps: the cycle is not whole, so the last output frame does not meet frame 0. ` +
+        "Render at the project's frame rate, or change the length so that frames x output fps / fps is a whole number.",
+    );
+  }
+  const first = emptyFrame(layout, 0, fps);
+  if (first) warnings.push(`Loop: frame 0 is ${first}, so every pass restarts from black. Start the picture at 0 without a fade in.`);
+  const last = layout.frames - 1;
+  const closing = last > 0 ? emptyFrame(layout, last, fps) : null;
+  if (closing) warnings.push(`Loop: the last frame (${last}) is ${closing}, so every pass ends on black. Remove the fade out.`);
+  return warnings;
 }
 
 /**
@@ -695,7 +750,7 @@ function layoutTimeline(
   const pictureless = new Set<string>();
   let frames = 0;
   /** Clips of one video or audio track on the frame grid, sorted; the later of two overlapping clips wins. */
-  const placeTrack = (track: ClipTrack): Placed[] => {
+  const placeTrack = (track: ClipTrack, base = false): Placed[] => {
     const placed: Placed[] = [];
     const context = exportTransitionContext(fps, sources);
     const transitions = trackTransitions(track, context);
@@ -718,6 +773,7 @@ function layoutTimeline(
         );
       }
       const render = clip.asset.startsWith(GENERATED) ? generated.get(clip.id) : undefined;
+      const backdrop = render ? backdropOf(listed) : null;
       const source = render ? generatedSource(render) : sources.get(clip.asset);
       if (!source) throw new Error(`no export source for ${clip.asset}`);
       const subject = track.kind === "video" ? subjectOf(listed) : null;
@@ -755,9 +811,8 @@ function layoutTimeline(
         warnings.push(`Clip ${clip.id} has audio effects that are not baked; its sound was exported without them.`);
       }
       const placement = fixedPlacement(clip);
-      // Renders are made at the format's size; only footage is cut to it.
-      const picture = source.video;
-      const covers = variant?.cover === true && !render && picture !== null && isIdentityPlacement(placement) && !hasPictureKeys(clip);
+      const picture = track.kind === "video" ? source.video : null;
+      const cover = formatCrop(variant, clip, { size: picture, generated: render !== undefined, alpha: picture?.alpha === true, base }, output);
       placed.push({
         clip,
         source,
@@ -769,8 +824,9 @@ function layoutTimeline(
         ...exact,
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
+        ...(backdrop ? { glass: backdrop } : {}),
         ...(sound !== undefined ? { sound } : {}),
-        ...(covers ? { cover: formatCover(picture, output) } : {}),
+        ...(cover ? { cover } : {}),
         ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
       });
       frames = Math.max(frames, end);
@@ -817,17 +873,15 @@ function layoutTimeline(
       for (const sound of programSound(track, group)) audio.push(audible(placeTrack(sound).map((placed) => ({ ...placed, exact: true as const }))));
       continue;
     }
-    const placed = placeTrack(track);
+    // The first picture layer is the base when it is a video track; a program track first leaves the base black.
+    const placed = placeTrack(track, showsPicture(track) && pictures.length === 0);
     if (showsPicture(track)) pictures.push({ program: false, placed });
     audio.push(audible(placed));
   }
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const captionScale = variant?.captionScale ?? 1;
-  const subtitles = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps).map((track) =>
-    captionScale === 1 ? track : { ...track, style: { ...track.style, size: track.style.size * captionScale } },
-  );
+  const subtitles = scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), variant);
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);
@@ -840,9 +894,14 @@ function layoutTimeline(
       );
     }
   }
-  // The first picture layer is the base when it is a video track; a program track first leaves the base black.
   const baseLayer = pictures[0]?.program === false ? pictures[0].placed : [];
   for (const placed of baseLayer) placed.bottom = true;
+  // Nothing is below the base track to blur (ADR 0031).
+  for (const placed of baseLayer) {
+    if (!placed.glass) continue;
+    delete placed.glass;
+    warnings.push(`Clip ${placed.clip.id} is on the bottom picture track: nothing is below it, so its backdrop was not drawn.`);
+  }
   // Shapes play on the base track only (ADR 0030); elsewhere a shaped dissolve mixes.
   for (const placed of baseLayer) {
     const { shape } = placed.clip;
@@ -864,8 +923,6 @@ function layoutTimeline(
       placed.bottom = true;
     }
   }
-  // ADR 0027 decision 13: titles and overlays with alpha are fitted whole, never cropped, until per-format overrides exist.
-  for (const placed of upper.flat()) if (placed.source.video?.alpha) delete placed.cover;
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   /** {@link whole} cut where its wipes end and start (a subject's outgoing one too): a wipe's mask costs per pixel, only the frames it plays over get it. */
@@ -1131,19 +1188,21 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const shape = placed.tile ? null : pieceShape(placed, start, end, rect, from, out);
     // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
     const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
-    const chain = [
+    const head = [
       placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
-      ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, `o${n}`)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
+    ];
+    /** What multiplies the piece's alpha after its picture: opacity (`name` = its keyed mixer), fades, a wipe, then its timing back. */
+    const tail = (name: string) => [
+      ...(opacityKeys ? [keyedOpacity(placed.clip, start, end, fps, name)] : opacity < 1 ? [`colorchannelmixer=aa=${num(opacity)}`] : []),
       ...fades,
       ...(shape?.mask ? [shape.mask] : []),
       ...(timed ? ["setpts=PTS-STARTPTS"] : []),
       ...(start > from ? [`tpad=start=${start - from}:color=black@0`] : []),
     ];
-    lines.push(`${chain.join(",")}[o${n}]`);
     const left = placed.tile?.backdrop ? 0 : rect.left;
     const top = placed.tile?.backdrop ? 0 : rect.top;
     const moved = motion?.x !== undefined || shape?.x !== undefined || shape?.y !== undefined;
@@ -1151,12 +1210,68 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const position = moved
       ? `x='${axis(motion?.x ?? String(left), shape?.x)}':y='${axis(motion?.y ?? String(top), shape?.y)}':eval=frame`
       : `x=${left}:y=${top}`;
+    if (placed.glass) {
+      lines.push(`${head.join(",")},split[c${n}][cm${n}]`, `[c${n}]${tail(`o${n}`).join(",") || "null"}[o${n}]`);
+      below = backdropUnder(below, placed.glass, n, position, tail(`om${n}`), [start - from, end - from], to - from, out, lines);
+    } else {
+      lines.push(`${[...head, ...tail(`o${n}`)].join(",")}[o${n}]`);
+    }
     const overlay = `[${below}][o${n}]overlay=${position}:eof_action=pass:format=auto`;
     below = `b${n}`;
     lines.push(n === pieces.length - 1 ? `${overlay},format=${pixFmt}` : `${overlay}[${below}]`);
   });
   return { inputs, lines };
 }
+
+/**
+ * The backdrop of overlay piece `n` (ADR 0031) laid on `below`; returns the new label below the piece. The mask is the
+ * piece's own alpha cut at its layer's `threshold` (stream `[cm<n>]`, split off before opacity), then faded,
+ * wiped and placed like the piece itself, so glass fades with its card. What is below is blurred (`gblur`), put
+ * through {@link backdropMatrix} (saturate, then the scrim) and drawn back over itself through that mask. Blur and
+ * matrix run only on the segment frames [`on[0]`, `on[1]`) the piece covers: elsewhere the mask is empty.
+ */
+function backdropUnder(
+  below: string,
+  backdrop: Backdrop,
+  n: number,
+  position: string,
+  maskTail: readonly string[],
+  on: [number, number],
+  frames: number,
+  out: GraphTarget,
+  lines: string[],
+): string {
+  const { width, height } = out;
+  const layer = backdropLayer(backdrop, out, out.project);
+  const matrix = backdropMatrix(layer);
+  const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  const enable = on[0] > 0 || on[1] < frames ? `:enable='between(n,${on[0]},${on[1] - 1})'` : "";
+  const mixer = matrix.every((value, i) => value === identity[i])
+    ? []
+    : [`colorchannelmixer=${MIXER_COEFFICIENTS.map((name, i) => `${name}=${num(matrix[i]!)}`).join(":")}${enable}`];
+  const look = ["format=gbrp", ...(layer.sigma > 0 ? [`${backdropBlur(layer.sigma)}${enable}`] : []), ...mixer, "format=rgba"];
+  lines.push(
+    `[cm${n}]${[`lutrgb=a='gt(val,${layer.threshold})*255'`, ...maskTail].join(",")}[om${n}]`,
+    `color=c=black@0:s=${width}x${height}:r=${fpsRational(out.fps)},format=rgba,trim=end_frame=${frames}[cv${n}]`,
+    `[cv${n}][om${n}]overlay=${position}:eof_action=pass:format=rgb,alphaextract[bm${n}]`,
+    `[${below}]split[bk${n}][bb${n}]`,
+    `[bb${n}]${look.join(",")}[bg${n}]`,
+    `[bg${n}][bm${n}]alphamerge[ba${n}]`,
+    `[bk${n}][ba${n}]overlay=0:0:format=auto[k${n}]`,
+  );
+  return `k${n}`;
+}
+
+/**
+ * The `gblur` of a backdrop at Gaussian `sigma` (output pixels). Default `steps=1` peaks 1.77x a Gaussian; 3 passes
+ * give 1.15x, near the canvas `blur()` of the preview (shape test in export-render), at ~8 ms per pass per 1080p frame.
+ */
+export function backdropBlur(sigma: number): string {
+  return `gblur=sigma=${num(sigma)}:steps=3`;
+}
+
+/** `colorchannelmixer` options of a row-major 3 x 3 RGB matrix, in order. */
+const MIXER_COEFFICIENTS = ["rr", "rg", "rb", "gr", "gg", "gb", "br", "bg", "bb"] as const;
 
 /**
  * {@link pieceChain} of a subject piece with `matte` as its alpha (ADR 0032): the matte read on the same frames (it
@@ -1296,18 +1411,6 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
   side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
   if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
   return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
-}
-
-/**
- * {@link coverCrop} of a whole `source` picture filling `output` (ADR 0027 cover), with even edges and size: what
- * ffmpeg's `crop` keeps of a 4:2:0 picture without `exact`, so the plan states the pixels actually cut.
- */
-function formatCover(source: Size, output: Size): LayerRect {
-  const even = (value: number) => value - (value % 2);
-  const crop = coverCrop({ left: 0, top: 0, width: source.width, height: source.height }, output);
-  const width = Math.max(2, even(crop.width));
-  const height = Math.max(2, even(crop.height));
-  return { left: even(Math.max(0, Math.floor((source.width - width) / 2))), top: even(Math.max(0, Math.floor((source.height - height) / 2))), width, height };
 }
 
 /**

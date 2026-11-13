@@ -20,6 +20,7 @@ import {
   type FormatSource,
   type MulticamGroup,
   type ResolvedFormat,
+  type ResolvedSubtitleTrack,
   type Size,
   type Timeline,
   type Transcript,
@@ -27,6 +28,7 @@ import {
   programGroup,
   resolveFormat,
   sameAspect,
+  scaledCaptions,
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
@@ -62,6 +64,7 @@ import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
+import { loopSeamWarning } from "./seam.js";
 
 /** Options for {@link executeRender}. */
 export interface ExecuteRenderOptions {
@@ -152,6 +155,8 @@ export interface RenderRequest {
   stem?: string | undefined;
   cover?: CoverChoice | undefined;
   formats?: readonly string[] | undefined;
+  /** A file meant to repeat (ADR 0039); refused with `cover`. */
+  loop?: boolean | undefined;
 }
 
 /** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
@@ -296,6 +301,7 @@ export class ExportService {
       timeline,
       fps,
       ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
+      ...(params.loop ? { loop: true } : {}),
       resolution,
       loudness: loudnessTarget(preset, config?.export?.loudness),
       sources,
@@ -386,14 +392,23 @@ export class ExportService {
                 mattes = await makeMattes((fraction) => ctx.update({ progress: fraction }), ctx.signal);
               }
               if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
+              const ffmpeg = await this.#options.ffmpeg(root);
+              const cache = join(root, ".frameshell", "cache", "render");
               await executeRender(final, {
-                ffmpeg: await this.#options.ffmpeg(root),
-                workDir: join(root, ".frameshell", "cache", "render", randomBytes(6).toString("hex")),
+                ffmpeg,
+                workDir: join(cache, randomBytes(6).toString("hex")),
                 output,
                 signal: ctx.signal,
                 onProgress: (update: JobUpdate) => ctx.update(update),
                 ...(this.#options.parallelism !== undefined ? { parallelism: this.#options.parallelism } : {}),
               });
+              if (params.loop) {
+                // A diagnostic: a check that cannot run must not fail a render that succeeded.
+                const warning = await loopSeamWarning(ffmpeg, output, final.frames, final, join(cache, `seam-${randomBytes(6).toString("hex")}`), ctx.signal).catch(
+                  (error: unknown) => (ctx.signal.aborted ? null : `Loop: the seam check could not run: ${(error as Error).message}`),
+                );
+                if (warning) ctx.update({ warning });
+              }
             },
           });
           return { format: format.id, job, output, preset: preset.id, width: plan.width, height: plan.height, segments: plan.segments.length, warnings };
@@ -424,14 +439,20 @@ export class ExportService {
   }
 
   /**
-   * Timeline seconds where the subtitle cues of `loaded` start, over every subtitle track (what `review` marks on
-   * its contact sheet); `loaded`: see {@link ExportService.frame}.
+   * Every subtitle track of `loaded` with its style and cues (frames at the track's `fps`), as export burns them
+   * (what `review` marks and measures on its sheets), at the size of project format `projectFormat` (the primary
+   * when absent; an unknown one counts as the primary, `frame` refuses it); `loaded`: see {@link ExportService.frame}.
    */
-  async subtitleCueStarts(root: string, loaded: { timeline: Timeline; fps: number }): Promise<number[]> {
+  async resolvedSubtitles(
+    root: string,
+    loaded: { timeline: Timeline; fps: number },
+    projectFormat?: string,
+  ): Promise<ResolvedSubtitleTrack[]> {
     const { timeline, fps } = await this.#resolved(root, loaded.timeline.id, loaded);
     const transcripts = await this.#transcripts(root, timeline);
-    const tracks = subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps);
-    return tracks.flatMap((track) => track.cues.map((cue) => cue.start / fps));
+    const config = (await readEnclosingProject(root))?.config;
+    const layout = resolveFormat(timeline, config ?? { resolution: DEFAULT_RESOLUTION }, projectFormat)?.format;
+    return scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), layout);
   }
 
   /**
