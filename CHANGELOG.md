@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voice section in the clip inspector, app slice of #464 (ADR 0031, epic #451; no wire change): a media clip shows its
+  voice chain. The Voice switch writes the style's voice chain (high-pass, denoise, compressor) or bypasses it, and
+  switching on again brings the bypassed chain back (kept in that window only; the saved clip has no bypass flag).
+  Each effect is a row in processing order with its numbers (cutoff; floor and reduction; threshold, ratio, attack,
+  release, makeup), a move-earlier and a remove button; a menu adds a missing effect and Voice preset puts the style's
+  chain back. Every change is one undoable `clip.set` `audioEffects` by `ui`. Strings in English and Spanish.
 - Batch variants from data rows, slices 1 and 2 of #477 (ADR 0040, epic #451; daemon `batch.render`, MCP
   `batch_render`, JSON Schema `batch.json`, protocol 106): `frameshell batch <file.batch.json> [--out dir] [--formats
   id,id] [--dry-run]` renders one template timeline (default `main`) once per row. `slots` name what a row sets:
