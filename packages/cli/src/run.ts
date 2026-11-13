@@ -179,7 +179,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -364,6 +364,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           which: { type: "string" },
           typing: { type: "boolean", default: false },
           rate: { type: "string" },
+          bars: { type: "string" },
+          sections: { type: "string" },
+          chords: { type: "string" },
+          accents: { type: "string" },
+          "no-place": { type: "boolean", default: false },
           "reset-edits": { type: "boolean", default: false },
           // A switch on `clip set` (voice chain), a voice id on `voiceover generate`.
           voice: { type: firstWord === "voiceover" ? "string" : "boolean" },
@@ -539,6 +544,12 @@ function parseBuiltin(
     which?: string | undefined;
     typing?: boolean | undefined;
     rate?: string | undefined;
+    bars?: string | undefined;
+    sections?: string | undefined;
+    chords?: string | undefined;
+    accents?: string | undefined;
+    meter?: string | undefined;
+    "no-place"?: boolean | undefined;
     from?: string | undefined;
     to?: string | undefined;
     offset?: string | undefined;
@@ -906,6 +917,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       });
     case "sound.sfx":
     case "sound.place":
+    case "sound.music":
       return executeSound(conn, inv, cwd, flags.json);
     case "beats.measure":
     case "beats.show":
@@ -951,11 +963,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "timeline": {
       // Adapter clips need the project's plugins loaded, which may need a trust decision.
       const { type, props } = inv.params;
-      if (props !== undefined || (typeof type === "string" && type !== "media" && type !== "timeline")) {
+      if (props !== undefined || inv.method === "clip.verify" || (typeof type === "string" && type !== "media" && type !== "timeline")) {
         await settleTrust(conn, flags, io);
       }
       const long = (inv.method === "multicam.faces" || inv.method === "clip.reframe") && !flags.json;
-      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined);
+      return executeTimeline(conn, inv, cwd, flags.json, long ? progressPrinter(io) : undefined, outcome);
     }
     case "render": {
       // Plugin presets load only for trusted projects.

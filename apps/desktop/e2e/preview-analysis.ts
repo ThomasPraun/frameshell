@@ -13,8 +13,13 @@ export interface RunLog {
   fps: number;
   sampleRate: number;
   segments: Segment[];
-  /** Per display frame (page rAF): [performance ms, source frame shown or -1]. */
+  /** Per display frame (page rAF): [performance ms, source frame shown or -1]. Cut timings come from it. */
   probes: [number, number][];
+  /**
+   * Program frames the engine drew, in order (`drawnFrames`). Interior drops count from it, not from `probes`: the
+   * worker draws without the page's main thread, so a late page rAF misses frames that did reach the screen (#573).
+   */
+  drawn: number[];
   /** Program sample `sample` played at context frame `frame`. */
   anchor: { frame: number; sample: number };
   /** Context frame of `audio[0]`; audio is the graph output as the recorder heard it (mono). */
@@ -158,17 +163,13 @@ function analyzeVideo(run: RunLog) {
   }
   let interiorDrops = 0;
   let interiorFrames = 0;
-  run.segments.forEach((s, k) => {
-    const a = firstIdx.get(k);
-    const b = lastIdx.get(k);
-    if (a === undefined || b === undefined) return;
-    const shown = new Set<number>();
-    for (let i = a; i <= b; i++) if (d[i]!.seg === k) shown.add(d[i]!.f);
+  const drawn = new Set(run.drawn);
+  for (const s of run.segments) {
     for (let f = s.inF + 1; f < s.outF - 1; f++) {
       interiorFrames++;
-      if (!shown.has(f)) interiorDrops++;
+      if (!drawn.has(s.pF + f - s.inF)) interiorDrops++;
     }
-  });
+  }
   const rafDt: number[] = [];
   for (let i = 1; i < probes.length; i++) rafDt.push(probes[i]![0] - probes[i - 1]![0]);
   const first = firstIdx.get(0);

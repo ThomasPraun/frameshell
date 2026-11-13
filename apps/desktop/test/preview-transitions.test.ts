@@ -1,5 +1,5 @@
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
-import type { Clip } from "@frameshell/schema";
+import type { Clip, TransitionShape } from "@frameshell/schema";
 import { composePlacement, dissolveProgress, fadeWeight, gainAt, placementAt, soundCurve } from "@frameshell/schema/composite";
 import { shapeAt } from "@frameshell/schema/transitions";
 import { describe, expect, it } from "vitest";
@@ -198,6 +198,18 @@ describe("compileProgram with transitions", () => {
       top: 0,
       clip: { left: 0, top: y0 * 360, width: 640, height: (1 - y0) * 360 },
     });
+  });
+
+  it("cuts the incoming picture of an iris to shapeAt's circle around its origin, in output pixels", () => {
+    const shape: TransitionShape = { kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] };
+    const program = compileProgram(view([video("v1", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })])]), A);
+    const incoming = spanShape(programAt(program, 54, 1) as PlacedSpan, 54, 30)!;
+    expect(incoming).toEqual(shapeAt(shape, dissolveProgress(2, 0.5, 54 / 30)).incoming);
+    expect(spanShape(programAt(program, 54, 0) as PlacedSpan, 54, 30)).toEqual({ dx: 0, dy: 0, clip: null });
+    const { circle } = shapedRect(incoming, { left: 0, top: 0, width: 1920, height: 1080 }, { width: 640, height: 360 });
+    // Centre (0.7, 0.3) of the frame; at r 1 the circle reaches the farthest corner, (0, 360).
+    expect(circle).toEqual({ x: expect.closeTo(448, 9), y: expect.closeTo(108, 9), radius: expect.closeTo(incoming.circle!.r * Math.hypot(448, 252), 9), outside: false });
+    expect(spanShape(programAt(program, 75, 0) as PlacedSpan, 75, 30)).toBeNull();
   });
 
   it("plays a shaped dissolve with no handle at full length, the edge frames held, never a dip", () => {

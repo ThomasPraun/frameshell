@@ -1,6 +1,9 @@
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
+import { type Timeline, createTimeline } from "@frameshell/schema";
 import { type FitRequest, planFit } from "../src/music/fit.js";
+import { planMusicFit } from "../src/music/run.js";
+import { tempoGrid } from "../src/timeline/tempo.js";
 
 // `planFit`: the arithmetic of music.fit at 30 fps. A 40 s track whose final hit is at 30 s of the file.
 const clip = { start: 0, in: 0, out: 40, speed: 1 };
@@ -149,5 +152,40 @@ describe("planFit, exact", () => {
     const plan = fit({ exact: true, end: 30 });
     expect(plan.operations).toEqual([]);
     expect(plan.speedChangePercent).toBeNull();
+  });
+});
+
+describe("planMusicFit, grid references in end and from", () => {
+  // 120 BPM nominal grid on the timeline clock: beat N at (N-1)/2 s, bar N at 2(N-1) s.
+  const timeline: Timeline = {
+    ...createTimeline("main"),
+    tempo: { bpm: 120 },
+    tracks: [{ id: "t_a", kind: "audio", clips: [{ id: "c_music", type: "media", asset: "assets/music.wav", start: 0, in: 0, out: 40 }] }],
+  };
+  const depsFor = (on: Timeline) => ({
+    profile: async () => {
+      throw new Error("the hit is given");
+    },
+    onsets: async () => null,
+    loadGrid: (horizon: number) => tempoGrid({ fps: 30, timeline: on, horizon, beatsOf: async () => null }),
+  });
+  const plan = (end: string, from?: string) => planMusicFit(timeline, 30, { clip: "c_music", end, from, hit: 30, exact: false }, depsFor(timeline));
+
+  it("lands the hit on bar:N and beat:N", async () => {
+    expect((await plan("bar:16")).landsAt).toBe(30);
+    expect((await plan("beat:73")).landsAt).toBe(36);
+  });
+
+  it("reads from through the grid too", async () => {
+    // bar:2 is 2 s: the music may not start before it, so the first 2 s of the track are dropped.
+    const fitted = await plan("bar:16", "bar:2");
+    expect(fitted.after.start).toBe(2);
+    expect(fitted.introCut).toBe(2);
+  });
+
+  it("refuses a grid reference with no tempo, naming the argument", async () => {
+    const { tempo: _tempo, ...bare } = timeline;
+    const error = await planMusicFit(bare as Timeline, 30, { clip: "c_music", end: "bar:2", hit: 30, exact: false }, depsFor(bare as Timeline)).catch((thrown: unknown) => thrown);
+    expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, message: expect.stringContaining("music.fit: end:") });
   });
 });

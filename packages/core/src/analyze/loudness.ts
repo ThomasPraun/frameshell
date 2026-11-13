@@ -37,11 +37,17 @@ export function parseLoudness(text: string): LoudnessReading | null {
   };
 }
 
-/** Measure the first audio stream of absolute `path`; null when ffmpeg reports nothing (no audio). Rejects with ffmpeg's error. */
-export async function measureLoudness(ffmpeg: string, path: string, signal?: AbortSignal): Promise<LoudnessReading | null> {
+/** Audio filters that keep the 200 Hz to 6 kHz band, what a phone speaker plays: `measureLoudness`'s `before`. */
+export const PHONE_BAND_FILTER = "highpass=f=200,lowpass=f=6000";
+
+/**
+ * Measure the first audio stream of absolute `path`, after the audio filters `before` when given; null when ffmpeg
+ * reports nothing (no audio). Rejects with ffmpeg's error.
+ */
+export async function measureLoudness(ffmpeg: string, path: string, signal?: AbortSignal, before?: string): Promise<LoudnessReading | null> {
   const text = await runTool(
     ffmpeg,
-    ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", path, "-map", "0:a:0", "-vn", "-af", "ebur128=peak=true:metadata=1,ametadata=mode=print:file=-", "-f", "null", "-"],
+    ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", path, "-map", "0:a:0", "-vn", "-af", `${before ? `${before},` : ""}ebur128=peak=true:metadata=1,ametadata=mode=print:file=-`, "-f", "null", "-"],
     signal ? { signal } : {},
   );
   return parseLoudness(text);

@@ -862,6 +862,18 @@ describe("export compiler", () => {
       expect(graphs).not.toContain("eval=frame");
     });
 
+    it("irises: a geq circle on the incoming head only, centred on the origin, the outgoing clip concatenated under it (golden)", () => {
+      const plan = planOf(shaped({ kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] }, { kind: "iris" }));
+      golden("shaped-iris-plan", { segments: plan.segments, files: plan.files, audio: plan.audio });
+      const graphs = Object.values(plan.files).join("\n");
+      expect(graphs.match(/geq=/g)).toHaveLength(3);
+      // Centres in output pixels: (0.7, 0.3) of the frame, then the frame's centre.
+      expect(graphs).toContain("hypot(X+0+0.5-1344,Y+0+0.5-324)");
+      expect(graphs).toContain("hypot(X+0+0.5-960,Y+0+0.5-540)");
+      expect(graphs).not.toContain("alpha=1");
+      expect(graphs).not.toContain("eval=frame");
+    });
+
     it("plays a shaped clip on an upper track as a plain dissolve", () => {
       const timeline = shaped({ kind: "push" }, { kind: "wipe" });
       const lifted: Timeline = { ...timeline, tracks: [{ id: "v0", kind: "video", clips: [{ id: "c_bg", type: "media", asset: "assets/logo.png", start: 0, in: 0, out: 9 }] }, ...timeline.tracks] };
