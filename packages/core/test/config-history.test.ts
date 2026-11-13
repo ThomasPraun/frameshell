@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type AppDirs, type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
@@ -94,13 +94,28 @@ describe("format changes in history", () => {
     expect(await formatIds()).toEqual(["16x9"]);
   });
 
-  it("refuses a revert across a hand edit of formats in frameshell.json", async () => {
-    const { dir, agent } = await setup();
+  it("journals a hand edit of formats before a revert, so the revert goes through whatever the watcher's timing", async () => {
+    const { dir, agent, formatIds } = await setup();
     const added = await agent.request("format.add", { cwd: dir, id: "9x16" });
     const file = join(dir, "frameshell.json");
     const config = JSON.parse(readFileSync(file, "utf8")) as { formats: unknown[] };
     config.formats.push({ id: "1x1", width: 1080, height: 1080 });
     writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+    await agent.request("revert", { cwd: dir, timeline: "main", target: added.op });
+    expect(await formatIds()).toEqual(["16x9", "1x1"]);
+    const history = await agent.request("history", { cwd: dir, timeline: "main" });
+    expect(history.transactions.flatMap((tx) => tx.operations.map((op) => op.op))).toContain("file.edit");
+  });
+
+  it("refuses a revert across a hand edit it cannot journal (no head snapshot to diff against)", async () => {
+    const { dir, agent } = await setup();
+    const added = await agent.request("format.add", { cwd: dir, id: "9x16" });
+    const file = join(dir, "frameshell.json");
+    const config = JSON.parse(readFileSync(file, "utf8")) as { formats: unknown[] };
+    config.formats.push({ id: "1x1", width: 1080, height: 1080 });
+    // Back to back and synchronous: the watcher cannot report the edit between the two.
+    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+    rmSync(join(dir, ".frameshell", "history", "project.config.project.head.json"), { force: true });
     await expect(agent.request("revert", { cwd: dir, timeline: "main", target: added.op })).rejects.toMatchObject({
       code: ErrorCode.RevertConflict,
       message: expect.stringContaining("changed outside the journal"),
@@ -188,11 +203,12 @@ describe("format changes in history", () => {
     await session.request("format.add", { cwd: dir, id: "1x1" });
     await session.request("track.add", { cwd: dir, timeline: "intro", kind: "video", name: "V2" });
     await session.request("tx.commit", {});
+    // Started one at a time: a promise created early rejects unobserved while the first is awaited.
     for (const call of [
-      session.request("revert", { cwd: dir, timeline: "main", target: elsewhere.tx }),
-      session.request("history.diff", { cwd: dir, timeline: "main", target: elsewhere.tx }),
+      () => session.request("revert", { cwd: dir, timeline: "main", target: elsewhere.tx }),
+      () => session.request("history.diff", { cwd: dir, timeline: "main", target: elsewhere.tx }),
     ]) {
-      await expect(call).rejects.toMatchObject({
+      await expect(call()).rejects.toMatchObject({
         code: ErrorCode.HistoryNotFound,
         message: expect.stringContaining("--timeline intro"),
         data: { target: elsewhere.tx, timeline: "main", timelines: ["intro"] },
