@@ -1526,12 +1526,12 @@ function registerIpc(): void {
       try {
         // The misread check stays with the agent for now: it may download a transcription model, which the person has not agreed to here.
         const result = await runVoiceover(
-          (yes) => daemon.request("voiceover.generate", { cwd: project.dir, script: path, yes, verify: false }),
+          (confirmed) => daemon.request("voiceover.generate", { cwd: project.dir, script: path, yes: confirmed !== null, ...(confirmed ? { confirmation: confirmed.confirmation } : {}), verify: false }),
           async (ask) => {
             const { response } = await box({
               type: "warning",
               message: said.voiceoverCostTitle(ask.provider, ask.lines),
-              detail: ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost),
+              detail: `${ask.changed ? `${said.voiceoverCostChanged}\n\n` : ""}${ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost)}`,
               buttons: [said.voiceoverGenerate, said.cancel],
               defaultId: 1,
               cancelId: 1,

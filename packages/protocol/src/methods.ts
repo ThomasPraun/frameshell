@@ -2313,12 +2313,15 @@ export const methods = {
       "trusted, has no transcription plugin or the transcription fails; the takes stay as they are. Nothing is placed " +
       "on a timeline. A paid provider (its cost estimate is above 0, or it gives no estimate and does not declare itself " +
       "free) generates nothing without `yes: true` and fails with ConfirmationRequired, whose data carries the cost " +
-      "(`null` when unknown): show it to the person and pass `yes` only after they confirm it, never on your own. The " +
+      "(`null` when unknown) and a `confirmation` token of what was priced (provider, voice, the lines to say and the cost): show it to the person and pass `yes` only after they confirm it, never on your own. " +
+      "A client that showed the person the cost passes the token back as `confirmation`: when the lines or the cost changed since " +
+      "(the script was edited, a take appeared, the provider's price moved) a paid run fails with ConfirmationStale, " +
+      "carrying the current ask, and generates nothing; ask the person again. The " +
       "provider `command` is the TTS program the person set up on this machine (global `config.json` only); it is free. A second charge is prevented by the takes marked on disk and one run at a time per " +
       "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
       "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
       "SpeechProviderNotFound (data lists the providers there are; `command` is missing until set up on the machine), ProjectNotTrusted (a plugin provider in an untrusted " +
-      "project), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
+      "project), ConfirmationStale (`confirmation` no longer matches the run), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
       "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +
       "SpeechFailed (the provider failed; takes finished before it are kept, imported and reused by the next call).",
     params: z.strictObject({
@@ -2346,6 +2349,14 @@ export const methods = {
         .boolean()
         .default(false)
         .describe("The person confirmed the cost of a paid provider. Never set it without their explicit confirmation."),
+      confirmation: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "The `confirmation` token of the ConfirmationRequired the person saw. A paid run whose lines or cost no longer match it " +
+            "fails with ConfirmationStale instead of charging more than was confirmed. Without it `yes` confirms whatever the run costs.",
+        ),
       verify: z
         .boolean()
         .default(true)
@@ -5175,10 +5186,15 @@ export const ErrorCode = {
   /** data: `{ provider, line, details, written: string[] }`: the provider failed on line `line`; `written` lists the takes kept. */
   SpeechFailed: -32047,
   /**
-   * data: `{ provider, voice, lines: string[], cost: { amount, currency }, characters }`: a paid generation waits for the
-   * person to confirm its cost; call again with `yes` (CLI `--yes`) only once they did.
+   * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`: a paid generation
+   * waits for the person to confirm its cost; call again with `yes` (CLI `--yes`) and the `confirmation` token only once they did.
    */
   ConfirmationRequired: -32048,
+  /**
+   * data: same as `ConfirmationRequired` (the current ask, with its new `confirmation`) plus `hint`: the call carried the
+   * `confirmation` of an earlier ask, but the lines to say or their cost changed since, so nothing was generated.
+   */
+  ConfirmationStale: -32049,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

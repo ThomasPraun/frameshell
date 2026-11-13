@@ -51,6 +51,8 @@ afterEach(async () => {
 
 const generate = (params: Record<string, unknown> = {}, options = {}) =>
   conn.request("voiceover.generate", { cwd: root, script: "scripts/launch-vo.md", ...params }, options);
+/** The `data` of the refusal of a call (its error is typed as the result of a call that succeeds). */
+const refusal = (call: Promise<unknown>) => call.then(() => Promise.reject(new Error("expected a refusal")), (error: { data: { confirmation: string } }) => error.data);
 const take = (id: string) => join(root, "assets", "voiceover", "launch-vo", `${id}.wav`);
 
 describe("voiceover.generate", () => {
@@ -187,6 +189,34 @@ describe("voiceover.generate with a paid plugin provider", () => {
     expect(calls()).toHaveLength(2);
     // Cached takes cost nothing: no confirmation needed.
     expect((await generate()).cost).toBeNull();
+  });
+
+  it("charges only what the confirmation token stands for", async () => {
+    await conn.request("project.trust", { cwd: root, decision: "trust" });
+    const asked = await refusal(generate());
+    expect(asked.confirmation).toMatch(/^[0-9a-f]{32}$/);
+    // A longer script after the person saw the cost: the old token no longer stands for the run.
+    writeFileSync(join(root, "scripts", "launch-vo.md"), script([...LINES, "## End", "One more line."], ["provider: paid-tone"]));
+    const stale = await generate({ yes: true, confirmation: asked.confirmation }).then(() => null, (error: unknown) => error);
+    expect(stale).toMatchObject({
+      code: ErrorCode.ConfirmationStale,
+      data: { lines: ["hook-1", "fix-1", "end-1"], cost: { currency: "USD" }, confirmation: expect.stringMatching(/^[0-9a-f]{32}$/) },
+    });
+    expect(calls()).toEqual([]);
+    expect(existsSync(join(root, "assets", "voiceover"))).toBe(false);
+
+    const again = (stale as { data: { confirmation: string } }).data.confirmation;
+    expect(again).not.toBe(asked.confirmation);
+    const result = await generate({ yes: true, confirmation: again });
+    expect(result.lines.map((line) => line.state)).toEqual(["generated", "generated", "generated"]);
+    expect(calls()).toHaveLength(3);
+  });
+
+  it("accepts the token of an unchanged run, and `yes` alone still confirms any cost", async () => {
+    await conn.request("project.trust", { cwd: root, decision: "trust" });
+    const asked = await refusal(generate());
+    expect((await generate({ yes: true, confirmation: asked.confirmation })).lines.map((line) => line.state)).toEqual(["generated", "generated"]);
+    expect((await generate({ yes: true, confirmation: "not-the-token" })).cost).toBeNull();
   });
 
   it("keeps and imports the takes finished before the provider fails", async () => {
