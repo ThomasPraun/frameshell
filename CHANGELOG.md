@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Captions and generated clips take the project style, third slice of #468 (ADR 0028, epic #451; `clip.live`
+  `styleCss`, style `type.caption`, plugin API `styleTokens` / `RenderContext.styleCss`, protocol 106): a subtitle
+  track that names no preset shows its text in `colors.ink` outlined in `colors.bg`, the keyword in `colors.keyword`
+  (else the accent), the spoken word in `colors.highlight` (else the accent), at `type.caption` px, and neither mark
+  under `calm`; a track that names a preset looks as before, and the track's own fields and the vertical-format scale
+  still win. `fonts.captions` sets the caption face: a `.ttf` or `.otf` under `assets/fonts/`, whose family and line
+  metrics are read from the file, so export, the preview and review safe zones place lines alike; a face that cannot
+  be used falls back to Archivo Black and `render` warns. HyperFrames renders and live pages get the style as CSS
+  variables (`--fs-color-accent`, `--fs-font-display`, `--fs-motion-standard`, ...) in a first stylesheet, with style
+  font files inlined; the sheet's hash enters the render key only for adapters that take tokens and only with a
+  `style.json`, so other renders keep their keys.
 - Loop-safe export, first slice of #474 (ADR 0039, epic #451; `render` `loop`, CLI `render --loop`, `JobInfo.warnings`,
   protocol 105): `render --loop` makes a file meant to repeat (title loops, banners). MP4 and MOV audio gets a 2 ms
   half-sine fade at its first and last sample after loudness (silent exports unchanged); `--loop` with `--cover-frame`

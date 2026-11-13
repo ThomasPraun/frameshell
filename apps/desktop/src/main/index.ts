@@ -1682,7 +1682,14 @@ function registerIpc(): void {
       const page = await daemon.request("clip.live", { cwd: project.dir, timeline, clip });
       // The project may have changed while the daemon answered: never serve a page of a project the window left.
       if (state.project !== project) throw new Error("The project changed while its live page loaded");
-      const url = livePages.issue({ project: project.dir, root: page.root, entry: page.entry, head: page.head, ...(page.elementCss ? { elementCss: page.elementCss } : {}) });
+      const url = livePages.issue({
+        project: project.dir,
+        root: page.root,
+        entry: page.entry,
+        head: page.head,
+        ...(page.elementCss ? { elementCss: page.elementCss } : {}),
+        ...(page.styleCss ? { styleCss: page.styleCss } : {}),
+      });
       const previous = state.live.get(clip);
       if (previous) livePages.revoke(previous);
       state.live.set(clip, url);

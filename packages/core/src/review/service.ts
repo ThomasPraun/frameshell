@@ -14,7 +14,7 @@ import {
   type TimelineViewName,
 } from "@frameshell/protocol";
 import { type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES } from "@frameshell/schema";
-import { bundledFontMetrics } from "../export/font-metrics.js";
+import { captionFontMetrics } from "../export/font-metrics.js";
 import type { ExportService } from "../export/service.js";
 import type { TimelineService } from "../timeline/service.js";
 import {
@@ -136,7 +136,8 @@ export class ReviewService {
         else if (kind === "safe") {
           const frame = { width: source.width, height: source.height };
           const picks = contactPicks(source.fps, range, critical, request.every, MAX_SAFE_TILES);
-          const metrics = subtitles.length > 0 ? await bundledFontMetrics() : null;
+          // Every track of a project takes the one caption face of its style.
+          const metrics = subtitles[0] ? await captionFontMetrics(root, subtitles[0].style.font) : null;
           for (const platform of safePlatforms) {
             const zone = SAFE_ZONES[platform];
             const insets = filmInsets(zone, frame);

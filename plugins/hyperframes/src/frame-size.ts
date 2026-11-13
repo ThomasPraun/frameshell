@@ -65,6 +65,19 @@ export function withStyle(html: string, marker: string, css: string): string {
   return at >= 0 ? html.slice(0, at) + tag + html.slice(at) : tag + html;
 }
 
+/**
+ * `css` as the first stylesheet of the document, tagged with attribute `marker`: right after the `<head>` tag, else
+ * after `<html>`, else after the doctype (standards mode stays), else first. Escaped as {@link withStyle} does.
+ */
+export function withLeadingStyle(html: string, marker: string, css: string): string {
+  const tag = `<style ${marker}>\n${css.replace(/<\//g, "<\\/")}\n</style>`;
+  for (const open of [/<head(?:\s[^>]*)?>/i, /<html(?:\s[^>]*)?>/i, /<!doctype[^>]*>/i]) {
+    const match = open.exec(html);
+    if (match) return html.slice(0, match.index + match[0].length) + tag + html.slice(match.index + match[0].length);
+  }
+  return tag + html;
+}
+
 /** First composition root tag outside scripts, styles and comments. */
 function findRoot(html: string): { tag: string; index: number } | null {
   const masked = html.replace(OPAQUE, (text) => " ".repeat(text.length));

@@ -228,7 +228,7 @@
               "type": "null"
             }
           ],
-          "description": "Box behind the spoken word in captions. Hex `#rrggbb`."
+          "description": "Colour of the word being spoken in captions. Hex `#rrggbb`."
         }
       },
       "additionalProperties": false
@@ -421,6 +421,20 @@
           "exclusiveMinimum": 0,
           "maximum": 1080,
           "description": "Left edge of left-aligned text, from the frame's edge. Pixels on a frame whose short side is 1080; scale with the short side."
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1080,
+              "description": "Caption text size (font size). Pixels on a frame whose short side is 1080; scale with the short side."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Caption text size (font size) in pixels on a 1080 short side; null: the caption preset's."
         }
       },
       "additionalProperties": false

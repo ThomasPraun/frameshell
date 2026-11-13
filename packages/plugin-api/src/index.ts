@@ -122,6 +122,12 @@ export interface ClipAdapter {
    * so the preview never shows what the render ignores.
    */
   readonly elementStyles?: boolean;
+  /**
+   * Optional. `true` when `render` applies {@link RenderContext.styleCss} (ADR 0028). Only then does the
+   * host make the sheet and count it in the clip's render key, so other adapters' renders never re-run on a
+   * style edit.
+   */
+  readonly styleTokens?: boolean;
 }
 
 /**
@@ -221,6 +227,13 @@ export interface RenderContext {
    * after the composition's own styles.
    */
   readonly elementCss?: string;
+  /**
+   * The project style's tokens (ADR 0028) as a style sheet: `:root` custom properties (`--fs-color-accent`,
+   * `--fs-font-display`, `--fs-motion-quick`, ...) and an `@font-face` with inline data per project font file.
+   * Absent when the project has no `style.json` or the adapter does not set {@link ClipAdapter.styleTokens}. An
+   * adapter inserts it first in the page's `<head>`, so a composition that sets a variable itself keeps its value.
+   */
+  readonly styleCss?: string;
 }
 
 /** One render progress report. */

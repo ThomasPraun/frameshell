@@ -72,7 +72,7 @@ export const StyleColorsSchema = z.strictObject({
   accent: Color("The one accent (the key word, the chosen item)."),
   card: Color("Cards and panels over the picture."),
   keyword: Color("Keyword colour in captions."),
-  highlight: Color("Box behind the spoken word in captions."),
+  highlight: Color("Colour of the word being spoken in captions."),
 });
 
 /** Font roles; at most two faces is the usual rule (display + UI). */
@@ -89,6 +89,7 @@ export const StyleTypeSchema = z.strictObject({
   card: Px("Text size on cards."),
   minReadable: Px("Smallest text meant to be read; smaller is decoration."),
   margin: Px("Left edge of left-aligned text, from the frame's edge."),
+  caption: Px("Caption text size (font size).").nullable().describe("Caption text size (font size) in pixels on a 1080 short side; null: the caption preset's."),
 });
 
 /** The motion values a personality sets (ADR 0028 decision 8). */
@@ -317,7 +318,7 @@ export const STYLE_DEFAULTS: Readonly<Omit<StyleValues, "motion">> = {
   brand: { product: null, url: null, promise: null, hook: null, cta: null, audience: null, reference: null, mustShow: [], mustAvoid: [] },
   colors: { bg: null, ink: null, ink2: null, accent: null, card: null, keyword: null, highlight: null },
   fonts: { display: null, ui: null, captions: null, keyword: null },
-  type: { hero: 200, card: 110, minReadable: 28, margin: 120 },
+  type: { hero: 200, card: 110, minReadable: 28, margin: 120, caption: null },
   sound: {
     musicUnderVoice: 12,
     sfxUnderVoice: 20,

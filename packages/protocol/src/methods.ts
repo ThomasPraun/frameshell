@@ -72,7 +72,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 105;
+export const PROTOCOL_VERSION = 106;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1611,6 +1611,13 @@ export const methods = {
         .string()
         .optional()
         .describe("Sheet of the clip's `elements` (ADR 0021), which the page's bridge applies; absent when the clip has none."),
+      styleCss: z
+        .string()
+        .optional()
+        .describe(
+          "The project style's token sheet (ADR 0028), inserted first in the page's `<head>` as the render gets it; absent " +
+            "without `style.json` or when the clip's adapter does not apply style tokens.",
+        ),
     }),
   },
   "context.write": {

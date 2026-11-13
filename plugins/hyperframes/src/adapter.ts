@@ -1,7 +1,7 @@
 import { cp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
-import { type FrameSize, projectResolution, sizeEntry, withStyle } from "./frame-size.js";
+import { type FrameSize, projectResolution, sizeEntry, withLeadingStyle, withStyle } from "./frame-size.js";
 import { liveHead } from "./live.js";
 
 /** Clip type this adapter registers. */
@@ -71,7 +71,8 @@ const SKIPPED_DIRS = new Set(["node_modules"]);
  * Renders run in-process with `@hyperframes/producer` to VP9 WebM with alpha,
  * with the managed ffmpeg, ffprobe and headless Chrome. A composition laid
  * out for the project frame renders at a format's size when the format has
- * another aspect (ADR 0027). Live preview (ADR 0010) serves the composition
+ * another aspect (ADR 0027), with the project style's tokens (ADR 0028) as its first
+ * stylesheet. Live preview (ADR 0010) serves the composition
  * directory as it is, with the clip's variables and the HyperFrames runtime
  * in `head`.
  */
@@ -83,6 +84,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
     type: CLIP_TYPE,
     propsSchema,
     elementStyles: true,
+    styleTokens: true,
     async inputs(clip) {
       const { source } = clip as HyperframesClip;
       if (!source) return [];
@@ -146,12 +148,14 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
 
 /**
  * The copied entry laid out at the render size (`sizeEntry`, ADR 0027 decision 8), with the clip's element CSS
- * (ADR 0021) as its last stylesheet. Written only when it changed, so a plain render reads the file as copied.
+ * (ADR 0021) as its last stylesheet and the style tokens (ADR 0028) as its first. Written only when it changed, so a
+ * plain render reads the file as copied.
  */
 async function prepareEntry(entry: string, ctx: RenderContext, project: FrameSize): Promise<void> {
   const original = await readFile(entry, "utf8");
   let html = sizeEntry(original, ctx, project);
   if (ctx.elementCss) html = withStyle(html, "data-frameshell-elements", ctx.elementCss);
+  if (ctx.styleCss) html = withLeadingStyle(html, "data-frameshell-style", ctx.styleCss);
   if (html !== original) await writeFile(entry, html);
 }
 

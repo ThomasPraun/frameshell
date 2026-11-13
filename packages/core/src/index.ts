@@ -263,7 +263,9 @@ export {
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
-export { type FontMetrics, bundledFontMetrics, parseFontMetrics } from "./export/font-metrics.js";
+export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";
+export { bundledFontMetrics, captionFontMetrics, fontFileMetrics } from "./export/font-metrics.js";
+export { readCaptionTokens } from "./style/captions.js";
 export {
   COVER_MAX_CHARS,
   type CoverLayout,

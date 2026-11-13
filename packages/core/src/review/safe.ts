@@ -1,9 +1,11 @@
 import type { ReviewSafeFlag, ZoneEdge } from "@frameshell/protocol";
-import { type ResolvedSubtitleTrack, type SafeZone, type Size, type SubtitleCue, type SubtitleStyle, cueTokens, subtitleLayout } from "@frameshell/schema";
-import type { FontMetrics } from "../export/font-metrics.js";
+import { type FontMetrics, type ResolvedSubtitleTrack, type SafeZone, type Size, type SubtitleCue, type SubtitleStyle, cueTokens, subtitleLayout } from "@frameshell/schema";
 
 // Where a platform's UI covers the picture and which captions reach into it. Pure: the `safe` sheet of `review`.
 // The zones are the numbers of `@frameshell/schema` `safe-zones.ts`, never copied here.
+
+/** What sizing a cue needs of its face. */
+type SizingMetrics = Pick<FontMetrics, "capHeight" | "width">;
 
 /** Pixels each edge's zone covers. */
 export interface Insets {
@@ -66,11 +68,11 @@ export function crossings(box: Box, insets: Insets, frame: Size): { edge: ZoneEd
 }
 
 /**
- * Where a cue's glyphs are in a `frame`-sized picture: as wide as its text in the bundled face (no wrapping, as the
+ * Where a cue's glyphs are in a `frame`-sized picture: as wide as its text in the caption face (no wrapping, as the
  * ASS export writes it) centred on the layout's x, from the cap height above the baseline, plus the outline, to the
  * baseline, plus room for descenders when the text has any. Ignores the keyword's entry scale.
  */
-export function cueBox(style: SubtitleStyle, cue: SubtitleCue, frame: Size, metrics: FontMetrics): Box {
+export function cueBox(style: SubtitleStyle, cue: SubtitleCue, frame: Size, metrics: SizingMetrics): Box {
   const layout = subtitleLayout(style, frame);
   const text = cueTokens(cue).join(" ");
   const half = (metrics.width(text) * layout.fontSize) / 2 + layout.outline;
@@ -92,7 +94,7 @@ export interface CueCrossing {
 }
 
 /** The cues of `tracks` that reach into a zone of `insets` in a `frame`-sized picture, in track then cue order. */
-export function cueCrossings(tracks: readonly ResolvedSubtitleTrack[], insets: Insets, frame: Size, metrics: FontMetrics): CueCrossing[] {
+export function cueCrossings(tracks: readonly ResolvedSubtitleTrack[], insets: Insets, frame: Size, metrics: SizingMetrics): CueCrossing[] {
   const found: CueCrossing[] = [];
   for (const track of tracks) {
     for (const cue of track.cues) {

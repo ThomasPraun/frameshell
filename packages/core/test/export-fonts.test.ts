@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SUBTITLE_FONT } from "@frameshell/schema";
 import { writeFonts } from "../src/export/fonts.js";
-import { fontSource } from "../src/index.js";
+import { fontSource, parseFontMetrics } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 
 /** Offsets of the sfnt tables of a TTF, by tag. */
@@ -38,5 +38,25 @@ describe("subtitle font", () => {
     const dir = tempDir();
     await writeFonts(dir, [SUBTITLE_FONT.file]);
     expect(readFileSync(join(dir, "fonts", SUBTITLE_FONT.file))).toEqual(readFileSync(fontSource(SUBTITLE_FONT.file)));
+  });
+
+  it("gives the metrics libass lays it out with, read by the parser preview and review share", () => {
+    const metrics = parseFontMetrics(readFileSync(fontSource(SUBTITLE_FONT.file)));
+    expect(metrics).toMatchObject({ family: SUBTITLE_FONT.family, ascent: SUBTITLE_FONT.ascent, descent: SUBTITLE_FONT.descent });
+    expect(() => parseFontMetrics(new Uint8Array(Buffer.from("wOF2 not a font at all")))).toThrow(/not a TrueType or OpenType font/);
+  });
+});
+
+describe("project caption fonts (ADR 0028)", () => {
+  it("are read under the project and copied into fonts/ by name; one named like the bundled file is renamed", async () => {
+    const project = tempDir();
+    const bytes = readFileSync(fontSource(SUBTITLE_FONT.file));
+    mkdirSync(join(project, "assets", "fonts", "brand"), { recursive: true });
+    writeFileSync(join(project, "assets", "fonts", "brand", "Brand.ttf"), bytes);
+    writeFileSync(join(project, "assets", "fonts", SUBTITLE_FONT.file), bytes);
+    const dir = tempDir();
+    await writeFonts(dir, ["assets/fonts/brand/Brand.ttf", `assets/fonts/${SUBTITLE_FONT.file}`, SUBTITLE_FONT.file], project);
+    expect(readdirSync(join(dir, "fonts")).sort()).toEqual(["ArchivoBlack-Regular.ttf", "Brand.ttf", `project-${SUBTITLE_FONT.file}`]);
+    await expect(writeFonts(tempDir(), ["assets/fonts/brand/Brand.ttf"])).rejects.toThrow("unknown export font");
   });
 });

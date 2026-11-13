@@ -2,6 +2,7 @@ import { DEFAULT_FRAME_QUALITY, type EncoderName, ErrorCode, type FrameFormat, R
 import {
   type AdapterClip,
   type Backdrop,
+  type CaptionTokens,
   type Clip,
   type ClipEdges,
   type ClipTrack,
@@ -123,6 +124,8 @@ export interface RenderInput {
    * An asset without one shows no subtitles (and a warning when it has sound).
    */
   transcripts?: ReadonlyMap<string, Transcript>;
+  /** The project style's caption values (ADR 0028 decision 11, `readCaptionTokens`); absent: the presets alone. */
+  captions?: CaptionTokens;
   /** Render of every generated clip on a video track, by clip id; they composite like footage (SPEC §3.5 step 2). */
   generated?: ReadonlyMap<string, GeneratedSource>;
   /**
@@ -215,8 +218,8 @@ export interface RenderPlan {
   /** Files to write into the work directory before any step runs. */
   files: Record<string, string>;
   /**
-   * Font files (`SUBTITLE_FONT.file`) to copy into `fonts/` of the work
-   * directory before any step runs: burned subtitles read them. Empty when
+   * Font files to copy into `fonts/` of the work directory before any step runs: burned subtitles read them.
+   * `SUBTITLE_FONT.file` for the bundled face, else a project-relative font file of the style. Empty when
    * nothing is burned.
    */
   fonts: string[];
@@ -264,6 +267,8 @@ export interface FrameInput {
   resolution: Size;
   /** See {@link RenderInput.transcripts}. */
   transcripts?: ReadonlyMap<string, Transcript>;
+  /** See {@link RenderInput.captions}. */
+  captions?: CaptionTokens;
   /** See {@link RenderInput.generated}. */
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** See {@link RenderInput.mattes}. */
@@ -435,7 +440,7 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx, input.mattes);
+  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx, input.mattes, input.captions);
   const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
   const outFps = tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
   const rate = fpsRational(outFps);
@@ -517,7 +522,7 @@ export function compileRender(input: RenderInput): RenderPlan {
     warnings,
     ...(input.loop ? { loop: true as const } : {}),
     files,
-    fonts: layout.subtitles.length > 0 || cover?.layout ? [SUBTITLE_FONT.file] : [],
+    fonts: burnedFonts(layout.subtitles, Boolean(cover?.layout)),
     segments,
     audio,
   };
@@ -619,7 +624,18 @@ function loopWarnings(layout: Layout, fps: number, outFps: number): string[] {
  */
 export function compileFrame(input: FrameInput): FramePlan {
   const { fps, width, height } = input;
-  const layout = layoutTimeline(input.timeline, fps, input.sources, { width, height }, input.transcripts, input.generated, input.variant, undefined, input.mattes);
+  const layout = layoutTimeline(
+    input.timeline,
+    fps,
+    input.sources,
+    { width, height },
+    input.transcripts,
+    input.generated,
+    input.variant,
+    undefined,
+    input.mattes,
+    input.captions,
+  );
   const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
@@ -631,7 +647,7 @@ export function compileFrame(input: FrameInput): FramePlan {
     at: seconds(frame, fps),
     clip: clip?.clip.id ?? null,
     files: burn ? script : {},
-    fonts: burn ? [SUBTITLE_FONT.file] : [],
+    fonts: !burn ? [] : input.cover ? burnedFonts([], true) : burnedFonts(layout.subtitles, false),
     args: [
       ...BASE,
       ...graph.inputs,
@@ -712,6 +728,13 @@ export function parseLoudnessStats(text: string): LoudnessMeasurement | null {
   return Number.isFinite(integrated) && integrated > -70 ? measured : null;
 }
 
+/** Font files a plan burns with (see {@link RenderPlan.fonts}): each subtitle track's face, and the bundled one for a cover word. */
+function burnedFonts(subtitles: readonly ResolvedSubtitleTrack[], cover: boolean): string[] {
+  const files = subtitles.map((track) => track.style.font.file ?? SUBTITLE_FONT.file);
+  if (cover) files.push(SUBTITLE_FONT.file);
+  return [...new Set(files)];
+}
+
 /**
  * Place the timeline's clips on the frame grid, resolve subtitle cues, and
  * reject what export cannot render. A generated clip plays its cached render
@@ -734,6 +757,7 @@ function layoutTimeline(
   variant?: FormatLayout,
   audioFx: ReadonlyMap<string, string> = new Map(),
   mattes: ReadonlyMap<string, MatteSource> = new Map(),
+  captions?: CaptionTokens,
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -881,7 +905,7 @@ function layoutTimeline(
   if (frames === 0) {
     throw unsupported(timeline.id, `Timeline ${timeline.id} has no clips; add some first: \`frameshell clip add <track> <asset>\`.`, {});
   }
-  const subtitles = scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps), variant);
+  const subtitles = scaledCaptions(subtitleTracks(timeline, (asset) => transcripts.get(asset) ?? null, fps, captions), variant);
   for (const track of subtitles) {
     if (track.unknownPreset !== null) {
       warnings.push(`Subtitle track ${track.track} names unknown style preset "${track.unknownPreset}"; it was rendered as ${track.style.preset}.`);

@@ -16,6 +16,7 @@ import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useProjectFormats, useProjectKind, useResolution } from "../preview/useProgram.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { drawSubtitleLines, subtitleLines } from "../subtitles/model.js";
+import { useCaptionStyle } from "../subtitles/caption-style.js";
 import { useSubtitleFont, useSubtitles } from "../subtitles/useSubtitles.js";
 import { formatTimecode } from "../timeline/layout.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -297,7 +298,7 @@ export function PreviewPanel({
           />
           {program && <RenderSlates program={program} frame={frame} live={mode.held?.clip ?? liveClip?.clip ?? null} />}
           {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
-          <SubtitleOverlay size={canvasSize} frame={frame} format={shown} />
+          <SubtitleOverlay size={canvasSize} frame={frame} format={shown} mediaUrl={project.mediaUrl} />
           {program && !playing && !variant && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} />}
           {program && editing && view && !playing && !variant && !pickTool && (
             <ElementLayer program={program} frame={frame} timeline={view.timeline} clip={mode.clip!} elements={elements} onNotice={setNotice} />
@@ -370,14 +371,15 @@ function Inspector() {
 
 /**
  * Subtitle lines at program frame `frame`, drawn over the picture on a
- * canvas the size of the player's, with the bundled face export burns with.
+ * canvas the size of the player's, in the project style's look and face (ADR 0028), as export burns them.
  * `data-frame` names the frame drawn once the face is loaded (tests wait on it).
  */
-function SubtitleOverlay({ size, frame, format }: { size: Size; frame: number; format: FormatLayout }) {
-  const { tracks: stored } = useSubtitles();
+function SubtitleOverlay({ size, frame, format, mediaUrl }: { size: Size; frame: number; format: FormatLayout; mediaUrl: string }) {
+  const captionStyle = useCaptionStyle(mediaUrl);
+  const { tracks: stored } = useSubtitles(captionStyle.tokens);
   const tracks = useMemo(() => scaledCaptions(stored, format), [stored, format]);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const ready = useSubtitleFont(canvas);
+  const ready = useSubtitleFont(canvas, captionStyle);
   useLayoutEffect(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
