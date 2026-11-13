@@ -532,6 +532,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preview: after a timeline change (such as a subject matte turning ready, ADR 0032) the preview no longer reports
   the previous picture as the new one's frame while the engine still decodes it (#551).
+- Desktop: a detached panel window closed within a moment of being moved, resized or leaving full screen keeps that
+  placement for the next time it opens (#533).
+- CLI: `import --wait`, `render --wait` and other job followers no longer print a step twice when the job list the
+  daemon answers is older than the events already read (#533).
 
 ## [0.18.0] - 2026-11-07
 
