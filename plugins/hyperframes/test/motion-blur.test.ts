@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { RenderContext } from "@frameshell/plugin-api";
+import { MOTION_BLUR_REFUSED, type RenderContext } from "@frameshell/plugin-api";
 import { type Producer, createHyperframesAdapter } from "../src/index.js";
 import { MOTION_RUNTIME } from "../src/motion-runtime.js";
 
@@ -79,9 +79,13 @@ describe("hyperframes motion blur", () => {
     const blur = { motionBlur: { shutter: 180, samples: 8, blend: "linear" as const } };
     const refusal = new Error('[MotionBlur] sub-frame motion blur is not supported on the "hdr_layered" capture route.');
     const refused = createHyperframesAdapter({ projectDir: project, producer: async () => producer(refusal).fake });
-    await expect(refused.render({ id: "c_1", source: SOURCE }, context(blur))).rejects.toThrow(
-      /^hyperframes clip c_1 cannot be motion-blurred: sub-frame motion blur is not supported on the "hdr_layered" capture route\. .*--clear-motion-blur/,
-    );
+    // The code tells the host to fall back to the sharp render (MOTION_BLUR_REFUSED of the plugin API).
+    await expect(refused.render({ id: "c_1", source: SOURCE }, context(blur))).rejects.toMatchObject({
+      message: expect.stringMatching(
+        /^hyperframes clip c_1 cannot be motion-blurred: sub-frame motion blur is not supported on the "hdr_layered" capture route\. .*exports use the sharp render.*--clear-motion-blur/,
+      ),
+      code: MOTION_BLUR_REFUSED,
+    });
     const other = createHyperframesAdapter({ projectDir: project, producer: async () => producer(new Error("Chrome crashed")).fake });
     await expect(other.render({ id: "c_1", source: SOURCE }, context(blur))).rejects.toThrow(/^Chrome crashed$/);
   });

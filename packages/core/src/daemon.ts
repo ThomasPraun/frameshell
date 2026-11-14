@@ -685,7 +685,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     encoder: (ffmpeg) => encoderCache.pick(ffmpeg),
     clips: {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
-      ensure: (dir, timeline, onProgress, size) => clips.ensure(clipRoot(dir), timeline, onProgress, size),
+      ensure: (dir, timeline, options) => clips.ensure(clipRoot(dir), timeline, options),
     },
     audioFx,
     mattes: {
@@ -731,7 +731,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
     // `clips` and `faceScans` are declared below: they are read when a review runs, not now.
-    generated: (dir, timeline, size) => clips.ensure(clipRoot(dir), timeline, undefined, size),
+    generated: (dir, timeline, size) => clips.ensure(clipRoot(dir), timeline, { size }),
     faceScans: (dir) => faceScans(dir)(),
   });
   const brands = new BrandService({
