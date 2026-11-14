@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Colour section of the clip inspector and LOG footage warning, second slice of #384 (ADR 0031, epic #451; protocol 130):
+  a media clip on a video track shows Colour in the clip inspector: sliders for exposure, temperature, tint,
+  contrast and saturation, a menu of the project's `.cube` LUTs with its mix, and Reset. A drag is one undoable step
+  (`clip.set grade` with that number); English and Spanish. Footage that looks like LOG or HDR (colour tags of HDR or
+  logarithmic curves or wide-gamut primaries, or a camera LOG word in the file name) gets a note there, and
+  `clip set --grade-*` (and MCP `clip_set`) prints it as a warning; the grade is kept. `asset.list` probes carry
+  `colorTransfer` and `colorPrimaries`; an asset ingested before the upgrade is judged by its name in the inspector
+  until it is ingested again.
 - Brand capture from a URL, slice 3 of #467 (ADR 0044, epic #451; protocol 128): `frameshell brand capture <url>` (MCP
   `brand_capture`, job kind `brand`) opens a public `http`/`https` page in the managed headless Chrome, whose only way out
   is a daemon-local guarded proxy (public unicast addresses, ports 80/443, each host resolved once and dialed by the checked
