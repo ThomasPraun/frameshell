@@ -106,6 +106,7 @@ describe("frameshell review", () => {
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toMatch(/Metrics \(\d+ samples, [\d.]+ s apart\): longest still /);
       expect(result.stdout).toMatch(/loudness: -?[\d.]+ LUFS, range [\d.]+ LU, true peak -?[\d.]+ dBTP, phone band -?[\d.]+ LUFS/);
+      expect(result.stdout).toMatch(/ {2}sound \(the file's mix\)\n {4}ending: last 50 ms at -?[\d.]+ dBFS, loudest moment at [\d.]+ s \(\d+ %\)\n {4}clicks: \d+/);
       const run = /Review (\d+) of/.exec(result.stdout)![1]!;
       expect(existsSync(join(project, ".frameshell", "review", run, "metrics.json"))).toBe(true);
       expect(existsSync(join(project, ".frameshell", "review", run, "contact.png"))).toBe(false);

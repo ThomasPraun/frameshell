@@ -91,7 +91,8 @@ export function dipAt(points: readonly DipPoint[], time: number): number {
   return 0;
 }
 
-const BINARY_ERRORS: readonly number[] = [ErrorCode.BinaryUnavailable, ErrorCode.BinaryNotFound, ErrorCode.BinaryInstallFailed, ErrorCode.BinaryChecksumMismatch];
+/** Error codes of a missing or failing managed binary: nothing was heard, so a listener must not go on as if it was silence. */
+export const BINARY_ERRORS: readonly number[] =[ErrorCode.BinaryUnavailable, ErrorCode.BinaryNotFound, ErrorCode.BinaryInstallFailed, ErrorCode.BinaryChecksumMismatch];
 
 /**
  * Loud runs of the sound of the media clips on the `under` tracks of `timeline`, on the timeline clock. Muted tracks

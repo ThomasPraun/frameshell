@@ -1,4 +1,4 @@
-import { type DaemonConnection, REVIEW_OUTPUTS, type ReviewMetrics, type ReviewOutput, type ReviewResult } from "@frameshell/protocol";
+import { type DaemonConnection, REVIEW_OUTPUTS, type ReviewMetrics, type ReviewOutput, type ReviewResult, type ReviewSound } from "@frameshell/protocol";
 import { FormatIdSchema, PLATFORM_IDS, type PlatformId } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
@@ -16,7 +16,10 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                events, near-blank frames, empty frame 0, subtitle cues too short to read, loudness of a
                                --file (LUFS, LRA, true peak, phone band), sounds against the picture events they belong
                                to (early over 45 ms, late over 75 ms, next to what random placement scores), the jump
-                               from the last frame to the first, and craft warnings; written without --sheets.
+                               from the last frame to the first, the sound review list (timeline: voice over the bed per
+                               0.5 s window, effect files repeated, clips cut off loud, the music on the last frame;
+                               --file: the end of the sound, its loudest moment, clicks), and craft warnings; written
+                               without --sheets.
                                requirements.json (project root, written with file.write; see its JSON Schema): the
                                film's expectations (length, longest still stretch, end card, loudness of a --file,
                                smallest captions, per clip appearsBy/before/keepsMoving) are checked into metrics, a
@@ -142,6 +145,35 @@ function formatReview(result: ReviewResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** The lines `review` prints for the sound review list; its findings are printed with the craft warnings. */
+function formatSound(sound: ReviewSound): string[] {
+  const lines: string[] = [];
+  if (sound.clips) {
+    const { voice, music, sfx, other } = sound.clips;
+    lines.push(`  sound (each clip from its asset): ${voice} voice, ${music} music, ${sfx} effect and ${other} other clips`);
+  } else lines.push("  sound (the file's mix)");
+  const { voice, ending, clicks } = sound;
+  if (voice) {
+    lines.push(
+      `    voice over bed: ${voice.windows} windows of ${voice.window} s with the voice, ${voice.withBed} with a bed under it` +
+        (voice.minMargin === null ? "" : `, margin ${voice.minMargin} dB at least, ${voice.medianMargin} dB median`),
+    );
+  }
+  const repeated = (sound.repeats ?? []).map((repeat) => `${repeat.file} x${repeat.plays}`);
+  if (repeated.length > 0) lines.push(`    effects heard more than once: ${repeated.join(", ")}`);
+  if (ending?.measure === "music") {
+    lines.push(
+      ending.level === null
+        ? `    ending: no music on the last frame${ending.musicEndsAt === null ? "" : ` (it ends at ${ending.musicEndsAt} s)`}`
+        : `    ending: the music is ${Math.abs(ending.level)} dB under its loudest on the last frame`,
+    );
+  } else if (ending) {
+    lines.push(`    ending: last 50 ms at ${ending.level ?? "silence"}${ending.level === null ? "" : " dBFS"}, loudest moment at ${ending.loudestAt ?? "-"} s (${ending.loudestShare === null ? "-" : `${Math.round(ending.loudestShare * 100)} %`})`);
+  }
+  if (clicks) lines.push(`    clicks: ${clicks.count}${clicks.count > 0 ? ` (${clicks.at.join(", ")} s)` : ""}`);
+  return lines;
+}
+
 /** The lines `review` prints for `metrics`: the numbers, then the craft warnings. */
 function formatMetrics(metrics: ReviewMetrics): string[] {
   const { picture, subtitles, loudness } = metrics;
@@ -166,6 +198,7 @@ function formatMetrics(metrics: ReviewMetrics): string[] {
       lines.push(`    ${entry.kind ?? "hit"} at ${entry.at} s: ${entry.verdict === "none" ? "no visual event within 0.12 s" : `${entry.verdict} by ${Math.round(Math.abs(entry.offset!) * 1000)} ms`}`);
     }
   }
+  if (metrics.sound) lines.push(...formatSound(metrics.sound));
   if (seam) lines.push(`  loop seam: the last frame (${seam.last} s) differs from the first by ${seam.jump} of 255 (${seam.verdict})`);
   if (delivery) {
     lines.push(`  delivery against ${delivery.timeline} with ${delivery.preset} (${delivery.format}): ${delivery.checks.every((check) => check.ok) ? "as planned" : "differs"}`);

@@ -46,3 +46,49 @@ export const GRAPHIC_WIDTH = 160;
 export const GRAPHIC_SAMPLES = 12;
 /** Most frames of a generated clip measured per second. */
 export const GRAPHIC_HZ = 4;
+
+// The sound review list (#457): the 2.5D shorts course's rules ("the voice is always on top", "no whoosh repeated more than
+// twice", "the music resolves on the final frame") and earshot's mechanical audio QA, with its numbers.
+
+/** Seconds per window of the voice-over-bed check: a few syllables, so one buried word shows and pauses between words do not. */
+export const VOICE_WINDOW_S = 0.5;
+/** dB the bed may come up to under the voice: half the 12 dB the style guide sets music under the voice by default (`musicUnderVoice`). */
+export const VOICE_OVER_BED_DB = 6;
+/** Most low stretches listed in `sound.voice.low`. */
+export const VOICE_LISTED = 20;
+/** Plays of one effect file allowed in a film: "no whoosh repeated more than twice" (2.5D shorts course, #457). */
+export const SFX_REPEAT_MAX = 2;
+/** Effects a key run repeats by design (`sound.place` `typing` rotates six takes of these): left out of the repeat count. */
+export const SFX_REPEAT_EXEMPT: readonly SfxKind[] = ["tick", "click"];
+/** Plays of one sample in a row that read as a machine gun (earshot: 4 events of one sample with pitch spread under 0.1 semitone). */
+export const MACHINE_GUN_PLAYS = 4;
+/** Most files listed in `sound.repeats` and runs in `sound.machineGun`. */
+export const SOUND_LISTED = 20;
+/** Level against its loudest (dB) above which a sound's tail is chopped rather than decayed (earshot: unfaded tail above -35 dB re peak). */
+export const CHOP_DB = -35;
+/** Most clips listed in `sound.chopped`. */
+export const CHOP_LISTED = 20;
+/** Seconds of a file's sound the ending is measured over, and the RMS (dBFS) it must be under (earshot: last 50 ms at or under -45 dBFS). */
+export const ENDING_TAIL_S = 0.05;
+/** See {@link ENDING_TAIL_S}. */
+export const ENDING_DBFS = -45;
+/** The loudest moment of a file comes before this share of its length (earshot: loudest before 85 % of the runtime). */
+export const LOUDEST_BEFORE = 0.85;
+/** Seconds of the loudest moment: the EBU R128 momentary window. */
+export const LOUDEST_WINDOW_S = 0.4;
+/** dB within which a moment is as loud as the loudest: about the smallest change of level a listener notices, so a steady sound has no late peak. */
+export const LOUDEST_MARGIN_DB = 1;
+/** Clicks (earshot): a burst above this frequency (Hz)... */
+export const CLICK_BAND_HZ = 14_000;
+/** ...peaking over this many times the RMS of the {@link CLICK_CONTEXT_S} around it... */
+export const CLICK_RATIO = 9;
+/** ...with at least this share of that window's energy in {@link CLICK_BURST_S}. */
+export const CLICK_SHARE = 0.8;
+/** Seconds of a click's burst. */
+export const CLICK_BURST_S = 0.001;
+/** Seconds of the window a click is measured against; two bursts closer than this are one click. */
+export const CLICK_CONTEXT_S = 0.02;
+/** dBFS a click's peak (in the band) reaches at least: a lone burst under it is the encode's quantization dust (one 16-bit step is -90 dBFS), not a click anyone hears. */
+export const CLICK_FLOOR_DBFS = -60;
+/** Most clicks listed in `sound.clicks.at`. */
+export const CLICK_LISTED = 20;

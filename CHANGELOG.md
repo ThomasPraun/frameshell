@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The sound review list of `review`, sixth slice of #457 (epic #451; protocol 139; `metrics.sound`, craft checks `voice-bed`,
+  `sfx-repeat`, `machine-gun`, `chopped`, `ending`, `click`): the measurable parts of "the voice is always on top, no effect
+  repeated more than twice, the music resolves on the final frame" and earshot's mechanical audio QA. On a timeline nothing is
+  mixed: each heard clip is read from its asset's cached 10 ms envelope (the cut-snapping one) with its gain, gain keys and
+  fades, and sorted by role: voice (a `Voiceover` track, a track a duck names in `under`, an asset with a transcript), music
+  (a `Music` track, a music take, a ducked clip), effects (a generated take, an `SFX` track) and the rest. `sound.voice` is
+  voice minus bed per 0.5 s window where the voice speaks, with the stretches under 6 dB (`voice-bed`); `repeats` lists
+  effect files heard more than once (ticks and clicks left out: key runs rotate them), over twice is `sfx-repeat`;
+  `machineGun` is one file 4 times or more in a row; `chopped` lists clips ending inside the film with their last 10 ms
+  above -35 dB of their loudest (a dissolve or the same sound going on is no cut); `ending` is the music on the last frame
+  against its loudest, above -35 dB a warning. On a `--file` (the decoded mix) `ending` is the RMS of the last 50 ms (above
+  -45 dBFS) and where the loudest 400 ms are (after 85 % of the film), and `clicks` are bursts above 14 kHz over 9 times
+  the RMS of their 20 ms with 80 % of that energy in 1 ms. Thresholds are data in `review/thresholds.ts`; every finding is a
+  warning unless `requirements.json` lists its check in `fail`. The phone band against the mix was already measured on a file
+  (third slice). Not yet: masking per 1/3-octave band, harshness (2 to 6 kHz against the music's loudest), a click within 2 ms
+  of a clip edge as a failure.
+
 - 3D playbook, slice 4 of #473 (ADR 0042, epic #451): the `hyperframes` skill gains `3d-playbook.md`, a reference for
   3D product shots in three.js: which route to take (the `product-shot` template, a hand-written scene, Blender), the
   studio defaults (lights, environment, tone mapping, VSM shadows), the four finishes with their numbers, the glint,
