@@ -1,0 +1,182 @@
+{
+  "cpus": 8,
+  "loadavgAtStart": [
+    23.2,
+    15,
+    19
+  ],
+  "frames": 60,
+  "size": "1920x1080",
+  "repeats": 3,
+  "control": {
+    "secondsMin": 5.44,
+    "secondsMedian": 5.64,
+    "msPerFrameMin": 90.6,
+    "msPerFrameMedian": 94,
+    "megabytes": 0.12
+  },
+  "scene": {
+    "secondsMin": 14.61,
+    "secondsMedian": 20.05,
+    "msPerFrameMin": 243.4,
+    "msPerFrameMedian": 334.2,
+    "megabytes": 0.52
+  },
+  "sceneNoReadback": {
+    "secondsMin": 16.11,
+    "secondsMedian": 20.33,
+    "msPerFrameMin": 268.5,
+    "msPerFrameMedian": 338.8
+  },
+  "sceneOverControlMsPerFrame": {
+    "min": 152.8,
+    "median": 240.2
+  },
+  "runsSeconds": {
+    "control": [
+      5.639084584,
+      5.436404791999994,
+      6.773923291999992
+    ],
+    "scene": [
+      14.606991459000001,
+      20.053716958000006,
+      20.078060583
+    ],
+    "sceneNoReadback": [
+      20.325018625000002,
+      32.674161915999996,
+      16.111632458000006
+    ]
+  },
+  "alpha": {
+    "t=0": {
+      "corner": {
+        "liveScreenshotRGBA": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "webmRGBA": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "panel": {
+        "liveScreenshotRGBA": [
+          223,
+          229,
+          249,
+          128
+        ],
+        "webmRGBA": [
+          223,
+          228,
+          249,
+          129
+        ]
+      },
+      "subject": {
+        "liveScreenshotRGBA": [
+          13,
+          24,
+          44,
+          255
+        ],
+        "webmRGBA": [
+          13,
+          24,
+          43,
+          255
+        ]
+      },
+      "shadowGround": {
+        "liveScreenshotRGBA": [
+          223,
+          229,
+          249,
+          128
+        ],
+        "webmRGBA": [
+          223,
+          228,
+          249,
+          129
+        ]
+      },
+      "histogramPct": {
+        "transparent": 67.2,
+        "partial": 23.4,
+        "opaque": 9.3
+      },
+      "cornerAlpha": 0
+    },
+    "t=1": {
+      "corner": {
+        "liveScreenshotRGBA": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "webmRGBA": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "panel": {
+        "liveScreenshotRGBA": [
+          223,
+          229,
+          249,
+          128
+        ],
+        "webmRGBA": [
+          223,
+          228,
+          249,
+          129
+        ]
+      },
+      "subject": {
+        "liveScreenshotRGBA": [
+          22,
+          32,
+          50,
+          255
+        ],
+        "webmRGBA": [
+          21,
+          32,
+          49,
+          255
+        ]
+      },
+      "shadowGround": {
+        "liveScreenshotRGBA": [
+          0,
+          0,
+          0,
+          102
+        ],
+        "webmRGBA": [
+          0,
+          0,
+          0,
+          102
+        ]
+      },
+      "histogramPct": {
+        "transparent": 68.2,
+        "partial": 22.4,
+        "opaque": 9.3
+      },
+      "cornerAlpha": 0
+    }
+  }
+}

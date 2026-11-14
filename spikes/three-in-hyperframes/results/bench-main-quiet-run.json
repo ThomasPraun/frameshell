@@ -1,0 +1,212 @@
+{
+ "1080p-default": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 2912.3,
+  "pmremMs": 1242.9,
+  "coldFirstPaintMs": 881.8,
+  "paintMedianMs": 102.4,
+  "paintMaxMs": 111.2,
+  "seekMedianMs": 103.5,
+  "screenshotMedianMs": 79.3,
+  "perFrameMs": 181.7,
+  "errors": []
+ },
+ "1080p-msaa-off": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": false,
+   "shadows": "vsm",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 2952.4,
+  "pmremMs": 1230,
+  "coldFirstPaintMs": 791.2,
+  "paintMedianMs": 79.5,
+  "paintMaxMs": 91.1,
+  "seekMedianMs": 80.4,
+  "screenshotMedianMs": 76.4,
+  "perFrameMs": 155.9,
+  "errors": []
+ },
+ "1080p-shadows-pcf-hard": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "pcf",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 2761.4,
+  "pmremMs": 1215.9,
+  "coldFirstPaintMs": 742.7,
+  "paintMedianMs": 56.2,
+  "paintMaxMs": 59.8,
+  "seekMedianMs": 57,
+  "screenshotMedianMs": 76.8,
+  "perFrameMs": 133,
+  "errors": []
+ },
+ "1080p-shadows-off": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "off",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 2493.5,
+  "pmremMs": 1283.9,
+  "coldFirstPaintMs": 529.6,
+  "paintMedianMs": 55.9,
+  "paintMaxMs": 67.6,
+  "seekMedianMs": 57.1,
+  "screenshotMedianMs": 77.7,
+  "perFrameMs": 133.6,
+  "errors": []
+ },
+ "1080p-vsm-1024-r8-s16": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 16,
+   "pmremSize": 256
+  },
+  "readyMs": 3470.1,
+  "pmremMs": 1398.6,
+  "coldFirstPaintMs": 919.9,
+  "paintMedianMs": 132,
+  "paintMaxMs": 145.1,
+  "seekMedianMs": 134.1,
+  "screenshotMedianMs": 74.4,
+  "perFrameMs": 206.4,
+  "errors": []
+ },
+ "1080p-vsm-512-r4-s8": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 512,
+   "shadowRadius": 4,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 3058.3,
+  "pmremMs": 1283.6,
+  "coldFirstPaintMs": 860.6,
+  "paintMedianMs": 73,
+  "paintMaxMs": 82.3,
+  "seekMedianMs": 73.9,
+  "screenshotMedianMs": 77.5,
+  "perFrameMs": 150.5,
+  "errors": []
+ },
+ "1080p-vsm-2048-r16-s16": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 2048,
+   "shadowRadius": 16,
+   "shadowBlurSamples": 16,
+   "pmremSize": 256
+  },
+  "readyMs": 4920.8,
+  "pmremMs": 1322.8,
+  "coldFirstPaintMs": 1147.4,
+  "paintMedianMs": 358.4,
+  "paintMaxMs": 611.5,
+  "seekMedianMs": 359.4,
+  "screenshotMedianMs": 76.2,
+  "perFrameMs": 434.6,
+  "errors": []
+ },
+ "1080p-pmrem-128": {
+  "config": {
+   "width": 1920,
+   "height": 1080,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 128
+  },
+  "readyMs": 3291.3,
+  "pmremMs": 1277.5,
+  "coldFirstPaintMs": 892.7,
+  "paintMedianMs": 107.4,
+  "paintMaxMs": 113.3,
+  "seekMedianMs": 108.3,
+  "screenshotMedianMs": 78.7,
+  "perFrameMs": 186.1,
+  "errors": []
+ },
+ "720p-default": {
+  "config": {
+   "width": 1280,
+   "height": 720,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 3079.3,
+  "pmremMs": 1261.1,
+  "coldFirstPaintMs": 888.1,
+  "paintMedianMs": 76.9,
+  "paintMaxMs": 83.6,
+  "seekMedianMs": 78,
+  "screenshotMedianMs": 54.7,
+  "perFrameMs": 131.6,
+  "errors": []
+ },
+ "2160p-default": {
+  "config": {
+   "width": 3840,
+   "height": 2160,
+   "msaa": true,
+   "shadows": "vsm",
+   "shadowMap": 1024,
+   "shadowRadius": 8,
+   "shadowBlurSamples": 8,
+   "pmremSize": 256
+  },
+  "readyMs": 4388.9,
+  "pmremMs": 1386.2,
+  "coldFirstPaintMs": 1063.3,
+  "paintMedianMs": 273.1,
+  "paintMaxMs": 344.3,
+  "seekMedianMs": 274.1,
+  "screenshotMedianMs": 217.5,
+  "perFrameMs": 490.6,
+  "errors": []
+ }
+}

@@ -1,0 +1,127 @@
+{
+  "duration": 0.5,
+  "frames": 15,
+  "referenceLoadsMs": {
+    "texture": 3082.9000000953674,
+    "glb": 3093.7000000476837,
+    "both": 3093.7000000476837
+  },
+  "defaultLoadingManagerPropertyTypes": {
+    "itemsLoaded": "undefined",
+    "itemsTotal": "undefined"
+  },
+  "modes": {
+    "sync": {
+      "renderSeconds": 6.4,
+      "frame0VsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "frame0Complete": true
+    },
+    "late-400ms": {
+      "renderSeconds": 5.8,
+      "frame0VsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "frame0Complete": true
+    },
+    "late-5s": {
+      "renderSeconds": 5.3,
+      "frame0VsLoadedReference": {
+        "worst": 255,
+        "mean": 3.8876844618055557,
+        "over2": 292871
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 255,
+        "mean": 3.9405078125,
+        "over2": 292992
+      },
+      "frame0Complete": false
+    },
+    "slow-gated-5s": {
+      "renderSeconds": 5.2,
+      "frame0VsLoadedReference": {
+        "worst": 255,
+        "mean": 3.8876844618055557,
+        "over2": 292871
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 255,
+        "mean": 3.9405078125,
+        "over2": 292992
+      },
+      "frame0Complete": false
+    },
+    "buildready-sync": {
+      "renderSeconds": 5.7,
+      "frame0VsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "frame0Complete": true
+    },
+    "buildready-5s": {
+      "renderSeconds": 9.8,
+      "frame0VsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 0,
+        "mean": 0,
+        "over2": 0
+      },
+      "frame0Complete": true
+    },
+    "fetch": {
+      "renderSeconds": 6.9,
+      "frame0VsLoadedReference": {
+        "worst": 4,
+        "mean": 0.0008189863040123456,
+        "over2": 145
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 3,
+        "mean": 0.0004759837962962963,
+        "over2": 22
+      },
+      "frame0Complete": true
+    },
+    "none": {
+      "renderSeconds": 6.8,
+      "frame0VsLoadedReference": {
+        "worst": 255,
+        "mean": 3.8876844618055557,
+        "over2": 292871
+      },
+      "lastFrameVsLoadedReference": {
+        "worst": 255,
+        "mean": 3.9405078125,
+        "over2": 292992
+      },
+      "frame0Complete": false
+    }
+  }
+}
