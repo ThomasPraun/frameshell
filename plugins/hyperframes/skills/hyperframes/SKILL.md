@@ -77,6 +77,8 @@ A composition that calls `FrameshellMotion.bind("<composition id>", paint)` has 
 
 ## 3D compositions (three.js)
 
+How to make a 3D shot look right (studio defaults, materials, glint, camera, beat sheet, failure and fix, a GLB from Blender) is the [3D product shot playbook](3d-playbook.md): read it before building one.
+
 A 3D template (`product-shot`) paints a three.js scene into one `<canvas>` on the motion runtime's clock. The scaffold copies the pinned three.js bundle (`frameshell-three.js`, MIT) next to `frameshell-motion.js`; `hyperframes update` refreshes both. Never load three.js from a CDN or `node_modules`: the render is offline and only files of the composition directory are cache inputs.
 
 - **One clock.** `M.bind(id, function (t) { pose(t); renderer.render(scene, camera); })`: set every position, rotation, light and camera from `t`, then render once. `check` blocks `setAnimationLoop` and `THREE.Clock` / `getDelta`, and warns on `mixer.update(dt)` (use `mixer.setTime(t)`).

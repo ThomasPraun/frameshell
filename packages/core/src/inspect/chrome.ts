@@ -21,6 +21,28 @@ interface Pending {
   reject: (error: Error) => void;
 }
 
+/**
+ * The command line of one headless Chrome. `--enable-unsafe-swiftshader`
+ * keeps WebGL alive on a machine without a GPU, so a three.js clip
+ * (ADR 0042) paints in `clip.verify` as it does in the render, which runs
+ * the same SwiftShader flags.
+ */
+export function chromeLaunchArgs(profile: string, extraArgs: readonly string[] = [], platform: NodeJS.Platform = process.platform): string[] {
+  return [
+    "--remote-debugging-pipe",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--hide-scrollbars",
+    "--mute-audio",
+    "--force-color-profile=srgb",
+    "--enable-unsafe-swiftshader",
+    `--user-data-dir=${profile}`,
+    ...(platform === "linux" ? ["--no-sandbox"] : []),
+    ...extraArgs,
+    "about:blank",
+  ];
+}
+
 /** One headless Chrome, killed with {@link Chrome.close}. */
 export class Chrome {
   readonly #process: ChildProcess;
@@ -55,18 +77,7 @@ export class Chrome {
    */
   static async launch(executable: string, extraArgs: readonly string[] = []): Promise<Chrome> {
     const profile = await mkdtemp(join(tmpdir(), "frameshell-inspect-"));
-    const args = [
-      "--remote-debugging-pipe",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--hide-scrollbars",
-      "--mute-audio",
-      "--force-color-profile=srgb",
-      `--user-data-dir=${profile}`,
-      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-      ...extraArgs,
-      "about:blank",
-    ];
+    const args = chromeLaunchArgs(profile, extraArgs);
     const child = spawn(executable, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
     const chrome = new Chrome(child, profile);
     await new Promise<void>((resolve, reject) => {
