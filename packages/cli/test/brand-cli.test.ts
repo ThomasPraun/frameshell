@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,5 +69,32 @@ describe("frameshell brand capture", () => {
   it("documents the command and rejects a wrong shape", () => {
     expect(frameshell(["--help"]).stdout).toMatch(/brand capture <url>/);
     expect(frameshell(["brand", "capture"]).code).not.toBe(0);
+  }, CLI_TIMEOUT);
+});
+
+describe("frameshell brand import-figma and brand show", () => {
+  it("shows no brand, imports a folder of frames, then shows them with scale and positions", () => {
+    const empty = frameshell(["brand", "show"]);
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).toMatch(/No brand\.json .*no brand captured or imported yet/);
+
+    const figma = join(project, "..", "Figma export");
+    mkdirSync(figma);
+    writeFileSync(join(figma, "Home.svg"), '<svg width="1440" height="900" viewBox="0 0 1440 900" xmlns="http://www.w3.org/2000/svg"><script>x()</script><rect width="1440" height="900"/></svg>');
+    const imported = frameshell(["brand", "import-figma", "../Figma export"]);
+    expect(imported.code).toBe(0);
+    expect(imported.stdout).toMatch(/Imported 1 Figma frame into brand\.json/);
+    expect(imported.stdout).toMatch(/scale 1\.333 \(widest frame 1440 px\), centred/);
+    expect(imported.stdout).toMatch(/frame assets\/brand\/figma-export\/home\.svg {2}1440x900 at 0,-60 {2}from Home\.svg {2}removed: 1 script element/);
+
+    const shown = JSON.parse(frameshell(["brand", "show", "--json"]).stdout) as { exists: boolean; imports: { id: string; frames: { path: string }[] }[] };
+    expect(shown.exists).toBe(true);
+    expect(shown.imports.map((entry) => entry.id)).toEqual(["figma-export"]);
+    expect(frameshell(["brand", "show"]).stdout).toMatch(/Figma import figma-export: .*Figma export/);
+  }, CLI_TIMEOUT);
+
+  it("rejects a wrong shape", () => {
+    expect(frameshell(["brand", "import-figma"]).code).not.toBe(0);
+    expect(frameshell(["brand", "show", "extra"]).code).not.toBe(0);
   }, CLI_TIMEOUT);
 });

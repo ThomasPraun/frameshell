@@ -59,3 +59,15 @@ It opens the page in Frameshell's own headless Chrome (public addresses only, po
 3. **Fonts:** a face is copied only when the font file itself names OFL-1.1, Apache-2.0 or UFL; its credits entry carries that licence and the foundry. Google Fonts serves subsets without licence text, so they are listed but not copied: fetch the family from the google/fonts repository and import it with `--licence OFL-1.1 --source-url <repo URL> --author <foundry>`. Any other face is listed by name only: pick an open font close to it and say so.
 4. **Style:** capture never changes `style.json`. It prints suggested `frameshell style set` lines (colours, fonts, `brand.product`, `brand.url`, `brand.mustShow`); run the ones the person agrees to.
 5. **A failed capture says so:** `Capture FAILED (little text)` means a login wall, a bot check or an empty app shell. Open `hero.png` to see what loaded, then ask the person for the logo and a screenshot. A local or staging page (`localhost`, a LAN address, port 3000) is refused: ask for screenshots or exported files.
+
+### Figma frames
+
+When the person has the product UI in Figma (or the app is behind a login), ask them to export the frames as SVG into one folder, then:
+
+```sh
+frameshell brand import-figma ~/Desktop/acme-figma
+```
+
+Each `.svg` is sanitised (scripts, foreign content, event handlers and external references removed; a file with a DTD or no size is skipped) and saved under `assets/brand/<id>/`. The whole folder gets one scale, the project canvas width divided by the widest frame, and each frame's centred position: a button keeps the same size from screen to screen, and SVG stays sharp when the camera zooms into it. The frames have credits entries with no licence: ask, then `frameshell credits set <file> --licence own` for the person's own design. Nothing is fetched.
+
+`frameshell brand show` prints everything captured and imported (files with their source, colours, accent, fonts, frames with scale and position). Read it before building anything branded; use these files, never a redrawn logo or invented UI.

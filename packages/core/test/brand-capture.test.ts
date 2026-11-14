@@ -57,7 +57,7 @@ let site: http.Server;
 let secret: Awaited<ReturnType<typeof secretListener>>;
 let options: BrandServiceOptions;
 let network: ReturnType<typeof fakeNetwork>;
-const credited: { assets: string[]; sourceUrl: string; licence?: string }[] = [];
+const credited: { assets: string[]; sourceUrl?: string; licence?: string }[] = [];
 
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_CHROME"] === "1")("brand capture in real headless Chrome", () => {
   beforeAll(async () => {

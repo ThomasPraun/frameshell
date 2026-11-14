@@ -2,7 +2,7 @@ import { brotliCompressSync, constants, deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { bestSource, coversLatinA, faceFor, fontExtension, fontLicence, isIconFamily, parseFontFaces, readFontNames } from "../src/brand/fonts.js";
 import { pickAccent, rankColors, suggestStyle } from "../src/brand/findings.js";
-import { svgProblems } from "../src/brand/page-script.js";
+import { svgProblems } from "../src/brand/svg.js";
 import { nameTable, sfnt, woff, woff2 } from "./brand-fixture.js";
 
 // Seam under test: the pure judgements of brand capture (ADR 0044): font licence from the file's own name table

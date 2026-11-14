@@ -1547,6 +1547,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         });
       });
     },
+    "brand.show": async ({ cwd }) => brands.show(await root(cwd)),
+    "brand.importFigma": async ({ cwd, dir: folder }) => {
+      const dir = await root(cwd);
+      return brands.importFigma(dir, resolve(cwd, folder), (await readProjectConfig(dir)).resolution);
+    },
     "analyze.diff": async ({ cwd, file, reference, name, lag, maxLag, every, snapshots }, _caller, request) => {
       const dir = await root(cwd);
       const path = resolve(cwd, file);

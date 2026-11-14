@@ -950,6 +950,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "beats.show":
       return executeBeats(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
     case "brand.capture":
+    case "brand.importFigma":
+    case "brand.show":
       return executeBrand(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
     case "voiceover.place":
       return executeVoiceover(conn, inv, cwd, flags.json, undefined);

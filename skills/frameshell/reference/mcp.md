@@ -8,6 +8,7 @@ Both reach the same daemon, journal the same operations and take the same argume
 
 - **MCP only:** seeing pixels (`frame_capture`, `frames_strip`, `review`, `analyze` and `analyze_diff` return the image itself), the app (`ui_state`, `ui_*`), `history_diff`, `clip_renders`, `asset_list`, `export_presets`. `job_list` and `job_cancel` have CLI twins (`job list`, `job cancel`).
 - `brand_capture { url: "https://example.com" }` is the job behind `frameshell brand capture`: the same files, `brand.json`, credits entries and `style` suggestions; see [credits.md](credits.md#brand-capture).
+- `brand_import_figma { dir: "/Users/me/Desktop/acme-figma" }` is `frameshell brand import-figma`; `brand_show {}` returns `brand.json` (captures and imports) for `frameshell brand show`.
 - **CLI:** loops over many operations from one shell call (dozens of `cut`s), and every environment where the MCP server is not registered.
 - **One channel per transaction.** A transaction groups one session's operations: the CLI's session is `FRAMESHELL_SESSION`, the server's is its own. Begin, edit and commit through the same one.
 

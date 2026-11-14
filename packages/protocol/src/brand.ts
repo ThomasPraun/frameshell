@@ -1,4 +1,4 @@
-import { BrandCaptureSchema } from "@frameshell/schema";
+import { BrandCaptureSchema, BrandImportSchema } from "@frameshell/schema";
 import { z } from "zod";
 
 /** One `style set` a brand capture suggests; never applied by the capture (ADR 0044 decision 7). */
@@ -17,4 +17,20 @@ export const BrandCaptureResultSchema = z.object({
     .array(StyleSuggestionSchema)
     .describe("Suggested `style set` calls (colours, fonts, brand.product, brand.url, brand.mustShow). Show the findings to the person and apply only what they agree to."),
   bytes: z.int().describe("Bytes transferred through the capture proxy."),
+});
+
+/** Result of `brand.show`. */
+export const BrandShowResultSchema = z.object({
+  dir: z.string().describe("Project root."),
+  manifest: z.string().describe("Project-relative manifest: `brand.json`."),
+  exists: z.boolean().describe("False when the project has no `brand.json` yet (no capture or import ran); the lists are then empty."),
+  captures: z.array(BrandCaptureSchema).describe("Brand captures from web pages (`brand.capture`), oldest first."),
+  imports: z.array(BrandImportSchema).describe("Figma folder imports (`brand.importFigma`), oldest first."),
+});
+
+/** Result of `brand.importFigma`. */
+export const BrandImportFigmaResultSchema = z.object({
+  dir: z.string().describe("Project root."),
+  manifest: z.string().describe("Project-relative manifest the import was added to: `brand.json`."),
+  import: BrandImportSchema.describe("The frames written and where each sits on the canvas, as recorded in `brand.json`."),
 });
