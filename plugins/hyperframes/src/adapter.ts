@@ -105,6 +105,8 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       process.env["HYPERFRAMES_FFMPEG_PATH"] = ffmpeg;
       process.env["HYPERFRAMES_FFPROBE_PATH"] = ffprobe;
       process.env["PRODUCER_HEADLESS_SHELL_PATH"] = chrome;
+      // SwiftShader WebGL for every render (ADR 0042): hardware GL would make 3D pixels depend on the machine's GPU.
+      process.env["PRODUCER_BROWSER_GPU_MODE"] = "software";
       // Render a copy: the producer may write scratch files next to the entry, which would count as composition edits.
       const composition = join(ctx.outDir, "composition");
       await cp(dir.path, composition, { recursive: true });

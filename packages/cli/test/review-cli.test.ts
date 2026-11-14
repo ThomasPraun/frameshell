@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,6 +127,31 @@ describe("frameshell review", () => {
       expect(delivery.stdout).toContain("craft delivery: the file differs from the export plan");
       const json = JSON.parse(frameshell(["review", "--file", "assets/take.mp4", "--preset", "youtube-1080p", "--sheets", "metrics", "--json"]).stdout) as { metrics: { delivery: { checks: { field: string; ok: boolean }[] } } };
       expect(json.metrics.delivery.checks.find((check) => check.field === "width")).toMatchObject({ ok: false });
+    },
+    120_000,
+  );
+
+  it(
+    "prints the checks of requirements.json, exits 1 on a failure and not on a waived warning",
+    () => {
+      const path = join(project, "requirements.json");
+      try {
+        writeFileSync(path, JSON.stringify({ schemaVersion: 1, film: { maxSeconds: 0.5, minSeconds: 0.5 } }));
+        const failed = frameshell(["review", "--sheets", "metrics"]);
+        expect(failed.code, failed.stderr).toBe(1);
+        expect(failed.stdout).toContain("requirements.json: 1 failed, 1 of 2 checks pass");
+        expect(failed.stdout).toContain("FAIL film.maxSeconds: the film runs 1 s, over the 0.5 s the project allows.");
+        // A craft check that fails when listed, then waived with a reason: reported, not failing.
+        writeFileSync(path, JSON.stringify({ schemaVersion: 1, fail: ["frame-0", "static"], waivers: [{ check: "frame-0", reason: "fades in" }, { check: "static", reason: "x" }] }));
+        const waived = frameshell(["review", "--sheets", "metrics"]);
+        expect(waived.code, waived.stderr).toBe(0);
+        expect(waived.stdout).toContain("requirements.json: met, 0 of 0 checks pass");
+        expect(waived.stdout).toContain("unused waiver of static: x");
+        const json = JSON.parse(frameshell(["review", "--sheets", "metrics", "--json"]).stdout) as { metrics: { waived: unknown[]; requirements: { failed: number } } };
+        expect(json.metrics.requirements.failed).toBe(0);
+      } finally {
+        rmSync(path, { force: true });
+      }
     },
     120_000,
   );

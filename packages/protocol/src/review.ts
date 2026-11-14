@@ -1,4 +1,4 @@
-import { SafeZoneSchema } from "@frameshell/schema";
+import { CRAFT_CHECKS, SafeZoneSchema } from "@frameshell/schema";
 import { z } from "zod";
 import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
@@ -133,9 +133,9 @@ export const ReviewSpanSchema = z.object({ from: z.number(), to: z.number(), sec
 export type ReviewSpan = z.output<typeof ReviewSpanSchema>;
 
 /** Checks that raise a craft warning in `metrics.craft`. */
-export const REVIEW_CHECKS = ["static", "frame-0", "blank", "reading", "peak", "phone-band", "silent", "sync", "loop-seam", "delivery", "safe-zone"] as const;
+export const REVIEW_CHECKS = CRAFT_CHECKS;
 
-/** A craft warning: a thing a reviewer would flag, with a number behind it. Warnings never fail a run. */
+/** A craft warning: a thing a reviewer would flag, with a number behind it. Only `requirements.json` can make one a failure. */
 export const ReviewCraftWarningSchema = z.object({
   check: z
     .enum(REVIEW_CHECKS)
@@ -148,6 +148,9 @@ export const ReviewCraftWarningSchema = z.object({
   from: z.number().nullable().describe("Seconds the thing starts; null when it is about the whole film."),
   to: z.number().nullable(),
   message: z.string(),
+  severity: z
+    .enum(["warn", "fail"])
+    .describe("`warn` unless the project's `requirements.json` lists the check in `fail` and no waiver covers the warning: then `fail`, and it counts in `requirements.failed`."),
 });
 
 /** See {@link ReviewCraftWarningSchema}. */
@@ -234,6 +237,55 @@ export const ReviewDeliverySchema = z.object({
 /** See {@link ReviewDeliverySchema}. */
 export type ReviewDelivery = z.output<typeof ReviewDeliverySchema>;
 
+/** What a check finds, before `requirements.json` sets its severity. */
+export type ReviewFinding = Omit<ReviewCraftWarning, "severity">;
+
+/** A craft warning a waiver of `requirements.json` covers: kept in the report with the reason, out of `craft`. */
+export const ReviewWaivedWarningSchema = ReviewCraftWarningSchema.omit({ severity: true }).extend({
+  reason: z.string().describe("The waiver's reason."),
+  clip: z.string().optional().describe("The clip the waiver names; absent for a waiver of the whole check."),
+});
+
+/** See {@link ReviewWaivedWarningSchema}. */
+export type ReviewWaivedWarning = z.output<typeof ReviewWaivedWarningSchema>;
+
+/** One expectation of `requirements.json` against the film. */
+export const ReviewRequirementCheckSchema = z.object({
+  id: z
+    .string()
+    .describe(
+      "What was checked: `film.maxSeconds`, `film.minSeconds`, `film.maxStatic`, `film.endCard`, `film.loudness.target`, `film.loudness.maxTruePeak`, `captions.minSize`, " +
+        "`clip.appearsBy`, `clip.before` or `clip.keepsMoving`.",
+    ),
+  clip: z.string().optional().describe("The clip a `clip.*` check is about."),
+  status: z.enum(["pass", "fail", "skipped"]).describe("`skipped`: it cannot be measured on this review (a file has no clips, a timeline has no loudness, the range stops short of the end...); the message says why."),
+  expected: z.union([z.string(), z.number()]).describe("What the file asks for."),
+  actual: z.union([z.string(), z.number()]).nullable().describe("What the review measured; null when skipped."),
+  message: z.string(),
+});
+
+/** See {@link ReviewRequirementCheckSchema}. */
+export type ReviewRequirementCheck = z.output<typeof ReviewRequirementCheckSchema>;
+
+/** A waiver of `requirements.json` and how many warnings it covered in this run. */
+export const ReviewWaiverUseSchema = z.object({
+  check: z.enum(REVIEW_CHECKS),
+  clip: z.string().optional(),
+  reason: z.string(),
+  matched: z.int().describe("Warnings of this run it covers; 0: it is not needed (any more) or names a clip this review cannot place."),
+});
+
+/** `requirements.json` judged against a run. */
+export const ReviewRequirementsSchema = z.object({
+  file: z.string().describe("Project-relative path of the file."),
+  checks: z.array(ReviewRequirementCheckSchema),
+  waivers: z.array(ReviewWaiverUseSchema),
+  failed: z.int().describe("Checks that failed plus craft warnings of severity `fail`: non-zero makes `frameshell review` exit 1."),
+});
+
+/** See {@link ReviewRequirementsSchema}. */
+export type ReviewRequirements = z.output<typeof ReviewRequirementsSchema>;
+
 /** The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (draft size) and its sound. */
 export const ReviewMetricsSchema = z.object({
   picture: z.object({
@@ -254,7 +306,9 @@ export const ReviewMetricsSchema = z.object({
   sync: ReviewSyncSchema.nullable().describe("Sounds against the picture events they belong to, with what random placement would score; null when there are no sounds to compare."),
   seam: ReviewSeamSchema.nullable().describe("Last frame against the first; null for a film of one frame."),
   delivery: ReviewDeliverySchema.nullable().describe("The file against the export plan; null unless a `file` is reviewed with a `preset`."),
-  craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order; empty when none."),
+  craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order, waived ones left out; empty when none."),
+  waived: z.array(ReviewWaivedWarningSchema).describe("Craft warnings a waiver of `requirements.json` covers, with its reason: accepted, not gone; empty when none."),
+  requirements: ReviewRequirementsSchema.nullable().describe("`requirements.json` judged: its checks, its waivers and what failed; null when the project has none."),
 });
 
 /** See {@link ReviewMetricsSchema}. */

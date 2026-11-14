@@ -1,0 +1,47 @@
+comparison                                                       max R/G/B  mean R/G/B           %px>1 %px>2
+still: GL identity readback vs source                            0/0/0      0.000/0.000/0.000    0 0
+still 33: ffmpeg lut3d vs float64 ref (round)                    1/1/1      0.374/0.453/0.374    0 0
+still 33: ffmpeg lut3d vs float64 ref (truncate)                 1/1/1      0.000/0.000/0.000    0 0
+still 33: shader hw-trilinear (RGBA16F) vs ffmpeg                1/1/1      0.375/0.454/0.374    0 0
+still 33: shader 8-tap (RGBA32F) vs ffmpeg                       1/1/1      0.374/0.453/0.374    0 0
+still 33: shader hw-trilinear + floor vs ffmpeg                  1/1/1      0.023/0.026/0.022    0 0
+still 33: shader 8-tap + floor vs ffmpeg                         1/1/1      0.000/0.000/0.000    0 0
+still 33: shader 8-tap vs float64 ref (round)                    1/1/1      0.000/0.000/0.000    0 0
+still 33: hw-trilinear via ImageBitmap->2D vs ffmpeg             1/1/1      0.375/0.454/0.374    0 0
+still 33: 8-tap via ImageBitmap->2D vs ffmpeg                    1/1/1      0.374/0.453/0.374    0 0
+still 65: ffmpeg lut3d vs float64 ref (round)                    1/1/1      0.365/0.446/0.365    0 0
+still 65: ffmpeg lut3d vs float64 ref (truncate)                 1/1/1      0.000/0.000/0.000    0 0
+still 65: shader hw-trilinear (RGBA16F) vs ffmpeg                1/1/1      0.366/0.447/0.366    0 0
+still 65: shader 8-tap (RGBA32F) vs ffmpeg                       1/1/1      0.365/0.446/0.365    0 0
+still 65: shader hw-trilinear + floor vs ffmpeg                  1/1/1      0.019/0.024/0.020    0 0
+still 65: shader 8-tap + floor vs ffmpeg                         1/1/1      0.000/0.000/0.000    0 0
+still 65: shader 8-tap vs float64 ref (round)                    1/1/1      0.000/0.000/0.000    0 0
+still 65: hw-trilinear via ImageBitmap->2D vs ffmpeg             1/1/1      0.366/0.447/0.366    0 0
+still 65: 8-tap via ImageBitmap->2D vs ffmpeg                    1/1/1      0.365/0.446/0.365    0 0
+still: ffmpeg 33 vs ffmpeg 65 (table size effect)                3/2/3      0.053/0.042/0.051    0.744 0.018
+video: ffmpeg auto (tagged bt709) vs bt709 full_chroma_int       13/5/15    1.821/0.808/2.035    60.58 40.084
+video: ffmpeg auto (untagged) vs ffmpeg auto (tagged)            22/37/11   7.138/11.040/3.263   98.323 95.493
+video tagged: preview 2D drawImage(VideoFrame) vs ffmpeg auto (tagged) 8/3/9      1.084/0.615/1.198    40.805 24.232
+video tagged: GL texImage2D(VideoFrame) vs ffmpeg auto (tagged)  8/3/9      1.084/0.615/1.198    40.805 24.231
+video tagged: GL vs 2D drawImage (same frame)                    1/1/1      0.000/0.000/0.000    0 0
+video tagged: GL with UNPACK colorspace conversion vs without    0/0/0      0.000/0.000/0.000    0 0
+video untagged: preview 2D drawImage(VideoFrame) vs ffmpeg auto (tagged) 8/3/9      1.084/0.615/1.198    40.805 24.232
+video untagged: GL texImage2D(VideoFrame) vs ffmpeg auto (tagged) 8/3/9      1.084/0.615/1.198    40.805 24.231
+video untagged: GL vs 2D drawImage (same frame)                  1/1/1      0.000/0.000/0.000    0 0
+video untagged: GL with UNPACK colorspace conversion vs without  0/0/0      0.000/0.000/0.000    0 0
+video 33 hw: shader vs float64 ref on GL's own decode (LUT only) 1/1/1      0.021/0.023/0.020    0 0
+video 33 hw: shader vs ffmpeg bt709 full_chroma_int + lut3d      25/9/27    2.345/1.134/2.497    74.051 55.334
+video 33 hw: shader vs ffmpeg auto (tagged) + lut3d              11/5/12    1.181/1.011/1.223    66.845 27.707
+video 33 hw: shader (untagged) vs ffmpeg auto (untagged) + lut3d 25/37/15   4.317/9.134/2.483    96.716 93.517
+video 33 8-tap: shader vs float64 ref on GL's own decode (LUT only) 1/1/1      0.000/0.000/0.000    0 0
+video 33 8-tap: shader vs ffmpeg bt709 full_chroma_int + lut3d   25/9/27    2.345/1.134/2.497    74.053 55.321
+video 33 8-tap: shader vs ffmpeg auto (tagged) + lut3d           11/5/12    1.180/1.010/1.222    66.858 27.699
+video 33 8-tap: shader (untagged) vs ffmpeg auto (untagged) + lut3d 25/37/15   4.315/9.136/2.483    96.703 93.524
+video 65 hw: shader vs float64 ref on GL's own decode (LUT only) 1/1/1      0.018/0.021/0.019    0 0
+video 65 hw: shader vs ffmpeg bt709 full_chroma_int + lut3d      25/9/27    2.339/1.130/2.493    74.008 55.41
+video 65 hw: shader vs ffmpeg auto (tagged) + lut3d              11/5/12    1.173/1.005/1.218    66.933 27.756
+video 65 hw: shader (untagged) vs ffmpeg auto (untagged) + lut3d 25/37/15   4.311/9.130/2.476    96.588 93.432
+video 65 8-tap: shader vs float64 ref on GL's own decode (LUT only) 0/1/1      0.000/0.000/0.000    0 0
+video 65 8-tap: shader vs ffmpeg bt709 full_chroma_int + lut3d   25/9/27    2.339/1.130/2.493    73.994 55.409
+video 65 8-tap: shader vs ffmpeg auto (tagged) + lut3d           11/5/12    1.172/1.004/1.218    66.94 27.775
+video 65 8-tap: shader (untagged) vs ffmpeg auto (untagged) + lut3d 25/37/15   4.310/9.132/2.476    96.596 93.432

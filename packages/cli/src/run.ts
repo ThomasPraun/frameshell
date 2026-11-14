@@ -884,7 +884,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return flags.json ? json(result) : formatCheck(result);
     }
     case "review":
-      return executeReview(conn, inv, cwd, flags.json);
+      return executeReview(conn, inv, cwd, flags.json, outcome);
     case "analyze":
     case "analyze.diff":
       return executeAnalyze(conn, inv, cwd, flags.json);

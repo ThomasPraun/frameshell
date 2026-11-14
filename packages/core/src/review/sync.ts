@@ -1,4 +1,4 @@
-import type { ReviewCraftWarning, ReviewSync } from "@frameshell/protocol";
+import type { ReviewFinding, ReviewSync } from "@frameshell/protocol";
 import type { SfxKind } from "@frameshell/schema";
 import {
   SYNC_CHANCE_MARGIN,
@@ -114,8 +114,8 @@ export function syncMetrics(input: SyncInput): ReviewSync | null {
 }
 
 /** Craft warnings of a sync: sounds early or late, and sounds no nearer a picture event than random ones. */
-export function syncWarnings(sync: ReviewSync): ReviewCraftWarning[] {
-  const warnings: ReviewCraftWarning[] = [];
+export function syncWarnings(sync: ReviewSync): ReviewFinding[] {
+  const warnings: ReviewFinding[] = [];
   for (const verdict of ["early", "late"] as const) {
     const found = sync.offsets.filter((entry) => entry.verdict === verdict);
     if (found.length === 0) continue;

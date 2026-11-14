@@ -13,6 +13,7 @@ import {
   BRAND_FILE,
   type FormatEntry,
   PEOPLE_FILE,
+  REQUIREMENTS_FILE,
   STYLE_FILE,
   type ParseResult,
   type ProjectConfig,
@@ -23,6 +24,7 @@ import {
   parseBrandManifest,
   parsePeopleFile,
   parseProjectConfig,
+  parseRequirementsFile,
   parseStyleFile,
   parseTimeline,
   parseTranscript,
@@ -355,6 +357,7 @@ const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown
   { match: (rel) => rel === PEOPLE_FILE, parse: parsePeopleFile },
   { match: (rel) => rel === STYLE_FILE, parse: parseStyleFile },
   { match: (rel) => rel === BRAND_FILE, parse: parseBrandManifest },
+  { match: (rel) => rel === REQUIREMENTS_FILE, parse: parseRequirementsFile },
 ];
 
 /** `text` parsed as JSON; `InvalidProjectFile` for `path` when it is not JSON. */

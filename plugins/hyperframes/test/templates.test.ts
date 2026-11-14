@@ -1,12 +1,15 @@
+import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CommandResult } from "@frameshell/plugin-api";
 import { type CheckReport, type UpdateReport, checkCompositions, newComposition, updateRuntime } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "../src/motion-runtime.js";
-import { TEMPLATES, type TemplateVariable } from "../src/templates/index.js";
+import { TEMPLATES, type TemplateVariable, usesThree } from "../src/templates/index.js";
+import { THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "../src/three-runtime.js";
 
 let project: string;
 type Outcome = Exclude<CommandResult, string | void>;
@@ -185,6 +188,44 @@ describe("frameshell hyperframes new --template", () => {
   });
 });
 
+describe("3D templates (ADR 0042)", () => {
+  const threeTemplates = TEMPLATES.filter(usesThree);
+
+  it("product-shot is a 3D template", () => {
+    expect(threeTemplates.map((t) => t.id)).toContain("product-shot");
+  });
+
+  it.each(threeTemplates.map((t) => t.id))("%s gets the pinned three.js bundle next to it and loads it after the motion runtime", async (id) => {
+    const result = await scaffold(["shot", "--template", id]);
+    expect(read("shot", THREE_RUNTIME_FILE)).toBe(THREE_RUNTIME);
+    expect(result.data).toMatchObject({ three: THREE_VERSION });
+    expect(result.output).toContain(`${THREE_RUNTIME_FILE} (three.js ${THREE_VERSION}, MIT`);
+    const html = read("shot");
+    expect(html.indexOf(`<script src="${MOTION_RUNTIME_FILE}"></script>`)).toBeLessThan(html.indexOf(`<script src="${THREE_RUNTIME_FILE}"></script>`));
+    // Assets gate the render through __hf.buildReady (THREE.DefaultLoadingManager gates nothing in three 0.187).
+    expect(html).toContain("window.__hf.buildReady[key] = promise");
+    expect(html).not.toMatch(/setAnimationLoop|THREE\.Clock|getDelta|performance\.now|TTFLoader/);
+  });
+
+  it("a 2D template gets no three.js bundle", async () => {
+    const result = await scaffold(["card", "--template", "end-card"]);
+    expect(existsSync(join(dirOf("card"), THREE_RUNTIME_FILE))).toBe(false);
+    expect(result.data).not.toHaveProperty("three");
+  });
+
+  it("the bundle carries the MIT notice and only the pinned three package", () => {
+    expect(THREE_RUNTIME).toMatch(/^\/\*! three\.js \d+\.\d+\.\d+ for Frameshell \(ADR 0042\)/);
+    expect(THREE_RUNTIME).toContain("The MIT License");
+    expect(THREE_RUNTIME).toContain("three.js authors");
+    expect(THREE_RUNTIME).not.toMatch(/https:\/\/cdn\.|import\(/);
+  });
+
+  it("is current (run `pnpm gen:three` after re-pinning three)", async () => {
+    const script = fileURLToPath(new URL("../scripts/build-three.mjs", import.meta.url));
+    await expect(promisify(execFile)(process.execPath, [script, "--check"])).resolves.toBeDefined();
+  }, 60_000);
+});
+
 describe("frameshell hyperframes update", () => {
   const update = async (args: string[] = []) => {
     const result = (await updateRuntime.run({ args, cwd: project, project: { dir: project } })) as Outcome;
@@ -251,6 +292,27 @@ describe("frameshell hyperframes update", () => {
     const { output, report } = await update();
     expect(output).toContain("No motion compositions");
     expect(report.compositions).toEqual([]);
+  });
+
+  it("refreshes an older three.js bundle of a 3D composition next to its runtime, and keeps an edited one unless --force", async () => {
+    await scaffold(["shot", "--template", "product-shot"]);
+    await scaffold(["edit", "--template", "product-shot"]);
+    const bundle = (name: string) => join(dirOf(name), THREE_RUNTIME_FILE);
+    writeFileSync(bundle("shot"), THREE_RUNTIME.replace(`three.js ${THREE_VERSION} for`, "three.js 0.180.0 for"));
+    writeFileSync(bundle("edit"), `${THREE_RUNTIME}\n/* local tweak */`);
+    const { report, output } = await update();
+    expect(report.three).toBe(THREE_VERSION);
+    expect(report.compositions).toEqual([
+      { file: "compositions/hyperframes/edit/frameshell-motion.js", status: "current", from: MOTION_RUNTIME_VERSION, written: false },
+      { file: "compositions/hyperframes/edit/frameshell-three.js", status: "modified", from: THREE_VERSION, written: false },
+      { file: "compositions/hyperframes/shot/frameshell-motion.js", status: "current", from: MOTION_RUNTIME_VERSION, written: false },
+      { file: "compositions/hyperframes/shot/frameshell-three.js", status: "updated", from: "0.180.0", written: true },
+    ]);
+    expect(output).toContain(`updated three.js 0.180.0 -> ${THREE_VERSION}`);
+    expect(output).toContain("edited copy of three.js");
+    expect(readFileSync(bundle("shot"), "utf8")).toBe(THREE_RUNTIME);
+    await update(["edit", "--force"]);
+    expect(readFileSync(bundle("edit"), "utf8")).toBe(THREE_RUNTIME);
   });
 
   it("rejects unknown flags and a second composition", async () => {

@@ -18,7 +18,7 @@ export {
 } from "@frameshell/schema/motion";
 
 /** Version of this runtime; a composition's copy names it in its first line. */
-export const version = "0.2.0";
+export const version = "0.3.0";
 
 /** Paints the whole composition at `t` seconds; must depend on nothing but `t`. */
 export type Paint = (t: number) => void;
@@ -43,7 +43,22 @@ export interface MotionTimeline {
 interface MotionWindow {
   __timelines?: Record<string, unknown>;
   addEventListener(type: "hf-seek", listener: (event: { detail?: { time?: unknown } }) => void): void;
-  document?: { querySelectorAll(selector: string): ArrayLike<{ getAttribute(name: string): string | null }> };
+  document?: {
+    querySelectorAll(selector: string): ArrayLike<{ getAttribute(name: string): string | null }>;
+    documentElement?: { style: { filter: string } };
+  };
+}
+
+/**
+ * Makes Chrome raster the whole page again on the next frame: a changed filter on the document
+ * element invalidates every element under it. Without it Chrome re-rasters only the rectangles it
+ * thinks changed into the previous tile ("partial raster"), and when a capture happens after seeks
+ * that were never captured (motion blur samples) a few edge pixels keep an older pose. Both values
+ * leave every pixel as it is; alternating keeps a filter (one containing block) after the first seek.
+ */
+function repaintAll(page: MotionWindow): void {
+  const style = page.document?.documentElement?.style;
+  if (style) style.filter = style.filter === "opacity(1)" ? "brightness(1)" : "opacity(1)";
 }
 
 declare const window: MotionWindow | undefined;
@@ -65,6 +80,8 @@ function declaredDuration(page: MotionWindow, compositionId: string): number {
  * `window.__timelines`, which renders and live preview seek frame by frame.
  * Until that timeline is first driven, the runtime's `hf-seek` event paints
  * instead, so a runtime that stops driving registered timelines still moves.
+ * Every seek also changes the document element's inline `filter` (no pixel
+ * change) so Chrome rasters the whole page again.
  */
 export function bind(compositionId: string, paint: Paint): MotionTimeline {
   const page = globalThis as unknown as MotionWindow;
@@ -84,6 +101,7 @@ export function bind(compositionId: string, paint: Paint): MotionTimeline {
     seek(seconds) {
       driven = true;
       draw(seconds);
+      repaintAll(page);
       return timeline;
     },
     time: () => current,
@@ -92,7 +110,9 @@ export function bind(compositionId: string, paint: Paint): MotionTimeline {
   draw(0);
   registry[compositionId] = timeline;
   page.addEventListener("hf-seek", (event) => {
-    if (!driven) draw(event.detail?.time);
+    if (driven) return;
+    draw(event.detail?.time);
+    repaintAll(page);
   });
   return timeline;
 }
@@ -121,16 +141,30 @@ export interface Writable {
 const fixed = (value: number) => String(Math.round(value * 1000) / 1000);
 
 /**
+ * Chrome repaints a transform change only above about 1/80 px of screen translation
+ * or 1e-4 in the matrix (measured in docs/research/motion-blur.md); a smaller change keeps
+ * the raster of an older pose, so the picture would depend on which times were painted before.
+ * Translation steps of 1/32 px and rotation steps of 0.02° (3.5e-4) are always repainted.
+ */
+const TRANSLATE_STEPS_PER_PX = 32;
+const ROTATE_STEPS_PER_DEGREE = 50;
+const onGrid = (value: number, stepsPerUnit: number) => String(Math.round(value * stepsPerUnit) / stepsPerUnit);
+
+/**
  * Writes `pose` to `element` as a 2D `transform` and `opacity`, every field
  * every time, so nothing from an earlier frame leaks into this one. Never the
  * `translate`, `scale` or `rotate` properties (element adjustments own them,
  * ADR 0021) and never 3D or `will-change` (they break frame-exact renders).
+ * `x` and `y` land on a 1/32 px grid and `rotate` on a 0.02° grid, so every
+ * change the page writes is one Chrome repaints (scale and opacity: 0.001).
  */
 export function write(element: Writable, pose: Pose): void {
   const scaleX = pose.scaleX ?? pose.scale ?? 1;
   const scaleY = pose.scaleY ?? pose.scale ?? 1;
-  element.style.transform =
-    `translate(${fixed(pose.x ?? 0)}px, ${fixed(pose.y ?? 0)}px) rotate(${fixed(pose.rotate ?? 0)}deg) scale(${fixed(scaleX)}, ${fixed(scaleY)})`;
+  const x = onGrid(pose.x ?? 0, TRANSLATE_STEPS_PER_PX);
+  const y = onGrid(pose.y ?? 0, TRANSLATE_STEPS_PER_PX);
+  const rotate = onGrid(pose.rotate ?? 0, ROTATE_STEPS_PER_DEGREE);
+  element.style.transform = `translate(${x}px, ${y}px) rotate(${rotate}deg) scale(${fixed(scaleX)}, ${fixed(scaleY)})`;
   element.style.opacity = fixed(Math.min(1, Math.max(0, pose.opacity ?? 1)));
 }
 

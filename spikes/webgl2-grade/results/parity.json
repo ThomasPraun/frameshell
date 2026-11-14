@@ -1,0 +1,324 @@
+[
+ {
+  "name": "still: GL identity readback vs source",
+  "maxRGB": "0/0/0",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: ffmpeg lut3d vs float64 ref (round)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.374/0.453/0.374",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: ffmpeg lut3d vs float64 ref (truncate)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: shader hw-trilinear (RGBA16F) vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.375/0.454/0.374",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: shader 8-tap (RGBA32F) vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.374/0.453/0.374",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: shader hw-trilinear + floor vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.023/0.026/0.022",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: shader 8-tap + floor vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: shader 8-tap vs float64 ref (round)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: hw-trilinear via ImageBitmap->2D vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.375/0.454/0.374",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 33: 8-tap via ImageBitmap->2D vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.374/0.453/0.374",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: ffmpeg lut3d vs float64 ref (round)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.365/0.446/0.365",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: ffmpeg lut3d vs float64 ref (truncate)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: shader hw-trilinear (RGBA16F) vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.366/0.447/0.366",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: shader 8-tap (RGBA32F) vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.365/0.446/0.365",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: shader hw-trilinear + floor vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.019/0.024/0.020",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: shader 8-tap + floor vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: shader 8-tap vs float64 ref (round)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: hw-trilinear via ImageBitmap->2D vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.366/0.447/0.366",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still 65: 8-tap via ImageBitmap->2D vs ffmpeg",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.365/0.446/0.365",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "still: ffmpeg 33 vs ffmpeg 65 (table size effect)",
+  "maxRGB": "3/2/3",
+  "meanRGB": "0.053/0.042/0.051",
+  "pctOver1": 0.744,
+  "pctOver2": 0.018
+ },
+ {
+  "name": "video: ffmpeg auto (tagged bt709) vs bt709 full_chroma_int",
+  "maxRGB": "13/5/15",
+  "meanRGB": "1.821/0.808/2.035",
+  "pctOver1": 60.58,
+  "pctOver2": 40.084
+ },
+ {
+  "name": "video: ffmpeg auto (untagged) vs ffmpeg auto (tagged)",
+  "maxRGB": "22/37/11",
+  "meanRGB": "7.138/11.040/3.263",
+  "pctOver1": 98.323,
+  "pctOver2": 95.493
+ },
+ {
+  "name": "video tagged: preview 2D drawImage(VideoFrame) vs ffmpeg auto (tagged)",
+  "maxRGB": "8/3/9",
+  "meanRGB": "1.084/0.615/1.198",
+  "pctOver1": 40.805,
+  "pctOver2": 24.232
+ },
+ {
+  "name": "video tagged: GL texImage2D(VideoFrame) vs ffmpeg auto (tagged)",
+  "maxRGB": "8/3/9",
+  "meanRGB": "1.084/0.615/1.198",
+  "pctOver1": 40.805,
+  "pctOver2": 24.231
+ },
+ {
+  "name": "video tagged: GL vs 2D drawImage (same frame)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video tagged: GL with UNPACK colorspace conversion vs without",
+  "maxRGB": "0/0/0",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video untagged: preview 2D drawImage(VideoFrame) vs ffmpeg auto (tagged)",
+  "maxRGB": "8/3/9",
+  "meanRGB": "1.084/0.615/1.198",
+  "pctOver1": 40.805,
+  "pctOver2": 24.232
+ },
+ {
+  "name": "video untagged: GL texImage2D(VideoFrame) vs ffmpeg auto (tagged)",
+  "maxRGB": "8/3/9",
+  "meanRGB": "1.084/0.615/1.198",
+  "pctOver1": 40.805,
+  "pctOver2": 24.231
+ },
+ {
+  "name": "video untagged: GL vs 2D drawImage (same frame)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video untagged: GL with UNPACK colorspace conversion vs without",
+  "maxRGB": "0/0/0",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video 33 hw: shader vs float64 ref on GL's own decode (LUT only)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.021/0.023/0.020",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video 33 hw: shader vs ffmpeg bt709 full_chroma_int + lut3d",
+  "maxRGB": "25/9/27",
+  "meanRGB": "2.345/1.134/2.497",
+  "pctOver1": 74.051,
+  "pctOver2": 55.334
+ },
+ {
+  "name": "video 33 hw: shader vs ffmpeg auto (tagged) + lut3d",
+  "maxRGB": "11/5/12",
+  "meanRGB": "1.181/1.011/1.223",
+  "pctOver1": 66.845,
+  "pctOver2": 27.707
+ },
+ {
+  "name": "video 33 hw: shader (untagged) vs ffmpeg auto (untagged) + lut3d",
+  "maxRGB": "25/37/15",
+  "meanRGB": "4.317/9.134/2.483",
+  "pctOver1": 96.716,
+  "pctOver2": 93.517
+ },
+ {
+  "name": "video 33 8-tap: shader vs float64 ref on GL's own decode (LUT only)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video 33 8-tap: shader vs ffmpeg bt709 full_chroma_int + lut3d",
+  "maxRGB": "25/9/27",
+  "meanRGB": "2.345/1.134/2.497",
+  "pctOver1": 74.053,
+  "pctOver2": 55.321
+ },
+ {
+  "name": "video 33 8-tap: shader vs ffmpeg auto (tagged) + lut3d",
+  "maxRGB": "11/5/12",
+  "meanRGB": "1.180/1.010/1.222",
+  "pctOver1": 66.858,
+  "pctOver2": 27.699
+ },
+ {
+  "name": "video 33 8-tap: shader (untagged) vs ffmpeg auto (untagged) + lut3d",
+  "maxRGB": "25/37/15",
+  "meanRGB": "4.315/9.136/2.483",
+  "pctOver1": 96.703,
+  "pctOver2": 93.524
+ },
+ {
+  "name": "video 65 hw: shader vs float64 ref on GL's own decode (LUT only)",
+  "maxRGB": "1/1/1",
+  "meanRGB": "0.018/0.021/0.019",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video 65 hw: shader vs ffmpeg bt709 full_chroma_int + lut3d",
+  "maxRGB": "25/9/27",
+  "meanRGB": "2.339/1.130/2.493",
+  "pctOver1": 74.008,
+  "pctOver2": 55.41
+ },
+ {
+  "name": "video 65 hw: shader vs ffmpeg auto (tagged) + lut3d",
+  "maxRGB": "11/5/12",
+  "meanRGB": "1.173/1.005/1.218",
+  "pctOver1": 66.933,
+  "pctOver2": 27.756
+ },
+ {
+  "name": "video 65 hw: shader (untagged) vs ffmpeg auto (untagged) + lut3d",
+  "maxRGB": "25/37/15",
+  "meanRGB": "4.311/9.130/2.476",
+  "pctOver1": 96.588,
+  "pctOver2": 93.432
+ },
+ {
+  "name": "video 65 8-tap: shader vs float64 ref on GL's own decode (LUT only)",
+  "maxRGB": "0/1/1",
+  "meanRGB": "0.000/0.000/0.000",
+  "pctOver1": 0,
+  "pctOver2": 0
+ },
+ {
+  "name": "video 65 8-tap: shader vs ffmpeg bt709 full_chroma_int + lut3d",
+  "maxRGB": "25/9/27",
+  "meanRGB": "2.339/1.130/2.493",
+  "pctOver1": 73.994,
+  "pctOver2": 55.409
+ },
+ {
+  "name": "video 65 8-tap: shader vs ffmpeg auto (tagged) + lut3d",
+  "maxRGB": "11/5/12",
+  "meanRGB": "1.172/1.004/1.218",
+  "pctOver1": 66.94,
+  "pctOver2": 27.775
+ },
+ {
+  "name": "video 65 8-tap: shader (untagged) vs ffmpeg auto (untagged) + lut3d",
+  "maxRGB": "25/37/15",
+  "meanRGB": "4.310/9.132/2.476",
+  "pctOver1": 96.596,
+  "pctOver2": 93.432
+ }
+]

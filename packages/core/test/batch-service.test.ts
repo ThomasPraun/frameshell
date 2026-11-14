@@ -283,6 +283,21 @@ describe("BatchService", () => {
       expect(manifest.entries.map((e) => e.status)).toEqual(["done", "done", "done", "done"]);
     });
 
+    it("has no rows left, and takes a re-run, as soon as the last job ends, before the manifest says done", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows: [{ id: "a" }] });
+      const batches = service();
+      const out = join(root, "exports", "launch");
+      await batches.render(root, root, request(file));
+      expect(batches.active(root)).toBe(true);
+      await finishNext();
+      await queue.drained();
+      // The manifest write that says `done` is still in flight here.
+      expect(batches.active(root)).toBe(false);
+      expect(await batches.render(root, root, request(file))).toMatchObject({ jobs: [], skipped: ["a"] });
+      expect(manifestOf(out).state).toBe("done");
+    });
+
     it("counts rows a stopped daemon left queued or running as failed, and settles the ones it leaves alone", async () => {
       const root = tempDir();
       const file = batchFile(root, { rows });

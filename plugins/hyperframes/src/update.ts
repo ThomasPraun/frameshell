@@ -4,6 +4,7 @@ import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/p
 import { compositionDir } from "./adapter.js";
 import { COMPOSITIONS, entryOf, scaffoldedEntries } from "./check.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "./motion-runtime.js";
+import { THREE_HEADER, THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "./three-runtime.js";
 
 const USAGE = "usage: frameshell hyperframes update [<composition>] [--dry-run] [--force]; <composition> is a name (`intro`), a composition directory or its HTML entry";
 
@@ -20,9 +21,9 @@ export type RuntimeStatus =
   /** Not a Frameshell runtime (no header); kept unless `--force`. */
   | "foreign";
 
-/** One composition's result in `data.compositions` of `frameshell hyperframes update`. */
+/** One frozen copy's result in `data.compositions` of `frameshell hyperframes update`. */
 export interface RuntimeUpdate {
-  /** Project-relative, `/`-separated path of the runtime copy. */
+  /** Project-relative, `/`-separated path of the copy: `frameshell-motion.js`, or `frameshell-three.js` of a 3D composition. */
   file: string;
   status: RuntimeStatus;
   /** Version the copy named before; null when it named none. */
@@ -33,17 +34,43 @@ export interface RuntimeUpdate {
 
 /** `data` of `frameshell hyperframes update`. */
 export interface UpdateReport {
-  /** Version the plugin bundles. */
+  /** Motion runtime version the plugin bundles. */
   runtime: string;
+  /** three.js version the plugin bundles (ADR 0042). */
+  three: string;
   dryRun: boolean;
   compositions: RuntimeUpdate[];
 }
 
-const HEADER = /^\/\* Frameshell motion runtime (\d+)\.(\d+)\.(\d+) \(ADR 0033\)/;
+/** A script the plugin ships and scaffolding copies into compositions. */
+interface Bundle {
+  file: string;
+  text: string;
+  version: string;
+  /** What the output calls it. */
+  label: string;
+  /** First line of a copy, capturing its version. */
+  header: RegExp;
+}
 
-/** Version named in the first line of a runtime copy, as numbers; null when it is not a Frameshell runtime. */
-function versionOf(text: string): [number, number, number] | null {
-  const match = HEADER.exec(text);
+const MOTION: Bundle = {
+  file: MOTION_RUNTIME_FILE,
+  text: MOTION_RUNTIME,
+  version: MOTION_RUNTIME_VERSION,
+  label: "runtime",
+  header: /^\/\* Frameshell motion runtime (\d+)\.(\d+)\.(\d+) \(ADR 0033\)/,
+};
+const THREE: Bundle = {
+  file: THREE_RUNTIME_FILE,
+  text: THREE_RUNTIME,
+  version: THREE_VERSION,
+  label: "three.js",
+  header: THREE_HEADER,
+};
+
+/** Version named in the first line of a copy, as numbers; null when it is not a Frameshell copy of `bundle`. */
+function versionOf(bundle: Bundle, text: string): [number, number, number] | null {
+  const match = bundle.header.exec(text);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
@@ -68,7 +95,8 @@ function parseArgs(args: readonly string[]): { composition: string | undefined; 
 /**
  * `frameshell hyperframes update [<composition>] [--dry-run] [--force]`:
  * refreshes the frozen copies of the motion runtime (`frameshell-motion.js`)
- * that `hyperframes new --template` put next to compositions (ADR 0033).
+ * that `hyperframes new --template` put next to compositions (ADR 0033), and
+ * of the three.js bundle (`frameshell-three.js`) next to 3D ones (ADR 0042).
  * A copy never changes by itself, so a clip renders the same after a plugin
  * upgrade; this applies runtime fixes on request. Older Frameshell copies are
  * replaced; an edited copy, a newer one or a file that is not ours is kept
@@ -76,37 +104,43 @@ function parseArgs(args: readonly string[]): { composition: string | undefined; 
  * refreshed copy re-render.
  */
 export const updateRuntime: PluginCommand = {
-  description: "Refresh the frozen frameshell-motion.js copies in motion compositions (--dry-run to preview)",
+  description: "Refresh the frozen frameshell-motion.js (and frameshell-three.js) copies in motion compositions (--dry-run to preview)",
   async run(ctx: CommandContext): Promise<CommandResult> {
     const { composition, dryRun, force } = parseArgs(ctx.args);
     const entries = composition === undefined ? await scaffoldedEntries(ctx.project.dir) : [await entryOf(composition, ctx)];
-    const report: UpdateReport = { runtime: MOTION_RUNTIME_VERSION, dryRun, compositions: [] };
+    const report: UpdateReport = { runtime: MOTION_RUNTIME_VERSION, three: THREE_VERSION, dryRun, compositions: [] };
+    const bundleOf = new Map<string, Bundle>();
     for (const entry of entries) {
       const dir = await compositionDir(ctx.project.dir, { id: entry, source: entry });
-      const path = join(dir.path, MOTION_RUNTIME_FILE);
-      const file = posix.join(dir.rel, MOTION_RUNTIME_FILE);
-      const text = await readFile(path, "utf8").catch(() => null);
-      if (text === null) {
-        if (composition !== undefined) throw new Error(`${file} does not exist: ${entry} is not a motion composition (scaffold one with \`frameshell hyperframes new <name> --template <id>\`)`);
-        continue;
+      for (const bundle of [MOTION, THREE]) {
+        const path = join(dir.path, bundle.file);
+        const file = posix.join(dir.rel, bundle.file);
+        const text = await readFile(path, "utf8").catch(() => null);
+        if (text === null) {
+          if (bundle === THREE) continue;
+          if (composition !== undefined) throw new Error(`${file} does not exist: ${entry} is not a motion composition (scaffold one with \`frameshell hyperframes new <name> --template <id>\`)`);
+          break;
+        }
+        const have = versionOf(bundle, text);
+        const order = have === null ? 0 : compare(have, versionOf(bundle, bundle.text)!);
+        const status: RuntimeStatus = text === bundle.text ? "current" : have === null ? "foreign" : order < 0 ? "updated" : order > 0 ? "newer" : "modified";
+        const written = status === "updated" || (force && status !== "current");
+        if (written && !dryRun) await writeFile(path, bundle.text);
+        report.compositions.push({ file, status, from: have ? have.join(".") : null, written });
+        bundleOf.set(file, bundle);
       }
-      const have = versionOf(text);
-      const status: RuntimeStatus =
-        text === MOTION_RUNTIME ? "current" : have === null ? "foreign" : compare(have, versionOf(MOTION_RUNTIME)!) < 0 ? "updated" : compare(have, versionOf(MOTION_RUNTIME)!) > 0 ? "newer" : "modified";
-      const written = status === "updated" || (force && status !== "current");
-      if (written && !dryRun) await writeFile(path, MOTION_RUNTIME);
-      report.compositions.push({ file, status, from: have ? have.join(".") : null, written });
     }
     if (composition === undefined && report.compositions.length === 0) {
       return { output: `No motion compositions in ${COMPOSITIONS}/ (none has ${MOTION_RUNTIME_FILE}).`, data: report };
     }
     const lines = report.compositions.map((item) => {
+      const { label, version } = bundleOf.get(item.file)!;
       const said = {
-        current: `already runtime ${report.runtime}`,
-        updated: `${dryRun ? "would update" : "updated"} runtime ${item.from} -> ${report.runtime}`,
-        modified: `edited copy of runtime ${item.from}${item.written ? "" : ", kept (--force replaces it)"}`,
-        newer: `runtime ${item.from} is newer than this plugin's ${report.runtime}${item.written ? "" : ", kept (--force replaces it)"}`,
-        foreign: `not a Frameshell runtime${item.written ? "" : ", kept (--force replaces it)"}`,
+        current: `already ${label} ${version}`,
+        updated: `${dryRun ? "would update" : "updated"} ${label} ${item.from} -> ${version}`,
+        modified: `edited copy of ${label} ${item.from}${item.written ? "" : ", kept (--force replaces it)"}`,
+        newer: `${label} ${item.from} is newer than this plugin's ${version}${item.written ? "" : ", kept (--force replaces it)"}`,
+        foreign: `not a Frameshell ${label}${item.written ? "" : ", kept (--force replaces it)"}`,
       }[item.status];
       const forced = item.written && item.status !== "updated" ? ` (--force: ${dryRun ? "would replace" : "replaced"})` : "";
       return `${item.file}: ${said}${forced}`;

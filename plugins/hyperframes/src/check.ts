@@ -3,6 +3,7 @@ import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/plugin-api";
 import { compositionDir } from "./adapter.js";
 import { seekSafetyFindings } from "./seek-safety.js";
+import { THREE_HEADER, THREE_RUNTIME_FILE } from "./three-runtime.js";
 
 /** Directory of `frameshell hyperframes new` compositions, project-relative. */
 export const COMPOSITIONS = "compositions/hyperframes";
@@ -108,6 +109,26 @@ async function isDirectory(path: string): Promise<boolean> {
   return (await stat(path).catch(() => null))?.isDirectory() ?? false;
 }
 
+/** Linter rule the three.js bundle trips (its `WebGLAnimation`), reported on the entry HTML without a position. */
+const BUNDLE_RAF = "requestanimationframe_in_composition";
+
+/**
+ * The three.js bundle of a 3D composition (ADR 0042), when the directory holds a Frameshell copy of any version:
+ * whether the author's own scripts call `requestAnimationFrame`. The linter scans local scripts, and the library's
+ * UUIDs (`Math.random`) and render loop would block every 3D composition although neither changes a pixel; the
+ * scene code itself is still linted.
+ */
+async function bundledThree(dir: string): Promise<{ authorRaf: boolean } | null> {
+  const text = await readFile(join(dir, THREE_RUNTIME_FILE), "utf8").catch(() => null);
+  if (text === null || !THREE_HEADER.test(text)) return null;
+  const files = await readdir(dir, { recursive: true }).catch(() => []);
+  let authorRaf = false;
+  for (const file of files.filter((f) => /\.(html?|m?js)$/i.test(f) && f !== THREE_RUNTIME_FILE && !f.split(/[\\/]/).includes("node_modules"))) {
+    if ((await readFile(join(dir, file), "utf8").catch(() => "")).includes("requestAnimationFrame")) authorRaf = true;
+  }
+  return { authorRaf };
+}
+
 /** Lints one composition: `@hyperframes/lint` over its directory, plus the seek-safety rules of {@link seekSafetyFindings}. */
 async function checkComposition(projectDir: string, entry: string): Promise<CheckedComposition> {
   const { lintProject } = await import("@hyperframes/lint");
@@ -123,9 +144,11 @@ async function checkComposition(projectDir: string, entry: string): Promise<Chec
   };
   // The composition directory is the HyperFrames project (the render copies exactly it); only `index.html` is its default entry.
   const project = await lintProject(dir.path, name === "index.html" ? undefined : join(dir.path, name), { host: "cli" });
+  const bundled = await bundledThree(dir.path);
   const findings: CheckFinding[] = [];
   for (const { file, result } of project.results) {
     for (const finding of result.findings) {
+      if (bundled && (projectRel(finding.file ?? file) === posixJoin(dir.rel, THREE_RUNTIME_FILE) || (finding.code === BUNDLE_RAF && !bundled.authorRaf))) continue;
       findings.push({
         file: projectRel(finding.file ?? file),
         line: finding.line ?? null,

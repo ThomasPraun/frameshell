@@ -49,6 +49,8 @@ import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
 import { fileOnsets, takeOnsets } from "./onsets.js";
 import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
+import { type ClipSpan, judgeRequirements } from "./requirements.js";
+import { readRequirementsFile } from "./requirements-file.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt } from "./safe.js";
 import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
 import { syncMetrics } from "./sync.js";
@@ -115,7 +117,7 @@ export class ReviewService {
     await mkdir(scratch, { recursive: true });
     try {
       const ffmpeg = await this.#options.ffmpeg(root);
-      const { source, critical, subtitles, viewed, loaded, warnings } = await this.#open(root, request, ffmpeg, scratch);
+      const { source, critical, subtitles, viewed, loaded, clips, warnings } = await this.#open(root, request, ffmpeg, scratch);
       const range = frameRange(source.frames, source.fps, request.from, request.to);
       if (!range) {
         const last = frameTime(source.frames - 1, source.fps);
@@ -226,6 +228,22 @@ export class ReviewService {
           delivery,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
         });
+        const requirements = await readRequirementsFile(root);
+        if (requirements) {
+          const judged = judgeRequirements({
+            requirements,
+            metrics,
+            series,
+            filmSeconds: source.frames / source.fps,
+            range: seconds,
+            fps: source.fps,
+            timeline: loaded?.timeline ?? null,
+            clips,
+            tracks: loaded ? subtitles : null,
+          });
+          metrics = judged.metrics;
+          warnings.push(...judged.notes);
+        }
         await writeFile(join(dir, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
       }
 
@@ -405,11 +423,11 @@ export class ReviewService {
     request: ReviewRequest,
     ffmpeg: string,
     scratch: string,
-  ): Promise<{ source: FilmSource; critical: Critical[]; subtitles: ResolvedSubtitleTrack[]; viewed: Pick<ReviewResult, "view" | "proposal">; loaded: LoadedTimeline | null; warnings: string[] }> {
+  ): Promise<{ source: FilmSource; critical: Critical[]; subtitles: ResolvedSubtitleTrack[]; viewed: Pick<ReviewResult, "view" | "proposal">; loaded: LoadedTimeline | null; clips: ClipSpan[] | null; warnings: string[] }> {
     const warnings: string[] = [];
     if (request.file) {
       const source = await fileSource(ffmpeg, await this.#options.ffprobe(root), request.file);
-      return { source, critical: [], subtitles: [], viewed: { view: "current", proposal: null }, loaded: null, warnings };
+      return { source, critical: [], subtitles: [], viewed: { view: "current", proposal: null }, loaded: null, clips: null, warnings };
     }
     const { timelines, exports } = this.#options;
     const loaded = { ...(await timelines.viewTimeline(root, request.timeline, request.view)), ...(request.formats ? { formats: request.formats } : {}) };
@@ -437,7 +455,8 @@ export class ReviewService {
       },
       scratch,
     );
-    return { source, critical: timelineCritical(shown, cues), subtitles, viewed: { view: loaded.view, proposal: loaded.proposal }, loaded, warnings };
+    const clips = shown.tracks.flatMap((track) => (track.clips as ClipSpan[]).map(({ id, start, end }) => ({ id, start, end })));
+    return { source, critical: timelineCritical(shown, cues), subtitles, viewed: { view: loaded.view, proposal: loaded.proposal }, loaded, clips, warnings };
   }
 
   /**
