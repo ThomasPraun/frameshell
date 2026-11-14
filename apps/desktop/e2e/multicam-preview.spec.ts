@@ -218,6 +218,7 @@ test("plays across shot changes: only whole layouts, in order, one decoder per v
   test.info().annotations.push({ type: "3 angles", description: JSON.stringify(stats) });
   expect(stats?.["decoders"]).toBe(3);
   expect(stats?.["audioChunks"]).toBeGreaterThan(0);
+  expect(stats?.["graded"], "no clip has a grade: no picture takes the grade pass's extra copy").toBe(0);
 });
 
 test("a 4-angle grid plays with four decoders", async () => {

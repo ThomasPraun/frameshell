@@ -58,6 +58,7 @@ export type ToEngine =
   /** Port to the program AudioWorklet (absent when audio is unavailable). */
   | { type: "audio"; port: MessagePort }
   | { type: "size"; width: number; height: number }
+  /** `program.grades` holds only the tables the engine has not had yet (`PreviewPlayer.setProgram`). */
   | { type: "program"; program: Program }
   | { type: "clock"; sample: ClockSample }
   | { type: "play"; anchor: Anchor; clock: ClockSample }

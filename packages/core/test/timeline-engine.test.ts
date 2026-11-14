@@ -486,6 +486,11 @@ describe("clip.move, trim, split, remove, set", () => {
 
     expect((await rejection(apply(footage, "clip.set", { clip: "c_0001", grade: { contrast: 9 } }))).code).toBe(ErrorCode.InvalidParams);
     expect((await rejection(apply(footage, "clip.set", { clip: "c_0001", grade: { lut: "luts/warm.png" } }))).code).toBe(ErrorCode.InvalidParams);
+    for (const outside of ["/luts/warm.cube", "C:\\luts\\warm.cube", "../warm.cube", "luts/../../warm.cube", "..\\warm.cube"]) {
+      expect((await rejection(apply(footage, "clip.set", { clip: "c_0001", grade: { lut: outside } }))).message).toMatch(/is outside the project/);
+    }
+    const inside = (await apply(footage, "clip.set", { clip: "c_0001", grade: { lut: "luts/old/../warm.cube" } })).timeline;
+    expect(clipsOf(inside, "t_v")[0]).toMatchObject({ grade: { lut: "luts/old/../warm.cube" } });
     const card = (await apply(footage, "clip.add", { track: "t_v", type: "hyperframes", duration: 2, start: 30, props: { title: "A" } })).timeline;
     expect((await rejection(apply(card, "clip.set", { clip: "c_0002", grade: { exposure: 1 } }))).message).toMatch(/only media clips take `grade`/);
   });

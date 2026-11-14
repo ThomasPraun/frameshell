@@ -5,7 +5,7 @@ import probeWorkletUrl from "./probe-recorder.worklet.ts?worker&url";
 import programWorkletUrl from "./program-audio.worklet.ts?worker&url";
 import type { Anchor, ClockSample, EngineStats, FromEngine, LayerAlpha, ToEngine } from "./engine-protocol.js";
 import { heardTime, programSample } from "./engine-protocol.js";
-import { PROGRAM_SAMPLE_RATE, type Program } from "./program.js";
+import { PROGRAM_SAMPLE_RATE, type Program, withNewTables } from "./program.js";
 import type { TransportPlayer } from "./transport.js";
 import { t } from "../i18n.js";
 
@@ -51,6 +51,8 @@ export class PreviewPlayer implements TransportPlayer {
   #program: Program | null = null;
   /** Programs sent to the engine: a `shown` of an earlier one is stale. */
   #programs = 0;
+  /** Keys of the grade tables the engine holds: those of the last program sent. */
+  #gradeKeys = new Set<string>();
   #context: AudioContext | null = null;
   /** Program output gain; zero while {@link setMuted}, so the audio clock keeps running. */
   #output: GainNode | null = null;
@@ -109,7 +111,9 @@ export class PreviewPlayer implements TransportPlayer {
   setProgram(program: Program): void {
     this.#program = program;
     this.#programs++;
-    this.#send({ type: "program", program });
+    this.#send({ type: "program", program: withNewTables(program, this.#gradeKeys) });
+    // The engine drops the tables this program does not use: they are sent again if a later one does.
+    this.#gradeKeys = new Set(Object.keys(program.grades ?? {}));
     this.#events.onShown?.(null);
   }
 

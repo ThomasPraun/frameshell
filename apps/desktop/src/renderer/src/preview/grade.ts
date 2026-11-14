@@ -56,9 +56,9 @@ export type GradeSource = VideoFrame | ImageBitmap;
 
 /**
  * One WebGL2 context per engine, made when the first program with a grade arrives (not on the first graded frame:
- * context and shader take up to 0.4 s cold). Tables are uploaded once per `gradeKey`. Pictures without a grade never
- * reach it. `apply` returns null when WebGL2 is unavailable or the context is lost: the caller draws the picture as it
- * is, and `onUnavailable` is told once.
+ * context and shader take up to 0.4 s cold). Tables are uploaded once per key, and again after a restored context.
+ * Pictures without a grade never reach it. `apply` returns null when WebGL2 is unavailable or the context is lost: the
+ * caller draws the picture as it is, and `onUnavailable` is told once.
  */
 export class GradePass {
   readonly #onUnavailable: (reason: string) => void;
@@ -67,7 +67,9 @@ export class GradePass {
   #program: WebGLProgram | null = null;
   #source: WebGLTexture | null = null;
   #uniforms: { size: WebGLUniformLocation | null; height: WebGLUniformLocation | null } | null = null;
-  readonly #tables = new Map<string, WebGLTexture>();
+  /** The tables of the last {@link prepare}, kept to upload again into a restored context. */
+  #wanted: ReadonlyMap<string, GradeTable> = new Map();
+  readonly #textures = new Map<string, WebGLTexture>();
   #lost = false;
   #failed = false;
   #told = false;
@@ -78,18 +80,22 @@ export class GradePass {
     this.#onUnavailable = onUnavailable;
   }
 
-  /** Make the context and upload `tables`; drop the uploaded tables not among them. False when the pass cannot run. */
-  prepare(tables: Readonly<Record<string, GradeTable>>): boolean {
+  /**
+   * Make the context and upload `tables` (by key: one key, one table, never changed); drop the uploaded tables not
+   * among them. False when the pass cannot run.
+   */
+  prepare(tables: ReadonlyMap<string, GradeTable>): boolean {
+    this.#wanted = tables;
     // Nothing to grade and no context yet: none is made.
-    if (Object.keys(tables).length === 0 && !this.#gl) return true;
+    if (tables.size === 0 && !this.#gl) return true;
     if (!this.#ready()) return false;
     const gl = this.#gl!;
-    for (const [key, texture] of this.#tables) {
-      if (key in tables) continue;
+    for (const [key, texture] of this.#textures) {
+      if (tables.has(key)) continue;
       gl.deleteTexture(texture);
-      this.#tables.delete(key);
+      this.#textures.delete(key);
     }
-    for (const [key, table] of Object.entries(tables)) if (!this.#tables.has(key)) this.#tables.set(key, this.#upload(table));
+    for (const [key, table] of tables) if (!this.#textures.has(key)) this.#textures.set(key, this.#upload(table));
     return true;
   }
 
@@ -97,10 +103,17 @@ export class GradePass {
    * `image` (`width` x `height`, its intrinsic size) through the table of `key`, as a new bitmap the caller draws and
    * closes; null when the pass cannot run or `key` was not prepared.
    */
-  apply(image: GradeSource, width: number, height: number, key: string, size: number): ImageBitmap | null {
+  apply(image: GradeSource, width: number, height: number, key: string): ImageBitmap | null {
     if (!this.#ready()) return null;
-    const table = this.#tables.get(key);
-    if (!table) return null;
+    const wanted = this.#wanted.get(key);
+    if (!wanted) return null;
+    let table = this.#textures.get(key);
+    if (!table) {
+      // A restored context starts without textures.
+      table = this.#upload(wanted);
+      this.#textures.set(key, table);
+    }
+    const size = wanted.size;
     const gl = this.#gl!;
     const canvas = this.#canvas!;
     if (canvas.width !== width || canvas.height !== height) {
@@ -144,9 +157,9 @@ export class GradePass {
       this.#tell("the WebGL2 context was lost");
     });
     canvas.addEventListener("webglcontextrestored", () => {
-      // Every object of the old context is gone: build again on the next frame.
+      // Every object of the old context is gone: context and textures are built again on the next graded frame.
       this.#gl = null;
-      this.#tables.clear();
+      this.#textures.clear();
       this.#lost = false;
     });
     const program = gl.createProgram();

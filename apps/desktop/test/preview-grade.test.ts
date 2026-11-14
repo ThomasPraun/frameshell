@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { type ExportSource, compileFrame, gradeFiles } from "@frameshell/core";
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
-import { gradeKey, gradeOf, parseCube } from "@frameshell/schema/grade";
+import { type GradeTable, gradeKey, gradeOf, gradeTable, parseCube } from "@frameshell/schema/grade";
 import { describe, expect, it } from "vitest";
-import { compileProgram, programAt } from "../src/renderer/src/preview/program.js";
+import { compileProgram, programAt, tableKey, withNewTables } from "../src/renderer/src/preview/program.js";
 import { gradesOf, tableOf } from "../src/renderer/src/preview/useGradeTables.js";
 
 // Seam under test: a media clip's colour grade (ADR 0031) in the preview program, against the table export writes
@@ -68,6 +68,8 @@ function view(source: Timeline): TimelineView {
 }
 
 const key = (grade: object) => gradeKey(gradeOf({ type: "media", grade })!);
+/** Key a span and `Program.grades` use: the grade's, and which table of it. */
+const shown = (grade: object, tables: ReadonlyMap<string, GradeTable>) => tableKey(key(grade), tables.get(key(grade))!);
 
 describe("colour grade in the preview (ADR 0031)", () => {
   const grades = gradesOf([view(timeline)]);
@@ -76,18 +78,38 @@ describe("colour grade in the preview (ADR 0031)", () => {
   it("marks graded footage and stills with their grade's key and carries only the tables in use", () => {
     expect([...grades.keys()].sort()).toEqual([key(WARM), key(LOOK)].sort());
     const program = compileProgram(view(timeline), assets, { resolution: HD, grades: tables });
-    expect(programAt(program, 15, 0)).toMatchObject({ kind: "media", clip: "c_talk", grade: key(WARM) });
+    expect(programAt(program, 15, 0)).toMatchObject({ kind: "media", clip: "c_talk", grade: shown(WARM, tables) });
     expect(programAt(program, 135, 0)).not.toHaveProperty("grade");
-    expect(programAt(program, 45, 1)).toMatchObject({ kind: "still", clip: "c_logo", grade: key(LOOK) });
-    expect(Object.keys(program.grades!).sort()).toEqual([key(WARM), key(LOOK)].sort());
+    expect(programAt(program, 45, 1)).toMatchObject({ kind: "still", clip: "c_logo", grade: shown(LOOK, tables) });
+    expect(Object.keys(program.grades!).sort()).toEqual([shown(WARM, tables), shown(LOOK, tables)].sort());
   });
 
   it("draws a grade whose table is not ready ungraded, and a timeline without grades as before", () => {
     const partial = compileProgram(view(timeline), assets, { resolution: HD, grades: new Map([[key(WARM), tables.get(key(WARM))!]]) });
     expect(programAt(partial, 45, 1)).not.toHaveProperty("grade");
-    expect(Object.keys(partial.grades!)).toEqual([key(WARM)]);
+    expect(Object.keys(partial.grades!)).toEqual([shown(WARM, tables)]);
     const plain: Timeline = { ...timeline, tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_plain", type: "media", asset: TALK, start: 0, in: 0, out: 4 }] }] };
     expect(compileProgram(view(plain), assets, { resolution: HD, grades: tables })).not.toHaveProperty("grades");
+  });
+
+  it("gives a grade's new table (its LUT edited) a new key, so the engine uploads it; the same table keeps its key", () => {
+    const before = compileProgram(view(timeline), assets, { resolution: HD, grades: tables });
+    expect(compileProgram(view(timeline), assets, { resolution: HD, grades: tables }).layers).toEqual(before.layers);
+    const edited = new Map(tables).set(key(LOOK), gradeTable(grades.get(key(LOOK))!, parseCube(SWAP.replace("1 1 1", "1 1 0"))));
+    const after = compileProgram(view(timeline), assets, { resolution: HD, grades: edited });
+    const look = (program: typeof after) => (programAt(program, 45, 1) as { grade?: string }).grade!;
+    expect(look(after)).not.toBe(look(before));
+    expect(after.grades![look(after)]).toBe(edited.get(key(LOOK)));
+    expect(programAt(after, 15, 0)).toMatchObject({ grade: shown(WARM, tables) });
+  });
+
+  it("sends the engine only the tables it has not had yet", () => {
+    const program = compileProgram(view(timeline), assets, { resolution: HD, grades: tables });
+    const all = new Set(Object.keys(program.grades!));
+    expect(withNewTables(program, new Set()).grades).toEqual(program.grades);
+    expect(withNewTables(program, all)).not.toHaveProperty("grades");
+    expect(Object.keys(withNewTables(program, new Set([shown(WARM, tables)])).grades!)).toEqual([shown(LOOK, tables)]);
+    expect(withNewTables(program, all).layers).toBe(program.layers);
   });
 
   it("uploads the very table export writes for lut3d, for the same clips", async () => {

@@ -7,7 +7,8 @@ import {
   type SnapReport,
   type TimelinePatch,
 } from "@frameshell/protocol";
-import { basename } from "node:path/posix";
+import { win32 } from "node:path";
+import { basename, normalize } from "node:path/posix";
 import {
   type Angle,
   type AdapterClip,
@@ -1127,7 +1128,8 @@ class Edit {
 
   /**
    * Merge `grade` field by field into the clip's (ADR 0031; `null` clears, and so does a merge left with no field). Only
-   * media clips on video tracks take one; the LUT file is read when the clip is drawn or exported.
+   * media clips on video tracks take one; the LUT file is read when the clip is drawn or exported, and a LUT path
+   * outside the project is refused here, as export would refuse it.
    */
   setGrade(track: AnyClipTrack, clip: Clip, grade: NonNullable<OperationArgs<"clip.set">["grade"]> | null): void {
     if (!isMedia(clip)) {
@@ -1137,6 +1139,14 @@ class Edit {
       });
     }
     if (track.kind === "audio") throw this.invalid("audio tracks take no `grade`: they show no picture.", { field: "grade" });
+    const lut = grade?.lut;
+    // win32 rules: they take `/x`, `C:\x` and `\\host\x` as absolute.
+    if (typeof lut === "string" && (win32.isAbsolute(lut) || normalize(lut.replaceAll("\\", "/")).split("/")[0] === "..")) {
+      throw this.invalid(`\`grade.lut\` ${lut} is outside the project; export and the preview read LUTs from the project only.`, {
+        field: "grade",
+        hint: "Copy the .cube file into the project (e.g. `luts/`) and pass its project-relative path.",
+      });
+    }
     const merged: Record<string, unknown> = grade === null ? {} : { ...clip.grade };
     for (const [field, value] of Object.entries(grade ?? {})) {
       if (value === null) delete merged[field];

@@ -95,7 +95,7 @@ export type VideoSpan =
       matte?: string;
       /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
       cover?: LayerRect;
-      /** `gradeKey` of the clip's colour grade (ADR 0031), a key of {@link Program.grades}; absent: drawn as decoded. */
+      /** Key of the clip's colour grade table (ADR 0031, {@link tableKey}), a key of {@link Program.grades}; absent: drawn as decoded. */
       grade?: string;
     }
   | {
@@ -113,7 +113,7 @@ export type VideoSpan =
       motion?: SpanMotion;
       /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
       cover?: LayerRect;
-      /** `gradeKey` of the clip's colour grade (ADR 0031), a key of {@link Program.grades}; absent: drawn as decoded. */
+      /** Key of the clip's colour grade table (ADR 0031, {@link tableKey}), a key of {@link Program.grades}; absent: drawn as decoded. */
       grade?: string;
     }
   | {
@@ -459,7 +459,10 @@ export interface Program {
   layers: VideoSpan[][];
   /** Sorted by start; spans may overlap (they are mixed). */
   audio: AudioSpan[];
-  /** Table of every colour grade a span draws with, by `gradeKey` (ADR 0031); absent when none does. */
+  /**
+   * Table of every colour grade a span draws with, by {@link tableKey} (ADR 0031); absent when none does. The player sends
+   * the engine only tables it has not had yet (`PreviewPlayer.setProgram`).
+   */
   grades?: Record<string, GradeTable>;
 }
 
@@ -1193,11 +1196,34 @@ function gradedPicture(
 ): PlacedSpan | PlaceholderSpan | null {
   if (picture?.kind !== "media" && picture?.kind !== "still") return picture;
   const grade = gradeOf(clip);
-  const key = grade ? gradeKey(grade) : null;
-  const table = key === null ? undefined : tables?.get(key);
-  if (key === null || !table) return picture;
+  const table = grade ? tables?.get(gradeKey(grade)) : undefined;
+  if (!grade || !table) return picture;
+  const key = tableKey(gradeKey(grade), table);
   used[key] = table;
   return { ...picture, grade: key };
+}
+
+const tableSerials = new WeakMap<GradeTable, number>();
+let lastTableSerial = 0;
+
+/**
+ * Key of `table`, the table of the grade whose `gradeKey` is `grade`: a new table object (its LUT file edited) gets a
+ * new key, so the engine uploads it instead of keeping the old texture under the same `gradeKey`.
+ */
+export function tableKey(grade: string, table: GradeTable): string {
+  let serial = tableSerials.get(table);
+  if (serial === undefined) tableSerials.set(table, (serial = ++lastTableSerial));
+  return `${grade}#${serial}`;
+}
+
+/**
+ * `program` carrying only the grade tables whose key is not in `held` (the engine has them: a 65-point table is
+ * 3.3 MB, too much to copy to the worker on every revision). Keys name one table each ({@link tableKey}).
+ */
+export function withNewTables(program: Program, held: ReadonlySet<string>): Program {
+  const { grades, ...rest } = program;
+  const fresh = Object.entries(grades ?? {}).filter(([key]) => !held.has(key));
+  return fresh.length > 0 ? { ...rest, grades: Object.fromEntries(fresh) } : rest;
 }
 
 /** `picture` with the source pixels it keeps to cover `format`'s frame, as export cuts them (`formatCrop`). */

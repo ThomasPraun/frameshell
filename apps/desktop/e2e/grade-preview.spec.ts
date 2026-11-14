@@ -42,16 +42,18 @@ async function addNoise(): Promise<void> {
   renameSync(join(staging, "noise.png"), join(box.projectDir, NOISE));
 }
 
-/** A 17-point look: S-curve and a cross-channel twist, so the lattice interpolation shows. */
-function writeLut(): void {
+const curve = (v: number) => v * v * (3 - 2 * v);
+/** S-curve and a cross-channel twist, so the lattice interpolation shows. */
+const TWIST = (x: number, y: number, z: number) => [curve(0.8 * x + 0.2 * z), curve(0.9 * y + 0.1 * x), 0.7 * z + 0.3 * y * y];
+
+/** A 17-point look of `look` (red, green, blue in 0 to 1). */
+function writeLut(look: (x: number, y: number, z: number) => number[] = TWIST): void {
   const size = 17;
   const lines = [`LUT_3D_SIZE ${size}`];
-  const curve = (v: number) => v * v * (3 - 2 * v);
   for (let b = 0; b < size; b++) {
     for (let g = 0; g < size; g++) {
       for (let r = 0; r < size; r++) {
-        const [x, y, z] = [r / (size - 1), g / (size - 1), b / (size - 1)];
-        lines.push([curve(0.8 * x + 0.2 * z), curve(0.9 * y + 0.1 * x), 0.7 * z + 0.3 * y * y].map((v) => v.toFixed(6)).join(" "));
+        lines.push(look(r / (size - 1), g / (size - 1), b / (size - 1)).map((v) => v.toFixed(6)).join(" "));
       }
     }
   }
@@ -117,4 +119,24 @@ test("the preview grades a still as export does: within 1 level, on almost no ch
   test.info().annotations.push({ type: "preview vs export", description: `max ${last.max}, ${(last.share * 100).toFixed(4)} % of channels differ` });
   expect(last.share).toBeLessThan(0.001);
   await expect(page.getByText(/cannot show colour grades/)).toHaveCount(0);
+});
+
+test("an edited LUT shows in the preview as export reads it, under the same grade", async () => {
+  const webgl2 = await page.evaluate(() => new OffscreenCanvas(1, 1).getContext("webgl2") !== null);
+  test.skip(!webgl2, "no WebGL2 on this machine: the preview draws graded clips ungraded");
+  const before = await exportedPixels(box, 0);
+  writeLut((x, y, z) => [curve(z), 0.6 * x + 0.4 * y, curve(y)]);
+  const after = await exportedPixels(box, 0);
+  expect(difference(after, before).max).toBeGreaterThan(16);
+  let last = { max: 255, share: 1 };
+  await expect
+    .poll(
+      async () => {
+        last = difference(await previewPixels(page, SIZE), after);
+        return last.max;
+      },
+      { timeout: 20_000, intervals: [250, 500, 1000] },
+    )
+    .toBeLessThanOrEqual(1);
+  expect(last.share).toBeLessThan(0.001);
 });

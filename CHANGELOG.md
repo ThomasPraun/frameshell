@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unavailable the preview draws graded clips ungraded and says so once (English and Spanish). `clip set
   --grade-exposure/--grade-temperature/--grade-tint/--grade-contrast/--grade-saturation/--grade-lut/--grade-lut-mix`
   set one number each (`--grade-lut none` removes the LUT), `--clear-grade` removes the grade; `clip.set` `grade`
-  merges field by field, MCP `clip_set` follows. A LUT that is missing, outside the project or not a 3D `.cube` fails
-  the export naming the clip. Shots take none (skipped with a warning); timelines without grades export as before.
+  merges field by field and refuses a LUT path outside the project, MCP `clip_set` follows. A LUT that is missing,
+  outside the project or not a 3D `.cube` fails the export naming the clip. Editing the `.cube` file updates the
+  preview as it does export. Shots take none (skipped with a warning); timelines without grades export as before.
 
 - Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 126):
   `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`

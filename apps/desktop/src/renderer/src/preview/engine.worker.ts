@@ -4,6 +4,7 @@
 import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
+import type { GradeTable } from "@frameshell/schema/grade";
 import { type AudioRead, audioReads, renderRead, sourceWindow, stretchKey } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
 import { GradePass, type GradeSource } from "./grade.js";
@@ -487,6 +488,8 @@ class Engine implements LayerHost {
   readonly #masker = new AlphaMasker();
   readonly #glass = new BackdropPass();
   readonly #grader = new GradePass((reason) => scope.postMessage({ type: "gradeOff", reason }));
+  /** Grade tables of the current program's spans by key: a program carries only the ones not sent before. */
+  #gradeTables = new Map<string, GradeTable>();
 
   #anchor: Anchor | null = null;
   #clock: ClockSample | null = null;
@@ -640,8 +643,9 @@ class Engine implements LayerHost {
     // Renders are held in memory whole: drop the ones no longer played (proxy indexes are small, kept).
     for (const path of this.#sources.keys()) if (!used.has(path) && isReadWhole(path)) this.#sources.delete(path);
     this.#forgetStills(next);
+    this.#gradeTables = this.#tablesOf(next);
     // The grade pass starts with the first program that needs it, so the first graded frame does not wait for it.
-    this.#grader.prepare(next.grades ?? {});
+    this.#grader.prepare(this.#gradeTables);
 
     while (this.#layers.length > next.layers.length) this.#layers.pop()!.dispose();
     for (const [i, pipeline] of this.#layers.entries()) {
@@ -878,12 +882,23 @@ class Engine implements LayerHost {
     context.globalAlpha = 1;
   }
 
+  /** The grade tables `next`'s spans draw with: the ones it carries, else those an earlier program brought. */
+  #tablesOf(next: Program): Map<string, GradeTable> {
+    const tables = new Map<string, GradeTable>();
+    for (const layer of next.layers) {
+      for (const span of layer) {
+        if ((span.kind !== "media" && span.kind !== "still") || !span.grade) continue;
+        const table = next.grades?.[span.grade] ?? this.#gradeTables.get(span.grade);
+        if (table) tables.set(span.grade, table);
+      }
+    }
+    return tables;
+  }
+
   /** `image` through the table of grade `key`; null (drawn as it is) when the pass cannot run or the table is unknown. */
   #graded(image: GradeSource, key: string): ImageBitmap | null {
-    const table = this.#program?.grades?.[key];
-    if (!table) return null;
     const [width, height] = image instanceof VideoFrame ? [image.displayWidth, image.displayHeight] : [image.width, image.height];
-    return this.#grader.apply(image, width, height, key, table.size);
+    return this.#grader.apply(image, width, height, key);
   }
 
   /**
