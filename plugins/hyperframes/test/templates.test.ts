@@ -106,6 +106,23 @@ describe("template cursor-text-select", () => {
   });
 });
 
+describe("template before-after", () => {
+  it("wipes down only on a tall frame (the runtime's format class), so a square wipes across", async () => {
+    await scaffold(["spot", "--template", "before-after"]);
+    expect(read("spot")).toContain('var down = P.direction === "down" || (P.direction === "auto" && S.format === "tall");');
+  });
+});
+
+describe("template emphasis-marker", () => {
+  it("marks the last two words when the phrase is empty or missing, and skips punctuation-only words when matching", async () => {
+    await scaffold(["spot", "--template", "emphasis-marker"]);
+    const html = read("spot");
+    expect(html).toContain("if (first < 0) first = Math.max(0, n - 2);");
+    expect(html).toContain("if (text) { kept.push(k); plain.push(text); }");
+    expect(html).toContain("lastWord = kept[first + want.length - 1]; first = kept[first];");
+  });
+});
+
 describe("the plugin skill", () => {
   const skill = readFileSync(fileURLToPath(new URL("../skills/hyperframes/SKILL.md", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
 
