@@ -11,6 +11,7 @@ import puppeteer from "puppeteer-core";
 import { describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import { TEMPLATES, createHyperframesAdapter, newComposition } from "../src/index.js";
+import { usesThree } from "../src/templates/index.js";
 
 // Opt-in like render-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the templates of #466 in managed Chrome. Live pages at the
 // four formats check the per-format layout and cold-vs-reseek determinism; one real render per template checks alpha and speed.
@@ -24,10 +25,10 @@ const binaries = () => {
 /** The four built-in formats (ADR 0027) at a small size with the same aspect ratio. */
 const FORMATS = { "16x9": [480, 270], "1x1": [360, 360], "4x5": [288, 360], "9x16": [270, 480] } as const;
 
-async function scaffold(template: string, width: number, height: number): Promise<string> {
+async function scaffold(template: string, width: number, height: number, duration?: number): Promise<string> {
   const dir = tempDir();
   writeFileSync(join(dir, "frameshell.json"), JSON.stringify({ resolution: { width, height } }));
-  await newComposition.run({ args: ["spot", "--template", template], cwd: dir, project: { dir } });
+  await newComposition.run({ args: ["spot", "--template", template, ...(duration === undefined ? [] : ["--duration", String(duration)])], cwd: dir, project: { dir } });
   return dir;
 }
 
@@ -147,7 +148,10 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     it(
       "renders without the 45 s timeline wait, with alpha for an overlay",
       async () => {
-        const dir = await scaffold(template, 480, 270);
+        // A 3D template renders on SwiftShader, one frame at a time (ADR 0042), so its time follows the machine's load: it gets a
+        // 1 s clip and only a loose bound. The 45 s timeline wait is still caught by the 2D templates, which share `bind`.
+        const three = usesThree(TEMPLATES.find((t) => t.id === template)!);
+        const dir = await scaffold(template, 480, 270, three ? 1 : undefined);
         const manager = binaries();
         const ffmpeg = await manager.ensure("ffmpeg");
         const adapter = createHyperframesAdapter({ projectDir: dir });
@@ -162,10 +166,10 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
           ensureBinary: (name) => manager.ensure(name),
           progress: () => {},
         });
-        expect(performance.now() - started).toBeLessThan(40_000);
+        expect(performance.now() - started).toBeLessThan(three ? 120_000 : 40_000);
         const { stdout } = await execFileAsync(
           ffmpeg,
-          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", "1.5", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
+          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", three ? "0.5" : "1.5", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
           { encoding: "buffer", maxBuffer: 1 << 26 },
         );
         let opaque = 0;
