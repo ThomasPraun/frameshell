@@ -1,7 +1,7 @@
 // Script the capture installs in an isolated world of the page (`Page.createIsolatedWorld`): it shares the DOM
 // but not the page's globals, so the site's own scripts cannot replace getComputedStyle or XMLSerializer
 // under it. Everything it returns is data; SVG it serialises is checked again by `svgProblems`.
-import { LOGO_IMAGE_CHARS, SAFE_IMAGE, SVG_ELEMENTS, SVG_UNWRAP } from "./svg.js";
+import { EXTERNAL_CSS, LOGO_IMAGE_CHARS, SAFE_IMAGE, SVG_ELEMENTS, SVG_UNWRAP } from "./svg.js";
 
 /** Logo or icon candidate as the script reports it. */
 export type PageLogo =
@@ -76,6 +76,7 @@ export const PAGE_SCRIPT = String.raw`(() => {
   const ALLOWED = new Set(${JSON.stringify(SVG_ELEMENTS)});
   const UNWRAP = new Set(${JSON.stringify(SVG_UNWRAP)});
   const SAFE_IMAGE = new RegExp(${JSON.stringify(SAFE_IMAGE.source)}, "i");
+  const EXTERNAL_CSS = new RegExp(${JSON.stringify(EXTERNAL_CSS.source)}, "i");
   const SHAPES = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan"]);
   // Bake computed fill and stroke into a fresh clone, so classes and currentColor survive without the page's
   // stylesheets. Runs before anything changes the clone's structure: nodes are paired by document order.
@@ -111,7 +112,7 @@ export const PAGE_SCRIPT = String.raw`(() => {
         else if (local === "href" || local === "src") {
           const keep = value.startsWith("#") || (el.localName.toLowerCase() === "image" && SAFE_IMAGE.test(value) && value.length <= ${LOGO_IMAGE_CHARS});
           if (!keep) el.removeAttribute(attr.name);
-        } else if (/url\(\s*['"]?(?!#)/i.test(value) || /@import|expression\(/i.test(value)) el.removeAttribute(attr.name);
+        } else if (EXTERNAL_CSS.test(value)) el.removeAttribute(attr.name);
       }
       if (el.localName.toLowerCase() === "image" && !el.getAttribute("href") && !el.getAttribute("xlink:href")) el.remove();
     }

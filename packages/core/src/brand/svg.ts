@@ -1,6 +1,6 @@
 // SVG allowlist sanitiser (ADR 0044 decision 5) in Node: a strict XML parse (no DTD, only the predefined entities),
 // then the same rules the capture page script applies to inline logos (it reads SVG_ELEMENTS, SVG_UNWRAP and
-// SAFE_IMAGE from here): unknown elements dropped, <a>/<switch> unwrapped, no event handlers, no reference that does
+// SAFE_IMAGE and EXTERNAL_CSS from here): unknown elements dropped, <a>/<switch> unwrapped, no event handlers, no reference that does
 // not start with `#` except small `data:` rasters on <image>, no external url(). The output is checked by svgProblems.
 
 /** Elements kept, lower case; everything else (script, style, foreignObject, iframe, animate…) is dropped. */
@@ -16,6 +16,12 @@ export const SVG_UNWRAP: readonly string[] = ["a", "switch"];
 
 /** The only `href` an <image> may keep besides `#id`: a base64 raster. */
 export const SAFE_IMAGE = /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]*$/i;
+
+/**
+ * CSS in an attribute that can fetch: url() not to `#`, @import, expression(), and the image functions that take a
+ * quoted URL string (`image-set('https://…' 1x)`, `-webkit-image-set(`, `image(`, `cross-fade(`, `src(`).
+ */
+export const EXTERNAL_CSS = /url\(\s*['"]?(?!#)|@import|expression\(|(?:image-set|image|cross-fade|src)\(/i;
 
 /** Longest `data:` raster a captured logo or icon keeps, characters. */
 export const LOGO_IMAGE_CHARS = 200_000;
@@ -107,8 +113,21 @@ function parseXml(text: string, limits: SvgLimits): Extract<XmlNode, { kind: "el
       if (close === -1 || !parent) malformed();
       parent!.children.push({ kind: "text", text: text.slice(i + 9, close) });
       i = close + 3;
+    } else if (text.startsWith("<!DOCTYPE", i) && !root && /\s/.test(text[i + 9] ?? "")) {
+      // A DOCTYPE naming an external DTD (Illustrator writes the SVG 1.1 one) is skipped: it is never read, and
+      // undeclared entities are refused by decode. An internal subset (`[`) can declare entities: refused.
+      let quote = "";
+      for (i += 9; i < text.length; i++) {
+        const char = text[i]!;
+        if (quote) quote = char === quote ? "" : quote;
+        else if (char === '"' || char === "'") quote = char;
+        else if (char === "[") fail("has a DTD");
+        else if (char === ">") break;
+      }
+      if (i >= text.length) malformed();
+      i++;
     } else if (text.startsWith("<!", i)) {
-      // DOCTYPE and ENTITY declarations: entity expansion and external entities are refused outright.
+      // ENTITY and other declarations: entity expansion and external entities are refused outright.
       fail("has a DTD");
     } else if (text.startsWith("<?", i)) {
       const close = text.indexOf("?>", i + 2);
@@ -230,20 +249,29 @@ function cleanAttrs(el: Extract<XmlNode, { kind: "element" }>, limits: SvgLimits
     // Namespace declarations are written again by the serialiser; editor namespaces (inkscape:, sketch:…) go.
     if (lower === "xmlns" || lower.startsWith("xmlns:")) continue;
     if (lower.includes(":") && lower !== "xlink:href" && lower !== "xml:space" && lower !== "xml:lang") continue;
-    // Browsers ignore whitespace and control characters inside a URL scheme (`java\tscript:`).
-    const compact = [...value].filter((char) => char > " " && !/\s/.test(char)).join("");
+    const reference = lower === "href" || lower === "xlink:href" || lower === "src";
     if (lower.startsWith("on")) note("event handler");
-    else if (/javascript:|vbscript:/i.test(compact)) note("script URL");
-    else if (lower === "href" || lower === "xlink:href" || lower === "src") {
+    // Before compact(): an embedded raster can be millions of characters, and SAFE_IMAGE leaves no room for a scheme.
+    else if (reference && image && SAFE_IMAGE.test(value)) {
+      if (value.length <= limits.imageChars) out.push([name, value]);
+      else note("oversized embedded image");
+    } else if (SCRIPT_URL.test(compact(value))) note("script URL");
+    else if (reference) {
       if (value.startsWith("#") && lower !== "src") out.push([name, value]);
-      else if (image && SAFE_IMAGE.test(value)) {
-        if (value.length <= limits.imageChars) out.push([name, value]);
-        else note("oversized embedded image");
-      } else note("external reference");
+      else note("external reference");
     } else if (value.includes("\\")) note("CSS escape");
-    else if (/url\(\s*['"]?(?!#)/i.test(compact) || /@import|expression\(/i.test(compact)) note("external url()");
+    else if (EXTERNAL_CSS.test(compact(value))) note("external url()");
     else out.push([name, value]);
   }
+  return out;
+}
+
+const SCRIPT_URL = /javascript:|vbscript:/i;
+
+/** `value` without whitespace and control characters, which browsers ignore inside a URL scheme (`java\tscript:`). */
+function compact(value: string): string {
+  let out = "";
+  for (const char of value) if (char > " " && !/\s/.test(char)) out += char;
   return out;
 }
 
@@ -284,16 +312,46 @@ function svgSize(attrs: [string, string][]): { width: number | null; height: num
 
 /**
  * Why a sanitised SVG must not be saved, or null. A second line behind the allowlist: no script, no foreign
- * content, no event handlers, no external reference, no DTD, no CSS escape inside an attribute.
+ * content, no event handlers, no external reference, no DTD, no CSS escape inside an attribute. Text content is
+ * not checked (it is escaped on output), so a `<text>` about `javascript:` is kept.
  */
 export function svgProblems(svg: string): string | null {
   if (!/^<svg[\s>]/i.test(svg.trim())) return "not an SVG document";
   if (/<!DOCTYPE|<!ENTITY/i.test(svg)) return "has a DTD";
   if (/<\s*(script|foreignObject|iframe|object|embed)\b/i.test(svg)) return "has script or foreign content";
-  if (/\son[a-z]+\s*=/i.test(svg)) return "has an event handler";
-  if (/javascript:|vbscript:/i.test(svg)) return "has a script URL";
-  if (/(?:^|[\s:])href\s*=\s*["'](?!#|data:image\/(?:png|jpe?g|gif|webp);base64,)/i.test(svg)) return "has an external reference";
-  if (/url\(\s*['"]?(?!#)/i.test(svg) || /@import/i.test(svg)) return "has an external url()";
-  if (/\s[\w:-]+\s*=\s*"[^"]*\\/.test(svg)) return "has a CSS escape";
+  const markup = withoutText(svg);
+  if (/\son[a-z]+\s*=/i.test(markup)) return "has an event handler";
+  if (SCRIPT_URL.test(markup)) return "has a script URL";
+  if (/(?:^|[\s:])href\s*=\s*["'](?!#|data:image\/(?:png|jpe?g|gif|webp);base64,)/i.test(markup)) return "has an external reference";
+  if (EXTERNAL_CSS.test(markup)) return "has an external url()";
+  if (/\s[\w:-]+\s*=\s*"[^"]*\\/.test(markup)) return "has a CSS escape";
   return null;
+}
+
+/**
+ * Tags and comments of serialised XML without the text between them. Both serialisers escape `<` in text and
+ * attributes, so a tag ends at the first `>` outside quotes; a comment is kept whole, up to its first `-->`.
+ */
+function withoutText(svg: string): string {
+  const parts: string[] = [];
+  let i = svg.indexOf("<");
+  while (i !== -1) {
+    let end: number;
+    if (svg.startsWith("<!--", i)) {
+      const close = svg.indexOf("-->", i + 4);
+      end = close === -1 ? svg.length : close + 3;
+    } else {
+      let quote = "";
+      for (end = i + 1; end < svg.length; end++) {
+        const char = svg[end]!;
+        if (quote) quote = char === quote ? "" : quote;
+        else if (char === '"' || char === "'") quote = char;
+        else if (char === ">") break;
+      }
+      end++;
+    }
+    parts.push(svg.slice(i, end));
+    i = svg.indexOf("<", end);
+  }
+  return parts.join(" ");
 }

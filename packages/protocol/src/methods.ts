@@ -1737,14 +1737,15 @@ export const methods = {
     description:
       "Import a folder of SVG frames exported from Figma as brand components (ADR 0044 decision 10), so a motion template can zoom " +
       "into a button and stay sharp. Every `.svg` file directly in `dir` (file name order, at most 200, 25 MB each, 200 MB together) " +
-      "is sanitised by an allowlist: no script, `foreignObject`, `style` element, event handler, external `href` or `url()`, external " +
-      "`<use>` or DTD; embedded `data:` PNG/JPEG/GIF/WebP rasters are kept up to 10 MB of text each. A file that is not well-formed XML, " +
-      "has a DTD or states no size (width/height or viewBox) is skipped with a warning. The frames are written to " +
+      "is sanitised by an allowlist: no script, `foreignObject`, `style` element, event handler, external `href`, `url()` or `image-set()`, " +
+      "external `<use>` or entity declaration; embedded `data:` PNG/JPEG/GIF/WebP rasters are kept up to 10 MB of text each. A file that is not well-formed XML, " +
+      "declares entities (an internal DTD subset) or states no size (width/height or viewBox) is skipped with a warning. The frames are written to " +
       "`assets/brand/<id>/<name>.svg` (`<id>` from the folder name, `-2` when taken) and recorded in `brand.json` with ONE scale for " +
       "the whole folder (project canvas width / widest frame; Figma frames are usually 1440 px wide), never fitted per frame, and each " +
       "frame's top-left once centred on the canvas. Each frame gets a `credits.json` entry with no licence, so `credits check` fails " +
       "on a placed frame until the person confirms it is theirs (`credits set <file> --licence own`). Nothing goes over the network. " +
-      "Example: `{ dir: \"~/Desktop/acme-figma\" }` with `~` expanded. Fails with AssetNotFound (`dir` is not a folder), " +
+      "Example: `{ dir: \"/Users/me/Desktop/acme-figma\" }`; `~` is not expanded. Fails with AssetNotFound (`dir` is not a folder " +
+      "or starts with `~`), " +
       "InvalidOperation (`reason: no-frames`: no frame could be kept; the message says why), InvalidProjectFile (`brand.json` is " +
       "broken), ProjectNotFound.",
     params: z.strictObject({

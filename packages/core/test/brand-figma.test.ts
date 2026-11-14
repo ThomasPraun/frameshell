@@ -30,7 +30,7 @@ describe("readFigmaFolder", () => {
       "screen-2.SVG": frame(375, 812),
       "notes.txt": "hi",
       ".hidden.svg": frame(1, 1),
-      "doctype.svg": `<!DOCTYPE svg><svg viewBox="0 0 1 1"/>`,
+      "doctype.svg": `<!DOCTYPE svg [<!ENTITY a "a">]><svg viewBox="0 0 1 1"/>`,
       "sizeless.svg": `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`,
     });
     mkdirSync(join(dir, "nested.svg"));

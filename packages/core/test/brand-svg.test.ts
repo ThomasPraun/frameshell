@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PAGE_SCRIPT } from "../src/brand/page-script.js";
-import { SVG_ELEMENTS, sanitizeSvg, svgProblems } from "../src/brand/svg.js";
+import { EXTERNAL_CSS, SVG_ELEMENTS, sanitizeSvg, svgProblems } from "../src/brand/svg.js";
 
 // Seam under test: the Node SVG allowlist of ADR 0044 decision 5, fed hostile files the way a Figma folder or a
 // fetched logo could carry them.
@@ -56,7 +56,10 @@ describe("sanitizeSvg", () => {
     ["an entity-encoded javascript href", `<svg viewBox="0 0 10 10"><a href="&#106;avascript:alert(1)"><rect width="1" height="1"/></a><use href="&#x6A;avascript:x"/></svg>`, "1 script URL"],
     ["a javascript URL split by a tab", `<svg viewBox="0 0 10 10"><use href="java&#9;script:alert(1)"/></svg>`, "1 script URL"],
     ["an external url() in a style attribute", `<svg viewBox="0 0 10 10"><rect width="1" height="1" style="fill: url( 'https://evil.test/p.svg#x' )"/></svg>`, "1 external url()"],
-    ["a CSS escape hiding url(", `<svg viewBox="0 0 10 10"><rect width="1" height="1" style="fill: \\75 rl(https://evil.test/x)"/></svg>`, "1 CSS escape"],
+    ["a quoted URL in image-set()", `<svg viewBox="0 0 10 10"><rect width="1" height="1" style="mask-image:image-set('https://evil.test/x.png' 1x)"/></svg>`, "1 external url()"],
+    ["a quoted URL in -webkit-image-set()", `<svg viewBox="0 0 10 10"><rect width="1" height="1" style="mask-image: -webkit-image-set(&quot;https://evil.test/x.png&quot; 1x)"/></svg>`, "1 external url()"],
+    ["a quoted URL in image(), cross-fade() and src()", `<svg viewBox="0 0 10 10"><rect width="1" height="1" style="mask-image:image('https://evil.test/a.png')"/><rect width="1" height="1" style="mask-image:cross-fade('https://evil.test/b.png' 50%, red)"/><rect width="1" height="1" style="mask-image:src('https://evil.test/c.png')"/></svg>`, "3 external url()s"],
+    ["a CSS escape hiding url(",`<svg viewBox="0 0 10 10"><rect width="1" height="1" style="fill: \\75 rl(https://evil.test/x)"/></svg>`, "1 CSS escape"],
     ["an embedded raster over the cap", `<svg viewBox="0 0 10 10"><image href="data:image/png;base64,${"A".repeat(2_000)}" width="1" height="1"/></svg>`, "1 oversized embedded image"],
   ])("removes %s", (_name, svg, removed) => {
     const out = clean(svg);
@@ -74,7 +77,9 @@ describe("sanitizeSvg", () => {
 
   it.each([
     ["a DOCTYPE with entities (billion laughs)", `<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;">]><svg viewBox="0 0 1 1"><text>&b;</text></svg>`, "has a DTD"],
-    ["an external entity", `<svg viewBox="0 0 1 1"><text>&xxe;</text></svg>`, "uses an undeclared entity &xxe;"],
+    ["an ENTITY declaration without a DOCTYPE", `<!ENTITY a "aaaa"><svg viewBox="0 0 1 1"/>`, "has a DTD"],
+    ["a DOCTYPE after the root", `<svg viewBox="0 0 1 1"/><!DOCTYPE svg>`, "has a DTD"],
+    ["an external entity",`<svg viewBox="0 0 1 1"><text>&xxe;</text></svg>`, "uses an undeclared entity &xxe;"],
     ["a bare ampersand", `<svg viewBox="0 0 1 1"><text>Fish & Chips</text></svg>`, "is not well-formed XML"],
     ["mismatched tags", `<svg viewBox="0 0 1 1"><g></svg>`, "is not well-formed XML"],
     ["an unclosed root", `<svg viewBox="0 0 1 1"><g/>`, "is not well-formed XML"],
@@ -85,6 +90,23 @@ describe("sanitizeSvg", () => {
     ["too many elements", `<svg viewBox="0 0 1 1">${"<rect/>".repeat(600)}</svg>`, "has more than 500 elements"],
   ])("refuses %s", (_name, svg, problem) => {
     expect(refused(svg)).toBe(problem);
+  });
+
+  it("keeps a logo with the Illustrator header: a DOCTYPE naming the external SVG 1.1 DTD, which is never read", () => {
+    const out = clean(`<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 24.0.0, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 100 50" style="enable-background:new 0 0 100 50;" xml:space="preserve">
+<rect width="100" height="50" fill="#FF5A1F"/>
+</svg>`);
+    expect(out.svg).not.toMatch(/DOCTYPE|svg11\.dtd/);
+    expect(out.svg).toContain('<rect width="100" height="50" fill="#FF5A1F"/>');
+    expect([out.width, out.height]).toEqual([100, 50]);
+  });
+
+  it("keeps text that talks about script URLs, handlers and url(): only markup is checked", () => {
+    const out = clean(`<svg viewBox="0 0 1 1"><text>see javascript: docs, url(x) and onload= href="http://a"</text><title>image-set('a')</title></svg>`);
+    expect(out.svg).toContain("see javascript: docs");
   });
 
   it("reads the size from width and height in px, else from the viewBox", () => {
@@ -100,9 +122,22 @@ describe("sanitizeSvg", () => {
   });
 });
 
+describe("svgProblems", () => {
+  it.each([
+    ["image-set() with a quoted URL", `<svg><rect style="mask-image:image-set('https://evil.test/x.png' 1x)"/></svg>`, "has an external url()"],
+    ["-webkit-image-set()", `<svg><rect style="mask-image:-webkit-image-set(&quot;https://evil.test/x.png&quot; 1x)"/></svg>`, "has an external url()"],
+    ["cross-fade()", `<svg><rect style="mask-image:cross-fade('https://evil.test/x.png' 50%, red)"/></svg>`, "has an external url()"],
+    ["an event handler", `<svg><rect onclick="x()"/></svg>`, "has an event handler"],
+    ["a handler hidden in a comment", `<svg><!-- --!><img src=x onerror=alert(1)> --><rect/></svg>`, "has an event handler"],
+  ])("refuses %s", (_name, svg, problem) => {
+    expect(svgProblems(svg)).toBe(problem);
+  });
+});
+
 describe("page script", () => {
   it("parses with the shared allowlist written into it", () => {
     expect(() => new Function(PAGE_SCRIPT)).not.toThrow();
     expect(PAGE_SCRIPT).toContain(JSON.stringify(SVG_ELEMENTS));
+    expect(PAGE_SCRIPT).toContain(JSON.stringify(EXTERNAL_CSS.source));
   });
 });

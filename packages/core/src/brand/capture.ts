@@ -2,7 +2,7 @@
 // brand (logos, icons, share image, colours, fonts, :root variables, headings, buttons) in an isolated world, take
 // the first screen and the whole page, and save what it found under assets/brand/<id>/ and assets/fonts/ with a
 // `brand.json` entry and a credits entry per file. It never writes `style.json`: it returns `style set` suggestions.
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { ErrorCode, type MethodResult, RpcError } from "@frameshell/protocol";
 import {
@@ -569,8 +569,15 @@ export class BrandService {
       };
       const next = parseBrandManifest({ ...manifest, imports: [...manifest.imports, entry] } satisfies BrandManifest);
       if (!next.ok) throw new Error(`brand.importFigma: the import does not fit ${BRAND_FILE}: ${next.error}`);
-      for (const frame of frames) await writeTextAtomic(join(root, ...BRAND_DIR.split("/"), id, frame.file), frame.svg);
-      await writeJsonAtomic(join(root, BRAND_FILE), next.value);
+      const folder = join(root, ...BRAND_DIR.split("/"), id);
+      try {
+        for (const frame of frames) await writeTextAtomic(join(folder, frame.file), frame.svg);
+        await writeJsonAtomic(join(root, BRAND_FILE), next.value);
+      } catch (error) {
+        // freeId gave a folder that did not exist: remove it, so a failed import leaves no files brand.json misses.
+        await rm(folder, { recursive: true, force: true }).catch(() => {});
+        throw error;
+      }
       return entry;
     });
     // No licence: `credits check` fails on a placed frame until the person confirms it is theirs (ADR 0026).
