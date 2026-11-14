@@ -201,11 +201,14 @@ export function producerMotionBlur(blur: RenderMotionBlur): ProducerMotionBlur {
 function motionBlurRefusal(id: string, error: unknown): unknown {
   const message = (error as Error)?.message ?? String(error);
   if (!message.includes("[MotionBlur]")) return error;
-  return new Error(
+  const refusal = new Error(
     `hyperframes clip ${id} cannot be motion-blurred: ${message.replace(/^[\s\S]*?\[MotionBlur\]\s*/, "")} ` +
-      "Compositions with HDR content or shader transitions render only sharp: turn it off with `frameshell clip set <clip> --clear-motion-blur`.",
+      "Compositions with HDR content or shader transitions render only sharp, so exports use the sharp render: " +
+      `\`frameshell clip set ${id} --clear-motion-blur\` turns the blur off.`,
     { cause: error },
   );
+  // `MOTION_BLUR_REFUSED` of @frameshell/plugin-api (a dev dependency here: its types only reach the bundle).
+  return Object.assign(refusal, { code: "MOTION_BLUR_REFUSED" });
 }
 
 /** Throws unless `source` names the composition's HTML entry. */

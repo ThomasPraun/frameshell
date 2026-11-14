@@ -309,7 +309,7 @@
       "-i",
       "mix.wv",
       "-filter_complex",
-      "[1:a:0]loudnorm=I=-17:TP=-1:LRA=20:measured_I=-23.10:measured_TP=-6.20:measured_LRA=4.30:measured_thresh=-33.40:offset=0.40:linear=true,aresample=48000,atrim=end_sample=384000[a]",
+      "[1:a:0]loudnorm=I=-17:TP=-1:LRA=20:measured_I=-23.10:measured_TP=-6.20:measured_LRA=4.30:measured_thresh=-33.40:offset=0.40:linear=true,aresample=48000,aresample=192000,alimiter=limit=0.8414:level=false:latency=true,aresample=48000,atrim=end_sample=384000[a]",
       "-map",
       "0:v:0",
       "-map",
