@@ -71,6 +71,7 @@ const api: FrameshellApi = {
   },
   panels: {
     detached: () => ipcRenderer.invoke(Channel.panelsDetached),
+    fullScreenSettled: (panel) => ipcRenderer.invoke(Channel.panelsFullScreenSettled, panel),
   },
   timeline: {
     show: (timeline, view) => invokeOutcome(Channel.timelineShow, timeline, view),

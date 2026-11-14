@@ -81,6 +81,7 @@ describe("hyperframes adapter", () => {
     const adapter = createHyperframesAdapter({ projectDir: project, producer: async () => producer });
     const outDir = tempDir();
     const { ctx, progress, binaries, controller } = context(outDir);
+    process.env["PRODUCER_BROWSER_GPU_MODE"] = "hardware";
     const result = await adapter.render({ id: "c_1", source: SOURCE, props: { title: "Launch" } }, ctx);
 
     expect(result).toEqual({ file: join(outDir, "render.webm"), hasAlpha: true });
@@ -98,6 +99,8 @@ describe("hyperframes adapter", () => {
     expect(process.env["HYPERFRAMES_FFMPEG_PATH"]).toBe("/managed/ffmpeg");
     expect(process.env["HYPERFRAMES_FFPROBE_PATH"]).toBe("/managed/ffprobe");
     expect(process.env["PRODUCER_HEADLESS_SHELL_PATH"]).toBe("/managed/chrome-headless-shell");
+    // ADR 0042: SwiftShader GL whatever the daemon's environment says.
+    expect(process.env["PRODUCER_BROWSER_GPU_MODE"]).toBe("software");
     expect(progress).toContainEqual({ fraction: 0.4, message: "Capturing frames" });
     expect(progress.at(-1)).toEqual({ fraction: 1, message: "Done" });
   });

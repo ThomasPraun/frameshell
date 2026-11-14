@@ -94,4 +94,5 @@ Found while looking for why motion-blurred renders were not repeatable (owner de
 - **Slow fixes.** A frozen runtime copy fixes an old clip only through `update`.
 - **Authoring rules (in the plugin skill since slice 2):** no CSS transitions, timers, `requestAnimationFrame`, `Date` or unseeded random; no `will-change`, `translate3d` or 3D transforms; never the `translate`, `scale` or `rotate` properties; fonts and images ready before frame 0.
 - **Personalities.** The springs in `MOTION_PERSONALITIES` (ADR 0028) point at `SPRING_PRESETS` and its eases at `EASE_CURVES`, so the numbers have one source. `energetic` (response 0.22, damping 0.45) has no preset and stays inline.
+- **3D** compositions (three.js on the same `bind` clock, a pinned bundle copied beside the runtime, SwiftShader renders) are ADR 0042.
 - **Unblocks** #466 (templates), #453 (motion-film playbook), the `pick` part of #469, #458 (beats as runtime input) and #468 (tokens read by templates).

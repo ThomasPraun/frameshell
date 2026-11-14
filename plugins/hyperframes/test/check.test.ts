@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -165,5 +165,57 @@ describe("seekSafetyFindings", () => {
   it("ignores comments and external scripts", () => {
     const html = '<script src="x.js" onComplete: delay: ScrollTrigger></script><script>\n// delay: 1\n/* ScrollTrigger */\nconst d = 1;\n</script>';
     expect(seekSafetyFindings(html)).toEqual([]);
+  });
+
+  it("flags three.js render loops and clocks as errors and a stepped mixer as a warning (ADR 0042)", () => {
+    const html = "<script>\nrenderer.setAnimationLoop(draw);\nvar clock = new THREE.Clock();\nvar dt = clock.getDelta();\nmixer.update(dt);\nmixer.setTime(t);\n</script>";
+    expect(seekSafetyFindings(html).map((f) => `${f.rule}:${f.severity}@${f.line}`)).toEqual([
+      "three_animation_loop:error@2",
+      "three_clock:error@3",
+      "three_clock:error@4",
+      "three_mixer_update:warning@5",
+    ]);
+  });
+});
+
+describe("hyperframes check on a 3D composition (ADR 0042)", () => {
+  const scaffold3d = async () => {
+    await newComposition.run({ args: ["shot", "--template", "product-shot"], cwd: project, project: { dir: project } });
+    return join(project, "compositions", "hyperframes", "shot");
+  };
+
+  it("does not block on the vendored three.js bundle's own Math.random and render loop", async () => {
+    await scaffold3d();
+    const { report, failed } = await check(["shot", "--strict"]);
+    expect(report.compositions[0]!.findings.filter((f) => f.severity !== "info")).toEqual([]);
+    expect(failed).toBe(false);
+  });
+
+  it("still blocks on the scene code's own requestAnimationFrame, render loop and randomness", async () => {
+    const dir = await scaffold3d();
+    const entry = join(dir, "index.html");
+    const html = readFileSync(entry, "utf8").replace(
+      "</body>",
+      "<script>\nrequestAnimationFrame(function () {});\nrenderer.setAnimationLoop(function () {});\nvar jitter = Math.random();\n</script>\n</body>",
+    );
+    writeFileSync(entry, html);
+    const { report, failed } = await check(["shot"]);
+    const rules = report.compositions[0]!.findings.filter((f) => f.severity === "error").map((f) => `${f.file}:${f.rule}`);
+    expect(rules).toEqual(
+      expect.arrayContaining([
+        "compositions/hyperframes/shot/index.html:requestanimationframe_in_composition",
+        "compositions/hyperframes/shot/index.html:three_animation_loop",
+        "compositions/hyperframes/shot/index.html:non_deterministic_code",
+      ]),
+    );
+    expect(rules.some((rule) => rule.includes("frameshell-three.js"))).toBe(false);
+    expect(failed).toBe(true);
+  });
+
+  it("lints a file named frameshell-three.js that is not the Frameshell bundle like any other script", async () => {
+    const dir = await scaffold3d();
+    writeFileSync(join(dir, "frameshell-three.js"), "window.THREE = {}; var r = Math.random();");
+    const { report } = await check(["shot"]);
+    expect(report.compositions[0]!.findings.map((f) => `${f.file}:${f.rule}`)).toContain("compositions/hyperframes/shot/frameshell-three.js:non_deterministic_code");
   });
 });
