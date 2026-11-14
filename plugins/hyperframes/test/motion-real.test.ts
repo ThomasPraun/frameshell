@@ -1,9 +1,13 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import puppeteer from "puppeteer-core";
 import { describe, expect, it } from "vitest";
 import { BinaryManager, ClipVerifier } from "@frameshell/core";
 import { createHyperframesAdapter } from "../src/index.js";
@@ -64,6 +68,7 @@ function project(): string {
   const dir = tempDir();
   const composition = join(dir, "compositions", "hyperframes", "motion");
   mkdirSync(composition, { recursive: true });
+  writeFileSync(join(dir, "frameshell.json"), JSON.stringify({ resolution: { width: 160, height: 90 } }));
   writeFileSync(join(composition, "index.html"), COMPOSITION);
   writeFileSync(join(composition, MOTION_RUNTIME_FILE), MOTION_RUNTIME);
   return dir;
@@ -126,6 +131,57 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       const shifted = await red(moved.file, 0.9);
       expect(shifted.x).toBeCloseTo(late.x, 0);
       expect(shifted.y).toBeGreaterThan(late.y + 20);
+    },
+    600_000,
+  );
+
+  it(
+    "paints the settling tail frame by frame as it paints each frame cold (no change too small for Chrome to repaint)",
+    async () => {
+      // Near rest the spring moves the box less than 1/80 px a frame: before the runtime wrote on a 1/32 px grid,
+      // Chrome kept the older raster and frames 26 to 29 of a sequential render differed from cold by 8/255 (#501).
+      const dir = project();
+      const composition = join(dir, "compositions", "hyperframes", "motion");
+      const server = createServer((request, response) => {
+        const name = decodeURIComponent(new URL(request.url ?? "/", "http://x").pathname).replace(/^\//, "");
+        readFile(join(composition, name)).then(
+          (body) => response.writeHead(200, { "content-type": name.endsWith(".html") ? "text/html" : "text/javascript" }).end(body),
+          () => response.writeHead(404).end(),
+        );
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/index.html`;
+      // Software compositing, as the producer runs Chrome by default.
+      const browser = await puppeteer.launch({ executablePath: await binaries().ensure("chrome-headless-shell"), args: ["--disable-gpu-compositing"] });
+      try {
+        // The background is made transparent once per page, as the producer does: puppeteer's `omitBackground` sets it
+        // around every capture, which repaints the whole page and hides the threshold.
+        const open = async () => {
+          const page = await browser.newPage();
+          await page.setViewport({ width: 160, height: 90 });
+          await page.goto(url);
+          const cdp = await page.createCDPSession();
+          await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+          const shot = async (t: number) => {
+            await page.evaluate(`window.__timelines.motion.seek(${t})`);
+            const { data } = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
+            return data;
+          };
+          return { page, shot };
+        };
+        const sequential = await open();
+        const differing: number[] = [];
+        for (let frame = 0; frame < 30; frame++) {
+          const warm = await sequential.shot(frame / 30);
+          const cold = await open();
+          if (warm !== (await cold.shot(frame / 30))) differing.push(frame);
+          await cold.page.close();
+        }
+        expect(differing).toEqual([]);
+      } finally {
+        await browser.close();
+        server.close();
+      }
     },
     600_000,
   );

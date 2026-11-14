@@ -834,6 +834,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Motion compositions paint each time the same whatever was painted before (#501, epic #451): motion runtime 0.3.0
+  writes `x` and `y` on a 1/32 px grid and `rotate` on a 0.02° grid, because Chrome does not repaint a transform change
+  under about 1/80 px and kept the older pose, so slow motion (a spring settling) rendered by frame differed from the
+  same frames painted alone (8/255). Each seek also changes the document element's filter between `opacity(1)` and
+  `brightness(1)` (no pixel changes), so Chrome rasters the whole page again instead of only the rectangles it thinks
+  changed. With both, the sub-frame samples of a motion-blurred render (HyperFrames producer, fixed 8 samples) match
+  each time painted on a fresh page in 240 of 240, and repeated blurred renders are byte-identical, as PNG and as WebM
+  (before: up to 4/255 in PNG and 92/255 after VP9). New clips get 0.3.0; an existing clip keeps its frozen copy until
+  `frameshell hyperframes update`. Numbers in `docs/research/motion-blur.md`.
 - Leaving the preview's full screen no longer depends on a fixed 1.5 s wait (#533): macOS drops a request to leave
   while it animates into full screen, and a slow machine took longer, so Escape did nothing. The window now reports
   when it settled (`enter-full-screen`, `panels.fullScreenSettled` in the app's API) and the leave waits for that.
