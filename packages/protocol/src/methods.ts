@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 130;
+export const PROTOCOL_VERSION = 131;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -451,6 +451,19 @@ const ProbeSchema = z.object({
           "The picture has an alpha plane (WebM with `alpha_mode`, ProRes 4444, PNG with alpha). Export never crops such a source " +
             "on an upper track to fill another format's frame (ADR 0027); the base track still crops it. Absent in probes cached before it existed.",
         ),
+      colorTransfer: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+          "ffprobe `color_transfer` tag of the picture (`bt709`, `smpte2084`, `arib-std-b67`, `log100`...); null when untagged. " +
+            "Colour grade warns on HDR and logarithmic curves (ADR 0031). Absent in probes cached before it existed.",
+        ),
+      colorPrimaries: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("ffprobe `color_primaries` tag (`bt709`, `bt2020`...); null when untagged. Absent in probes cached before it existed."),
     })
     .nullable()
     .describe("First video stream; null for audio-only files."),

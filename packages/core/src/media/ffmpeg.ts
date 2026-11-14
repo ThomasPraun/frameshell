@@ -89,6 +89,8 @@ interface FfprobeStream {
   sample_rate?: string;
   channels?: number;
   pix_fmt?: string;
+  color_transfer?: string;
+  color_primaries?: string;
   disposition?: { attached_pic?: number };
   tags?: Record<string, string>;
   side_data_list?: { side_data_type?: string; rotation?: number }[];
@@ -157,6 +159,8 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
           vfr: !still && avg !== null && real !== null && Math.abs(avg - real) > 0.01,
           still,
           alpha: hasAlpha,
+          colorTransfer: colorTag(video.color_transfer),
+          colorPrimaries: colorTag(video.color_primaries),
         }
       : null,
     audio: audio
@@ -165,6 +169,11 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
   };
   // A still has an alpha plane too, but no proxy to build with it.
   return { media, alpha: still ? null : alpha };
+}
+
+/** An ffprobe colour tag, or null when the stream does not say (`unknown` is ffprobe's word for that). */
+function colorTag(value: string | undefined): string | null {
+  return value && value !== "unknown" ? value : null;
 }
 
 /** Alpha of a stream by pix_fmt or the VP8/VP9 `alpha_mode` tag; null when opaque. */

@@ -19,6 +19,8 @@ import {
   RESERVED_MIC_IDS,
   type Clip,
   type Grade,
+  type LogHint,
+  logFootageWarning,
   type ElementAdjust,
   type ClipKey,
   type Marker,
@@ -94,6 +96,8 @@ export interface SourceInfo {
   duration: number | null;
   video: boolean;
   audio: boolean;
+  /** Why the picture looks like LOG or HDR footage (ADR 0031); absent when it does not or the source is not probed for it. */
+  log?: LogHint | null;
 }
 
 /** An adapter-registered clip type as the engine sees it. */
@@ -1018,7 +1022,10 @@ class Edit {
       else clip.audio = audio;
     }
     if (backdrop !== undefined) this.setBackdrop(track, clip, backdrop);
-    if (grade !== undefined) this.setGrade(track, clip, grade);
+    if (grade !== undefined) {
+      this.setGrade(track, clip, grade);
+      if (grade !== null && isMedia(clip) && clip.grade) await this.warnLogFootage(clip.asset);
+    }
     if (motionBlur !== undefined) await this.setMotionBlur(track, clip, motionBlur);
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
@@ -1181,6 +1188,20 @@ class Edit {
     if (!(await this.adapter(clip.type)).motionBlur) {
       this.warnings.push(`the ${clip.type} plugin does not apply motion blur yet: ${clip.id} keeps rendering sharp until it does.`);
     }
+  }
+
+  /**
+   * ADR 0031 decision 9: footage that looks like LOG or HDR is graded all the same, with a warning. A source the
+   * context cannot read says nothing here: the grade is no less valid, and export reports the file.
+   */
+  async warnLogFootage(asset: string): Promise<void> {
+    let log: LogHint | null | undefined;
+    try {
+      log = (await this.context.source(asset)).log;
+    } catch {
+      return;
+    }
+    if (log) this.warnings.push(logFootageWarning(asset, log));
   }
 
   /** Merge `elements` per selector (`null` removes one, `null` for all clears); empty ends up absent. */

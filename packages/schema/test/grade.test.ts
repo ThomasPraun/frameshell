@@ -8,6 +8,8 @@ import {
   gradeOf,
   gradeTable,
   gradeTableSize,
+  logFootageHint,
+  logFootageWarning,
   normalizeGrade,
   parseCube,
   parseTimeline,
@@ -74,5 +76,33 @@ describe("colour grade (ADR 0031)", () => {
     expect(applyGradeTable(identity, [255, 255, 255])).toEqual([255, 255, 255]);
     const flat = { size: 2, data: new Float32Array(24).fill(100.9 / 255) };
     expect(applyGradeTable(flat, [10, 200, 30])).toEqual([100, 100, 100]);
+  });
+});
+
+describe("LOG footage hint (ADR 0031 decision 9)", () => {
+  it("reads HDR and logarithmic transfer curves, wide-gamut primaries, tags first", () => {
+    expect(logFootageHint("assets/a.mp4", { colorTransfer: "arib-std-b67", colorPrimaries: "bt2020" })).toEqual({ kind: "transfer", value: "arib-std-b67" });
+    expect(logFootageHint("assets/a.mp4", { colorTransfer: "smpte2084" })).toEqual({ kind: "transfer", value: "smpte2084" });
+    expect(logFootageHint("assets/a.mp4", { colorTransfer: "log316" })).toEqual({ kind: "transfer", value: "log316" });
+    expect(logFootageHint("assets/a.mp4", { colorTransfer: "bt709", colorPrimaries: "bt2020" })).toEqual({ kind: "primaries", value: "bt2020" });
+    expect(logFootageHint("assets/a.mp4", { colorTransfer: "bt709", colorPrimaries: "bt709" })).toBeNull();
+    expect(logFootageHint("assets/a.mp4", { colorTransfer: null, colorPrimaries: null })).toBeNull();
+    expect(logFootageHint("assets/a.mp4")).toBeNull();
+  });
+
+  it("reads camera LOG words in the file name, not words that merely hold the letters", () => {
+    for (const name of ["assets/A001_LogC.mov", "assets/clip-S-Log3.mp4", "assets/C-Log2 take 4.mov", "assets/v-log_01.mp4", "assets/footage_log.mp4", "assets/hlg-sunset.mov"]) {
+      expect(logFootageHint(name, { colorTransfer: "bt709" })?.kind, name).toBe("name");
+    }
+    for (const name of ["assets/dialog.mp4", "assets/blog-intro.mp4", "assets/my-vlog.mp4", "assets/catalog.mov", "assets/logs/clip.mp4", "assets/login.mp4"]) {
+      expect(logFootageHint(name, { colorTransfer: "bt709" }), name).toBeNull();
+    }
+    // The extension is not the name.
+    expect(logFootageHint("assets/clip.log", null)).toBeNull();
+  });
+
+  it("words the warning for the CLI and the agent", () => {
+    const hint = logFootageHint("assets/a.mp4", { colorTransfer: "arib-std-b67" })!;
+    expect(logFootageWarning("assets/a.mp4", hint)).toMatch(/assets\/a\.mp4 may be LOG or HDR footage \(its transfer curve is tagged arib-std-b67\), not Rec\.709/);
   });
 });

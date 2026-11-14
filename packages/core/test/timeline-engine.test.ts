@@ -495,6 +495,22 @@ describe("clip.move, trim, split, remove, set", () => {
     expect((await rejection(apply(card, "clip.set", { clip: "c_0002", grade: { exposure: 1 } }))).message).toMatch(/only media clips take `grade`/);
   });
 
+  it("warns, never refuses, when graded footage looks like LOG; stays quiet for other sources and unreadable ones (ADR 0031 decision 9)", async () => {
+    const footage = await withClip();
+    const logged = context({
+      source: async (asset) => ({ ...SOURCES[asset]!, log: asset === "assets/talk.mp4" ? { kind: "transfer", value: "arib-std-b67" } : null }),
+    });
+    const graded = await apply(footage, "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } }, logged);
+    expect(clipsOf(graded.timeline, "t_v")[0]).toMatchObject({ grade: { exposure: 0.5 } });
+    expect(graded.warnings).toHaveLength(1);
+    expect(graded.warnings[0]).toMatch(/assets\/talk\.mp4 may be LOG or HDR footage \(its transfer curve is tagged arib-std-b67\)/);
+    // Clearing the grade has nothing to warn about; a source that does not read leaves the grade valid.
+    expect((await apply(graded.timeline, "clip.set", { clip: "c_0001", grade: null }, logged)).warnings).toEqual([]);
+    const unreadable = context({ source: async () => Promise.reject(new Error("gone")) });
+    expect((await apply(footage, "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } }, unreadable)).warnings).toEqual([]);
+    expect((await apply(footage, "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } })).warnings).toEqual([]);
+  });
+
   it("merges a generated clip's backdrop field by field, clears it, warns on the bottom track, refuses other clips (ADR 0031)", async () => {
     const twoTracks = (await apply(await withClip(), "track.add", { kind: "video" }, context({ newId: () => "t_v2" }))).timeline;
     const card = (await apply(twoTracks, "clip.add", { track: "t_v2", type: "hyperframes", duration: 2, start: 10, props: { title: "A" } })).timeline;
