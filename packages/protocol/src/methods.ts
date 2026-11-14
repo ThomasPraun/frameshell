@@ -432,6 +432,9 @@ const ClipFinalRenderSchema = z.object({
   job: z.string().nullable().describe("Id of the `clip` job rendering it now; null otherwise."),
   progress: z.number().min(0).max(1).describe("0..1 of the running render; 1 when ready, 0 otherwise."),
   error: z.string().nullable().describe("Why the render failed; null otherwise."),
+  refused: z
+    .boolean()
+    .describe("True when `failed` because the plugin refused the motion blur: exports and `frame` then use the draft render, never waiting for this one."),
 });
 
 /** Render cache state of one generated clip (SPEC §6.5). */

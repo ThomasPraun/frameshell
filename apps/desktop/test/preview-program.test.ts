@@ -156,7 +156,7 @@ describe("compileProgram", () => {
       job: null,
       progress: 1,
       error: null,
-      final: { state: "rendering", key: "kb", file: null, hasAlpha: null, width: null, height: null, duration: null, job: "j_c2", progress: 0.5, error: null },
+      final: { state: "rendering", key: "kb", file: null, hasAlpha: null, width: null, height: null, duration: null, job: "j_c2", progress: 0.5, error: null, refused: false },
     };
     const generated = { id: "g1", type: "hyperframes", source: "compositions/hyperframes/g1/index.html", start: 0, duration: 1, end: 1 };
     const played = (info: ClipRenderInfo) =>

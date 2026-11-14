@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for it. `clip.renders` reports the blurred render in a new `final` field (state `waiting` while the sharp one is not
   ready yet), and the app follows its job. When the plugin refuses to blur a composition (HyperFrames: HDR content,
   shader transitions; plugin API `MOTION_BLUR_REFUSED`), exports use the sharp render and the render job gets a
-  warning; the refusal is not retried until the clip changes. `gc` keeps both renders of every blurred clip.
+  warning; `final.refused` says so and the refusal is not retried until the clip changes. Chat about this says
+  `frame pending` while the blurred render is due. `gc` keeps both renders of every blurred clip.
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also

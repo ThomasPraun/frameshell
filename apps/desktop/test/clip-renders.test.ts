@@ -52,7 +52,7 @@ describe("applyClipJob", () => {
   });
 
   it("follows the blurred final render of a clip with motion blur in `final`, leaving its ready draft as it is (ADR 0041)", () => {
-    const final = { state: "queued" as const, key: "keyblur", file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null };
+    const final = { state: "queued" as const, key: "keyblur", file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null, refused: false };
     const draft = info("c1", { job: null, state: "ready", file: ".frameshell/cache/clips/keyc1.webm", progress: 1, final });
     const renders = new Map([["c1", draft]]);
     const output = "/p/.frameshell/cache/clips/keyblur";

@@ -623,7 +623,7 @@ describe("motion blur in generated clips", () => {
       const refused = await add("blur-card", "refuse", 4);
       await conn.request("clip.set", { cwd: dir, clip: refused, motionBlur: { shutter: 90 } });
       const failed = await until(refused, (info) => info.final?.state === "failed");
-      expect(failed).toMatchObject({ state: "ready", final: { error: expect.stringContaining("cannot be motion-blurred"), file: null } });
+      expect(failed).toMatchObject({ state: "ready", final: { error: expect.stringContaining("cannot be motion-blurred"), file: null, refused: true } });
       const before = (await conn.request("job.list", { cwd: dir })).jobs.filter((job) => job.output?.endsWith(failed.final!.key)).length;
 
       const { job, out } = await exported();

@@ -280,7 +280,10 @@ export class ClipRenderer {
       // Never `waiting`: a missing draft is always queued.
       const info: ClipRenderInfo = { ...about, ...draft, state: draft.state as ClipRenderInfo["state"] };
       // The final is queued behind its draft, in the background: the preview shows the draft meanwhile (ADR 0041).
-      if (keyed.final) info.final = await this.#stateOf(root, keyed.final, clip, format, draft.state === "ready" ? "background" : null);
+      if (keyed.final) {
+        const final = await this.#stateOf(root, keyed.final, clip, format, draft.state === "ready" ? "background" : null);
+        info.final = { ...final, refused: this.#failed.get(entryId(root, keyed.final.key))?.refused === true };
+      }
       clips.push(info);
     }
     return { timeline: timeline.id, revision: timeline.revision, clips };
@@ -298,7 +301,7 @@ export class ClipRenderer {
     format: ClipFormat,
     queue: JobPriority | null,
     refreshAfter = false,
-  ): Promise<ClipFinalRenderInfo> {
+  ): Promise<Omit<ClipFinalRenderInfo, "refused">> {
     const { key } = variant;
     const ready = await this.#ready(root, key);
     if (ready) {
@@ -399,7 +402,7 @@ export class ClipRenderer {
       const { final } = keyed;
       const failed = final ? this.#failed.get(entryId(root, final.key)) : undefined;
       let got: Obtained;
-      if (!final || tier === "draft") got = await this.#obtain(root, keyed, clip, format);
+      if (!final || tier === "draft") got = await this.#obtain(root, keyed, clip, format, final !== null);
       else if (failed?.refused) got = await sharp(clip, keyed, failed.error);
       else {
         got = await this.#obtain(root, final, clip, format);
@@ -430,12 +433,15 @@ export class ClipRenderer {
     return rendered;
   }
 
-  /** The cached render of `variant`, or the render queued interactive for it; a failed key is tried again. */
-  async #obtain(root: string, variant: Variant, clip: AdapterClip, format: ClipFormat): Promise<Obtained> {
+  /**
+   * The cached render of `variant`, or the render queued interactive for it; a failed key is tried again.
+   * `refreshAfter` as for {@link #render}.
+   */
+  async #obtain(root: string, variant: Variant, clip: AdapterClip, format: ClipFormat, refreshAfter = false): Promise<Obtained> {
     const ready = await this.#ready(root, variant.key);
     if (ready) return { ready };
     this.#failed.delete(entryId(root, variant.key));
-    return { done: this.#render(root, variant, clip, format, "interactive").done };
+    return { done: this.#render(root, variant, clip, format, "interactive", refreshAfter).done };
   }
 
   /**
