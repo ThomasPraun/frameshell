@@ -67,6 +67,7 @@ import {
   type ClipFormatOverride,
   type FormatEntry,
   clipInFormat,
+  letterboxBars,
 } from "@frameshell/schema";
 import { formatNotFound } from "../formats.js";
 import { dipAt } from "../media/duck.js";
@@ -304,6 +305,8 @@ class Edit {
         return this.markerRemove(request.args);
       case "tempo.set":
         return this.tempoSet(request.args);
+      case "letterbox.set":
+        return this.letterboxSet(request.args);
       case "captions.set":
         return this.captionsSet(request.args);
       case "timeline.patch":
@@ -2448,6 +2451,29 @@ class Edit {
     else delete this.draft.markers;
     if (next.tempo) this.draft.tempo = next.tempo;
     else delete this.draft.tempo;
+    if (next.letterbox) this.draft.letterbox = next.letterbox;
+    else delete this.draft.letterbox;
+  }
+
+  // Letterbox (ADR 0043)
+
+  letterboxSet(args: OperationArgs<"letterbox.set">): void {
+    const { aspect, clear } = args;
+    if (clear === true) {
+      if (aspect !== undefined) throw this.invalid("`clear` removes the letterbox: pass it without `aspect`.", { field: "clear" });
+      if (!this.draft.letterbox) this.warnings.push("the timeline has no letterbox: nothing to clear.");
+      delete this.draft.letterbox;
+      return;
+    }
+    if (aspect === undefined) throw this.invalid("nothing to set.", { hint: "Pass `aspect` (2.39, 1.85, 1.3333 for 4:3) or `clear: true`." });
+    const primary = this.context.formats?.[0];
+    if (primary && letterboxBars(primary, aspect).length === 0) {
+      this.warnings.push(`the frame (${primary.width}x${primary.height}) already has aspect ${aspect}: no bars show.`);
+    }
+    if (primary && this.context.formats!.length > 1) {
+      this.warnings.push(`bars show in the primary format (${primary.id}) only: the other formats re-block without them.`);
+    }
+    this.draft.letterbox = { aspect };
   }
 
   // Tempo (ADR 0029)

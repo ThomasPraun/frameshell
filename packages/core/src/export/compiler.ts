@@ -52,6 +52,8 @@ import {
   staticGain,
   subtitleTracks,
   withTrackMutes,
+  type Letterbox,
+  letterboxBars,
 } from "@frameshell/schema";
 import { tierFps, tierVideoArgs } from "../encoders/tiers.js";
 import { GIF_MAX_FPS, GIF_MAX_FRAMES } from "./presets.js";
@@ -538,13 +540,14 @@ export function compileRender(input: RenderInput): RenderPlan {
   const files: Record<string, string> = {};
   if (layout.subtitles.length > 0) files[SUBTITLES_FILE] = assSubtitles(layout.subtitles, { width, height }, fps);
   if (cover?.layout) files[COVER_FILE] = assCover(cover.layout, { width, height });
+  const bars = letterboxChain(timeline.letterbox, { width, height }, target.pixFmt);
   const segments: RenderSegment[] = bounds.map(([from, to], index) => {
     const name = `seg-${String(index + 1).padStart(4, "0")}`;
     const outFrames = Math.round((to / fps) * outFps) - Math.round((from / fps) * outFps);
     const showsCover = cover !== null && index === 0;
     const graph = showsCover ? videoGraph(layout, cover.frame, cover.frame + 1, target) : videoGraph(layout, from, to, target);
     const burn = showsCover ? (cover.layout ? burnCover() : "") : burnSubtitles(layout, from, to, fps);
-    const tail = `${burn}${outFps === fps ? "" : `,fps=${rate}`}`;
+    const tail = `${bars}${burn}${outFps === fps ? "" : `,fps=${rate}`}`;
     files[`${name}.filter`] = `${[...graph.lines.slice(0, -1), `${graph.lines.at(-1)}${tail}[v]`].join(";\n")}\n`;
     return {
       file: `${name}.${ext}`,
@@ -725,6 +728,7 @@ export function compileFrame(input: FrameInput): FramePlan {
   const graph = videoGraph(layout, frame, frame + 1, { fps, width, height, pixFmt: encoding.pixFmt, project: input.resolution });
   const clip = layout.base.find((placed) => placed.start <= frame && frame < placed.end);
   const burn = input.cover !== undefined ? (input.cover ? burnCover() : "") : burnSubtitles(layout, frame, frame + 1, fps);
+  const bars = letterboxChain(input.timeline.letterbox, { width, height }, encoding.pixFmt);
   const script = input.cover ? { [COVER_FILE]: assCover(input.cover, { width, height }) } : { [SUBTITLES_FILE]: assSubtitles(layout.subtitles, { width, height }, fps) };
   return {
     frame,
@@ -735,7 +739,7 @@ export function compileFrame(input: FrameInput): FramePlan {
     args: [
       ...BASE,
       ...graph.inputs,
-      ...["-filter_complex", `${graph.lines.join(";")}${burn}[v]`, "-map", "[v]", "-frames:v", "1"],
+      ...["-filter_complex", `${graph.lines.join(";")}${bars}${burn}[v]`, "-map", "[v]", "-frames:v", "1"],
       ...encoding.args,
       ...["-f", "image2", "-update", "1", input.output],
     ],
@@ -772,6 +776,18 @@ function emptyFrame(layout: Layout, frame: number, fps: number): string | null {
   if (drawn.some((span) => !fading(span))) return null;
   if (drawn.length === 0) return frame === 0 ? "black (no picture starts at 0)" : "black (no picture shows there)";
   return frame === 0 ? "black (the first clip fades in from black)" : "black (every picture there is fading in or out)";
+}
+
+/**
+ * Filter chain appended to a graph's last line that paints the timeline's letterbox bars (ADR 0043,
+ * `letterboxBars`, the preview's numbers) on the finished `frame`, before any caption is burned; empty without a
+ * letterbox. `drawbox` paints limited-range black, so a full-range (`yuvj`) frame gets its bars in the limited twin.
+ */
+function letterboxChain(letterbox: Letterbox | undefined, frame: { width: number; height: number }, pixFmt: string): string {
+  const bars = letterbox ? letterboxBars(frame, letterbox.aspect) : [];
+  if (bars.length === 0) return "";
+  const boxes = bars.map((bar) => `drawbox=x=${bar.left}:y=${bar.top}:w=${bar.width}:h=${bar.height}:color=black:t=fill`);
+  return pixFmt.startsWith("yuvj") ? `,format=${pixFmt.replace("yuvj", "yuv")},${boxes.join(",")},format=${pixFmt}` : `,${boxes.join(",")}`;
 }
 
 /** Filter chain appended to the cover frame's graph: the cover word over the picture. */

@@ -144,6 +144,16 @@ describe("per-format overrides (ADR 0027 decision 5)", () => {
     expect(shown.tracks[2]).toMatchObject({ style: { preset: "clean", position: "center" } });
   });
 
+  it("keeps the letterbox in the primary format only (ADR 0043), on a file and on a view", () => {
+    const boxed: Timeline = { ...timeline, letterbox: { aspect: 2.39 } };
+    expect(resolveFormat(boxed, config)!.timeline).toBe(boxed);
+    expect(resolveFormat(boxed, config, "9x16")!.timeline).not.toHaveProperty("letterbox");
+    const shown = resolveFormat(overridden(), config, "9x16")!.timeline;
+    expect(resolveFormat({ ...overridden(), letterbox: { aspect: 2.39 } }, config, "9x16")!.timeline).toEqual(shown);
+    const view = { tracks: [], letterbox: { aspect: 1.85 } };
+    expect(formatTimeline(view, "1x1")).toEqual({ tracks: [] });
+  });
+
   it("works on a timeline view, whose clips carry derived fields", () => {
     const view = { tracks: [{ id: "t_top", kind: "video", name: null, clips: [{ id: "c_a", end: 2, transform: { x: 5 }, formats: { "9x16": { transform: { x: 9 } } } }] }] };
     expect(formatTimeline(view, "9x16").tracks[0]!.clips[0]).toMatchObject({ end: 2, transform: { x: 9 } });

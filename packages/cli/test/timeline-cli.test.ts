@@ -662,6 +662,34 @@ describe("tempo and --snap-to (ADR 0029)", () => {
   });
 });
 
+describe("letterbox (ADR 0043)", () => {
+  it("letterbox set takes 2.39, 4:3 or 4/3, shows in timeline show, reverts and clears; bad aspects exit 2", () => {
+    writeFileSync(join(project, "timelines", "boxed.json"), JSON.stringify({ schemaVersion: 1, id: "boxed", revision: 0, tracks: [{ id: "v1", kind: "video", clips: [] }] }));
+    const on = ["--timeline", "boxed"];
+    const stored = () => JSON.parse(readFileSync(join(project, "timelines", "boxed.json"), "utf8")) as { letterbox?: unknown };
+
+    const set = json<{ operation: { op: string } }>(["letterbox", "set", "2.39", ...on]);
+    expect(set.operation.op).toBe("letterbox.set");
+    expect(stored().letterbox).toEqual({ aspect: 2.39 });
+    expect(frameshell(["timeline", "show", ...on]).stdout).toMatch(/^Letterbox: 2.39:1$/m);
+    expect(frameshell(["letterbox", "set", "4:3", ...on]).code).toBe(0);
+    expect(stored().letterbox).toEqual({ aspect: 4 / 3 });
+    expect(frameshell(["timeline", "show", ...on]).stdout).toMatch(/^Letterbox: 1.3333:1$/m);
+    expect(frameshell(["letterbox", "set", "4/3", ...on]).code).toBe(0);
+
+    expect(frameshell(["letterbox", "clear", ...on]).code).toBe(0);
+    expect(stored()).not.toHaveProperty("letterbox");
+    const flat = json<{ operation: { id: string } }>(["letterbox", "set", "1.85", ...on]);
+    expect(stored().letterbox).toEqual({ aspect: 1.85 });
+    expect(frameshell(["revert", flat.operation.id, ...on]).code).toBe(0);
+    expect(stored()).not.toHaveProperty("letterbox");
+
+    for (const bad of ["0", "wide", "4:0", "2.39:1:1"]) expect(frameshell(["letterbox", "set", bad, ...on]).code, bad).toBe(2);
+    expect(frameshell(["letterbox", "set", ...on]).code).toBe(2);
+    expect(frameshell(["letterbox", "set", "2.39", "--clip", "c_x", ...on]).code).toBe(2);
+  });
+});
+
 describe("per-format overrides (ADR 0027)", () => {
   it("clip set, clip key and track set with --format change one format only; --reset drops it", () => {
     expect(frameshell(["format", "add", "9x16"]).code).toBe(0);

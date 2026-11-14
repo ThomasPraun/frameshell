@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 129;
+export const PROTOCOL_VERSION = 130;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3859,6 +3859,17 @@ export const methods = {
       "\"beat\" | \"bar\" | \"marker\"`. Removing the `clip` clears the tempo with a warning. Fails with InvalidOperation (not a media clip " +
       "of a video or audio track, nothing to set).",
     params: operationArgs["tempo.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "letterbox.set": {
+    mutating: true,
+    description:
+      "Set or clear the timeline's letterbox (ADR 0043): black bars over the whole finished picture, above every video track and " +
+      "under the captions, which stay where they are (over a bar when placed there). `{ aspect: 2.39 }` keeps a 2.39:1 picture: bars " +
+      "top and bottom when the aspect is wider than the frame, at the sides when narrower; `{ clear: true }` removes them. Export " +
+      "and the app's preview draw the same bars. Primary format only: other formats re-block without bars. Fails with " +
+      "InvalidOperation (nothing to set, `clear` with `aspect`).",
+    params: operationArgs["letterbox.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   cleanup: {

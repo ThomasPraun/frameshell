@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 130): an optional `letterbox { aspect }` on the
+  timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
+  bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also
+  `1.85`, `4:3`, `4/3`) and `letterbox clear` (daemon `letterbox.set`, MCP `letterbox_set`; journaled, revertible, a
+  proposal in review mode); `timeline show` prints it. Export paints the bars with `drawbox` before burning the captions
+  in every segment, the cover frame and `frame` captures (limited-range black converted back on full-range JPEG frames);
+  the app's preview draws the same pixels (`letterboxBars`) above the live page and render slates, under the captions.
+  Primary format only: other formats re-block without bars. Timelines without it export byte-identical plans.
 - Brand capture from a URL, slice 3 of #467 (ADR 0044, epic #451; protocol 128): `frameshell brand capture <url>` (MCP
   `brand_capture`, job kind `brand`) opens a public `http`/`https` page in the managed headless Chrome, whose only way out
   is a daemon-local guarded proxy (public unicast addresses, ports 80/443, each host resolved once and dialed by the checked

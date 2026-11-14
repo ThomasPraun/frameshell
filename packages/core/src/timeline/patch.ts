@@ -5,7 +5,7 @@ import type { AnyClip, AnyClipTrack, Marker, MulticamGroup, Timeline, Track } fr
 /**
  * Patch turning `from` into `to`, at clip granularity: whole tracks only when
  * a track appears, disappears or its own fields change; whole multicam groups
- * and markers; the timeline's `tempo` as one value. Diffing makes every operation's inverse correct by construction
+ * and markers; the timeline's `tempo` and `letterbox` each as one value. Diffing makes every operation's inverse correct by construction
  * (`diff(after, before)`).
  */
 export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
@@ -44,6 +44,7 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
   }
   const patch: TimelinePatch = {};
   if (!isDeepStrictEqual(from.tempo, to.tempo)) patch.tempo = to.tempo ? structuredClone(to.tempo) : null;
+  if (!isDeepStrictEqual(from.letterbox, to.letterbox)) patch.letterbox = to.letterbox ? structuredClone(to.letterbox) : null;
   if (markers.length > 0) patch.markers = markers;
   if (groups.length > 0) patch.groups = groups;
   if (tracks.length > 0) patch.tracks = tracks;
@@ -56,7 +57,7 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
 
 /** True when `patch` changes nothing. */
 export function isEmptyPatch(patch: TimelinePatch): boolean {
-  return patch.tempo === undefined && !patch.markers && !patch.groups && !patch.tracks && !patch.clips && !patch.order;
+  return patch.tempo === undefined && patch.letterbox === undefined && !patch.markers && !patch.groups && !patch.tracks && !patch.clips && !patch.order;
 }
 
 /**
@@ -71,6 +72,8 @@ export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
   const next = structuredClone(timeline);
   if (patch.tempo === null) delete next.tempo;
   else if (patch.tempo) next.tempo = structuredClone(patch.tempo);
+  if (patch.letterbox === null) delete next.letterbox;
+  else if (patch.letterbox) next.letterbox = structuredClone(patch.letterbox);
   if (patch.groups) {
     const groups: MulticamGroup[] = next.groups ?? [];
     for (const { id, group } of patch.groups) {

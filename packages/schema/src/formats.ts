@@ -137,9 +137,12 @@ export function clipInFormat<C extends object>(clip: C, id: string): C {
  * `timeline` as it plays in format `id` (ADR 0027): each clip {@link clipInFormat}, a subtitle track's override
  * style over its own, and clips hidden there kept in place at opacity 0 (their opacity keys dropped), so their
  * sound, transitions and captions are the primary's. Works on a timeline file and on a `timeline.show` view alike.
- * `timeline` itself when nothing in it is overridden in `id`. Call it for formats other than the primary only.
+ * The timeline's `letterbox` is left out: its bars are the primary's only (ADR 0043). `timeline` itself when nothing in it
+ * is overridden in `id` and it has no letterbox. Call it for formats other than the primary only.
  */
-export function formatTimeline<T extends { tracks: readonly object[] }>(timeline: T, id: string): T {
+export function formatTimeline<T extends { tracks: readonly object[] }>(given: T, id: string): T {
+  const { letterbox: _letterbox, ...rest } = given as T & { letterbox?: unknown };
+  const timeline = "letterbox" in given ? (rest as T) : given;
   const tracks = timeline.tracks as readonly FormattableTrack[];
   const touched = tracks.some((track) => track.formats?.[id] !== undefined || track.clips?.some((clip) => (clip as FormattableClip).formats?.[id] !== undefined));
   if (!touched) return timeline;

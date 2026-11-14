@@ -184,6 +184,12 @@ People changes are not timeline operations: review mode does not hold them, `his
 | `tempo_set(timeline?, clip? \| bpm?, offset?, meter?, clear?)` | The timeline's beat grid (ADR 0029): `clip` follows the measured grid of that music clip's asset (after `beats_measure`) and moves with the clip; `bpm` is a nominal grid for blocking before music exists; `clear` removes it. Journaled, revertible; removing the clip clears the tempo with a warning. |
 | `tempo_show(timeline?)` | The stored tempo and its grid on the timeline clock (`beats` and `bars` in timeline seconds, `bpm`, `low`), or `problem` when the music has no beats file yet. `timeline_show` with `grid: true` embeds the same grid. Every time argument of `clip_add`, `clip_move`, `clip_trim`, `clip_split`, `clip_key`, `cut`, `transition_*` and `marker_*` takes `snapTo: "beat" \| "bar"` to land on it (refused on a LOW confidence grid). |
 
+## Letterbox (ADR 0043)
+
+| Tool | Does |
+|---|---|
+| `letterbox_set(timeline?, aspect? \| clear?)` | Black bars over the whole finished picture, above every video track and under the captions: `aspect` is the picture's width / height inside them (2.39, 1.85, 1.3333), bars top and bottom when wider than the frame, at the sides when narrower; `clear` removes them. Export and the app's preview draw the same pixels; primary format only. Journaled, revertible, a proposal in review mode; `timeline_show` lists it. |
+
 ## Style (ADR 0028)
 
 Optional `style.json`: the project's style guide as numbers (colours, fonts, type sizes, motion personality and overrides, sound levels under the voice, platforms, rules, banned list).

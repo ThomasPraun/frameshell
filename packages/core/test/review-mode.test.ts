@@ -174,6 +174,17 @@ describe("review mode on: proposals (#315)", () => {
     expect(own).toMatchObject({ view: "proposal", markers: [{ label: "lead", at: 0.5 }, { label: "drop", at: 4 }] });
   });
 
+  it("holds an agent's letterbox as a proposal; the person accepting it writes it to the file (ADR 0043)", async () => {
+    const { dir, connect, ui, read } = await setup({ review: true });
+    // No session: the change is its own transaction, ready for review at once.
+    const agent = await connect("cli/test");
+    const set = await agent.request("letterbox.set", { cwd: dir, aspect: 2.39 });
+    expect(JSON.parse(read())).not.toHaveProperty("letterbox");
+    expect(await agent.request("timeline.show", { cwd: dir, timeline: "main" })).toMatchObject({ view: "proposal", letterbox: { aspect: 2.39 } });
+    await ui().request("proposal.accept", { cwd: dir, tx: set.operation.tx });
+    expect(JSON.parse(read()).letterbox).toEqual({ aspect: 2.39 });
+  });
+
   it("refuses a second author, a new transaction and the author's next change once ready; the person still edits", async () => {
     const { dir, connect, ui, t1, t2, read } = await setup({ review: true });
     const agent = await connect("cli/test");
