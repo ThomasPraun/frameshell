@@ -1159,6 +1159,42 @@ describe("tempo (ADR 0029 slice 3)", () => {
   });
 });
 
+describe("letterbox (ADR 0043 slice 1)", () => {
+  it("letterbox.set stores the aspect, replaces it, and the inverse restores the previous one", async () => {
+    const set = await apply(base(), "letterbox.set", { aspect: 2.39 });
+    expect(set.timeline.letterbox).toEqual({ aspect: 2.39 });
+    expect(set.inverse.args).toEqual({ letterbox: null });
+    const flat = await apply(set.timeline, "letterbox.set", { aspect: 1.85 });
+    expect(flat.timeline.letterbox).toEqual({ aspect: 1.85 });
+    expect(flat.inverse.args).toEqual({ letterbox: { aspect: 2.39 } });
+    expect((await apply(flat.timeline, "timeline.patch", flat.inverse.args)).timeline.letterbox).toEqual({ aspect: 2.39 });
+    expect(parseTimeline(flat.timeline)).toMatchObject({ ok: true });
+  });
+
+  it("letterbox.set clears with `clear`, warns when there was none, and refuses mixed, empty or non-positive arguments", async () => {
+    const t = (await apply(base(), "letterbox.set", { aspect: 2.39 })).timeline;
+    const cleared = await apply(t, "letterbox.set", { clear: true });
+    expect(cleared.timeline).not.toHaveProperty("letterbox");
+    expect(cleared.warnings).toEqual([]);
+    expect((await apply(base(), "letterbox.set", { clear: true })).warnings).toEqual([expect.stringMatching(/no letterbox/)]);
+    expect((await rejection(apply(t, "letterbox.set", { clear: true, aspect: 2 }))).message).toMatch(/clear/);
+    expect((await rejection(apply(t, "letterbox.set", {}))).message).toMatch(/nothing to set/);
+    expect(() => op("letterbox.set", { aspect: 0 })).toThrow();
+    expect(parseTimeline({ ...base(), letterbox: { aspect: -1 } })).toMatchObject({ ok: false });
+  });
+
+  it("warns when the primary frame already has the aspect, and that other formats show no bars", async () => {
+    const formats = [
+      { id: "16x9", width: 1920, height: 1080 },
+      { id: "9x16", width: 1080, height: 1920 },
+    ];
+    expect((await apply(base(), "letterbox.set", { aspect: 16 / 9 }, context({ formats: formats.slice(0, 1) }))).warnings).toEqual([
+      expect.stringMatching(/1920x1080\) already has aspect/),
+    ]);
+    expect((await apply(base(), "letterbox.set", { aspect: 2.39 }, context({ formats }))).warnings).toEqual([expect.stringMatching(/primary format \(16x9\) only/)]);
+  });
+});
+
 // Property-style: random operation sequences from a seeded PRNG (no dependency).
 
 function prng(seed: number) {

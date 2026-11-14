@@ -89,10 +89,12 @@ export {
   type Marker,
   type MarkerColor,
   TempoSchema,
+  LetterboxSchema,
   MIN_TEMPO_BPM,
   MAX_TEMPO_BPM,
   MAX_TEMPO_METER,
   type Tempo,
+  type Letterbox,
   isGridRefLabel,
   markerLabelKey,
   findMarker,
@@ -300,6 +302,7 @@ export {
   normalizeGrade,
   parseCube,
 } from "./grade.js";
+export { type FrameSize, type LetterboxBar, letterboxBars } from "./finish.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   SHOOT_SCHEMA_URL,

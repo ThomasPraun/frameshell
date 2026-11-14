@@ -56,6 +56,7 @@ const VERBS: Record<string, string> = {
   "marker.set": t.history.verbs.changeMarker,
   "marker.remove": t.history.verbs.removeMarker,
   "tempo.set": t.history.verbs.setTempo,
+  "letterbox.set": t.history.verbs.setLetterbox,
   "timeline.patch": t.history.verbs.directEdit,
   "file.edit": t.history.verbs.directEdit,
   "format.add": t.history.verbs.addFormat,

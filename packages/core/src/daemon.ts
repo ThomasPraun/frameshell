@@ -2124,6 +2124,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       };
     },
     "tempo.set": (params, caller) => operate("tempo.set", params, caller),
+    "letterbox.set": (params, caller) => operate("letterbox.set", params, caller),
     "track.list": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
       return timelines.tracks(dir, timeline, await viewOf(dir, caller, view));

@@ -1117,6 +1117,13 @@ code {
   pointer-events: none;
 }
 
+/* Letterbox bars (ADR 0043): over the picture and the live page, under the subtitles; clicks reach the layers below. */
+.preview-letterbox {
+  position: absolute;
+  background: #000;
+  pointer-events: none;
+}
+
 .preview-duration::before {
   content: "/ ";
 }

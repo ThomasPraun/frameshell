@@ -10,7 +10,7 @@ import { holdSettled } from "../preview/element-edit.js";
 import { elementMode, useElementMode } from "../preview/element-mode.js";
 import { liveTarget } from "../preview/live.js";
 import { PreviewPlayer } from "../preview/player.js";
-import { type PlaceholderReason, type PlaceholderSpan, type Program, placeholdersAt } from "../preview/program.js";
+import { type PlaceholderReason, type PlaceholderSpan, type Program, letterboxOverlay, placeholdersAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, layersAt, placementEdit } from "../preview/transform-edit.js";
 import { transport, useTransport } from "../preview/transport.js";
 import { useProgram, useProjectFormats, useProjectKind, useResolution } from "../preview/useProgram.js";
@@ -300,7 +300,8 @@ export function PreviewPanel({
             onLive={setLiveClip}
           />
           {program && <RenderSlates program={program} frame={frame} live={mode.held?.clip ?? liveClip?.clip ?? null} />}
-          {/* Subtitles read over every picture and the render slates. Neither takes a click. */}
+          {program && <LetterboxBars program={program} output={shownFrame} />}
+          {/* Subtitles read over every picture, the render slates and the letterbox bars. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} format={shown} mediaUrl={project.mediaUrl} />
           {program && !playing && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} format={variant ? shown : null} />}
           {program && editing && view && !playing && !variant && !pickTool && (
@@ -381,6 +382,23 @@ function Inspector({ format, fillOf }: { format: string | null; fillOf: ((clip: 
   if (track !== null && kind === "subtitles") return <SubtitleInspector track={track} format={format} />;
   if (track !== null && kind === "program" && clips.length === 0) return <GroupInspector track={track} />;
   return <ClipInspector format={format} fillOf={fillOf} />;
+}
+
+/**
+ * The timeline's letterbox (ADR 0043): black bars over every picture, the live page and the render slates, under the
+ * captions, at the pixels export paints them. They take no click.
+ */
+function LetterboxBars({ program, output }: { program: Program; output: Size }) {
+  const percent = (fraction: number) => `${fraction * 100}%`;
+  return letterboxOverlay(program, output).map((bar, index) => (
+    <div
+      key={index}
+      className="preview-letterbox"
+      aria-hidden="true"
+      data-testid="preview-letterbox"
+      style={{ left: percent(bar.left), top: percent(bar.top), width: percent(bar.width), height: percent(bar.height) }}
+    />
+  ));
 }
 
 /**

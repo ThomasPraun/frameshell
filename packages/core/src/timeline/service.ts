@@ -1590,6 +1590,7 @@ export class TimelineService {
       ...(timeline.groups ? { groups: timeline.groups } : {}),
       ...(timeline.markers ? { markers: sortedMarkers(timeline) } : {}),
       ...(timeline.tempo ? { tempo: timeline.tempo } : {}),
+      ...(timeline.letterbox ? { letterbox: timeline.letterbox } : {}),
       problems,
     };
   }

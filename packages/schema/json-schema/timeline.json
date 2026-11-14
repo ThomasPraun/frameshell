@@ -3707,6 +3707,21 @@
         }
       },
       "additionalProperties": false
+    },
+    "letterbox": {
+      "type": "object",
+      "properties": {
+        "aspect": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Picture aspect inside the bars, width / height: 2.39 (scope), 1.85 (flat), 1.3333 (4:3)."
+        }
+      },
+      "required": [
+        "aspect"
+      ],
+      "additionalProperties": false,
+      "description": "Black letterbox bars over the whole picture (ADR 0043), under the captions; the primary format only. Absent: none."
     }
   },
   "required": [

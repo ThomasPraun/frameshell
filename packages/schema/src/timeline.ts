@@ -878,6 +878,21 @@ export const TempoSchema: z.ZodType<Tempo> = z
     }
   });
 
+/** The timeline's letterbox (ADR 0043); see {@link LetterboxSchema}. Written out to keep the protocol registry's type small. */
+export interface Letterbox {
+  aspect: number;
+}
+
+/**
+ * Black bars over the finished picture of the whole timeline (ADR 0043): above every video track, under the captions,
+ * in the primary format only. Bars are top and bottom when `aspect` is wider than the frame, left and right when narrower.
+ */
+export const LetterboxSchema: z.ZodType<Letterbox> = z
+  .strictObject({
+    aspect: z.number().positive().describe("Picture aspect inside the bars, width / height: 2.39 (scope), 1.85 (flat), 1.3333 (4:3)."),
+  })
+  .describe("Black letterbox bars over the whole picture (ADR 0043), under the captions; the primary format only. Absent: none.");
+
 /**
  * Zod model of a timeline file (SPEC §5.3). `revision` guards direct edits
  * (SPEC §6.4); duration is derived, never stored. Checks here need no project
@@ -896,6 +911,7 @@ export const TimelineSchema = z
       .optional()
       .describe("Named points on the timeline clock (ADR 0029), sorted by `at`; labels unique ignoring case. Absent when none."),
     tempo: TempoSchema.optional().describe("The beat grid the timeline follows (ADR 0029): a music clip's measured grid, or a nominal BPM. Absent: no grid."),
+    letterbox: LetterboxSchema.optional(),
   })
   .superRefine((timeline, ctx) => {
     const seen = new Set<string>();

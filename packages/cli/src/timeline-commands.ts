@@ -247,6 +247,10 @@ mutations print the new revision):
   tempo clear                  Remove the timeline's tempo
   tempo show                   The stored tempo and its grid on the timeline clock: bpm, bars and beats in seconds;
                                says why there is no grid yet (no beats file for the clip)
+  letterbox set <aspect>       Black bars over the whole picture, under the captions, keeping a picture of <aspect>
+                               (2.39, 1.85, 4:3): top and bottom when wider than the frame, at the sides when
+                               narrower. Export and the preview draw the same bars; primary format only
+  letterbox clear              Remove the letterbox
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
@@ -329,7 +333,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "letterbox", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -565,6 +569,8 @@ const ALLOWED: Record<string, string[]> = {
   "tempo set": ["clip", "bpm", "offset", "meter"],
   "tempo clear": [],
   "tempo show": [],
+  "letterbox set": [],
+  "letterbox clear": [],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
   "multicam offset": [],
@@ -613,6 +619,8 @@ const ARITY: Record<string, [number, number]> = {
   "tempo set": [0, 0],
   "tempo clear": [0, 0],
   "tempo show": [0, 0],
+  "letterbox set": [1, 1],
+  "letterbox clear": [0, 0],
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
   "clip set": [1, 1],
@@ -649,6 +657,14 @@ export function timelineCommandFlags(): Map<string, string[]> {
   return new Map(
     Object.entries(ALLOWED).map(([command, flags]) => [command.trim(), command.startsWith("tx ") ? [...flags] : [...flags, "timeline"]]),
   );
+}
+
+/** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
+function aspectOf(raw: string): number {
+  const match = /^\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:[:/]\s*(\d+(?:\.\d+)?|\.\d+)\s*)?$/.exec(raw);
+  const aspect = match ? Number(match[1]) / (match[2] === undefined ? 1 : Number(match[2])) : Number.NaN;
+  if (!Number.isFinite(aspect) || aspect <= 0) throw new UsageError(`letterbox set: expected an aspect such as 2.39, 1.85 or 4:3, got "${raw}".`);
+  return aspect;
 }
 
 /**
@@ -944,6 +960,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     case "tempo show":
       method = "tempo.show";
+      break;
+    case "letterbox set":
+      method = "letterbox.set";
+      params["aspect"] = aspectOf(args[0]!);
+      break;
+    case "letterbox clear":
+      method = "letterbox.set";
+      params["clear"] = true;
       break;
     case "clip set": {
       method = "clip.set";
@@ -1675,5 +1699,6 @@ function formatTimeline(view: TimelineView): string {
   }
   if (view.markers) lines.push(`Markers: ${view.markers.map((marker) => `${marker.id} ${marker.at} "${marker.label}"`).join(", ")}`);
   if (view.tempo) lines.push(`Tempo: ${Object.entries(view.tempo).map(([key, value]) => `${key} ${value}`).join(", ")} (grid: \`frameshell tempo show\`)`);
+  if (view.letterbox) lines.push(`Letterbox: ${Number(view.letterbox.aspect.toFixed(4))}:1`);
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }
