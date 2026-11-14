@@ -10,6 +10,7 @@ import {
   type GcEntry,
   type GcSkip,
   type JobInfo,
+  type JobPriority,
   RpcError,
 } from "@frameshell/protocol";
 import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
@@ -255,7 +256,7 @@ export class ClipRenderer {
         clips.push({ ...info, state: "failed", error: failed });
         continue;
       }
-      const pending = this.#render(root, keyed, clip, format);
+      const pending = this.#render(root, keyed, clip, format, "interactive");
       const job = this.#options.jobs.get(pending.job);
       clips.push({ ...info, state: job?.state === "running" ? "rendering" : "queued", job: pending.job, progress: job?.progress ?? 0 });
     }
@@ -350,7 +351,7 @@ export class ClipRenderer {
         continue;
       }
       this.#failed.delete(entryId(root, keyed.key));
-      waits.push({ clip, done: this.#render(root, keyed, clip, format).done });
+      waits.push({ clip, done: this.#render(root, keyed, clip, format, "interactive").done });
     }
     let done = rendered.size;
     onProgress?.(done / placed.length);
@@ -477,7 +478,7 @@ export class ClipRenderer {
       const keyed = await this.#keyOf(root, clip, adapters, format);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
       if (await this.#ready(root, keyed.key)) continue;
-      this.#render(root, keyed, clip, format);
+      this.#render(root, keyed, clip, format, "background");
     }
   }
 
@@ -536,18 +537,26 @@ export class ClipRenderer {
     return { path, file: `${CLIP_CACHE_DIR}/${meta.file}`, hasAlpha: meta.hasAlpha, width: meta.width, height: meta.height, duration: meta.duration };
   }
 
-  /** The pending render of `keyed`, queueing one when none runs. */
-  #render(root: string, keyed: Extract<Keyed, { key: string }>, clip: AdapterClip, format: ClipFormat): Pending {
+  /**
+   * The pending render of `keyed`, queueing one when none runs. `interactive`: somebody waits for it (the preview
+   * reading {@link status}, an export, a frame); it moves a queued background render of the same key up.
+   * `background`: the refresh after an edit, behind every interactive render.
+   */
+  #render(root: string, keyed: Extract<Keyed, { key: string }>, clip: AdapterClip, format: ClipFormat, priority: JobPriority): Pending {
     const { key, registered, styleCss } = keyed;
     const id = entryId(root, key);
     const running = this.#pending.get(id);
-    if (running) return running;
+    if (running) {
+      if (priority === "interactive") this.#options.jobs.promote(running.job);
+      return running;
+    }
     const dir = join(root, ...CLIP_CACHE_DIR.split("/"));
     let settle!: (job: JobInfo) => void;
     const finished = new Promise<JobInfo>((resolve) => (settle = resolve));
     const snapshot = structuredClone(clip);
     const info = this.#options.jobs.enqueue({
       kind: "clip",
+      priority,
       project: root,
       asset: clip.source ?? `${clip.type}:${clip.id}`,
       output: join(dir, key),

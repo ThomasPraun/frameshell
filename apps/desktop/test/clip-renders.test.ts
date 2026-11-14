@@ -28,6 +28,8 @@ const job = (overrides: Partial<JobInfo> = {}): JobInfo => ({
   project: "/p",
   asset: "compositions/hyperframes/intro/index.html",
   output: "/p/.frameshell/cache/clips/keyc1",
+  priority: "interactive",
+  position: null,
   state: "running",
   step: "render",
   progress: 0.25,
