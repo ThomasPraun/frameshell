@@ -734,6 +734,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     // `clips` and `faceScans` are declared below: they are read when a review runs, not now.
     generated: (dir, timeline, size) => clips.ensure(clipRoot(dir), timeline, { size }),
     faceScans: (dir) => faceScans(dir)(),
+    soundProfile: (dir, asset) => energy.profile(dir, asset),
   });
   const brands = new BrandService({
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),

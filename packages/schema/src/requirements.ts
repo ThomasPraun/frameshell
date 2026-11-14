@@ -8,7 +8,25 @@ export const REQUIREMENTS_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_
 export const REQUIREMENTS_FILE = "requirements.json";
 
 /** The craft checks `review` can raise a warning for (`metrics.craft`); `fail` and `waivers` name them. */
-export const CRAFT_CHECKS = ["static", "frame-0", "blank", "reading", "peak", "phone-band", "silent", "sync", "loop-seam", "delivery", "safe-zone"] as const;
+export const CRAFT_CHECKS = [
+  "static",
+  "frame-0",
+  "blank",
+  "reading",
+  "peak",
+  "phone-band",
+  "silent",
+  "sync",
+  "loop-seam",
+  "delivery",
+  "safe-zone",
+  "voice-bed",
+  "sfx-repeat",
+  "machine-gun",
+  "chopped",
+  "ending",
+  "click",
+] as const;
 
 /** One of {@link CRAFT_CHECKS}. */
 export type CraftCheck = (typeof CRAFT_CHECKS)[number];
