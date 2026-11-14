@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Skill playbook for story-led animated shorts from the person's voice (#481, part of #453, epic #451): the new
+  `skills/frameshell/reference/story-shorts.md` (pitch of five true stories, script budget, `sources.md`, the shot list
+  as a contract with reads, camera reasons, beats in frames and acting lines, captions, platform rules, song-led films),
+  routed from `SKILL.md` and `video-from-audio.md`. The motion-films playbook now starts intake with `brand capture` and
+  describes the `product-shot` template for 3D shots.
 - Brand capture from a URL, slice 3 of #467 (ADR 0044, epic #451; protocol 128): `frameshell brand capture <url>` (MCP
   `brand_capture`, job kind `brand`) opens a public `http`/`https` page in the managed headless Chrome, whose only way out
   is a daemon-local guarded proxy (public unicast addresses, ports 80/443, each host resolved once and dialed by the checked
