@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 123;
+export const PROTOCOL_VERSION = 124;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3870,13 +3870,13 @@ export const methods = {
       "where the clip plays the file from later than 0 and the start lands after `from`, the intro comes back as far as the file has it; " +
       "where the file is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
       "or spliced. `exact: true` keeps the start (the clip's own, or `from`) and changes the speed so the hit lands exactly on " +
-      "`end`: at most ±1.7 % of the clip's speed (export keeps the pitch with atempo; the preview still shifts it a little until " +
-      "its stretch lands); beyond that it refuses and says which `end` would fit, or to drop `exact`. A detected hit under " +
-      "confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
+      "`end`: at most ±1.7 % of the clip's speed (export and preview keep the pitch); beyond that it refuses and says " +
+      "which `end` would fit, or to drop `exact`. A detected hit under confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
       "If the clip carries duck keys (`track.duck`), they sit on the clip's clock and would no longer match the voice: duck runs " +
       "again in the same transaction over the other video and audio tracks with its defaults (`skip: [\"duck\"]` leaves them and " +
       "says so). Music keys (`music.shape`) are run again first with the settings kept on the clip, so the steps down stay on the hits of the picture " +
-      "(`skip: [\"shape\"]` leaves them and says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
+      "(`skip: [\"shape\"]` leaves them and says so). The clip's start gets a 5 ms fade in (`audio.fadeInMs`, so the entry does not click) " +
+      "unless it already has a fade in or a dissolve (`skip: [\"fade\"]` leaves it out). Writes only existing fields (`start`, `in`, `speed`, `audio.fadeInMs`, gain keys) as one transaction labelled `Music fit: …` " +
       "(`revert` undoes it whole; with review mode on it is one proposal). Example: `{ clip: \"c_1a2b3c\", end: \"end-card\" }`. " +
       "Fails with InvalidOperation (not a music clip of an audio track, `end` not after `from`, a `hit` outside the played part, " +
       "no hit found, more than ±1.7 % needed, low confidence with `exact`, the new place overlaps another clip), " +
@@ -3899,7 +3899,7 @@ export const methods = {
         .default(false)
         .describe("Keep the start and land the hit exactly on `end` with a small change of speed (at most ±1.7 %). Default false: slide the clip, keep its speed."),
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
-      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; `duck` and `shape` can be."),
+      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; `fade`, `duck` and `shape` can be."),
     }),
     result: MusicFitResultSchema,
   },
@@ -3915,7 +3915,7 @@ export const methods = {
       "the picture before it and the music starting late where it is shorter (never looped), and the candidates are ranked: files that " +
       "cover the picture first, then by how sure the final hit is, ties in the order given. Without `end` the order given is the rank. " +
       "A file that cannot be placed (silent, no sound, no final hit, undecodable) is listed in `skipped` and the rest go on. `dryRun: true` " +
-      "changes nothing and returns the plan. One transaction labelled `Music candidates: …` (`revert` undoes it whole; with review mode on it is " +
+      "changes nothing and returns the plan. Every clip is added with a 5 ms fade in (`audio.fadeInMs`). One transaction labelled `Music candidates: …` (`revert` undoes it whole; with review mode on it is " +
       "one proposal). To choose: `track.set` `muted: false` on the winner and `track.remove` with `force` on the others, then `music.fit` " +
       "the clip that stays. Example: `{ assets: [\"assets/music/a.wav\", \"assets/music/b.wav\", \"assets/music/c.wav\"], end: \"end-card\" }`. " +
       "Fails with InvalidOperation (fewer than 2 or more than 7 files, a file twice, none placeable, `end` not after `from`), AssetNotFound, " +
@@ -3951,7 +3951,8 @@ export const methods = {
       "(`clip.key` `gain`) on the clip, marked `auto: \"music\"`: running it again replaces those and keeps the keys you set by hand (a hand key inside a dip stays as set and " +
       "a warning names it); `clear: true` removes them. The level they dip from is the clip's `audio.gain` or its own keys. The times of the hits are kept in the clip's `audio.shape`, " +
       "so `music.fit` runs the same shaping again after it moves the clip (`skip: [\"shape\"]` leaves the keys and says so). The keys replace the clip's duck keys (`track.duck`): " +
-      "duck runs again in the same transaction with its stored parameters, so the voice still ducks the shaped music. Not done here: the rising high-pass build before a drop. " +
+      "duck runs again in the same transaction with its stored parameters, so the voice still ducks the shaped music. The clip's start also gets a 5 ms fade in " +
+      "(`audio.fadeInMs`) unless it already has a fade in or a dissolve; `clear` leaves the clip's edges alone. Not done here: the rising high-pass build before a drop. " +
       "`dryRun: true` changes nothing and returns the `curve` and `steps`. One transaction labelled `Music shape: …` (`revert` undoes it whole; with review mode on it is one proposal). " +
       "Example: `{ clip: \"c_1a2b3c\", drop: [\"hit\"], ending: 28 }`. Fails with InvalidOperation (not a music clip of an audio track, nothing to shape, `clear` with `drop` or `ending`, " +
       "no time falls on the clip), ClipNotFound or TimelineNotFound.",

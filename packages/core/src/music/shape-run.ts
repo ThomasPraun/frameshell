@@ -2,6 +2,7 @@ import { ErrorCode, type MusicShapeResult, RpcError } from "@frameshell/protocol
 import type { ShapeSettings, Timeline } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
+import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { clipEnd } from "./fit.js";
 import { type MusicFitPlan, findMusicClip, planDuckAgain } from "./run.js";
 import { SHAPE_STEP_S, shapeCurve } from "./shape.js";
@@ -29,6 +30,8 @@ export interface MusicShapePlan extends Omit<MusicShapeResult, "timeline" | "rev
   operation: { clip: string; curve: DipPoint[]; settings: ShapeSettings | null };
   /** Duck to run again after the keys are written (they replace the clip's duck keys); null when the clip has none. */
   duckAgain: MusicFitPlan["duckAgain"];
+  /** True when the clip gets the {@link MUSIC_ENTRY_FADE_MS} fade in (`audio.fadeInMs`) before its keys. */
+  entryFade: boolean;
   /** True for `clear` on a clip with no music keys: nothing to write. */
   noop: boolean;
 }
@@ -89,7 +92,10 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
   }
 
   const curve = settings ? shapeCurve(settings, playsTo) : [];
+  // A shaping re-shapes the music's entry too (ADR 0037); `clear` leaves the clip's edges alone.
+  const entryFade = settings !== null && needsEntryFade(clip);
   const steps: MusicShapeResult["steps"] = [
+    ...(entryFade ? [{ id: "fade" as const, detail: `${MUSIC_ENTRY_FADE_MS} ms fade in at the start of ${clip.id} (audio.fadeInMs)` }] : []),
     {
       id: "shape",
       detail: settings
@@ -109,7 +115,7 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
     duckAgain = rerun.duckAgain;
     if (rerun.duckAgain) steps.push({ id: "duck", detail: `run duck again on ${track.id} over ${rerun.duck.under.join(", ")}` });
   }
-  return { clip: clip.id, track: track.id, asset: clip.asset, cleared: settings === null, drops, ending, settings, curve, duck, steps, warnings, operation: { clip: clip.id, curve, settings }, duckAgain, noop: settings === null && !keyed };
+  return { clip: clip.id, track: track.id, asset: clip.asset, cleared: settings === null, drops, ending, settings, curve, duck, steps, warnings, operation: { clip: clip.id, curve, settings }, duckAgain, entryFade, noop: settings === null && !keyed };
 }
 
 /** `Music shape: c_1a2b3c steps down before 12.4 s, fades out from 28 s` / `Music shape: c_1a2b3c cleared`. */

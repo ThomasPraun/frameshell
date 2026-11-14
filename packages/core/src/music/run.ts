@@ -4,6 +4,7 @@ import type { DipPoint } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
+import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";
 import { shapeCurve } from "./shape.js";
@@ -26,6 +27,8 @@ export interface MusicFitRequest {
   hit?: number | undefined;
   exact: boolean;
   skip?: readonly string[] | undefined;
+  /** Give the clip the entry fade (default true; `music.candidates` plans without, it writes its own clips). */
+  entryFade?: boolean | undefined;
   /** Nothing is written: warnings say what would happen, not what happened. */
   dryRun?: boolean | undefined;
 }
@@ -101,15 +104,26 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
   }
 
   const plan = planFit({ clip: { start: clip.start, in: clip.in, out: clip.out, speed: clip.speed ?? 1 }, end, from, hit: hit.at, exact: request.exact, fps });
-  warnings.push(...plan.warnings);
+  const entryFade = request.entryFade !== false && needsEntryFade(clip) && request.skip?.includes("fade") !== true;
+  // With only the fade to write, "nothing to change" would be wrong.
+  warnings.push(
+    ...plan.warnings.map((warning) =>
+      entryFade && plan.operations.length === 0 && warning.startsWith("The final hit already lands") ? `${warning.replace(": nothing to change.", ".")} Only the fade in is written.` : warning,
+    ),
+  );
   checkRoom(track.id, track.clips, clip, plan, fps);
 
   const keyed = clip.keys?.gain?.some((key) => key.auto === "duck") === true;
   const changes = plan.operations.length > 0;
+  const operations: ({ clip: string } & FitOperation)[] = plan.operations.map((operation) => ({ ...operation, clip: clip.id }) as MusicFitPlan["operations"][number]);
   let duck: MusicFitResult["duck"] = null;
   let duckAgain: MusicFitPlan["duckAgain"] = null;
   let shapeAgain: MusicFitPlan["shapeAgain"] = null;
   const steps = [...plan.steps];
+  if (entryFade) {
+    operations.push({ clip: clip.id, op: "clip.set", args: { audioFadeInMs: MUSIC_ENTRY_FADE_MS } });
+    steps.push({ id: "fade", detail: `${MUSIC_ENTRY_FADE_MS} ms fade in at the start of ${clip.id} (audio.fadeInMs)`, skippable: true });
+  }
   if (keyed && changes) {
     const rerun = planDuckAgain(timeline, track.id, clip, { skipped: request.skip?.includes("duck") === true, dryRun: request.dryRun === true });
     duck = rerun.duck;
@@ -134,8 +148,8 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
       steps.push({ id: "shape", detail: `run music shape again on ${clip.id} (hits at ${(settings.drops ?? []).join(", ") || "none"}${settings.ending === undefined ? "" : `, ending ${settings.ending} s`})`, skippable: true });
     }
   }
-  // `duck` and `shape` are always accepted: an agent that passes them every time gets no error when there is nothing to skip.
-  checkSkip(request.skip, [...new Set([...steps.filter((step) => step.skippable).map((step) => step.id), "duck", "shape"])]);
+  // `duck`, `shape` and `fade` are always accepted: an agent that passes them every time gets no error when there is nothing to skip.
+  checkSkip(request.skip, [...new Set([...steps.filter((step) => step.skippable).map((step) => step.id), "duck", "shape", "fade"])]);
 
   const place = (clipPlace: FitPlan["after"]): MusicFitResult["after"] => ({ start: clipPlace.start, in: clipPlace.in, speed: clipPlace.speed, end: round3(clipEnd(clipPlace)) });
   return {
@@ -156,7 +170,7 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
     duck,
     steps,
     warnings,
-    operations: plan.operations.map((operation) => ({ ...operation, clip: clip.id }) as MusicFitPlan["operations"][number]),
+    operations,
     duckAgain,
     shapeAgain,
   };

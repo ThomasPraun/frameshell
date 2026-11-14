@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `analyze` curve, ink, mouth sync and labels, and `analyze diff` (#471 slice 3, epic #451; protocol 123): the result and
+- The 5 ms fade in of #485 (ADR 0037), now that sample-accurate audio fades exist (#585): `music fit`, `music shape`
+  and `music candidates` give the music clip's start `audio.fadeInMs` 5, as one more step of the same transaction
+  (`revert` undoes it with the fit; one proposal in review mode), so a track cut mid-waveform does not click. A fade
+  in already on the clip (`audio.fadeInMs`, `fadeIn` or a dissolve) is kept; `music fit --skip fade` leaves it out; where
+  a fit already lands, the fade is all it writes. `fade` joins the step ids of `music.fit` and `music.shape` (protocol 123).
+- `analyze` curve, ink, mouth sync and labels, and `analyze diff` (#471 slice 3, epic #451; protocol 124): the result and
   `analysis.json` of `frameshell analyze` gain
   - `curve`: the change of the picture over time (`values` every `step` seconds, 0.1 or longer for a film over 2 minutes,
     a cut is a spike) and its `moves`, the steady stretches between the big changes, each with its start, duration, peak
@@ -795,6 +800,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The preview keeps the pitch of a clip at speed ≠ 1, like export (#499, epic #451): its program audio stretches a
+  sped-up clip's sound with WSOLA (2048-sample Hann frames, the window of export `atempo` at 48 kHz, each moved by up
+  to 512 samples to line up with the one before) instead of resampling it, so a 1.25x clip no longer sounds higher in
+  the app than in the file. Reads of one clip carry the alignment over from one to the next during a play; speed 1 is
+  sample-for-sample unchanged. A test plays tones at 0.75x, 1.25x and 2x through the preview and the real export mix:
+  the same pitch within 2 Hz, the sound on time within one 128-sample block, sample-accurate fades the same (also at
+  2x and 0.75x: the fades ramp over program samples after the stretch). Export is unchanged: `atempo` stays with no
+  pre-roll (ADR 0037), since it is on time for continuous sound and early only on a hit right after digital silence (up
+  to about 21 ms, a known limit); `music fit --exact` warns about that case.
 - Voiceover cost dialog (#586, ADR 0034 decision 20; protocol 118): the paid run is bound to what the person saw.
   `voiceover.generate`'s `ConfirmationRequired` carries a `confirmation` token (provider, voice, lines to say and their
   cost), the app sends it back with `yes`, and a paid run whose lines or cost changed since (the script was edited while
@@ -809,6 +823,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement for the next time it opens (#533).
 - CLI: `import --wait`, `render --wait` and other job followers no longer print a step twice when the job list the
   daemon answers is older than the events already read (#533).
+- Windows: an atomic write (`writeTextAtomic`) whose target a reader keeps opening tries the rename again every
+  25 ms at most instead of every 200 ms, so it reaches the moment no handle is open within the same 3 s (#533).
 
 ## [0.18.0] - 2026-11-07
 
