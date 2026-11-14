@@ -1,5 +1,5 @@
 // "Chat about this" reference text (SPEC decision 21, §10): what the user selected, as plain lines any agent CLI reads.
-import type { TimelineView } from "@frameshell/protocol";
+import type { ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import type { SelectedPoint, SelectedWord, Selection } from "../selection.js";
 import { wordPlacement } from "../transcript/model.js";
 
@@ -7,6 +7,20 @@ import { wordPlacement } from "../transcript/model.js";
 const TAG = "[frameshell]";
 /** Longest quoted text (subtitle words) before it is shortened; ids carry the rest. */
 const MAX_QUOTE = 48;
+
+/**
+ * True when a `frame` capture would wait for a clip render: one queued, rendering or failed (a capture retries it).
+ * With motion blur (ADR 0041) the capture waits for `final`, unless the plugin refused it (then it uses the draft).
+ */
+export function framePending(renders: readonly ClipRenderInfo[]): boolean {
+  return renders.some(
+    (clip) =>
+      clip.state === "queued" ||
+      clip.state === "rendering" ||
+      clip.state === "failed" ||
+      (clip.final !== undefined && clip.final.state !== "ready" && !clip.final.refused),
+  );
+}
 
 /** Timeline seconds as `HH:MM:SS.hh` (hundredths), e.g. `00:03:12.40`. */
 export function referenceTime(seconds: number): string {

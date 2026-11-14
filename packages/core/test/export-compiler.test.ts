@@ -35,6 +35,7 @@ import {
   paletteStep,
   parseLoudnessStats,
 } from "../src/index.js";
+import { TRUE_PEAK_CEILING } from "../src/export/compiler.js";
 
 // Golden files: reviewed ffmpeg plans. Regenerate with UPDATE_GOLDEN=1 and review the diff.
 const GOLDEN_DIR = fileURLToPath(new URL("./golden/", import.meta.url));
@@ -598,6 +599,14 @@ describe("export compiler", () => {
     expect(muxStep(silentPlan, null, "/out/x.mp4").args).toContain("anullsrc=r=48000:cl=stereo,atrim=end_sample=384000[a]");
   });
 
+  it("limits true peak at 4x the export's sample rate, with or without a loudness measurement", () => {
+    const rate44 = compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio: { ...youtube1080.audio, sampleRate: 44_100 } }, loudness: -17, sources, resolution });
+    for (const measured of [MEASURED, null]) {
+      const filter = muxStep(rate44, measured, "/out.mp4").args.find((arg) => arg.startsWith("[1:a:0]"))!;
+      expect(filter).toContain(`aresample=44100,aresample=176400,alimiter=limit=${(10 ** (TRUE_PEAK_CEILING / 20)).toFixed(4)}:level=false:latency=true,aresample=44100,atrim=`);
+    }
+  });
+
   it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still, subtitles burned (golden)", () => {
     const frame = (at: number) =>
       compileFrame({ timeline, fps: 30, sources, resolution, transcripts, width: 1280, height: 720, at, output: "/out/frame.png" });
@@ -714,6 +723,63 @@ describe("export compiler", () => {
         frame: compileFrame({ ...input, width: 1280, height: 720, at: 3.1, output: "/out/frame.png" }),
       });
       expect(animatedPlan).toMatchObject({ frames: 210, duration: 7 });
+    });
+
+    describe("vignette (ADR 0043 slice 2)", () => {
+      const lens = { strength: 0.5, radius: 0.9, softness: 0.5 };
+      const vignetted: Timeline = {
+        ...animated,
+        tracks: animated.tracks.map((track) =>
+          track.kind === "video"
+            ? {
+                ...track,
+                clips: track.clips.map((clip) =>
+                  clip.id === "c_talk1" ? { ...clip, vignette: lens, grade: { temperature: 0.4 } } : clip.id === "c_logo2" || clip.id === "c_end" ? { ...clip, vignette: {} } : clip,
+                ),
+              }
+            : track,
+        ) as Timeline["tracks"],
+      };
+      const grades = new Map([[gradeKey(gradeOf({ type: "media", grade: { temperature: 0.4 } } as Clip)!), "grade-warm.cube"]]);
+      const plan = compileRender({ ...input, timeline: vignetted, grades });
+      const graph = Object.values(plan.files).join("\n");
+
+      it("darkens a clip's picture after its grade and before scale, alpha and fades, in segments and captures (golden)", () => {
+        golden("vignette-plan", {
+          segments: plan.segments,
+          files: plan.files,
+          frame: compileFrame({ ...input, timeline: vignetted, grades, width: 1280, height: 720, at: 3.1, output: "/out/frame.png" }),
+        });
+        // Bottom track: grade, then the vignette at the source's size, then the fit to the frame.
+        expect(graph).toMatch(/lut3d=file=grade-warm\.cube:interp=trilinear,format=gbrap\[vtp\d+\]/);
+        expect(graph).toContain("color=c=black:s=1920x1080:r=30/1,trim=end_frame=1,format=gbrap,geq=r='st(0,X+0.5-W/2);");
+        expect(graph).toContain("st(3,clip((ld(2)-0.9+0.5)/0.5,0,1));floor(255*(1-0.5*(ld(3)*ld(3)*(3-2*ld(3))))+0.5)");
+        expect(graph).toMatch(/blend=c0_mode=multiply:c1_mode=multiply:c2_mode=multiply:c3_mode=normal,scale=1920:1080:force_original_aspect_ratio=decrease/);
+        // A keyed layer (the logo) and a render (c_end, defaults): darkened before its keyed scale.
+        expect(graph).toMatch(/c3_mode=normal,setpts=PTS\+[\d.]+\/TB,scale=w=/);
+        expect(graph).toContain("floor(255*(1-0.35*(ld(3)*ld(3)*(3-2*ld(3))))+0.5)");
+        expect(plan.warnings).toEqual(animatedPlan.warnings);
+      });
+
+      it("leaves clips without one, and a strength of 0, as they were", () => {
+        const off: Timeline = {
+          ...animated,
+          tracks: animated.tracks.map((track) =>
+            track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (clip.id === "c_talk1" ? { ...clip, vignette: { strength: 0, radius: 0.5 } } : clip)) } : track,
+          ) as Timeline["tracks"],
+        };
+        expect(compileRender({ ...input, timeline: off })).toEqual(animatedPlan);
+      });
+
+      it("cuts a covering clip in another format first, so the plate is the size of what shows", () => {
+        const project = { resolution, formats: [{ id: "16x9", width: 1920, height: 1080 }, { id: "9x16", width: 1080, height: 1920 }] };
+        const { format } = resolveFormat(vignetted, project, "9x16")!;
+        const vertical = { ...youtube1080, video: { ...youtube1080.video, width: 1080, height: 1920 } };
+        const graphs = Object.values(compileRender({ ...input, preset: vertical, timeline: vignetted, grades, variant: format }).files).join("\n");
+        const [, width] = /lut3d=file=grade-warm\.cube:interp=trilinear,format=gbrap,crop=(\d+):1080:\d+:0\[vtp\d+\]/.exec(graphs)!;
+        expect(Number(width)).toBeLessThan(1080);
+        expect(graphs).toContain(`color=c=black:s=${width}x1080:r=30/1,trim=end_frame=1,format=gbrap,geq=`);
+      });
     });
 
     describe("colour grade (ADR 0031, #384)", () => {

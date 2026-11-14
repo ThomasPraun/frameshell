@@ -1,6 +1,6 @@
-import type { TimelineView } from "@frameshell/protocol";
+import type { ClipFinalRenderInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { agentInput, referenceLines, referenceTime } from "../src/renderer/src/ask/reference.js";
+import { agentInput, framePending, referenceLines, referenceTime } from "../src/renderer/src/ask/reference.js";
 import type { Selection, SelectedWord } from "../src/renderer/src/selection.js";
 
 // Seam under test: "Chat about this" (#49) reference text, SPEC §10 format. Selection and timeline view in, the
@@ -219,5 +219,19 @@ describe("agent input", () => {
 
   it("strips control characters a file name or transcript could smuggle in (Enter, escape sequences)", () => {
     expect(agentInput(['[frameshell] subtitle "a\rb\u001b[201~c"'], true)).toBe('[frameshell] subtitle "a b [201~c" ');
+  });
+
+  it("holds the frame while a clip's blurred final render is due, not when the plugin refused it (ADR 0041)", () => {
+    const unrendered = { key: "k", file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null };
+    const draft = (state: ClipRenderInfo["state"]): ClipRenderInfo => ({ clip: "c_0100", track: "v2", type: "hyperframes", source: "comp/index.html", ...unrendered, state });
+    const final = (state: ClipFinalRenderInfo["state"], refused = false): ClipFinalRenderInfo => ({ ...unrendered, state, refused });
+    expect(framePending([draft("ready")])).toBe(false);
+    expect(framePending([draft("rendering")])).toBe(true);
+    expect(framePending([draft("failed")])).toBe(true);
+    expect(framePending([{ ...draft("ready"), final: final("ready") }])).toBe(false);
+    expect(framePending([{ ...draft("ready"), final: final("queued") }])).toBe(true);
+    expect(framePending([{ ...draft("ready"), final: final("rendering") }])).toBe(true);
+    expect(framePending([{ ...draft("ready"), final: final("failed") }])).toBe(true);
+    expect(framePending([{ ...draft("ready"), final: final("failed", true) }])).toBe(false);
   });
 });

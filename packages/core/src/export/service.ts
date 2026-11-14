@@ -36,6 +36,7 @@ import {
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
+import type { ClipEnsureOptions } from "../clips/renderer.js";
 import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
@@ -240,8 +241,11 @@ export interface ExportServiceOptions {
    */
   clips?: {
     check(root: string, timeline: Timeline): Promise<void>;
-    /** `size`: render at that frame size (a format other than the primary, ADR 0027); absent: the project resolution. */
-    ensure(root: string, timeline: Timeline, onProgress?: (fraction: number) => void, size?: Size): Promise<ReadonlyMap<string, GeneratedSource>>;
+    /**
+     * `size`: render at that frame size (a format other than the primary, ADR 0027); absent: the project resolution.
+     * `tier`: `draft` takes the sharp render of a clip with motion blur, `final` or absent the blurred one (ADR 0041).
+     */
+    ensure(root: string, timeline: Timeline, options?: ClipEnsureOptions): Promise<ReadonlyMap<string, GeneratedSource>>;
   };
   /**
    * Audio effects bakes (ADR 0031): `needs` lists the bakes a flattened timeline plays, `ensure` bakes what is
@@ -419,7 +423,12 @@ export class ExportService {
               let audioFx: ReadonlyMap<string, string> = new Map();
               if (layered.length > 0 && this.#options.clips) {
                 ctx.update({ step: "clips", progress: 0 });
-                generated = await this.#options.clips.ensure(root, input.timeline, (fraction) => ctx.update({ progress: fraction }), renderSize);
+                generated = await this.#options.clips.ensure(root, input.timeline, {
+                  onProgress: (fraction) => ctx.update({ progress: fraction }),
+                  size: renderSize,
+                  tier: params.quality,
+                  onWarning: (warning) => ctx.update({ warning }),
+                });
               }
               if (baked.length > 0 && this.#options.audioFx) {
                 ctx.update({ step: "audio-fx", progress: 0 });
@@ -640,7 +649,7 @@ export class ExportService {
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
     const renderSize = shape.primary ? undefined : { width: shape.width, height: shape.height };
     const generated =
-      generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, undefined, renderSize) : new Map();
+      generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, { size: renderSize }) : new Map();
     const sources = await this.#sources(root, timeline);
     const matted = subjectAssets(timeline, (asset) => movingPicture(sources.get(asset)), params.at);
     // Not in a job: the mattes of the subjects drawn at `at` are made here, as a render job would.

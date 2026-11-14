@@ -358,6 +358,8 @@ export {
   ClipRenderer,
   type ClipFormat,
   type ClipRendererOptions,
+  type ClipEnsureOptions,
+  type ClipTier,
   type RegisteredClipType,
   type RenderProbe,
   type RenderedClip,

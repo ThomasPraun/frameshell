@@ -1,5 +1,8 @@
-// Colour grade of a picture in the preview engine (ADR 0031): the WebGL2 twin of export's `lut3d` (`gradedChain` in
-// packages/core/src/export/compiler.ts). Runs in the engine worker; numbers measured in docs/research/webgl2-grade.md.
+// Colour grade and vignette of a picture in the preview engine (ADR 0031, 0043): the WebGL2 twin of export's `lut3d`
+// (`gradedChain` in packages/core/src/export/compiler.ts) and vignette plate (`export/vignette.ts`). Runs in the engine
+// worker; grade numbers measured in docs/research/webgl2-grade.md.
+import type { LayerRect } from "@frameshell/schema/composite";
+import type { ResolvedVignette } from "@frameshell/schema/finish";
 import type { GradeTable } from "@frameshell/schema/grade";
 
 /** Full-screen triangle; no vertex buffer. */
@@ -13,6 +16,8 @@ void main() {
  * ffmpeg 9 `lut3d=interp=trilinear` on 8-bit RGB, step for step (`applyGradeTable` in @frameshell/schema/grade): the
  * byte scaled to the lattice in single precision, 8 `texelFetch` taps mixed red, green, then blue, truncated to 8 bit.
  * Hardware filtering would round differently; truncation is what makes preview and export agree (ADR 0031).
+ * Then the vignette: `vignetteGain` and `vignetteLevel` (@frameshell/schema/finish) on the crop that shows, multiplied
+ * in as ffmpeg `blend` multiply does (`floor(byte * level / 255)`), in single precision.
  */
 const FRAGMENT = `#version 300 es
 precision highp float;
@@ -22,6 +27,12 @@ uniform sampler2D u_source;
 uniform sampler3D u_table;
 uniform int u_size;
 uniform int u_height;
+uniform bool u_graded;
+uniform bool u_vignetted;
+// Strength, radius, softness.
+uniform vec3 u_vignette;
+// Left, top, width, height of the picture that shows, in texture pixels.
+uniform vec4 u_crop;
 out vec4 color;
 
 vec3 tap(int r, int g, int b) {
@@ -32,13 +43,9 @@ vec3 mixed(vec3 from, vec3 to, float t) {
   return from + (to - from) * t;
 }
 
-void main() {
-  ivec2 at = ivec2(gl_FragCoord.xy);
-  // Row 0 of the texture is the picture's top; row 0 of the drawing buffer its bottom.
-  vec4 source = texelFetch(u_source, ivec2(at.x, u_height - 1 - at.y), 0);
+vec3 graded(vec3 bytes) {
   int last = u_size - 1;
   float lattice = float(last);
-  vec3 bytes = floor(source.rgb * 255.0 + 0.5);
   vec3 s = clamp(bytes * (1.0 / 255.0) * lattice, 0.0, lattice);
   ivec3 lo = ivec3(s);
   ivec3 hi = min(lo + 1, ivec3(last));
@@ -47,18 +54,47 @@ void main() {
   vec3 c10 = mixed(tap(lo.r, hi.g, lo.b), tap(hi.r, hi.g, lo.b), d.r);
   vec3 c01 = mixed(tap(lo.r, lo.g, hi.b), tap(hi.r, lo.g, hi.b), d.r);
   vec3 c11 = mixed(tap(lo.r, hi.g, hi.b), tap(hi.r, hi.g, hi.b), d.r);
-  vec3 graded = mixed(mixed(c00, c10, d.g), mixed(c01, c11, d.g), d.b);
-  color = vec4(clamp(floor(graded * 255.0), 0.0, 255.0) / 255.0, source.a);
+  vec3 value = mixed(mixed(c00, c10, d.g), mixed(c01, c11, d.g), d.b);
+  return clamp(floor(value * 255.0), 0.0, 255.0);
+}
+
+float level(vec2 texel) {
+  vec2 d = texel + 0.5 - u_crop.xy - u_crop.zw * 0.5;
+  float far = 2.0 * sqrt(d.x * d.x + d.y * d.y) / sqrt(u_crop.z * u_crop.z + u_crop.w * u_crop.w);
+  float strength = u_vignette.x;
+  float radius = u_vignette.y;
+  float softness = u_vignette.z;
+  float t = softness > 0.0 ? clamp((far - radius + softness) / softness, 0.0, 1.0) : step(radius, far);
+  return floor(255.0 * (1.0 - strength * (t * t * (3.0 - 2.0 * t))) + 0.5);
+}
+
+void main() {
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  // Row 0 of the texture is the picture's top; row 0 of the drawing buffer its bottom.
+  ivec2 texel = ivec2(at.x, u_height - 1 - at.y);
+  vec4 source = texelFetch(u_source, texel, 0);
+  vec3 bytes = floor(source.rgb * 255.0 + 0.5);
+  if (u_graded) bytes = graded(bytes);
+  if (u_vignetted) bytes = floor(bytes * level(vec2(texel)) / 255.0);
+  color = vec4(bytes / 255.0, source.a);
 }`;
 
 /** A picture the pass reads: a decoded frame or a still. */
 export type GradeSource = VideoFrame | ImageBitmap;
 
+/** What the pass does to one picture: a grade, a vignette, or both. */
+export interface PictureLook {
+  /** Key of a prepared grade table; an unknown key is left out. */
+  grade?: string;
+  /** The clip's vignette on `crop`, the pixels of the picture that show (all of it, or a format's cover crop). */
+  vignette?: { vignette: ResolvedVignette; crop: LayerRect };
+}
+
 /**
- * One WebGL2 context per engine, made when the first program with a grade arrives (not on the first graded frame:
- * context and shader take up to 0.4 s cold). Tables are uploaded once per key, and again after a restored context.
- * Pictures without a grade never reach it. `apply` returns null when WebGL2 is unavailable or the context is lost: the
- * caller draws the picture as it is, and `onUnavailable` is told once.
+ * One WebGL2 context per engine, made when the first program with a grade or a vignette arrives (not on the first
+ * frame: context and shader take up to 0.4 s cold). Tables are uploaded once per key, and again after a restored
+ * context; a vignette needs no upload. Pictures with neither never reach it. `apply` returns null when WebGL2 is
+ * unavailable or the context is lost: the caller draws the picture as it is, and `onUnavailable` is told once.
  */
 export class GradePass {
   readonly #onUnavailable: (reason: string) => void;
@@ -66,14 +102,14 @@ export class GradePass {
   #gl: WebGL2RenderingContext | null = null;
   #program: WebGLProgram | null = null;
   #source: WebGLTexture | null = null;
-  #uniforms: { size: WebGLUniformLocation | null; height: WebGLUniformLocation | null } | null = null;
+  #uniforms: Record<"size" | "height" | "graded" | "vignetted" | "vignette" | "crop", WebGLUniformLocation | null> | null = null;
   /** The tables of the last {@link prepare}, kept to upload again into a restored context. */
   #wanted: ReadonlyMap<string, GradeTable> = new Map();
   readonly #textures = new Map<string, WebGLTexture>();
   #lost = false;
   #failed = false;
   #told = false;
-  /** Pictures graded so far (diagnostics: a timeline without grades keeps it at 0). */
+  /** Pictures through the pass so far (diagnostics: a timeline without grades or vignettes keeps it at 0). */
   passes = 0;
 
   constructor(onUnavailable: (reason: string) => void) {
@@ -82,12 +118,13 @@ export class GradePass {
 
   /**
    * Make the context and upload `tables` (by key: one key, one table, never changed); drop the uploaded tables not
-   * among them. False when the pass cannot run.
+   * among them. `vignettes`: some picture has a vignette, so the context is made without a table too. False when the
+   * pass cannot run.
    */
-  prepare(tables: ReadonlyMap<string, GradeTable>): boolean {
+  prepare(tables: ReadonlyMap<string, GradeTable>, vignettes = false): boolean {
     this.#wanted = tables;
-    // Nothing to grade and no context yet: none is made.
-    if (tables.size === 0 && !this.#gl) return true;
+    // Nothing to grade or vignette and no context yet: none is made.
+    if (tables.size === 0 && !vignettes && !this.#gl) return true;
     if (!this.#ready()) return false;
     const gl = this.#gl!;
     for (const [key, texture] of this.#textures) {
@@ -100,20 +137,20 @@ export class GradePass {
   }
 
   /**
-   * `image` (`width` x `height`, its intrinsic size) through the table of `key`, as a new bitmap the caller draws and
-   * closes; null when the pass cannot run or `key` was not prepared.
+   * `image` (`width` x `height`, its intrinsic size) through `look`, as a new bitmap the caller draws and closes; null
+   * when the pass cannot run, or `look` asks only for a grade that was not prepared.
    */
-  apply(image: GradeSource, width: number, height: number, key: string): ImageBitmap | null {
+  apply(image: GradeSource, width: number, height: number, look: PictureLook): ImageBitmap | null {
     if (!this.#ready()) return null;
-    const wanted = this.#wanted.get(key);
-    if (!wanted) return null;
-    let table = this.#textures.get(key);
-    if (!table) {
+    const key = look.grade;
+    const wanted = key !== undefined ? this.#wanted.get(key) : undefined;
+    if (!wanted && !look.vignette) return null;
+    let table = key !== undefined ? this.#textures.get(key) : undefined;
+    if (wanted && !table) {
       // A restored context starts without textures.
       table = this.#upload(wanted);
-      this.#textures.set(key, table);
+      this.#textures.set(key!, table);
     }
-    const size = wanted.size;
     const gl = this.#gl!;
     const canvas = this.#canvas!;
     if (canvas.width !== width || canvas.height !== height) {
@@ -126,9 +163,18 @@ export class GradePass {
     gl.bindTexture(gl.TEXTURE_2D, this.#source);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, image);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_3D, table);
-    gl.uniform1i(this.#uniforms!.size, size);
-    gl.uniform1i(this.#uniforms!.height, height);
+    gl.bindTexture(gl.TEXTURE_3D, wanted ? table! : null);
+    const uniforms = this.#uniforms!;
+    gl.uniform1i(uniforms.graded, wanted ? 1 : 0);
+    gl.uniform1i(uniforms.size, wanted?.size ?? 2);
+    gl.uniform1i(uniforms.height, height);
+    gl.uniform1i(uniforms.vignetted, look.vignette ? 1 : 0);
+    if (look.vignette) {
+      const { strength, radius, softness } = look.vignette.vignette;
+      const crop = look.vignette.crop;
+      gl.uniform3f(uniforms.vignette, strength, radius, softness);
+      gl.uniform4f(uniforms.crop, crop.left, crop.top, crop.width, crop.height);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.passes++;
     return canvas.transferToImageBitmap();
@@ -189,7 +235,8 @@ export class GradePass {
     this.#gl = gl;
     this.#program = program;
     this.#source = source;
-    this.#uniforms = { size: gl.getUniformLocation(program, "u_size"), height: gl.getUniformLocation(program, "u_height") };
+    const at = (name: string) => gl.getUniformLocation(program, name);
+    this.#uniforms = { size: at("u_size"), height: at("u_height"), graded: at("u_graded"), vignetted: at("u_vignetted"), vignette: at("u_vignette"), crop: at("u_crop") };
   }
 
   #upload(table: GradeTable): WebGLTexture {

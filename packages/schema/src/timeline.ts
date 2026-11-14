@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
+import { VIGNETTE_LIMITS } from "./finish.js";
 import { GRADE_LIMITS, MAX_LUT_SIZE } from "./grade.js";
 import { MotionBlurSchema } from "./motion-blur.js";
 import { FormatIdSchema } from "./format-id.js";
@@ -401,6 +402,33 @@ export const GradeSchema = z
       "as one 3D table. Media clips only; shots take none.",
   );
 
+/** Vignette of a media or generated clip (ADR 0043): its picture darkened towards the edges. */
+export const VignetteSchema = z
+  .strictObject({
+    strength: z
+      .number()
+      .min(VIGNETTE_LIMITS.strength.min)
+      .max(VIGNETTE_LIMITS.strength.max)
+      .optional()
+      .describe(`Darkening at the edge: 0 none, 1 black. Default ${VIGNETTE_LIMITS.strength.default}.`),
+    radius: z
+      .number()
+      .min(VIGNETTE_LIMITS.radius.min)
+      .max(VIGNETTE_LIMITS.radius.max)
+      .optional()
+      .describe(`Where the darkening is full, from the centre in half-diagonals of the picture (1 = the corners). Default ${VIGNETTE_LIMITS.radius.default}.`),
+    softness: z
+      .number()
+      .min(VIGNETTE_LIMITS.softness.min)
+      .max(VIGNETTE_LIMITS.softness.max)
+      .optional()
+      .describe(`Width of the falloff inside \`radius\`, in half-diagonals: 0 a hard edge. Default ${VIGNETTE_LIMITS.softness.default}.`),
+  })
+  .describe(
+    "Vignette (ADR 0043): the clip's own picture darkens smoothly towards its edges, after the grade and before any transition shape. " +
+      "`{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none.",
+  );
+
 /** Footage, audio or image file. Duration on the timeline = `(out - in) / speed`. */
 export const MediaClipSchema = z
   .strictObject({
@@ -412,6 +440,7 @@ export const MediaClipSchema = z
     out: z.number().positive().describe("Source seconds just after the last frame; greater than `in`."),
     speed: z.number().positive().optional().describe("Playback rate; 1 = normal, 2 = twice as fast. Default 1."),
     grade: GradeSchema.optional(),
+    vignette: VignetteSchema.optional(),
   })
   .refine((clip) => clip.out > clip.in, { message: "must be after `in`", path: ["out"] });
 
@@ -472,6 +501,7 @@ export const AdapterClipSchema = z.strictObject({
   elements: ElementsSchema.optional(),
   backdrop: BackdropSchema.optional(),
   motionBlur: MotionBlurSchema.optional(),
+  vignette: VignetteSchema.optional(),
 });
 
 /** Clip of a video or audio track. `type` selects the variant. */
@@ -1145,6 +1175,8 @@ export type MediaClipAudio = z.infer<typeof MediaClipAudioSchema>;
 export type Backdrop = z.infer<typeof BackdropSchema>;
 /** Colour grade of a media clip; see {@link GradeSchema}. */
 export type Grade = z.infer<typeof GradeSchema>;
+/** Vignette of a media or generated clip, as stored; see {@link VignetteSchema}. */
+export type Vignette = z.infer<typeof VignetteSchema>;
 
 /** True for a program track's shot. Adapter `type` is any string, so `clip.type === "shot"` alone does not narrow. */
 export function isShotClip(clip: AnyClip): clip is ShotClip {

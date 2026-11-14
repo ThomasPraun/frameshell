@@ -502,48 +502,161 @@ describe("style tokens in generated clips", () => {
   );
 });
 
-// Motion blur (ADR 0041): an adapter with `motionBlur` gets the clip's blur, defaults filled in, and its key counts it.
+// Motion blur (ADR 0041): an adapter with `motionBlur` gets the clip's blur, defaults filled in, in a second render beside
+// the sharp one (decision 11). The blur-card paints its blurred render red and its sharp one blue, so a pixel says which
+// render a file or frame used.
 describe("motion blur in generated clips", () => {
+  let dir = "";
+  let blurTrack = "";
+  const requireBlur = { shutter: 90, samples: 8, blend: "linear" };
+
+  beforeAll(async () => {
+    dir = tempDir();
+    await conn.request("project.init", { dir });
+    const configPath = join(dir, "frameshell.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
+    installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: dir, decision: "trust" });
+    mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
+    const card = (name: string, value: Record<string, unknown>) => writeFileSync(join(dir, "compositions", "cards", `${name}.json`), JSON.stringify(value));
+    card("blur", { color: "blue", blurColor: "red", seconds: 1, requireBlur, delayMs: 300, blurDelayMs: 600 });
+    card("refuse", { color: "blue", blurColor: "red", seconds: 1, refuseBlur: true });
+    card("plain", { color: "blue", seconds: 1 });
+    blurTrack = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
+  }, TIMEOUT);
+
+  const add = async (type: string, name: string, start: number, props?: Record<string, unknown>) =>
+    (await conn.request("clip.add", { cwd: dir, track: blurTrack, type, source: `compositions/cards/${name}.json`, start, duration: 1, ...(props ? { props } : {}) }))
+      .changes.added[0]!;
+  const isBlue = ({ red, blue }: { red: number; blue: number }) => red < 40 && blue > 150;
+  const states = async () => new Map((await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
+  /** Poll `clip.renders` until `check` holds for clip `id`; every state seen on the way is pushed to `seen`. */
+  const until = async (id: string, check: (info: ClipRenderInfo) => boolean, seen: ClipRenderInfo[] = []) => {
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+      const info = (await states()).get(id)!;
+      seen.push(info);
+      if (check(info)) return info;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    throw new Error(`clip ${id} never reached the expected state; last: ${JSON.stringify(seen.at(-1))}`);
+  };
+  /** Red and blue of the middle pixel at `at` seconds of a video or image file. */
+  const pixel = async (file: string, at = 0) => {
+    const { ffmpeg } = await mediaTools();
+    const args = ["-hide_banner", "-loglevel", "error", ...(at > 0 ? ["-ss", String(at)] : []), "-i", file, "-frames:v", "1"];
+    const rgb = await runBuffer(ffmpeg, [...args, "-vf", "crop=1:1:32:18,format=rgb24", "-f", "rawvideo", "-"]);
+    return { red: rgb[0]!, blue: rgb[2]! };
+  };
+  const exported = async (quality?: "draft" | "final") => {
+    const out = join(tempDir(), `${quality ?? "untiered"}.mp4`);
+    const { job } = await conn.request("render", { cwd: dir, timeline: "main", out, ...(quality ? { quality } : {}) });
+    for (const deadline = Date.now() + 120_000; Date.now() < deadline; ) {
+      const found = (await conn.request("job.list", { cwd: dir })).jobs.find((one) => one.id === job.id)!;
+      if (found.state === "done" || found.state === "failed") return { job: found, out };
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`render ${job.id} never finished`);
+  };
+
   it(
-    "renders a blur-card with the resolved blur and re-keys it; a card without the capability keeps its key, with a warning",
+    "keeps the sharp render as the draft, renders the blurred one after it, and keeps the keys of clips without blur",
     async () => {
-      const dir = tempDir();
-      await conn.request("project.init", { dir });
-      const configPath = join(dir, "frameshell.json");
-      const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
-      writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
-      installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
-      await conn.request("project.trust", { cwd: dir, decision: "trust" });
-      mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
-      const requireBlur = { shutter: 90, samples: 8, blend: "linear" };
-      writeFileSync(join(dir, "compositions", "cards", "blur.json"), JSON.stringify({ color: "red", seconds: 1, requireBlur }));
-      writeFileSync(join(dir, "compositions", "cards", "plain.json"), JSON.stringify({ color: "blue", seconds: 1 }));
-      const track = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
-      const add = async (type: string, name: string, start: number) =>
-        (await conn.request("clip.add", { cwd: dir, track, type, source: `compositions/cards/${name}.json`, start, duration: 1 })).changes.added[0]!;
       const blurred = await add("blur-card", "blur", 0);
       const sharp = await add("card", "plain", 1);
-      const states = async () => new Map((await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
-      const settled = async (id: string, key?: string | null) => {
-        for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
-          const info = (await states()).get(id)!;
-          if ((info.state === "ready" || info.state === "failed") && (key === undefined || info.key !== key)) return info;
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-        throw new Error(`clip ${id} never settled`);
-      };
-      // Without blur the card that needs one fails: the render got no motionBlur.
-      const before = await settled(blurred);
-      expect(before).toMatchObject({ state: "failed", error: expect.stringContaining("got motion blur undefined") });
-      const sharpKey = (await settled(sharp)).key;
+      // No blur: one render, keyed by the recipe as before.
+      const plain = await until(blurred, (info) => info.state === "ready");
+      expect(plain).not.toHaveProperty("final");
+      const sharpKey = (await until(sharp, (info) => info.state === "ready")).key;
 
       const set = await conn.request("clip.set", { cwd: dir, clip: blurred, motionBlur: { shutter: 90 } });
       expect(set.warnings ?? []).toEqual([]);
-      expect(await settled(blurred, before.key)).toMatchObject({ state: "ready" });
+      const seen: ClipRenderInfo[] = [];
+      const done = await until(blurred, (info) => info.final?.state === "ready", seen);
+      // The draft keeps the sharp key and stays ready; the preview had it while the blurred render was made.
+      expect(done).toMatchObject({ state: "ready", key: plain.key, file: plain.file });
+      expect(seen.some((info) => info.state === "ready" && info.final !== undefined && info.final.state !== "ready")).toBe(true);
+      expect(done.final).toMatchObject({ file: `.frameshell/cache/clips/${done.final!.key}.webm`, hasAlpha: true, width: 64, height: 36, progress: 1, error: null });
+      expect(done.final!.key).not.toBe(plain.key);
+
+      // A clip added with blur gets its draft first, then the blurred one, which waits for it meanwhile.
+      const second = await add("blur-card", "blur", 2, { label: "Second" });
+      await conn.request("clip.set", { cwd: dir, clip: second, motionBlur: { shutter: 90 } });
+      const order: ClipRenderInfo[] = [];
+      const both = await until(second, (info) => info.final?.state === "ready", order);
+      expect(order.some((info) => info.state !== "ready" && info.final?.state === "waiting")).toBe(true);
+      const jobs = (await conn.request("job.list", { cwd: dir })).jobs.filter((job) => job.kind === "clip");
+      const started = (key: string) => jobs.findIndex((job) => job.output?.endsWith(key));
+      expect(started(both.key!)).toBeLessThan(started(both.final!.key));
 
       const warned = await conn.request("clip.set", { cwd: dir, clip: sharp, motionBlur: {} });
       expect(warned.warnings).toEqual([expect.stringMatching(/card plugin does not apply motion blur yet/)]);
-      expect((await states()).get(sharp)!.key).toBe(sharpKey);
+      expect((await states()).get(sharp)).toMatchObject({ key: sharpKey });
+      expect((await states()).get(sharp)).not.toHaveProperty("final");
+      await conn.request("clip.remove", { cwd: dir, clip: second });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "exports a draft from the sharp render and a final, an untiered render and frames from the blurred one",
+    async () => {
+      const draft = await exported("draft");
+      expect(draft.job.state).toBe("done");
+      expect(isBlue(await pixel(draft.out, 0.5))).toBe(true);
+      for (const quality of ["final", undefined] as const) {
+        const final = await exported(quality);
+        expect(final.job.state).toBe("done");
+        expect(final.job.warnings.filter((warning) => warning.includes("motion blur"))).toEqual([]);
+        expect((await pixel(final.out, 0.5)).red).toBeGreaterThan(150);
+      }
+      const png = join(tempDir(), "frame.png");
+      await conn.request("frame", { cwd: dir, timeline: "main", at: 0.5, out: png });
+      expect((await pixel(png)).red).toBeGreaterThan(150);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "exports a clip whose plugin refuses the blur from its sharp render, with a warning, and never retries the refusal",
+    async () => {
+      const refused = await add("blur-card", "refuse", 4);
+      await conn.request("clip.set", { cwd: dir, clip: refused, motionBlur: { shutter: 90 } });
+      const failed = await until(refused, (info) => info.final?.state === "failed");
+      expect(failed).toMatchObject({ state: "ready", final: { error: expect.stringContaining("cannot be motion-blurred"), file: null, refused: true } });
+      const before = (await conn.request("job.list", { cwd: dir })).jobs.filter((job) => job.output?.endsWith(failed.final!.key)).length;
+
+      const { job, out } = await exported();
+      expect(job.state).toBe("done");
+      expect(job.warnings).toEqual([expect.stringMatching(new RegExp(`^Clip ${refused} is exported without motion blur, from its sharp render: .*cannot be motion-blurred`))]);
+      expect(isBlue(await pixel(out, 4.5))).toBe(true);
+      // The blurred clip beside it still exports blurred.
+      expect((await pixel(out, 0.5)).red).toBeGreaterThan(150);
+      expect((await conn.request("job.list", { cwd: dir })).jobs.filter((one) => one.output?.endsWith(failed.final!.key)).length).toBe(before);
+      await conn.request("clip.remove", { cwd: dir, clip: refused });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "gc keeps both renders of a blurred clip, and the blurred one goes once the blur is cleared",
+    async () => {
+      const [blurred] = [...(await states()).values()].filter((info) => info.final !== undefined);
+      const { key, final } = await until(blurred!.clip, (info) => info.final?.state === "ready");
+      for (const deadline = Date.now() + 60_000; (await conn.request("job.list", { cwd: dir, active: true })).jobs.length > 0; ) {
+        if (Date.now() > deadline) throw new Error("clip jobs never settled");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const keyOf = (path: string) => path.split("/").at(-1)!.split(".")[0]!;
+      const kept = (await conn.request("gc", { cwd: dir, dryRun: true })).removed.map((entry) => keyOf(entry.path));
+      expect(kept).not.toContain(key);
+      expect(kept).not.toContain(final!.key);
+
+      await conn.request("clip.set", { cwd: dir, clip: blurred!.clip, motionBlur: null });
+      expect((await states()).get(blurred!.clip)).toMatchObject({ key, state: "ready" });
+      const unused = (await conn.request("gc", { cwd: dir, dryRun: true })).removed.map((entry) => keyOf(entry.path));
+      expect(unused).toContain(final!.key);
+      expect(unused).not.toContain(key);
     },
     TIMEOUT,
   );

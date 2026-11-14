@@ -3,6 +3,7 @@ import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { type FSWatcher, watch } from "chokidar";
 import {
+  type ClipFinalRenderInfo,
   type ClipLiveResult,
   type ClipRenderInfo,
   type ClipRendersResult,
@@ -13,7 +14,7 @@ import {
   type JobPriority,
   RpcError,
 } from "@frameshell/protocol";
-import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
+import { type ClipAdapter, type LivePage, MOTION_BLUR_REFUSED } from "@frameshell/plugin-api";
 import { type AdapterClip, type FormatEntry, type ResolvedMotionBlur, type Timeline, clipInFormat, elementStyles, motionBlurOf } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
@@ -103,14 +104,51 @@ interface Placed {
 }
 
 /**
- * Key of a clip, or why it has none; `styleCss`: the token sheet the key counts, which the render gets (ADR 0028);
- * `motionBlur`: likewise the clip's resolved blur, for an adapter that applies it (ADR 0041).
+ * Which render of a clip that keeps two (ADR 0041 decision 11): `draft` the fast one (live preview, draft exports),
+ * `final` the expensive one (final and untiered exports, frames). A clip with one render gives it for both.
  */
-type Keyed = { key: string; registered: RegisteredClipType; styleCss?: string; motionBlur?: ResolvedMotionBlur } | { key: null; error: string };
+export type ClipTier = "draft" | "final";
+
+/** Options of {@link ClipRenderer.ensure}. */
+export interface ClipEnsureOptions {
+  /** Share of clips done, 0..1. */
+  onProgress?: ((fraction: number) => void) | undefined;
+  /** Render at that frame size instead of the project resolution (a format of the project, ADR 0027); part of the key. */
+  size?: { width: number; height: number } | undefined;
+  /** Render of a clip that keeps two to use. Default `final`. */
+  tier?: ClipTier | undefined;
+  /** A clip exported with its draft render because the plugin refused the final one (motion blur, ADR 0041 decision 8). */
+  onWarning?: ((warning: string) => void) | undefined;
+}
+
+/**
+ * One cached render of a clip: its key and what the render gets beside the clip. `styleCss`: the token sheet the key
+ * counts (ADR 0028); `motionBlur`: likewise the clip's resolved blur, for an adapter that applies it (ADR 0041).
+ */
+interface Variant {
+  key: string;
+  registered: RegisteredClipType;
+  styleCss?: string;
+  motionBlur?: ResolvedMotionBlur;
+}
+
+/** Keys of a clip, or why it has none: `key` its draft render's; `final` the blurred render beside it, when it has one. */
+type Keyed = (Variant & { final: Variant | null }) | { key: null; error: string };
+
+/** A failed render: why, and whether the adapter refused the motion blur (then never retried while the key holds). */
+interface Failure {
+  error: string;
+  refused: boolean;
+}
+
+/** Cached render of a variant, or the render that makes it. */
+type Obtained = { ready: RenderedClip } | { done: Promise<RenderedClip> };
 
 interface Pending {
   job: string;
   done: Promise<RenderedClip>;
+  /** Refresh once it is ready: some caller queued it as a draft whose final render follows. */
+  refreshAfter: boolean;
 }
 
 /** Cache entry metadata, written after the media file: its presence marks a complete entry. */
@@ -138,11 +176,16 @@ interface EntryMeta {
  * daemon calls it on every timeline change), and when a file under the
  * project changes (composition edits). A failed key is not retried by
  * refreshes until its inputs change; {@link ensure} (export) retries it.
+ * A clip with motion blur keeps two entries (ADR 0041 decision 11): the
+ * sharp draft, and the blurred final queued in the background once the
+ * draft is ready.
  */
 export class ClipRenderer {
   readonly #options: ClipRendererOptions;
   readonly #pending = new Map<string, Pending>();
-  readonly #failed = new Map<string, string>();
+  readonly #failed = new Map<string, Failure>();
+  /** Renders whose adapter refused the motion blur, by entry id, until their `done` reads it. */
+  readonly #refused = new Set<string>();
   readonly #watchers = new Map<string, FSWatcher>();
   readonly #timers = new Map<string, NodeJS.Timeout>();
   /** Per root: the running refresh, and whether another was asked for meanwhile. */
@@ -228,42 +271,50 @@ export class ClipRenderer {
     const clips: ClipRenderInfo[] = [];
     for (const { clip, track } of placed) {
       const keyed = await this.#keyOf(root, clip, adapters, format);
-      const info: ClipRenderInfo = {
-        clip: clip.id,
-        track,
-        type: clip.type,
-        source: clip.source ?? null,
-        state: "unavailable",
-        key: keyed.key,
-        file: null,
-        hasAlpha: null,
-        width: null,
-        height: null,
-        duration: null,
-        job: null,
-        progress: 0,
-        error: null,
-      };
+      const about = { clip: clip.id, track, type: clip.type, source: clip.source ?? null };
       if (keyed.key === null) {
-        info.error = keyed.error;
-        clips.push(info);
+        clips.push({ ...about, ...UNRENDERED, state: "unavailable", error: keyed.error });
         continue;
       }
-      const ready = await this.#ready(root, keyed.key);
-      if (ready) {
-        clips.push({ ...info, state: "ready", file: ready.file, hasAlpha: ready.hasAlpha, width: ready.width, height: ready.height, duration: ready.duration, progress: 1 });
-        continue;
+      const draft = await this.#stateOf(root, keyed, clip, format, "interactive", keyed.final !== null);
+      // Never `waiting`: a missing draft is always queued.
+      const info: ClipRenderInfo = { ...about, ...draft, state: draft.state as ClipRenderInfo["state"] };
+      // The final is queued behind its draft, in the background: the preview shows the draft meanwhile (ADR 0041).
+      if (keyed.final) {
+        const final = await this.#stateOf(root, keyed.final, clip, format, draft.state === "ready" ? "background" : null);
+        info.final = { ...final, refused: this.#failed.get(entryId(root, keyed.final.key))?.refused === true };
       }
-      const failed = this.#failed.get(entryId(root, keyed.key));
-      if (failed !== undefined) {
-        clips.push({ ...info, state: "failed", error: failed });
-        continue;
-      }
-      const pending = this.#render(root, keyed, clip, format, "interactive");
-      const job = this.#options.jobs.get(pending.job);
-      clips.push({ ...info, state: job?.state === "running" ? "rendering" : "queued", job: pending.job, progress: job?.progress ?? 0 });
+      clips.push(info);
     }
     return { timeline: timeline.id, revision: timeline.revision, clips };
+  }
+
+  /**
+   * State of render `variant` of `clip`. Missing and not failed, it is queued at `queue` priority (an interactive
+   * one moves a queued background render of the same key up); with `queue` null it is `waiting` unless already pending.
+   * `refreshAfter` as for {@link #render}.
+   */
+  async #stateOf(
+    root: string,
+    variant: Variant,
+    clip: AdapterClip,
+    format: ClipFormat,
+    queue: JobPriority | null,
+    refreshAfter = false,
+  ): Promise<Omit<ClipFinalRenderInfo, "refused">> {
+    const { key } = variant;
+    const ready = await this.#ready(root, key);
+    if (ready) {
+      const { file, hasAlpha, width, height, duration } = ready;
+      return { ...UNRENDERED, state: "ready", key, file, hasAlpha, width, height, duration, progress: 1 };
+    }
+    const id = entryId(root, key);
+    const failed = this.#failed.get(id);
+    if (failed) return { ...UNRENDERED, state: "failed", key, error: failed.error };
+    const pending = queue ? this.#render(root, variant, clip, format, queue, refreshAfter) : this.#pending.get(id);
+    if (!pending) return { ...UNRENDERED, state: "waiting", key };
+    const job = this.#options.jobs.get(pending.job);
+    return { ...UNRENDERED, state: job?.state === "running" ? "rendering" : "queued", key, job: pending.job, progress: job?.progress ?? 0 };
   }
 
   /**
@@ -328,16 +379,12 @@ export class ClipRenderer {
    * Cached render of every generated clip on a video track of `timeline`,
    * by clip id, rendering missing ones first (SPEC §3.5 step 2). Retries
    * failed keys. Throws `ClipRenderFailed` for the first clip that cannot be
-   * rendered, or has no adapter. `onProgress` gets the share of clips done.
-   * `size`: render at that frame size instead of the project resolution (a
-   * format of the project, ADR 0027); the size is part of the key.
+   * rendered, or has no adapter. A clip that keeps two renders (ADR 0041)
+   * gives its `tier`'s; where the plugin refused the final one, the draft
+   * with a warning (decision 8). See {@link ClipEnsureOptions}.
    */
-  async ensure(
-    root: string,
-    timeline: Timeline,
-    onProgress?: (fraction: number) => void,
-    size?: { width: number; height: number },
-  ): Promise<Map<string, RenderedClip>> {
+  async ensure(root: string, timeline: Timeline, options: ClipEnsureOptions = {}): Promise<Map<string, RenderedClip>> {
+    const { onProgress, size, tier = "final", onWarning } = options;
     const placed = generatedClips(timeline);
     const rendered = new Map<string, RenderedClip>();
     if (placed.length === 0) return rendered;
@@ -345,16 +392,33 @@ export class ClipRenderer {
     const project = await this.#options.format(root);
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const waits: { clip: AdapterClip; done: Promise<RenderedClip> }[] = [];
+    const sharp = (clip: AdapterClip, draft: Variant, refusal: string): Promise<Obtained> => {
+      onWarning?.(`Clip ${clip.id} is exported without motion blur, from its sharp render: ${refusal}`);
+      return this.#obtain(root, draft, clip, format);
+    };
     for (const { clip } of placed) {
       const keyed = await this.#keyOf(root, clip, adapters, format);
       if (keyed.key === null) throw renderFailed(timeline.id, clip, keyed.error);
-      const ready = await this.#ready(root, keyed.key);
-      if (ready) {
-        rendered.set(clip.id, ready);
-        continue;
+      const { final } = keyed;
+      const failed = final ? this.#failed.get(entryId(root, final.key)) : undefined;
+      let got: Obtained;
+      if (!final || tier === "draft") got = await this.#obtain(root, keyed, clip, format, final !== null);
+      else if (failed?.refused) got = await sharp(clip, keyed, failed.error);
+      else {
+        got = await this.#obtain(root, final, clip, format);
+        if ("done" in got) {
+          const blurred = got.done;
+          got = {
+            done: blurred.catch(async (error: unknown) => {
+              if ((error as Refusal).refused !== true) throw error;
+              const fallback = await sharp(clip, keyed, (error as Error).message);
+              return "ready" in fallback ? fallback.ready : fallback.done;
+            }),
+          };
+        }
       }
-      this.#failed.delete(entryId(root, keyed.key));
-      waits.push({ clip, done: this.#render(root, keyed, clip, format, "interactive").done });
+      if ("ready" in got) rendered.set(clip.id, got.ready);
+      else waits.push({ clip, done: got.done });
     }
     let done = rendered.size;
     onProgress?.(done / placed.length);
@@ -367,6 +431,17 @@ export class ClipRenderer {
       onProgress?.(++done / placed.length);
     }
     return rendered;
+  }
+
+  /**
+   * The cached render of `variant`, or the render queued interactive for it; a failed key is tried again.
+   * `refreshAfter` as for {@link #render}.
+   */
+  async #obtain(root: string, variant: Variant, clip: AdapterClip, format: ClipFormat, refreshAfter = false): Promise<Obtained> {
+    const ready = await this.#ready(root, variant.key);
+    if (ready) return { ready };
+    this.#failed.delete(entryId(root, variant.key));
+    return { done: this.#render(root, variant, clip, format, "interactive", refreshAfter).done };
   }
 
   /**
@@ -437,6 +512,7 @@ export class ClipRenderer {
         const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format);
         if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
         keys.add(keyed.key);
+        if (keyed.final) keys.add(keyed.final.key);
       }
     }
     return keys;
@@ -480,8 +556,15 @@ export class ClipRenderer {
       if (this.#closed) return;
       const keyed = await this.#keyOf(root, clip, adapters, format);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
-      if (await this.#ready(root, keyed.key)) continue;
-      this.#render(root, keyed, clip, format, "background");
+      const { final } = keyed;
+      if (!(await this.#ready(root, keyed.key))) {
+        // A final render waits for its draft: the refresh after the draft is ready queues it.
+        this.#render(root, keyed, clip, format, "background", final !== null);
+        continue;
+      }
+      if (final && !this.#failed.has(entryId(root, final.key)) && !(await this.#ready(root, final.key))) {
+        this.#render(root, final, clip, format, "background");
+      }
     }
   }
 
@@ -508,9 +591,12 @@ export class ClipRenderer {
         return { key: null, error: (error as Error).message };
       }
     }
+    const recipe = { plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}) };
+    const draft: Variant = { key: clipCacheKey(recipe), registered, ...(sheet ? { styleCss: sheet.css } : {}) };
+    // A blurred clip keeps its sharp render as the draft and the blurred one as a second entry (ADR 0041 decision 11).
     const blur = registered.adapter.motionBlur ? motionBlurOf(clip) : null;
-    const key = clipCacheKey({ plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}), ...(blur ? { motionBlur: blur } : {}) });
-    return { key, registered, ...(sheet ? { styleCss: sheet.css } : {}), ...(blur ? { motionBlur: blur } : {}) };
+    const final: Variant | null = blur ? { ...draft, key: clipCacheKey({ ...recipe, motionBlur: blur }), motionBlur: blur } : null;
+    return { ...draft, final };
   }
 
   /** Content hash of a project-relative input; null when missing or outside the project. */
@@ -542,16 +628,18 @@ export class ClipRenderer {
   }
 
   /**
-   * The pending render of `keyed`, queueing one when none runs. `interactive`: somebody waits for it (the preview
+   * The pending render of `variant`, queueing one when none runs. `interactive`: somebody waits for it (the preview
    * reading {@link status}, an export, a frame); it moves a queued background render of the same key up.
-   * `background`: the refresh after an edit, behind every interactive render.
+   * `background`: the refresh after an edit, behind every interactive render. `refreshAfter`: refresh once it is
+   * ready (a draft, whose final render is queued then).
    */
-  #render(root: string, keyed: Extract<Keyed, { key: string }>, clip: AdapterClip, format: ClipFormat, priority: JobPriority): Pending {
-    const { key, registered, styleCss, motionBlur } = keyed;
+  #render(root: string, variant: Variant, clip: AdapterClip, format: ClipFormat, priority: JobPriority, refreshAfter = false): Pending {
+    const { key, registered, styleCss, motionBlur } = variant;
     const id = entryId(root, key);
     const running = this.#pending.get(id);
     if (running) {
       if (priority === "interactive") this.#options.jobs.promote(running.job);
+      running.refreshAfter ||= refreshAfter;
       return running;
     }
     const dir = join(root, ...CLIP_CACHE_DIR.split("/"));
@@ -568,22 +656,28 @@ export class ClipRenderer {
     });
     const done = (async () => {
       const job = info.state === "canceled" ? info : await finished;
+      const refused = this.#refused.delete(id);
       if (job.state === "done") {
         const ready = await this.#ready(root, key);
         if (ready) return ready;
         throw new Error(`the render of ${clip.id} finished but left no cache entry`);
       }
-      throw new Error(job.error ?? `the render of ${clip.id} was canceled`);
+      const error: Refusal = new Error(job.error ?? `the render of ${clip.id} was canceled`);
+      if (refused) error.refused = true;
+      throw error;
     })();
     if (info.state !== "canceled") this.#settle.set(info.id, settle);
-    const pending: Pending = { job: info.id, done };
+    const pending: Pending = { job: info.id, done, refreshAfter };
     this.#pending.set(id, pending);
     // Kept for status until settled; a failure is remembered so refreshes do not loop on it.
     done.then(
-      () => this.#pending.delete(id),
+      () => {
+        this.#pending.delete(id);
+        if (pending.refreshAfter) this.#schedule(root);
+      },
       (error: unknown) => {
         this.#pending.delete(id);
-        if (info.state !== "canceled" && !this.#closed) this.#failed.set(id, (error as Error).message);
+        if (info.state !== "canceled" && !this.#closed) this.#failed.set(id, { error: (error as Error).message, refused: (error as Refusal).refused === true });
       },
     );
     return pending;
@@ -604,19 +698,25 @@ export class ClipRenderer {
     const outDir = join(dir, `.tmp-${key}-${randomBytes(4).toString("hex")}`);
     await mkdir(outDir, { recursive: true });
     try {
-      const result = await registered.adapter.render(clip, {
-        projectDir: root,
-        outDir,
-        ...format,
-        signal: ctx.signal,
-        ensureBinary: (name) => this.#options.ensureBinary(root, name),
-        ...elementCssOf(clip),
-        ...(styleCss ? { styleCss } : {}),
-        ...(motionBlur ? { motionBlur } : {}),
-        progress: ({ fraction }) => {
-          if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
-        },
-      });
+      let result: Awaited<ReturnType<ClipAdapter["render"]>>;
+      try {
+        result = await registered.adapter.render(clip, {
+          projectDir: root,
+          outDir,
+          ...format,
+          signal: ctx.signal,
+          ensureBinary: (name) => this.#options.ensureBinary(root, name),
+          ...elementCssOf(clip),
+          ...(styleCss ? { styleCss } : {}),
+          ...(motionBlur ? { motionBlur } : {}),
+          progress: ({ fraction }) => {
+            if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
+          },
+        });
+      } catch (error) {
+        if (motionBlur && (error as { code?: unknown } | null)?.code === MOTION_BLUR_REFUSED) this.#refused.add(entryId(root, key));
+        throw error;
+      }
       if (typeof result?.file !== "string" || typeof result.hasAlpha !== "boolean") {
         throw new Error(`${registered.plugin.name} returned no { file, hasAlpha } for ${clip.id}`);
       }
@@ -656,6 +756,12 @@ export class ClipRenderer {
 
 /** Top-level project entries whose changes never feed a render: daemon state, timelines (refreshed on change), VCS, exports. */
 const IGNORED = new Set([".frameshell", ".git", "node_modules", "timelines", "exports"]);
+
+/** A render error; `refused`: the adapter refused the motion blur ({@link MOTION_BLUR_REFUSED}). */
+type Refusal = Error & { refused?: boolean };
+
+/** A render's state fields before anything is known: nothing rendered, nothing running. */
+const UNRENDERED = { key: null, file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null } as const;
 
 const CLIP_ENTRY = /^([0-9a-f]{32})\.(json|mp4|webm)$/;
 const CLIP_TEMP = /^\.tmp-[0-9a-f]{32}-[0-9a-f]+$/;
