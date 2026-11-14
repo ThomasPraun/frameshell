@@ -49,14 +49,16 @@ When it passes, paste the printed credit block into the video description (MCP `
 When the person names their site ("make it look like acme.com"), capture it instead of guessing colours or redrawing a logo:
 
 ```sh
-frameshell brand capture https://acme.com
+frameshell brand capture https://acme.com --sections "Pricing,Teams"
 ```
 
 It opens the page in Frameshell's own headless Chrome (public addresses only, ports 80 and 443, no cookies or sign-in) and saves under `assets/brand/<id>/` the logo candidates from the header and nav, icons, the share image, `hero.png` and `page.png`; open-licensed fonts go to `assets/fonts/`. `brand.json` lists what was found: colours with their roles and the accent, fonts by use (each face with a note saying why it was or was not copied), `:root` variables, headings, buttons and video URLs.
 
+`--sections` (optional, up to 12 texts, comma-separated) also crops the part of the page around each text at 3x into `section-<text>.png`: the smallest element at least 500 px wide that holds the text, found in a heading first. Use these crops for push-ins on real product UI instead of zooming into `page.png`. Name texts the page shows (a heading such as "Pricing"); `brand.json` `sections` says which element was cropped, or `not found` for a text no visible element holds.
+
 1. **List what was found to the person before you use it.** Name the logo files, the accent and the fonts, and ask whether this is their brand and which logo is right. Never invent product UI or redraw a logo: use the captured files, or ask for the real ones.
 2. **Credits fail until the person confirms.** Every captured file has a credits entry with its source URL and no licence, so `frameshell credits` fails on placed brand files. For the person's own brand, ask, then `frameshell credits set <file> --licence own`. For someone else's brand, do not use the files without their say.
-3. **Fonts:** a face is copied only when the font file itself names OFL-1.1, Apache-2.0 or UFL; its credits entry carries that licence and the foundry. Google Fonts serves subsets without licence text, so they are listed but not copied: fetch the family from the google/fonts repository and import it with `--licence OFL-1.1 --source-url <repo URL> --author <foundry>`. Any other face is listed by name only: pick an open font close to it and say so.
+3. **Fonts:** a face is copied only when the font file itself names OFL-1.1, Apache-2.0 or UFL; its credits entry carries that licence and the foundry. Google Fonts serves subsets without licence text, so they are listed but not copied: fetch the family from the google/fonts repository and import it with `--licence OFL-1.1 --source-url <repo URL> --author <foundry>`. Any other face is listed by name only, with the closest open font from Frameshell's curated table (`substitute` in `brand.json`, a `closest open font:` line in the output: family, licence, google/fonts folder). Tell the person their font was not copied and which open font stands in, then fetch that family from its folder and import it with its licence the same way. An icon font (by name, or because most of its characters sit in the Private Use Area) is never a text face, even under an open licence.
 4. **Style:** capture never changes `style.json`. It prints suggested `frameshell style set` lines (colours, fonts, `brand.product`, `brand.url`, `brand.mustShow`); run the ones the person agrees to.
 5. **A failed capture says so:** `Capture FAILED (little text)` means a login wall, a bot check or an empty app shell. Open `hero.png` to see what loaded, then ask the person for the logo and a screenshot. A local or staging page (`localhost`, a LAN address, port 3000) is refused: ask for screenshots or exported files.
 

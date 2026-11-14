@@ -38,7 +38,23 @@ export interface PageFindings {
   scrollHeight: number;
 }
 
-/** Installs `globalThis.__frameshellBrand` with `measure()` and `flatten()`. */
+/** What `__frameshellBrand.section(text, minWidth)` returns for a text it found; null when it found none. */
+export interface PageSection {
+  /** Element holding the text, e.g. `h2` or `p#intro`. */
+  tag: string;
+  /** Ancestor cropped: the smallest at least `minWidth` CSS px wide. */
+  container: string;
+  /** Box of the container in document CSS px. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Top and height of the element holding the text, in document CSS px. */
+  hitY: number;
+  hitHeight: number;
+}
+
+/** Installs `globalThis.__frameshellBrand` with `measure()`, `flatten()` and `section()`. */
 export const PAGE_SCRIPT = String.raw`(() => {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
@@ -252,6 +268,61 @@ export const PAGE_SCRIPT = String.raw`(() => {
     return true;
   };
 
-  globalThis.__frameshellBrand = { measure, flatten };
+  // The part of the page holding "query": the visible element whose text holds it (a heading first, then text
+  // outside header, nav and footer, an exact match before a partial one, then document order), lifted through
+  // wrappers with the same text (a span in an h2 is the h2), then its smallest ancestor at least "minWidth" CSS px
+  // wide: the section around a heading, never the heading line alone. Text split across elements is found within
+  // headings and short elements only. Boxes (container and hit) in document CSS px.
+  const norm = (text) => (text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const section = (query, minWidth) => {
+    const want = norm(query);
+    const body = document.body || document.documentElement;
+    if (!want) return null;
+    const chrome = (el) => !!el.closest("header, nav, footer, [role=banner], [role=navigation], [role=contentinfo]");
+    const heading = (el) => /^h[1-6]$/i.test(el.tagName) || el.getAttribute("role") === "heading";
+    const seen = new Set();
+    const candidates = [];
+    const consider = (found, text) => {
+      let el = found;
+      const same = norm(el.innerText || el.textContent);
+      while (el.parentElement && el.parentElement !== body && norm(el.parentElement.innerText || el.parentElement.textContent) === same) el = el.parentElement;
+      if (seen.has(el) || !visible(el)) return;
+      seen.add(el);
+      const titled = heading(el) || !!found.closest("h1, h2, h3, h4, h5, h6, [role=heading]");
+      const rank = (titled ? 0 : chrome(el) ? 4 : 2) + (text === want ? 0 : 1);
+      candidates.push({ el, rank, order: candidates.length });
+    };
+    let scanned = 0;
+    for (const el of body.querySelectorAll("*")) {
+      if (++scanned > 20000) break;
+      if (/^(script|style|noscript|template|svg|head)$/i.test(el.tagName)) continue;
+      const own = norm([...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(" "));
+      if (own.includes(want)) consider(el, own);
+      else if (heading(el) || (el.childElementCount > 0 && el.childElementCount <= 8 && (el.textContent || "").length <= 300)) {
+        const text = norm(el.innerText || el.textContent);
+        if (text.includes(want) && ![...el.children].some((child) => norm(child.innerText || child.textContent).includes(want))) consider(el, text);
+      }
+    }
+    candidates.sort((a, b) => a.rank - b.rank || a.order - b.order);
+    const hit = candidates[0];
+    if (!hit) return null;
+    let box = hit.el === body ? body : hit.el.parentElement;
+    let rect = box.getBoundingClientRect();
+    while (box.parentElement && (rect.width < minWidth || rect.height < 1)) {
+      box = box.parentElement;
+      rect = box.getBoundingClientRect();
+    }
+    const pageWidth = Math.max(document.documentElement.scrollWidth, body.scrollWidth);
+    const x = Math.max(0, rect.left + scrollX);
+    const y = Math.max(0, rect.top + scrollY);
+    const width = Math.min(rect.right + scrollX, pageWidth) - x;
+    const height = rect.bottom + scrollY - y;
+    if (width < 1 || height < 1) return null;
+    const label = (el) => el.tagName.toLowerCase() + (el.id ? "#" + el.id : "");
+    const hitRect = hit.el.getBoundingClientRect();
+    return { tag: label(hit.el), container: label(box), x, y, width, height, hitY: hitRect.top + scrollY, hitHeight: hitRect.height };
+  };
+
+  globalThis.__frameshellBrand = { measure, flatten, section };
   return true;
 })()`;

@@ -58,6 +58,16 @@ describe("brand.capture", () => {
     }
   });
 
+  it("refuses more than 12 sections or an empty one as invalid params", async () => {
+    const brandJobs = async () => (await conn.request("job.list", { cwd: project })).jobs.filter((job) => job.kind === "brand").length;
+    const before = await brandJobs();
+    for (const sections of [Array.from({ length: 13 }, (_, i) => `Part ${i}`), ["Pricing", "  "]]) {
+      const error = await conn.request("brand.capture", { cwd: project, url: "https://example.com/", sections }).catch((caught: unknown) => caught);
+      expect((error as RpcError).code).toBe(ErrorCode.InvalidParams);
+    }
+    expect(await brandJobs()).toBe(before);
+  });
+
   it("refuses a brand.json that fails its schema through file.write", async () => {
     const error = await conn.request("file.write", { path: join(project, "brand.json"), content: "{}" }).catch((caught: unknown) => caught);
     expect((error as RpcError).code).toBe(ErrorCode.InvalidProjectFile);

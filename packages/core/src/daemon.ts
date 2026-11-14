@@ -1533,7 +1533,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         );
       });
     },
-    "brand.capture": async ({ cwd, url }, _caller, request) => {
+    "brand.capture": async ({ cwd, url, sections }, _caller, request) => {
       const dir = await root(cwd);
       const checked = checkCaptureUrl(url);
       if (!checked.ok) throw new RpcError(ErrorCode.InvalidOperation, `brand.capture: ${checked.problem.message}`, { op: "brand.capture", reason: checked.problem.reason, field: "url" });
@@ -1550,7 +1550,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
               // Connection closed.
             }
           },
-        });
+        }, sections ? { sections } : {});
       });
     },
     "brand.show": async ({ cwd }) => brands.show(await root(cwd)),

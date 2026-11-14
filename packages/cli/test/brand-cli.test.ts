@@ -68,7 +68,19 @@ describe("frameshell brand capture", () => {
 
   it("documents the command and rejects a wrong shape", () => {
     expect(frameshell(["--help"]).stdout).toMatch(/brand capture <url>/);
+    expect(frameshell(["--help"]).stdout).toMatch(/--sections "Pricing,Teams"/);
     expect(frameshell(["brand", "capture"]).code).not.toBe(0);
+  }, CLI_TIMEOUT);
+
+  it("checks --sections before anything loads", () => {
+    const empty = frameshell(["brand", "capture", "https://example.com/", "--sections", " , "]);
+    expect(empty.code).not.toBe(0);
+    expect(empty.stderr).toMatch(/--sections: expected texts on the page/);
+    const many = frameshell(["brand", "capture", "https://example.com/", "--sections", Array.from({ length: 13 }, (_, i) => `Part ${i}`).join(",")]);
+    expect(many.stderr).toMatch(/--sections: at most 12 texts, got 13/);
+    // Sections are passed through: the loopback refusal still comes first from the daemon.
+    expect(frameshell(["brand", "capture", "http://127.0.0.1/", "--sections", "Pricing"]).stderr).toMatch(/non-public address/);
+    expect(frameshell(["brand", "show", "--sections", "Pricing"]).stderr).toMatch(/does not take --sections/);
   }, CLI_TIMEOUT);
 });
 

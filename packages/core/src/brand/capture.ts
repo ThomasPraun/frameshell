@@ -1,7 +1,8 @@
 // `brand.capture` (ADR 0044): open a public page in managed headless Chrome behind the capture proxy, measure its
 // brand (logos, icons, share image, colours, fonts, :root variables, headings, buttons) in an isolated world, take
-// the first screen and the whole page, and save what it found under assets/brand/<id>/ and assets/fonts/ with a
-// `brand.json` entry and a credits entry per file. It never writes `style.json`: it returns `style set` suggestions.
+// the first screen, the whole page and the sections asked for by text (at 3x), and save what it found under
+// assets/brand/<id>/ and assets/fonts/ with a `brand.json` entry and a credits entry per file. It never writes
+// `style.json`: it returns `style set` suggestions.
 import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { ErrorCode, type MethodResult, RpcError } from "@frameshell/protocol";
@@ -13,14 +14,18 @@ import {
   type BrandManifest,
   MAX_SOURCE_URL,
   createBrandManifest,
+  type FontCategory,
+  type FontWidth,
+  fontClassFromName,
   parseBrandManifest,
+  substituteFont,
 } from "@frameshell/schema";
 import { readJsonIfExists, writeJsonAtomic, writeTextAtomic } from "../fs-util.js";
 import { Chrome, ChromePage } from "../inspect/chrome.js";
 import { pickAccent, rankColors, suggestStyle } from "./findings.js";
 import { fitFrames, readFigmaFolder } from "./figma.js";
-import { type DeclaredFace, bestSource, faceFor, firstFamily, fontExtension, isGenericFamily, isIconFamily, parseFontFaces, readFontNames } from "./fonts.js";
-import { PAGE_SCRIPT, type PageFindings } from "./page-script.js";
+import { type DeclaredFace, bestSource, faceFor, firstFamily, fontExtension, isGenericFamily, isIconCoverage, isIconFamily, parseFontFaces, readFontFacts } from "./fonts.js";
+import { PAGE_SCRIPT, type PageFindings, type PageSection } from "./page-script.js";
 import { CAPTURE_PORTS } from "./policy.js";
 import { CaptureProxy, type Dial, PROXY_REFUSAL_HEADER, type Resolve, fetchThrough } from "./proxy.js";
 import { LOGO_IMAGE_CHARS, sanitizeSvg, svgProblems } from "./svg.js";
@@ -50,6 +55,14 @@ export const CAPTURE_LIMITS = {
   fontFaces: 12,
   /** Under this many characters of text, with no logo, icon, share image or font, the capture failed. */
   littleText: 200,
+  /** Device pixel ratio of section crops: sharp enough for a camera push-in. */
+  sectionScale: 3,
+  /** A section is the smallest element at least this wide (CSS px) holding its text. */
+  sectionWidth: 500,
+  /** Taller sections are cut to their top this many CSS px (7200 px at 3x). */
+  sectionHeight: 2400,
+  /** Most sections one capture crops. */
+  sections: 12,
 } as const;
 
 /** Capture limits; tests shorten the waits. */
@@ -83,6 +96,12 @@ export interface BrandServiceOptions {
   network?: { resolve?: Resolve; dial?: Dial };
   /** Tests only: shorter waits. */
   limits?: Partial<CaptureLimits>;
+}
+
+/** What to capture besides the defaults. */
+export interface CaptureRequest {
+  /** Texts whose page sections are cropped at `sectionScale` (`brand capture --sections`). */
+  sections?: readonly string[];
 }
 
 /** Hooks of one capture run. */
@@ -132,7 +151,7 @@ export class BrandService {
    * Capture `url` (already checked by `checkCaptureUrl`) into project `root`. Throws InvalidOperation with reason
    * `address` when the host is not public, `load` when the page did not load, `timeout` past the time limit.
    */
-  async capture(root: string, url: URL, hooks: CaptureHooks = {}): Promise<MethodResult<"brand.capture">> {
+  async capture(root: string, url: URL, hooks: CaptureHooks = {}, request: CaptureRequest = {}): Promise<MethodResult<"brand.capture">> {
     const limits = this.#limits;
     const invalid = (reason: string, message: string) => new RpcError(ErrorCode.InvalidOperation, `brand.capture: ${message}`, { op: "brand.capture", reason, field: "url" });
     const proxy = await CaptureProxy.start({ maxBytes: limits.bytes, ...(this.#options.network ?? {}) });
@@ -159,7 +178,7 @@ export class BrandService {
           throw stop.signal.reason;
         }
         chrome = launched;
-        return this.#run(root, url, launched, proxy, { signal: stop.signal, deadline, commit }, hooks, invalid);
+        return this.#run(root, url, launched, proxy, { signal: stop.signal, deadline, commit }, hooks, invalid, request);
       })();
       work.catch(() => {});
       return await Promise.race([work, aborted.catch((error: unknown) => (commit.started ? work : Promise.reject(error)))]);
@@ -179,6 +198,7 @@ export class BrandService {
     { signal, deadline, commit }: { signal: AbortSignal; deadline: number; commit: { started: boolean } },
     hooks: CaptureHooks,
     invalid: (reason: string, message: string) => RpcError,
+    request: CaptureRequest,
   ): Promise<MethodResult<"brand.capture">> {
     const limits = this.#limits;
     const live = () => {
@@ -269,6 +289,8 @@ export class BrandService {
         await evaluate("__frameshellBrand.flatten()");
         full = await screenshot(chrome, sessionId, { width: limits.width, height: found.scrollHeight, scale: 1 / limits.scale });
       } else warnings.push(`The page is ${found.scrollHeight} px tall, over ${limits.pageHeight}: no full-page shot.`);
+      const wanted = [...new Set((request.sections ?? []).map((text) => text.trim()).filter((text) => text !== ""))].slice(0, limits.sections);
+      const sections = wanted.length > 0 ? await this.#sections(chrome, sessionId, evaluate, wanted, waitIdle, live, (message) => stage(message, 0.5)) : [];
       const declared: DeclaredFace[] = [];
       for (const sheet of sheets) {
         const text = await chrome.send("CSS.getStyleSheetText", { styleSheetId: sheet.id }, sessionId).catch(() => null);
@@ -313,6 +335,9 @@ export class BrandService {
       }
       pending.push({ name: "hero.png", role: "hero", kind: "raster", sourceUrl: finalUrl, bytes: hero, width: limits.width * limits.scale, height: limits.height * limits.scale });
       if (full) pending.push({ name: "page.png", role: "page", kind: "raster", sourceUrl: finalUrl, bytes: full, width: limits.width, height: found.scrollHeight });
+      for (const { shot } of sections) {
+        if (shot) pending.push({ name: shot.name, role: "section", kind: "raster", sourceUrl: finalUrl, bytes: shot.bytes, width: shot.bytes.readUInt32BE(16), height: shot.bytes.readUInt32BE(20) });
+      }
 
       const fonts = await this.#fonts(found, declared, fetchFile, finalUrl);
       live();
@@ -338,7 +363,7 @@ export class BrandService {
           planned.set(font.path, font.bytes);
           files.push({ path: font.path, role: "font", kind: "font", origin: "captured", sourceUrl: font.sourceUrl, width: null, height: null });
         }
-        const assets = files.filter((file) => file.role !== "hero" && file.role !== "page" && file.role !== "font").length + fonts.files.length;
+        const assets = files.filter((file) => file.role !== "hero" && file.role !== "page" && file.role !== "section" && file.role !== "font").length + fonts.files.length;
         const little = found.textLength < limits.littleText && assets === 0;
         if (little) warnings.push(`Very little text (${found.textLength} characters) and no logo, icon, share image or font: the page is likely a login wall, a bot check or an empty app shell. Look at hero.png, then ask the person for the logo files or a screenshot.`);
         const capture: BrandCapture = {
@@ -358,6 +383,7 @@ export class BrandService {
           headings: found.headings,
           buttons: found.buttons,
           videos: found.videos,
+          sections: sections.map((section) => ({ text: section.text, file: section.shot ? `${BRAND_DIR}/${id}/${section.shot.name}` : null, box: section.box, note: section.note })),
           warnings,
         };
         const others = manifest.captures.filter((one) => one.id !== id);
@@ -387,6 +413,60 @@ export class BrandService {
     } finally {
       off();
     }
+  }
+
+  /**
+   * Crop each text's section (the smallest element at least `sectionWidth` CSS px wide holding it) at
+   * `sectionScale`, at most `sectionHeight` tall around the text (`sectionWindow`). Fixed and sticky elements are
+   * made static first, so a header does not cover a crop.
+   */
+  async #sections(
+    chrome: Chrome,
+    sessionId: string,
+    evaluate: <T>(expression: string) => Promise<T>,
+    texts: readonly string[],
+    waitIdle: () => Promise<void>,
+    live: () => void,
+    stage: (message: string) => void,
+  ): Promise<SectionShot[]> {
+    const limits = this.#limits;
+    stage(`cropping ${texts.length} section${texts.length === 1 ? "" : "s"} at ${limits.sectionScale}x`);
+    await evaluate("__frameshellBrand.flatten()");
+    // A higher device pixel ratio re-rasterises text and vectors, and lets srcset pick sharper images.
+    await chrome.send("Emulation.setDeviceMetricsOverride", { width: limits.width, height: limits.height, deviceScaleFactor: limits.sectionScale, mobile: false }, sessionId);
+    await evaluate("scrollTo(0, 0)");
+    await waitIdle();
+    const out: SectionShot[] = [];
+    const names = new Set<string>();
+    for (const text of texts) {
+      live();
+      const box = await evaluate<PageSection | null>(`__frameshellBrand.section(${JSON.stringify(text)}, ${limits.sectionWidth})`);
+      if (!box) {
+        out.push({ text, shot: null, box: null, note: "not found: no visible element of the page holds this text" });
+        continue;
+      }
+      const { y, height } = sectionWindow(box, limits.sectionHeight);
+      let bytes: Buffer;
+      try {
+        bytes = await screenshot(chrome, sessionId, { x: box.x, y, width: box.width, height, scale: 1 });
+      } catch (error) {
+        out.push({ text, shot: null, box: null, note: `not cropped: ${(error as Error).message}` });
+        continue;
+      }
+      const base = `section-${slug(text)}`;
+      let name = base;
+      for (let n = 2; names.has(name); n++) name = `${base}-${n}`;
+      names.add(name);
+      const below = Math.round(y - box.y);
+      const cut = height < box.height ? `; cut to ${limits.sectionHeight} of its ${Math.round(box.height)} px${below > 0 ? `, from ${below} px below its top so the ${box.tag} is inside` : ", from its top"}` : "";
+      out.push({
+        text,
+        shot: { name: `${name}.png`, bytes },
+        box: { x: tenth(box.x), y: tenth(y), width: tenth(box.width), height: tenth(height) },
+        note: `${box.container === box.tag ? box.tag : `${box.container} holding the ${box.tag}`}, ${Math.round(box.width)}x${Math.round(height)} CSS px${cut}`,
+      });
+    }
+    return out;
   }
 
   /** A picture by URL as a file to save: sanitised SVG or a known raster; null (with a warning) otherwise. */
@@ -431,11 +511,14 @@ export class BrandService {
    * write under assets/fonts/ (a font embedded as a data: URL is credited to the page, `pageUrl`).
    */
   async #fonts(found: PageFindings, declared: DeclaredFace[], fetchFile: (url: string) => ReturnType<typeof fetchThrough>, pageUrl: string): Promise<{ found: BrandCapture["fonts"]; files: FontFile[] }> {
-    const byFamily = new Map<string, { family: string; uses: number; weights: Map<number, number> }>();
+    const byFamily = new Map<string, { family: string; uses: number; weights: Map<number, number>; fallback: FontCategory | null }>();
     for (const stack of found.fonts) {
       const family = firstFamily(stack.stack);
       if (!family) continue;
-      const entry = byFamily.get(family.toLowerCase()) ?? { family, uses: 0, weights: new Map<number, number>() };
+      // The stack's later families say what kind of face it is: `"Acme", Georgia, serif`.
+      const fallback = stack.stack.split(",").slice(1).map((one) => fontClassFromName(firstFamily(one)).category).find((category) => category !== null) ?? null;
+      const entry = byFamily.get(family.toLowerCase()) ?? { family, uses: 0, weights: new Map<number, number>(), fallback };
+      entry.fallback ??= fallback;
       entry.uses += stack.uses;
       for (const [raw, count] of Object.entries(stack.weights)) {
         // Computed weights of a variable face may be fractional (`350.5`); brand.json keeps integers 1-1000.
@@ -450,9 +533,11 @@ export class BrandService {
     for (const entry of [...byFamily.values()].sort((a, b) => b.uses - a.uses).slice(0, 8)) {
       const weights = [...entry.weights].sort((a, b) => b[1] - a[1]).map(([weight]) => weight);
       const generic = isGenericFamily(entry.family);
-      const icon = isIconFamily(entry.family);
+      let icon = isIconFamily(entry.family);
       const faces: BrandCapture["fonts"][number]["faces"] = [];
+      let traits: { category: FontCategory | null; width: FontWidth | null } = { category: null, width: null };
       if (!generic && !icon) {
+        const familyFiles = files.length;
         const chosen = new Set<DeclaredFace>();
         for (const weight of weights.slice(0, 3)) {
           const face = faceFor(declared, entry.family, weight);
@@ -463,6 +548,10 @@ export class BrandService {
           const base = { weight: face.weight, style: face.style, unicodeRange: face.unicodeRange, url: source };
           if (!source) {
             faces.push({ ...base, file: null, licence: null, note: "not copied: only local() sources" });
+            continue;
+          }
+          if (icon) {
+            faces.push({ ...base, file: null, licence: null, note: "not copied: another face of this family is an icon font" });
             continue;
           }
           if (fetched >= this.#limits.fontFaces) {
@@ -487,14 +576,21 @@ export class BrandService {
             continue;
           }
           const ext = fontExtension(bytes);
-          let names: ReturnType<typeof readFontNames> | null;
+          let names: ReturnType<typeof readFontFacts> | null;
           try {
-            names = ext ? readFontNames(bytes) : null;
+            names = ext ? readFontFacts(bytes) : null;
           } catch {
             names = null;
           }
           if (!ext || !names) {
             faces.push({ ...base, file: null, licence: null, note: "not copied: not a font file Frameshell can read" });
+            continue;
+          }
+          if (traits.category === null && traits.width === null) traits = { category: names.category, width: names.width };
+          if (isIconCoverage(names.coverage)) {
+            // Open-licensed icon fonts exist (Font Awesome Free is OFL): the cmap decides before the licence.
+            icon = true;
+            faces.push({ ...base, file: null, licence: null, note: `not copied: an icon font (${names.coverage!.privateUse} of the ${names.coverage!.mapped} characters it maps are in the Private Use Area)` });
             continue;
           }
           if (!names.licence) {
@@ -514,9 +610,16 @@ export class BrandService {
           faces.push(saved);
           files.push({ path, bytes, sourceUrl, licence: names.licence, maker: names.maker, family: entry.family, face: saved });
         }
+        if (icon) {
+          // A later face showed the family is an icon font: no face of it stays copied.
+          files.length = familyFiles;
+          for (const [i, face] of faces.entries()) if (face.file !== null) faces[i] = { ...face, file: null, licence: null, note: "not copied: another face of this family is an icon font" };
+        }
         if (chosen.size === 0) faces.push({ weight: String(weights[0] ?? 400), style: "normal", unicodeRange: null, url: null, file: null, licence: null, note: "not copied: no @font-face found for it (a system font, or declared in a stylesheet the capture could not read)" });
       }
-      out.push({ family: entry.family, uses: entry.uses, weights, generic, icon, faces });
+      const copied = faces.some((face) => face.file !== null);
+      const substitute = generic || icon || copied ? null : substituteFont(entry.family, { category: traits.category ?? entry.fallback, width: traits.width });
+      out.push({ family: entry.family, uses: entry.uses, weights, generic, icon, faces, substitute });
     }
     return { found: out, files };
   }
@@ -622,9 +725,45 @@ async function freeFontPath(root: string, wanted: string, bytes: Uint8Array, pla
   }
 }
 
-async function screenshot(chrome: Chrome, session: string, clip: { width: number; height: number; scale: number } | null): Promise<Buffer> {
+/** A section crop before it has a path; `shot` null when the text was not found. */
+interface SectionShot {
+  text: string;
+  shot: { name: string; bytes: Buffer } | null;
+  box: { x: number; y: number; width: number; height: number } | null;
+  note: string;
+}
+
+/**
+ * Top and height (document CSS px) of the crop of `section`, at most `max` tall: its top when the element holding
+ * the text fits there, else starting at that element, moved up when the window would pass the section's bottom.
+ */
+export function sectionWindow(section: Pick<PageSection, "y" | "height" | "hitY" | "hitHeight">, max: number): { y: number; height: number } {
+  if (section.height <= max) return { y: section.y, height: section.height };
+  if (section.hitY + Math.min(section.hitHeight, max) <= section.y + max) return { y: section.y, height: max };
+  return { y: Math.max(section.y, Math.min(section.hitY, section.y + section.height - max)), height: max };
+}
+
+/** A file name part from section text: `Pricing & Plans` gives `pricing-plans`. */
+function slug(text: string): string {
+  const out = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  return out || "text";
+}
+
+function tenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/** The viewport, or `clip` (document CSS px; `scale` multiplies the device pixel ratio) beyond it. */
+async function screenshot(chrome: Chrome, session: string, clip: { x?: number; y?: number; width: number; height: number; scale: number } | null): Promise<Buffer> {
   const params = clip
-    ? { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width: clip.width, height: clip.height, scale: clip.scale } }
+    ? { format: "png", captureBeyondViewport: true, clip: { x: clip.x ?? 0, y: clip.y ?? 0, width: clip.width, height: clip.height, scale: clip.scale } }
     : { format: "png" };
   const shot = (await chrome.send("Page.captureScreenshot", params, session)) as { data: string };
   return Buffer.from(shot.data, "base64");

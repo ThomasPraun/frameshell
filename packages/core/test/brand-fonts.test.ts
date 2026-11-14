@@ -1,9 +1,10 @@
 import { brotliCompressSync, constants, deflateSync } from "node:zlib";
+import { substituteFont } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { bestSource, coversLatinA, faceFor, fontExtension, fontLicence, isIconFamily, parseFontFaces, readFontNames } from "../src/brand/fonts.js";
+import { bestSource, coversLatinA, faceFor, fontExtension, fontLicence, isIconCoverage, isIconFamily, parseFontFaces, readFontFacts } from "../src/brand/fonts.js";
 import { pickAccent, rankColors, suggestStyle } from "../src/brand/findings.js";
 import { svgProblems } from "../src/brand/svg.js";
-import { nameTable, sfnt, woff, woff2 } from "./brand-fixture.js";
+import { cmap12, cmap4, nameTable, os2, sfnt, woff, woff2, woff2Tables } from "./brand-fixture.js";
 
 // Seam under test: the pure judgements of brand capture (ADR 0044): font licence from the file's own name table
 // (TrueType, WOFF, WOFF2), which declared face serves a weight, the accent rule, the style suggestions, the SVG check.
@@ -13,7 +14,7 @@ const OFL = nameTable({ 1: "Acme Sans", 8: "Acme Type Co", 13: "This Font Softwa
 describe("font licence from the name table", () => {
   it("reads TrueType, WOFF and WOFF2 alike", () => {
     for (const file of [sfnt({ name: OFL }), woff({ head: Buffer.alloc(54, 1), name: OFL }), woff2(OFL)]) {
-      expect(readFontNames(file)).toMatchObject({ family: "Acme Sans", maker: "Acme Type Co", licence: "OFL-1.1" });
+      expect(readFontFacts(file)).toMatchObject({ family: "Acme Sans", maker: "Acme Type Co", licence: "OFL-1.1" });
     }
     expect(fontExtension(woff2(OFL))).toBe("woff2");
     expect(fontExtension(Buffer.from("<!doctype html>"))).toBeNull();
@@ -24,21 +25,68 @@ describe("font licence from the name table", () => {
     expect(fontLicence(new Map([[14, "https://www.apache.org/licenses/LICENSE-2.0"]]))).toBe("Apache-2.0");
     expect(fontLicence(new Map([[13, "Ubuntu Font Licence 1.0"]]))).toBe("UFL-1.0");
     expect(fontLicence(new Map([[13, "This font is licensed for use on example.com only. All rights reserved."]]))).toBeNull();
-    expect(readFontNames(sfnt({ name: nameTable({ 1: "Closed Serif" }) })).licence).toBeNull();
+    expect(readFontFacts(sfnt({ name: nameTable({ 1: "Closed Serif" }) })).licence).toBeNull();
   });
 
   it("refuses a compression bomb instead of decoding it", () => {
     const zeros = Buffer.alloc(64 * 1024 * 1024);
     const brotliBomb = brotliCompressSync(zeros, { params: { [constants.BROTLI_PARAM_QUALITY]: 1 } });
-    expect(() => readFontNames(woff2(OFL, undefined, { stream: brotliBomb }))).toThrow(/buffer|larger/i);
-    expect(() => readFontNames(woff2(OFL, undefined, { transformedLength: 100 * 1024 * 1024 }))).toThrow(/larger than Frameshell reads/);
+    expect(() => readFontFacts(woff2(OFL, undefined, { stream: brotliBomb }))).toThrow(/buffer|larger/i);
+    expect(() => readFontFacts(woff2(OFL, undefined, { transformedLength: 100 * 1024 * 1024 }))).toThrow(/larger than Frameshell reads/);
     const zlibBomb = deflateSync(zeros);
     // Declared larger than the bomb's compressed bytes, so the reader inflates it.
-    expect(() => readFontNames(woff({ name: Buffer.alloc(512 * 1024) }, { name: zlibBomb }))).toThrow(/buffer|larger/i);
+    expect(() => readFontFacts(woff({ name: Buffer.alloc(512 * 1024) }, { name: zlibBomb }))).toThrow(/buffer|larger/i);
   });
 
   it("refuses a file that is no font", () => {
-    expect(() => readFontNames(Buffer.from("not a font at all"))).toThrow(/not a TrueType/);
+    expect(() => readFontFacts(Buffer.from("not a font at all"))).toThrow(/not a TrueType/);
+  });
+});
+
+describe("icon fonts by cmap, class by OS/2", () => {
+  const latin = cmap4([[0x20, 0x7e]]);
+  const icons = cmap4([
+    [0x41, 0x5a],
+    [0xe000, 0xe0ff],
+  ]);
+
+  it("calls a face whose cmap is mostly Private Use Area an icon font, in every container", () => {
+    for (const file of [sfnt({ name: OFL, cmap: icons }), woff({ name: OFL, cmap: icons }), woff2Tables({ cmap: icons, name: OFL })]) {
+      const facts = readFontFacts(file);
+      expect(facts.coverage).toEqual({ mapped: 26 + 256, privateUse: 256 });
+      expect(isIconCoverage(facts.coverage)).toBe(true);
+      expect(facts.licence).toBe("OFL-1.1");
+    }
+    const text = readFontFacts(sfnt({ name: OFL, cmap: latin }));
+    expect(text.coverage).toEqual({ mapped: 95, privateUse: 0 });
+    expect(isIconCoverage(text.coverage)).toBe(false);
+    // A text face with a few private glyphs (a logo at U+F8FF) stays a text face.
+    expect(isIconCoverage(readFontFacts(sfnt({ name: OFL, cmap: cmap4([[0x20, 0x7e], [0xf8f0, 0xf8ff]]) })).coverage)).toBe(false);
+  });
+
+  it("reads format 12 groups, including the supplementary Private Use Areas", () => {
+    const facts = readFontFacts(sfnt({ name: OFL, cmap: cmap12([[0x20, 0x7e], [0xf0000, 0xf00ff]]) }));
+    expect(facts.coverage).toEqual({ mapped: 95 + 256, privateUse: 256 });
+    expect(isIconCoverage(facts.coverage)).toBe(true);
+  });
+
+  it("stops counting a hostile cmap instead of running long", () => {
+    const hostile = cmap4(Array.from({ length: 2000 }, () => [0x0, 0xfffe] as [number, number]));
+    const started = Date.now();
+    expect(readFontFacts(sfnt({ name: OFL, cmap: hostile })).coverage!.mapped).toBeLessThanOrEqual(0x20000);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("keeps the names when the cmap is broken or missing", () => {
+    const facts = readFontFacts(sfnt({ name: OFL, cmap: Buffer.from([0, 0, 0, 1, 0, 3]) }));
+    expect(facts).toMatchObject({ family: "Acme Sans", coverage: null, category: null, width: null });
+  });
+
+  it("reads width and design class from OS/2", () => {
+    expect(readFontFacts(sfnt({ name: OFL, "OS/2": os2({ widthClass: 3, familyClass: 8 }) }))).toMatchObject({ category: "sans", width: "condensed" });
+    expect(readFontFacts(sfnt({ name: OFL, "OS/2": os2({ widthClass: 5, familyClass: 2 }) }))).toMatchObject({ category: "serif", width: "normal" });
+    expect(readFontFacts(woff2Tables({ "OS/2": os2({ widthClass: 7, familyClass: 5 }), name: OFL }))).toMatchObject({ category: "slab", width: "expanded" });
+    expect(readFontFacts(sfnt({ name: OFL, "OS/2": os2({ widthClass: 5, familyClass: 8, panose: [2, 11, 5, 9] }) }))).toMatchObject({ category: "mono" });
   });
 });
 
@@ -102,9 +150,9 @@ describe("colours and the accent", () => {
         headings: [{ tag: "h1", text: "Fly", family: "Closed Serif", size: 48, weight: 700, tracking: 0, color: "#ff5a1f", background: null }],
         files: [{ path: "assets/brand/acme-test/logo-1.svg", role: "logo", kind: "svg", origin: "captured", sourceUrl: "https://www.acme.test/en", width: 100, height: 40 }],
         fonts: [
-          { family: "Acme Sans", uses: 30, weights: [400], generic: false, icon: false, faces: [{ weight: "400", style: "normal", unicodeRange: null, url: "https://www.acme.test/a.ttf", file: "assets/fonts/AcmeSans-400.ttf", licence: "OFL-1.1", note: "copied" }] },
-          { family: "Closed Serif", uses: 3, weights: [700], generic: false, icon: false, faces: [] },
-          { family: "sans-serif", uses: 2, weights: [400], generic: true, icon: false, faces: [] },
+          { family: "Acme Sans", uses: 30, weights: [400], generic: false, icon: false, faces: [{ weight: "400", style: "normal", unicodeRange: null, url: "https://www.acme.test/a.ttf", file: "assets/fonts/AcmeSans-400.ttf", licence: "OFL-1.1", note: "copied" }], substitute: null },
+          { family: "Closed Serif", uses: 3, weights: [700], generic: false, icon: false, faces: [], substitute: substituteFont("Closed Serif", { category: "serif" }) },
+          { family: "sans-serif", uses: 2, weights: [400], generic: true, icon: false, faces: [], substitute: null },
         ],
       },
       null,
@@ -120,6 +168,9 @@ describe("colours and the accent", () => {
       "brand.url": "acme.test",
       "brand.mustShow": ["logo"],
     });
+    expect(suggestions.find((one) => one.path === "fonts.display")?.why).toBe(
+      "the headings' family; not copied: closest open font Source Serif 4 (OFL-1.1, a serif face) from https://github.com/google/fonts/tree/main/ofl/sourceserif4",
+    );
   });
 
   it("suggests the file of the face that draws the suggested weight", () => {
@@ -132,7 +183,7 @@ describe("colours and the accent", () => {
         title: null,
         files: [],
         headings: [{ tag: "h1", text: "Fly", family: "Acme", size: 48, weight: 700, tracking: 0, color: null, background: null }],
-        fonts: [{ family: "Acme", uses: 9, weights: [400, 700], generic: false, icon: false, faces: [face("400"), face("700")] }],
+        fonts: [{ family: "Acme", uses: 9, weights: [400, 700], generic: false, icon: false, faces: [face("400"), face("700")], substitute: null }],
       },
       null,
       null,
