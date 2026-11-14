@@ -95,7 +95,7 @@ mutations print the new revision):
            [--grade-exposure stops] [--grade-temperature -1..1] [--grade-tint -1..1] [--grade-contrast x]
            [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
            [--motion-blur] [--motion-blur-shutter deg] [--motion-blur-samples n] [--motion-blur-blend linear|srgb]
-           [--clear-motion-blur]
+           [--clear-motion-blur] [--vignette 0-1] [--vignette-radius 0-1.5] [--vignette-softness 0-1] [--clear-vignette]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
            [--hidden | --shown] [--reset]]
                                --format <id> (a format other than the primary, see format list) sets the clip in
@@ -122,6 +122,11 @@ mutations print the new revision):
                                --motion-blur-shutter degrees (default 180, centred on the frame), averaged in linear light
                                (--motion-blur-blend srgb for the After Effects look). The clip re-renders, about samples
                                times as long as sharp; --clear-motion-blur turns it off
+                               --vignette darkens a media or generated clip's own picture towards its edges (ADR 0043):
+                               strength 0 none to 1 black (default 0.35), full at --vignette-radius half-diagonals from
+                               the centre (default 1 = the corners), falling off over --vignette-softness (default 0.6,
+                               0 a hard edge). Merged into its vignette; after the grade, before transitions. Export and
+                               the preview draw the same falloff; --clear-vignette removes it
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -407,6 +412,10 @@ export const TIMELINE_OPTIONS = {
   "motion-blur-samples": { type: "string" },
   "motion-blur-blend": { type: "string" },
   "clear-motion-blur": { type: "boolean" },
+  vignette: { type: "string" },
+  "vignette-radius": { type: "string" },
+  "vignette-softness": { type: "string" },
+  "clear-vignette": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -565,6 +574,10 @@ const ALLOWED: Record<string, string[]> = {
     "motion-blur-samples",
     "motion-blur-blend",
     "clear-motion-blur",
+    "vignette",
+    "vignette-radius",
+    "vignette-softness",
+    "clear-vignette",
     "script-ref",
     "clear-script-ref",
     "format",
@@ -1036,6 +1049,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
           : values["motion-blur"] === true || blurFlags.length > 0
             ? { shutter: num("motion-blur-shutter"), samples: num("motion-blur-samples"), blend }
             : undefined;
+      const vignetteFlags = (["vignette", "vignette-radius", "vignette-softness"] as const).filter((flag) => str(flag) !== undefined);
+      if (values["clear-vignette"] === true && vignetteFlags.length > 0) throw new UsageError("Pass --clear-vignette alone, without --vignette or --vignette-*.");
+      const vignette =
+        values["clear-vignette"] === true
+          ? null
+          : vignetteFlags.length > 0
+            ? { strength: num("vignette"), radius: num("vignette-radius"), softness: num("vignette-softness") }
+            : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -1048,6 +1069,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         backdrop,
         grade,
         motionBlur,
+        vignette,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -1322,6 +1344,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   if (params["backdrop"]) params["backdrop"] = clean(params["backdrop"] as Record<string, unknown>);
   if (params["grade"]) params["grade"] = clean(params["grade"] as Record<string, unknown>);
   if (params["motionBlur"]) params["motionBlur"] = clean(params["motionBlur"] as Record<string, unknown>);
+  if (params["vignette"]) params["vignette"] = clean(params["vignette"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
   const glassFromStyle = method === "clip.set" && values["glass"] === true;
   return {

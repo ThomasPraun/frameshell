@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 135;
+export const PROTOCOL_VERSION = 138;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -412,6 +412,31 @@ const MatteStateSchema = z.object({
   error: z.string().nullable().describe("Why the matte could not be made; null otherwise."),
 });
 
+/** The final render of a generated clip that has two (ADR 0041 decision 11): its own cache entry and state. */
+const ClipFinalRenderSchema = z.object({
+  state: z
+    .enum(["ready", "waiting", "queued", "rendering", "failed"])
+    .describe(
+      "`ready`: `file` holds it; the preview plays it instead of the draft. `waiting`: it is queued once the draft render is " +
+        "ready (a draft that failed must be fixed first). `queued` / `rendering`: a `clip` job is on it (`job`, `progress`), " +
+        "in the background unless an export or `frame` waits for it. `failed`: see `error`; final and untiered exports retry " +
+        "it, except when the plugin refused it (motion blur on HDR content or shader transitions), where they use the draft " +
+        "render with a warning.",
+    ),
+  key: z.string().describe("Cache key: the draft's inputs plus the clip's `motionBlur` with its defaults filled in."),
+  file: z.string().nullable().describe("Project-relative cached render, `.frameshell/cache/clips/<key>.webm` or `.mp4`; null until ready."),
+  hasAlpha: z.boolean().nullable().describe("True when `file` carries alpha; null until ready."),
+  width: z.int().nullable().describe("Rendered width in pixels; null until ready."),
+  height: z.int().nullable().describe("Rendered height in pixels; null until ready."),
+  duration: z.number().nullable().describe("Rendered seconds; null until ready or unknown."),
+  job: z.string().nullable().describe("Id of the `clip` job rendering it now; null otherwise."),
+  progress: z.number().min(0).max(1).describe("0..1 of the running render; 1 when ready, 0 otherwise."),
+  error: z.string().nullable().describe("Why the render failed; null otherwise."),
+  refused: z
+    .boolean()
+    .describe("True when `failed` because the plugin refused the motion blur: exports and `frame` then use the draft render, never waiting for this one."),
+});
+
 /** Render cache state of one generated clip (SPEC §6.5). */
 const ClipRenderSchema = z.object({
   clip: z.string().describe("Clip id, e.g. `c_0100`; inside a nested timeline `<nested clip>/<clip>`, e.g. `c_0200/c_0100`."),
@@ -447,6 +472,12 @@ const ClipRenderSchema = z.object({
   job: z.string().nullable().describe("Id of the `clip` job rendering it now (`job.list`, `job.progress`); null otherwise."),
   progress: z.number().min(0).max(1).describe("0..1 of the running render; 1 when ready, 0 otherwise."),
   error: z.string().nullable().describe("Why the render failed or is unavailable; null otherwise."),
+  final: ClipFinalRenderSchema.optional().describe(
+    "Present when the clip keeps two renders (ADR 0041): one with `motionBlur`, on a plugin that applies it. The fields above " +
+      "are then the draft render, sharp and rendered first (live preview, `render` with `quality: \"draft\"`), and `final` " +
+      "the blurred one, queued after it (about `samples` times as long): the preview swaps it in once ready, and `render` " +
+      "with `quality: \"final\"` or no quality, and `frame`, wait for it. Absent: the clip has one render.",
+  ),
 });
 
 const ProbeSchema = z.object({
@@ -1467,6 +1498,7 @@ export const methods = {
       "its middle frame and its dominant colours), the **cutting** (shot count, cuts per minute, average, median, shortest and longest shot), " +
       "the **palette** of the whole film, the **look** (brightness 0 to 1, contrast, saturation, warmth from -1 blue to 1 red, and an 8 x 6 grid of mean colours for the film in the result and for every shot in `analysis.json`), " +
       "the **rhythm** (`shotLengthCv`: spread of the shot lengths over their mean, 0 a metronome; `stillShare`: share of frames in which the picture does not change; `longestStill`; big changes of the picture, their count and per minute; the `largestGap` between them; `bursts`: 3 or more big changes within 1.5 s), " +
+      "the **cuts** (every big change of the picture told apart from the frame before and after it: `cut` a new scene, `jump` the same framing with time skipped (a jump cut), `punch-in` / `punch-out` the same shot scaled up or down with its `scale`, `change` no cut (a flash, a caption); `opensShot: false` marks the jump cuts and punches the scene score misses; `counts` and `jumpsPerMinute`), " +
       "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
       "the **curve** (the change of the picture over time, one value per 0.1 s or more, and its `moves`: steady stretches with their start, duration, peak and the closest ease: linear, in, out or inOut), " +
       "the **ink** of each shot and of the film (share of the picture covered by graphics or text, its peak, when and the box of grid cells), " +
@@ -1477,8 +1509,8 @@ export const methods = {
       "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
-      "A hard cut is found; a dissolve, a whip pan or a jump cut inside one continuous take is not (lower `threshold` to catch softer ones; " +
-      "a read of the text itself is not made; events, ink and ease are hints, so look at the frames they name). Label what you tell the person as `labels` does: " +
+      "The scene score finds a hard cut only: a dissolve or a whip pan is not found (lower `threshold` to catch softer ones), and jump cuts and punch-ins are told apart in `cuts`, not in `shots`. " +
+      "A read of the text itself is not made; cuts, events, ink and ease are hints, so look at the frames they name). Label what you tell the person as `labels` does: " +
       "MEASURED, ESTIMATED (hints, and what you read off the sheets by eye: say which frames to check) or DECISION (our creative choice). To compare our film with it, use `analyze.diff`. " +
       "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 35 seconds. The MCP tool returns the " +
       "sheets as images. Example: `{ file: \"references/reel.mp4\" }`. Fails with AssetNotFound (`file` missing), " +
@@ -3757,8 +3789,11 @@ export const methods = {
       "nothing is below: stored with a warning, not drawn. " +
       "`motionBlur` (ADR 0041, generated clips) renders each frame as the average of `samples` (default 8) pictures across a shutter of " +
       "`shutter` degrees (default 180, centred on the frame), averaged in `blend` space (default `linear`): fast moves smear like a camera's. " +
-      "`{}` turns it on with the defaults, merged field by field, `null` clears. The clip re-renders and the render costs about `samples` " +
-      "times a sharp one; preview and export wait for it. Use it on fast motion graphics, not on text that should read sharp while it " +
+      "`{}` turns it on with the defaults, merged field by field, `null` clears. The clip keeps two renders: the sharp one first (live " +
+      "preview, `render` with `quality: \"draft\"`), then the blurred one in the background, about `samples` times as long " +
+      "(`clip.renders` `final`); the preview swaps it in when ready, and `render` with `quality: \"final\"` or none, and `frame`, " +
+      "wait for it. When the plugin refuses to blur the composition (HDR content, shader transitions) they use the sharp render, " +
+      "with a warning on the render job. Use it on fast motion graphics, not on text that should read sharp while it " +
       "moves. A composition that cuts between scenes inside itself declares the cut with the motion runtime's `cuts()`, else the frame " +
       "at the cut blends both scenes. " +
       "`format` (ADR 0027, a format of `format.list` other than the primary) sets the clip in that format only, stored in its " +
@@ -5232,6 +5267,8 @@ export type ClipVerifyParams = MethodParams<"clip.verify">;
 export type ClipVerifyResult = MethodResult<"clip.verify">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
+/** The final render of a generated clip that keeps two, as `clip.renders` reports it (ADR 0041). */
+export type ClipFinalRenderInfo = z.output<typeof ClipFinalRenderSchema>;
 /** One entry of `audio.bakes`. */
 export type AudioBakeInfo = z.output<typeof AudioBakeSchema>;
 /** Result of `audio.bakes`. */

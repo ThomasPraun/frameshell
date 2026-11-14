@@ -90,7 +90,7 @@ export type FromEngine =
    */
   | { type: "alpha"; id: number; frame: number; layers: LayerAlpha[] }
   | { type: "error"; message: string }
-  /** Sent once per engine: WebGL2 cannot run the colour grade pass (`reason`), so graded clips show ungraded (ADR 0031). */
+  /** Sent once per engine: WebGL2 cannot run the grade and vignette pass (`reason`), so those clips show without them (ADR 0031, 0043). */
   | { type: "gradeOff"; reason: string };
 
 /** Engine worker to the program AudioWorklet. */

@@ -3,7 +3,9 @@
 // Live preview (ADR 0010): the page is `live.html` next to the card; the card's { liveRoot, liveEntry, liveFail }
 // override or break it. `still` renders the same cards but has no live preview. `token-card` takes the style's token
 // sheet (ADR 0028); a card's { requireStyle } fails the render unless the sheet it got contains that text.
-// `blur-card` applies motion blur (ADR 0041); a card's { requireBlur } fails the render unless it got exactly that blur.
+// `blur-card` applies motion blur (ADR 0041): a blurred render (one that got `motionBlur`) fails unless it is the card's
+// { requireBlur } when set, paints { blurColor } when set, waits { blurDelayMs } more, and with { refuseBlur } throws the
+// MOTION_BLUR_REFUSED error a plugin gives for a composition it cannot blur.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -40,11 +42,13 @@ export function activate(api) {
     async render(clip, ctx) {
       const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
-      if (card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
+      const blurred = ctx.motionBlur !== undefined;
+      if (blurred && card.refuseBlur) throw Object.assign(new Error(`card ${clip.source} cannot be motion-blurred`), { code: "MOTION_BLUR_REFUSED" });
+      if (blurred && card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
       if (card.requireStyle && !ctx.styleCss?.includes(card.requireStyle)) throw new Error(`card ${clip.source} got no style sheet with ${card.requireStyle}`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
-        await new Promise((resolve) => setTimeout(resolve, (card.delayMs ?? 0) / steps));
+        await new Promise((resolve) => setTimeout(resolve, ((card.delayMs ?? 0) + (blurred ? (card.blurDelayMs ?? 0) : 0)) / steps));
         if (ctx.signal.aborted) throw new Error("aborted");
         ctx.progress({ fraction: step / (steps + 1), message: "Painting" });
       }
@@ -52,12 +56,13 @@ export function activate(api) {
       const file = join(ctx.outDir, "card.webm");
       const size = `${ctx.width}x${ctx.height}`;
       const alpha = card.alpha ?? 1;
+      const color = (blurred ? card.blurColor : undefined) ?? card.color ?? "white";
       await new Promise((resolve, reject) =>
         execFile(
           ffmpeg,
           [
             ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"],
-            ...["-i", `color=c=${card.color ?? "white"}@${alpha}:s=${size}:r=${ctx.fps}:d=${card.seconds ?? 2},format=rgba`],
+            ...["-i", `color=c=${color}@${alpha}:s=${size}:r=${ctx.fps}:d=${card.seconds ?? 2},format=rgba`],
             ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-crf", "30", "-b:v", "0", "-deadline", "realtime", file],
           ],
           (error, _stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve()),

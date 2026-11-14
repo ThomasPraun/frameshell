@@ -242,10 +242,18 @@ export interface RenderContext {
   /**
    * The clip's motion blur (ADR 0041), defaults filled in; absent when the clip has none or the adapter does not set
    * {@link ClipAdapter.motionBlur}. Each output frame is the average of `samples` pictures at sub-frame times spread
-   * evenly across a window of `shutter` degrees of one frame, centred on the frame time.
+   * evenly across a window of `shutter` degrees of one frame, centred on the frame time. An adapter that cannot blur
+   * this clip throws an error whose `code` is {@link MOTION_BLUR_REFUSED}: the host then uses the clip's sharp render,
+   * with a warning, where the blurred one was asked for.
    */
   readonly motionBlur?: RenderMotionBlur;
 }
+
+/**
+ * `code` of the error a render throws when it cannot apply {@link RenderContext.motionBlur} to this clip (HyperFrames:
+ * HDR content, shader transitions). Any other error fails the blurred render as usual.
+ */
+export const MOTION_BLUR_REFUSED = "MOTION_BLUR_REFUSED";
 
 /** Motion blur settings of one render; see {@link RenderContext.motionBlur}. */
 export interface RenderMotionBlur {

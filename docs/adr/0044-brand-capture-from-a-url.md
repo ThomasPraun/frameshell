@@ -60,7 +60,7 @@ status: accepted
 
 ## Consequences
 
-- SPEC decision 49. `PROTOCOL_VERSION` 128 (capture), 135 (Figma import and `brand.show`). New job kind `brand` and step `capture`; new published schema `brand.json`.
+- SPEC decision 49. `PROTOCOL_VERSION` 128 (capture), 138 (Figma import and `brand.show`). New job kind `brand` and step `capture`; new published schema `brand.json`.
 - ADR 0028 decision 7 is amended by decision 4: Frameshell may copy a font a page serves when the file itself names an open licence.
 - Capturing someone else's site is possible. The credits gate (no licence = fail) and the skill's "is this your brand?" step are the guard; Frameshell does not judge trademark use. Robots.txt and site terms are not read.
 - Sites behind a login cannot be captured (fresh profile, no cookies); a capture of them fails honestly as `little-text` or shows the login page.

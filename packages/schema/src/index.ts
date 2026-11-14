@@ -82,6 +82,7 @@ export {
   AudioEffectSchema,
   BackdropSchema,
   GradeSchema,
+  VignetteSchema,
   MARKER_COLORS,
   MARKER_LABEL_MAX,
   MarkerIdSchema,
@@ -134,6 +135,7 @@ export {
   type AudioEffect,
   type Backdrop,
   type Grade,
+  type Vignette,
   type CaptionPhrase,
   type CaptionGap,
   type SubtitleEntry,
@@ -306,7 +308,17 @@ export {
   normalizeGrade,
   parseCube,
 } from "./grade.js";
-export { type FrameSize, type LetterboxBar, letterboxBars } from "./finish.js";
+export {
+  type FrameSize,
+  type LetterboxBar,
+  type ResolvedVignette,
+  type VignetteFields,
+  VIGNETTE_LIMITS,
+  letterboxBars,
+  vignetteGain,
+  vignetteLevel,
+  vignetteOf,
+} from "./finish.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   SHOOT_SCHEMA_URL,

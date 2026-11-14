@@ -140,6 +140,34 @@ describe("compileProgram", () => {
     expect(program.audio).toEqual([]);
   });
 
+  it("plays the sharp draft of a clip with motion blur until its blurred final is ready, then the final (ADR 0041)", () => {
+    const draft: ClipRenderInfo = {
+      clip: "g1",
+      track: "v1",
+      type: "hyperframes",
+      source: null,
+      state: "ready",
+      key: "k1",
+      file: ".frameshell/cache/clips/k1.webm",
+      hasAlpha: true,
+      width: 1920,
+      height: 1080,
+      duration: 3,
+      job: null,
+      progress: 1,
+      error: null,
+      final: { state: "rendering", key: "kb", file: null, hasAlpha: null, width: null, height: null, duration: null, job: "j_c2", progress: 0.5, error: null, refused: false },
+    };
+    const generated = { id: "g1", type: "hyperframes", source: "compositions/hyperframes/g1/index.html", start: 0, duration: 1, end: 1 };
+    const played = (info: ClipRenderInfo) =>
+      compileProgram(view([{ id: "v1", kind: "video", name: null, follows: null, clips: [generated] }]), assets(), { renders: new Map([["g1", info]]) }).layers[0]![0];
+    expect(played(draft)).toMatchObject({ render: { state: "ready", file: ".frameshell/cache/clips/k1.webm" }, size: HD });
+    const final = { ...draft.final!, state: "ready" as const, file: ".frameshell/cache/clips/kb.webm", hasAlpha: true, width: 1920, height: 1080, job: null, progress: 1 };
+    expect(played({ ...draft, final })).toMatchObject({ render: { state: "ready", file: ".frameshell/cache/clips/kb.webm" }, size: HD });
+    // A refused or failed final keeps the draft on screen.
+    expect(played({ ...draft, final: { ...final, state: "failed", file: null } })).toMatchObject({ render: { state: "ready", file: ".frameshell/cache/clips/k1.webm" } });
+  });
+
   it("plays generated clips from their cached renders on their own layer, with render state until ready (SPEC §6.5)", () => {
     const generated = (id: string, start: number, duration: number, extra: Record<string, unknown> = {}) => ({
       id,

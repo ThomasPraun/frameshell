@@ -9,7 +9,7 @@ import { shortcutLabel } from "../shortcuts.js";
 import { windowOf } from "../windows.js";
 import { agentTargets } from "./agent-targets.js";
 import { type ChatTarget, shortcutTarget } from "./chat-targets.js";
-import { referenceLines } from "./reference.js";
+import { framePending as rendersPending, referenceLines } from "./reference.js";
 
 /** Shortcut as menus show it. */
 export const ASK_SHORTCUT = shortcutLabel("Mod+L");
@@ -79,9 +79,9 @@ export function hasSelection(current: Selection): boolean {
  * latest revision. A preview region, and every point picked with the Pick
  * tool, first gets its frame captured by the daemon; when that fails the line
  * goes without it and `warning` says why. The capture waits for every
- * generated clip's render, so while one is queued, rendering or failed the
- * line says `frame pending` instead and is typed at once (ADR 0011): the
- * agent captures the frame later. Points, and a region with elements, get a
+ * generated clip's render (the blurred one with motion blur), so while one is
+ * pending ({@link rendersPending}) the line says `frame pending` instead and
+ * is typed at once (ADR 0011): the agent captures the frame later. Points, and a region with elements, get a
  * details file under `.frameshell/context/` with everything the line shortens.
  */
 export async function composeReference(): Promise<{ lines: string[]; warning: string | null }> {
@@ -92,7 +92,7 @@ export async function composeReference(): Promise<{ lines: string[]; warning: st
   if (times.length === 0) return { lines: referenceLines(current, view), warning: null };
 
   const renders = await clipRenders();
-  const framePending = renders.some((clip) => clip.state === "queued" || clip.state === "rendering" || clip.state === "failed");
+  const framePending = rendersPending(renders);
   const sources = new Map(renders.filter((clip) => clip.source).map((clip) => [clip.clip, clip.source!]));
   const frames = new Map<number, string>();
   if (!framePending) {
