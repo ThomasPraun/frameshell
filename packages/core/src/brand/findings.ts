@@ -90,11 +90,17 @@ export function suggestStyle(capture: Pick<BrandCapture, "colors" | "accent" | "
     })?.file;
     return { family: font.family, ...(file ? { file } : {}), ...(weight !== undefined ? { weight } : {}) };
   };
+  // A family with no copied file: say which open font to import instead (the person picks).
+  const instead = (font: BrandCapture["fonts"][number]) => {
+    const sub = font.substitute;
+    if (!sub) return "";
+    return sub.match === "same" ? `; not copied: import ${sub.family} (${sub.licence}) from ${sub.source}` : `; not copied: closest open font ${sub.family} (${sub.licence}, ${sub.why}) from ${sub.source}`;
+  };
   if (display) {
     const weight = capture.headings.find((heading) => heading.family === display.family)?.weight ?? display.weights[0];
-    out.push({ path: "fonts.display", value: fontValue(display, weight), why: headingFamily === display.family ? "the headings' family" : "the most used family" });
+    out.push({ path: "fonts.display", value: fontValue(display, weight), why: `${headingFamily === display.family ? "the headings' family" : "the most used family"}${instead(display)}` });
   }
-  if (ui) out.push({ path: "fonts.ui", value: fontValue(ui, ui.weights[0]), why: "the body text's family" });
+  if (ui) out.push({ path: "fonts.ui", value: fontValue(ui, ui.weights[0]), why: `the body text's family${instead(ui)}` });
   const product = (siteName ?? capture.title?.split(/\s+[|·–—-]\s+/)[0] ?? "").trim();
   if (product) out.push({ path: "brand.product", value: product, why: siteName ? "og:site_name" : "page title" });
   out.push({ path: "brand.url", value: new URL(capture.finalUrl).hostname.replace(/^www\./, ""), why: "the captured site" });

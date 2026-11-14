@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { HttpUrl } from "./credits.js";
+import { OPEN_FONT_LICENCES } from "./font-substitutes.js";
 
 /** Canonical `$schema` URL for a project's `brand.json`. */
 export const BRAND_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/brand.json`;
@@ -23,10 +24,11 @@ export const BrandFileSchema = z.strictObject({
     .regex(/^assets\/[^\\]+$/, "must be a project-relative path under `assets/`")
     .describe("Project-relative path, e.g. `assets/brand/example-com/logo-1.svg` or `assets/fonts/Inter-400.woff2`."),
   role: z
-    .enum(["logo", "icon", "og", "hero", "page", "font"])
+    .enum(["logo", "icon", "og", "hero", "page", "section", "font"])
     .describe(
       "`logo`: a logo candidate from the header or nav, or an image or SVG named like a logo. `icon`: a favicon or touch icon. " +
-        "`og`: the page's share image. `hero`: the first screen (1600x1000 CSS px at 2x). `page`: the whole page at 1x. `font`: a face whose own name table names an open licence.",
+        "`og`: the page's share image. `hero`: the first screen (1600x1000 CSS px at 2x). `page`: the whole page at 1x. " +
+        "`section`: a part of the page asked for by its text (`sections`), at 3x. `font`: a face whose own name table names an open licence.",
     ),
   kind: z.enum(["svg", "raster", "font"]).describe("`svg`: sanitised vector, sharp at any zoom. `raster`: PNG, JPEG, GIF or WebP. `font`: a font file."),
   origin: z.literal("captured").describe("Taken from the page as it is; a logo is never redrawn."),
@@ -61,6 +63,28 @@ export const BrandFontSchema = z.strictObject({
   generic: z.boolean().describe("True for a generic or system family (`sans-serif`, `system-ui`…): nothing to copy."),
   icon: z.boolean().describe("True for an icon font: never a face for text."),
   faces: z.array(BrandFontFaceSchema).describe("Declared faces chosen for the weights in use (the one covering Latin `A` when subsets are split)."),
+  substitute: z
+    .strictObject({
+      family: z.string().min(1),
+      licence: z.enum(OPEN_FONT_LICENCES),
+      source: HttpUrl.describe("Folder of the family in github.com/google/fonts, with its licence file."),
+      match: z.enum(["same", "known", "class"]).describe("`same`: the family is itself open. `known`: a curated stand-in for that family. `class`: by category and width only."),
+      why: z.string(),
+    })
+    .nullable()
+    .default(null)
+    .describe("Closest open font from Frameshell's curated table when no face of the family was copied (not for icon fonts); null otherwise. Taste data, not measured."),
+});
+
+/** A part of the captured page asked for by its text (`brand capture --sections`). */
+export const BrandSectionSchema = z.strictObject({
+  text: z.string().min(1).max(200).describe("Text asked for, as given."),
+  file: z.string().nullable().describe("Crop under `assets/brand/<id>/` (PNG at 3x); null when the text was not found."),
+  box: z
+    .strictObject({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() })
+    .nullable()
+    .describe("Crop on the page, CSS px from the top left of the document; null when not found."),
+  note: z.string().describe("Which element was cropped (`section` holding an `h2`…), or why there is no crop."),
 });
 
 /** A heading or button as the page draws it. */
@@ -93,6 +117,10 @@ export const BrandCaptureSchema = z.strictObject({
   headings: z.array(BrandTextStyleSchema),
   buttons: z.array(BrandTextStyleSchema),
   videos: z.array(z.string()).describe("Video URLs the page plays, recorded and never downloaded."),
+  sections: z
+    .array(BrandSectionSchema)
+    .default([])
+    .describe("Parts of the page asked for by text: each the smallest element at least 500 CSS px wide holding the text, shot at 3x."),
   warnings: z.array(z.string()),
 });
 

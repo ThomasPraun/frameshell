@@ -1,19 +1,23 @@
-// Fonts of a captured page (ADR 0044 decision 2): which faces the page declares, which one serves each weight in
-// use, and whether a face's own name table names an open licence. A face is copied only on that verdict.
+// Fonts of a captured page (ADR 0044 decision 4): which faces the page declares, which one serves each weight in
+// use, whether a face's own name table names an open licence, and whether its cmap makes it an icon font. A face is
+// copied only on those verdicts; otherwise the curated substitute table names an open font to use instead.
 import { brotliDecompressSync, inflateSync } from "node:zlib";
-import { readNameTable } from "@frameshell/schema";
+import { type CmapCoverage, type FontCategory, type FontWidth, type OpenFontLicence, cmapCoverage, readNameTable } from "@frameshell/schema";
 
-/** Licences a face may be copied under, as `credits.json` records them. */
-export type OpenFontLicence = "OFL-1.1" | "Apache-2.0" | "UFL-1.0";
-
-/** What a face's name table says about itself. */
-export interface FontNames {
+/** What a face's own tables say about itself. */
+export interface FontFacts {
   family: string | null;
   /** Foundry (name id 8), else designer (9). */
   maker: string | null;
   licence: OpenFontLicence | null;
   /** Licence text and URL as written (ids 13 and 14), for the note. */
   licenceText: string | null;
+  /** Design class from OS/2 (`sFamilyClass`, PANOSE); null when the file has no OS/2 table or does not say. */
+  category: FontCategory | null;
+  /** OS/2 `usWidthClass`; null without an OS/2 table. */
+  width: FontWidth | null;
+  /** What the Unicode cmap maps; null when the file has no readable one. */
+  coverage: CmapCoverage | null;
 }
 
 /** One `@font-face` rule of a stylesheet, its `src` URLs resolved. */
@@ -38,11 +42,55 @@ export function fontLicence(names: Map<number, string>): OpenFontLicence | null 
   return LICENCES.find(([, pattern]) => pattern.test(text))?.[0] ?? null;
 }
 
-/** Read the name table of a TrueType, OpenType, WOFF or WOFF2 file. Throws when it is none of them. */
-export function readFontNames(file: Uint8Array): FontNames {
-  const names = readNameTable(nameTableOf(file));
+/**
+ * Read the `name`, `OS/2` and `cmap` tables of a TrueType, OpenType, WOFF or WOFF2 file. Throws when it is none of
+ * them or has no `name` table; a missing or broken `OS/2` or `cmap` only leaves its facts null.
+ */
+export function readFontFacts(file: Uint8Array): FontFacts {
+  const tables = fontTables(file, ["name", "OS/2", "cmap"]);
+  const name = tables.get("name");
+  if (!name) throw new Error("font has no name table");
+  const names = readNameTable(name);
   const licenceText = [names.get(13), names.get(14)].filter(Boolean).join(" ") || null;
-  return { family: names.get(16) ?? names.get(1) ?? null, maker: names.get(8) ?? names.get(9) ?? null, licence: fontLicence(names), licenceText };
+  let coverage: CmapCoverage | null;
+  try {
+    const cmap = tables.get("cmap");
+    coverage = cmap ? cmapCoverage(cmap) : null;
+  } catch {
+    coverage = null;
+  }
+  return {
+    family: names.get(16) ?? names.get(1) ?? null,
+    maker: names.get(8) ?? names.get(9) ?? null,
+    licence: fontLicence(names),
+    licenceText,
+    coverage,
+    ...os2Class(tables.get("OS/2")),
+  };
+}
+
+/**
+ * True when a face's cmap makes it an icon font: at least half of what it maps sits in the Private Use Area (Font
+ * Awesome, Material Symbols: icons there, a few letters for ligatures at most). Text faces map few or none there.
+ */
+export function isIconCoverage(coverage: CmapCoverage | null): boolean {
+  return coverage !== null && coverage.privateUse > 0 && coverage.privateUse * 2 >= coverage.mapped;
+}
+
+/** Category and width from an OS/2 table: `usWidthClass` (offset 6), `sFamilyClass` (30), PANOSE (32). */
+function os2Class(os2: Uint8Array | undefined): { category: FontCategory | null; width: FontWidth | null } {
+  if (!os2 || os2.byteLength < 42) return { category: null, width: null };
+  const view = new DataView(os2.buffer, os2.byteOffset, os2.byteLength);
+  const widthClass = view.getUint16(6);
+  const width: FontWidth | null = widthClass >= 1 && widthClass <= 4 ? "condensed" : widthClass === 5 ? "normal" : widthClass >= 6 && widthClass <= 9 ? "expanded" : null;
+  // PANOSE family kind 2 (Latin text) with proportion 9 is monospaced; kind 3 is hand-written.
+  const panoseKind = view.getUint8(32);
+  if (panoseKind === 2 && view.getUint8(35) === 9) return { category: "mono", width };
+  if (panoseKind === 3) return { category: "script", width };
+  // IBM font class (high byte of sFamilyClass): 1-3 and 7 serif, 4 and 5 slab, 8 sans, 10 script.
+  const ibm = view.getUint8(30);
+  const category: FontCategory | null = [1, 2, 3, 7].includes(ibm) ? "serif" : ibm === 4 || ibm === 5 ? "slab" : ibm === 8 ? "sans" : ibm === 10 ? "script" : null;
+  return { category, width };
 }
 
 /** File extension for a font by its signature, or null when it is not a font file. */
@@ -56,39 +104,56 @@ export function fontExtension(file: Uint8Array): "ttf" | "otf" | "woff" | "woff2
   return null;
 }
 
-/** The bytes of the `name` table, unwrapped from WOFF (zlib per table) or WOFF2 (one brotli stream). */
-function nameTableOf(file: Uint8Array): Uint8Array {
+/**
+ * The bytes of the `wanted` tables a file has, unwrapped from WOFF (zlib per table) or WOFF2 (one brotli stream).
+ * Throws when the file is no font or its directory is broken.
+ */
+function fontTables(file: Uint8Array, wanted: readonly string[]): Map<string, Uint8Array> {
   const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
   const kind = fontExtension(file);
+  const out = new Map<string, Uint8Array>();
   if (kind === "ttf" || kind === "otf") {
     for (let i = 0; i < view.getUint16(4); i++) {
       const entry = 12 + i * 16;
-      if (tagAt(file, entry) === "name") return file.subarray(view.getUint32(entry + 8), view.getUint32(entry + 8) + view.getUint32(entry + 12));
+      const tag = tagAt(file, entry);
+      if (!wanted.includes(tag)) continue;
+      const offset = view.getUint32(entry + 8);
+      const length = view.getUint32(entry + 12);
+      if (offset + length > file.byteLength) throw new Error("bad table directory");
+      out.set(tag, file.subarray(offset, offset + length));
     }
-    throw new Error("font has no name table");
+    return out;
   }
   if (kind === "woff") {
     for (let i = 0; i < view.getUint16(12); i++) {
       const entry = 44 + i * 20;
-      if (tagAt(file, entry) !== "name") continue;
+      const tag = tagAt(file, entry);
+      if (!wanted.includes(tag)) continue;
       const offset = view.getUint32(entry + 4);
       const compressed = view.getUint32(entry + 8);
       const original = view.getUint32(entry + 12);
-      if (offset + compressed > file.byteLength || original > MAX_NAME_TABLE) throw new Error("bad WOFF table directory");
+      if (offset + compressed > file.byteLength || original > maxTable(tag)) throw new Error("bad WOFF table directory");
       const stored = file.subarray(offset, offset + compressed);
       // The cap stops a zlib bomb: inflating past the declared length throws instead of filling memory.
-      return compressed < original ? inflateSync(stored, { maxOutputLength: original }) : stored;
+      out.set(tag, compressed < original ? inflateSync(stored, { maxOutputLength: original }) : stored);
     }
-    throw new Error("font has no name table");
+    return out;
   }
-  if (kind === "woff2") return woff2NameTable(file, view);
+  if (kind === "woff2") return woff2Tables(file, view, wanted);
   throw new Error("not a TrueType, OpenType, WOFF or WOFF2 font");
 }
 
 /** Largest `name` table read. Real ones are a few KB; the cap bounds decoding of a page's untrusted bytes. */
 const MAX_NAME_TABLE = 1024 * 1024;
 
-/** Largest decoded WOFF2 table stream read: the name table may sit after glyf, so the whole prefix is decoded. */
+/** Largest `OS/2` or `cmap` table read: a full CJK cmap is a few hundred KB. */
+const MAX_OTHER_TABLE = 4 * 1024 * 1024;
+
+function maxTable(tag: string): number {
+  return tag === "name" ? MAX_NAME_TABLE : MAX_OTHER_TABLE;
+}
+
+/** Largest decoded WOFF2 table stream read: the tables read may sit after glyf, so the whole prefix is decoded. */
 const MAX_WOFF2_STREAM = 32 * 1024 * 1024;
 
 /** WOFF2 table tags by their known-tag index (W3C WOFF2 §4.2). */
@@ -100,11 +165,11 @@ const WOFF2_TAGS = [
 ];
 
 /**
- * The `name` table of a WOFF2 file: tables sit back to back in one brotli stream, in directory order, each
- * `transformLength` long when transformed (glyf and loca by default, hmtx on request), else `origLength`. `name`
- * is never transformed. Font collections are refused.
+ * Tables of a WOFF2 file: they sit back to back in one brotli stream, in directory order, each `transformLength`
+ * long when transformed (glyf and loca by default, hmtx on request), else `origLength`. `name`, `OS/2` and `cmap`
+ * are never transformed. Font collections are refused.
  */
-function woff2NameTable(file: Uint8Array, view: DataView): Uint8Array {
+function woff2Tables(file: Uint8Array, view: DataView, wanted: readonly string[]): Map<string, Uint8Array> {
   if (view.getUint32(4) === 0x74746366) throw new Error("WOFF2 font collections are not read");
   const tables = view.getUint16(12);
   const compressedLength = view.getUint32(20);
@@ -119,7 +184,7 @@ function woff2NameTable(file: Uint8Array, view: DataView): Uint8Array {
     throw new Error("bad WOFF2 table directory");
   };
   let offset = 0;
-  let found: { offset: number; length: number } | null = null;
+  const found = new Map<string, { offset: number; length: number }>();
   for (let i = 0; i < tables; i++) {
     const flags = view.getUint8(at++);
     const index = flags & 0x3f;
@@ -132,17 +197,17 @@ function woff2NameTable(file: Uint8Array, view: DataView): Uint8Array {
     const original = base128();
     const transformed = tag === "glyf" || tag === "loca" ? version !== 3 : version !== 0;
     const length = transformed ? base128() : original;
-    if (tag === "name") found = { offset, length };
+    if (wanted.includes(tag)) found.set(tag, { offset, length });
     offset += length;
   }
-  if (!found) throw new Error("font has no name table");
+  if (found.size === 0) return new Map();
   // `offset` is now the whole stream's decoded length. Decoding is capped there, so a brotli bomb throws instead of
   // filling memory; a directory declaring more than MAX_WOFF2_STREAM is refused before decoding.
-  if (offset > MAX_WOFF2_STREAM || found.length > MAX_NAME_TABLE) throw new Error("WOFF2 tables larger than Frameshell reads");
+  if (offset > MAX_WOFF2_STREAM || [...found].some(([tag, table]) => table.length > maxTable(tag))) throw new Error("WOFF2 tables larger than Frameshell reads");
   if (at + compressedLength > file.byteLength) throw new Error("bad WOFF2 table directory");
   const stream = brotliDecompressSync(file.subarray(at, at + compressedLength), { maxOutputLength: Math.max(offset, 1) });
   if (stream.byteLength !== offset) throw new Error("WOFF2 stream length does not match its table directory");
-  return stream.subarray(found.offset, found.offset + found.length);
+  return new Map([...found].map(([tag, table]) => [tag, stream.subarray(table.offset, table.offset + table.length)]));
 }
 
 function tagAt(file: Uint8Array, at: number): string {

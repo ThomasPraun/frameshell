@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Brand sections and substitute fonts, slice 4 of #467 (ADR 0044, epic #451; protocol 139):
+  `frameshell brand capture <url> --sections "Pricing,Teams"` (daemon/MCP `sections`, up to 12 texts) also crops the
+  part of the page around each text at 3x into `assets/brand/<id>/section-<text>.png`: the smallest element at least
+  500 CSS px wide holding the text, a heading before a nav link, never the heading line alone; `brand.json`
+  `sections` records each crop's box and element, or `not found`. A font family whose face may not be copied now names
+  the closest open font from a curated, licence-checked table in `packages/schema/src/font-substitutes.ts` (50 families
+  from google/fonts with their folder; metric-compatible stand-ins for Arial, Times New Roman, Courier New, Calibri,
+  Cambria, Georgia; then category and width from the name, OS/2 or the CSS stack) as `substitute`, also named in the
+  `style` suggestion and the CLI output. Icon fonts are now also told by their cmap (most characters in the Private Use
+  Area), before the licence check, so an OFL icon font is never copied as a text face.
 - 3D playbook, slice 4 of #473 (ADR 0042, epic #451): the `hyperframes` skill gains `3d-playbook.md`, a reference for
   3D product shots in three.js: which route to take (the `product-shot` template, a hand-written scene, Blender), the
   studio defaults (lights, environment, tone mapping, VSM shadows), the four finishes with their numbers, the glint,

@@ -84,9 +84,10 @@
                     "og",
                     "hero",
                     "page",
+                    "section",
                     "font"
                   ],
-                  "description": "`logo`: a logo candidate from the header or nav, or an image or SVG named like a logo. `icon`: a favicon or touch icon. `og`: the page's share image. `hero`: the first screen (1600x1000 CSS px at 2x). `page`: the whole page at 1x. `font`: a face whose own name table names an open licence."
+                  "description": "`logo`: a logo candidate from the header or nav, or an image or SVG named like a logo. `icon`: a favicon or touch icon. `og`: the page's share image. `hero`: the first screen (1600x1000 CSS px at 2x). `page`: the whole page at 1x. `section`: a part of the page asked for by its text (`sections`), at 3x. `font`: a face whose own name table names an open licence."
                 },
                 "kind": {
                   "type": "string",
@@ -289,6 +290,57 @@
                     "additionalProperties": false
                   },
                   "description": "Declared faces chosen for the weights in use (the one covering Latin `A` when subsets are split)."
+                },
+                "substitute": {
+                  "default": null,
+                  "description": "Closest open font from Frameshell's curated table when no face of the family was copied (not for icon fonts); null otherwise. Taste data, not measured.",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "family": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "licence": {
+                          "type": "string",
+                          "enum": [
+                            "OFL-1.1",
+                            "Apache-2.0",
+                            "UFL-1.0"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "maxLength": 2048,
+                          "description": "Folder of the family in github.com/google/fonts, with its licence file."
+                        },
+                        "match": {
+                          "type": "string",
+                          "enum": [
+                            "same",
+                            "known",
+                            "class"
+                          ],
+                          "description": "`same`: the family is itself open. `known`: a curated stand-in for that family. `class`: by category and width only."
+                        },
+                        "why": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "family",
+                        "licence",
+                        "source",
+                        "match",
+                        "why"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -449,6 +501,74 @@
               "type": "string"
             },
             "description": "Video URLs the page plays, recorded and never downloaded."
+          },
+          "sections": {
+            "default": [],
+            "description": "Parts of the page asked for by text: each the smallest element at least 500 CSS px wide holding the text, shot at 3x.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "Text asked for, as given."
+                },
+                "file": {
+                  "description": "Crop under `assets/brand/<id>/` (PNG at 3x); null when the text was not found.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "box": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "width": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "height": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "width",
+                        "height"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Crop on the page, CSS px from the top left of the document; null when not found."
+                },
+                "note": {
+                  "type": "string",
+                  "description": "Which element was cropped (`section` holding an `h2`…), or why there is no crop."
+                }
+              },
+              "required": [
+                "text",
+                "file",
+                "box",
+                "note"
+              ],
+              "additionalProperties": false
+            }
           },
           "warnings": {
             "type": "array",

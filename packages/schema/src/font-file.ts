@@ -129,6 +129,24 @@ export function readNameTable(table: Uint8Array): Map<number, string> {
 
 /** Glyph index of a code point (0, `.notdef`, when the face lacks it) from the best Unicode `cmap` subtable. */
 function unicodeCmap(view: DataView, cmap: number): (code: number) => number {
+  const { format4, format12 } = unicodeSubtables(view, cmap);
+  if (format12 !== null) {
+    const offset = format12;
+    return (code) => {
+      for (let g = 0; g < view.getUint32(offset + 12); g++) {
+        const group = offset + 16 + g * 12;
+        const start = view.getUint32(group);
+        if (code >= start && code <= view.getUint32(group + 4)) return view.getUint32(group + 8) + code - start;
+      }
+      return 0;
+    };
+  }
+  if (format4 === null) throw new Error("font has no Unicode cmap");
+  return format4Lookup(view, format4);
+}
+
+/** Offsets of the Unicode `cmap` subtables Frameshell reads: format 12 (full range) and format 4 (BMP). */
+function unicodeSubtables(view: DataView, cmap: number): { format4: number | null; format12: number | null } {
   let format4: number | null = null;
   let format12: number | null = null;
   for (let i = 0; i < view.getUint16(cmap + 2); i++) {
@@ -142,34 +160,96 @@ function unicodeCmap(view: DataView, cmap: number): (code: number) => number {
     if (format === 12) format12 = offset;
     else if (format === 4) format4 ??= offset;
   }
-  if (format12 !== null) {
-    const offset = format12;
-    return (code) => {
-      for (let g = 0; g < view.getUint32(offset + 12); g++) {
-        const group = offset + 16 + g * 12;
-        const start = view.getUint32(group);
-        if (code >= start && code <= view.getUint32(group + 4)) return view.getUint32(group + 8) + code - start;
-      }
-      return 0;
-    };
-  }
-  if (format4 === null) throw new Error("font has no Unicode cmap");
-  const offset = format4;
+  return { format4, format12 };
+}
+
+/** Glyph lookup of the format 4 subtable at `offset`. */
+function format4Lookup(view: DataView, offset: number): (code: number) => number {
   const segments = view.getUint16(offset + 6) / 2;
   const ends = offset + 14;
   const starts = ends + segments * 2 + 2;
-  const deltas = starts + segments * 2;
-  const ranges = deltas + segments * 2;
   return (code) => {
     if (code > 0xffff) return 0;
     for (let s = 0; s < segments; s++) {
       if (code > view.getUint16(ends + s * 2)) continue;
       if (code < view.getUint16(starts + s * 2)) return 0;
-      const range = view.getUint16(ranges + s * 2);
-      if (range === 0) return (code + view.getInt16(deltas + s * 2)) & 0xffff;
-      const glyph = view.getUint16(ranges + s * 2 + range + (code - view.getUint16(starts + s * 2)) * 2);
-      return glyph === 0 ? 0 : (glyph + view.getInt16(deltas + s * 2)) & 0xffff;
+      return format4Glyph(view, offset, s, code);
     }
     return 0;
   };
+}
+
+/** Glyph of `code` in segment `s` of the format 4 subtable at `offset` (the segment must hold `code`). */
+function format4Glyph(view: DataView, offset: number, s: number, code: number): number {
+  const segments = view.getUint16(offset + 6) / 2;
+  const starts = offset + 14 + segments * 2 + 2;
+  const deltas = starts + segments * 2;
+  const ranges = deltas + segments * 2;
+  const range = view.getUint16(ranges + s * 2);
+  if (range === 0) return (code + view.getInt16(deltas + s * 2)) & 0xffff;
+  const glyph = view.getUint16(ranges + s * 2 + range + (code - view.getUint16(starts + s * 2)) * 2);
+  return glyph === 0 ? 0 : (glyph + view.getInt16(deltas + s * 2)) & 0xffff;
+}
+
+/** Code points a font maps to a glyph, all together and in the Private Use Areas. */
+export interface CmapCoverage {
+  /** Code points with a glyph other than `.notdef`. */
+  mapped: number;
+  /** Of those, the ones in U+E000-F8FF, U+F0000-FFFFD or U+100000-10FFFD, where icon fonts put their icons. */
+  privateUse: number;
+}
+
+/** Most code points (format 4) or groups (format 12) read from one `cmap`, so a hostile table cannot run long. */
+const MAX_CMAP_STEPS = 0x20000;
+
+const PRIVATE_USE: readonly (readonly [number, number])[] = [
+  [0xe000, 0xf8ff],
+  [0xf0000, 0xffffd],
+  [0x100000, 0x10fffd],
+];
+
+function privateUseIn(low: number, high: number): number {
+  let count = 0;
+  for (const [start, end] of PRIVATE_USE) count += Math.max(0, Math.min(high, end) - Math.max(low, start) + 1);
+  return count;
+}
+
+/**
+ * What the best Unicode subtable of a `cmap` table maps. `table` is the table's bytes alone, as a WOFF or WOFF2
+ * unwrapper hands it over. Overlapping ranges count twice. Throws when it has no format 4 or 12 Unicode subtable.
+ */
+export function cmapCoverage(table: Uint8Array): CmapCoverage {
+  const view = new DataView(table.buffer, table.byteOffset, table.byteLength);
+  const { format4, format12 } = unicodeSubtables(view, 0);
+  let mapped = 0;
+  let privateUse = 0;
+  if (format12 !== null) {
+    const groups = Math.min(view.getUint32(format12 + 12), MAX_CMAP_STEPS);
+    for (let g = 0; g < groups; g++) {
+      const group = format12 + 16 + g * 12;
+      const start = Math.min(view.getUint32(group), 0x10ffff);
+      const end = Math.min(view.getUint32(group + 4), 0x10ffff);
+      if (end < start) continue;
+      // A group starting at glyph 0 maps its first code point to `.notdef`.
+      const first = view.getUint32(group + 8) === 0 ? start + 1 : start;
+      mapped += end - first + 1;
+      privateUse += privateUseIn(first, end);
+    }
+    return { mapped, privateUse };
+  }
+  if (format4 === null) throw new Error("font has no Unicode cmap");
+  const segments = view.getUint16(format4 + 6) / 2;
+  const ends = format4 + 14;
+  const starts = ends + segments * 2 + 2;
+  let steps = 0;
+  for (let s = 0; s < segments; s++) {
+    const end = view.getUint16(ends + s * 2);
+    for (let code = view.getUint16(starts + s * 2); code <= end && code < 0xffff; code++) {
+      if (++steps > MAX_CMAP_STEPS) return { mapped, privateUse };
+      if (format4Glyph(view, format4, s, code) === 0) continue;
+      mapped++;
+      if (code >= 0xe000 && code <= 0xf8ff) privateUse++;
+    }
+  }
+  return { mapped, privateUse };
 }

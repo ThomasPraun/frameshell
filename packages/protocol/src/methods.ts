@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 138;
+export const PROTOCOL_VERSION = 139;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1733,7 +1733,11 @@ export const methods = {
       "sanitised, or the image file), favicons and touch icons, the share image (og:image), the first screen (`hero.png`) and the whole page " +
       "at 1x (`page.png`, up to 16384 px tall), all under `assets/brand/<id>/` (`<id>` from the host: `example-com`, `-2` when taken); and " +
       "font faces into `assets/fonts/` only when the font file's own name table names OFL-1.1, Apache-2.0 or UFL (otherwise the family, " +
-      "weights and why are listed). It measures colours by use and role with an accent (the colour in the most roles), fonts by use, " +
+      "weights and why are listed, with the closest open font from Frameshell's curated table as `substitute`; an icon font, by name " +
+      "or because most of its cmap is in the Private Use Area, is never a face). With `sections` (texts on the page, e.g. " +
+      "`[\"Pricing\", \"Teams\"]`), each text's section, the smallest element at least 500 CSS px wide holding it, is cropped at 3x " +
+      "into `section-<text>.png` (up to 2400 CSS px tall) for sharp push-ins; `capture.sections` says what was cropped or not found. " +
+      "It measures colours by use and role with an accent (the colour in the most roles), fonts by use, " +
       "`:root` variables, headings and buttons, and records video URLs without downloading them. Everything goes into `brand.json` at " +
       "the project root, and each saved file gets a `credits.json` entry with its source URL and no licence (fonts: the licence they " +
       "name), so `credits check` fails on them until the person confirms they may use them (`credits set --licence own` for their own " +
@@ -1748,6 +1752,11 @@ export const methods = {
     params: z.strictObject({
       cwd: CwdParam,
       url: z.string().min(1).max(MAX_SOURCE_URL).describe("Public page to capture, `http` or `https`, at most 2048 characters, e.g. `https://example.com/pricing`."),
+      sections: z
+        .array(z.string().trim().min(1).max(200))
+        .max(12)
+        .optional()
+        .describe("Texts on the page whose sections to crop at 3x, at most 12, e.g. `[\"Pricing\", \"Teams\"]`; matched case-insensitively."),
     }),
     result: BrandCaptureResultSchema,
   },
