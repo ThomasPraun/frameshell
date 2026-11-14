@@ -14,6 +14,8 @@ const box = sandbox("multicam");
 const configFile = join(box.projectDir, "frameshell.json");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const ASSET = "assets/split.mp4";
+/** Seconds a fitted timeline shows across its lanes at least (`span` in `renderer/src/timeline/layout.ts`). */
+const FIT_SPAN_S = 60;
 
 let app: ElectronApplication;
 let page: Page;
@@ -146,14 +148,16 @@ test("in 9:16 the handles and the inspector edit the clip there only", async () 
   await expect.poll(() => colours(0.5)).toBe("KK");
 
   // The timeline marks a clip adjusted in a format; its tooltip names the format. Over the ruler first, so the
-  // tooltip is read again from the clip as it is now. The pointer goes to the middle of the first track's row (its
-  // head sits level with it), 10 px in, so the 2 s clip is under it at any zoom and window size.
+  // tooltip is read again from the clip as it is now. The pointer goes to the clip's middle second on the first
+  // track's row (its head sits level with it): the 2 s clip is only lanes width / 30 px wide.
   const hoverClip = async () => {
-    const lanes = await laidOutBox(page.locator(".timeline-scroller"));
+    const scroller = page.locator(".timeline-scroller");
+    const lanes = await laidOutBox(scroller);
     const head = await laidOutBox(page.locator(".track-head").first());
-    await page.mouse.move(lanes.x + 10, lanes.y + 8);
+    const x = lanes.x + (await scroller.evaluate((element) => element.scrollWidth)) / FIT_SPAN_S;
+    await page.mouse.move(x, lanes.y + 8);
     await expect(page.locator(".clip-tooltip")).toHaveCount(0);
-    await page.mouse.move(lanes.x + 10, head.y + head.height / 2);
+    await page.mouse.move(x, head.y + head.height / 2);
     await expect(page.locator(".clip-tooltip")).toBeVisible();
   };
   await hoverClip();
