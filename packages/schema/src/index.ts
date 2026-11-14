@@ -615,3 +615,12 @@ export {
   type SoundRole,
   type SoundTier,
 } from "./sound.js";
+export {
+  DEFAULT_MOTION_BLUR_BLEND,
+  MOTION_BLUR_BLENDS,
+  MOTION_BLUR_LIMITS,
+  type MotionBlur,
+  MotionBlurSchema,
+  type ResolvedMotionBlur,
+  motionBlurOf,
+} from "./motion-blur.js";

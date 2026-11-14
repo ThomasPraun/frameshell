@@ -2435,6 +2435,7 @@ function isFile(path: string): boolean {
 function clipTypeInfo(adapter: ClipAdapter): ClipTypeInfo {
   return {
     elementStyles: adapter.elementStyles === true,
+    motionBlur: adapter.motionBlur === true,
     validateProps: async (props) => {
       const schema = adapter.propsSchema;
       if (!schema) return null;

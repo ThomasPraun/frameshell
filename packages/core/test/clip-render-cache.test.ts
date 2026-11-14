@@ -501,3 +501,50 @@ describe("style tokens in generated clips", () => {
     TIMEOUT,
   );
 });
+
+// Motion blur (ADR 0041): an adapter with `motionBlur` gets the clip's blur, defaults filled in, and its key counts it.
+describe("motion blur in generated clips", () => {
+  it(
+    "renders a blur-card with the resolved blur and re-keys it; a card without the capability keeps its key, with a warning",
+    async () => {
+      const dir = tempDir();
+      await conn.request("project.init", { dir });
+      const configPath = join(dir, "frameshell.json");
+      const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+      writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
+      installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
+      await conn.request("project.trust", { cwd: dir, decision: "trust" });
+      mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
+      const requireBlur = { shutter: 90, samples: 8, blend: "linear" };
+      writeFileSync(join(dir, "compositions", "cards", "blur.json"), JSON.stringify({ color: "red", seconds: 1, requireBlur }));
+      writeFileSync(join(dir, "compositions", "cards", "plain.json"), JSON.stringify({ color: "blue", seconds: 1 }));
+      const track = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
+      const add = async (type: string, name: string, start: number) =>
+        (await conn.request("clip.add", { cwd: dir, track, type, source: `compositions/cards/${name}.json`, start, duration: 1 })).changes.added[0]!;
+      const blurred = await add("blur-card", "blur", 0);
+      const sharp = await add("card", "plain", 1);
+      const states = async () => new Map((await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
+      const settled = async (id: string, key?: string | null) => {
+        for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+          const info = (await states()).get(id)!;
+          if ((info.state === "ready" || info.state === "failed") && (key === undefined || info.key !== key)) return info;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error(`clip ${id} never settled`);
+      };
+      // Without blur the card that needs one fails: the render got no motionBlur.
+      const before = await settled(blurred);
+      expect(before).toMatchObject({ state: "failed", error: expect.stringContaining("got motion blur undefined") });
+      const sharpKey = (await settled(sharp)).key;
+
+      const set = await conn.request("clip.set", { cwd: dir, clip: blurred, motionBlur: { shutter: 90 } });
+      expect(set.warnings ?? []).toEqual([]);
+      expect(await settled(blurred, before.key)).toMatchObject({ state: "ready" });
+
+      const warned = await conn.request("clip.set", { cwd: dir, clip: sharp, motionBlur: {} });
+      expect(warned.warnings).toEqual([expect.stringMatching(/card plugin does not apply motion blur yet/)]);
+      expect((await states()).get(sharp)!.key).toBe(sharpKey);
+    },
+    TIMEOUT,
+  );
+});

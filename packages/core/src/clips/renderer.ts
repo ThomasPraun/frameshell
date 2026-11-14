@@ -13,7 +13,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import type { ClipAdapter, LivePage } from "@frameshell/plugin-api";
-import { type AdapterClip, type FormatEntry, type Timeline, clipInFormat, elementStyles } from "@frameshell/schema";
+import { type AdapterClip, type FormatEntry, type ResolvedMotionBlur, type Timeline, clipInFormat, elementStyles, motionBlurOf } from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
@@ -101,8 +101,11 @@ interface Placed {
   track: string;
 }
 
-/** Key of a clip, or why it has none; `styleCss`: the token sheet the key counts, which the render gets (ADR 0028). */
-type Keyed = { key: string; registered: RegisteredClipType; styleCss?: string } | { key: null; error: string };
+/**
+ * Key of a clip, or why it has none; `styleCss`: the token sheet the key counts, which the render gets (ADR 0028);
+ * `motionBlur`: likewise the clip's resolved blur, for an adapter that applies it (ADR 0041).
+ */
+type Keyed = { key: string; registered: RegisteredClipType; styleCss?: string; motionBlur?: ResolvedMotionBlur } | { key: null; error: string };
 
 interface Pending {
   job: string;
@@ -504,8 +507,9 @@ export class ClipRenderer {
         return { key: null, error: (error as Error).message };
       }
     }
-    const key = clipCacheKey({ plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}) });
-    return { key, registered, ...(sheet ? { styleCss: sheet.css } : {}) };
+    const blur = registered.adapter.motionBlur ? motionBlurOf(clip) : null;
+    const key = clipCacheKey({ plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}), ...(blur ? { motionBlur: blur } : {}) });
+    return { key, registered, ...(sheet ? { styleCss: sheet.css } : {}), ...(blur ? { motionBlur: blur } : {}) };
   }
 
   /** Content hash of a project-relative input; null when missing or outside the project. */
@@ -538,7 +542,7 @@ export class ClipRenderer {
 
   /** The pending render of `keyed`, queueing one when none runs. */
   #render(root: string, keyed: Extract<Keyed, { key: string }>, clip: AdapterClip, format: ClipFormat): Pending {
-    const { key, registered, styleCss } = keyed;
+    const { key, registered, styleCss, motionBlur } = keyed;
     const id = entryId(root, key);
     const running = this.#pending.get(id);
     if (running) return running;
@@ -551,7 +555,7 @@ export class ClipRenderer {
       project: root,
       asset: clip.source ?? `${clip.type}:${clip.id}`,
       output: join(dir, key),
-      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx, styleCss),
+      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx, styleCss, motionBlur),
     });
     const done = (async () => {
       const job = info.state === "canceled" ? info : await finished;
@@ -585,6 +589,7 @@ export class ClipRenderer {
     format: ClipFormat,
     ctx: JobContext,
     styleCss?: string,
+    motionBlur?: ResolvedMotionBlur,
   ): Promise<void> {
     ctx.update({ step: "render", progress: 0 });
     const outDir = join(dir, `.tmp-${key}-${randomBytes(4).toString("hex")}`);
@@ -598,6 +603,7 @@ export class ClipRenderer {
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
         ...elementCssOf(clip),
         ...(styleCss ? { styleCss } : {}),
+        ...(motionBlur ? { motionBlur } : {}),
         progress: ({ fraction }) => {
           if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
         },

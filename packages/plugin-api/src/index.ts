@@ -128,6 +128,11 @@ export interface ClipAdapter {
    * style edit.
    */
   readonly styleTokens?: boolean;
+  /**
+   * Optional. `true` when `render` applies {@link RenderContext.motionBlur} (ADR 0041). Only then does the host pass
+   * a clip's `motionBlur` and count it in the render key; clips of other adapters render sharp and `clip.set` warns.
+   */
+  readonly motionBlur?: boolean;
 }
 
 /**
@@ -234,6 +239,22 @@ export interface RenderContext {
    * adapter inserts it first in the page's `<head>`, so a composition that sets a variable itself keeps its value.
    */
   readonly styleCss?: string;
+  /**
+   * The clip's motion blur (ADR 0041), defaults filled in; absent when the clip has none or the adapter does not set
+   * {@link ClipAdapter.motionBlur}. Each output frame is the average of `samples` pictures at sub-frame times spread
+   * evenly across a window of `shutter` degrees of one frame, centred on the frame time.
+   */
+  readonly motionBlur?: RenderMotionBlur;
+}
+
+/** Motion blur settings of one render; see {@link RenderContext.motionBlur}. */
+export interface RenderMotionBlur {
+  /** Shutter angle, degrees of one frame (1 to 360), centred on the frame time. */
+  readonly shutter: number;
+  /** Sub-frame pictures averaged into each frame (1 to 64). */
+  readonly samples: number;
+  /** Averaging space: `linear` light, or `srgb` values. */
+  readonly blend: "linear" | "srgb";
 }
 
 /** One render progress report. */

@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 130;
+export const PROTOCOL_VERSION = 131;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3682,11 +3682,17 @@ export const methods = {
       "its render does not change. Merged field by field, `null` clears. Glass is a style choice, never a default: use it when the " +
       "style's `glass.cards` is true, with the style's `glass` numbers (`style_show`), else only when asked. On the bottom video track " +
       "nothing is below: stored with a warning, not drawn. " +
+      "`motionBlur` (ADR 0041, generated clips) renders each frame as the average of `samples` (default 8) pictures across a shutter of " +
+      "`shutter` degrees (default 180, centred on the frame), averaged in `blend` space (default `linear`): fast moves smear like a camera's. " +
+      "`{}` turns it on with the defaults, merged field by field, `null` clears. The clip re-renders and the render costs about `samples` " +
+      "times a sharp one; preview and export wait for it. Use it on fast motion graphics, not on text that should read sharp while it " +
+      "moves. A composition that cuts between scenes inside itself declares the cut with the motion runtime's `cuts()`, else the frame " +
+      "at the cut blends both scenes. " +
       "`format` (ADR 0027, a format of `format.list` other than the primary) sets the clip in that format only, stored in its " +
       "`formats` override: `transform`, `props` (checked over the clip's own), `elements` and `hidden` (no picture there, the sound " +
       "still plays); `reset: true` drops the override first. Use it where the automatic layout of a format is wrong, e.g. a lower " +
       "third that sits too low in 9:16: `{ clip, format: \"9x16\", transform: { y: 520 } }`. Timing and sound are every format's: " +
-      "with `format`, speed, gain, muted, audio fades, audioEffects, backdrop and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
+      "with `format`, speed, gain, muted, audio fades, audioEffects, backdrop, motionBlur and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
