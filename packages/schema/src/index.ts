@@ -81,6 +81,7 @@ export {
   MediaClipAudioSchema,
   AudioEffectSchema,
   BackdropSchema,
+  GradeSchema,
   MARKER_COLORS,
   MARKER_LABEL_MAX,
   MarkerIdSchema,
@@ -130,6 +131,7 @@ export {
   type MediaClipAudio,
   type AudioEffect,
   type Backdrop,
+  type Grade,
   type CaptionPhrase,
   type CaptionGap,
   type SubtitleEntry,
@@ -252,6 +254,23 @@ export {
   bakeRef,
   normalizeAudioEffects,
 } from "./effects.js";
+export {
+  GRADE_LIMITS,
+  GRADE_TABLE_SIZE,
+  MAX_LUT_SIZE,
+  type CubeLut,
+  type GradeTable,
+  type NormalizedGrade,
+  applyGradeTable,
+  cubeText,
+  gradeKey,
+  gradeOf,
+  gradeTable,
+  gradeTableSize,
+  isIdentityGrade,
+  normalizeGrade,
+  parseCube,
+} from "./grade.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   SHOOT_SCHEMA_URL,

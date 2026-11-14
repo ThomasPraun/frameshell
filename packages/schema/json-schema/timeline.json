@@ -993,6 +993,54 @@
                           "description": "Playback rate; 1 = normal, 2 = twice as fast. Default 1.",
                           "type": "number",
                           "exclusiveMinimum": 0
+                        },
+                        "grade": {
+                          "type": "object",
+                          "properties": {
+                            "exposure": {
+                              "description": "Stops of light: 1 doubles it, -1 halves it. Default 0.",
+                              "type": "number",
+                              "minimum": -4,
+                              "maximum": 4
+                            },
+                            "temperature": {
+                              "description": "White balance: -1 cooler (blue) to 1 warmer (red). Default 0.",
+                              "type": "number",
+                              "minimum": -1,
+                              "maximum": 1
+                            },
+                            "tint": {
+                              "description": "White balance: -1 greener to 1 more magenta. Default 0.",
+                              "type": "number",
+                              "minimum": -1,
+                              "maximum": 1
+                            },
+                            "contrast": {
+                              "description": "Factor about mid grey: 1 unchanged, above 1 more contrast. Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 3
+                            },
+                            "saturation": {
+                              "description": "Factor of colour: 1 unchanged, 0 grey. Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 3
+                            },
+                            "lut": {
+                              "description": "Project-relative 3D LUT, e.g. `luts/warm.cube` (Adobe Cube 1.0, up to 65 points, Rec.709 input): the look, applied after the correction.",
+                              "type": "string",
+                              "pattern": "\\.cube$"
+                            },
+                            "lutMix": {
+                              "description": "Strength of the LUT: 0 the corrected picture, 1 the full look. Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Colour grade (ADR 0031): exposure and white balance, then contrast and saturation, then the LUT; export and the preview apply it as one 3D table. Media clips only; shots take none."
                         }
                       },
                       "required": [

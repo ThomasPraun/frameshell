@@ -195,6 +195,9 @@ describe("shot edits", () => {
     expect(skipped.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; audioEffects skipped."]);
     const glass = await apply(base(), "clip.set", { clip: "c_s1", audioEffects: [{ kind: "highpass" }], backdrop: { blur: 46 } });
     expect(glass.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; audioEffects and backdrop skipped."]);
+    const graded = await apply(base(), "clip.set", { clip: "c_s1", grade: { exposure: 1 } });
+    expect(graded.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; grade skipped."]);
+    expect(shots(graded.timeline)[0]).toEqual(shots(base())[0]);
     expect(shots(glass.timeline)[0]).toEqual(shots(base())[0]);
     expect(shots(skipped.timeline)[0]).toEqual(shots(base())[0]);
     const withRef = await apply(base(), "clip.set", { clip: "c_s1", audioEffects: [{ kind: "highpass" }], scriptRef: "scripts/script.md" });

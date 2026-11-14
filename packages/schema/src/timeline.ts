@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
+import { GRADE_LIMITS, MAX_LUT_SIZE } from "./grade.js";
 import { FormatIdSchema } from "./format-id.js";
 import { TakeIdSchema } from "./shoot.js";
 
@@ -352,6 +353,53 @@ const clipBase = {
   formats: ClipFormatsSchema,
 };
 
+/** Colour grade of a media clip (ADR 0031): a correction first, then an optional LUT. */
+export const GradeSchema = z
+  .strictObject({
+    exposure: z
+      .number()
+      .min(GRADE_LIMITS.exposure.min)
+      .max(GRADE_LIMITS.exposure.max)
+      .optional()
+      .describe("Stops of light: 1 doubles it, -1 halves it. Default 0."),
+    temperature: z
+      .number()
+      .min(GRADE_LIMITS.temperature.min)
+      .max(GRADE_LIMITS.temperature.max)
+      .optional()
+      .describe("White balance: -1 cooler (blue) to 1 warmer (red). Default 0."),
+    tint: z.number().min(GRADE_LIMITS.tint.min).max(GRADE_LIMITS.tint.max).optional().describe("White balance: -1 greener to 1 more magenta. Default 0."),
+    contrast: z
+      .number()
+      .min(GRADE_LIMITS.contrast.min)
+      .max(GRADE_LIMITS.contrast.max)
+      .optional()
+      .describe("Factor about mid grey: 1 unchanged, above 1 more contrast. Default 1."),
+    saturation: z
+      .number()
+      .min(GRADE_LIMITS.saturation.min)
+      .max(GRADE_LIMITS.saturation.max)
+      .optional()
+      .describe("Factor of colour: 1 unchanged, 0 grey. Default 1."),
+    lut: z
+      .string()
+      .regex(/\.cube$/i, { message: "must be a `.cube` file" })
+      .optional()
+      .describe(
+        `Project-relative 3D LUT, e.g. \`luts/warm.cube\` (Adobe Cube 1.0, up to ${MAX_LUT_SIZE} points, Rec.709 input): the look, applied after the correction.`,
+      ),
+    lutMix: z
+      .number()
+      .min(GRADE_LIMITS.lutMix.min)
+      .max(GRADE_LIMITS.lutMix.max)
+      .optional()
+      .describe("Strength of the LUT: 0 the corrected picture, 1 the full look. Default 1."),
+  })
+  .describe(
+    "Colour grade (ADR 0031): exposure and white balance, then contrast and saturation, then the LUT; export and the preview apply it " +
+      "as one 3D table. Media clips only; shots take none.",
+  );
+
 /** Footage, audio or image file. Duration on the timeline = `(out - in) / speed`. */
 export const MediaClipSchema = z
   .strictObject({
@@ -362,6 +410,7 @@ export const MediaClipSchema = z
     in: Seconds.describe("Source seconds of the first frame."),
     out: z.number().positive().describe("Source seconds just after the last frame; greater than `in`."),
     speed: z.number().positive().optional().describe("Playback rate; 1 = normal, 2 = twice as fast. Default 1."),
+    grade: GradeSchema.optional(),
   })
   .refine((clip) => clip.out > clip.in, { message: "must be after `in`", path: ["out"] });
 
@@ -1076,6 +1125,8 @@ export type ClipAudio = z.infer<typeof ClipAudioSchema>;
 export type MediaClipAudio = z.infer<typeof MediaClipAudioSchema>;
 /** Backdrop of a generated clip; see {@link BackdropSchema}. */
 export type Backdrop = z.infer<typeof BackdropSchema>;
+/** Colour grade of a media clip; see {@link GradeSchema}. */
+export type Grade = z.infer<typeof GradeSchema>;
 
 /** True for a program track's shot. Adapter `type` is any string, so `clip.type === "shot"` alone does not narrow. */
 export function isShotClip(clip: AnyClip): clip is ShotClip {

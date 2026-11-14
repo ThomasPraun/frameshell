@@ -29,6 +29,10 @@
       "types": "./dist/effects.d.ts",
       "default": "./dist/effects.js"
     },
+    "./grade": {
+      "types": "./dist/grade.d.ts",
+      "default": "./dist/grade.js"
+    },
     "./formats": {
       "types": "./dist/formats.d.ts",
       "default": "./dist/formats.js"

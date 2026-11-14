@@ -6,6 +6,7 @@ import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTi
 import { type Program, compileProgram } from "./program.js";
 import { useAudioBakes } from "./useAudioBakes.js";
 import { useClipRenders } from "./useClipRenders.js";
+import { useGradeTables } from "./useGradeTables.js";
 import { useSubjectMattes } from "./useSubjectMattes.js";
 
 /** Poll `asset.list` this often while an asset is still ingesting (until daemon asset events, #69). */
@@ -29,10 +30,11 @@ export function useProgram(format?: ResolvedFormat): Program | null {
   const renders = useClipRenders(stored, storedNested, format?.id);
   const bakes = useAudioBakes(stored, storedNested);
   const mattes = useSubjectMattes(stored, storedNested, assets);
+  const grades = useGradeTables(stored, storedNested);
   const { view, nested } = useMemo(() => viewsInFormat(stored, storedNested, format?.id), [stored, storedNested, format?.id]);
   return useMemo(
-    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes, ...(format ? { format } : {}) }) : null),
-    [view, assets, resolution, nested, renders, bakes, mattes, format],
+    () => (view && assets ? compileProgram(view, assets, { resolution, nested, renders, bakes, mattes, grades, ...(format ? { format } : {}) }) : null),
+    [view, assets, resolution, nested, renders, bakes, mattes, grades, format],
   );
 }
 

@@ -28,6 +28,8 @@ export interface PlayerEvents {
   onError?(message: string): void;
   /** Audio output is unavailable: playback runs on a silent clock. */
   onSilent?(): void;
+  /** WebGL2 cannot run the colour grade pass (`reason`): graded clips show ungraded (ADR 0031). Once per engine. */
+  onGradeOff?(reason: string): void;
 }
 
 /** A source of {@link ClockSample}s plus where rendering is (for scheduling). */
@@ -235,6 +237,9 @@ export class PreviewPlayer implements TransportPlayer {
     else if (message.type === "alpha") {
       this.#alphaReplies.get(message.id)?.({ frame: message.frame, layers: message.layers });
       this.#alphaReplies.delete(message.id);
+    } else if (message.type === "gradeOff") {
+      console.warn(`Preview colour grade off: ${message.reason}`);
+      this.#events.onGradeOff?.(message.reason);
     } else this.#events.onError?.(message.message);
   }
 

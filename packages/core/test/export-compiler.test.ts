@@ -16,6 +16,8 @@ import {
   audioFades,
   bakeRef,
   flattenTimeline,
+  gradeKey,
+  gradeOf,
   resolveFormat,
 } from "@frameshell/schema";
 import {
@@ -693,6 +695,65 @@ describe("export compiler", () => {
         frame: compileFrame({ ...input, width: 1280, height: 720, at: 3.1, output: "/out/frame.png" }),
       });
       expect(animatedPlan).toMatchObject({ frames: 210, duration: 7 });
+    });
+
+    describe("colour grade (ADR 0031, #384)", () => {
+      const warm = { temperature: 0.4, saturation: 1.2 };
+      const cold = { temperature: -0.5, lut: "luts/look.cube" };
+      const graded: Timeline = {
+        ...animated,
+        tracks: animated.tracks.map((track) =>
+          track.kind === "video"
+            ? {
+                ...track,
+                clips: track.clips.map((clip) =>
+                  clip.id === "c_talk1" ? { ...clip, grade: warm } : clip.id === "c_talk2" || clip.id === "c_logo2" ? { ...clip, grade: cold } : clip,
+                ),
+              }
+            : track,
+        ) as Timeline["tracks"],
+      };
+      const key = (grade: object) => gradeKey(gradeOf({ type: "media", grade } as Clip)!);
+      const grades = new Map([
+        [key(warm), "grade-warm.cube"],
+        [key(cold), "grade-cold.cube"],
+      ]);
+      const gradedPlan = compileRender({ ...input, timeline: graded, grades });
+      const graphs = (plan: { files: Record<string, string> }) => Object.values(plan.files).join("\n");
+
+      it("grades each side of a bottom-track dissolve before the mix, and upper layers before scale and alpha (golden)", () => {
+        golden("grade-plan", {
+          segments: gradedPlan.segments,
+          files: gradedPlan.files,
+          frame: compileFrame({ ...input, timeline: graded, grades, width: 1280, height: 720, at: 3.1, output: "/out/frame.png" }),
+        });
+        const graph = graphs(gradedPlan);
+        expect(graph).toContain("format=rgba,lut3d=file=grade-warm.cube:interp=trilinear,scale=1920:1080:force_original_aspect_ratio=decrease");
+        // The incoming side of the dissolve is a layer: graded before it is scaled and faded in.
+        expect(graph).toMatch(/lut3d=file=grade-cold\.cube:interp=trilinear,setpts=PTS\+[\d.]+\/TB,scale=/);
+        expect(gradedPlan.warnings).toEqual(animatedPlan.warnings);
+      });
+
+      it("leaves timelines without a grade as they were, and draws a grade without a table ungraded, with a warning", () => {
+        expect(compileRender({ ...input, grades })).toEqual(animatedPlan);
+        const missing = compileRender({ ...input, timeline: graded, grades: new Map([[key(warm), "grade-warm.cube"]]) });
+        expect(graphs(missing)).not.toContain("grade-cold");
+        expect(missing.warnings).toEqual([
+          "Clip c_talk2 has a colour grade with no table; it was exported ungraded.",
+          "Clip c_logo2 has a colour grade with no table; it was exported ungraded.",
+          ...animatedPlan.warnings,
+        ]);
+      });
+
+      it("treats a grade that changes nothing as none", () => {
+        const neutral: Timeline = {
+          ...animated,
+          tracks: animated.tracks.map((track) =>
+            track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (clip.id === "c_talk1" ? { ...clip, grade: { exposure: 0, lutMix: 0, lut: "luts/look.cube" } } : clip)) } : track,
+          ) as Timeline["tracks"],
+        };
+        expect(compileRender({ ...input, timeline: neutral }).files).toEqual(animatedPlan.files);
+      });
     });
 
     it("draws an incoming dissolve over the outgoing clip's tail, never an xfade, and concatenates the bottom track around it", () => {

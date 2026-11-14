@@ -10,6 +10,7 @@ const en = {
   /** Note on a subject layer whose plate has its own transparency: export draws the subject, the preview does not. */
   matteAlpha: "Subjects of transparent clips show only in export: what goes behind the person shows in front of them here",
   noAudio: "No audio output: playing without sound",
+  gradeOff: "This computer cannot show colour grades in the preview (no WebGL2): graded clips show ungraded. Export applies them.",
   /** Notice when the preview's audio output cannot be set up; `{reason}` is the system's message. */
   audioUnavailable: (reason: string) => `Preview audio unavailable: ${reason}`,
   playhead: "Playhead",
@@ -85,6 +86,7 @@ const es: typeof en = {
   matte: "Aún no hay máscara del sujeto: lo que va detrás de la persona se ve delante",
   matteAlpha: "El sujeto de los clips con transparencia solo se ve al exportar: aquí lo que va detrás de la persona se ve delante",
   noAudio: "Sin salida de audio: se reproduce sin sonido",
+  gradeOff: "Esta computadora no puede mostrar la corrección de color en la vista previa (no hay WebGL2): los clips corregidos se ven sin corregir. La exportación sí la aplica.",
   audioUnavailable: (reason) => `Audio de la vista previa no disponible: ${reason}`,
   playhead: "Cursor de reproducción",
   duration: "Duración",

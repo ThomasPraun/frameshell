@@ -68,6 +68,7 @@ import {
 } from "./cover.js";
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
+import { gradeFiles } from "./grade.js";
 import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
@@ -329,9 +330,11 @@ export class ExportService {
     const standInMattes = new Map((prepared?.assets ?? []).map((asset) => [asset, { path: "", ...pictureSize(sources.get(asset)!) }]));
     const encoder = params.quality ? ((await this.#options.encoder?.(await this.#options.ffmpeg(root))) ?? "libx264") : null;
     const captions = await readCaptionTokens(root, timeline);
+    const grades = await gradeFiles(root, timeline);
     const shared = {
       timeline,
       fps,
+      grades: grades.files,
       ...(params.quality && encoder ? { encode: { encoder, tier: params.quality } } : {}),
       ...(loop ? { loop: true } : {}),
       resolution,
@@ -430,7 +433,7 @@ export class ExportService {
               if (generated.size > 0 || baked.length > 0 || makeMattes) final = compileRender({ ...input, generated, audioFx, mattes });
               const ffmpeg = await this.#options.ffmpeg(root);
               const cache = join(root, ".frameshell", "cache", "render");
-              await executeRender(final, {
+              await executeRender({ ...final, files: { ...final.files, ...grades.contents } }, {
                 ffmpeg,
                 workDir: join(cache, randomBytes(6).toString("hex")),
                 output,
@@ -643,10 +646,12 @@ export class ExportService {
     // Not in a job: the mattes of the subjects drawn at `at` are made here, as a render job would.
     const mattes = matted.length > 0 && this.#options.mattes ? await (await this.#options.mattes.prepare(root, matted)).make() : new Map<string, MatteSource>();
     const { tokens: captions } = cover === undefined ? await readCaptionTokens(root, timeline) : {};
+    const grades = await gradeFiles(root, timeline);
     const plan = compileFrame({
       timeline,
       fps,
       sources,
+      grades: grades.files,
       transcripts: await this.#transcripts(root, timeline),
       ...(captions ? { captions } : {}),
       resolution,
@@ -667,7 +672,7 @@ export class ExportService {
     await mkdir(dirname(params.out), { recursive: true });
     try {
       await mkdir(workDir, { recursive: true });
-      await writeFiles(workDir, plan.files);
+      await writeFiles(workDir, { ...plan.files, ...grades.contents });
       await writeFonts(workDir, plan.fonts, root);
       await runTool(ffmpeg, plan.args, { cwd: workDir });
       await renameRetrying(partial, params.out);

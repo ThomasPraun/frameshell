@@ -91,6 +91,8 @@ mutations print the new revision):
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
+           [--grade-exposure stops] [--grade-temperature -1..1] [--grade-tint -1..1] [--grade-contrast x]
+           [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
            [--hidden | --shown] [--reset]]
                                --format <id> (a format other than the primary, see format list) sets the clip in
@@ -107,6 +109,11 @@ mutations print the new revision):
                                glass; by default blur 46 px, saturate 1.45, dim 0.55): what is below the clip is
                                blurred, saturated and dimmed where the clip shows. Glass is a style choice, never a
                                default. --backdrop-* set one number each, over --glass (blur = Gaussian sigma in project px)
+                               --grade-* colour-grade a media clip on a video track, one number each, merged into its
+                               grade: exposure in stops, white balance (temperature -1 cool to 1 warm, tint -1 green to
+                               1 magenta), contrast and saturation factors (1 = unchanged), then a 3D .cube LUT (project
+                               file, up to 65 points, Rec.709 input; none removes it) at --grade-lut-mix (default 1).
+                               Export and the preview apply the same table; --clear-grade removes the grade
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -365,6 +372,14 @@ export const TIMELINE_OPTIONS = {
   "backdrop-saturate": { type: "string" },
   "backdrop-dim": { type: "string" },
   "clear-backdrop": { type: "boolean" },
+  "grade-exposure": { type: "string" },
+  "grade-temperature": { type: "string" },
+  "grade-tint": { type: "string" },
+  "grade-contrast": { type: "string" },
+  "grade-saturation": { type: "string" },
+  "grade-lut": { type: "string" },
+  "grade-lut-mix": { type: "string" },
+  "clear-grade": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -509,6 +524,14 @@ const ALLOWED: Record<string, string[]> = {
     "backdrop-saturate",
     "backdrop-dim",
     "clear-backdrop",
+    "grade-exposure",
+    "grade-temperature",
+    "grade-tint",
+    "grade-contrast",
+    "grade-saturation",
+    "grade-lut",
+    "grade-lut-mix",
+    "clear-grade",
     "script-ref",
     "clear-script-ref",
     "format",
@@ -927,6 +950,25 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
           : backdropFlags.length > 0
             ? { blur: num("backdrop-blur"), saturate: num("backdrop-saturate"), dim: num("backdrop-dim") }
             : undefined;
+      const gradeFlags = (["grade-exposure", "grade-temperature", "grade-tint", "grade-contrast", "grade-saturation", "grade-lut", "grade-lut-mix"] as const).filter(
+        (flag) => str(flag) !== undefined,
+      );
+      if (values["clear-grade"] === true && gradeFlags.length > 0) throw new UsageError("Pass --clear-grade alone, without --grade-*.");
+      const lut = str("grade-lut");
+      const grade =
+        values["clear-grade"] === true
+          ? null
+          : gradeFlags.length > 0
+            ? {
+                exposure: num("grade-exposure"),
+                temperature: num("grade-temperature"),
+                tint: num("grade-tint"),
+                contrast: num("grade-contrast"),
+                saturation: num("grade-saturation"),
+                lut: lut === "none" ? null : lut,
+                lutMix: num("grade-lut-mix"),
+              }
+            : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -937,6 +979,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         audioEffects:
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         backdrop,
+        grade,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -1197,6 +1240,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   if (params["transform"]) params["transform"] = clean(params["transform"] as Record<string, unknown>);
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
   if (params["backdrop"]) params["backdrop"] = clean(params["backdrop"] as Record<string, unknown>);
+  if (params["grade"]) params["grade"] = clean(params["grade"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
   const glassFromStyle = method === "clip.set" && values["glass"] === true;
   return {

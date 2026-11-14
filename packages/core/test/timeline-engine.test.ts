@@ -469,6 +469,27 @@ describe("clip.move, trim, split, remove, set", () => {
     expect((await rejection(apply(before, "clip.set", { clip: "c_0001", audioFadeInMs: -1 }))).code).toBe(ErrorCode.InvalidParams);
   });
 
+  it("merges a media clip's grade field by field, removes a field with null, clears it, refuses other clips (ADR 0031)", async () => {
+    const footage = await withClip();
+    const warm = await apply(footage, "clip.set", { clip: "c_0001", grade: { temperature: 0.3, lut: "luts/warm.cube" } });
+    expect(clipsOf(warm.timeline, "t_v")[0]).toMatchObject({ grade: { temperature: 0.3, lut: "luts/warm.cube" } });
+    expect(warm.warnings).toEqual([]);
+    expect(parseTimeline(warm.timeline).ok).toBe(true);
+    const merged = (await apply(warm.timeline, "clip.set", { clip: "c_0001", grade: { exposure: -0.5, lut: null } })).timeline;
+    expect(clipsOf(merged, "t_v")[0]!).toMatchObject({ grade: { temperature: 0.3, exposure: -0.5 } });
+    expect((clipsOf(merged, "t_v")[0] as { grade?: object }).grade).not.toHaveProperty("lut");
+    const cleared = (await apply(merged, "clip.set", { clip: "c_0001", grade: null })).timeline;
+    expect(clipsOf(cleared, "t_v")[0]).not.toHaveProperty("grade");
+    const lutOnly = (await apply(footage, "clip.set", { clip: "c_0001", grade: { lut: "luts/warm.cube" } })).timeline;
+    const emptied = (await apply(lutOnly, "clip.set", { clip: "c_0001", grade: { lut: null } })).timeline;
+    expect(clipsOf(emptied, "t_v")[0]).not.toHaveProperty("grade");
+
+    expect((await rejection(apply(footage, "clip.set", { clip: "c_0001", grade: { contrast: 9 } }))).code).toBe(ErrorCode.InvalidParams);
+    expect((await rejection(apply(footage, "clip.set", { clip: "c_0001", grade: { lut: "luts/warm.png" } }))).code).toBe(ErrorCode.InvalidParams);
+    const card = (await apply(footage, "clip.add", { track: "t_v", type: "hyperframes", duration: 2, start: 30, props: { title: "A" } })).timeline;
+    expect((await rejection(apply(card, "clip.set", { clip: "c_0002", grade: { exposure: 1 } }))).message).toMatch(/only media clips take `grade`/);
+  });
+
   it("merges a generated clip's backdrop field by field, clears it, warns on the bottom track, refuses other clips (ADR 0031)", async () => {
     const twoTracks = (await apply(await withClip(), "track.add", { kind: "video" }, context({ newId: () => "t_v2" }))).timeline;
     const card = (await apply(twoTracks, "clip.add", { track: "t_v2", type: "hyperframes", duration: 2, start: 10, props: { title: "A" } })).timeline;

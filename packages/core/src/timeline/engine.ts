@@ -17,6 +17,7 @@ import {
   CORE_CLIP_TYPES,
   RESERVED_MIC_IDS,
   type Clip,
+  type Grade,
   type ElementAdjust,
   type ClipKey,
   type Marker,
@@ -958,16 +959,17 @@ class Edit {
         hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
       });
     }
-    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, transform, props, elements, scriptRef } = args;
-    if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, transform, props, elements, scriptRef } = args;
+    if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, transform, props, elements, scriptRef].every((value) => value === undefined)) {
       throw this.invalid("nothing to set.", {
-        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, transform, props, elements, scriptRef.",
+        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, transform, props, elements, scriptRef.",
       });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
-    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined)) {
+    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined || grade !== undefined)) {
       // ADR 0031 decision 5: no effects on shots or angles in v1, skipped like transitions on program tracks.
-      const skipped = [audioEffects !== undefined ? "audioEffects" : null, backdrop !== undefined ? "backdrop" : null].filter(Boolean).join(" and ");
+      const effects = { audioEffects, backdrop, grade };
+      const skipped = (Object.keys(effects) as (keyof typeof effects)[]).filter((field) => effects[field] !== undefined).join(" and ");
       this.warnings.push(`${clip.id} is a multicam shot: shots take no effects in this version; ${skipped} skipped.`);
       if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, transform, props, elements, scriptRef].every((value) => value === undefined)) return;
     }
@@ -1013,6 +1015,7 @@ class Edit {
       else clip.audio = audio;
     }
     if (backdrop !== undefined) this.setBackdrop(track, clip, backdrop);
+    if (grade !== undefined) this.setGrade(track, clip, grade);
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
       clip.transform = { ...clip.transform, ...transform };
@@ -1042,7 +1045,7 @@ class Edit {
    */
   async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
     this.checkFormat(format);
-    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "scriptRef"] as const).filter((field) => args[field] !== undefined);
+    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "scriptRef"] as const).filter((field) => args[field] !== undefined);
     if (shared.length > 0) {
       throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
         field: shared[0]!,
@@ -1120,6 +1123,27 @@ class Edit {
     if (bottom === track) {
       this.warnings.push(`${clip.id} is on the bottom picture track ${track.id}: nothing is below it, so its backdrop is not drawn until it moves to an upper track.`);
     }
+  }
+
+  /**
+   * Merge `grade` field by field into the clip's (ADR 0031; `null` clears, and so does a merge left with no field). Only
+   * media clips on video tracks take one; the LUT file is read when the clip is drawn or exported.
+   */
+  setGrade(track: AnyClipTrack, clip: Clip, grade: NonNullable<OperationArgs<"clip.set">["grade"]> | null): void {
+    if (!isMedia(clip)) {
+      throw this.invalid(`only media clips take \`grade\`; ${clip.id} is ${clip.type}.`, {
+        field: "grade",
+        hint: isNested(clip) ? "Grade the media clips inside the nested timeline." : "Grade the footage under the generated clip.",
+      });
+    }
+    if (track.kind === "audio") throw this.invalid("audio tracks take no `grade`: they show no picture.", { field: "grade" });
+    const merged: Record<string, unknown> = grade === null ? {} : { ...clip.grade };
+    for (const [field, value] of Object.entries(grade ?? {})) {
+      if (value === null) delete merged[field];
+      else if (value !== undefined) merged[field] = value;
+    }
+    if (Object.keys(merged).length === 0) delete clip.grade;
+    else clip.grade = merged as Grade;
   }
 
   /** Merge `elements` per selector (`null` removes one, `null` for all clears); empty ends up absent. */
