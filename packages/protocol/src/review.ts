@@ -145,7 +145,7 @@ export const ReviewCraftWarningSchema = z.object({
         "`reading`: a subtitle cue is on screen for less than it takes to read. `peak`: the true peak is above -1 dBTP. `phone-band`: the phone band is 6 LU or more under the whole mix. `silent`: over 15 s with no sound. " +
         "`sync`: a sound lands early or late against its picture event, or the sounds sit no nearer picture events than chance. `loop-seam`: with `loop`, the last frame repeats the first or jumps from it. " +
         "`delivery`: the file differs from the export plan. `safe-zone`: a graphic or a face reaches into a platform zone. " +
-        "`voice-bed`: the bed comes within 6 dB of the voice. `sfx-repeat`: one effect file plays more than twice. `machine-gun`: one effect file 4 times or more in a row. " +
+        "`voice-bed`: the bed comes within 6 dB of the voice. `sfx-repeat`: one effect file plays more than twice. `machine-gun`: one effect file 4 times or more in a row, each within 1 s of the last. " +
         "`chopped`: a clip ends with its sound above -35 dB of its loudest. `ending`: the music is cut on the last frame, or a file's sound is not down at its end or peaks in its last 15 %. " +
         "`click`: a click in a file's sound.",
     ),
@@ -274,7 +274,7 @@ export const ReviewSoundRepeatSchema = z.object({
 /** A run of one effect file played again and again. */
 export const ReviewMachineGunSchema = z.object({
   file: z.string(),
-  plays: z.int().describe("Plays in a row, no other effect between them."),
+  plays: z.int().describe("Plays in a row, each within 1 s of the last and no other effect between them."),
   from: z.number().describe("Seconds the first starts."),
   to: z.number().describe("Seconds the last starts."),
 });
@@ -323,7 +323,7 @@ export const ReviewSoundSchema = z.object({
     ),
   voice: ReviewVoiceSchema.nullable().describe("Null for a file or a timeline with no voice clip in the range."),
   repeats: z.array(ReviewSoundRepeatSchema).nullable().describe("Effect files heard more than once (ticks and clicks left out: key runs repeat them by design); null for a file."),
-  machineGun: z.array(ReviewMachineGunSchema).nullable().describe("Runs of 4 or more plays of one effect file in a row (speed keeps pitch, so they sound the same); null for a file."),
+  machineGun: z.array(ReviewMachineGunSchema).nullable().describe("Runs of 4 or more plays of one effect file in a row, each within 1 s of the last (speed keeps pitch, so they sound the same); null for a file."),
   chopped: z.array(ReviewChoppedSchema).nullable().describe("Clips ending inside the film with their sound still above -35 dB of their loudest (at most 20); null for a file."),
   ending: ReviewEndingSchema.nullable().describe("Null when the range stops short of the film's end, or for a file with no sound."),
   clicks: ReviewClicksSchema.nullable().describe(

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Clip, SfxKind, Timeline, Track } from "@frameshell/schema";
 import type { EnergyProfile } from "../src/media/energy.js";
-import { fileSound, findClicks, heardClips, soundWarnings, timelineSound } from "../src/review/sound.js";
+import { fileSound, findClicks, heardClips, soundListWarnings, timelineSound } from "../src/review/sound.js";
 
 // The sound review list of `review` (#457): roles, voice over bed, repeats, cut-off tails, the ending and clicks, on
 // envelopes made up per test (one dBFS value per 10 ms).
@@ -74,14 +74,14 @@ describe("review sound: voice over bed", () => {
   it("measures the margin per 0.5 s window where the voice speaks", () => {
     const sound = timelineSound({ clips: heardClips(tl(0), FPS, none), profiles, range: { from: 0, to: 3 }, filmEnd: 3 })!;
     expect(sound.voice).toMatchObject({ window: 0.5, windows: 4, withBed: 4, minMargin: 12, medianMargin: 12, low: [] });
-    expect(soundWarnings(sound).filter((warning) => warning.check === "voice-bed")).toEqual([]);
+    expect(soundListWarnings(sound).filter((warning) => warning.check === "voice-bed")).toEqual([]);
   });
 
   it("lists the stretches where the bed comes within 6 dB of the voice, merged, and warns", () => {
     const sound = timelineSound({ clips: heardClips(tl(8), FPS, none), profiles, range: { from: 0, to: 3 }, filmEnd: 3 })!;
     expect(sound.voice!.minMargin).toBe(4);
     expect(sound.voice!.low).toEqual([{ from: 0, to: 2, margin: 4 }]);
-    const warnings = soundWarnings(sound).filter((warning) => warning.check === "voice-bed");
+    const warnings = soundListWarnings(sound).filter((warning) => warning.check === "voice-bed");
     expect(warnings).toEqual([expect.objectContaining({ from: 0, to: 2, message: expect.stringContaining("within 4 dB of the voice") })]);
   });
 
@@ -108,7 +108,7 @@ describe("review sound: repeated effects", () => {
     const sound = timelineSound({ clips: heardClips(timeline([track("t_fx", clips)]), FPS, { ...none, kinds }), profiles, range: { from: 0, to: 10 }, filmEnd: 10 })!;
     expect(sound.repeats).toEqual([{ file: whoosh, plays: 3, at: [1, 3, 5] }]);
     expect(sound.machineGun).toEqual([]);
-    expect(soundWarnings(sound).map((warning) => warning.check)).toEqual(["sfx-repeat"]);
+    expect(soundListWarnings(sound).map((warning) => warning.check)).toEqual(["sfx-repeat"]);
   });
 
   it("four plays of one file in a row are a machine gun, ticks included; another effect between breaks the run", () => {
@@ -119,6 +119,12 @@ describe("review sound: repeated effects", () => {
     const broken = [clip("a", tick, 0, 0.3), clip("b", tick, 1, 0.3), clip("x", other, 2, 0.3), clip("c", tick, 3, 0.3), clip("d", tick, 4, 0.3)];
     const after = timelineSound({ clips: heardClips(timeline([track("t_fx", broken)]), FPS, { ...none, kinds }), profiles, range: { from: 0, to: 5 }, filmEnd: 5 })!;
     expect(after.machineGun).toEqual([]);
+  });
+
+  it("plays of one file far apart are no machine gun", () => {
+    const clips = [0, 20, 40, 60].map((at, i) => clip(`t${i}`, tick, at, 0.3));
+    const sound = timelineSound({ clips: heardClips(timeline([track("t_fx", clips)]), FPS, { ...none, kinds }), profiles, range: { from: 0, to: 61 }, filmEnd: 61 })!;
+    expect(sound.machineGun).toEqual([]);
   });
 });
 
@@ -131,7 +137,7 @@ describe("review sound: cut-off tails and the ending", () => {
     const cut = run([clip("c_a", "assets/pad.wav", 0, 2)]);
     expect(cut.chopped).toEqual([{ clip: "c_a", track: "t_a", role: "other", at: 2, level: 0 }]);
     // The warning spans the last 10 ms, inside the clip, where a waiver naming the clip finds it.
-    expect(soundWarnings(cut).map(({ check, from, to }) => ({ check, from, to }))).toEqual([{ check: "chopped", from: 1.99, to: 2 }]);
+    expect(soundListWarnings(cut).map(({ check, from, to }) => ({ check, from, to }))).toEqual([{ check: "chopped", from: 1.99, to: 2 }]);
     expect(run([clip("c_a", "assets/pad.wav", 0, 2, { fadeOut: 0.5 } as Partial<Clip>)]).chopped).toEqual([]);
     // A 5 ms de-click ramp still cuts the tail.
     expect(run([clip("c_a", "assets/pad.wav", 0, 2, { audio: { fadeOutMs: 5 } } as Partial<Clip>)]).chopped).toHaveLength(1);
@@ -143,10 +149,10 @@ describe("review sound: cut-off tails and the ending", () => {
     const music = (length: number, extra: Partial<Clip> = {}) => timeline([track("t_m", [clip("c_m", "assets/pad.wav", 0, length, extra)], { name: "Music" })]);
     const cut = timelineSound({ clips: heardClips(music(4), FPS, none), profiles, range: { from: 0, to: 4 }, filmEnd: 4 })!;
     expect(cut.ending).toEqual({ measure: "music", level: 0, musicEndsAt: 4, loudestAt: null, loudestShare: null });
-    expect(soundWarnings(cut).map((warning) => warning.check)).toEqual(["ending"]);
+    expect(soundListWarnings(cut).map((warning) => warning.check)).toEqual(["ending"]);
     const faded = timelineSound({ clips: heardClips(music(4, { fadeOut: 1 } as Partial<Clip>), FPS, none), profiles, range: { from: 0, to: 4 }, filmEnd: 4 })!;
     expect(faded.ending!.level!).toBeLessThan(-35);
-    expect(soundWarnings(faded)).toEqual([]);
+    expect(soundListWarnings(faded)).toEqual([]);
     const early = timelineSound({ clips: heardClips(music(3), FPS, none), profiles, range: { from: 0, to: 4 }, filmEnd: 4 })!;
     expect(early.ending).toMatchObject({ level: null, musicEndsAt: 3 });
     // The range stops short of the end: no ending.
@@ -161,22 +167,22 @@ describe("review sound: a file", () => {
     const sound = fileSound({ envelope, clicks: [], range: { from: 0, to: 10 }, filmEnd: 10 });
     // The first 400 ms within 1 dB of the loudest start at 8.92 s: 32 of their 40 steps are in the loud second.
     expect(sound.ending).toEqual({ measure: "mix", level: -6, musicEndsAt: null, loudestAt: 8.92, loudestShare: 0.912 });
-    expect(soundWarnings(sound).map((warning) => warning.message)).toEqual([expect.stringContaining("above -45 dBFS"), expect.stringContaining("peaks at its end")]);
+    expect(soundListWarnings(sound).map((warning) => warning.message)).toEqual([expect.stringContaining("above -45 dBFS"), expect.stringContaining("peaks at its end")]);
     const resolved = Float32Array.from({ length: 1000 }, (_, i) => (i >= 300 && i < 340 ? -6 : i >= 990 ? -80 : -30));
-    expect(soundWarnings(fileSound({ envelope: resolved, clicks: [], range: { from: 0, to: 10 }, filmEnd: 10 }))).toEqual([]);
+    expect(soundListWarnings(fileSound({ envelope: resolved, clicks: [], range: { from: 0, to: 10 }, filmEnd: 10 }))).toEqual([]);
   });
 
   it("a steady sound that wobbles under 1 dB peaks where it starts, not at its end", () => {
     const envelope = Float32Array.from({ length: 300 }, (_, i) => (i >= 250 ? -20.9 : -21.2));
     const sound = fileSound({ envelope, clicks: [], range: { from: 0, to: 3 }, filmEnd: 3 });
     expect(sound.ending).toMatchObject({ loudestAt: 0, level: -20.9 });
-    expect(soundWarnings(sound).map((warning) => warning.message)).toEqual([expect.stringContaining("above -45 dBFS")]);
+    expect(soundListWarnings(sound).map((warning) => warning.message)).toEqual([expect.stringContaining("above -45 dBFS")]);
   });
 
   it("lists clicks inside the range as one craft warning", () => {
     const sound = fileSound({ envelope: new Float32Array(100), clicks: [0.25, 0.6, 3], range: { from: 0, to: 1 }, filmEnd: 1 });
     expect(sound.clicks).toEqual({ count: 2, at: [0.25, 0.6] });
-    expect(soundWarnings(sound).filter((warning) => warning.check === "click")).toEqual([expect.objectContaining({ from: 0.25, to: 0.6, message: expect.stringContaining("2 clicks") })]);
+    expect(soundListWarnings(sound).filter((warning) => warning.check === "click")).toEqual([expect.objectContaining({ from: 0.25, to: 0.6, message: expect.stringContaining("2 clicks") })]);
   });
 });
 

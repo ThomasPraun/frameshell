@@ -3,7 +3,7 @@ import type { ResolvedSubtitleTrack } from "@frameshell/schema";
 import { deliveryWarnings } from "./delivery.js";
 import { seamWarnings } from "./loop.js";
 import { safeWarnings } from "./safe.js";
-import { soundWarnings } from "./sound.js";
+import { soundListWarnings } from "./sound.js";
 import type { MotionSeries } from "./source.js";
 import { syncWarnings } from "./sync.js";
 
@@ -198,7 +198,7 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   if (seam && input.loop) craft.push(...seamWarnings(seam));
   if (delivery) craft.push(...deliveryWarnings(delivery));
   for (const { platform, flags } of input.safe ?? []) craft.push(...safeWarnings(platform, flags));
-  if (sound) craft.push(...soundWarnings(sound));
+  if (sound) craft.push(...soundListWarnings(sound));
 
   craft.sort((a, b) => (a.from ?? -1) - (b.from ?? -1));
   // Every finding is a warning until `requirements.json` is applied (`judgeRequirements`).

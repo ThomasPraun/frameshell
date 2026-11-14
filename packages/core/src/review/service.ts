@@ -25,14 +25,13 @@ import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
 import { captionFontMetrics } from "../export/font-metrics.js";
-import type { ExportService, LoadedTimeline } from "../export/service.js";
+import { type ExportService, type LoadedTimeline, readTranscriptFile } from "../export/service.js";
 import { BINARY_ERRORS } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { probeMedia } from "../media/ffmpeg.js";
 import type { ScannedAsset } from "../people/face-clusters.js";
 import { soundsOn } from "../sound/place.js";
 import type { TimelineService } from "../timeline/service.js";
-import { resolveTranscript } from "../transcripts/transcriber.js";
 import {
   type Critical,
   type FramePick,
@@ -396,8 +395,7 @@ export class ReviewService {
       const assets = new Set(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [] : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : [])))));
       const transcribed = new Set<string>();
       for (const asset of assets) {
-        const found = await resolveTranscript(root, asset).catch(() => null);
-        if (found?.previous?.asset === asset) transcribed.add(asset);
+        if ((await readTranscriptFile(root, asset).catch(() => null)) !== null) transcribed.add(asset);
       }
       const kinds = new Map((await soundsOn(root, timeline)).map((item) => [item.file, item.kind] as const));
       const clips = heardClips(timeline, fps, { transcribed, kinds }).filter((clip) => clip.end > range.from && clip.start < range.to);
@@ -408,6 +406,7 @@ export class ReviewService {
         try {
           profiles.set(asset, await soundProfile(root, asset));
         } catch (error) {
+          // No ffmpeg hears nothing: the outer catch drops the whole list with a warning instead of reviewing it as silence.
           if (error instanceof RpcError && BINARY_ERRORS.includes(error.code)) throw error;
           // A clip of a video track is only heard as a voice; a still there has no sound to miss.
           if (clips.some((clip) => clip.asset === asset && timeline.tracks.find((track) => track.id === clip.track)?.kind !== "video")) unread.add(asset);

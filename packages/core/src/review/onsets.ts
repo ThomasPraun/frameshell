@@ -67,8 +67,8 @@ export async function fileClicks(ffmpeg: string, file: string, scratch: string, 
       signal ? { signal } : {},
     );
     const sound = wavData(await readFile(wav));
-    // An Int16Array view needs an even byte offset.
-    const data = sound.data.byteOffset % 2 === 0 ? sound.data : sound.data.slice();
+    // An Int16Array view needs an even byte offset; `data` is a Buffer, whose `slice` is a view, so copy it.
+    const data = sound.data.byteOffset % 2 === 0 ? sound.data : new Uint8Array(sound.data);
     const samples = new Int16Array(data.buffer, data.byteOffset, Math.floor(data.byteLength / 2));
     return findClicks(samples, sound.rate);
   } finally {

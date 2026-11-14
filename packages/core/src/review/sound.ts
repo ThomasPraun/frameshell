@@ -1,6 +1,6 @@
 import type { ReviewFinding, ReviewSound, SoundRole } from "@frameshell/protocol";
 import { type Clip, type SfxKind, type Timeline, clipTime, edgeTransitions, fadeWeight, gainAt, isSubjectClip, soundCurve, withProgramSound } from "@frameshell/schema";
-import { ENERGY_HOP_S, type EnergyProfile } from "../media/energy.js";
+import { ENERGY_HOP_S, type EnergyProfile, SILENCE_DB } from "../media/energy.js";
 import { MUSIC_TRACK_NAME } from "../sound/music-place.js";
 import { SFX_TRACK_NAME } from "../sound/place.js";
 import { SOUND_DIR } from "../sound/takes.js";
@@ -19,6 +19,7 @@ import {
   LOUDEST_BEFORE,
   LOUDEST_MARGIN_DB,
   LOUDEST_WINDOW_S,
+  MACHINE_GUN_GAP_S,
   MACHINE_GUN_PLAYS,
   SFX_REPEAT_EXEMPT,
   SFX_REPEAT_MAX,
@@ -34,9 +35,6 @@ import {
 
 /** Music takes of `sound.music` are `<SOUND_DIR>/music-<preset>-<key>.wav` (`musicFile` in `sound/takes.ts`). */
 const MUSIC_TAKE_PREFIX = `${SOUND_DIR}/music-`;
-
-/** Level (dBFS) of no sound at all: the envelope's floor. */
-const SILENCE_DB = -120;
 
 const round = (value: number, digits = 3) => Math.round(value * 10 ** digits) / 10 ** digits;
 const toPower = (db: number) => 10 ** (db / 10);
@@ -234,7 +232,7 @@ function voiceOverBed(series: RoleSeries, hops: number, from: number, hasVoice: 
   };
 }
 
-/** Effect files heard more than once, and runs of one file in a row. */
+/** Effect files heard more than once, and quick runs of one file in a row (each within {@link MACHINE_GUN_GAP_S} of the last). */
 function repeatsOf(clips: readonly HeardClip[]): Pick<ReviewSound, "repeats" | "machineGun"> {
   const effects = clips.filter((clip) => clip.role === "sfx").sort((a, b) => a.start - b.start);
   const byFile = new Map<string, HeardClip[]>();
@@ -250,7 +248,7 @@ function repeatsOf(clips: readonly HeardClip[]): Pick<ReviewSound, "repeats" | "
   const machineGun: NonNullable<ReviewSound["machineGun"]> = [];
   for (let i = 0; i < effects.length; ) {
     let j = i + 1;
-    while (j < effects.length && effects[j]!.asset === effects[i]!.asset) j++;
+    while (j < effects.length && effects[j]!.asset === effects[i]!.asset && effects[j]!.start - effects[j - 1]!.start <= MACHINE_GUN_GAP_S + 1e-6) j++;
     if (j - i >= MACHINE_GUN_PLAYS) machineGun.push({ file: effects[i]!.asset, plays: j - i, from: round(effects[i]!.start), to: round(effects[j - 1]!.start) });
     i = j;
   }
@@ -418,8 +416,11 @@ export function fileSound(input: FileSoundInput): ReviewSound {
   };
 }
 
-/** Craft warnings of the sound review list. */
-export function soundWarnings(sound: ReviewSound): ReviewFinding[] {
+/**
+ * Craft warnings of the sound review list. Not the placement warnings of `sound place` (`soundWarnings` in
+ * `sound/place.ts`, ADR 0038 decision 5), which this list does not lint yet.
+ */
+export function soundListWarnings(sound: ReviewSound): ReviewFinding[] {
   const found: ReviewFinding[] = [];
   for (const span of sound.voice?.low ?? []) {
     found.push({
@@ -443,7 +444,7 @@ export function soundWarnings(sound: ReviewSound): ReviewFinding[] {
       check: "machine-gun",
       from: run.from,
       to: run.to,
-      message: `${run.file} plays ${run.plays} times in a row from ${run.from} to ${run.to} s, the same sample at the same pitch: it reads as a machine gun. Alternate variants or seeds.`,
+      message: `${run.file} plays ${run.plays} times in a row from ${run.from} to ${run.to} s, each within ${MACHINE_GUN_GAP_S} s of the last, the same sample at the same pitch: it reads as a machine gun. Alternate variants or seeds.`,
     });
   }
   for (const clip of sound.chopped ?? []) {
@@ -461,7 +462,7 @@ export function soundWarnings(sound: ReviewSound): ReviewFinding[] {
       check: "ending",
       from: null,
       to: null,
-      message: `the music is ${Math.abs(ending.level)} dB under its loudest on the last frame, above ${CHOP_DB} dB: it is cut, not resolved. End the film on the music's final hit (\`music fit\`) or fade it out.`,
+      message: `the music is ${Math.abs(ending.level)} dB under its loudest on the last frame, above ${CHOP_DB} dB: it is cut, not resolved. Let its final hit ring out before the last frame (\`music fit --end\` at the end-card cut) or fade it (\`music shape --ending\`).`,
     });
   }
   if (ending?.measure === "mix") {

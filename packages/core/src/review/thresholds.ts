@@ -62,6 +62,11 @@ export const SFX_REPEAT_MAX = 2;
 export const SFX_REPEAT_EXEMPT: readonly SfxKind[] = ["tick", "click"];
 /** Plays of one sample in a row that read as a machine gun (earshot: 4 events of one sample with pitch spread under 0.1 semitone). */
 export const MACHINE_GUN_PLAYS = 4;
+/**
+ * Most seconds between two plays of a machine-gun run: earshot's rule is about rapid repeats, so one effect heard every
+ * 20 s is not one. One take twice in a row at any distance is `sound place`'s warning (ADR 0038 decision 5), not this list's.
+ */
+export const MACHINE_GUN_GAP_S = 1;
 /** Most files listed in `sound.repeats` and runs in `sound.machineGun`. */
 export const SOUND_LISTED = 20;
 /** Level against its loudest (dB) above which a sound's tail is chopped rather than decayed (earshot: unfaded tail above -35 dB re peak). */
