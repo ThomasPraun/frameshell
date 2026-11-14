@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, REVIEW_KEEP, type ReviewResult, RpcError, connectToDaemon } from "@frameshell/protocol";
@@ -268,6 +268,51 @@ describe("review method", () => {
       const runs = readdirSync(join(project, ".frameshell", "review")).map(Number).sort((a, b) => a - b);
       expect(runs).toHaveLength(REVIEW_KEEP);
       expect(runs.at(-1)).toBeGreaterThan(REVIEW_KEEP);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "judges requirements.json: checks, a waived warning with its reason, a failure; the file stays as written",
+    async () => {
+      const shown = await conn.request("timeline.show", { cwd: project });
+      const [first, second] = shown.tracks.flatMap((track) => track.clips.map((clip) => clip.id));
+      const path = join(project, "requirements.json");
+      const invalid = await conn.request("file.write", { path, content: JSON.stringify({ schemaVersion: 1, fail: ["loud"] }) }).catch((error: unknown) => error);
+      expect(invalid).toMatchObject({ code: ErrorCode.InvalidProjectFile });
+      const content = JSON.stringify({
+        schemaVersion: 1,
+        film: { maxSeconds: 2, minSeconds: 1 },
+        clips: [
+          { clip: first, appearsBy: 0.5, before: second },
+          { clip: second, appearsBy: "payoff" },
+        ],
+        fail: ["frame-0"],
+        waivers: [{ check: "frame-0", reason: "the film fades in from black" }],
+      });
+      await conn.request("file.write", { path, content });
+      try {
+        const { metrics } = await conn.request("review", { cwd: project, sheets: ["metrics"] });
+        const { requirements } = metrics!;
+        expect(requirements!.file).toBe("requirements.json");
+        expect(requirements!.checks.map((check) => [check.id, check.status])).toEqual([
+          ["film.maxSeconds", "fail"],
+          ["film.minSeconds", "pass"],
+          ["clip.appearsBy", "pass"],
+          ["clip.before", "pass"],
+          ["clip.appearsBy", "pass"],
+        ]);
+        expect(requirements!.failed).toBe(1);
+        expect(metrics!.craft.map((warning) => warning.check)).not.toContain("frame-0");
+        expect(metrics!.waived).toEqual([expect.objectContaining({ check: "frame-0", reason: "the film fades in from black" })]);
+        expect(requirements!.waivers).toEqual([{ check: "frame-0", reason: "the film fades in from black", matched: 1 }]);
+        expect(readFileSync(path, "utf8")).toBe(content);
+      } finally {
+        rmSync(path, { force: true });
+      }
+      const none = await conn.request("review", { cwd: project, sheets: ["metrics"] });
+      expect(none.metrics!.requirements).toBeNull();
+      expect(none.metrics!.waived).toEqual([]);
     },
     MEDIA_TIMEOUT,
   );

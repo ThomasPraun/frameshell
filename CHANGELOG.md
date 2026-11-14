@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Requirements and waivers of `review`, fifth slice of #457 (epic #451; protocol 127; `requirements.json`, `metrics.requirements`,
+  `metrics.waived`, craft `severity`): a project's `requirements.json` (project root, written with `file.write`, validated on
+  write, JSON Schema `requirements.json`) states what the film must be and `review` judges it on every run with metrics.
+  `film`: `maxSeconds`, `minSeconds`, `maxStatic` (longest still stretch), `endCard.minSeconds` (the last picture holds still
+  and is not blank) and, for a `--file`, `loudness` `target` LUFS (`tolerance` 1.5 LU) and `maxTruePeak`; `captions.minSize`
+  (share of the short side, read from the subtitle tracks); per clip `appearsBy` (seconds or a marker, through the shared
+  TimeRef resolver), `before` and `keepsMoving.maxStatic`. Each is a `pass`, `fail` or `skipped` (with why: a timeline has no
+  loudness, a file has no clips, the range stops short of the end) in `metrics.requirements.checks`. Craft warnings stay `warn`
+  unless the file lists their check in `fail`; a waiver (`check`, optional `clip`, `reason`) moves the warnings it covers out of
+  `craft` into `metrics.waived` with its reason, so an accepted warning is reported, never dropped, and a waiver that covers
+  nothing is listed with `matched: 0`. `requirements.failed` (failed checks plus craft warnings of severity `fail`) makes
+  `frameshell review` exit 1. `ReviewMetrics` gains `waived` and `requirements`, craft warnings gain `severity`; the check list
+  moved to `@frameshell/schema` (`CRAFT_CHECKS`). Not yet: `staysInFrame` and other pixel-level clip assertions, the sound
+  review list, waivers kept on the clip in the timeline.
 - 3D in generated clips, slices 1 and 2 of #473 (ADR 0042, epic #451): the `hyperframes` plugin template
   `product-shot` (`frameshell hyperframes new <name> --template product-shot`) paints a three.js scene on the motion
   runtime's clock: a product (a built-in rounded box with a label picture, or your GLB from the composition directory)

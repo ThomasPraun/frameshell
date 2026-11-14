@@ -216,6 +216,19 @@ export {
   voiceChainOf,
   glassOf,
 } from "./style.js";
+export {
+  CRAFT_CHECKS,
+  CaptionRequirementsSchema,
+  ClipRequirementSchema,
+  FilmRequirementsSchema,
+  REQUIREMENTS_FILE,
+  REQUIREMENTS_SCHEMA_URL,
+  RequirementsFileSchema,
+  WaiverSchema,
+  type CraftCheck,
+  type RequirementsFile,
+  parseRequirementsFile,
+} from "./requirements.js";
 export { STYLE_TOKEN_PREFIX, type StyleTokenFace, styleTokenCss } from "./style-tokens.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {

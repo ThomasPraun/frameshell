@@ -1,4 +1,4 @@
-import type { MediaProbe, ReviewCraftWarning, ReviewDelivery, ReviewLoudness } from "@frameshell/protocol";
+import type { MediaProbe, ReviewFinding, ReviewDelivery, ReviewLoudness } from "@frameshell/protocol";
 import type { ExportPreset } from "@frameshell/schema";
 import { DELIVERY_FPS, DELIVERY_FRAMES, DELIVERY_LOUDNESS_LU } from "./thresholds.js";
 
@@ -62,7 +62,7 @@ export function deliveryChecks(plan: Planned, preset: Pick<ExportPreset, "video"
 }
 
 /** One craft warning for a delivery that differs from its plan; none when every check holds. */
-export function deliveryWarnings(delivery: ReviewDelivery): ReviewCraftWarning[] {
+export function deliveryWarnings(delivery: ReviewDelivery): ReviewFinding[] {
   const wrong = delivery.checks.filter((check) => !check.ok);
   if (wrong.length === 0) return [];
   const list = wrong.map((check) => `${check.field} is ${check.actual ?? "missing"}, the plan says ${check.expected}`);
