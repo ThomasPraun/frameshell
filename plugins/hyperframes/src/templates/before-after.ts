@@ -92,7 +92,7 @@ export const beforeAfter: Template = {
       var L = M.pick({ w: 0.76, h: 0.74 }, { w: 0.82, h: 0.72 }, { w: 0.86, h: 0.64 });
       var cardW = L.w * S.width * P.size;
       var cardH = L.h * S.height * P.size;
-      var down = P.direction === "down" || (P.direction === "auto" && S.height >= S.width * 0.9);
+      var down = P.direction === "down" || (P.direction === "auto" && S.format === "tall");
       var em = unit * 0.026;
 
       var bg = document.getElementById("bg");
@@ -191,7 +191,7 @@ export const beforeAfter: Template = {
         afterPane.style.clipPath = down ? "inset(0 0 " + shown + "% 0)" : "inset(0 " + shown + "% 0 0)";
         var edge = M.ease("enter", (t - AT + 0.15) / 0.15) * (1 - M.ease("enter", (t - AT - P.wipeTime) / 0.2));
         M.write(divider, { x: down ? 0 : pos, y: down ? pos : 0, opacity: edge });
-        M.write(handle, { x: down ? 0 : pos, y: down ? pos : 0, scale: 0.6 + 0.4 * M.spring("snappy", t - AT + 0.15), opacity: edge });
+        put(handle, { x: down ? 0 : pos, y: down ? pos : 0, scale: 0.6 + 0.4 * M.spring("snappy", t - AT + 0.15), opacity: edge });
         M.write(beforeChip, { opacity: M.ease("enter", (t - 0.4) / 0.25) * (1 - M.ease("enter", (t - AT - P.wipeTime * 0.75) / 0.2)) });
         M.write(afterChip, { opacity: M.ease("enter", (t - AT - P.wipeTime * 0.25) / 0.25) });
       });

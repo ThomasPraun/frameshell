@@ -127,17 +127,23 @@ export const emphasisMarker: Template = {
       function norm(text) {
         return String(text).toLowerCase().replace(/[^\\p{L}\\p{N}]/gu, "");
       }
-      var plain = words.map(norm);
+      // Words with no letter or digit (a lone dash) are skipped on both sides; kept[k] is the word index of the k-th kept word.
+      var kept = [];
+      var plain = [];
+      words.forEach(function (word, k) {
+        var text = norm(word);
+        if (text) { kept.push(k); plain.push(text); }
+      });
       var want = String(P.mark).split(/\\s+/).map(norm).filter(Boolean);
       var first = -1;
-      for (var i = 0; want.length && first < 0 && i + want.length <= n; i++) {
+      for (var i = 0; want.length && first < 0 && i + want.length <= plain.length; i++) {
         var same = true;
         for (var j = 0; j < want.length; j++) if (plain[i + j] !== want[j]) same = false;
         if (same) first = i;
       }
       var lastWord = n - 1;
       if (first < 0) first = Math.max(0, n - 2);
-      else lastWord = first + want.length - 1;
+      else { lastWord = kept[first + want.length - 1]; first = kept[first]; }
 
       // The wobble: a seeded hash of the shape's index, so the same seed always draws the same mark. -1..1.
       var seed = 0;
