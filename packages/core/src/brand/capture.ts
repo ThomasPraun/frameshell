@@ -2,13 +2,14 @@
 // brand (logos, icons, share image, colours, fonts, :root variables, headings, buttons) in an isolated world, take
 // the first screen and the whole page, and save what it found under assets/brand/<id>/ and assets/fonts/ with a
 // `brand.json` entry and a credits entry per file. It never writes `style.json`: it returns `style set` suggestions.
-import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { ErrorCode, type MethodResult, RpcError } from "@frameshell/protocol";
 import {
   BRAND_DIR,
   BRAND_FILE,
   type BrandCapture,
+  type BrandImport,
   type BrandManifest,
   MAX_SOURCE_URL,
   createBrandManifest,
@@ -17,10 +18,12 @@ import {
 import { readJsonIfExists, writeJsonAtomic, writeTextAtomic } from "../fs-util.js";
 import { Chrome, ChromePage } from "../inspect/chrome.js";
 import { pickAccent, rankColors, suggestStyle } from "./findings.js";
+import { fitFrames, readFigmaFolder } from "./figma.js";
 import { type DeclaredFace, bestSource, faceFor, firstFamily, fontExtension, isGenericFamily, isIconFamily, parseFontFaces, readFontNames } from "./fonts.js";
-import { PAGE_SCRIPT, type PageFindings, svgProblems } from "./page-script.js";
+import { PAGE_SCRIPT, type PageFindings } from "./page-script.js";
 import { CAPTURE_PORTS } from "./policy.js";
 import { CaptureProxy, type Dial, PROXY_REFUSAL_HEADER, type Resolve, fetchThrough } from "./proxy.js";
+import { LOGO_IMAGE_CHARS, sanitizeSvg, svgProblems } from "./svg.js";
 
 /** Limits of one capture (ADR 0044 decision 8): starting points, not measured. */
 export const CAPTURE_LIMITS = {
@@ -75,7 +78,7 @@ export interface BrandServiceOptions {
   /** Path of managed `chrome-headless-shell` for the project. */
   chrome(root: string): Promise<string>;
   /** Record provenance of files under `assets/` (`CreditsService.record`). */
-  credits(root: string, assets: string[], provenance: { sourceUrl: string; licence?: string; author?: string; title?: string }): Promise<unknown>;
+  credits(root: string, assets: string[], provenance: { sourceUrl?: string; licence?: string; author?: string; title?: string }): Promise<unknown>;
   /** Tests only: fake DNS and dial for the proxy, so a local fixture site stands for a public one. */
   network?: { resolve?: Resolve; dial?: Dial };
   /** Tests only: shorter waits. */
@@ -100,8 +103,11 @@ interface Pending {
   height: number | null;
 }
 
-/** Largest SVG file sanitised: it is parsed inside the page, as one string. */
+/** Largest SVG file a capture saves: a logo or icon, not a drawing. */
 const MAX_SVG_BYTES = 2 * 1024 * 1024;
+
+/** Sanitiser limits of a fetched logo or icon. */
+const SVG_FILE_LIMITS = { imageChars: LOGO_IMAGE_CHARS, elements: 20_000, depth: 100 };
 
 const RASTER = [
   { ext: "png", test: (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
@@ -110,7 +116,7 @@ const RASTER = [
   { ext: "webp", test: (b: Uint8Array) => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50 },
 ] as const;
 
-/** Captures brands into projects; the only writer of `brand.json`. */
+/** Captures brands and imports Figma frames into projects; the only writer of `brand.json`. */
 export class BrandService {
   readonly #options: BrandServiceOptions;
   readonly #limits: CaptureLimits;
@@ -290,19 +296,19 @@ export class BrandService {
           else pending.push({ name: `${name}.svg`, role: "logo", kind: "svg", sourceUrl: finalUrl, bytes: Buffer.from(logo.markup), width: logo.width, height: logo.height });
           continue;
         }
-        const file = await this.#picture(logo.url, name, "logo", fetchFile, evaluate, warnings);
+        const file = await this.#picture(logo.url, name, "logo", fetchFile, warnings);
         if (file) pending.push({ ...file, width: file.width ?? logo.width, height: file.height ?? logo.height });
       }
       let iconNumber = 0;
       for (const icon of found.icons) {
-        const file = await this.#picture(icon.url, `icon-${iconNumber + 1}`, "icon", fetchFile, evaluate, warnings);
+        const file = await this.#picture(icon.url, `icon-${iconNumber + 1}`, "icon", fetchFile, warnings);
         if (file) {
           iconNumber++;
           pending.push(file);
         }
       }
       if (found.og) {
-        const file = await this.#picture(found.og, "og", "og", fetchFile, evaluate, warnings);
+        const file = await this.#picture(found.og, "og", "og", fetchFile, warnings);
         if (file) pending.push(file);
       }
       pending.push({ name: "hero.png", role: "hero", kind: "raster", sourceUrl: finalUrl, bytes: hero, width: limits.width * limits.scale, height: limits.height * limits.scale });
@@ -389,7 +395,6 @@ export class BrandService {
     name: string,
     role: Pending["role"],
     fetchFile: (url: string) => ReturnType<typeof fetchThrough>,
-    evaluate: <T>(expression: string) => Promise<T>,
     warnings: string[],
   ): Promise<Pending | null> {
     let fetched: Awaited<ReturnType<typeof fetchThrough>>;
@@ -405,13 +410,12 @@ export class BrandService {
         warnings.push(`${target} was not saved: an SVG over ${MAX_SVG_BYTES / 1_048_576} MB is not a logo.`);
         return null;
       }
-      const clean =await evaluate<string | null>(`__frameshellBrand.sanitizeSvg(${JSON.stringify(fetched.body.toString("utf8"))})`);
-      const problem = clean === null ? "is not a readable SVG" : svgProblems(clean);
-      if (problem) {
-        warnings.push(`${target} was not saved: it ${problem}.`);
+      const clean = sanitizeSvg(fetched.body.toString("utf8"), SVG_FILE_LIMITS);
+      if (!clean.ok) {
+        warnings.push(`${target} was not saved: it ${clean.problem}.`);
         return null;
       }
-      return { name: `${name}.svg`, role, kind: "svg", sourceUrl: fetched.url, bytes: Buffer.from(clean!), width: null, height: null };
+      return { name: `${name}.svg`, role, kind: "svg", sourceUrl: fetched.url, bytes: Buffer.from(clean.value.svg), width: null, height: null };
     }
     const raster = RASTER.find((one) => one.test(fetched.body));
     if (!raster) {
@@ -517,6 +521,70 @@ export class BrandService {
     return { found: out, files };
   }
 
+  /** `brand.json` of project `root`; empty lists when it has none. Throws InvalidProjectFile when it is broken. */
+  async show(root: string): Promise<MethodResult<"brand.show">> {
+    const manifest = await readManifest(root);
+    const exists = (await stat(join(root, BRAND_FILE)).catch(() => null))?.isFile() ?? false;
+    return { dir: root, manifest: BRAND_FILE, exists, captures: manifest.captures, imports: manifest.imports };
+  }
+
+  /**
+   * Import the SVG frames of folder `dir` (absolute) into project `root`, fitted to `canvas` with one scale
+   * (ADR 0044 decision 10). Throws AssetNotFound when `dir` is not a folder, InvalidOperation (`no-frames`) when no
+   * frame could be kept.
+   */
+  async importFigma(root: string, dir: string, canvas: { width: number; height: number }): Promise<MethodResult<"brand.importFigma">> {
+    if (!(await stat(dir).catch(() => null))?.isDirectory()) {
+      throw new RpcError(ErrorCode.AssetNotFound, `brand.importFigma: ${dir} is not a folder. Export the Figma frames as SVG into one folder first.`, { path: dir });
+    }
+    const { frames, warnings } = await readFigmaFolder(dir);
+    if (frames.length === 0) {
+      const why = warnings.length > 0 ? `: ${warnings.slice(0, 5).join(" ")}` : ": it holds no .svg file.";
+      throw new RpcError(ErrorCode.InvalidOperation, `brand.importFigma: no frame of ${dir} could be imported${why}`, { op: "brand.importFigma", reason: "no-frames", field: "dir" });
+    }
+    const fit = fitFrames(frames, canvas);
+    const inside = relative(root, dir);
+    const source = inside === "" ? "." : inside.startsWith("..") || isAbsolute(inside) ? dir : inside.split(sep).join("/");
+    const entry = await this.#change(root, async () => {
+      const manifest = await readManifest(root);
+      const id = await freeId(root, manifest, basename(dir));
+      const entry: BrandImport = {
+        id,
+        kind: "figma",
+        source,
+        importedAt: new Date().toISOString(),
+        canvas: { width: canvas.width, height: canvas.height },
+        reference: fit.reference,
+        scale: fit.scale,
+        frames: frames.map((frame, index) => ({
+          path: `${BRAND_DIR}/${id}/${frame.file}`,
+          name: frame.name,
+          origin: "imported",
+          width: frame.width,
+          height: frame.height,
+          ...fit.places[index]!,
+          removed: frame.removed,
+        })),
+        warnings,
+      };
+      const next = parseBrandManifest({ ...manifest, imports: [...manifest.imports, entry] } satisfies BrandManifest);
+      if (!next.ok) throw new Error(`brand.importFigma: the import does not fit ${BRAND_FILE}: ${next.error}`);
+      const folder = join(root, ...BRAND_DIR.split("/"), id);
+      try {
+        for (const frame of frames) await writeTextAtomic(join(folder, frame.file), frame.svg);
+        await writeJsonAtomic(join(root, BRAND_FILE), next.value);
+      } catch (error) {
+        // freeId gave a folder that did not exist: remove it, so a failed import leaves no files brand.json misses.
+        await rm(folder, { recursive: true, force: true }).catch(() => {});
+        throw error;
+      }
+      return entry;
+    });
+    // No licence: `credits check` fails on a placed frame until the person confirms it is theirs (ADR 0026).
+    for (const frame of entry.frames) await this.#options.credits(root, [frame.path], { title: frame.name.replace(/\.svg$/i, "").slice(0, 300) || frame.name });
+    return { dir: root, manifest: BRAND_FILE, import: entry };
+  }
+
   /** Run `change` after the project's previous manifest change. */
   #change<T>(root: string, change: () => Promise<T>): Promise<T> {
     const run = (this.#tails.get(root) ?? Promise.resolve()).catch(() => {}).then(change);
@@ -570,10 +638,13 @@ async function readManifest(root: string): Promise<BrandManifest> {
   return parsed.value;
 }
 
-/** A capture id from the host (`www.example.com` → `example-com`), with `-2`, `-3`… when taken by a manifest entry or a folder. */
-async function freeId(root: string, manifest: BrandManifest, host: string): Promise<string> {
-  const base = host.toLowerCase().replace(/^www\./, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site";
-  const taken = new Set(manifest.captures.map((capture) => capture.id));
+/**
+ * A brand id from a host (`www.example.com` → `example-com`) or a folder name (`Acme Figma` → `acme-figma`), with
+ * `-2`, `-3`… when taken by a manifest entry or a folder.
+ */
+async function freeId(root: string, manifest: BrandManifest, name: string): Promise<string> {
+  const base = name.toLowerCase().replace(/^www\./, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "site";
+  const taken = new Set([...manifest.captures, ...manifest.imports].map((entry) => entry.id));
   const folders = await readdir(join(root, ...BRAND_DIR.split("/"))).catch(() => [] as string[]);
   for (const folder of folders) taken.add(folder);
   if (!taken.has(base)) return base;

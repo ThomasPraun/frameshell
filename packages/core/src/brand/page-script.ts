@@ -1,6 +1,7 @@
 // Script the capture installs in an isolated world of the page (`Page.createIsolatedWorld`): it shares the DOM
-// but not the page's globals, so the site's own scripts cannot replace getComputedStyle, DOMParser or
-// XMLSerializer under it. Everything it returns is data; SVG it serialises is checked again by `svgProblems`.
+// but not the page's globals, so the site's own scripts cannot replace getComputedStyle or XMLSerializer
+// under it. Everything it returns is data; SVG it serialises is checked again by `svgProblems`.
+import { EXTERNAL_CSS, LOGO_IMAGE_CHARS, SAFE_IMAGE, SVG_ELEMENTS, SVG_UNWRAP } from "./svg.js";
 
 /** Logo or icon candidate as the script reports it. */
 export type PageLogo =
@@ -37,7 +38,7 @@ export interface PageFindings {
   scrollHeight: number;
 }
 
-/** Installs `globalThis.__frameshellBrand` with `measure()`, `sanitizeSvg(text)` and `flatten()`. */
+/** Installs `globalThis.__frameshellBrand` with `measure()` and `flatten()`. */
 export const PAGE_SCRIPT = String.raw`(() => {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 1;
@@ -72,9 +73,10 @@ export const PAGE_SCRIPT = String.raw`(() => {
     return { tag: el.tagName.toLowerCase(), text: (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80), family: firstFamily(s.fontFamily), size: Math.round(parseFloat(s.fontSize) * 10) / 10, weight: Math.round(Number(s.fontWeight)) || 400, tracking: tracking(s), color: hex(s.color), background: hex(s.backgroundColor) };
   };
 
-  const ALLOWED = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "lineargradient", "radialgradient", "stop", "clippath", "mask", "pattern", "symbol", "use", "title", "desc", "image", "filter", "feblend", "fecolormatrix", "fecomponenttransfer", "fecomposite", "feflood", "fegaussianblur", "feoffset", "femerge", "femergenode", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fedropshadow", "femorphology"]);
-  const UNWRAP = new Set(["a", "switch"]);
-  const SAFE_IMAGE = /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]*$/i;
+  const ALLOWED = new Set(${JSON.stringify(SVG_ELEMENTS)});
+  const UNWRAP = new Set(${JSON.stringify(SVG_UNWRAP)});
+  const SAFE_IMAGE = new RegExp(${JSON.stringify(SAFE_IMAGE.source)}, "i");
+  const EXTERNAL_CSS = new RegExp(${JSON.stringify(EXTERNAL_CSS.source)}, "i");
   const SHAPES = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan"]);
   // Bake computed fill and stroke into a fresh clone, so classes and currentColor survive without the page's
   // stylesheets. Runs before anything changes the clone's structure: nodes are paired by document order.
@@ -108,9 +110,9 @@ export const PAGE_SCRIPT = String.raw`(() => {
         const local = name.replace(/^xlink:/, "");
         if (name.startsWith("on") || /javascript:|vbscript:/i.test(value)) el.removeAttribute(attr.name);
         else if (local === "href" || local === "src") {
-          const keep = value.startsWith("#") || (el.localName.toLowerCase() === "image" && SAFE_IMAGE.test(value) && value.length < 200000);
+          const keep = value.startsWith("#") || (el.localName.toLowerCase() === "image" && SAFE_IMAGE.test(value) && value.length <= ${LOGO_IMAGE_CHARS});
           if (!keep) el.removeAttribute(attr.name);
-        } else if (/url\(\s*['"]?(?!#)/i.test(value) || /@import|expression\(/i.test(value)) el.removeAttribute(attr.name);
+        } else if (EXTERNAL_CSS.test(value)) el.removeAttribute(attr.name);
       }
       if (el.localName.toLowerCase() === "image" && !el.getAttribute("href") && !el.getAttribute("xlink:href")) el.remove();
     }
@@ -241,13 +243,6 @@ export const PAGE_SCRIPT = String.raw`(() => {
     };
   };
 
-  const sanitizeSvg = (text) => {
-    const parsed = new DOMParser().parseFromString(text, "image/svg+xml");
-    const root = parsed.documentElement;
-    if (!root || root.localName !== "svg" || parsed.querySelector("parsererror")) return null;
-    return clean(root);
-  };
-
   // Fixed and sticky elements made static, so a full-page shot does not repeat headers and banners.
   const flatten = () => {
     for (const el of document.querySelectorAll("body *")) {
@@ -257,21 +252,6 @@ export const PAGE_SCRIPT = String.raw`(() => {
     return true;
   };
 
-  globalThis.__frameshellBrand = { measure, sanitizeSvg, flatten };
+  globalThis.__frameshellBrand = { measure, flatten };
   return true;
 })()`;
-
-/**
- * Why an SVG the page script returned must not be saved, or null. A second line behind the script's allowlist:
- * no script, no foreign content, no event handlers, no external reference, no DTD.
- */
-export function svgProblems(svg: string): string | null {
-  if (!/^<svg[\s>]/i.test(svg.trim())) return "not an SVG document";
-  if (/<!DOCTYPE|<!ENTITY/i.test(svg)) return "has a DTD";
-  if (/<\s*(script|foreignObject|iframe|object|embed)\b/i.test(svg)) return "has script or foreign content";
-  if (/\son[a-z]+\s*=/i.test(svg)) return "has an event handler";
-  if (/javascript:|vbscript:/i.test(svg)) return "has a script URL";
-  if (/(?:^|[\s:])href\s*=\s*["'](?!#|data:image\/(?:png|jpe?g|gif|webp);base64,)/i.test(svg)) return "has an external reference";
-  if (/url\(\s*['"]?(?!#)/i.test(svg) || /@import/i.test(svg)) return "has an external url()";
-  return null;
-}

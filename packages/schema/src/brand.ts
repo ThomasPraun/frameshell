@@ -96,19 +96,54 @@ export const BrandCaptureSchema = z.strictObject({
   warnings: z.array(z.string()),
 });
 
-/** Zod model of `brand.json` (ADR 0044): what each brand capture found and wrote. */
+/** Width Figma frames are usually designed at, CSS px (ADR 0044 decision 10). */
+export const FIGMA_FRAME_WIDTH = 1440;
+
+/** One frame of a Figma import: a sanitised SVG and where it sits on the project canvas. */
+export const BrandFrameSchema = z.strictObject({
+  path: z
+    .string()
+    .regex(/^assets\/brand\/[^\\]+\.svg$/, "must be a project-relative `.svg` path under `assets/brand/`")
+    .describe("Project-relative path of the sanitised frame, e.g. `assets/brand/acme-figma/home.svg`."),
+  name: z.string().min(1).max(255).describe("File name in the imported folder, e.g. `Home.svg`."),
+  origin: z.literal("imported").describe("Exported from a design file by the person; never redrawn."),
+  width: z.number().positive().describe("Frame width in its own px (`width` attribute, else the viewBox)."),
+  height: z.number().positive().describe("Frame height in its own px."),
+  x: z.number().describe("Left edge on the canvas after scaling by the import's `scale`, canvas px; centred, so negative when wider than the canvas."),
+  y: z.number().describe("Top edge on the canvas after scaling, canvas px; centred, so negative when taller than the canvas."),
+  removed: z.array(z.string()).describe("What the sanitiser removed, e.g. `1 script element`, `2 external references`; empty when nothing."),
+});
+
+/** One import of a folder of Figma SVG exports (ADR 0044 decision 10). */
+export const BrandImportSchema = z.strictObject({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "must be lowercase letters, digits and dashes").describe("Folder name under `assets/brand/`, from the imported folder's name."),
+  kind: z.literal("figma"),
+  source: z.string().min(1).max(4096).describe("Folder imported from: project-relative when inside the project, else absolute."),
+  importedAt: z.iso.datetime().describe("When the import ran (ISO 8601, UTC)."),
+  canvas: z.strictObject({ width: z.int().positive(), height: z.int().positive() }).describe("Project canvas (`resolution`) the frames were fitted to."),
+  reference: z.number().positive().describe(`Width the scale is taken from: the widest frame (Figma frames are usually ${FIGMA_FRAME_WIDTH} px).`),
+  scale: z.number().positive().describe("One factor for every frame of the folder: canvas width / `reference`. Never fitted per frame, so UI sizes match between screens."),
+  frames: z.array(BrandFrameSchema).min(1).describe("Frames kept, in file name order."),
+  warnings: z.array(z.string()).describe("Files skipped and why."),
+});
+
+/** Zod model of `brand.json` (ADR 0044): what each brand capture and Figma import found and wrote. */
 export const BrandManifestSchema = z
   .strictObject({
     $schema: z.string().optional(),
     schemaVersion: z.literal(SCHEMA_VERSION),
     captures: z.array(BrandCaptureSchema).default([]),
+    imports: z.array(BrandImportSchema).default([]),
   })
   .superRefine((file, ctx) => {
+    // Captures and imports share the folder namespace `assets/brand/<id>/`.
     const seen = new Set<string>();
-    file.captures.forEach((capture, index) => {
-      if (seen.has(capture.id)) ctx.addIssue({ code: "custom", message: `duplicate capture id ${capture.id}`, path: ["captures", index, "id"] });
-      seen.add(capture.id);
-    });
+    for (const list of ["captures", "imports"] as const) {
+      file[list].forEach((entry, index) => {
+        if (seen.has(entry.id)) ctx.addIssue({ code: "custom", message: `duplicate brand id ${entry.id}`, path: [list, index, "id"] });
+        seen.add(entry.id);
+      });
+    }
   });
 
 /** Validated `brand.json` content. */
@@ -117,9 +152,12 @@ export type BrandManifest = z.output<typeof BrandManifestSchema>;
 /** One capture of a {@link BrandManifest}. */
 export type BrandCapture = BrandManifest["captures"][number];
 
-/** A manifest with no captures, as the daemon writes it first. */
+/** One Figma import of a {@link BrandManifest}. */
+export type BrandImport = BrandManifest["imports"][number];
+
+/** A manifest with no captures or imports, as the daemon writes it first. */
 export function createBrandManifest(): BrandManifest {
-  return { $schema: BRAND_SCHEMA_URL, schemaVersion: SCHEMA_VERSION, captures: [] };
+  return { $schema: BRAND_SCHEMA_URL, schemaVersion: SCHEMA_VERSION, captures: [], imports: [] };
 }
 
 /** Validate unknown input as `brand.json`. Never throws. */

@@ -258,9 +258,13 @@ export {
   BRAND_FILE,
   BRAND_SCHEMA_URL,
   type BrandCapture,
+  BrandFrameSchema,
+  type BrandImport,
+  BrandImportSchema,
   BrandCaptureSchema,
   type BrandManifest,
   BrandManifestSchema,
+  FIGMA_FRAME_WIDTH,
   createBrandManifest,
   parseBrandManifest,
 } from "./brand.js";

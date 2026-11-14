@@ -1547,6 +1547,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         });
       });
     },
+    "brand.show": async ({ cwd }) => brands.show(await root(cwd)),
+    "brand.importFigma": async ({ cwd, dir: folder }) => {
+      const dir = await root(cwd);
+      if (/^~(?:[/\\]|$)/.test(folder)) {
+        throw new RpcError(ErrorCode.AssetNotFound, `brand.importFigma: ${folder} starts with ~, which the daemon does not expand: pass the folder's absolute path.`, { path: folder });
+      }
+      return brands.importFigma(dir, resolve(cwd, folder), (await readProjectConfig(dir)).resolution);
+    },
     "analyze.diff": async ({ cwd, file, reference, name, lag, maxLag, every, snapshots }, _caller, request) => {
       const dir = await root(cwd);
       const path = resolve(cwd, file);

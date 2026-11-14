@@ -478,6 +478,148 @@
         ],
         "additionalProperties": false
       }
+    },
+    "imports": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Folder name under `assets/brand/`, from the imported folder's name."
+          },
+          "kind": {
+            "type": "string",
+            "const": "figma"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Folder imported from: project-relative when inside the project, else absolute."
+          },
+          "importedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "When the import ran (ISO 8601, UTC)."
+          },
+          "canvas": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ],
+            "additionalProperties": false,
+            "description": "Project canvas (`resolution`) the frames were fitted to."
+          },
+          "reference": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Width the scale is taken from: the widest frame (Figma frames are usually 1440 px)."
+          },
+          "scale": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "One factor for every frame of the folder: canvas width / `reference`. Never fitted per frame, so UI sizes match between screens."
+          },
+          "frames": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "pattern": "^assets\\/brand\\/[^\\\\]+\\.svg$",
+                  "description": "Project-relative path of the sanitised frame, e.g. `assets/brand/acme-figma/home.svg`."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "description": "File name in the imported folder, e.g. `Home.svg`."
+                },
+                "origin": {
+                  "type": "string",
+                  "const": "imported",
+                  "description": "Exported from a design file by the person; never redrawn."
+                },
+                "width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Frame width in its own px (`width` attribute, else the viewBox)."
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Frame height in its own px."
+                },
+                "x": {
+                  "type": "number",
+                  "description": "Left edge on the canvas after scaling by the import's `scale`, canvas px; centred, so negative when wider than the canvas."
+                },
+                "y": {
+                  "type": "number",
+                  "description": "Top edge on the canvas after scaling, canvas px; centred, so negative when taller than the canvas."
+                },
+                "removed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "What the sanitiser removed, e.g. `1 script element`, `2 external references`; empty when nothing."
+                }
+              },
+              "required": [
+                "path",
+                "name",
+                "origin",
+                "width",
+                "height",
+                "x",
+                "y",
+                "removed"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Frames kept, in file name order."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files skipped and why."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "importedAt",
+          "canvas",
+          "reference",
+          "scale",
+          "frames",
+          "warnings"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

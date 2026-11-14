@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (labelled ESTIMATED in `labels`; at most 300 are classified, with a warning). The CLI prints a `Cuts` line and lists the
   jump cuts and punches; the skill (`reference-video.md`), `docs/mcp.md` and SPEC say how to read them. New files in
   `packages/core/src/analyze/` (`framing.ts`, `cuts.ts`), after HyperFrames' `measure` (Apache-2.0, #478).
+- Figma import and `brand show`, next slice of #467 (ADR 0044 decision 10, epic #451; protocol 138):
+  `frameshell brand import-figma <dir>` (daemon `brand.importFigma`, MCP `brand_import_figma`) imports a folder of SVG
+  frames exported from Figma into `assets/brand/<id>/` with no network. Each file is sanitised by the same allowlist as
+  captured logos, now in Node (`brand/svg.ts`: a strict XML parse with no internal DTD subset and only the predefined
+  entities, so an Illustrator DOCTYPE naming the SVG 1.1 DTD is kept; no script, `foreignObject`, `style` element,
+  event handler, external `href`/`url()`, quoted URL in `image-set()`/`image()`/`cross-fade()`/`src()`, CSS escape;
+  embedded rasters up to 10 MB of text); a file that is not well-formed, declares entities or states no size is
+  skipped with a warning. The whole folder
+  gets one scale (project canvas width / widest frame), each frame its centred position, recorded in `brand.json`
+  (`imports`, published schema) with what the sanitiser removed; every frame gets a credits entry with no licence.
+  `frameshell brand show` (daemon `brand.show`, MCP `brand_show`) prints the captures and imports of `brand.json` with
+  their provenance. `brand.capture` now sanitises fetched SVG files with the same Node sanitiser instead of the page.
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also

@@ -30,7 +30,7 @@ import {
   InboxTakeResultSchema,
   TargetChangedSchema,
 } from "./targets.js";
-import { BrandCaptureResultSchema } from "./brand.js";
+import { BrandCaptureResultSchema, BrandImportFigmaResultSchema, BrandShowResultSchema } from "./brand.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "./analyze.js";
 import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 137;
+export const PROTOCOL_VERSION = 138;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1750,6 +1750,41 @@ export const methods = {
       url: z.string().min(1).max(MAX_SOURCE_URL).describe("Public page to capture, `http` or `https`, at most 2048 characters, e.g. `https://example.com/pricing`."),
     }),
     result: BrandCaptureResultSchema,
+  },
+  "brand.show": {
+    mutating: false,
+    description:
+      "The project's brand as recorded in `brand.json` (ADR 0044): every web capture (`brand.capture`: logo, icon, share-image, " +
+      "screenshot and font files with their source URL, colours by role with the accent, fonts by use with each face's licence, " +
+      "`:root` variables, headings, buttons, warnings) and every Figma import (`brand.importFigma`: frames with their source folder, " +
+      "size, the import's one scale and each frame's centred position on the canvas, what the sanitiser removed). Read it before " +
+      "building anything branded, and use these files instead of drawing a logo or product UI. Whether a file may be published is " +
+      "`credits.check`. `exists` is false (lists empty) when no capture or import ran. Fails with InvalidProjectFile (`brand.json` " +
+      "is broken), ProjectNotFound.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: BrandShowResultSchema,
+  },
+  "brand.importFigma": {
+    mutating: true,
+    description:
+      "Import a folder of SVG frames exported from Figma as brand components (ADR 0044 decision 10), so a motion template can zoom " +
+      "into a button and stay sharp. Every `.svg` file directly in `dir` (file name order, at most 200, 25 MB each, 200 MB together) " +
+      "is sanitised by an allowlist: no script, `foreignObject`, `style` element, event handler, external `href`, `url()` or `image-set()`, " +
+      "external `<use>` or entity declaration; embedded `data:` PNG/JPEG/GIF/WebP rasters are kept up to 10 MB of text each. A file that is not well-formed XML, " +
+      "declares entities (an internal DTD subset) or states no size (width/height or viewBox) is skipped with a warning. The frames are written to " +
+      "`assets/brand/<id>/<name>.svg` (`<id>` from the folder name, `-2` when taken) and recorded in `brand.json` with ONE scale for " +
+      "the whole folder (project canvas width / widest frame; Figma frames are usually 1440 px wide), never fitted per frame, and each " +
+      "frame's top-left once centred on the canvas. Each frame gets a `credits.json` entry with no licence, so `credits check` fails " +
+      "on a placed frame until the person confirms it is theirs (`credits set <file> --licence own`). Nothing goes over the network. " +
+      "Example: `{ dir: \"/Users/me/Desktop/acme-figma\" }`; `~` is not expanded. Fails with AssetNotFound (`dir` is not a folder " +
+      "or starts with `~`), " +
+      "InvalidOperation (`reason: no-frames`: no frame could be kept; the message says why), InvalidProjectFile (`brand.json` is " +
+      "broken), ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      dir: z.string().min(1).describe("Folder of exported SVG frames, absolute or relative to `cwd`."),
+    }),
+    result: BrandImportFigmaResultSchema,
   },
   gc: {
     mutating: true,
