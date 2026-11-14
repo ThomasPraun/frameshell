@@ -156,7 +156,8 @@ export async function planGridMoves(timeline: Timeline, fps: number, request: Gr
     const entry = report[index]!;
     if (entry.id !== null && skip.has(entry.id)) entry.status = "skipped";
     const target = entry.status === "move" ? entry.beat! : cut.at;
-    const tried = await tryCut(current, cut, target, { frames, ripple, deps });
+    const between = { original: timeline, from: cut.frame, until: cuts[index + 1]?.frame ?? Number.POSITIVE_INFINITY };
+    const tried = await tryCut(current, cut, target, { frames, ripple, deps, between });
     entry.warnings.push(...tried.warnings);
     if (tried.ok) {
       current = tried.timeline;
@@ -170,6 +171,7 @@ export async function planGridMoves(timeline: Timeline, fps: number, request: Gr
       entry.reason = tried.reason;
     } else {
       entry.warnings.push(`It moved ${ms(tried.at - cut.at)} ms with the cuts before it and cannot be put back: ${tried.reason}`);
+      entry.warnings.push(...(await syncSlips(current, between, frames, deps)).map((slip) => `So ${slip}, up to the next cut.`));
     }
   }
 
@@ -240,9 +242,15 @@ type Tried =
 /**
  * Put `cut` on timeline second `target` in `timeline` (as earlier cuts left it): a ripple trim of the clip before the
  * cut over the `ripple` tracks, and plain trims of the clips of those tracks that end with it, each applied in memory.
- * Refused when the cut is gone, a shot would be trimmed, the engine refuses, or a word would be cut, dropped or added.
+ * Refused when the cut is gone, a shot would be trimmed, the engine refuses, a word would be cut, dropped or added, or a
+ * clip of `between` would slip against its own sound (`syncSlips`).
  */
-async function tryCut(timeline: Timeline, cut: Cut, target: number, context: { frames: FrameGrid; ripple: readonly string[]; deps: GridMovesDeps }): Promise<Tried> {
+async function tryCut(
+  timeline: Timeline,
+  cut: Cut,
+  target: number,
+  context: { frames: FrameGrid; ripple: readonly string[]; deps: GridMovesDeps; between: Between },
+): Promise<Tried> {
   const { frames, ripple, deps } = context;
   const warnings: string[] = [];
   const lead = findClip(timeline, cut.out);
@@ -269,7 +277,11 @@ async function tryCut(timeline: Timeline, cut: Cut, target: number, context: { f
         if (isShotClip(clip)) return { ok: false, at, reason: `shot ${clip.id} of program track ${track.id} ends at the cut; grid moves do not trim multicam shots.`, warnings };
         followers.push({ track, clip });
       } else if (meets || frames.frame(clip.start) === frame) {
-        warnings.push(`${clip.id} on ${track.id} meets the cut, but its track keeps its timing (a clip on it runs across a cut): it ends up ${Math.abs(ms(shift))} ms off the cut.`);
+        warnings.push(
+          `${clip.id} on ${track.id} ${meets ? "ends" : "starts"} on the cut, but its track keeps its timing (a clip on it runs across a cut): ` +
+            `it stays where it is, so ${incoming.clip.id}, the shot after the cut, starts ${Math.abs(ms(shift))} ms ${shift < 0 ? "before" : "after"} it ` +
+            `${meets ? "ends" : "starts"} and plays that much out of sync with it.`,
+        );
       }
     }
   }
@@ -308,7 +320,66 @@ async function tryCut(timeline: Timeline, cut: Cut, target: number, context: { f
       return { ok: false, at, reason: `${what} (${clip.asset} ${round3(from)}–${round3(to)} s).`, warnings };
     }
   }
+  const slips = await syncSlips(next, context.between, frames, deps);
+  if (slips.length > 0) return { ok: false, at, reason: `after the move ${slips.join("; ")}.`, warnings };
   return { ok: true, timeline: next, requests, warnings };
+}
+
+/** The clips a cut's move settles: those that started from `from` up to (not at) `until`, frames of the planned timeline. */
+interface Between {
+  original: Timeline;
+  from: number;
+  until: number;
+}
+
+/**
+ * Clips of `between` (by their place in the planned timeline) that played in sync with a clip of the same file with sound
+ * (same speed, same source second at the same timeline second, overlapping) and no longer do in `now`: a J or L cut whose
+ * sound stays on a track that keeps its timing while its picture moved with the ripple.
+ */
+async function syncSlips(now: Timeline, between: Between, frames: FrameGrid, deps: Pick<GridMovesDeps, "end" | "hasAudio">): Promise<string[]> {
+  const placed = async (state: Timeline) => {
+    const list: { id: string; track: AnyClipTrack; clip: MediaClip; start: number; end: number; zero: number }[] = [];
+    for (const track of state.tracks.filter(isClipTrack)) {
+      for (const clip of track.clips as readonly AnyClip[]) {
+        if (!("asset" in clip)) continue;
+        const end = await deps.end(clip).catch(() => null);
+        // Timeline second where the clip would show its file's second 0.
+        if (end !== null) list.push({ id: clip.id, track, clip, start: clip.start, end, zero: clip.start - clip.in / (clip.speed ?? 1) });
+      }
+    }
+    return list;
+  };
+  const before = await placed(between.original);
+  const after = new Map((await placed(now)).map((entry) => [entry.id, entry]));
+  const slips: string[] = [];
+  const seen = new Set<string>();
+  for (const moved of before) {
+    const frame = frames.frame(moved.start);
+    if (frame < between.from || frame >= between.until) continue;
+    const movedNow = after.get(moved.id);
+    // Only a clip that moved itself: its partner may start in the range and stay put while the clip is past `until`.
+    if (!movedNow || frames.frame(movedNow.zero - moved.zero) === 0) continue;
+    for (const partner of before) {
+      if (partner.id === moved.id || partner.clip.asset !== moved.clip.asset || (partner.clip.speed ?? 1) !== (moved.clip.speed ?? 1)) continue;
+      if (frames.frame(partner.zero) !== frames.frame(moved.zero) || partner.start >= moved.end || moved.start >= partner.end) continue;
+      const partnerNow = after.get(partner.id);
+      if (!partnerNow) continue;
+      const drift = movedNow.zero - moved.zero - (partnerNow.zero - partner.zero);
+      if (frames.frame(drift) === 0) continue;
+      const key = [moved.id, partner.id].sort().join(" ");
+      if (seen.has(key)) continue;
+      const sounding = [moved, partner].some((entry) => entry.clip.audio?.muted !== true);
+      const audible = moved.track.kind === "audio" || partner.track.kind === "audio" || (await deps.hasAudio(moved.clip.asset));
+      if (!sounding || !audible) continue;
+      seen.add(key);
+      slips.push(
+        `${moved.id} on ${moved.track.id} plays ${Math.abs(ms(drift))} ms ${drift > 0 ? "late" : "early"} against ${partner.id} on ${partner.track.id}, ` +
+          `its own sound from ${moved.clip.asset} on a track that keeps its timing (a clip on it runs across a cut)`,
+      );
+    }
+  }
+  return slips;
 }
 
 /** Warnings about what stays while the cuts move: markers on a moved cut, and music shape hits whose shot moved. */

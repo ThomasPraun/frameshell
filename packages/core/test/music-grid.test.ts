@@ -182,6 +182,55 @@ describe("planGridMoves", () => {
     expect(shortPlan.cuts[1]!.reason).toMatch(/past the end of assets\/short\.mp4/);
   });
 
+  it("blocks a move that would put a shot out of sync with its own J-cut sound on a track that keeps its timing", async () => {
+    // c_s is c_b1's own sound (same file, same source second at the same timeline second), starting 0.3 s before its picture.
+    const state = timeline([2.1, 4.4], [{ id: "t_d", kind: "audio", clips: [media("c_s", "assets/talk.mp4", 1.8, 2.6, 4.7)] }], "assets/talk.mp4");
+    const plan = await planGridMoves(state, 30, request(), deps(state, { "assets/talk.mp4": [] }));
+    expect(plan.ripple).toEqual(["t_v"]);
+    expect(plan.cuts[0]).toMatchObject({ id: "g1", status: "blocked", landsAt: 2.1 });
+    expect(plan.cuts[0]!.reason).toBe(
+      "after the move c_b1 on t_v plays 100 ms early against c_s on t_d, its own sound from assets/talk.mp4 on a track that keeps its timing (a clip on it runs across a cut).",
+    );
+    // c_c1 is not c_s's picture: the cut moves, and the sound ending on it is named with what that does to the next shot.
+    expect(plan.cuts[1]).toMatchObject({ id: "g2", status: "move", landsAt: 4.5 });
+    expect(plan.cuts[1]!.warnings).toContainEqual(
+      "c_s on t_d ends on the cut, but its track keeps its timing (a clip on it runs across a cut): it stays where it is, so c_c1, the shot after the cut, starts 100 ms after it ends and plays that much out of sync with it.",
+    );
+    const after = await applied(state, plan.requests);
+    expect(clip(after, "c_b1").start).toBe(2.1);
+  });
+
+  it("warns when a cut cannot be put back after an earlier move, naming a shot that slips against its sound", async () => {
+    // g1 moves 2.4 -> 2.5; putting 4 back would cut "now" from the end of c_b1, so c_c1 stays 100 ms late against c_s.
+    const state = timeline([2.4, 4], [{ id: "t_d", kind: "audio", clips: [media("c_s", "assets/talk.mp4", 3.8, 2, 9.8)] }], "assets/talk.mp4");
+    const plan = await planGridMoves(state, 30, request(), deps(state, { "assets/talk.mp4": [{ text: "now", start: 6.52, end: 6.58 }] }));
+    expect(plan.cuts.map(({ id, status, landsAt }) => [id, status, landsAt])).toEqual([
+      ["g1", "move", 2.5],
+      [null, "on-grid", 4.1],
+    ]);
+    expect(plan.cuts[1]!.warnings).toEqual([
+      expect.stringMatching(/^It moved 100 ms with the cuts before it and cannot be put back: would cut "now" from the end of c_b1/),
+      "So c_c1 on t_v plays 100 ms late against c_s on t_d, its own sound from assets/talk.mp4 on a track that keeps its timing (a clip on it runs across a cut), up to the next cut.",
+    ]);
+    expect(plan.durationChange).toBe(0.1);
+  });
+
+  it("runs the duck again after the moves when the music carries duck keys, unless skipped", async () => {
+    const state = timeline([2.1, 4.4]);
+    const music = clip(state, "c_ma") as Extract<Clip, { type: "media" }>;
+    music.keys = { gain: [{ at: 0, value: 0, auto: "duck" }, { at: 3, value: -7, auto: "duck" }] };
+    const plan = await planGridMoves(state, 30, request({ dryRun: true }), deps(state));
+    expect(plan.duck).toEqual({ under: ["t_v"], rerun: true, parameters: "defaults" });
+    expect(plan.duckAgain).toEqual({ track: "t_m", under: ["t_v"], settings: null });
+    expect(plan.warnings).toContainEqual(expect.stringMatching(/^c_ma carries duck keys: duck would run again on t_m over t_v/));
+
+    const skipped = await planGridMoves(state, 30, request({ skip: ["duck"] }), deps(state));
+    expect(skipped.duck).toEqual({ under: ["t_v"], rerun: false, parameters: "defaults" });
+    expect(skipped.duckAgain).toBeNull();
+    expect(skipped.warnings).toContainEqual(expect.stringMatching(/no longer line up with the voice that moved with the cuts \(skipped\)/));
+    expect(skipped.requests.length).toBeGreaterThan(0);
+  });
+
   it("warns when a clip with sound has no transcript to check", async () => {
     const state = timeline([2.1, 4.4], [], "assets/talk.mp4");
     const plan = await planGridMoves(state, 30, request(), deps(state));

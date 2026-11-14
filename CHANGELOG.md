@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--max-shift` (0.25 s) gets an id and lands exactly on the beat by a ripple trim of the clip before it, over the tracks
   with no clip across a cut, so the music, voice lines and backgrounds keep their timing and the shot's own sound is trimmed
   with it. Every other cut is put back where it was, so only the shots between change length. A move is blocked when the
-  file has no more material, a clip would be empty or overlap, a multicam shot would be trimmed, or a transcribed word
-  would be cut or added; `--dry-run` lists every cut with its status. Duck keys on the music are written again. One
+  file has no more material, a clip would be empty or overlap, a multicam shot would be trimmed, a transcribed word
+  would be cut or added, or a shot would slip against its own sound from the same file left on a track that keeps its
+  timing (a J or L cut); `--dry-run` lists every cut with its status. Duck keys on the music are written again. One
   transaction `Music grid: …`.
 - Brand capture from a URL, slice 3 of #467 (ADR 0044, epic #451; protocol 128): `frameshell brand capture <url>` (MCP
   `brand_capture`, job kind `brand`) opens a public `http`/`https` page in the managed headless Chrome, whose only way out
