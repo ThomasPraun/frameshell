@@ -11,9 +11,9 @@ export const MUSIC_FIT_MIN_CONFIDENCE = 0.5;
 /** One thing a fit does, so a dry run can be read and a step dropped with `skip`. */
 export const MusicFitStepSchema = z.object({
   id: z
-    .enum(["place", "intro", "speed", "duck", "shape"])
+    .enum(["place", "intro", "speed", "fade", "duck", "shape"])
     .describe(
-      "`place`: move the clip. `intro`: drop the start of the track (`in` later). `speed`: varispeed (`exact`). `duck`: run `track.duck` again on the clip's track. " +
+      "`place`: move the clip. `intro`: drop the start of the track (`in` later). `speed`: varispeed (`exact`). `fade`: the 5 ms fade in of the clip's start (`audio.fadeInMs`), written unless the clip already has a fade in. `duck`: run `track.duck` again on the clip's track. " +
         "`shape`: run `music.shape` again with the settings stored on the clip (`audio.shape`).",
     ),
   detail: z.string().describe("One sentence the person can read, e.g. `start 4.2 s -> 6 s`."),
@@ -134,7 +134,7 @@ export const MusicCandidatesResultSchema = z.object({
 
 /** One thing a shaping does. */
 export const MusicShapeStepSchema = z.object({
-  id: z.enum(["shape", "duck"]).describe("`shape`: write the `music` keys. `duck`: run `track.duck` again on the clip's track, since the keys replace its duck keys."),
+  id: z.enum(["fade", "shape", "duck"]).describe("`fade`: the 5 ms fade in of the clip's start (`audio.fadeInMs`), written first unless the clip already has a fade in. `shape`: write the `music` keys. `duck`: run `track.duck` again on the clip's track, since the keys replace its duck keys."),
   detail: z.string().describe("One sentence the person can read."),
 });
 

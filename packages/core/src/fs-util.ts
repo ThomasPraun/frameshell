@@ -48,6 +48,11 @@ export async function writeTextAtomic(path: string, content: string | Uint8Array
 const BUSY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
 /** Longest a rename keeps retrying: a reader holds its handle for milliseconds, an antivirus scan longer. */
 const RENAME_RETRY_MS = 3_000;
+/**
+ * Longest pause between attempts. The window a rename needs (no handle open on the target) lasts
+ * milliseconds, so a long pause skips past it: more, closer attempts in the same {@link RENAME_RETRY_MS}.
+ */
+const RENAME_BACKOFF_CAP_MS = 25;
 
 /**
  * `rename`, retried with backoff on Windows while another handle blocks it (EPERM, EACCES, EBUSY):
@@ -57,7 +62,7 @@ const RENAME_RETRY_MS = 3_000;
  */
 export async function renameRetrying(from: string, to: string): Promise<void> {
   const deadline = Date.now() + RENAME_RETRY_MS;
-  for (let delayMs = 10; ; delayMs = Math.min(delayMs * 2, 200)) {
+  for (let delayMs = 10; ; delayMs = Math.min(delayMs * 2, RENAME_BACKOFF_CAP_MS)) {
     try {
       await rename(from, to);
       return;

@@ -6,6 +6,7 @@ import {
   ErrorCode,
   type EventName,
   type EventParams,
+  type AnalyzeDiffResult,
   type AnalyzeResult,
   type FrameResult,
   type Progress,
@@ -65,7 +66,7 @@ const INSTRUCTIONS =
   "start/end/at/from/to, source seconds for in/out), snapped to the frame grid. Read the timeline (resource " +
   "`frameshell://timelines/main` or `timeline_show`) before editing and use the ids it returns. Every mutating tool " +
   "returns the new `revision` and `operation.tx`; `revert` with that tx id undoes your change, `tx_begin`/`tx_commit` " +
-  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets, safe-zone sheets with `platform`, and `metrics`: still stretches, loudness of a `file`, sound sync, loop seam, a `file` against its export plan with `preset`, craft warnings); measure a reference video with `analyze` (shots, palette, look, rhythm, events, loudness, tempo). `history` with `since` " +
+  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets, safe-zone sheets with `platform`, and `metrics`: still stretches, loudness of a `file`, sound sync, loop seam, a `file` against its export plan with `preset`, craft warnings); measure a reference video with `analyze` (shots, palette, look, rhythm, events, curve, ink, sync, loudness, tempo) and compare our film with it with `analyze_diff`. `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
   "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +
@@ -205,7 +206,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     if (tool.name === "frame_capture") return capture(await link.get(), args);
     if (tool.name === "frames_strip") return strip(await link.get(), args);
     const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
-    if (tool.method === "review" || tool.method === "analyze") return withSheets(result as ReviewResult | AnalyzeResult);
+    if (tool.method === "review" || tool.method === "analyze" || tool.method === "analyze.diff") return withSheets(result as ReviewResult | AnalyzeResult | AnalyzeDiffResult);
     if (tool.method === "transcribe" || tool.method === "transcribe.speakers") {
       const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
       // Speakers rewrite an existing transcript: its resource changed, the list did not.
@@ -342,7 +343,7 @@ function imagesToSend<T extends { path: string }>(sheets: readonly T[]): T[] {
  * `review` and `analyze`: the sheets as images (at most {@link REVIEW_MAX_IMAGES}, see {@link imagesToSend}), then the run's facts with each sheet's
  * tiles reduced to their labels, which name the frame and why it is there.
  */
-async function withSheets(result: ReviewResult | AnalyzeResult): Promise<CallToolResult> {
+async function withSheets(result: ReviewResult | AnalyzeResult | AnalyzeDiffResult): Promise<CallToolResult> {
   const content: CallToolResult["content"] = [];
   for (const sheet of imagesToSend<{ path: string }>(result.sheets)) {
     const image = pngForModel(await readFile(sheet.path), REVIEW_MAX_SIDE, REVIEW_MAX_SIDE);

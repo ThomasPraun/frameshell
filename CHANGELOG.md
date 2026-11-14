@@ -9,7 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Zoom, slats and a pixel grid, slice 4 of #483 (ADR 0030, epic #451; protocol 123): `transition set --kind zoom|slats|grid`
+- The 5 ms fade in of #485 (ADR 0037), now that sample-accurate audio fades exist (#585): `music fit`, `music shape`
+  and `music candidates` give the music clip's start `audio.fadeInMs` 5, as one more step of the same transaction
+  (`revert` undoes it with the fit; one proposal in review mode), so a track cut mid-waveform does not click. A fade
+  in already on the clip (`audio.fadeInMs`, `fadeIn` or a dissolve) is kept; `music fit --skip fade` leaves it out; where
+  a fit already lands, the fade is all it writes. `fade` joins the step ids of `music.fit` and `music.shape` (protocol 123).
+- `analyze` curve, ink, mouth sync and labels, and `analyze diff` (#471 slice 3, epic #451; protocol 124): the result and
+  `analysis.json` of `frameshell analyze` gain
+  - `curve`: the change of the picture over time (`values` every `step` seconds, 0.1 or longer for a film over 2 minutes,
+    a cut is a spike) and its `moves`, the steady stretches between the big changes, each with its start, duration, peak
+    and the closest ease (`linear`, `in`, `out`, `inOut`, by the speed profile against the cubic eases) with its `fit`;
+    the direction and overshoot of a move are not measured (the change has no sign);
+  - `ink`, for the film and for every shot: the share of the 8 x 6 grid that gains detail over its quiet level in the
+    shot (text and graphics coming and going), its `peak`, when and the `region` of cells;
+  - `sync`: seconds the mouth of a talking face moves after the voice, by correlating the picture motion in the mouth area
+    of the face box of the `people scan` cached for this exact file (found by content; scans keep boxes, not landmarks)
+    with the loudness of the sound, within 0.5 s; skipped with a `reason` (no sound, no scan, no face for 3 s, no relation);
+  - `labels`: MEASURED, ESTIMATED or DECISION for every value, by field path (a key covers what is inside it, the most
+    specific wins; `labelOf` in the protocol). `frameshell analyze` prints the label before each line.
+  New daemon method `analyze.diff` (job kind `analyze`, MCP `analyze_diff`) and `frameshell analyze diff <film> <reference>
+  [--name n] [--lag s] [--max-lag s] [--every s] [--snapshots n]`: our film against a reference, lined up by activity-curve
+  alignment (the lag within `--max-lag`, 3 s by default, or the one you give) and read at matched times: `energy` (mean and 95th
+  percentile of the motion of each, their ratio, second-by-second windows), SSIM from ffmpeg's `ssim` every `--every` s
+  (0.5), and a side-by-side sheet (ours left, `--snapshots` pairs, the lowest-SSIM moments among them) through the sheet code
+  of `review`. A distance to read, not a pass or fail. Written to `.frameshell/analysis/<name>/` (`diff.json`, `diff.png`).
+  New files in `packages/core/src/analyze/` (`curve.ts`, `ink.ts`, `lip.ts`, `lip-run.ts`, `align.ts`, `correlate.ts`,
+  `activity.ts`, `diff.ts`), after HyperFrames' `measure` (Apache-2.0, #478). Skill page `reference-video.md` explains how to
+  read them and how to report them.
+- Zoom, slats and a pixel grid, slice 4 of #483 (ADR 0030, epic #451; protocol 125): `transition set --kind zoom|slats|grid`
   (MCP `transition_set`) with `--origin` for a zoom and `--count` (2 to 64) for slats and a grid. A zoom dives the
   outgoing clip into the centre of `--origin` (up to 4 times larger, by the larger side of the rectangle; default the
   middle half) while the incoming clip grows out of the same point; slats uncover the incoming clip in `--count` strips
@@ -784,6 +811,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The preview keeps the pitch of a clip at speed ≠ 1, like export (#499, epic #451): its program audio stretches a
+  sped-up clip's sound with WSOLA (2048-sample Hann frames, the window of export `atempo` at 48 kHz, each moved by up
+  to 512 samples to line up with the one before) instead of resampling it, so a 1.25x clip no longer sounds higher in
+  the app than in the file. Reads of one clip carry the alignment over from one to the next during a play; speed 1 is
+  sample-for-sample unchanged. A test plays tones at 0.75x, 1.25x and 2x through the preview and the real export mix:
+  the same pitch within 2 Hz, the sound on time within one 128-sample block, sample-accurate fades the same (also at
+  2x and 0.75x: the fades ramp over program samples after the stretch). Export is unchanged: `atempo` stays with no
+  pre-roll (ADR 0037), since it is on time for continuous sound and early only on a hit right after digital silence (up
+  to about 21 ms, a known limit); `music fit --exact` warns about that case.
 - Voiceover cost dialog (#586, ADR 0034 decision 20; protocol 118): the paid run is bound to what the person saw.
   `voiceover.generate`'s `ConfirmationRequired` carries a `confirmation` token (provider, voice, lines to say and their
   cost), the app sends it back with `yes`, and a paid run whose lines or cost changed since (the script was edited while
@@ -798,6 +834,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placement for the next time it opens (#533).
 - CLI: `import --wait`, `render --wait` and other job followers no longer print a step twice when the job list the
   daemon answers is older than the events already read (#533).
+- Windows: an atomic write (`writeTextAtomic`) whose target a reader keeps opening tries the rename again every
+  25 ms at most instead of every 200 ms, so it reaches the moment no handle is open within the same 3 s (#533).
 
 ## [0.18.0] - 2026-11-07
 

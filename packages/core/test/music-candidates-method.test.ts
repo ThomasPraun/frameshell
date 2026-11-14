@@ -140,6 +140,8 @@ describe("music.candidates", () => {
         const clip = track.clips[0] as MediaClip;
         expect(clip).toMatchObject({ id: candidate.clip, asset: candidate.asset, start: candidate.place.start, in: candidate.place.in });
         expect(clip.audio?.gain ?? 0).toBe(candidate.gain);
+        // Every entry gets the 5 ms fade in, ADR 0037.
+        expect(clip.audio?.fadeInMs).toBe(5);
         if (candidate.hit) {
           const lands = clip.start + (candidate.hit.at - clip.in) / (clip.speed ?? 1);
           expect(Math.abs(lands - 11)).toBeLessThanOrEqual(1 / FPS / 2 + 1e-6);

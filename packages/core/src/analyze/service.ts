@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { ANALYSIS_DIR, ANALYSIS_MANIFEST, type AnalyzeEvent, type AnalyzeResultShape, type AnalyzeSheet, type AnalyzeShotLook, ErrorCode, RpcError } from "@frameshell/protocol";
+import { ANALYSIS_DIR, ANALYSIS_MANIFEST, ANALYZE_RESULT_LABELS, type AnalyzeDiffResultShape, type AnalyzeEvent, type AnalyzeResultShape, type AnalyzeSheet, type AnalyzeShotLook, ErrorCode, RpcError } from "@frameshell/protocol";
 import { effectiveBeatGrid, isLowConfidence } from "@frameshell/schema";
 import { pool } from "../export/service.js";
 import { probeMedia, runTool } from "../media/ffmpeg.js";
@@ -14,7 +14,11 @@ import { readRawFrames } from "../media/raw-frames.js";
 import { Frames, writeSheetImages } from "../review/images.js";
 import { type Critical, type FramePick, contactPicks, frameRange, sheetLayout } from "../review/plan.js";
 import { captureParallelism, fileSource } from "../review/source.js";
+import { curveOf } from "./curve.js";
+import { type AnalyzeDiffHooks, type AnalyzeDiffRequest, runDiff } from "./diff.js";
 import { elementEvents, flashes, hitEvents, holds, soundHits } from "./events.js";
+import { inkOf } from "./ink.js";
+import { measureSync } from "./lip-run.js";
 import { measureLoudness } from "./loudness.js";
 import { type Look, LookBuilder } from "./look.js";
 import { PALETTE_SIZE, PaletteBuilder } from "./palette.js";
@@ -23,7 +27,7 @@ import { rhythmOf } from "./rhythm.js";
 import { sceneScores } from "./scene.js";
 import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
 
-// `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, loudness and tempo of a reference video, on the managed ffmpeg.
+// `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness and tempo of a reference video, on the managed ffmpeg.
 // Frame sampling and sheet tiling are `review`'s (`review/plan.ts`, `review/images.ts`); the beat detector is `media/beats.ts`.
 
 /** Most tiles of the contact sheet in all images: a longer film is sampled more coarsely than 2 per second. */
@@ -70,6 +74,11 @@ export interface AnalyzeHooks {
 export function analysisName(file: string): string {
   const slug = basename(file, extname(file)).toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-._]+|[-._]+$/g, "").slice(0, 64);
   return slug === "" ? "video" : slug;
+}
+
+/** Name of the comparison folder when the caller gives none: `<film>-vs-<reference>`, cut to 64 characters. */
+export function diffName(film: string, reference: string): string {
+  return `${analysisName(film)}-vs-${analysisName(reference)}`.slice(0, 64).replace(/[-._]+$/, "");
 }
 
 /** The sound of a video decoded for the detectors. */
@@ -135,9 +144,13 @@ export class AnalyzeService {
     const cutFrames = cuts.map((cut) => cut.frame);
     const { rhythm, changes } = rhythmOf(series.activity, fps, shots.map((shot) => shot.endFrame - shot.startFrame), cutFrames);
     const events: AnalyzeEvent[] = [...flashes(series.brightness, fps), ...holds(series.activity, fps), ...elementEvents(series, cutFrames, fps)];
+    const { curve, truncated: movesCut } = curveOf(series.activity, fps, changes.map((change) => change.frame));
+    if (movesCut) warnings.push("curve: more than 200 moves found, the first 200 are listed.");
+    const ink = inkOf(series, shots, fps);
 
     let loudness: AnalyzeResultShape["loudness"] = null;
     let tempo: TempoWithBeats | null = null;
+    let voiceDb: Float32Array | null = null;
     if (probe.audio) {
       stage("Measuring the loudness", 0.5);
       loudness = await measureLoudness(ffmpeg, request.file, signal);
@@ -146,12 +159,15 @@ export class AnalyzeService {
       const soundScratch = join(root, ".frameshell", "cache", "analyze", randomBytes(6).toString("hex"));
       try {
         const sound = await decodeSound(ffmpeg, request.file, soundScratch, warnings, signal);
-        events.push(...hitEvents(soundHits(energyEnvelope(pcm16(sound.data), sound.rate), ENERGY_HOP_S), changes.map((change) => change.frame), fps, series.frames));
+        voiceDb = energyEnvelope(pcm16(sound.data), sound.rate);
+        events.push(...hitEvents(soundHits(voiceDb, ENERGY_HOP_S), changes.map((change) => change.frame), fps, series.frames));
         tempo = await this.#tempo(root, request.file, sound, warnings, signal, (fraction) => hooks.progress?.(0.55 + 0.1 * fraction));
       } finally {
         await rm(soundScratch, { recursive: true, force: true });
       }
     } else warnings.push("audio: the video has no sound, so there is no loudness, tempo or hits.");
+    stage("Looking for a talking face", 0.6);
+    const sync = await measureSync(root, ffmpeg, request.file, { fps, frames, width, height }, voiceDb, signal);
     events.sort((a, b) => a.startFrame - b.startFrame || a.endFrame - b.endFrame);
     const listed = capEvents(events, warnings);
 
@@ -196,21 +212,35 @@ export class AnalyzeService {
         image: images[i]!,
         palette: palettes.shots[i]!,
         look: shotLook(lookOf(looks[i]!, i)),
+        ink: ink.shots[i]!,
       })),
       stats: shotStats(shots, fps),
       palette: palettes.overall,
       look: wholeLook,
       rhythm,
       events: listed,
+      curve,
+      ink: ink.film,
+      sync,
       loudness,
       tempo: tempo ? withoutBeats(tempo) : null,
       sheets,
       warnings,
+      labels: { ...ANALYZE_RESULT_LABELS },
     };
     const manifest = { ...result, shots: result.shots.map((shot, i) => ({ ...shot, look: lookOf(looks[i]!, i) })), tempo: tempo ?? null };
     await writeFile(join(dir, ANALYSIS_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
     hooks.progress?.(1);
     return result;
+  }
+
+  /**
+   * Compare our film with a reference (`analyze.diff`): lined up by activity, then SSIM, energy and a side-by-side sheet, into
+   * `.frameshell/analysis/<name>/`. Never touches project files.
+   */
+  async diff(root: string, request: Omit<AnalyzeDiffRequest, "name"> & { name?: string | undefined }, hooks: AnalyzeDiffHooks = {}): Promise<AnalyzeDiffResultShape> {
+    const name = request.name ?? diffName(request.file, request.reference);
+    return runDiff({ root, ffmpeg: await this.#options.ffmpeg(root), ffprobe: await this.#options.ffprobe(root) }, { ...request, name }, hooks);
   }
 
   /** The tempo of `sound`, or null with a warning when it holds no steady beat. */

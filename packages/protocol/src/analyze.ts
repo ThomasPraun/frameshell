@@ -10,7 +10,7 @@ export const ANALYSIS_DIR = ".frameshell/analysis";
 export const ANALYSIS_MANIFEST = "analysis.json";
 
 /** The sheets `analyze` can write. */
-export const ANALYZE_SHEETS = ["contact", "shots"] as const;
+export const ANALYZE_SHEETS = ["contact", "shots", "diff"] as const;
 
 /** One colour of a palette. */
 export interface AnalyzeColor {
@@ -41,6 +41,84 @@ export interface AnalyzeLook extends AnalyzeShotLook {
   grid: string[];
 }
 
+/** Where a value in an analysis comes from; every value of an `analyze` result carries one (see `labels`). */
+export const ANALYZE_LABELS = ["MEASURED", "ESTIMATED", "DECISION"] as const;
+
+/** One of {@link ANALYZE_LABELS}. */
+export type AnalyzeLabel = (typeof ANALYZE_LABELS)[number];
+
+/** A box on the picture, as fractions of its width and height (0 to 1, origin top left). */
+export interface AnalyzeBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** How much of the picture graphics and text cover. */
+export interface AnalyzeInk {
+  /** Mean over the frames of the share of the picture covered, 0 to 1. */
+  mean: number;
+  /** Largest share covered in any frame. */
+  peak: number;
+  /** Seconds of the first frame with the `peak`; null when nothing is covered. */
+  peakAt: number | null;
+  /** Box around what is covered at that frame, in steps of one grid cell (1/8 wide, 1/6 high); null when nothing is covered. */
+  region: AnalyzeBox | null;
+}
+
+/** The eases a move is compared with. */
+export const ANALYZE_EASES = ["linear", "in", "out", "inOut"] as const;
+
+/** A stretch of steady motion of the picture. */
+export interface AnalyzeMove {
+  startFrame: number;
+  /** The frame after the last one. */
+  endFrame: number;
+  start: number;
+  end: number;
+  /** `endFrame - startFrame` frames ÷ fps, rounded down. */
+  duration: number;
+  /** Largest change between two frames inside, grey levels 0 to 255 on a 64 px wide picture, 2 decimals. */
+  peak: number;
+  /** Seconds of the frame with the `peak`. */
+  peakAt: number;
+  /** The ease whose speed profile is closest to the move's: `linear` (steady), `in` (starts slow, ends fast), `out` (starts fast, settles), `inOut` (slow, fast, slow); null for a move under 4 frames or over 3 s. */
+  ease: (typeof ANALYZE_EASES)[number] | null;
+  /** Root-mean-square gap between the move's speed and that ease's, in units of the mean speed (0 an exact match), 3 decimals; null when `ease` is. */
+  fit: number | null;
+}
+
+/** How much the picture changes over time. */
+export interface AnalyzeCurve {
+  /** Seconds each value covers (0.1, or more for a long film so that there are at most 1200 values). */
+  step: number;
+  /** Mean change between consecutive frames in each `step`, grey levels 0 to 255 on a 64 px wide picture, 2 decimals; value `i` starts at `i * step` seconds. */
+  values: number[];
+  /** Mean over every frame. */
+  mean: number;
+  /** Largest change between two frames. */
+  peak: number;
+  /** Seconds of that frame. */
+  peakAt: number;
+  /** Stretches of steady motion between the big changes of the picture, in time order, at most 200. */
+  moves: AnalyzeMove[];
+}
+
+/** The lag between a talking face's mouth and the voice. */
+export interface AnalyzeSync {
+  /** Seconds the mouth moves after the voice (negative: before it), to the frame; null when it could not be measured (see `reason`). */
+  offset: number | null;
+  /** How alike mouth motion and voice level are at that offset, 0 to 1 (Pearson correlation); null when not measured. */
+  confidence: number | null;
+  /** The face track of the people scan the mouth was read from (`t1`…); null when not measured. */
+  track: string | null;
+  /** Frames the two were compared on. */
+  frames: number;
+  /** Why there is no offset; null when there is one. */
+  reason: string | null;
+}
+
 /** One shot of the film. */
 export interface AnalyzeShot {
   /** 1-based, in film order. */
@@ -63,6 +141,8 @@ export interface AnalyzeShot {
   palette: AnalyzeColor[];
   /** How the shot looks. `analysis.json` adds `grid` (the 8 x 6 colour grid of the shot) to it. */
   look: AnalyzeShotLook;
+  /** How much of the picture graphics and text cover in the shot, seen as detail that is not there at the shot's quietest. */
+  ink: AnalyzeInk;
 }
 
 /** How the film is cut. */
@@ -202,12 +282,20 @@ export interface AnalyzeResultShape {
   rhythm: AnalyzeRhythm;
   /** Flashes, appearing and disappearing elements, holds and sound hits, in time order. */
   events: AnalyzeEvent[];
+  /** How much the picture changes over time, and the moves in it. */
+  curve: AnalyzeCurve;
+  /** How much of the picture graphics and text cover over the whole film. */
+  ink: AnalyzeInk;
+  /** Mouth against voice; `reason` says why not when it was not measured. */
+  sync: AnalyzeSync;
   /** Null when the video has no sound. */
   loudness: AnalyzeLoudness | null;
   /** Null when there is no sound, or no steady beat in it (see `warnings`). */
   tempo: AnalyzeTempo | null;
   sheets: AnalyzeSheet[];
   warnings: string[];
+  /** MEASURED, ESTIMATED or DECISION for every value: the key is the path of a field (`shots[].ink`, `events`), and covers everything inside it. */
+  labels: Record<string, AnalyzeLabel>;
 }
 
 const ColorSchema = z.object({
@@ -222,6 +310,54 @@ const ShotLookSchema = z.object({
   warmth: z.number().describe("Mean of (red - blue) over 255, -1 blue to 1 red: above 0 the picture leans warm, below it cool."),
 });
 
+const BoxSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+const InkSchema = z.object({
+  mean: z.number().describe("Mean over the frames of the share of the picture covered by graphics or text, 0 to 1, 3 decimals."),
+  peak: z.number().describe("Largest share covered in any frame, 0 to 1."),
+  peakAt: z.number().nullable().describe("Seconds of the first frame with the `peak`; null when nothing is covered."),
+  region: BoxSchema.nullable().describe("Box around what is covered at that frame, as fractions of the picture's width and height (origin top left), in steps of one grid cell (1/8 wide, 1/6 high); null when nothing is covered."),
+});
+
+const MoveSchema = z.object({
+  startFrame: z.int(),
+  endFrame: z.int().describe("The frame after the last one."),
+  start: z.number(),
+  end: z.number(),
+  duration: z.number().describe("`endFrame - startFrame` frames ÷ fps, rounded down, seconds."),
+  peak: z.number().describe("Largest change between two frames inside the move, grey levels 0 to 255 on a 64 px wide picture."),
+  peakAt: z.number().describe("Seconds of the frame with the `peak`."),
+  ease: z
+    .enum(ANALYZE_EASES)
+    .nullable()
+    .describe("The ease whose speed profile is closest to the move's: `linear` (steady), `in` (starts slow, ends fast), `out` (starts fast, settles), `inOut` (slow, fast, slow). Null for a move under 4 frames or over 3 s (camera work, a subject walking)."),
+  fit: z.number().nullable().describe("Root-mean-square gap between the move's speed and that ease's, in units of the mean speed: 0 is an exact match, over 0.5 a poor one. Null when `ease` is."),
+});
+
+const CurveSchema = z.object({
+  step: z.number().describe("Seconds each value covers: 0.1, or more for a long film so that there are at most 1200 values."),
+  values: z.array(z.number()).describe("Mean change between consecutive frames in each `step`, grey levels 0 to 255 on a 64 px wide picture, 2 decimals. Value `i` starts at `i * step` seconds; a cut is a spike."),
+  mean: z.number().describe("Mean over every frame."),
+  peak: z.number().describe("Largest change between two frames."),
+  peakAt: z.number().describe("Seconds of that frame."),
+  moves: z.array(MoveSchema).describe("Stretches of steady motion between the big changes of the picture (a pan, a slide-in, a zoom, a counter), in time order, at most 200. The direction of a move and any overshoot are not measured: the change has no sign."),
+});
+
+const SyncSchema = z.object({
+  offset: z.number().nullable().describe("Seconds the mouth moves after the voice (negative: before it), to the frame. Positive: the picture is late or the sound early. Null when not measured: see `reason`."),
+  confidence: z.number().nullable().describe("How alike mouth motion and voice level are at that offset, 0 to 1 (Pearson correlation). Under 0.2 there is no offset. Null when not measured."),
+  track: z.string().nullable().describe("The face track of the people scan the mouth was read from (`t1`…); null when not measured."),
+  frames: z.int().describe("Frames the two were compared on."),
+  reason: z.string().nullable().describe("Why there is no offset (no sound, no people scan of this file, a face that does not talk…); null when there is one."),
+});
+
+const LabelsSchema = z.record(z.string(), z.enum(ANALYZE_LABELS));
+
 const ShotSchema = z.object({
   index: z.int().describe("1-based, in film order."),
   startFrame: z.int().describe("First frame (0-based) of the shot."),
@@ -233,6 +369,7 @@ const ShotSchema = z.object({
   image: z.string().describe("Absolute path of a JPEG of the shot's middle frame, at most 640 px on the long side."),
   palette: z.array(ColorSchema).describe("Dominant colours of the shot, up to 5, biggest first."),
   look: ShotLookSchema.describe("How the shot looks. `analysis.json` adds `grid` (the 8 x 6 colour grid of the shot) to it."),
+  ink: InkSchema.describe("How much of the picture graphics and text cover in the shot: detail in a grid cell that is not there at the shot's quietest. Text that stays on the whole shot is not seen."),
 });
 
 const LookSchema = z.object({
@@ -314,7 +451,7 @@ const TempoSchema = z.object({
 const SheetSchema = z.object({
   kind: z
     .enum(ANALYZE_SHEETS)
-    .describe("`contact`: a frame every half second (2 per second) plus the first frame of every shot, labelled with the time. `shots`: the middle frame of every shot, labelled `#<shot> <start>`."),
+    .describe("`contact`: a frame every half second (2 per second) plus the first frame of every shot, labelled with the time. `shots`: the middle frame of every shot, labelled `#<shot> <start>`. `diff` (`analyze.diff` only): our film beside the reference at matched times, ours on the left."),
   path: z.string().describe("Absolute path of the PNG."),
   width: z.int(),
   height: z.int(),
@@ -344,8 +481,225 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
   look: LookSchema.describe("How the whole film looks: brightness, contrast, saturation, warmth and an 8 x 6 colour grid."),
   rhythm: RhythmSchema.describe("How the film moves in time: shot-length spread, share of still frames, big changes, bursts."),
   events: z.array(EventSchema).describe("Flashes, appearing and disappearing elements, holds and sound hits, in time order. A hint to check on the sheets, not a guarantee."),
+  curve: CurveSchema.describe("How much the picture changes over time (every cut is a spike) and the steady moves in it, each with the closest ease."),
+  ink: InkSchema.describe("How much of the picture graphics and text cover over the whole film; each shot's own is in `shots[].ink`."),
+  sync: SyncSchema.describe("Mouth against voice for a talking face, from the face scan of `people scan` when this file has one cached; otherwise `reason` says why it is skipped."),
   loudness: LoudnessSchema.nullable().describe("Null when the video has no sound."),
   tempo: TempoSchema.nullable().describe("Null when there is no sound, or no steady beat in it (see `warnings`)."),
   sheets: z.array(SheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
   warnings: z.array(z.string()).describe("What could not be measured (no sound, no beat, sound too long for the beat detector…); empty when none."),
+  labels: LabelsSchema.describe("MEASURED (read from the frames or the sound), ESTIMATED (a heuristic's hint: check the frames it names) or DECISION (a choice of the run) for every value: the key is the path of a field (`shots[].ink`, `events`) and covers all inside it; the most specific key wins. Say these words when you report a number."),
 });
+
+/**
+ * The label of every value of an `analyze` result, by field path (`[]` for an array): a key covers everything inside it
+ * and a more specific key wins. A test walks a real result to keep this complete.
+ */
+export const ANALYZE_RESULT_LABELS: Readonly<Record<string, AnalyzeLabel>> = {
+  file: "MEASURED",
+  name: "DECISION",
+  dir: "DECISION",
+  fps: "MEASURED",
+  width: "MEASURED",
+  height: "MEASURED",
+  frames: "MEASURED",
+  duration: "MEASURED",
+  threshold: "DECISION",
+  shots: "MEASURED",
+  "shots[].ink": "ESTIMATED",
+  stats: "MEASURED",
+  palette: "MEASURED",
+  look: "MEASURED",
+  rhythm: "MEASURED",
+  events: "ESTIMATED",
+  curve: "MEASURED",
+  "curve.step": "DECISION",
+  "curve.moves[].ease": "ESTIMATED",
+  "curve.moves[].fit": "ESTIMATED",
+  ink: "ESTIMATED",
+  sync: "MEASURED",
+  "sync.offset": "ESTIMATED",
+  loudness: "MEASURED",
+  tempo: "MEASURED",
+  "tempo.alternatives": "ESTIMATED",
+  sheets: "MEASURED",
+  warnings: "MEASURED",
+};
+
+/** Facts of one of the two films `analyze.diff` compares. */
+export interface AnalyzeDiffFilm {
+  /** Absolute path. */
+  file: string;
+  fps: number;
+  /** Size of the frames, px. */
+  width: number;
+  height: number;
+  frames: number;
+  /** Seconds: `frames` ÷ fps, rounded down. */
+  duration: number;
+}
+
+/** How the two films were lined up in time. */
+export interface AnalyzeDiffAlignment {
+  /** Seconds to add to a time of our film to find the same moment of the reference (positive: the reference is later). */
+  lag: number;
+  /** `activity`: the lag of the best match of the two activity curves; `forced`: given by the caller; `none`: no clear match, 0 is used (see `warnings`). */
+  source: "activity" | "forced" | "none";
+  /** Pearson correlation of the two activity curves at `lag`, -1 to 1, 3 decimals; null when a curve is flat. */
+  correlation: number | null;
+  /** Most the search looked for either way, seconds. */
+  maxLag: number;
+}
+
+/** How much one film moves. */
+export interface AnalyzeDiffEnergy {
+  /** Mean change between consecutive frames over the matched stretch, grey levels 0 to 255 on a 64 px wide picture, 2 decimals. */
+  mean: number;
+  /** 95th percentile of that change. */
+  p95: number;
+}
+
+/** Activity of both films in one window of the matched stretch. */
+export interface AnalyzeDiffWindow {
+  /** Seconds of the start of the window in our film. */
+  at: number;
+  /** Mean change in our film in the window. */
+  film: number;
+  /** Mean change in the reference over the same window (`at + lag`). */
+  reference: number;
+}
+
+/** One SSIM reading. */
+export interface AnalyzeDiffSample {
+  /** Seconds in our film. */
+  at: number;
+  /** Seconds in the reference: `at + lag`. */
+  referenceAt: number;
+  /** Structural similarity of the two frames, -1 to 1 (1 identical), 3 decimals. */
+  ssim: number;
+}
+
+/** What `analyze.diff` measured. */
+export interface AnalyzeDiffResultShape {
+  /** Name of the comparison: its folder is `.frameshell/analysis/<name>/`. */
+  name: string;
+  /** Absolute folder: `diff.json`, the sheet. */
+  dir: string;
+  film: AnalyzeDiffFilm;
+  reference: AnalyzeDiffFilm;
+  alignment: AnalyzeDiffAlignment;
+  energy: {
+    /** Seconds each window covers. */
+    step: number;
+    film: AnalyzeDiffEnergy;
+    reference: AnalyzeDiffEnergy;
+    /** `film.mean` over `reference.mean`: above 1 our film moves more; null when the reference holds still. */
+    ratio: number | null;
+    windows: AnalyzeDiffWindow[];
+  };
+  diff: {
+    /** Seconds between readings. */
+    every: number;
+    /** Size both films were scaled to for the comparison, px. */
+    size: { width: number; height: number };
+    samples: AnalyzeDiffSample[];
+    /** Mean SSIM of the samples. */
+    mean: number;
+    /** Lowest SSIM and its time in our film. */
+    min: number;
+    minAt: number;
+    /** Share of the samples under 0.5, 0 to 1: how much of the film looks clearly different. */
+    below: number;
+  };
+  sheets: AnalyzeSheet[];
+  warnings: string[];
+  labels: Record<string, AnalyzeLabel>;
+}
+
+/** The label of every value of an `analyze.diff` result; see {@link ANALYZE_RESULT_LABELS}. */
+export const ANALYZE_DIFF_LABELS: Readonly<Record<string, AnalyzeLabel>> = {
+  name: "DECISION",
+  dir: "DECISION",
+  film: "MEASURED",
+  reference: "MEASURED",
+  alignment: "MEASURED",
+  "alignment.lag": "ESTIMATED",
+  "alignment.correlation": "ESTIMATED",
+  "alignment.maxLag": "DECISION",
+  energy: "MEASURED",
+  "energy.step": "DECISION",
+  diff: "MEASURED",
+  "diff.every": "DECISION",
+  "diff.size": "DECISION",
+  sheets: "MEASURED",
+  warnings: "MEASURED",
+};
+
+const DiffFilmSchema = z.object({
+  file: z.string().describe("Absolute path."),
+  fps: z.number(),
+  width: z.int().describe("Size of the frames, px."),
+  height: z.int(),
+  frames: z.int(),
+  duration: z.number().describe("Seconds: `frames` ÷ fps, rounded down."),
+});
+
+const DiffEnergySchema = z.object({
+  mean: z.number().describe("Mean change between consecutive frames over the matched stretch, grey levels 0 to 255 on a 64 px wide picture, 2 decimals."),
+  p95: z.number().describe("95th percentile of that change: the size of its big moves."),
+});
+
+/**
+ * What `analyze.diff` measured. Typed by hand like {@link AnalyzeResultSchema}: inferred from the Zod object inside the
+ * `methods` registry it is too long for TypeScript to print (TS7056).
+ */
+export const AnalyzeDiffResultSchema: z.ZodType<AnalyzeDiffResultShape> = z.object({
+  name: z.string().describe("Name of the comparison: its folder is `.frameshell/analysis/<name>/`."),
+  dir: z.string().describe("Absolute folder of the comparison: the sheet PNGs and `diff.json` (this result)."),
+  film: DiffFilmSchema.describe("Our film."),
+  reference: DiffFilmSchema.describe("The reference."),
+  alignment: z
+    .object({
+      lag: z.number().describe("Seconds to add to a time of our film to find the same moment of the reference (positive: the reference is later), to 50 ms."),
+      source: z.enum(["activity", "forced", "none"]).describe("`activity`: the lag of the best match of the two activity curves; `forced`: the caller's `lag`; `none`: no clear match, 0 is used."),
+      correlation: z.number().nullable().describe("Pearson correlation of the two activity curves at `lag`, -1 to 1, 3 decimals: above 0.5 the two move alike; null when a curve is flat."),
+      maxLag: z.number().describe("Most the search looked for either way, seconds."),
+    })
+    .describe("How the two films were lined up in time: the diff and the sheet read matching times, not the same times."),
+  energy: z
+    .object({
+      step: z.number().describe("Seconds each window covers."),
+      film: DiffEnergySchema,
+      reference: DiffEnergySchema,
+      ratio: z.number().nullable().describe("`film.mean` over `reference.mean`: above 1 our film moves more, below 1 less; null when the reference holds still."),
+      windows: z
+        .array(z.object({ at: z.number(), film: z.number(), reference: z.number() }))
+        .describe("Activity of both in each window of the matched stretch, `at` in seconds of our film (the reference's is `at + alignment.lag`): where one moves and the other holds, or the other way round."),
+    })
+    .describe("How much each film moves, and where, over the stretch both have."),
+  diff: z
+    .object({
+      every: z.number().describe("Seconds between readings."),
+      size: z.object({ width: z.int(), height: z.int() }).describe("Size both frames were scaled to for the comparison (the reference is stretched to our film's shape), px."),
+      samples: z.array(z.object({ at: z.number(), referenceAt: z.number(), ssim: z.number() })).describe("SSIM of our frame at `at` and the reference's at `referenceAt`, 3 decimals, 1 identical."),
+      mean: z.number().describe("Mean SSIM of the samples."),
+      min: z.number().describe("Lowest SSIM."),
+      minAt: z.number().describe("Seconds of the lowest, in our film."),
+      below: z.number().describe("Share of the samples under 0.5, 0 to 1: how much of the film looks clearly different. A different film made in the same style reads low everywhere; this is a distance to read, not a pass or fail."),
+    })
+    .describe("SSIM (structural similarity, ffmpeg's `ssim`) of the two films at matched times."),
+  sheets: z.array(SheetSchema).describe("Our film beside the reference at matched times (ours left, the reference right): the lowest SSIM moments and evenly spread ones, in time order."),
+  warnings: z.array(z.string()).describe("What was not clean (shapes differ, no clear alignment, a stretch too short…); empty when none."),
+  labels: LabelsSchema.describe("MEASURED, ESTIMATED or DECISION for every value, by field path; see `analyze`."),
+});
+
+/** Label of the value at `path` (`shots[3].ink.mean` or `shots[].ink.mean`) under `table`: the most specific key covering it; null when none does. */
+export function labelOf(table: Readonly<Record<string, AnalyzeLabel>>, path: string): AnalyzeLabel | null {
+  const parts = path.replace(/\[\d*\]/g, "[]").split(".");
+  for (let n = parts.length; n > 0; n--) {
+    const key = parts.slice(0, n).join(".");
+    const label = table[key] ?? table[key.replace(/\[\]$/, "")];
+    if (label) return label;
+  }
+  return null;
+}

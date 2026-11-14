@@ -4,7 +4,7 @@
 import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
-import { type AudioRead, audioReads, renderRead, sourceWindow } from "./audio-plan.js";
+import { type AudioRead, audioReads, renderRead, sourceWindow, stretchKey } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
 import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
 import {
@@ -20,6 +20,7 @@ import {
 } from "./engine-protocol.js";
 import {
   type AngleSpan,
+  type AudioSpan,
   type PartShape,
   type Program,
   type VideoSpan,
@@ -34,6 +35,7 @@ import {
 import { DropLog } from "./drop-log.js";
 import { mediaSrc } from "./media-src.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
+import { StretchChain } from "./time-stretch.js";
 import { type EncodedPicture, type VideoSource, isReadWhole, mattedPath, mattedSource, openVideoSource, splitMattedPath } from "./video-source.js";
 
 /** DedicatedWorkerGlobalScope, as far as the engine uses it (the DOM lib types `self` as Window). */
@@ -502,6 +504,8 @@ class Engine implements LayerHost {
   /** Audio requested from here on fades in here (play start, live cut) unless its clip starts later. */
   #audioFadeFloor = 0;
   readonly #audioJobs = new Set<AudioJob>();
+  /** Time stretch of each sped-up span this play reads (#499), by {@link stretchKey}: its reads render in order. */
+  #stretches = new Map<string, { chain: StretchChain; tail: Promise<void> }>();
 
   readonly #drops = new DropLog();
   readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0, dropped: this.#drops.drops };
@@ -953,6 +957,7 @@ class Engine implements LayerHost {
 
   #stopAudio(): void {
     for (const job of this.#audioJobs) job.limit = -Infinity;
+    this.#stretches = new Map();
     if (this.#anchor) this.#post({ type: "stop" });
   }
 
@@ -969,15 +974,29 @@ class Engine implements LayerHost {
     }
   }
 
+  /** The stretch of `span` for the next read of it, which renders after `previous`; call `done` once it has. */
+  #stretchTurn(span: AudioSpan): { chain: StretchChain; previous: Promise<void>; done: () => void } {
+    const key = stretchKey(span);
+    const state = this.#stretches.get(key) ?? { chain: new StretchChain(), tail: Promise.resolve() };
+    let done = () => {};
+    const next = new Promise<void>((resolve) => (done = resolve));
+    const previous = state.tail;
+    this.#stretches.set(key, { chain: state.chain, tail: next });
+    return { chain: state.chain, previous, done };
+  }
+
   async #feedAudio(read: AudioRead, anchor: Anchor, fadeFloor: number): Promise<void> {
     const job: AudioJob = { limit: Infinity };
     this.#audioJobs.add(job);
+    // Reads of a sped-up span fetch in parallel but render in order, so its stretch continues from one to the next.
+    const turn = read.span.speed === 1 ? null : this.#stretchTurn(read.span);
     try {
       const { first, count } = sourceWindow(read);
       const bytesPerFrame = 2 * read.span.channels;
       const bytes = await this.fetch(read.span.sidecar, first * bytesPerFrame, (first + count) * bytesPerFrame);
+      if (turn) await turn.previous;
       if (job.limit <= read.from || this.#anchor !== anchor) return;
-      let data = renderRead(read, new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1), first);
+      let data = renderRead(read, new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1), first, turn?.chain);
       const to = Math.min(read.to, job.limit);
       if (to < read.to) data = data.slice(0, to - read.from);
       const chunk = {
@@ -991,6 +1010,7 @@ class Engine implements LayerHost {
     } catch (error) {
       this.error(`Cannot read ${read.span.sidecar}: ${(error as Error).message}`);
     } finally {
+      turn?.done();
       this.#audioJobs.delete(job);
     }
   }
