@@ -35,7 +35,8 @@ export interface FitRequest {
 export type FitOperation =
   | { op: "clip.trim"; args: { in: number; snap: false } }
   | { op: "clip.move"; args: { start: number } }
-  | { op: "clip.set"; args: { speed: number } };
+  | { op: "clip.set"; args: { speed: number } }
+  | { op: "clip.set"; args: { audioFadeInMs: number } };
 
 /** The fit: the clip as it ends up, the operations that get it there and what to tell the person. */
 export interface FitPlan
@@ -48,7 +49,7 @@ export interface FitPlan
 
 const round = (value: number, decimals: number) => Math.round(value * 10 ** decimals) / 10 ** decimals;
 const MAX_PERCENT = round(MUSIC_FIT_MAX_VARISPEED * 100, 3);
-/** How early the export's `atempo` plays material at speeds near 1: 1024 samples at 48 kHz (`music-atempo.test.ts`). */
+/** How early the export's `atempo` plays a hit after digital silence near speed 1: 1024 samples at 48 kHz (ADR 0037). */
 const ATEMPO_LEAD_MS = 21;
 
 const invalid = (message: string, data: Record<string, unknown>) => new RpcError(ErrorCode.InvalidOperation, `music.fit: ${message}`, { op: "music.fit", ...data });
@@ -170,8 +171,8 @@ function exactPlan(request: FitRequest, g: FrameGrid, end: number): FitPlan {
     speed === clip.speed
       ? []
       : [
-          `Export keeps the pitch with atempo, which starts about ${ATEMPO_LEAD_MS} ms early (measured, ADR 0037): the hit plays that much before ${secs(end)} in the export, a fraction of a frame; ` +
-            "the preview has no such shift but plays the pitch up or down by up to 0.3 semitone until its stretch lands (#499).",
+          `Export keeps the pitch with atempo, which plays a hit that follows digital silence up to about ${ATEMPO_LEAD_MS} ms early (measured, ADR 0037): up to that much before ${secs(end)} in the export, a fraction of a frame; ` +
+            "the preview keeps the pitch too (#499) and has no such shift.",
         ];
   return finish("exact", request, after, end, operations, steps, warnings, { introCut: 0, silentBefore: 0, speedChange: speed !== clip.speed ? (speed / clip.speed - 1) * 100 : null });
 }

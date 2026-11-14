@@ -31,7 +31,7 @@ import {
   TargetChangedSchema,
 } from "./targets.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
-import { AnalyzeResultSchema } from "./analyze.js";
+import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "./analyze.js";
 import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
 import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, MUSIC_BPM_RANGE, MUSIC_CHORD_PATTERN, MUSIC_LIMITS, MUSIC_LUFS, MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_METER_RANGE, MUSIC_PEAK_DBFS, MUSIC_PRESET_DEFAULTS, MUSIC_TAIL_SECONDS, MusicPresetSchema, MusicSectionSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VOICEOVER_LINE_GAP_S, VoiceoverLineSchema } from "@frameshell/schema";
@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 123;
+export const PROTOCOL_VERSION = 125;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1434,14 +1434,18 @@ export const methods = {
       "the **palette** of the whole film, the **look** (brightness 0 to 1, contrast, saturation, warmth from -1 blue to 1 red, and an 8 x 6 grid of mean colours for the film in the result and for every shot in `analysis.json`), " +
       "the **rhythm** (`shotLengthCv`: spread of the shot lengths over their mean, 0 a metronome; `stillShare`: share of frames in which the picture does not change; `longestStill`; big changes of the picture, their count and per minute; the `largestGap` between them; `bursts`: 3 or more big changes within 1.5 s), " +
       "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
+      "the **curve** (the change of the picture over time, one value per 0.1 s or more, and its `moves`: steady stretches with their start, duration, peak and the closest ease: linear, in, out or inOut), " +
+      "the **ink** of each shot and of the film (share of the picture covered by graphics or text, its peak, when and the box of grid cells), " +
+      "the **sync** (seconds the mouth of a talking face moves after the voice, when this exact file has a cached face scan from `people.scan`; otherwise `reason` says why it was skipped), " +
+      "`labels` (MEASURED, ESTIMATED or DECISION for every value, by field path), " +
       "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
       "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
       "A hard cut is found; a dissolve, a whip pan or a jump cut inside one continuous take is not (lower `threshold` to catch softer ones; " +
-      "motion curves, the mouth-to-voice lag and a read of the text itself come in later slices; events are hints, so look at the frames they name). Label what you tell the person: " +
-      "these numbers are MEASURED; what you read off the sheets by eye is ESTIMATED, and say which frames to check. " +
+      "a read of the text itself is not made; events, ink and ease are hints, so look at the frames they name). Label what you tell the person as `labels` does: " +
+      "MEASURED, ESTIMATED (hints, and what you read off the sheets by eye: say which frames to check) or DECISION (our creative choice). To compare our film with it, use `analyze.diff`. " +
       "Runs as a background job of kind `analyze` (`job.list`); a 1-minute 1080p video takes about 35 seconds. The MCP tool returns the " +
       "sheets as images. Example: `{ file: \"references/reel.mp4\" }`. Fails with AssetNotFound (`file` missing), " +
       "InvalidOperation (no picture, or shorter than a frame), the Binary* errors when ffmpeg cannot be fetched.",
@@ -1461,6 +1465,34 @@ export const methods = {
         .describe("Scene score (how different a frame is from the one before, 0 to 1) from which a frame opens a new shot. Default 0.3: hard cuts. Lower finds softer ones and false ones (flashes, fast motion); higher keeps only violent changes."),
     }),
     result: AnalyzeResultSchema,
+  },
+  "analyze.diff": {
+    description:
+      "Compare our film with a reference video (#471): how far apart they are, in numbers, instead of \"looks similar\". The two are lined up by " +
+      "**activity-curve alignment** (how much the picture changes over time, correlated within `maxLag` seconds either way, or the `lag` you give), then read at matched times: " +
+      "`alignment` (`lag`: seconds to add to a time of our film to find the same moment of the reference; `source`: `activity`, `forced` or `none`; `correlation` of the two curves), " +
+      "`energy` (mean and 95th-percentile motion of each, their `ratio` (above 1 our film moves more), and `windows`: both curves second by second, to see where one moves and the other holds), " +
+      "`diff` (SSIM, ffmpeg's structural similarity, of our frame and the reference's every `every` seconds: `samples`, `mean`, the lowest `min` and its time, and `below`: the share of readings under 0.5) " +
+      "and a **side-by-side sheet** (our frame left, the reference's right at the same matched time, the lowest-SSIM moments and evenly spread ones, `snapshots` pairs; the MCP tool returns it as an image). " +
+      "Read it as a distance, not a pass or fail: a different film in the same style scores low SSIM everywhere and can still match in energy. A reference of another shape is stretched to our film's (a warning says so). " +
+      "Writes `.frameshell/analysis/<name>/` (`diff.json` and the sheet; replaced by a new run of the same name; project files are never touched). `labels` marks every value MEASURED, ESTIMATED or DECISION. " +
+      "Runs as a background job of kind `analyze` (`job.list`); a 30-second pair of 720p films takes about 10 seconds. Example: `{ file: \"exports/reel.mp4\", reference: \"references/reel.mp4\" }`. " +
+      "Fails with AssetNotFound (a file missing), InvalidOperation (no picture, or no stretch the two share at that lag), the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("Our film: an export, or any video. Absolute, or relative to `cwd`."),
+      reference: z.string().min(1).describe("The reference video to compare it with: absolute, or relative to `cwd`; it may be anywhere, it is only read."),
+      name: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .optional()
+        .describe("Name of the comparison, its folder is `.frameshell/analysis/<name>/`. Default `<film>-vs-<reference>` (file names in lower case, 64 characters at most). A new run with the same name replaces the folder, so do not reuse the name of an `analyze` run you want to keep."),
+      lag: z.number().min(-3600).max(3600).optional().describe("Seconds to add to a time of our film to find the same moment of the reference (positive: the reference is later), instead of finding it. Use it when you know where the two start together; the alignment is then a DECISION."),
+      maxLag: z.number().min(0.5).max(30).optional().describe("Most seconds the alignment looks for the lag either way. Default 3."),
+      every: z.number().min(0.1).max(30).optional().describe("Seconds between SSIM readings. Default 0.5; a long film is read less often (600 readings at most)."),
+      snapshots: z.int().min(1).max(24).optional().describe("Pairs of frames on the side-by-side sheet. Default 8, at most 24 (12 pairs make one image)."),
+    }),
+    result: AnalyzeDiffResultSchema,
   },
   cover: {
     description:
@@ -3848,13 +3880,13 @@ export const methods = {
       "where the clip plays the file from later than 0 and the start lands after `from`, the intro comes back as far as the file has it; " +
       "where the file is shorter than the picture before the hit, the music starts late (`silentBefore`), and it is never looped " +
       "or spliced. `exact: true` keeps the start (the clip's own, or `from`) and changes the speed so the hit lands exactly on " +
-      "`end`: at most ±1.7 % of the clip's speed (export keeps the pitch with atempo; the preview still shifts it a little until " +
-      "its stretch lands); beyond that it refuses and says which `end` would fit, or to drop `exact`. A detected hit under " +
-      "confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
+      "`end`: at most ±1.7 % of the clip's speed (export and preview keep the pitch); beyond that it refuses and says " +
+      "which `end` would fit, or to drop `exact`. A detected hit under confidence 0.5 never changes the speed: pass `hit`. `dryRun: true` changes nothing and returns the plan with its `steps`. " +
       "If the clip carries duck keys (`track.duck`), they sit on the clip's clock and would no longer match the voice: duck runs " +
       "again in the same transaction over the other video and audio tracks with its defaults (`skip: [\"duck\"]` leaves them and " +
       "says so). Music keys (`music.shape`) are run again first with the settings kept on the clip, so the steps down stay on the hits of the picture " +
-      "(`skip: [\"shape\"]` leaves them and says so). Writes only existing fields (`start`, `in`, `speed`, gain keys) as one transaction labelled `Music fit: …` " +
+      "(`skip: [\"shape\"]` leaves them and says so). The clip's start gets a 5 ms fade in (`audio.fadeInMs`, so the entry does not click) " +
+      "unless it already has a fade in or a dissolve (`skip: [\"fade\"]` leaves it out). Writes only existing fields (`start`, `in`, `speed`, `audio.fadeInMs`, gain keys) as one transaction labelled `Music fit: …` " +
       "(`revert` undoes it whole; with review mode on it is one proposal). Example: `{ clip: \"c_1a2b3c\", end: \"end-card\" }`. " +
       "Fails with InvalidOperation (not a music clip of an audio track, `end` not after `from`, a `hit` outside the played part, " +
       "no hit found, more than ±1.7 % needed, low confidence with `exact`, the new place overlaps another clip), " +
@@ -3877,7 +3909,7 @@ export const methods = {
         .default(false)
         .describe("Keep the start and land the hit exactly on `end` with a small change of speed (at most ±1.7 %). Default false: slide the clip, keep its speed."),
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
-      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; `duck` and `shape` can be."),
+      skip: z.array(z.string().min(1)).optional().describe("Step ids from a dry run's `steps` to leave out; `fade`, `duck` and `shape` can be."),
     }),
     result: MusicFitResultSchema,
   },
@@ -3893,7 +3925,7 @@ export const methods = {
       "the picture before it and the music starting late where it is shorter (never looped), and the candidates are ranked: files that " +
       "cover the picture first, then by how sure the final hit is, ties in the order given. Without `end` the order given is the rank. " +
       "A file that cannot be placed (silent, no sound, no final hit, undecodable) is listed in `skipped` and the rest go on. `dryRun: true` " +
-      "changes nothing and returns the plan. One transaction labelled `Music candidates: …` (`revert` undoes it whole; with review mode on it is " +
+      "changes nothing and returns the plan. Every clip is added with a 5 ms fade in (`audio.fadeInMs`). One transaction labelled `Music candidates: …` (`revert` undoes it whole; with review mode on it is " +
       "one proposal). To choose: `track.set` `muted: false` on the winner and `track.remove` with `force` on the others, then `music.fit` " +
       "the clip that stays. Example: `{ assets: [\"assets/music/a.wav\", \"assets/music/b.wav\", \"assets/music/c.wav\"], end: \"end-card\" }`. " +
       "Fails with InvalidOperation (fewer than 2 or more than 7 files, a file twice, none placeable, `end` not after `from`), AssetNotFound, " +
@@ -3929,7 +3961,8 @@ export const methods = {
       "(`clip.key` `gain`) on the clip, marked `auto: \"music\"`: running it again replaces those and keeps the keys you set by hand (a hand key inside a dip stays as set and " +
       "a warning names it); `clear: true` removes them. The level they dip from is the clip's `audio.gain` or its own keys. The times of the hits are kept in the clip's `audio.shape`, " +
       "so `music.fit` runs the same shaping again after it moves the clip (`skip: [\"shape\"]` leaves the keys and says so). The keys replace the clip's duck keys (`track.duck`): " +
-      "duck runs again in the same transaction with its stored parameters, so the voice still ducks the shaped music. Not done here: the rising high-pass build before a drop. " +
+      "duck runs again in the same transaction with its stored parameters, so the voice still ducks the shaped music. The clip's start also gets a 5 ms fade in " +
+      "(`audio.fadeInMs`) unless it already has a fade in or a dissolve; `clear` leaves the clip's edges alone. Not done here: the rising high-pass build before a drop. " +
       "`dryRun: true` changes nothing and returns the `curve` and `steps`. One transaction labelled `Music shape: …` (`revert` undoes it whole; with review mode on it is one proposal). " +
       "Example: `{ clip: \"c_1a2b3c\", drop: [\"hit\"], ending: 28 }`. Fails with InvalidOperation (not a music clip of an audio track, nothing to shape, `clear` with `drop` or `ending`, " +
       "no time falls on the clip), ClipNotFound or TimelineNotFound.",
@@ -4990,6 +5023,10 @@ export type CoverResult = MethodResult<"cover">;
 export type AnalyzeParams = MethodParams<"analyze">;
 /** Result of `analyze`. */
 export type AnalyzeResult = MethodResult<"analyze">;
+/** `analyze.diff` params. */
+export type AnalyzeDiffParams = MethodParams<"analyze.diff">;
+/** Result of `analyze.diff`. */
+export type AnalyzeDiffResult = MethodResult<"analyze.diff">;
 /** `review` params. */
 export type ReviewParams = MethodParams<"review">;
 /** Result of `review`. */

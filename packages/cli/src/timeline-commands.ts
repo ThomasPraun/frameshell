@@ -251,7 +251,8 @@ mutations print the new revision):
                                on --end: at most 1.7 %, refused beyond it with the ends that fit; a doubtful hit
                                never does. --dry-run changes nothing. If the clip carries duck keys, duck runs again
                                in the same transaction over the other tracks with the settings the duck was run with
-                               (--skip duck leaves them). One transaction (revert it)
+                               (--skip duck leaves them). The clip's start gets a 5 ms fade in (audio.fadeInMs) unless it
+                               has a fade in already (--skip fade leaves it out). One transaction (revert it)
   music candidates <asset> <asset>… [--end <time>] [--from <time>] [--loudness LUFS] [--dry-run]
                                Put 2 to 7 candidate tracks under the same picture to pick by ear: each file on its own
                                new audio track Music 1..n, all muted but the first, at one loudness (EBU R128 over the
@@ -260,8 +261,8 @@ mutations print the new revision):
                                with --end each is fitted like music fit slides a clip (its own final hit lands on
                                --end) and they are ranked: files that cover the picture first, then by how sure the
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
-                               Choose with track set <track> --unmuted, then track remove <others> --force. One
-                               transaction (revert it)
+                               Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
+                               gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
   music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
                                (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,

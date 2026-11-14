@@ -94,7 +94,7 @@ export function buildTools(defaultCwd: string): ToolSpec[] {
       if (out) out.description = `Optional. ${out.description ?? ""}`.trim();
       description += CAPTURE_SUFFIX;
     }
-    if (method === "review" || method === "analyze") description += SHEETS_SUFFIX;
+    if (method === "review" || method === "analyze" || method === "analyze.diff") description += SHEETS_SUFFIX;
     tools.push({ name: toolName(method), description, inputSchema: input.schema, method, takesCwd: input.takesCwd });
   }
   const strip = withDefaultCwd(z.toJSONSchema(FramesStripParams, { target: "draft-2020-12", io: "input" }), defaultCwd);

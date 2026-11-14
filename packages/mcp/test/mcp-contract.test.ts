@@ -159,6 +159,11 @@ describe("frameshell mcp", () => {
       expect(analyzed.content.filter((part) => part.type === "image").length).toBeGreaterThanOrEqual(2);
       expect(json(analyzed)).toMatchObject({ name: "take", stats: { shotCount: 1 }, sheets: [{ kind: "contact", tiles: expect.arrayContaining(["0.00 start"]) }, { kind: "shots" }] });
 
+      // Our film against a reference: the side-by-side sheet as an image, the numbers as JSON.
+      const compared = await call("analyze_diff", { file: "assets/take.mp4", reference: "assets/take.mp4", snapshots: 2 });
+      expect(compared.content.filter((part) => part.type === "image")).toHaveLength(1);
+      expect(json(compared)).toMatchObject({ name: "take-vs-take", diff: { mean: 1 }, sheets: [{ kind: "diff", tiles: expect.arrayContaining([expect.stringMatching(/^film /), expect.stringMatching(/^ref /)]) }] });
+
       // Revert the transaction: the cut is undone as a new operation.
       const reverted = json(await call("revert", { target: tx }));
       expect(reverted).toMatchObject({ revision: cut["revision"] + 1, operation: { op: "revert" } });

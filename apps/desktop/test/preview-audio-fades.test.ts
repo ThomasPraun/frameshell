@@ -9,6 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { ffmpegRun, testFfmpeg } from "../e2e/media.js";
 import { audioReads, envelopeGain, renderRead, sourceWindow } from "../src/renderer/src/preview/audio-plan.js";
 import { compileProgram } from "../src/renderer/src/preview/program.js";
+import { StretchChain } from "../src/renderer/src/preview/time-stretch.js";
 
 // Seam under test: a clip's sample-accurate audio fades (#585) ramp the preview's samples as export's `afade` does,
 // sample for sample. The export mix runs on the real managed ffmpeg.
@@ -72,6 +73,43 @@ describe("sample-accurate audio fades in the preview (#585)", () => {
     }
     const plain = compileProgram({ ...shown, tracks: [{ ...shown.tracks[0]!, clips: clips.map(({ audio: _audio, ...clip }) => clip) }] as TimelineView["tracks"] }, assets);
     expect(plain.audio.every((span) => span.envelope === undefined)).toBe(true);
+  });
+
+  it("ramps a clip at speed != 1 over program samples, after its stretch (#499)", () => {
+    // 2x and 0.75x: the ramps last fadeInMs / fadeOutMs of the program, not of the source.
+    const sped = [
+      { id: "fast", type: "media", asset: asset.path, start: 0.5, in: 0.2, out: 2.2, speed: 2, end: 1.5, audio: { fadeInMs: 20, fadeOutMs: 30 } },
+      { id: "slow", type: "media", asset: asset.path, start: 2, in: 0.5, out: 1.25, speed: 0.75, end: 3, audio: { fadeInMs: 20, fadeOutMs: 30 } },
+    ];
+    const view = { ...shown, tracks: [{ ...shown.tracks[0]!, clips: sped }] as TimelineView["tracks"] };
+    const program = compileProgram(view, assets);
+    const pcm = new Int16Array(readFileSync(join(root, ...sidecar.split("/"))).buffer.slice(0));
+    for (const span of program.audio) {
+      expect(span.speed).not.toBe(1);
+      const fades = span.envelope!.fades!;
+      expect(fades).toMatchObject({ start: span.start, end: span.end, fadeIn: 960, fadeOut: 1440 });
+      const { fades: _fades, ...unfaded } = span.envelope!;
+      const flat = { ...span, envelope: unfaded };
+      const render = (target: typeof span) => {
+        const out = new Float32Array(target.end - target.start);
+        const chain = new StretchChain();
+        for (const read of audioReads([target], target.start, target.end, 4096)) {
+          const { first, count } = sourceWindow(read);
+          out.set(renderRead(read, pcm.subarray(first, first + count), first, chain), read.from - target.start);
+        }
+        return out;
+      };
+      const faded = render(span);
+      const plain = render(flat);
+      let checked = 0;
+      for (let i = 0; i < faded.length; i++) {
+        const expected = plain[i]! * audioFadeGain(fades, span.start + i);
+        expect(Math.abs(faded[i]! - expected)).toBeLessThan(1e-6);
+        if (audioFadeGain(fades, span.start + i) < 0.99 && Math.abs(plain[i]!) > 0.01) checked++;
+      }
+      // Both ramps hold sound to check, not only silence.
+      expect(checked).toBeGreaterThan(1500);
+    }
   });
 
   it("hears the same samples as the export mix of the same clips", async () => {

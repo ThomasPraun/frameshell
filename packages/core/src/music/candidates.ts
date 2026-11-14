@@ -69,7 +69,7 @@ export async function planMusicCandidates(timeline: Timeline, fps: number, reque
         placed.push({ ...base, place: { start: from, in: 0, speed: 1, end: round3(from + duration) }, hit: null, landsAt: null, introCut: 0, silentBefore: 0 });
         continue;
       }
-      const fit = await planMusicFit(withCandidate(timeline, asset, from, duration), fps, { clip: PLAN_CLIP, end, from, exact: false, dryRun: true }, deps);
+      const fit = await planMusicFit(withCandidate(timeline, asset, from, duration), fps, { clip: PLAN_CLIP, end, from, exact: false, dryRun: true, entryFade: false }, deps);
       placed.push({
         ...base,
         warnings: fit.warnings,
