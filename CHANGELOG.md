@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- More sound effect kinds, slice 5 of #463 (ADR 0038, epic #451; protocol 139): `sound sfx` (and `sound place`, MCP
+  `sound_sfx` / `sound_place`) make `glitch` (a stutter of short square or saw tones), `braaam` (a low brass blast on a
+  root, detuned saws under a sweeping low-pass), `swell` (a quiet build that peaks near its end, `--length` 0.5 to 3 s),
+  `bell` (a soft bell of inharmonic partials), `notify` (a ping near 2 kHz with a partial at 3.4 times its pitch) and
+  `sting` (a chirp falling into a low hum, for a logo), three variants each, deterministic by seed. Placement defaults:
+  glitch `click`, braaam and sting `knock`, swell `swell`, bell and notify `pop`; all but braaam and sting are
+  secondary tier. The `sound` skill reference lists them with taste rules. Not yet: the CC0 set and the energetic music
+  preset.
 - Emphasis and reveal templates, part of #466 (ADR 0033, epic #451): `frameshell hyperframes new <name> --template
   emphasis-marker` draws a hand-drawn mark on a phrase of a sentence (`marker`: highlight, circle, underline,
   strike-through, box or bracket; `mark` names the phrase, `rough`, `weight` and `seed` shape the wobble), `before-after`

@@ -96,3 +96,26 @@ export function peakOf(channels: readonly ArrayLike<number>[]): number {
   for (const channel of channels) for (let i = 0; i < channel.length; i++) peak = Math.max(peak, Math.abs(channel[i]!));
   return peak;
 }
+
+/** PolyBLEP correction around a waveform's discontinuity: `phase` in [0, 1) is the distance past it, `dt` the phase step per sample. */
+function polyBlep(phase: number, dt: number): number {
+  if (phase < dt) {
+    const x = phase / dt;
+    return x + x - x * x - 1;
+  }
+  if (phase > 1 - dt) {
+    const x = (phase - 1) / dt;
+    return x * x + x + x + 1;
+  }
+  return 0;
+}
+
+/** A saw in [-1, 1] with its edge smoothed (PolyBLEP), so low notes through a filter sweep do not alias. */
+export function sawBlep(phase: number, dt: number): number {
+  return 2 * phase - 1 - polyBlep(phase, dt);
+}
+
+/** A square in [-1, 1] with both edges smoothed (PolyBLEP). */
+export function squareBlep(phase: number, dt: number): number {
+  return (phase < 0.5 ? 1 : -1) + polyBlep(phase, dt) - polyBlep((phase + 0.5) % 1, dt);
+}
