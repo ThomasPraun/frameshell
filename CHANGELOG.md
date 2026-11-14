@@ -822,6 +822,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Leaving the preview's full screen no longer depends on a fixed 1.5 s wait (#533): macOS drops a request to leave
+  while it animates into full screen, and a slow machine took longer, so Escape did nothing. The window now reports
+  when it settled (`enter-full-screen`, `panels.fullScreenSettled` in the app's API) and the leave waits for that.
 - A batch render no longer counts as running once its last job ended (#533): `batch.render` of the same `out` straight
   after waited for the manifest to say `done` used to fail with "A batch is already rendering" when the run had not
   yet been dropped, and `gc` kept clip renders until then. The run is finished as soon as every row ended; a new
