@@ -218,6 +218,19 @@ export {
   voiceChainOf,
   glassOf,
 } from "./style.js";
+export {
+  CRAFT_CHECKS,
+  CaptionRequirementsSchema,
+  ClipRequirementSchema,
+  FilmRequirementsSchema,
+  REQUIREMENTS_FILE,
+  REQUIREMENTS_SCHEMA_URL,
+  RequirementsFileSchema,
+  WaiverSchema,
+  type CraftCheck,
+  type RequirementsFile,
+  parseRequirementsFile,
+} from "./requirements.js";
 export { STYLE_TOKEN_PREFIX, type StyleTokenFace, styleTokenCss } from "./style-tokens.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
 export {
@@ -232,8 +245,21 @@ export {
   createCreditsFile,
   creditLine,
   licenceInfo,
+  MAX_SOURCE_URL,
   parseCreditsFile,
 } from "./credits.js";
+export {
+  BRAND_COLOR_ROLES,
+  BRAND_DIR,
+  BRAND_FILE,
+  BRAND_SCHEMA_URL,
+  type BrandCapture,
+  BrandCaptureSchema,
+  type BrandManifest,
+  BrandManifestSchema,
+  createBrandManifest,
+  parseBrandManifest,
+} from "./brand.js";
 export { type PaintChange, paintStretches } from "./painted.js";
 export {
   AUDIO_EFFECT_KINDS,
@@ -469,7 +495,7 @@ export {
   subtitleLayout,
   subtitleTracks,
 } from "./subtitles.js";
-export { type FontMetrics, parseFontMetrics } from "./font-file.js";
+export { type FontMetrics, parseFontMetrics, readNameTable } from "./font-file.js";
 export {
   type TransitionContext,
   type ClipHandles,

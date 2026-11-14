@@ -302,6 +302,20 @@ _Avoid_: field, variable, placeholder
 One variant of a batch: an `id` (its output file name) and a value per slot it sets.
 _Avoid_: record, entry (the manifest's per row × format line is an entry)
 
+## Brand capture (ADR 0044)
+
+**Brand capture**:
+One run of `brand capture <url>`: a public page opened in headless Chrome behind the capture proxy, its logos, icons, shots and open-licensed fonts saved, its findings recorded in `brand.json`.
+_Avoid_: scrape, crawl (it opens one page), brand import (that is the Figma path)
+
+**Capture proxy**:
+The daemon-local proxy that is capture Chrome's only way out: public addresses and ports 80/443, each host resolved once, every redirect hop checked.
+_Avoid_: firewall, sandbox
+
+**Style suggestion**:
+A `style set` call a capture proposes from what it found; the agent shows the findings to the person and runs only what they agree to.
+_Avoid_: style patch (nothing is patched), brand style
+
 ## Photo segmentation (ADR 0022)
 
 **Mask**:

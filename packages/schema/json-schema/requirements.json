@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "film": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "maxSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The film is at most this long. Seconds."
+        },
+        "minSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The film is at least this long. Seconds."
+        },
+        "maxStatic": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The picture never holds still for longer than this (`review` measures the whole frame, at most 90 samples of a timeline). Seconds."
+        },
+        "endCard": {
+          "description": "The film ends on a held card, measured on the last stretch of the range reviewed; skipped when the range stops short of the end.",
+          "type": "object",
+          "properties": {
+            "minSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "The film ends on a picture that holds still (and is not blank) for at least this long. Seconds."
+            }
+          },
+          "required": [
+            "minSeconds"
+          ],
+          "additionalProperties": false
+        },
+        "loudness": {
+          "description": "Measured on an exported file (`review --file`), after the encode; a timeline has no loudness, so these are skipped for one.",
+          "type": "object",
+          "properties": {
+            "target": {
+              "description": "Integrated loudness the file should have, LUFS (e.g. -14).",
+              "type": "number",
+              "minimum": -70,
+              "maximum": 0
+            },
+            "tolerance": {
+              "default": 1.5,
+              "description": "LU the file may be off `target` (default 1.5, the delivery check's).",
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 12
+            },
+            "maxTruePeak": {
+              "description": "The file's true peak stays at or under this, dBTP (e.g. -1).",
+              "type": "number",
+              "minimum": -20,
+              "maximum": 3
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "captions": {
+      "type": "object",
+      "properties": {
+        "minSize": {
+          "type": "number",
+          "minimum": 0.005,
+          "maximum": 0.2,
+          "description": "Smallest caption text, as a share of the film's short side (0.026 is 28 px at 1080). Read from the subtitle tracks of a timeline."
+        }
+      },
+      "required": [
+        "minSize"
+      ],
+      "additionalProperties": false
+    },
+    "clips": {
+      "default": [],
+      "description": "Per-clip expectations, checked on a timeline.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "clip": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Clip id from `timeline.show`, e.g. `c_1a2b3c`."
+          },
+          "appearsBy": {
+            "description": "The clip starts at or before this time: seconds, or a marker id or label (optionally `hook+0.5`), as `marker.list` shows them.",
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ]
+          },
+          "before": {
+            "description": "The clip starts before this other clip starts.",
+            "type": "string",
+            "minLength": 1
+          },
+          "keepsMoving": {
+            "type": "object",
+            "properties": {
+              "maxStatic": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "The picture does not hold still for longer than this while the clip plays (the whole frame, so a clip under another moving one passes). Seconds."
+              }
+            },
+            "required": [
+              "maxStatic"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "clip"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "fail": {
+      "default": [],
+      "description": "Craft checks that are failures in this project: their warnings count in `requirements.failed` and make `frameshell review` exit 1, unless waived.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "static",
+          "frame-0",
+          "blank",
+          "reading",
+          "peak",
+          "phone-band",
+          "silent",
+          "sync",
+          "loop-seam",
+          "delivery",
+          "safe-zone"
+        ]
+      }
+    },
+    "waivers": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "check": {
+            "type": "string",
+            "enum": [
+              "static",
+              "frame-0",
+              "blank",
+              "reading",
+              "peak",
+              "phone-band",
+              "silent",
+              "sync",
+              "loop-seam",
+              "delivery",
+              "safe-zone"
+            ],
+            "description": "The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."
+          },
+          "clip": {
+            "description": "Waive only warnings whose time overlaps this clip. Absent: every warning of the check, including those about the whole film.",
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Why the warning is accepted: shown beside the waived warning."
+          }
+        },
+        "required": [
+          "check",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/requirements.json"
+}

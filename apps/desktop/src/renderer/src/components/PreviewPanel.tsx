@@ -338,14 +338,8 @@ export function PreviewPanel({
   );
 }
 
-/**
- * How long a window takes to settle into full screen. macOS animates into
- * it, and a request to leave during the animation is never answered, which
- * would block every later one.
- */
-const FULL_SCREEN_SETTLE_MS = 1500;
-/** When each document's preview last entered full screen, `performance.now()` of the project window. */
-const enteredFullScreen = new WeakMap<Document, number>();
+/** Longest a leave waits for the window to settle into full screen, should main never report it. */
+const FULL_SCREEN_SETTLE_CAP_MS = 10_000;
 /** Documents with a request to leave full screen already on its way. */
 const leaving = new WeakSet<Document>();
 
@@ -353,20 +347,25 @@ const leaving = new WeakSet<Document>();
 function toggleFullScreen(panel: HTMLElement): void {
   const doc = panel.ownerDocument;
   if (doc.fullscreenElement) return leaveFullScreen(doc);
-  enteredFullScreen.set(doc, performance.now());
   // Refused (no key press in this window): nothing changes.
-  void panel.requestFullscreen().catch(() => enteredFullScreen.delete(doc));
+  void panel.requestFullscreen().catch(() => undefined);
 }
 
-/** Leave full screen in `doc`, once the window has settled into it. */
+/**
+ * Leave full screen in `doc`, once its window settled into it. macOS animates into full screen and drops a request to
+ * leave during the animation, which would block every later one; the document cannot tell, main reports it
+ * (`enter-full-screen`).
+ */
 function leaveFullScreen(doc: Document): void {
   if (leaving.has(doc)) return;
   leaving.add(doc);
-  const wait = Math.max(0, (enteredFullScreen.get(doc) ?? 0) + FULL_SCREEN_SETTLE_MS - performance.now());
-  setTimeout(() => {
+  const detached = doc.defaultView !== window;
+  const settled = window.frameshell.panels.fullScreenSettled(detached ? "preview" : null).catch(() => undefined);
+  const cap = new Promise((resolve) => setTimeout(resolve, FULL_SCREEN_SETTLE_CAP_MS));
+  void Promise.race([settled, cap]).then(() => {
     leaving.delete(doc);
     if (doc.fullscreenElement) void doc.exitFullscreen().catch(() => undefined);
-  }, wait);
+  });
 }
 
 /**

@@ -9,7 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Colour grade of media clips, export and preview (#384, ADR 0031, epic #451; protocol 127): a media clip on a video
+- Brand capture from a URL, slice 3 of #467 (ADR 0044, epic #451; protocol 128): `frameshell brand capture <url>` (MCP
+  `brand_capture`, job kind `brand`) opens a public `http`/`https` page in the managed headless Chrome, whose only way out
+  is a daemon-local guarded proxy (public unicast addresses, ports 80/443, each host resolved once and dialed by the checked
+  IP, every redirect hop re-checked; `--proxy-bypass-list=<-loopback>`, `--disable-quic`,
+  `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; at most 120 s and 150 MB). It saves logo candidates
+  (sanitised SVG or the image), icons, the share image, `hero.png` and `page.png` under `assets/brand/<id>/`, copies a
+  font into `assets/fonts/` only when the font file's own name table names OFL-1.1, Apache-2.0 or UFL (amends ADR 0028
+  decision 7), and records colours with an accent, fonts by use, `:root` variables, headings, buttons and video URLs in a
+  new root `brand.json` (published schema). Every saved file gets a credits entry with its source URL and no licence.
+  `style.json` is never written: the result suggests `style set` calls. A page with almost no text and nothing to keep
+  returns `ok: false`, `reason: little-text`. `file:`, `data:`, `chrome:` and every non-http(s) URL, URLs with
+  credentials, other ports and private or loopback hosts are refused.
+- Requirements and waivers of `review`, fifth slice of #457 (epic #451; protocol 127; `requirements.json`, `metrics.requirements`,
+  `metrics.waived`, craft `severity`): a project's `requirements.json` (project root, written with `file.write`, validated on
+  write, JSON Schema `requirements.json`) states what the film must be and `review` judges it on every run with metrics.
+  `film`: `maxSeconds`, `minSeconds`, `maxStatic` (longest still stretch), `endCard.minSeconds` (the last picture holds still
+  and is not blank) and, for a `--file`, `loudness` `target` LUFS (`tolerance` 1.5 LU) and `maxTruePeak`; `captions.minSize`
+  (share of the short side, read from the subtitle tracks); per clip `appearsBy` (seconds or a marker, through the shared
+  TimeRef resolver), `before` and `keepsMoving.maxStatic`. Each is a `pass`, `fail` or `skipped` (with why: a timeline has no
+  loudness, a file has no clips, the range stops short of the end) in `metrics.requirements.checks`. Craft warnings stay `warn`
+  unless the file lists their check in `fail`; a waiver (`check`, optional `clip`, `reason`) moves the warnings it covers out of
+  `craft` into `metrics.waived` with its reason, so an accepted warning is reported, never dropped, and a waiver that covers
+  nothing is listed with `matched: 0`. `requirements.failed` (failed checks plus craft warnings of severity `fail`) makes
+  `frameshell review` exit 1. `ReviewMetrics` gains `waived` and `requirements`, craft warnings gain `severity`; the check list
+  moved to `@frameshell/schema` (`CRAFT_CHECKS`). Not yet: `staysInFrame` and other pixel-level clip assertions, the sound
+  review list, waivers kept on the clip in the timeline.
+- 3D in generated clips, slices 1 and 2 of #473 (ADR 0042, epic #451): the `hyperframes` plugin template
+  `product-shot` (`frameshell hyperframes new <name> --template product-shot`) paints a three.js scene on the motion
+  runtime's clock: a product (a built-in rounded box with a label picture, or your GLB from the composition directory)
+  in studio light arrives on a push-in, a glint sweeps across it, it turns slowly while the camera creeps and orbits,
+  and a headline rises under it, laid out for 16:9, 1:1, 4:5 and 9:16; props `title`, `model`, `label`, `color`,
+  `accent`, `ink`, `finish`, `spin`, `orbit`, `size`, `shadows`, `bg`, `backdrop`. The scaffold copies a pinned three.js
+  0.187.0 bundle (MIT, notice in its header; `pnpm gen:three`) as `frameshell-three.js` beside the motion runtime, and
+  `hyperframes update` refreshes it. Models and textures hold the render until they have loaded, and a missing one
+  fails the render with its path. `hyperframes check` no longer blocks on the bundle's own code and flags
+  `setAnimationLoop`, `THREE.Clock` / `getDelta` (errors) and `mixer.update` (warning) in scene code. Every
+  HyperFrames render now uses the software WebGL renderer (SwiftShader) whatever `PRODUCER_BROWSER_GPU_MODE` says.
+- Colour grade of media clips, export and preview (#384, ADR 0031, epic #451; protocol 129): a media clip on a video
   track takes `grade { exposure, temperature, tint, contrast, saturation, lut, lutMix }`: exposure in stops and white
   balance on light, then contrast and saturation, then a project `.cube` 3D LUT (Adobe Cube 1.0, up to 65 points,
   Rec.709 input) mixed in by `lutMix`. Both are baked into one 3D table (33 points, or the LUT's own size) that export
@@ -836,6 +873,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Motion compositions paint each time the same whatever was painted before (#501, epic #451): motion runtime 0.3.0
+  writes `x` and `y` on a 1/32 px grid and `rotate` on a 0.02° grid, because Chrome does not repaint a transform change
+  under about 1/80 px and kept the older pose, so slow motion (a spring settling) rendered by frame differed from the
+  same frames painted alone (8/255). Each seek also changes the document element's filter between `opacity(1)` and
+  `brightness(1)` (no pixel changes), so Chrome rasters the whole page again instead of only the rectangles it thinks
+  changed. With both, the sub-frame samples of a motion-blurred render (HyperFrames producer, fixed 8 samples) match
+  each time painted on a fresh page in 240 of 240, and repeated blurred renders are byte-identical, as PNG and as WebM
+  (before: up to 4/255 in PNG and 92/255 after VP9). New clips get 0.3.0; an existing clip keeps its frozen copy until
+  `frameshell hyperframes update`. Numbers in `docs/research/motion-blur.md`.
+- Leaving the preview's full screen no longer depends on a fixed 1.5 s wait (#533): macOS drops a request to leave
+  while it animates into full screen, and a slow machine took longer, so Escape did nothing. The window now reports
+  when it settled (`enter-full-screen`, `panels.fullScreenSettled` in the app's API) and the leave waits for that.
+- A batch render no longer counts as running once its last job ended (#533): `batch.render` of the same `out` straight
+  after waited for the manifest to say `done` used to fail with "A batch is already rendering" when the run had not
+  yet been dropped, and `gc` kept clip renders until then. The run is finished as soon as every row ended; a new
+  render waits for the manifest write of the one before, so it reads the final manifest.
 - The preview keeps the pitch of a clip at speed ≠ 1, like export (#499, epic #451): its program audio stretches a
   sped-up clip's sound with WSOLA (2048-sample Hann frames, the window of export `atempo` at 48 kHz, each moved by up
   to 512 samples to line up with the one before) instead of resampling it, so a 1.25x clip no longer sounds higher in

@@ -49,7 +49,7 @@ List what you assume (audience, platform, length, every fact on screen) and ever
 | Fonts | A commercial licence | An open-licence font (OFL), copied into `assets/fonts/` |
 | Pictures | Stock, image or video generators | The product's real UI and logo, and the motion templates (`device-frame`, `app-window`, `scene-background`) |
 | Sound effects | Sample packs | `sound sfx`: made offline, the person's own ([sound.md](sound.md)) |
-| 3D | A render service | The `blender` skill with the person's own Blender, when the plugin is installed |
+| 3D | A render service | The `product-shot` template of the `hyperframes` skill (three.js, renders anywhere) for a product or a GLB in studio light; the `blender` skill with the person's own Blender, when the plugin is installed, for lit sets |
 
 **Facts:** only figures from the brief or a source the person gave, with their scope ("in our beta, 40 teams"). Illustrative numbers and UI get labelled `SCHEMATIC` in the storyboard; an unvalidated claim says so.
 

@@ -1,4 +1,5 @@
 export * from "./methods.js";
+export * from "./brand.js";
 export * from "./timeline.js";
 export * from "./cleanup.js";
 export * from "./music.js";

@@ -403,6 +403,12 @@ export interface FrameshellApi {
      * its project window is closing or reloading.
      */
     detached(): Promise<DetachablePanel[]>;
+    /**
+     * Resolves once the window showing the preview is in full screen for good: macOS animates into it and drops a
+     * request to leave during the animation, so a leave waits for this. `panel` is the detached panel whose window
+     * it is, null for the project window itself. At once when that window is not entering full screen.
+     */
+    fullScreenSettled(panel: DetachablePanel | null): Promise<void>;
   };
   timeline: {
     /**
@@ -951,6 +957,7 @@ export const Channel = {
   layoutLoad: "layout:load",
   layoutSave: "layout:save",
   panelsDetached: "panels:detached",
+  panelsFullScreenSettled: "panels:full-screen-settled",
   timelineShow: "timeline:show",
   timelineChanged: "timeline:changed",
   timelineRejected: "timeline:rejected",

@@ -50,9 +50,10 @@ export class Chrome {
   /**
    * Start `executable` (managed `chrome-headless-shell`) with a fresh
    * profile. On Linux the sandbox is off, as renders run it: CI runners and
-   * containers forbid the user namespaces it needs.
+   * containers forbid the user namespaces it needs. `extraArgs` go before
+   * the start page (brand capture adds its proxy flags, ADR 0044).
    */
-  static async launch(executable: string): Promise<Chrome> {
+  static async launch(executable: string, extraArgs: readonly string[] = []): Promise<Chrome> {
     const profile = await mkdtemp(join(tmpdir(), "frameshell-inspect-"));
     const args = [
       "--remote-debugging-pipe",
@@ -63,6 +64,7 @@ export class Chrome {
       "--force-color-profile=srgb",
       `--user-data-dir=${profile}`,
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      ...extraArgs,
       "about:blank",
     ];
     const child = spawn(executable, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
@@ -196,10 +198,13 @@ export class ChromePage {
     }
   }
 
-  /** Evaluate `expression` (awaiting a promise it returns), its value as JSON; rejects with the page's exception. */
-  async evaluate<T>(expression: string, timeoutMs: number): Promise<T> {
+  /**
+   * Evaluate `expression` (awaiting a promise it returns), its value as JSON; rejects with the page's exception.
+   * `contextId` runs it in that execution context (an isolated world) instead of the page's main world.
+   */
+  async evaluate<T>(expression: string, timeoutMs: number, contextId?: number): Promise<T> {
     const result = (await withTimeout(
-      this.#chrome.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, this.#session),
+      this.#chrome.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId !== undefined ? { contextId } : {}) }, this.#session),
       timeoutMs,
       "the live page did not answer",
     )) as { result?: { value?: T }; exceptionDetails?: { text?: string; exception?: { description?: string } } };

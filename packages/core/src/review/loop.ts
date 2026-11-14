@@ -1,4 +1,4 @@
-import type { ReviewCraftWarning, ReviewSeam } from "@frameshell/protocol";
+import type { ReviewFinding, ReviewSeam } from "@frameshell/protocol";
 import { duplicateSeam, meanAbsDiff, seamPictureSize } from "../export/seam.js";
 import { readRawFrames } from "../media/raw-frames.js";
 import { SEAM_CONTINUOUS } from "./thresholds.js";
@@ -35,7 +35,7 @@ export async function seamOf(
 }
 
 /** The craft warning of a seam for a film meant to repeat: it holds a frame twice or jumps. */
-export function seamWarnings(seam: ReviewSeam): ReviewCraftWarning[] {
+export function seamWarnings(seam: ReviewSeam): ReviewFinding[] {
   if (seam.verdict === "continuous") return [];
   const message =
     seam.verdict === "duplicate"
