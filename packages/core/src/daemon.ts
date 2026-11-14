@@ -1511,6 +1511,30 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         );
       });
     },
+    "analyze.diff": async ({ cwd, file, reference, name, lag, maxLag, every, snapshots }, _caller, request) => {
+      const dir = await root(cwd);
+      const path = resolve(cwd, file);
+      const inside = relative(dir, path);
+      const input = (inside === "" || inside.startsWith("..") || isAbsolute(inside) ? path : inside).split(sep).join("/");
+      return inJob({ kind: "analyze", project: dir, asset: input }, async (ctx) => {
+        ctx.update({ step: "analyze", progress: 0 });
+        return analyses.diff(
+          dir,
+          { file: path, reference: resolve(cwd, reference), name, lag, maxLag, every, snapshots },
+          {
+            signal: ctx.signal,
+            progress: (progress) => ctx.update({ progress }),
+            stage: (message) => {
+              try {
+                request.progress({ message, stage: "analyze", values: { file: input } });
+              } catch {
+                // Connection closed.
+              }
+            },
+          },
+        );
+      });
+    },
     cover: async ({ cwd, timeline, view, ...choice }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));

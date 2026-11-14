@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`revert` undoes it with the fit; one proposal in review mode), so a track cut mid-waveform does not click. A fade
   in already on the clip (`audio.fadeInMs`, `fadeIn` or a dissolve) is kept; `music fit --skip fade` leaves it out; where
   a fit already lands, the fade is all it writes. `fade` joins the step ids of `music.fit` and `music.shape` (protocol 123).
+- `analyze` curve, ink, mouth sync and labels, and `analyze diff` (#471 slice 3, epic #451; protocol 124): the result and
+  `analysis.json` of `frameshell analyze` gain
+  - `curve`: the change of the picture over time (`values` every `step` seconds, 0.1 or longer for a film over 2 minutes,
+    a cut is a spike) and its `moves`, the steady stretches between the big changes, each with its start, duration, peak
+    and the closest ease (`linear`, `in`, `out`, `inOut`, by the speed profile against the cubic eases) with its `fit`;
+    the direction and overshoot of a move are not measured (the change has no sign);
+  - `ink`, for the film and for every shot: the share of the 8 x 6 grid that gains detail over its quiet level in the
+    shot (text and graphics coming and going), its `peak`, when and the `region` of cells;
+  - `sync`: seconds the mouth of a talking face moves after the voice, by correlating the picture motion in the mouth area
+    of the face box of the `people scan` cached for this exact file (found by content; scans keep boxes, not landmarks)
+    with the loudness of the sound, within 0.5 s; skipped with a `reason` (no sound, no scan, no face for 3 s, no relation);
+  - `labels`: MEASURED, ESTIMATED or DECISION for every value, by field path (a key covers what is inside it, the most
+    specific wins; `labelOf` in the protocol). `frameshell analyze` prints the label before each line.
+  New daemon method `analyze.diff` (job kind `analyze`, MCP `analyze_diff`) and `frameshell analyze diff <film> <reference>
+  [--name n] [--lag s] [--max-lag s] [--every s] [--snapshots n]`: our film against a reference, lined up by activity-curve
+  alignment (the lag within `--max-lag`, 3 s by default, or the one you give) and read at matched times: `energy` (mean and 95th
+  percentile of the motion of each, their ratio, second-by-second windows), SSIM from ffmpeg's `ssim` every `--every` s
+  (0.5), and a side-by-side sheet (ours left, `--snapshots` pairs, the lowest-SSIM moments among them) through the sheet code
+  of `review`. A distance to read, not a pass or fail. Written to `.frameshell/analysis/<name>/` (`diff.json`, `diff.png`).
+  New files in `packages/core/src/analyze/` (`curve.ts`, `ink.ts`, `lip.ts`, `lip-run.ts`, `align.ts`, `correlate.ts`,
+  `activity.ts`, `diff.ts`), after HyperFrames' `measure` (Apache-2.0, #478). Skill page `reference-video.md` explains how to
+  read them and how to report them.
 - Shaped transitions on upper tracks and nested clips, slice 3 of #483 (ADR 0030, epic #451): `transition.set` with
   `kind` `wipe`, `push` or `iris` now plays on every video track with the edge, like a dissolve, instead of the bottom
   one only. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not
