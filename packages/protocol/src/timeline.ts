@@ -7,6 +7,7 @@ import {
   DirectorRulesSchema,
   DuckSettingsSchema,
   ElementAdjustSchema,
+  MotionBlurSchema,
   ShapeSettingsSchema,
   FormatIdSchema,
   MAX_SNAP_WINDOW_S,
@@ -421,6 +422,13 @@ export const operationArgs = {
           "`exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project `.cube`) at `lutMix`. " +
           "Shots are skipped with a warning.",
       ),
+    motionBlur: MotionBlurSchema.nullable()
+      .optional()
+      .describe(
+        "Generated (adapter) clips only (ADR 0041): motion blur merged field by field into the clip's; `{}` turns it on with the defaults " +
+          "(`shutter` 180 degrees centred, `samples` 8, `blend` linear), `null` clears it. The render costs about `samples` times a sharp one. " +
+          "A plugin that does not apply it keeps the clip sharp, with a warning.",
+      ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
     elements: z
@@ -434,7 +442,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
     format: formatArg(
       "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
-        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `scriptRef` are shared by every format and refused with it.",
+        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `motionBlur`, `scriptRef` are shared by every format and refused with it.",
     ),
     hidden: z
       .boolean()

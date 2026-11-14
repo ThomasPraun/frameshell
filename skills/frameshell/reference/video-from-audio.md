@@ -10,7 +10,7 @@ A podcast, a talk or a voice note has no picture; its owner wants a video. The s
 | **Medium** | You | Simple plus section titles, highlighted keywords and images. |
 | **Explainer** | You | Medium plus up to one generated composition per scene (b-roll, diagrams, animated overlays). |
 
-Ask which level the person wants when they did not say. For simple, check `frameshell timeline show --json` first: the app may already have done it, and then there is nothing to build.
+Ask which level the person wants when they did not say. A true story told as an animated short in the person's own voice (pitch, sources, shot list) is [story-shorts.md](story-shorts.md). For simple, check `frameshell timeline show --json` first: the app may already have done it, and then there is nothing to build.
 
 ## Steps
 

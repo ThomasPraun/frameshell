@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AdapterClip } from "@frameshell/schema";
+import type { AdapterClip, ResolvedMotionBlur } from "@frameshell/schema";
 
 /** Bumped when the key recipe or the cache entry layout changes, so old entries are never reused. */
 const CACHE_LAYOUT_VERSION = 1;
@@ -16,6 +16,8 @@ export interface ClipKeyInput {
   format: { fps: number; width: number; height: number };
   /** Hash of the project's style token sheet (ADR 0028), for an adapter that applies it; absent otherwise. */
   style?: string;
+  /** The clip's motion blur, defaults filled in (ADR 0041), for an adapter that applies it; absent otherwise. */
+  motionBlur?: ResolvedMotionBlur;
 }
 
 /**
@@ -37,6 +39,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     format: input.format,
     // Absent drops out, so clips of adapters without style tokens, and projects without a style, keep their keys.
     style: input.style,
+    // Absent drops out like `style`; resolved, so `{}` and the spelled-out defaults give one key.
+    motionBlur: input.motionBlur,
   });
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
 }

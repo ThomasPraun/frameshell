@@ -42,6 +42,16 @@ describe.skipIf(process.platform === "win32")("alpha detection by pixel format",
     expect(media.video?.alpha).toBe(alpha);
   });
 
+  it("records the colour tags, null when absent or unknown (ADR 0031 LOG warning)", async () => {
+    const tagged = await probeSource(
+      fakeFfprobe({ codec_name: "hevc", pix_fmt: "yuv420p10le", color_transfer: "arib-std-b67", color_primaries: "bt2020" }, "mov,mp4"),
+      "ignored",
+    );
+    expect(tagged.media.video).toMatchObject({ colorTransfer: "arib-std-b67", colorPrimaries: "bt2020" });
+    const untagged = await probeSource(fakeFfprobe({ codec_name: "h264", pix_fmt: "yuv420p", color_transfer: "unknown" }, "mov,mp4"), "ignored");
+    expect(untagged.media.video).toMatchObject({ colorTransfer: null, colorPrimaries: null });
+  });
+
   it("builds no alpha proxy for a still", async () => {
     const probe = await probeSource(fakeFfprobe({ codec_name: "png", pix_fmt: "pal8" }, "png_pipe"), "ignored");
     expect(probe.alpha).toBeNull();
@@ -92,8 +102,15 @@ describe("MediaService.probe of an old manifest", () => {
     expect(probed.video).toMatchObject({ width: 320, alpha: false });
   }, 120_000);
 
-  it("answers from a manifest that records alpha", async () => {
-    const { root, media } = await setup({ ...oldVideo, alpha: true });
+  it("probes again when the manifest has alpha but no colour tags", async () => {
+    const { root, media } = await setup({ ...oldVideo, alpha: false });
+    const probed = await media.probe(root, "assets/a.mp4");
+    expect(probed.format).not.toBe("cached");
+    expect(probed.video).toHaveProperty("colorTransfer");
+  }, 120_000);
+
+  it("answers from a manifest that records alpha and the colour tags", async () => {
+    const { root, media } = await setup({ ...oldVideo, alpha: true, colorTransfer: null, colorPrimaries: null });
     expect((await media.probe(root, "assets/a.mp4")).format).toBe("cached");
   }, 120_000);
 });

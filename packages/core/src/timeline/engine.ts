@@ -19,6 +19,8 @@ import {
   RESERVED_MIC_IDS,
   type Clip,
   type Grade,
+  type LogHint,
+  logFootageWarning,
   type ElementAdjust,
   type ClipKey,
   type Marker,
@@ -94,6 +96,8 @@ export interface SourceInfo {
   duration: number | null;
   video: boolean;
   audio: boolean;
+  /** Why the picture looks like LOG or HDR footage (ADR 0031); absent when it does not or the source is not probed for it. */
+  log?: LogHint | null;
 }
 
 /** An adapter-registered clip type as the engine sees it. */
@@ -102,6 +106,8 @@ export interface ClipTypeInfo {
   validateProps(props: Record<string, unknown>): Promise<string | null>;
   /** The adapter applies `elements` (ADR 0021); absent means it does not. */
   elementStyles?: boolean;
+  /** The adapter applies `motionBlur` (ADR 0041); absent means its clips render sharp. */
+  motionBlur?: boolean;
 }
 
 /**
@@ -960,10 +966,10 @@ class Edit {
         hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
       });
     }
-    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, transform, props, elements, scriptRef } = args;
-    if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, transform, props, elements, scriptRef } = args;
+    if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, transform, props, elements, scriptRef].every((value) => value === undefined)) {
       throw this.invalid("nothing to set.", {
-        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, transform, props, elements, scriptRef.",
+        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, transform, props, elements, scriptRef.",
       });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
@@ -972,10 +978,10 @@ class Edit {
       const effects = { audioEffects, backdrop, grade };
       const skipped = (Object.keys(effects) as (keyof typeof effects)[]).filter((field) => effects[field] !== undefined).join(" and ");
       this.warnings.push(`${clip.id} is a multicam shot: shots take no effects in this version; ${skipped} skipped.`);
-      if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, transform, props, elements, scriptRef].every((value) => value === undefined)) return;
+      if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, transform, props, elements, motionBlur, scriptRef].every((value) => value === undefined)) return;
     }
     if (isShotClip(clip)) {
-      const given = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "transform", "props", "elements"] as const).filter((field) => args[field] !== undefined);
+      const given = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "transform", "props", "elements", "motionBlur"] as const).filter((field) => args[field] !== undefined);
       if (given.length > 0) {
         throw this.invalid(`shots take no ${given.map((f) => `\`${f}\``).join(", ")}; only \`scriptRef\` is set per shot.`, {
           field: given[0]!,
@@ -1016,7 +1022,11 @@ class Edit {
       else clip.audio = audio;
     }
     if (backdrop !== undefined) this.setBackdrop(track, clip, backdrop);
-    if (grade !== undefined) this.setGrade(track, clip, grade);
+    if (grade !== undefined) {
+      this.setGrade(track, clip, grade);
+      if (grade !== null && isMedia(clip) && clip.grade) await this.warnLogFootage(clip.asset);
+    }
+    if (motionBlur !== undefined) await this.setMotionBlur(track, clip, motionBlur);
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
       clip.transform = { ...clip.transform, ...transform };
@@ -1046,7 +1056,9 @@ class Edit {
    */
   async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
     this.checkFormat(format);
-    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "scriptRef"] as const).filter((field) => args[field] !== undefined);
+    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "motionBlur", "scriptRef"] as const).filter(
+      (field) => args[field] !== undefined,
+    );
     if (shared.length > 0) {
       throw this.invalid(`${shared.map((field) => `\`${field}\``).join(", ")} ${shared.length > 1 ? "are" : "is"} shared by every format; set it without \`format\`.`, {
         field: shared[0]!,
@@ -1154,6 +1166,42 @@ class Edit {
     }
     if (Object.keys(merged).length === 0) delete clip.grade;
     else clip.grade = merged as Grade;
+  }
+
+  /**
+   * Merge `motionBlur` field by field into a generated clip's (ADR 0041; `null` clears, `{}` turns it on with the
+   * defaults). Stored with a warning when the clip's plugin does not apply it: that clip renders sharp.
+   */
+  async setMotionBlur(track: AnyClipTrack, clip: Clip, motionBlur: NonNullable<OperationArgs<"clip.set">["motionBlur"]> | null): Promise<void> {
+    if (isMedia(clip) || isNested(clip)) {
+      throw this.invalid(`only generated clips take \`motionBlur\`; ${clip.id} is ${clip.type}.`, {
+        field: "motionBlur",
+        hint: isNested(clip) ? "Blur the generated clips inside the nested timeline." : "Footage carries the blur of the camera that shot it.",
+      });
+    }
+    if (track.kind === "audio") throw this.invalid("audio tracks take no `motionBlur`.", { field: "motionBlur" });
+    if (motionBlur === null) {
+      delete clip.motionBlur;
+      return;
+    }
+    clip.motionBlur = { ...clip.motionBlur, ...defined(motionBlur) };
+    if (!(await this.adapter(clip.type)).motionBlur) {
+      this.warnings.push(`the ${clip.type} plugin does not apply motion blur yet: ${clip.id} keeps rendering sharp until it does.`);
+    }
+  }
+
+  /**
+   * ADR 0031 decision 9: footage that looks like LOG or HDR is graded all the same, with a warning. A source the
+   * context cannot read says nothing here: the grade is no less valid, and export reports the file.
+   */
+  async warnLogFootage(asset: string): Promise<void> {
+    let log: LogHint | null | undefined;
+    try {
+      log = (await this.context.source(asset)).log;
+    } catch {
+      return;
+    }
+    if (log) this.warnings.push(logFootageWarning(asset, log));
   }
 
   /** Merge `elements` per selector (`null` removes one, `null` for all clears); empty ends up absent. */
