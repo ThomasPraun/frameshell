@@ -9,7 +9,7 @@ frameshell render --loop --out exports/title-loop.mp4
 `--loop` (MCP: `render` with `loop: true`) renders the whole timeline, frame 0 to the last frame, and:
 
 - fades the first and last 2 ms (96 samples at 48 kHz) of MP4 and MOV audio with a half sine, so the repeat does not click; a silent file is unchanged;
-- warns in `warnings` when the output frame rate makes frames x output fps / fps not a whole number (the cycle is a fraction of a frame; render at the project's rate or change the length), and when frame 0 or the last frame is black (a fade from or to black, or no picture), because every pass then passes through black;
+- warns in `warnings` when the output frame rate makes frames x output fps / fps not a whole number (the cycle is a fraction of a frame; render at the project's rate or change the length), when frame 0 or the last frame is black (a fade from or to black, or no picture), because every pass then passes through black, and when a clip has grain and the timeline is not a multiple of 64 frames long (the grain pattern repeats every 64 frames, so it jumps at the seam);
 - once the file is written, compares frame 0 with the last frame. When they are the same picture while the file moves, the job's `warnings` (`job.list`, `--json`; the CLI prints them after `Rendered`) says the last frame repeats frame 0, so the picture holds for two frames at the seam. The timeline is never changed: you fix it.
 - is refused with `--cover-frame` / `cover`: the cover replaces frame 0 and breaks the seam.
 

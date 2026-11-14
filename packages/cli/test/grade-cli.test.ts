@@ -36,3 +36,15 @@ describe("clip set --vignette (ADR 0043)", () => {
     expect(() => parseTimelineCommand(["clip", "set", "c_talk"], { "clear-vignette": true, vignette: "0.3" })).toThrow(/--clear-vignette alone/);
   });
 });
+
+describe("clip set --grain (ADR 0043)", () => {
+  it("sends only the numbers given, merged by the daemon into the clip's grain", () => {
+    expect(parseTimelineCommand(["clip", "set", "c_talk"], { grain: "0.3" })!.params).toEqual({ clip: "c_talk", grain: { amount: 0.3 } });
+    expect(parseTimelineCommand(["clip", "set", "c_talk"], { "grain-size": "2", "grain-seed": "7" })!.params["grain"]).toEqual({ size: 2, seed: 7 });
+  });
+
+  it("removes the grain with --clear-grain, alone", () => {
+    expect(parseTimelineCommand(["clip", "set", "c_talk"], { "clear-grain": true })!.params).toEqual({ clip: "c_talk", grain: null });
+    expect(() => parseTimelineCommand(["clip", "set", "c_talk"], { "clear-grain": true, grain: "0.3" })).toThrow(/--clear-grain alone/);
+  });
+});

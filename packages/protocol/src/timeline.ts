@@ -5,6 +5,7 @@ import {
   BackdropSchema,
   GradeSchema,
   VignetteSchema,
+  GrainSchema,
   DirectorRulesSchema,
   DuckSettingsSchema,
   ElementAdjustSchema,
@@ -438,6 +439,14 @@ export const operationArgs = {
           "defaults (`strength` 0.35, `radius` 1, `softness` 0.6), `null` clears it. The clip's own picture darkens towards its edges, " +
           "after its grade; export and the preview draw the same falloff. Shots are skipped with a warning; nested timeline clips are refused.",
       ),
+    grain: GrainSchema.nullable()
+      .optional()
+      .describe(
+        "Media and generated clips on video tracks (ADR 0043): film grain merged field by field into the clip's; `{}` turns it on with the " +
+          "defaults (`amount` 0.35, `size` 1.5 project px, `seed` a hash of the clip id), `null` clears it. Seeded noise over the clip's own " +
+          "picture after its grade and vignette, the same at a timeline frame in every export and capture. Never on screen recordings, UI or " +
+          "text. Shots are skipped with a warning; nested timeline clips are refused.",
+      ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
     elements: z
@@ -451,7 +460,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
     format: formatArg(
       "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
-        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `motionBlur`, `vignette`, `scriptRef` are shared by every format and refused with it.",
+        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `motionBlur`, `vignette`, `grain`, `scriptRef` are shared by every format and refused with it.",
     ),
     hidden: z
       .boolean()

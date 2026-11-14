@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { letterboxBars, parseTimeline, vignetteGain, vignetteLevel, vignetteOf } from "../src/index.js";
+import {
+  type ClipTrack,
+  type Timeline,
+  grainOf,
+  grainPhase,
+  grainPlate,
+  grainSeed,
+  grainSpread,
+  letterboxBars,
+  parseTimeline,
+  vignetteGain,
+  vignetteLevel,
+  vignetteOf,
+  withSubjectLayers,
+} from "../src/index.js";
 
 describe("vignette (ADR 0043)", () => {
   const frame = { width: 1920, height: 1080 };
@@ -78,5 +92,66 @@ describe("letterbox bars (ADR 0043)", () => {
     expect(letterboxBars({ width: 1920, height: 1080 }, 1.7778)).toEqual([]);
     const [top, bottom] = letterboxBars({ width: 100, height: 100 }, 1e6);
     expect(top!.height + bottom!.height).toBe(99);
+  });
+});
+
+describe("grain (ADR 0043)", () => {
+  it("seeds a clip by the low 31 bits of FNV-1a of its id unless it names a seed", () => {
+    // FNV-1a 32-bit test vectors: "" 0x811c9dc5, "a" 0xe40c292c, "foobar" 0xbf9cf968.
+    expect([grainSeed(""), grainSeed("a"), grainSeed("foobar")]).toEqual([0x011c9dc5, 0x640c292c, 0x3f9cf968]);
+    expect(grainOf({ id: "c_talk", type: "media", grain: {} })).toEqual({ amount: 0.35, size: 1.5, seed: grainSeed("c_talk"), strength: 17 });
+    expect(grainOf({ id: "c_talk", type: "hyperframes", grain: { amount: 1, size: 3, seed: 9 } })).toEqual({ amount: 1, size: 3, seed: 9, strength: 48 });
+  });
+
+  it("gives none to clips without it, an amount too small to show, shots and nested timelines", () => {
+    expect(grainOf({ id: "c", type: "media" })).toBeNull();
+    expect(grainOf({ id: "c", type: "media", grain: { amount: 0.02 } })).toBeNull();
+    expect(grainOf({ id: "c", type: "shot", grain: {} })).toBeNull();
+    expect(grainOf({ id: "c", type: "timeline", grain: {} })).toBeNull();
+  });
+
+  it("phases the pattern by timeline frame modulo 64", () => {
+    expect([0, 63, 64, 70, 134, -1].map(grainPhase)).toEqual([0, 63, 0, 6, 6, 63]);
+  });
+
+  it("puts one cell per size project pixels of the layer, never more than the picture has", () => {
+    expect(grainPlate(1.5, { width: 1920, height: 1080 }, { width: 3840, height: 2160 })).toEqual({ width: 1280, height: 720 });
+    expect(grainPlate(1, { width: 1920, height: 1080 }, { width: 1280, height: 720 })).toEqual({ width: 1280, height: 720 });
+    expect(grainPlate(4, { width: 2, height: 2 }, { width: 100, height: 100 })).toEqual({ width: 1, height: 1 });
+  });
+
+  it("expects uniform integer values centred on 0, softened by 2/3 when scaled up", () => {
+    const grain = { amount: 0.5, size: 1, seed: 1, strength: 24 };
+    expect(grainSpread(grain, false)).toEqual({ mean: -0.5, std: Math.sqrt(575 / 12) });
+    expect(grainSpread({ ...grain, strength: 17 }, true)).toEqual({ mean: 0, std: (Math.sqrt(288 / 12) * 2) / 3 });
+  });
+
+  it("keeps the plate clip's grain and seed on its subject-matte copy", () => {
+    const timeline: Timeline = {
+      schemaVersion: 1,
+      id: "main",
+      revision: 1,
+      tracks: [
+        { id: "v1", kind: "video", clips: [{ id: "c_talk", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 3, grain: { amount: 0.4 } }] },
+        { id: "v2", kind: "video", behind: "v1", clips: [{ id: "c_t", type: "media", asset: "assets/title.png", start: 0, in: 0, out: 3 }] },
+      ],
+    };
+    const lifted = withSubjectLayers(timeline);
+    const plate = (lifted.tracks[0] as ClipTrack).clips[0]!;
+    const copy = (lifted.tracks.find((track) => track.id === "v2/subject") as ClipTrack).clips[0]!;
+    expect(grainOf(copy)).toEqual(grainOf(plate));
+    expect(grainOf(copy)!.seed).toBe(grainSeed("c_talk"));
+  });
+
+  it("parses a timeline whose clips carry grain, and refuses a seed that is not a whole number", () => {
+    const timeline = (grain: object) => ({
+      schemaVersion: 1,
+      id: "main",
+      revision: 1,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_talk", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 3, grain }] }],
+    });
+    expect(parseTimeline(timeline({ amount: 0.4, size: 2, seed: 7 })).ok).toBe(true);
+    expect(parseTimeline(timeline({ seed: 1.5 })).ok).toBe(false);
+    expect(parseTimeline(timeline({ size: 0.5 })).ok).toBe(false);
   });
 });

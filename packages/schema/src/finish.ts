@@ -1,5 +1,5 @@
-// Film finish (ADR 0043): the timeline's letterbox bars and a clip's vignette, each one function that export and the
-// preview both draw from. No Zod here: the preview engine worker imports this file.
+// Film finish (ADR 0043): the timeline's letterbox bars and a clip's vignette and grain, each from functions that
+// export and the preview both draw from. No Zod here: the preview engine worker imports this file.
 
 /** Width and height of a frame in pixels. */
 export interface FrameSize {
@@ -102,4 +102,86 @@ export function vignetteGain(x: number, y: number, size: FrameSize, vignette: Re
  */
 export function vignetteLevel(gain: number): number {
   return Math.floor(255 * gain + 0.5);
+}
+
+/** Range and default of each grain number (ADR 0043 units). */
+export const GRAIN_LIMITS = {
+  amount: { min: 0, max: 1, default: 0.35 },
+  size: { min: 1, max: 4, default: 1.5 },
+  seed: { min: 0, max: 0x7fffffff },
+} as const;
+
+/** Frames before grain repeats: its phase is the timeline frame modulo this (ADR 0043 decision 7; changes only with the goldens). */
+export const GRAIN_PERIOD = 64;
+
+/** ffmpeg `noise` strength of grain `amount` 1: each grain value is uniform over this many levels. */
+export const GRAIN_STRENGTH = 48;
+
+/** A clip's `grain` as stored; omitted numbers take {@link GRAIN_LIMITS} defaults, the seed {@link grainSeed}. */
+export interface GrainFields {
+  amount?: number | undefined;
+  size?: number | undefined;
+  seed?: number | undefined;
+}
+
+/** Grain with every number given. */
+export interface ResolvedGrain {
+  /** 0 none to 1 strong. */
+  amount: number;
+  /** Width of one grain in project pixels (1-4). */
+  size: number;
+  /** Seed of the pattern, 0 to 2^31 - 1. */
+  seed: number;
+  /** Integer levels the grain values spread over: {@link grainStrength} of `amount`. */
+  strength: number;
+}
+
+/** Low 31 bits of the 32-bit FNV-1a hash of `id`'s UTF-8 bytes: the grain seed of a clip that names none. */
+export function grainSeed(id: string): number {
+  let hash = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(id)) hash = Math.imul(hash ^ byte, 0x01000193);
+  return (hash >>> 0) & 0x7fffffff;
+}
+
+/** Noise strength (integer levels, 0 to {@link GRAIN_STRENGTH}) of grain `amount`. */
+export function grainStrength(amount: number): number {
+  return Math.round(amount * GRAIN_STRENGTH);
+}
+
+/**
+ * The grain a clip's picture is drawn with: its `grain` with defaults filled in, the seed from its id when it names
+ * none (a subject-matte copy keeps its plate clip's id, so its grain lines up); null for none, an amount too small to
+ * show, multicam shots and nested timeline clips (ADR 0043 decision 9). Export and the preview both ask this.
+ */
+export function grainOf(clip: { id: string; type: string; grain?: GrainFields | undefined }): ResolvedGrain | null {
+  if (clip.type === "shot" || clip.type === "timeline" || !clip.grain) return null;
+  const amount = clip.grain.amount ?? GRAIN_LIMITS.amount.default;
+  const strength = grainStrength(amount);
+  if (strength <= 1) return null;
+  return { amount, size: clip.grain.size ?? GRAIN_LIMITS.size.default, seed: clip.grain.seed ?? grainSeed(clip.id), strength };
+}
+
+/** Frame of the grain pattern shown at timeline frame `frame`: the same whatever piece, segment or capture draws it. */
+export function grainPhase(frame: number): number {
+  return ((frame % GRAIN_PERIOD) + GRAIN_PERIOD) % GRAIN_PERIOD;
+}
+
+/**
+ * Grain cells across a picture of `picture` pixels shown as a layer of `layer` project pixels: one cell per `size`
+ * project pixels, at most one per picture pixel. Export's plate has this size, scaled up to the picture; the preview
+ * interpolates the same lattice.
+ */
+export function grainPlate(size: number, layer: FrameSize, picture: FrameSize): FrameSize {
+  const cells = (shown: number, pixels: number) => Math.min(pixels, Math.max(1, Math.round(shown / size)));
+  return { width: cells(layer.width, picture.width), height: cells(layer.height, picture.height) };
+}
+
+/**
+ * Expected mean and standard deviation of the luma change grain makes on a mid-grey picture: integer values uniform
+ * over `strength` levels from `-floor(strength / 2)`, times 2/3 when the plate is smaller than the picture (`smooth`:
+ * bilinear upscaling). Export's plate and the preview's pass are each held to it, not to each other's pixels.
+ */
+export function grainSpread(grain: ResolvedGrain, smooth: boolean): { mean: number; std: number } {
+  const { strength } = grain;
+  return { mean: (strength - 1) / 2 - Math.floor(strength / 2), std: Math.sqrt((strength * strength - 1) / 12) * (smooth ? 2 / 3 : 1) };
 }

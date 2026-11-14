@@ -1066,6 +1066,31 @@
                           },
                           "additionalProperties": false,
                           "description": "Vignette (ADR 0043): the clip's own picture darkens smoothly towards its edges, after the grade and before any transition shape. `{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none."
+                        },
+                        "grain": {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "description": "How strong the grain is: 0 none, 1 strong. Default 0.35.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "size": {
+                              "description": "Width of one grain in project pixels; above 1 the grain is also softer. Default 1.5.",
+                              "type": "number",
+                              "minimum": 1,
+                              "maximum": 4
+                            },
+                            "seed": {
+                              "description": "Seed of the pattern. Default: a hash of the clip id, so every clip has its own.",
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483647
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Film grain (ADR 0043): seeded noise over the clip's own picture, after its grade and vignette and before any transition shape; the pattern at a timeline frame is always the same and repeats every 64 frames. `{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none. Not for screen recordings or UI."
                         }
                       },
                       "required": [
@@ -2844,6 +2869,31 @@
                           },
                           "additionalProperties": false,
                           "description": "Vignette (ADR 0043): the clip's own picture darkens smoothly towards its edges, after the grade and before any transition shape. `{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none."
+                        },
+                        "grain": {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "description": "How strong the grain is: 0 none, 1 strong. Default 0.35.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "size": {
+                              "description": "Width of one grain in project pixels; above 1 the grain is also softer. Default 1.5.",
+                              "type": "number",
+                              "minimum": 1,
+                              "maximum": 4
+                            },
+                            "seed": {
+                              "description": "Seed of the pattern. Default: a hash of the clip id, so every clip has its own.",
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 2147483647
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Film grain (ADR 0043): seeded noise over the clip's own picture, after its grade and vignette and before any transition shape; the pattern at a timeline frame is always the same and repeats every 64 frames. `{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none. Not for screen recordings or UI."
                         }
                       },
                       "required": [

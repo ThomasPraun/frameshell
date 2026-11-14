@@ -104,6 +104,7 @@ mutations print the new revision):
            [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
            [--motion-blur] [--motion-blur-shutter deg] [--motion-blur-samples n] [--motion-blur-blend linear|srgb]
            [--clear-motion-blur] [--vignette 0-1] [--vignette-radius 0-1.5] [--vignette-softness 0-1] [--clear-vignette]
+           [--grain 0-1] [--grain-size 1-4] [--grain-seed n] [--clear-grain]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
            [--hidden | --shown] [--reset]]
                                --format <id> (a format other than the primary, see format list) sets the clip in
@@ -135,6 +136,12 @@ mutations print the new revision):
                                the centre (default 1 = the corners), falling off over --vignette-softness (default 0.6,
                                0 a hard edge). Merged into its vignette; after the grade, before transitions. Export and
                                the preview draw the same falloff; --clear-vignette removes it
+                               --grain adds film grain to a media or generated clip's own picture (ADR 0043): amount 0
+                               none to 1 strong (default 0.35), grains --grain-size project px wide (default 1.5; above 1
+                               also softer), pattern from --grain-seed (default: a hash of the clip id). Merged into its
+                               grain; after the grade and vignette, before transitions. A timeline frame always gets the
+                               same grain, repeating every 64 frames. Never on screen recordings, UI or text;
+                               --clear-grain removes it
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -424,6 +431,10 @@ export const TIMELINE_OPTIONS = {
   "vignette-radius": { type: "string" },
   "vignette-softness": { type: "string" },
   "clear-vignette": { type: "boolean" },
+  grain: { type: "string" },
+  "grain-size": { type: "string" },
+  "grain-seed": { type: "string" },
+  "clear-grain": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -588,6 +599,10 @@ const ALLOWED: Record<string, string[]> = {
     "vignette-radius",
     "vignette-softness",
     "clear-vignette",
+    "grain",
+    "grain-size",
+    "grain-seed",
+    "clear-grain",
     "script-ref",
     "clear-script-ref",
     "format",
@@ -1068,6 +1083,10 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
           : vignetteFlags.length > 0
             ? { strength: num("vignette"), radius: num("vignette-radius"), softness: num("vignette-softness") }
             : undefined;
+      const grainFlags = (["grain", "grain-size", "grain-seed"] as const).filter((flag) => str(flag) !== undefined);
+      if (values["clear-grain"] === true && grainFlags.length > 0) throw new UsageError("Pass --clear-grain alone, without --grain or --grain-*.");
+      const grain =
+        values["clear-grain"] === true ? null : grainFlags.length > 0 ? { amount: num("grain"), size: num("grain-size"), seed: num("grain-seed") } : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -1081,6 +1100,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         grade,
         motionBlur,
         vignette,
+        grain,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -1364,6 +1384,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   if (params["grade"]) params["grade"] = clean(params["grade"] as Record<string, unknown>);
   if (params["motionBlur"]) params["motionBlur"] = clean(params["motionBlur"] as Record<string, unknown>);
   if (params["vignette"]) params["vignette"] = clean(params["vignette"] as Record<string, unknown>);
+  if (params["grain"]) params["grain"] = clean(params["grain"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
   const glassFromStyle = method === "clip.set" && values["glass"] === true;
   return {

@@ -18,6 +18,7 @@ import {
   flattenTimeline,
   gradeKey,
   gradeOf,
+  grainSeed,
   resolveFormat,
 } from "@frameshell/schema";
 import {
@@ -518,6 +519,17 @@ describe("export compiler", () => {
       const fadeOut = editClips((clip) => (clip.id === "c_logo" ? { ...clip, fadeOut: 1 } : clip));
       expect(looped({ timeline: fadeOut }).warnings).toEqual([expect.stringMatching(/^Loop: the last frame \(239\) is black \(.*fading in or out\), so every pass ends on black/)]);
     });
+
+    it("warns when a grained clip's pattern does not close the loop: a length not a multiple of 64 frames (ADR 0043)", () => {
+      const grained = editClips((clip) => (clip.id === "c_talk1" ? { ...clip, grain: {} } : clip));
+      expect(looped({ timeline: grained }).warnings).toEqual([
+        "Loop: clip c_talk1 has grain, whose pattern repeats every 64 frames, and 240 frames are not a multiple of 64: the grain jumps at the seam. " +
+          "Make the timeline 256 frames long, or remove the grain.",
+      ]);
+      const whole = editClips((clip) => (clip.id === "c_talk1" ? { ...clip, grain: {} } : clip.id === "c_music" ? { ...clip, out: (clip.out as number) + 16 / 30 } : clip));
+      expect(looped({ timeline: whole }).warnings.filter((warning) => warning.includes("grain"))).toEqual([]);
+      expect(compileRender({ timeline: grained, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts }).warnings).toEqual([]);
+    });
   });
 
   describe("GIF (ADR 0039)", () => {
@@ -779,6 +791,54 @@ describe("export compiler", () => {
         const [, width] = /lut3d=file=grade-warm\.cube:interp=trilinear,format=gbrap,crop=(\d+):1080:\d+:0\[vtp\d+\]/.exec(graphs)!;
         expect(Number(width)).toBeLessThan(1080);
         expect(graphs).toContain(`color=c=black:s=${width}x1080:r=30/1,trim=end_frame=1,format=gbrap,geq=`);
+      });
+    });
+
+    describe("grain (ADR 0043 slice 3)", () => {
+      const withGrain = (grains: Record<string, object>): Timeline => ({
+        ...animated,
+        tracks: animated.tracks.map((track) =>
+          track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (grains[clip.id] ? { ...clip, ...grains[clip.id] } : clip)) } : track,
+        ) as Timeline["tracks"],
+      });
+      const grained = withGrain({
+        c_talk1: { grain: { amount: 0.5, size: 2, seed: 11 }, vignette: { strength: 0.5 } },
+        c_logo2: { grain: {} },
+        c_end: { grain: { size: 1, seed: 7 } },
+      });
+      const plan = compileRender({ ...input, timeline: grained });
+      const graph = Object.values(plan.files).join("\n");
+
+      it("merges a seeded plate into the picture after the vignette, before scale and alpha, in segments and captures (golden)", () => {
+        golden("grain-plan", {
+          segments: plan.segments,
+          files: plan.files,
+          frame: compileFrame({ ...input, timeline: grained, width: 1280, height: 720, at: 3.1, output: "/out/frame.png" }),
+        });
+        // c_talk1 on the bottom track: amount 0.5 = strength 24, 2 project px per cell of the 1920-wide source shown full frame.
+        expect(graph).toContain("color=c=gray:s=960x540:r=30/1,format=gray,trim=end_frame=64,noise=alls=24:allf=t+u:all_seed=11,format=gray[gpp0_0]");
+        expect(graph).toMatch(/\[vtp0\]\[vpp0\]blend=c0_mode=multiply:c1_mode=multiply:c2_mode=multiply:c3_mode=normal\[gtp0\]/);
+        expect(graph).toMatch(/\[gtp0\]\[gpp0\]blend=c0_mode=grainmerge:c1_mode=grainmerge:c2_mode=grainmerge:c3_mode=normal,scale=1920:1080:force_original_aspect_ratio=decrease/);
+        expect(graph).toContain("settb=expr=1/(30/1),setpts=N,scale=1920:1080:flags=bilinear,format=gray,format=gbrap[gpp0]");
+        // c_logo2 (defaults): the seed is its id's hash, and the strength 17 of amount 0.35.
+        expect(graph).toContain(`noise=alls=17:allf=t+u:all_seed=${grainSeed("c_logo2")}`);
+        // c_end at size 1: a plate as large as the render, so nothing scales it.
+        expect(graph).toMatch(/noise=alls=17:allf=t\+u:all_seed=7,format=gray\[gpo\d+_0\];\n\[gpo\d+_0\]null,trim=start_frame=\d+:end_frame=\d+,settb=expr=1\/\(30\/1\),setpts=N,format=gbrap\[gpo\d+\]/);
+        expect(plan.warnings).toEqual(animatedPlan.warnings);
+      });
+
+      it("starts each piece's plate at its timeline frame modulo 64, joining periods where a piece crosses one", () => {
+        // Segments of 60 frames: the second starts on frame 60 (phase 60), the third on frame 120 (phase 56).
+        const second = plan.files["seg-0002.filter"]!;
+        expect(second).toContain("[gpp0_0][gpp0_1]concat=n=2:v=1:a=0,trim=start_frame=60:end_frame=");
+        const third = plan.files["seg-0003.filter"]!;
+        expect(third).toMatch(/trim=start_frame=56:end_frame=\d+/);
+        const frame = compileFrame({ ...input, timeline: grained, width: 1280, height: 720, at: 2.5, output: "/out/frame.png" });
+        expect(frame.args.join(" ")).toContain("[gpp0_0]null,trim=start_frame=11:end_frame=12,");
+      });
+
+      it("leaves clips without grain, and an amount too small to show, as they were", () => {
+        expect(compileRender({ ...input, timeline: withGrain({ c_talk1: { grain: { amount: 0.01 } } }) })).toEqual(animatedPlan);
       });
     });
 

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
-import { VIGNETTE_LIMITS } from "./finish.js";
+import { GRAIN_LIMITS, VIGNETTE_LIMITS } from "./finish.js";
 import { GRADE_LIMITS, MAX_LUT_SIZE } from "./grade.js";
 import { MotionBlurSchema } from "./motion-blur.js";
 import { FormatIdSchema } from "./format-id.js";
@@ -429,6 +429,35 @@ export const VignetteSchema = z
       "`{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none.",
   );
 
+/** Film grain of a media or generated clip (ADR 0043): seeded noise that changes every frame. */
+export const GrainSchema = z
+  .strictObject({
+    amount: z
+      .number()
+      .min(GRAIN_LIMITS.amount.min)
+      .max(GRAIN_LIMITS.amount.max)
+      .optional()
+      .describe(`How strong the grain is: 0 none, 1 strong. Default ${GRAIN_LIMITS.amount.default}.`),
+    size: z
+      .number()
+      .min(GRAIN_LIMITS.size.min)
+      .max(GRAIN_LIMITS.size.max)
+      .optional()
+      .describe(`Width of one grain in project pixels; above 1 the grain is also softer. Default ${GRAIN_LIMITS.size.default}.`),
+    seed: z
+      .number()
+      .int()
+      .min(GRAIN_LIMITS.seed.min)
+      .max(GRAIN_LIMITS.seed.max)
+      .optional()
+      .describe("Seed of the pattern. Default: a hash of the clip id, so every clip has its own."),
+  })
+  .describe(
+    "Film grain (ADR 0043): seeded noise over the clip's own picture, after its grade and vignette and before any transition shape; " +
+      "the pattern at a timeline frame is always the same and repeats every 64 frames. `{}` uses the defaults. Media and generated " +
+      "clips on video tracks; shots and nested timeline clips take none. Not for screen recordings or UI.",
+  );
+
 /** Footage, audio or image file. Duration on the timeline = `(out - in) / speed`. */
 export const MediaClipSchema = z
   .strictObject({
@@ -441,6 +470,7 @@ export const MediaClipSchema = z
     speed: z.number().positive().optional().describe("Playback rate; 1 = normal, 2 = twice as fast. Default 1."),
     grade: GradeSchema.optional(),
     vignette: VignetteSchema.optional(),
+    grain: GrainSchema.optional(),
   })
   .refine((clip) => clip.out > clip.in, { message: "must be after `in`", path: ["out"] });
 
@@ -502,6 +532,7 @@ export const AdapterClipSchema = z.strictObject({
   backdrop: BackdropSchema.optional(),
   motionBlur: MotionBlurSchema.optional(),
   vignette: VignetteSchema.optional(),
+  grain: GrainSchema.optional(),
 });
 
 /** Clip of a video or audio track. `type` selects the variant. */
@@ -1177,6 +1208,8 @@ export type Backdrop = z.infer<typeof BackdropSchema>;
 export type Grade = z.infer<typeof GradeSchema>;
 /** Vignette of a media or generated clip, as stored; see {@link VignetteSchema}. */
 export type Vignette = z.infer<typeof VignetteSchema>;
+/** Film grain of a media or generated clip, as stored; see {@link GrainSchema}. */
+export type Grain = z.infer<typeof GrainSchema>;
 
 /** True for a program track's shot. Adapter `type` is any string, so `clip.type === "shot"` alone does not narrow. */
 export function isShotClip(clip: AnyClip): clip is ShotClip {
