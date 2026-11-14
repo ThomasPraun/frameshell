@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
-import { launch, sandbox } from "./harness.js";
+import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
@@ -146,12 +146,14 @@ test("in 9:16 the handles and the inspector edit the clip there only", async () 
   await expect.poll(() => colours(0.5)).toBe("KK");
 
   // The timeline marks a clip adjusted in a format; its tooltip names the format. Over the ruler first, so the
-  // tooltip is read again from the clip as it is now; 10 px in, so the 2 s clip is under the pointer at any zoom.
-  const lanes = (await page.locator(".timeline-scroller").boundingBox())!;
+  // tooltip is read again from the clip as it is now. The pointer goes to the middle of the first track's row (its
+  // head sits level with it), 10 px in, so the 2 s clip is under it at any zoom and window size.
   const hoverClip = async () => {
+    const lanes = await laidOutBox(page.locator(".timeline-scroller"));
+    const head = await laidOutBox(page.locator(".track-head").first());
     await page.mouse.move(lanes.x + 10, lanes.y + 8);
     await expect(page.locator(".clip-tooltip")).toHaveCount(0);
-    await page.mouse.move(lanes.x + 10, lanes.y + 22 + 22);
+    await page.mouse.move(lanes.x + 10, head.y + head.height / 2);
     await expect(page.locator(".clip-tooltip")).toBeVisible();
   };
   await hoverClip();
