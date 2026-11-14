@@ -32,7 +32,7 @@ import {
   type TrackSummary,
 } from "@frameshell/protocol";
 import type { ClipAdapter } from "@frameshell/plugin-api";
-import { type BeatsFile, type Marker, type ParseResult, type Timeline, parseTimeline, projectFormats } from "@frameshell/schema";
+import { type BeatsFile, type Marker, type ParseResult, type Timeline, logFootageHint, parseTimeline, projectFormats } from "@frameshell/schema";
 import {
   type ConfigChanged,
   type ConfigEdit,
@@ -1668,6 +1668,7 @@ export class TimelineService {
       duration: probe.video?.still ? null : probe.duration,
       video: probe.video !== null,
       audio: probe.audio !== null,
+      log: probe.video && !probe.video.still ? logFootageHint(asset, probe.video) : null,
     };
   }
 
@@ -2434,6 +2435,7 @@ function isFile(path: string): boolean {
 function clipTypeInfo(adapter: ClipAdapter): ClipTypeInfo {
   return {
     elementStyles: adapter.elementStyles === true,
+    motionBlur: adapter.motionBlur === true,
     validateProps: async (props) => {
       const schema = adapter.propsSchema;
       if (!schema) return null;

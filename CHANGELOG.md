@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion blur of generated clips, slices 1, 2, 4, 5 and 6 of #501 (ADR 0041, SPEC decision 46, epic #451; protocol 131):
+  an optional clip field `motionBlur { shutter?, samples?, blend? }` (`{}` = 180° shutter centred on the frame, 8 samples,
+  linear light) makes each frame of a generated clip's render the average of sub-frame pictures across the shutter. Set
+  with `clip.set` `motionBlur` (merged, `null` clears, shared by every format) and `frameshell clip set --motion-blur`,
+  `--motion-blur-shutter`, `--motion-blur-samples`, `--motion-blur-blend`, `--clear-motion-blur`. An adapter declares
+  `ClipAdapter.motionBlur` and gets `RenderContext.motionBlur` with defaults filled in (plugin API stays "1"); clips of
+  other adapters stay sharp and `clip.set` warns. The resolved settings join the clip render key only when present, so
+  existing keys are unchanged. The HyperFrames adapter renders with the producer's sub-frame accumulation
+  (`pageMotionBlur: "off"`), fixed samples, and names the clip when the producer refuses (HDR, shader transitions).
+  Motion runtime 0.4.0 adds `cuts(seconds[])`, a time guard that keeps samples from crossing a cut inside a composition
+  (the render declares its frame rate in `<meta name="frameshell-fps">`); `frameshell hyperframes update` brings it to
+  existing compositions. Opt-in real tests: blur smears the fast spring, a blurred clip renders twice to identical
+  frames, and a declared cut is never blurred across. Until the sharp/blurred variants of slice 3, a blurred clip has
+  one render that preview and every export wait for.
+- Colour section of the clip inspector and LOG footage warning, second slice of #384 (ADR 0031, epic #451; protocol 130):
+  a media clip on a video track shows Colour in the clip inspector: sliders for exposure, temperature, tint,
+  contrast and saturation, a menu of the project's `.cube` LUTs with its mix, and Reset. A drag is one undoable step
+  (`clip.set grade` with that number); English and Spanish. Footage that looks like LOG or HDR (colour tags of HDR or
+  logarithmic curves or wide-gamut primaries, or a camera LOG word in the file name) gets a note there, and
+  `clip set --grade-*` (and MCP `clip_set`) prints it as a warning; the grade is kept. `asset.list` probes carry
+  `colorTransfer` and `colorPrimaries`; an asset ingested before the upgrade is judged by its name in the inspector
+  until it is ingested again.
 - Skill playbook for story-led animated shorts from the person's voice (#481, part of #453, epic #451): the new
   `skills/frameshell/reference/story-shorts.md` (pitch of five true stories, script budget, `sources.md`, the shot list
   as a contract with reads, camera reasons, beats in frames and acting lines, captions, platform rules, song-led films),

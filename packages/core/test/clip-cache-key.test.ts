@@ -97,3 +97,15 @@ describe("clip render cache key with style tokens (ADR 0028)", () => {
     expect(clipCacheKey({ ...base, style: "a".repeat(32) })).toBe(styled);
   });
 });
+
+describe("clip render cache key with motion blur (ADR 0041)", () => {
+  it("is the old key without blur, and changes with each resolved setting", () => {
+    expect(clipCacheKey(base)).toBe("860bfe02caf248cce3c57980b63d9441");
+    const blurred = clipCacheKey({ ...base, motionBlur: { shutter: 180, samples: 8, blend: "linear" } });
+    expect(blurred).not.toBe(clipCacheKey(base));
+    expect(clipCacheKey({ ...base, motionBlur: { blend: "linear", samples: 8, shutter: 180 } })).toBe(blurred);
+    for (const changed of [{ shutter: 90 }, { samples: 16 }, { blend: "srgb" as const }]) {
+      expect(clipCacheKey({ ...base, motionBlur: { shutter: 180, samples: 8, blend: "linear", ...changed } })).not.toBe(blurred);
+    }
+  });
+});
