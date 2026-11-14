@@ -85,6 +85,53 @@ export function gradeKey(grade: NormalizedGrade): string {
   return JSON.stringify(grade);
 }
 
+/** ffprobe `color_transfer` values of footage that is not Rec.709: HDR (HLG, PQ), cinema and logarithmic curves. */
+const NON_709_TRANSFERS: ReadonlySet<string> = new Set(["arib-std-b67", "smpte2084", "log100", "log316", "smpte428"]);
+/** ffprobe `color_primaries` values of wide-gamut footage (Rec.2020, DCI-P3). */
+const WIDE_PRIMARIES: ReadonlySet<string> = new Set(["bt2020", "smpte431", "smpte432"]);
+/**
+ * Camera LOG names in a file name: S-Log, C-Log, N-Log, F-Log, D-Log, J-Log, V-Log (with its dash: bare `vlog` is
+ * a video diary), LogC, HLG, or a bare `log` word. A word boundary on both sides keeps `dialog` and `blog` out.
+ */
+const LOG_NAME = /(?<![a-z0-9])(?:[scnfdj]-?log\d?|v-log|log-?c\d?|log\d?|hlg)(?![a-z0-9])/;
+
+/** Why a source looks like LOG footage (ADR 0031 decision 9): what in its tags or its name says so. */
+export type LogHint =
+  | { kind: "transfer"; value: string }
+  | { kind: "primaries"; value: string }
+  | { kind: "name"; value: string };
+
+/**
+ * Whether the source `asset` looks like LOG or other non-Rec.709 footage, which the grade's LUTs and white balance
+ * are not made for. Heuristic, in order: the probe's `color_transfer` is HDR or logarithmic, its `color_primaries`
+ * are wide gamut, or the file name holds a camera LOG word. Cameras often tag LOG as plain Rec.709, so the name is
+ * a second chance; an asset probed before the tags were recorded has only the name. A hint never refuses a grade.
+ */
+export function logFootageHint(
+  asset: string,
+  video?: { colorTransfer?: string | null | undefined; colorPrimaries?: string | null | undefined } | null,
+): LogHint | null {
+  const transfer = video?.colorTransfer;
+  if (transfer && NON_709_TRANSFERS.has(transfer)) return { kind: "transfer", value: transfer };
+  const primaries = video?.colorPrimaries;
+  if (primaries && WIDE_PRIMARIES.has(primaries)) return { kind: "primaries", value: primaries };
+  const base = asset.slice(asset.lastIndexOf("/") + 1);
+  const stem = base.includes(".") ? base.slice(0, base.lastIndexOf(".")) : base;
+  const named = LOG_NAME.exec(stem.toLowerCase());
+  return named ? { kind: "name", value: named[0] } : null;
+}
+
+/** The warning text (English: CLI, MCP and daemon output) for a {@link LogHint} of `asset`. */
+export function logFootageWarning(asset: string, hint: LogHint): string {
+  const why =
+    hint.kind === "transfer"
+      ? `its transfer curve is tagged ${hint.value}`
+      : hint.kind === "primaries"
+        ? `its colour primaries are tagged ${hint.value}`
+        : `its name says ${hint.value}`;
+  return `${asset} may be LOG or HDR footage (${why}), not Rec.709: a LUT or white balance made for Rec.709 will look wrong. Apply the camera's own transform to Rec.709 first (a LUT from the camera maker); the grade is kept.`;
+}
+
 /** A parsed `.cube` 3D LUT (Adobe Cube LUT 1.0). */
 export interface CubeLut {
   /** Lattice points per side, 2 to {@link MAX_LUT_SIZE}. */

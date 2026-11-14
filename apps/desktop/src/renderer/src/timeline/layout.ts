@@ -4,11 +4,13 @@ import {
   type Backdrop,
   type Clip,
   type ElementAdjust,
+  type Grade,
   type MarkerColor,
   SHOT_LOW_CONFIDENCE,
   type TransitionShape,
 } from "@frameshell/schema";
 import { audioEffectsOf, normalizeAudioEffects, type NormalizedAudioEffect } from "@frameshell/schema/effects";
+import { type NormalizedGrade, normalizeGrade } from "@frameshell/schema/grade";
 import type { TransitionContext } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
@@ -97,6 +99,8 @@ export interface ClipBox {
   elements: Readonly<Record<string, ElementAdjust>>;
   /** Stored `backdrop` of a generated clip (ADR 0031); null without one. */
   backdrop: Backdrop | null;
+  /** Stored `grade` of a media clip (ADR 0031) with every number filled; null without one. */
+  grade: NormalizedGrade | null;
   /** Ids of the formats the clip has a stored override in (ADR 0027 `formats`), sorted; empty without any. */
   formats: string[];
 }
@@ -396,6 +400,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     keys: keyBoxes(fields["keys"]),
     elements: elementsOf(fields["elements"]),
     backdrop: kind === "generated" && typeof fields["backdrop"] === "object" && fields["backdrop"] !== null ? (fields["backdrop"] as Backdrop) : null,
+    grade: kind === "media" && typeof fields["grade"] === "object" && fields["grade"] !== null ? normalizeGrade(fields["grade"] as Grade) : null,
     formats: typeof fields["formats"] === "object" && fields["formats"] !== null ? Object.keys(fields["formats"]).sort() : [],
   };
 }
