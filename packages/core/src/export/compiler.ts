@@ -61,13 +61,16 @@ import {
   fadeFilters,
   gainExpression,
   gainVolume,
+  gridAlpha,
   irisAlpha,
+  slatsAlpha,
   keyedOpacity,
   num,
   placementExpressions,
   shapeOffsets,
   shapeProgressExpression,
   wipeAlpha,
+  zoomExpressions,
 } from "./animation.js";
 import { assSubtitles } from "./ass.js";
 import { type CoverLayout, assCover } from "./cover.js";
@@ -385,7 +388,7 @@ interface Placed {
   /** The shape the next clip comes in by (`trail` frames each side of this clip's end). */
   shapeOut?: TransitionShape;
   /**
-   * Not covered by the next clip under `shapeOut` (an upper track, a subject): a wipe or iris shows it only where the
+   * Not covered by the next clip under `shapeOut` (an upper track, a subject): a wipe, iris, slats or grid shows it only where the
    * incoming picture does not, the inverse mask (ADR 0030). On the base track the incoming clip is drawn over it.
    */
   uncover?: true;
@@ -1015,22 +1018,22 @@ function layoutTimeline(
   const visible = ({ placed }: Span) => placed.source.video !== null && (isKeyed(placed.clip, "opacity") || placed.placement.opacity > 0);
   const whole = (placed: Placed): Span => ({ placed, from: placed.start - (placed.lead ?? 0), to: placed.end + (placed.trail ?? 0) });
   /**
-   * {@link whole} cut where its wipes and irises end and start (an uncovered outgoing one and a nested clip's too): their
-   * mask costs per pixel, only the frames it plays over get it.
+   * {@link whole} cut where its masks and zooms end and start (an uncovered outgoing one and a nested clip's too): they
+   * cost per pixel or per frame, only the frames they play over get them.
    */
   const wipeSplit = (placed: Placed): Span[] => {
     const { from, to } = whole(placed);
     const host = placed.hostShape;
     const cuts = [
-      ...(masks(placed.shapeIn) ? [placed.start + (placed.lead ?? 0)] : []),
-      ...(masks(placed.shapeOut) && placed.uncover ? [placed.end - (placed.trail ?? 0)] : []),
-      ...(host && masks(host.shape) ? [host.cut - host.half, host.cut + host.half] : []),
+      ...(perFrame(placed.shapeIn) ? [placed.start + (placed.lead ?? 0)] : []),
+      ...(perFrame(placed.shapeOut) && (placed.uncover || placed.shapeOut?.kind === "zoom") ? [placed.end - (placed.trail ?? 0)] : []),
+      ...(host && perFrame(host.shape) ? [host.cut - host.half, host.cut + host.half] : []),
     ].filter((cut) => cut > from && cut < to);
     const edges = [from, ...[...new Set(cuts)].sort((a, b) => a - b), to];
     return edges.slice(1).map((end, index) => ({ placed, from: edges[index]!, to: end }));
   };
-  /** Frames each side of the end of `placed` that a push moves it out over: then it is a layer, not concatenated. */
-  const pushedOut = (placed: Placed) => (placed.shapeOut?.kind === "push" ? (placed.trail ?? 0) : 0);
+  /** Frames each side of the end of `placed` that a push or zoom moves it out over: then it is a layer, not concatenated. */
+  const pushedOut = (placed: Placed) => (placed.shapeOut?.kind === "push" || placed.shapeOut?.kind === "zoom" ? (placed.trail ?? 0) : 0);
   // A base clip filling the frame is concatenated from where its dissolve ends; its dissolving head is a layer over the clip before.
   const fills = (placed: Placed) => isIdentityPlacement(placed.placement) && !hasPictureKeys(placed.clip);
   const baseLayers = baseLayer.flatMap((placed): Span[] => {
@@ -1281,12 +1284,13 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const fades = placed.tile ? [] : fadeFilters(pictureRamps(placed, start, end, fps, true), true);
     const shape = placed.tile ? null : pieceShape(placed, start, end, rect, from, out);
     // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
-    const timed = motion?.scale !== undefined || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
+    const zoomed = shape?.zoom ? zoomedLayer(placed, shape.zoom, start, end, from, rect, out) : null;
+    const timed = motion?.scale !== undefined || zoomed !== null || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
     const head = [
       placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : pieceChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
-      `${motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
+      `${zoomed?.scale ?? motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
     ];
     /** What multiplies the piece's alpha after its picture: opacity (`name` = its keyed mixer), fades, a wipe, then its timing back. */
@@ -1299,10 +1303,10 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     ];
     const left = placed.tile?.backdrop ? 0 : rect.left;
     const top = placed.tile?.backdrop ? 0 : rect.top;
-    const moved = motion?.x !== undefined || shape?.x !== undefined || shape?.y !== undefined;
+    const moved = motion?.x !== undefined || zoomed !== null || shape?.x !== undefined || shape?.y !== undefined;
     const axis = (base: string, offset: string | undefined) => (offset === undefined ? base : `${base}+${offset}`);
     const position = moved
-      ? `x='${axis(motion?.x ?? String(left), shape?.x)}':y='${axis(motion?.y ?? String(top), shape?.y)}':eval=frame`
+      ? `x='${axis(zoomed?.x ?? motion?.x ?? String(left), shape?.x)}':y='${axis(zoomed?.y ?? motion?.y ?? String(top), shape?.y)}':eval=frame`
       : `x=${left}:y=${top}`;
     if (placed.glass) {
       lines.push(`${head.join(",")},split[c${n}][cm${n}]`, `[c${n}]${tail(`o${n}`).join(",") || "null"}[o${n}]`);
@@ -1476,20 +1480,24 @@ function layerOrigin(placed: Placed, time: string, first: number, last: number, 
 
 /**
  * What a shaped dissolve (ADR 0030, `shapeAt`) does to a piece on timeline frames [start, end) of a graph starting at
- * frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a wipe or iris
- * `geq` on the incoming layer (and the inverse on an uncovered outgoing one), reading the frame time `T` as timeline
- * seconds. A nested clip's shape (`hostShape`) moves or cuts its clips as an incoming picture. Null when none applies.
+ * frame `from`: `x`/`y`, a push's pixel offsets as `overlay` expressions of the graph's `t`; `mask`, a wipe, iris, slats
+ * or grid `geq` on the incoming layer (and the inverse on an uncovered outgoing one), reading the frame time `T` as
+ * timeline seconds; `zoom`, a zoom's scale and pixel shift (as {@link zoomExpressions}, composed) at a given time
+ * expression. A nested clip's shape (`hostShape`) moves or cuts its clips as an incoming picture. Null when none applies.
  */
-function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): { x?: string; y?: string; mask?: string } | null {
+function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect, from: number, out: GraphTarget): PieceShape | null {
   const { fps, width, height } = out;
   const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
   const xs: string[] = [];
   const ys: string[] = [];
   let mask: string | undefined;
+  const zooms: ((time: string) => { s: string; tx: string; ty: string })[] = [];
   const side = (shape: TransitionShape | undefined, cut: number, half: number, which: "incoming" | "outgoing") => {
     if (!shape || half <= 0 || end <= cut - half || start >= cut + half) return;
     const progress = (at: string) => shapeProgressExpression(cut / fps, half / fps, at);
-    if (shape.kind === "push") {
+    if (shape.kind === "zoom") {
+      zooms.push((at) => zoomExpressions(shape, which, progress(at), width, height));
+    } else if (shape.kind === "push") {
       const offsets = shapeOffsets(shape, which, progress(time), width, height);
       if (offsets.x) xs.push(offsets.x);
       if (offsets.y) ys.push(offsets.y);
@@ -1497,20 +1505,67 @@ function pieceShape(placed: Placed, start: number, end: number, rect: LayerRect,
       // A keyed layer moves: its corner is an expression of the frame time and the frame's own size.
       const corner = moves(placed) ? layerOrigin(placed, "T", start / fps, (end - 1) / fps, out, ["W", "H"]) : { x: num(rect.left), y: num(rect.top) };
       // The base's outgoing clip is covered by the incoming one; an upper track's or a subject's is uncovered.
-      const alpha = (shape.kind === "iris" ? irisAlpha : wipeAlpha)(shape, progress("T"), corner.x, corner.y, width, height, which === "outgoing");
+      const alpha = maskAlpha(shape)(shape, progress("T"), corner.x, corner.y, width, height, which === "outgoing");
       mask = mask ? `${mask},${alpha}` : alpha;
     }
   };
   side(placed.shapeIn, placed.start, placed.lead ?? 0, "incoming");
   side(placed.shapeOut, placed.end, placed.trail ?? 0, "outgoing");
   if (placed.hostShape) side(placed.hostShape.shape, placed.hostShape.cut, placed.hostShape.half, "incoming");
-  if (xs.length === 0 && ys.length === 0 && mask === undefined) return null;
-  return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}) };
+  if (xs.length === 0 && ys.length === 0 && mask === undefined && zooms.length === 0) return null;
+  // Zooms in turn: the earlier one acts on what the later one drew (M1 after M2), so scale = s1*s2 and shift = tx1 + s1*tx2.
+  const zoom =
+    zooms.length === 0
+      ? undefined
+      : (at: string) =>
+          zooms.map((one) => one(at)).reduce((total, next) => ({ s: `${total.s}*${next.s}`, tx: `${total.tx}+${total.s}*(${next.tx})`, ty: `${total.ty}+${total.s}*(${next.ty})` }));
+  return { ...(xs.length > 0 ? { x: xs.join("+") } : {}), ...(ys.length > 0 ? { y: ys.join("+") } : {}), ...(mask ? { mask } : {}), ...(zoom ? { zoom } : {}) };
 }
 
-/** True when `shape` cuts the picture with a per-pixel mask (wipe, iris) instead of moving it (push). */
-function masks(shape: TransitionShape | undefined): boolean {
+/** What a shaped dissolve does to one piece ({@link pieceShape}). */
+interface PieceShape {
+  x?: string;
+  y?: string;
+  mask?: string;
+  zoom?: (time: string) => { s: string; tx: string; ty: string };
+}
+
+/**
+ * Size and position of a piece under a zoom (ADR 0030): `scale` with `eval=frame` reading the piece's timeline seconds
+ * (its size times the zoom's scale, with its own keyed scale), `overlay` x/y (unquoted) reading the graph's time: the
+ * layer's centre goes where the zoom's map puts it, `s*centre + shift`.
+ */
+function zoomedLayer(placed: Placed, zoom: NonNullable<PieceShape["zoom"]>, start: number, end: number, from: number, rect: LayerRect, out: GraphTarget): { scale: string; x: string; y: string } {
+  const { fps, width, height, project } = out;
+  const time = from === 0 ? "t" : `(${num(from / fps)}+t)`;
+  const keyed = moves(placed);
+  const at = placementExpressions(placed.clip, time, start / fps, (end - 1) / fps);
+  const centre = (value: string, size: number, projectSize: number, own: number) => (keyed ? `(${num(size / 2)}+(${value})*${size}/${projectSize})` : `(${num(own)})`);
+  const grown = zoom("t");
+  const sized = (fitted: number) => {
+    const factor = isKeyed(placed.clip, "scale") ? `(${placementExpressions(placed.clip, "t", start / fps, (end - 1) / fps).scale})*` : "";
+    return `'max(1,floor(${num(fitted)}*${factor}(${grown.s})+0.5))'`;
+  };
+  const video = placed.source.video!;
+  const fit = Math.min(width / video.width, height / video.height);
+  const [w0, h0] = isKeyed(placed.clip, "scale") ? [video.width * fit, video.height * fit] : [rect.width, rect.height];
+  const moved = zoom(time);
+  const place = (cx: string, shift: string, own: string) => `floor((${moved.s})*${cx}+(${shift})-${own}/2+0.5)`;
+  return {
+    scale: `scale=w=${sized(w0)}:h=${sized(h0)}:eval=frame`,
+    x: place(centre(at.x, width, project.width, rect.left + rect.width / 2), moved.tx, "overlay_w"),
+    y: place(centre(at.y, height, project.height, rect.top + rect.height / 2), moved.ty, "overlay_h"),
+  };
+}
+
+/** True when `shape` needs work on every frame it plays over: a per-pixel mask or a zoom's scale (a push is only an offset). */
+function perFrame(shape: TransitionShape | undefined): boolean {
   return shape !== undefined && shape.kind !== "push";
+}
+
+/** The `geq` alpha of a shape that cuts the picture with a per-pixel mask (everything but push and zoom). */
+function maskAlpha(shape: TransitionShape): typeof wipeAlpha {
+  return shape.kind === "iris" ? irisAlpha : shape.kind === "slats" ? slatsAlpha : shape.kind === "grid" ? gridAlpha : wipeAlpha;
 }
 
 /**

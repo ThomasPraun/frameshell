@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   New files in `packages/core/src/analyze/` (`curve.ts`, `ink.ts`, `lip.ts`, `lip-run.ts`, `align.ts`, `correlate.ts`,
   `activity.ts`, `diff.ts`), after HyperFrames' `measure` (Apache-2.0, #478). Skill page `reference-video.md` explains how to
   read them and how to report them.
+- Zoom, slats and a pixel grid, slice 4 of #483 (ADR 0030, epic #451; protocol 125): `transition set --kind zoom|slats|grid`
+  (MCP `transition_set`) with `--origin` for a zoom and `--count` (2 to 64) for slats and a grid. A zoom dives the
+  outgoing clip into the centre of `--origin` (up to 4 times larger, by the larger side of the rectangle; default the
+  middle half) while the incoming clip grows out of the same point; slats uncover the incoming clip in `--count` strips
+  at once, each the `--direction` way (default 8, `left`); a grid shows it in square cells switching on in a fixed
+  scattered order, `--count` across (default 12). All three play on every video track and inside nested clips like the
+  other shapes, share `shapeAt` between export (a `scale` and `overlay` expression for a zoom, a `geq` alpha for slats
+  and cells) and preview (a scaled draw, a canvas clip path), and are counted as kinds of their own by the variety
+  warnings. The clip inspector's edge menu offers them (a count field for slats and a grid; English and Spanish) and the
+  timeline marks them with their own signs. A timeline file with these kinds is rejected by older hosts; timelines
+  without them export byte for byte as before.
 - Shaped transitions on upper tracks and nested clips, slice 3 of #483 (ADR 0030, epic #451): `transition.set` with
   `kind` `wipe`, `push` or `iris` now plays on every video track with the edge, like a dissolve, instead of the bottom
   one only. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not

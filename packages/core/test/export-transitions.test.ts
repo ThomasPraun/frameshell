@@ -15,6 +15,8 @@ import {
   layerRect,
   placementAt,
   shapeAt,
+  GRID_RANKS,
+  gridRank,
 } from "@frameshell/schema";
 import { type ExportSource, applyOperation, compileRender, executeRender } from "../src/index.js";
 import { tempDir } from "./helpers.js";
@@ -565,4 +567,95 @@ describe("export transitions and keys (real ffmpeg)", () => {
     },
     MEDIA_TIMEOUT,
   );
+  it(
+    "zooms, slats and a grid where shapeAt puts them, on the bottom track, in real frames (ADR 0030 slice 4)",
+    async () => {
+      const flat = async (name: string, colour: string): Promise<ExportSource> => {
+        const path = join(dir, name);
+        await run(ffmpeg, [
+          ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=${colour}:s=64x64:r=30:d=3`],
+          ...["-f", "lavfi", "-i", "sine=f=440:r=48000:d=3"],
+          ...["-c:v", "libx264", "-crf", "4", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path],
+        ]);
+        return { path, video: { codec: "h264", still: false, width: 64, height: 64 }, audio: true, duration: 3 };
+      };
+      const sources = new Map([
+        ["assets/dark.mp4", await flat("dark-2.mp4", "0x303030")],
+        ["assets/bright.mp4", await flat("bright-2.mp4", "0xd0d0d0")],
+      ]);
+      const render = async (name: string, shape: TransitionShape) => {
+        const timeline = timelineOf([
+          { id: "v1", kind: "video", clips: [media("a", "assets/dark.mp4", 0, 0.5, 1.5), media("b", "assets/bright.mp4", 1, 0, 1, { dissolve: 0.4, shape })] },
+        ]);
+        const output = join(dir, `${name}.mp4`);
+        await executeRender(compileRender({ timeline, fps: 30, preset: TINY, loudness: -17, sources, resolution, segmentSeconds: 2 }), { ffmpeg, workDir: join(dir, `work-${name}`), output });
+        const shown = await frames(output);
+        expect(shown).toHaveLength(60);
+        return shown;
+      };
+      const bright = (frame: Uint8Array, x: number, y: number) => frame[y * 64 + x]! > 128;
+
+      // Zoom about the centre (the default origin, 2x): the incoming picture is a square of side 64 * s around it, over
+      // the outgoing one, which fills the frame all the while.
+      const zoom: TransitionShape = { kind: "zoom" };
+      const zoomed = await render("shaped-zoom", zoom);
+      for (const frame of [26, 28, 30, 32, 34]) {
+        const { s } = shapeAt(zoom, dissolveProgress(1, 0.2, frame / 30)).incoming.zoom!;
+        const half = 32 * s;
+        for (let y = 2; y < 64; y += 4) {
+          for (let x = 2; x < 64; x += 4) {
+            const inside = Math.abs(x + 0.5 - 32) < half && Math.abs(y + 0.5 - 32) < half;
+            if (Math.abs(Math.abs(x + 0.5 - 32) - half) < 3 || Math.abs(Math.abs(y + 0.5 - 32) - half) < 3) continue;
+            expect(bright(zoomed[frame]!, x, y), `zoom frame ${frame} pixel ${x},${y} (half ${half})`).toBe(inside);
+          }
+        }
+      }
+      expect(bright(zoomed[20]!, 32, 32), "zoom before").toBe(false);
+      expect(bright(zoomed[40]!, 4, 4), "zoom after").toBe(true);
+
+      // An off-centre pivot keeps that point of the outgoing picture still: a corner element dived into stays put.
+      const corner: TransitionShape = { kind: "zoom", origin: [0.75, 0.75, 1, 1] };
+      const cornered = await render("shaped-zoom-corner", corner);
+      for (const frame of [27, 30, 33]) {
+        const { s } = shapeAt(corner, dissolveProgress(1, 0.2, frame / 30)).incoming.zoom!;
+        // The incoming square runs from the pivot (0.875) back by 0.875 * s of the frame, forward by 0.125 * s.
+        const [left, right] = [64 * (0.875 - 0.875 * s), 64 * (0.875 + 0.125 * s)];
+        for (let x = 2; x < 64; x += 4) {
+          if (Math.abs(x + 0.5 - left) < 3 || Math.abs(x + 0.5 - right) < 3) continue;
+          const y = 52;
+          const inside = x + 0.5 > left && x + 0.5 < right;
+          expect(bright(cornered[frame]!, x, y), `corner zoom frame ${frame} column ${x} (${left} to ${right})`).toBe(inside);
+        }
+      }
+
+      // Slats: each of 4 strips shows the incoming picture from its right edge, over its share p of itself.
+      const slats: TransitionShape = { kind: "slats", direction: "left", count: 4 };
+      const striped = await render("shaped-slats", slats);
+      for (const frame of [26, 30, 34]) {
+        const { r } = shapeAt(slats, dissolveProgress(1, 0.2, frame / 30)).incoming.slats!;
+        for (let x = 0; x < 64; x++) {
+          const along = ((x + 0.5) * 4) / 64;
+          const fraction = along - Math.floor(along);
+          if (Math.abs(fraction - (1 - r)) < 0.08) continue;
+          expect(bright(striped[frame]!, x, 32), `slats frame ${frame} column ${x} (r ${r})`).toBe(fraction >= 1 - r);
+        }
+      }
+
+      // A grid of 8 columns (8 px cells): a cell is bright once the progress has passed its rank.
+      const grid: TransitionShape = { kind: "grid", count: 8 };
+      const celled = await render("shaped-grid", grid);
+      for (const frame of [26, 30, 34]) {
+        const { r } = shapeAt(grid, dissolveProgress(1, 0.2, frame / 30)).incoming.grid!;
+        for (let row = 0; row < 8; row++) {
+          for (let column = 0; column < 8; column++) {
+            const margin = Math.abs(gridRank(column, row) - r * GRID_RANKS);
+            if (margin < 2) continue;
+            expect(bright(celled[frame]!, column * 8 + 4, row * 8 + 4), `grid frame ${frame} cell ${column},${row} (rank ${gridRank(column, row)}, r ${r})`).toBe(gridRank(column, row) < r * GRID_RANKS);
+          }
+        }
+      }
+    },
+    MEDIA_TIMEOUT,
+  );
+
 });

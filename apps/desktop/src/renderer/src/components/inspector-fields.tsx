@@ -1,5 +1,6 @@
 // Fields the inspectors share: numeric settings, text, and a segmented single choice.
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS } from "@frameshell/schema/effects";
+import { SHAPE_COUNT_RANGE } from "@frameshell/schema";
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 import { t } from "../i18n.js";
 
@@ -87,6 +88,15 @@ const FIELDS = {
     store: (v) => (v >= GAIN_MIN && v <= GAIN_MAX ? round(v, 1) : null),
     step: 0.5,
     decimals: 1,
+  },
+  count: {
+    label: t.inspector.fieldCount,
+    title: t.inspector.fieldCountTitle,
+    unit: "",
+    show: (v) => v,
+    store: (v) => (Number.isInteger(v) && v >= SHAPE_COUNT_RANGE.min && v <= SHAPE_COUNT_RANGE.max ? v : null),
+    step: 1,
+    decimals: 0,
   },
   length: {
     label: t.inspector.fieldLength,
@@ -241,7 +251,7 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
       <span className="clip-field-label">{spec.label}</span>
       <input
         className="clip-field-input"
-        aria-label={`${spec.label} (${spec.unit})`}
+        aria-label={spec.unit ? `${spec.label} (${spec.unit})` : spec.label}
         inputMode="decimal"
         spellCheck={false}
         disabled={disabled}

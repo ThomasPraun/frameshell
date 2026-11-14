@@ -116,6 +116,28 @@ test("the inspector picks a wipe and its direction, an iris, and a dip cut at a 
   await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "iris" });
   await expect(direction).toHaveCount(0);
 
+  // Zoom has no direction or count; slats take both, a grid only a count (ADR 0030 slice 4).
+  await kind.selectOption("zoom");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "zoom" });
+  await expect(direction).toHaveCount(0);
+  await kind.selectOption("slats");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "left" });
+  await direction.selectOption("down");
+  const count = inspector().getByRole("textbox", { name: "Count" });
+  await count.fill("6");
+  await count.press("Enter");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "down", count: 6 });
+  // Changing the direction keeps the count.
+  await direction.selectOption("up");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "up", count: 6 });
+  await kind.selectOption("grid");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "grid" });
+  await expect(direction).toHaveCount(0);
+  await expect(count).toHaveCount(1);
+  await kind.selectOption("iris");
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "iris" });
+  await expect(count).toHaveCount(0);
+
   // A dip cut is a hard cut with the outgoing clip darkened by opacity keys; it has no length.
   await kind.selectOption("dip-cut");
   await expect.poll(() => (saved("c_one")["keys"] as { opacity?: unknown[] } | undefined)?.opacity?.length).toBe(2);

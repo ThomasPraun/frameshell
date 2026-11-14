@@ -2,6 +2,8 @@ import {
   type Backdrop,
   type ClipFormatOverride,
   type ClipKey,
+  DEFAULT_GRID_COLUMNS,
+  DEFAULT_SLATS,
   type ElementAdjust,
   TRANSITION_DIRECTIONS,
   TRANSITION_SHAPE_KINDS,
@@ -248,13 +250,17 @@ const SHAPE_LABELS: Record<TransitionShapeKind, () => string> = {
   wipe: () => t.inspector.transitionWipe,
   push: () => t.inspector.transitionPush,
   iris: () => t.inspector.transitionIris,
+  zoom: () => t.inspector.transitionZoom,
+  slats: () => t.inspector.transitionSlats,
+  grid: () => t.inspector.transitionGrid,
 };
 
 /**
- * One edge's transition: kind and length, and a wipe's or push's direction. Where clips meet it can dissolve, wipe,
- * push or iris (on video tracks) or, on the bottom video track, dip cut; any edge can fade. The daemon applies it to
- * every video and audio track with an edge at that time, as `transition.set` does without `tracks`. An iris keeps the
- * `origin` it has (the agent sets it, from `inspect.point`); one chosen here opens from the frame's centre.
+ * One edge's transition: kind and length, a wipe's, push's or slats' direction and a slats' or grid's count. Where
+ * clips meet it can dissolve or take any shape (on video tracks) or, on the bottom video track, dip cut; any edge can
+ * fade. The daemon applies it to every video and audio track with an edge at that time, as `transition.set` does
+ * without `tracks`. An iris or zoom keeps the `origin` it has (the agent sets it, from `inspect.point`); one chosen
+ * here opens from the frame's centre (an iris) or dives into the middle half (a zoom).
  */
 function TransitionEdge({
   side,
@@ -282,8 +288,8 @@ function TransitionEdge({
   const choose = (choice: EdgeChoice) => {
     if (choice === "none") onSend({ op: "transition.remove", args: { at: state.at } }, { label: "Remove transition" });
     else if (choice === "dip-cut") set({ kind: choice }, "Add dip cut");
-    else if (choice === "iris") set({ kind: choice, duration: length }, "Add iris");
-    else if (choice === "wipe" || choice === "push") set({ kind: choice, duration: length, direction: state.shape?.direction ?? "left" }, `Add ${choice}`);
+    else if (choice === "iris" || choice === "zoom" || choice === "grid") set({ kind: choice, duration: length }, `Add ${choice}`);
+    else if (choice === "wipe" || choice === "push" || choice === "slats") set({ kind: choice, duration: length, direction: state.shape?.direction ?? "left" }, `Add ${choice}`);
     else set({ kind: choice, duration: length }, choice === "dissolve" ? "Add dissolve" : "Add fade");
   };
   const { shape } = state;
@@ -300,14 +306,14 @@ function TransitionEdge({
           <option key={kind.id} value={kind.id}>{`${edge}: ${kind.label}`}</option>
         ))}
       </select>
-      {shape && shape.kind !== "iris" && (
+      {shape && (shape.kind === "wipe" || shape.kind === "push" || shape.kind === "slats") && (
         <select
           className="clip-field-select"
           aria-label={t.inspector.transitionDirection(edge)}
           data-tip={t.inspector.transitionDirectionTitle}
           value={shape.direction ?? "left"}
           onChange={(event) =>
-            set({ kind: shape.kind, direction: event.target.value as TransitionDirection, duration: state.length }, "Change transition direction")
+            set({ ...shape, direction: event.target.value as TransitionDirection, duration: state.length }, "Change transition direction")
           }
         >
           {TRANSITION_DIRECTIONS.map((direction) => (
@@ -316,6 +322,13 @@ function TransitionEdge({
             </option>
           ))}
         </select>
+      )}
+      {shape && (shape.kind === "slats" || shape.kind === "grid") && (
+        <NumberField
+          name="count"
+          stored={shape.count ?? (shape.kind === "slats" ? DEFAULT_SLATS : DEFAULT_GRID_COLUMNS)}
+          onCommit={(value) => set({ ...shape, count: value, duration: state.length }, "Change transition count")}
+        />
       )}
       {state.kind && state.kind !== "dip-cut" && (
         <NumberField

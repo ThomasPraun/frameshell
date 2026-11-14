@@ -17,18 +17,22 @@ import {
   placementAt,
   shapeAt,
   TRANSITION_DIRECTIONS,
-  TRANSITION_SHAPE_KINDS,
   type TransitionShape,
   circleReach,
+  GRID_RANKS,
+  gridColumns,
+  gridRank,
+  gridRows,
+  slatRects,
 } from "@frameshell/schema";
 import { BUILTIN_PRESETS, type ExportSource, compileRender } from "../src/index.js";
-import { irisAlpha, keyExpression, shapeOffsets, shapeProgressExpression, wipeAlpha } from "../src/export/animation.js";
+import { gridAlpha, irisAlpha, keyExpression, shapeOffsets, shapeProgressExpression, slatsAlpha, wipeAlpha, zoomExpressions } from "../src/export/animation.js";
 
 // Parity of the export's ffmpeg expressions and ramps with the schema evaluator (ADR 0018 decision 9): every
 // expression the compiler writes is evaluated here numerically and sampled against `composite.ts`.
 
 /**
- * Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, floor, max, min, hypot,
+ * Evaluate the ffmpeg expression subset the compiler emits: numbers, variables, + - * /, if, lt, gte, mod, floor, max, min, hypot,
  * pow, sin; `geq`'s `alpha(X,Y)` reads an opaque picture (1).
  */
 function evaluate(expression: string, variables: Record<string, number>): number {
@@ -44,6 +48,8 @@ function evaluate(expression: string, variables: Record<string, number>): number
   const functions: Record<string, (...args: number[]) => number> = {
     if: (c, a, b) => (c !== 0 ? a! : b!),
     lt: (a, b) => (a! < b! ? 1 : 0),
+    gte: (a, b) => (a! >= b! ? 1 : 0),
+    mod: (a, b) => a! - b! * Math.floor(a! / b!),
     floor: (a) => Math.floor(a!),
     max: (a, b) => Math.max(a!, b!),
     pow: (a, b) => a! ** b!,
@@ -514,7 +520,7 @@ describe("nested clip parity (ADR 0018 decision 9)", () => {
 });
 
 describe("shape parity (ADR 0030)", () => {
-  const SHAPES: TransitionShape[] = TRANSITION_SHAPE_KINDS.filter((kind) => kind !== "iris").flatMap((kind) => TRANSITION_DIRECTIONS.map((direction) => ({ kind, direction })));
+  const SHAPES: TransitionShape[] = (["wipe", "push"] as const).flatMap((kind) => TRANSITION_DIRECTIONS.map((direction) => ({ kind, direction })));
   const IRISES: TransitionShape[] = [{ kind: "iris" }, { kind: "iris", origin: [0.6, 0.1, 0.9, 0.3] }, { kind: "iris", origin: [0, 1, 0, 1] }];
   const width = 64;
   const height = 36;
@@ -572,6 +578,75 @@ describe("shape parity (ADR 0030)", () => {
               expect(evaluate(alpha, { X: x, Y: y, T: t }), `${JSON.stringify(shape)} t ${t} pixel ${x},${y}`).toBe(distance < radius !== outgoing ? 1 : 0);
             }
           }
+        }
+      }
+    }
+  });
+
+  it("the slats' alpha equals shapeAt's strips at every sampled time and pixel, for the incoming layer and the outgoing complement", () => {
+    const cut = 3;
+    const half = 0.4;
+    const shapes: TransitionShape[] = [...TRANSITION_DIRECTIONS.map((direction) => ({ kind: "slats" as const, direction })), { kind: "slats", direction: "left", count: 5 }];
+    for (const shape of shapes) {
+      for (let i = -4; i <= 44; i += 8) {
+        const t = cut - half + (2 * half * i) / 40;
+        const { slats } = shapeAt(shape, dissolveProgress(cut, half, t)).incoming;
+        const rects = slatRects(slats!);
+        for (const outgoing of [false, true]) {
+          const alpha = /:a='([^']+)'$/.exec(slatsAlpha(shape, shapeProgressExpression(cut, half, "T"), "8", "4", width, height, outgoing))![1]!;
+          for (let y = 0; y < height - 8; y += 3) {
+            for (let x = 0; x < width - 16; x += 1) {
+              const cx = (x + 8.5) / width;
+              const cy = (y + 4.5) / height;
+              const edges = rects.flatMap(([x0, y0, x1, y1]) => [cx - x0, cx - x1, cy - y0, cy - y1]);
+              if (edges.some((d) => Math.abs(d) < 1e-9)) continue;
+              const inside = rects.some(([x0, y0, x1, y1]) => cx >= x0 && cx < x1 && cy >= y0 && cy < y1);
+              expect(evaluate(alpha, { X: x, Y: y, T: t }), `${JSON.stringify(shape)} t ${t} pixel ${x},${y}`).toBe(inside !== outgoing ? 1 : 0);
+            }
+          }
+        }
+      }
+    }
+  }, 120_000);
+
+  it("the grid's alpha equals the cells shapeAt switches on, exactly, for the incoming layer and the outgoing complement", () => {
+    const cut = 3;
+    const half = 0.4;
+    for (const shape of [{ kind: "grid" }, { kind: "grid", count: 7 }] as TransitionShape[]) {
+      const columns = gridColumns(shape);
+      const rows = gridRows(columns, width, height);
+      for (let i = -4; i <= 44; i += 4) {
+        const t = cut - half + (2 * half * i) / 40;
+        const { grid } = shapeAt(shape, dissolveProgress(cut, half, t)).incoming;
+        for (const outgoing of [false, true]) {
+          const alpha = /:a='([^']+)'$/.exec(gridAlpha(shape, shapeProgressExpression(cut, half, "T"), "8", "4", width, height, outgoing))![1]!;
+          for (let y = 0; y < height - 8; y += 2) {
+            for (let x = 0; x < width - 16; x += 2) {
+              const column = Math.floor(((x + 8.5) * columns) / width);
+              const row = Math.floor(((y + 4.5) * rows) / height);
+              const on = gridRank(column, row) < grid!.r * GRID_RANKS;
+              expect(evaluate(alpha, { X: x, Y: y, T: t }), `${JSON.stringify(shape)} t ${t} pixel ${x},${y}`).toBe(on !== outgoing ? 1 : 0);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it("the zoom's scale and shift equal shapeAt's map of the frame at every sampled time, both sides", () => {
+    const cut = 3;
+    const half = 0.4;
+    for (const shape of [{ kind: "zoom" }, { kind: "zoom", origin: [0.6, 0.2, 0.8, 0.4] }, { kind: "zoom", origin: [0, 0.5, 0.5, 1] }] as TransitionShape[]) {
+      for (let i = -4; i <= 44; i++) {
+        const t = cut - half + (2 * half * i) / 40;
+        const frame = shapeAt(shape, dissolveProgress(cut, half, t));
+        for (const side of ["incoming", "outgoing"] as const) {
+          const expressions = zoomExpressions(shape, side, shapeProgressExpression(cut, half, "t"), 1920, 1080);
+          const zoom = frame[side].zoom!;
+          const label = `${JSON.stringify(shape)} ${side} t ${t}`;
+          expect(evaluate(expressions.s, { t }), label).toBeCloseTo(zoom.s, 9);
+          expect(evaluate(expressions.tx, { t }), label).toBeCloseTo(zoom.tx * 1920, 6);
+          expect(evaluate(expressions.ty, { t }), label).toBeCloseTo(zoom.ty * 1080, 6);
         }
       }
     }

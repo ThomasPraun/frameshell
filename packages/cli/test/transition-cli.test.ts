@@ -9,6 +9,15 @@ describe("transition set shapes (#483)", () => {
     expect(parsed).toMatchObject({ method: "transition.set", params: { at: 12.5, kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] } });
   });
 
+  it("passes a zoom's --origin, and --count of slats and a grid as a number", () => {
+    const zoom = parseTimelineCommand(["transition", "set"], { at: "3", kind: "zoom", origin: "0.4,0.4,0.6,0.6" });
+    expect(zoom).toMatchObject({ params: { at: 3, kind: "zoom", origin: [0.4, 0.4, 0.6, 0.6] } });
+    const slats = parseTimelineCommand(["transition", "set"], { at: "3", kind: "slats", direction: "down", count: "6" });
+    expect(slats).toMatchObject({ params: { at: 3, kind: "slats", direction: "down", count: 6 } });
+    expect(parseTimelineCommand(["transition", "set"], { at: "3", kind: "grid", count: "24" })).toMatchObject({ params: { kind: "grid", count: 24 } });
+    expect(() => parseTimelineCommand(["transition", "set"], { at: "3", kind: "grid", count: "many" })).toThrow(/--count: expected a number/);
+  });
+
   it("passes a dip cut without origin or direction", () => {
     const parsed = parseTimelineCommand(["transition", "set"], { at: "4", kind: "dip-cut" });
     expect(parsed!.params).toEqual({ at: 4, kind: "dip-cut" });

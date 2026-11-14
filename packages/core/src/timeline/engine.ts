@@ -32,7 +32,9 @@ import {
   type ShotClip,
   type ShotLayout,
   type TimelineClip,
+  TRANSITION_SHAPE_KINDS,
   type TransitionContext,
+  type TransitionShapeKind,
   type Timeline,
   type Track,
   clipHandles,
@@ -1304,15 +1306,16 @@ class Edit {
     const frames = g.frame(length);
     const outgoingHalf = Math.floor(frames / 2);
     const { kind } = args;
-    const shaped = kind === "wipe" || kind === "push" || kind === "iris";
-    if (args.direction !== undefined && kind !== "wipe" && kind !== "push") {
-      throw this.invalid(`\`direction\` is for \`wipe\` and \`push\`; ${article(kind)} has none.`, {
-        field: "direction",
-        ...(kind === "iris" ? { hint: "An iris opens from `origin`." } : {}),
-      });
-    }
-    if (args.origin !== undefined && kind !== "iris") {
-      throw this.invalid(`\`origin\` is for \`iris\`; ${article(kind)} has none.`, { field: "origin" });
+    const shaped = isShapeKind(kind);
+    // Which kinds take which field (the schema checks the same on a hand edit).
+    const takes: Record<"direction" | "origin" | "count", readonly string[]> = { direction: ["wipe", "push", "slats"], origin: ["iris", "zoom"], count: ["slats", "grid"] };
+    for (const field of ["direction", "origin", "count"] as const) {
+      if (args[field] !== undefined && !takes[field].includes(kind)) {
+        throw this.invalid(`\`${field}\` is for ${takes[field].map((name) => `\`${name}\``).join(", ")}; ${article(kind)} has none.`, {
+          field,
+          ...(kind === "iris" && field === "direction" ? { hint: "An iris opens from `origin`." } : {}),
+        });
+      }
     }
     if (args.origin !== undefined && !orderedFrameRect(args.origin)) {
       throw this.invalid("`origin` is `[x0, y0, x1, y1]` in fractions of the frame, with x0 <= x1 and y0 <= y1.", { field: "origin" });
@@ -1333,7 +1336,12 @@ class Edit {
         } else {
           incoming.dissolve = length;
           if (shaped && track.kind === "video") {
-            incoming.shape = kind === "iris" ? { kind, ...(args.origin ? { origin: args.origin } : {}) } : { kind, direction: args.direction ?? "left" };
+            incoming.shape = {
+              kind,
+              ...(takes.direction.includes(kind) ? { direction: args.direction ?? "left" } : {}),
+              ...(args.origin ? { origin: args.origin } : {}),
+              ...(args.count !== undefined ? { count: args.count } : {}),
+            };
           }
         }
         return;
@@ -1495,7 +1503,7 @@ class Edit {
       if (run[0]!.kind === "cut" || !run.every((cut) => cut.kind === run[0]!.kind)) continue;
       const kind = run[0]!.kind;
       this.warnings.push(
-        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${/(sh|s)$/.test(kind) ? `${kind}es` : `${kind}s`}; ` +
+        `variety: the cuts at ${run.map((cut) => cut.at).join(", ")} s on ${track.id} are all ${kind === "slats" ? kind : /(sh|s)$/.test(kind) ? `${kind}es` : `${kind}s`}; ` +
           "never three of a kind in a row. Pick each by why the picture changes.",
       );
       break;
@@ -3130,8 +3138,14 @@ function clearIncoming(clip: Clip): void {
   delete clip.fadeIn;
 }
 
-/** `kind` of `transition.set` with its article, for messages: "a wipe", "an iris". */
+/** True for a `transition.set` kind that is a shape ({@link TRANSITION_SHAPE_KINDS}). */
+function isShapeKind(kind: string): kind is TransitionShapeKind {
+  return (TRANSITION_SHAPE_KINDS as readonly string[]).includes(kind);
+}
+
+/** `kind` of `transition.set` with its article, for messages: "a wipe", "an iris", "a slats shape". */
 function article(kind: string): string {
+  if (kind === "slats") return "a slats shape";
   return `${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind === "dip-cut" ? "dip cut" : kind}`;
 }
 

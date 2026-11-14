@@ -216,7 +216,7 @@ describe("painting", () => {
 
   it("draws a shaped dissolve as a band with its sign, and a dip cut as a shaded strip", () => {
     const plain = fills(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23)])]));
-    for (const shape of [{ kind: "wipe" }, { kind: "push", direction: "up" }, { kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] }]) {
+    for (const shape of [{ kind: "wipe" }, { kind: "push", direction: "up" }, { kind: "iris", origin: [0.6, 0.2, 0.8, 0.4] }, { kind: "zoom", origin: [0.6, 0.2, 0.8, 0.4] }, { kind: "slats", direction: "down", count: 5 }, { kind: "grid" }]) {
       // The band; its sign is stroked.
       expect(fills(view([video([clip("a", 0, 10, 12), clip("b", 2, 20, 23, { dissolve: 1, shape })])])), shape.kind).toBe(plain + 1);
     }
