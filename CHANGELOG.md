@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze` cuts told apart: jump cuts and punch-ins (#471 slice 4, epic #451; protocol 135): the result and `analysis.json`
+  of `frameshell analyze` gain `cuts`, every big change of the picture classified from the grey frame before and the frame
+  after it (one more pass at 96 px on the long side): `cut` (a new scene), `jump` (the same framing with time skipped),
+  `punch-in` / `punch-out` (the same shot scaled up or down, with its `scale`, searched from 1.08x to 2.5x and up to 4 %
+  off centre) and `change` (no cut: a flash, a caption). Each has its `time`, `score`, `similarity`, `changed` and
+  `opensShot`, false for the jump cuts and punches the scene score missed; `counts` and `jumpsPerMinute` sum them up
+  (labelled ESTIMATED in `labels`; at most 300 are classified, with a warning). The CLI prints a `Cuts` line and lists the
+  jump cuts and punches; the skill (`reference-video.md`), `docs/mcp.md` and SPEC say how to read them. New files in
+  `packages/core/src/analyze/` (`framing.ts`, `cuts.ts`), after HyperFrames' `measure` (Apache-2.0, #478).
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also
