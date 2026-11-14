@@ -30,6 +30,7 @@ import {
   InboxTakeResultSchema,
   TargetChangedSchema,
 } from "./targets.js";
+import { BrandCaptureResultSchema } from "./brand.js";
 import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "./analyze.js";
 import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
@@ -73,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 126;
+export const PROTOCOL_VERSION = 127;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -307,7 +308,7 @@ const PluginInfoSchema = z.object({
 const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
-    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte", "beats", "analyze"])
+    .enum(["ingest", "render", "clip", "faces", "people", "shoot", "audio-fx", "matte", "beats", "analyze", "brand"])
     .describe(
       "`ingest`: probe an asset and build its proxy, PCM sidecar, waveform and thumbnails. " +
         "`audio-fx`: bake one asset through a clip's audio effects into `.frameshell/audio-fx/` (ADR 0031). " +
@@ -318,7 +319,8 @@ const JobSchema = z.object({
         "`shoot`: transcribe one take recorded in the app and compare it with its shoot script (ADR 0024). " +
         "`matte`: compute the subject matte of one video asset (`matte.prepare`). " +
         "`beats`: measure the beat grid of one music asset (`beats.measure`). " +
-        "`analyze`: measure a reference video's shots, colours, look, rhythm, events, loudness and tempo (`analyze`).",
+        "`analyze`: measure a reference video's shots, colours, look, rhythm, events, loudness and tempo (`analyze`). " +
+        "`brand`: capture a public web page's logos, colours and fonts into the project (`brand.capture`).",
     ),
   project: z.string().describe("Absolute root of the project the job belongs to."),
   asset: z
@@ -326,7 +328,7 @@ const JobSchema = z.object({
     .describe(
       "Project-relative, `/`-separated input: the asset for `ingest` (e.g. `assets/raw-01.mp4`), the timeline file for " +
         "`render` and `faces` (e.g. `timelines/main.json`), the composition for `clip` (the clip's `source`, else `<type>:<clip id>`), " +
-        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`, the music for `beats`, the video for `analyze` (project-relative when inside the project, else absolute).",
+        "the scanned videos for `people` (comma-separated), the asset for `audio-fx`, the video for `matte`, the music for `beats`, the video for `analyze` (project-relative when inside the project, else absolute), the URL for `brand`.",
     ),
   output: z
     .string()
@@ -340,7 +342,7 @@ const JobSchema = z.object({
     .enum(["queued", "running", "done", "failed", "canceled"])
     .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
-    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats", "analyze"])
+    .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats", "analyze", "capture"])
     .nullable()
     .describe(
       "Step running now; null when not running. `ingest`: hash, probe, proxy, sidecar, waveform, thumbnails, in this " +
@@ -348,7 +350,7 @@ const JobSchema = z.object({
         "effects not baked yet), matte (makes the subject mattes of the plates of tracks `behind` one that are not made yet), video (segments " +
         "encoded in parallel, loudness measured alongside), then mux (joins segments, normalizes and encodes audio). " +
         "`clip`: render (the adapter plugin renders the composition). `faces`: faces (one angle after another). `people`: people (one video after another). " +
-        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, every frame for look, rhythm and events, loudness, tempo, then the sheets).",
+        "`shoot`: transcribe. `matte`: matte (every frame through the model, then refined and encoded). `beats`: beats (the whole track through the detector). `analyze`: analyze (shots, colours, every frame for look, rhythm and events, loudness, tempo, then the sheets). `brand`: capture (load, scroll, measure, fetch, save).",
     ),
   progress: z.number().min(0).max(1).describe("Overall fraction done, 0 to 1."),
   cached: z
@@ -1658,6 +1660,32 @@ export const methods = {
       credits: z.array(z.string()).describe("Credit lines of the placed assets that need one, without duplicates, sorted."),
       text: z.string().describe("`credits` as the block to paste into the video description; empty when none is needed."),
     }),
+  },
+  "brand.capture": {
+    mutating: true,
+    description:
+      "Capture a brand from a public web page (ADR 0044): open `url` in Frameshell's headless Chrome at 1600x1000 (2x), wait for the " +
+      "network to settle, scroll to load lazy content, then save into the project: logo candidates from the header and nav (inline SVG " +
+      "sanitised, or the image file), favicons and touch icons, the share image (og:image), the first screen (`hero.png`) and the whole page " +
+      "at 1x (`page.png`, up to 16384 px tall), all under `assets/brand/<id>/` (`<id>` from the host: `example-com`, `-2` when taken); and " +
+      "font faces into `assets/fonts/` only when the font file's own name table names OFL-1.1, Apache-2.0 or UFL (otherwise the family, " +
+      "weights and why are listed). It measures colours by use and role with an accent (the colour in the most roles), fonts by use, " +
+      "`:root` variables, headings and buttons, and records video URLs without downloading them. Everything goes into `brand.json` at " +
+      "the project root, and each saved file gets a `credits.json` entry with its source URL and no licence (fonts: the licence they " +
+      "name), so `credits check` fails on them until the person confirms they may use them (`credits set --licence own` for their own " +
+      "brand). It never changes `style.json`: `style` lists suggested `style set` calls; show the person what was found first. " +
+      "Only `http`/`https` URLs on ports 80 and 443; the page reaches public addresses only (private, loopback and link-local " +
+      "addresses, including through redirects, are refused), no cookies or sign-in. At most 120 s and 150 MB. Runs as a background " +
+      "job of kind `brand`. `capture.ok` is false (`reason: little-text`) when the page yielded very little text and no logo, icon, " +
+      "share image or font: a login wall or an empty app shell; look at `hero.png`. Example: `{ url: \"https://example.com\" }`. " +
+      "Fails with InvalidOperation (`reason`: `url`, `scheme`, `credentials`, `port`, `address` (not a public address, or a redirect to " +
+      "one), `load`, `timeout`), InvalidProjectFile (`brand.json` is broken), ProjectNotFound, or the Binary* errors when headless " +
+      "Chrome cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      url: z.string().min(1).max(4096).describe("Public page to capture, `http` or `https`, e.g. `https://example.com/pricing`."),
+    }),
+    result: BrandCaptureResultSchema,
   },
   gc: {
     mutating: true,
@@ -4769,7 +4797,7 @@ export const notifications = {
         .describe(
           "Stable code of the step, so a UI can say it in its own language: `hash`, `extract-audio`, `binary`, " +
             "`binary-download`, `binary-fallback`, `model`, `model-download`, `model-load`, `gpu-compile`, `gpu-compiled`, " +
-            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`, `matte` (`values`: `asset`, `eta` seconds left once known). Codes may be added: treat an unknown one as `message`.",
+            "`gpu-retry`, `transcribe`, `retranscribe`, `diarize`, `faces`, `people`, `matte` (`values`: `asset`, `eta` seconds left once known), `capture` (`values`: `url`). Codes may be added: treat an unknown one as `message`.",
         ),
       values: z
         .record(z.string(), z.union([z.string(), z.number()]))
@@ -4942,6 +4970,8 @@ export type ScriptCheckResult = MethodResult<"script.check">;
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 /** Result of `voiceover.place`. */
 export type VoiceoverPlaceResult = MethodResult<"voiceover.place">;
+/** Result of `brand.capture`. */
+export type BrandCaptureResult = MethodResult<"brand.capture">;
 /** Result of `sound.sfx`. */
 export type SoundSfxResult = MethodResult<"sound.sfx">;
 /** Result of `sound.place`. */

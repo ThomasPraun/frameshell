@@ -232,6 +232,18 @@ export {
   licenceInfo,
   parseCreditsFile,
 } from "./credits.js";
+export {
+  BRAND_COLOR_ROLES,
+  BRAND_DIR,
+  BRAND_FILE,
+  BRAND_SCHEMA_URL,
+  type BrandCapture,
+  BrandCaptureSchema,
+  type BrandManifest,
+  BrandManifestSchema,
+  createBrandManifest,
+  parseBrandManifest,
+} from "./brand.js";
 export { type PaintChange, paintStretches } from "./painted.js";
 export {
   AUDIO_EFFECT_KINDS,
@@ -450,7 +462,7 @@ export {
   subtitleLayout,
   subtitleTracks,
 } from "./subtitles.js";
-export { type FontMetrics, parseFontMetrics } from "./font-file.js";
+export { type FontMetrics, parseFontMetrics, readNameTable } from "./font-file.js";
 export {
   type TransitionContext,
   type ClipHandles,

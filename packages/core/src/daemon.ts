@@ -180,6 +180,8 @@ import { planMusic, runMusicPlacement } from "./sound/music-place.js";
 import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
+import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
+import { checkCaptureUrl } from "./brand/policy.js";
 
 /** Package version reported in the handshake. */
 export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
@@ -231,6 +233,11 @@ export interface DaemonOptions {
    * names the model `stand-in`, so nothing is downloaded. Default false.
    */
   matteStandIn?: boolean;
+  /**
+   * Tests only: fake DNS and dial for the brand capture proxy (ADR 0044), so a local fixture site stands for a
+   * public one. The address policy itself is never relaxed. Default: the system resolver and real connections.
+   */
+  brandNetwork?: BrandServiceOptions["network"];
   /** Video segments a render encodes at once. Default: half the cores, 1 to 4. */
   renderParallelism?: number;
   /** Render video segment length in seconds. Default 10. */
@@ -724,6 +731,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     // `clips` and `faceScans` are declared below: they are read when a review runs, not now.
     generated: (dir, timeline, size) => clips.ensure(clipRoot(dir), timeline, undefined, size),
     faceScans: (dir) => faceScans(dir)(),
+  });
+  const brands = new BrandService({
+    chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
+    credits: (dir, assets, provenance) => credits.record(dir, assets, provenance),
+    ...(options.brandNetwork ? { network: options.brandNetwork } : {}),
   });
   const analyses = new AnalyzeService({
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
@@ -1511,6 +1523,26 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             },
           },
         );
+      });
+    },
+    "brand.capture": async ({ cwd, url }, _caller, request) => {
+      const dir = await root(cwd);
+      const checked = checkCaptureUrl(url);
+      if (!checked.ok) throw new RpcError(ErrorCode.InvalidOperation, `brand.capture: ${checked.problem.message}`, { op: "brand.capture", reason: checked.problem.reason, field: "url" });
+      const target = checked.url;
+      return inJob({ kind: "brand", project: dir, asset: target.href }, async (ctx) => {
+        ctx.update({ step: "capture", progress: 0 });
+        return brands.capture(dir, target, {
+          signal: ctx.signal,
+          progress: (progress) => ctx.update({ progress }),
+          stage: (message) => {
+            try {
+              request.progress({ message, stage: "capture", values: { url: target.href } });
+            } catch {
+              // Connection closed.
+            }
+          },
+        });
       });
     },
     "analyze.diff": async ({ cwd, file, reference, name, lag, maxLag, every, snapshots }, _caller, request) => {

@@ -7,6 +7,7 @@
 Both reach the same daemon, journal the same operations and take the same arguments (`clip.add` → `clip_add`, `--snap-window` → `snapWindow`). Pick per task:
 
 - **MCP only:** seeing pixels (`frame_capture`, `frames_strip`, `review`, `analyze` and `analyze_diff` return the image itself), the app (`ui_state`, `ui_*`), `history_diff`, `clip_renders`, `asset_list`, `job_list`, `export_presets`.
+- `brand_capture { url: "https://example.com" }` is the job behind `frameshell brand capture`: the same files, `brand.json`, credits entries and `style` suggestions; see [credits.md](credits.md#brand-capture).
 - **CLI:** loops over many operations from one shell call (dozens of `cut`s), and every environment where the MCP server is not registered.
 - **One channel per transaction.** A transaction groups one session's operations: the CLI's session is `FRAMESHELL_SESSION`, the server's is its own. Begin, edit and commit through the same one.
 

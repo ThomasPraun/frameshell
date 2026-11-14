@@ -201,6 +201,7 @@ Pin: **Chrome for Testing 154.0.8037.57**, the build ADR 0002 measured, from Goo
 - Licence: Chromium's BSD-3-Clause plus the third-party notices in `LICENSE.headless_shell`; the binary is Google's, under the Chrome terms. Frameshell never redistributes it: the user's machine downloads it from Google, as puppeteer does. No mirror.
 - Verified when pinning (2026-09-30): each archive's MD5 matched the `x-goog-hash` Google's bucket publishes, each was listed (16 files on macOS, 287 on Linux, 288 on Windows, all under the one top directory), the darwin-arm64 executable printed `Google Chrome for Testing 154.0.8037.57` from a manager install, and the Linux zip extracted by `extractZip` matched `unzip` byte for byte. `FRAMESHELL_TEST_REAL_DOWNLOAD=1` installs and runs the pin; `FRAMESHELL_TEST_REAL_HYPERFRAMES=1` renders a composition with it.
 - Re-pin: pick a Chrome for Testing version (`https://googlechromelabs.github.io/chrome-for-testing/known-good-versions.json`), download each `chrome-headless-shell-<target>.zip`, record size and SHA-256 (check the MD5 against the bucket's `x-goog-hash` header), then run the two opt-in tests above.
+- Brand capture (ADR 0044) runs it behind the capture proxy with the flags of `guardedChromeFlags` (`packages/core/src/brand/capture.ts`). On a re-pin, also run `FRAMESHELL_TEST_REAL_CHROME=1` on `packages/core/test/brand-capture.test.ts` and the UDP table of `docs/research/brand-capture-proxy.md`: a Chrome that routes a protocol around the proxy breaks the guard silently.
 
 ## Blender (your own install)
 

@@ -1,0 +1,488 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "captures": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Folder name under `assets/brand/`, from the host, e.g. `example-com`."
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "URL asked for."
+          },
+          "finalUrl": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "URL the page ended on after redirects."
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "description": "When the capture ran (ISO 8601, UTC)."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "False when the page loaded but yielded too little to use."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "little-text"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`little-text`: very little text and no logo, icon, share image or font: a login wall, a bot check or an empty app shell."
+          },
+          "textLength": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Characters of visible text."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "pattern": "^assets\\/[^\\\\]+$",
+                  "description": "Project-relative path, e.g. `assets/brand/example-com/logo-1.svg` or `assets/fonts/Inter-400.woff2`."
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "logo",
+                    "icon",
+                    "og",
+                    "hero",
+                    "page",
+                    "font"
+                  ],
+                  "description": "`logo`: a logo candidate from the header or nav, or an image or SVG named like a logo. `icon`: a favicon or touch icon. `og`: the page's share image. `hero`: the first screen (1600x1000 CSS px at 2x). `page`: the whole page at 1x. `font`: a face whose own name table names an open licence."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "svg",
+                    "raster",
+                    "font"
+                  ],
+                  "description": "`svg`: sanitised vector, sharp at any zoom. `raster`: PNG, JPEG, GIF or WebP. `font`: a font file."
+                },
+                "origin": {
+                  "type": "string",
+                  "const": "captured",
+                  "description": "Taken from the page as it is; a logo is never redrawn."
+                },
+                "sourceUrl": {
+                  "type": "string",
+                  "maxLength": 4096,
+                  "description": "Where the bytes came from: the file's URL, or the page for screenshots and inline SVG."
+                },
+                "width": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Pixel width (CSS px for inline SVG), when known."
+                },
+                "height": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Pixel height, when known."
+                }
+              },
+              "required": [
+                "path",
+                "role",
+                "kind",
+                "origin",
+                "sourceUrl",
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "hex": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-f]{6}$"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "description": "Elements using it, all roles together."
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "background",
+                      "border",
+                      "heading",
+                      "link",
+                      "button"
+                    ]
+                  },
+                  "description": "Roles it plays, most used first."
+                }
+              },
+              "required": [
+                "hex",
+                "count",
+                "roles"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Most used first."
+          },
+          "accent": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^#[0-9a-f]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The colour seen in the most roles, never a browser link colour or a red used only for text; null when every colour is neutral."
+          },
+          "fonts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "First family of the `font-family` stacks that use it."
+                },
+                "uses": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991,
+                  "description": "Text elements set in it."
+                },
+                "weights": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "description": "Weights those elements use, most used first."
+                },
+                "generic": {
+                  "type": "boolean",
+                  "description": "True for a generic or system family (`sans-serif`, `system-ui`…): nothing to copy."
+                },
+                "icon": {
+                  "type": "boolean",
+                  "description": "True for an icon font: never a face for text."
+                },
+                "faces": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "weight": {
+                        "type": "string",
+                        "description": "`font-weight` of the face as declared, e.g. `400` or `100 900` for a variable face."
+                      },
+                      "style": {
+                        "type": "string",
+                        "description": "`font-style` as declared, e.g. `normal`, `italic`."
+                      },
+                      "unicodeRange": {
+                        "description": "`unicode-range` as declared; null when the face covers everything.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "url": {
+                        "description": "The source the capture would copy (woff2 first); null when only local() sources exist.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "file": {
+                        "description": "Project file the face was copied to, under `assets/fonts/`; null when it was not copied.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "licence": {
+                        "description": "`OFL-1.1`, `Apache-2.0` or `UFL-1.0` when the file's own name table names it; null otherwise.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "note": {
+                        "type": "string",
+                        "description": "Why the face was or was not copied."
+                      }
+                    },
+                    "required": [
+                      "weight",
+                      "style",
+                      "unicodeRange",
+                      "url",
+                      "file",
+                      "licence",
+                      "note"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Declared faces chosen for the weights in use (the one covering Latin `A` when subsets are split)."
+                }
+              },
+              "required": [
+                "family",
+                "uses",
+                "weights",
+                "generic",
+                "icon",
+                "faces"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Most used first."
+          },
+          "variables": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "`:root` custom properties as computed (first 300)."
+          },
+          "headings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string",
+                  "description": "Element, e.g. `h1`, `button`, `a`."
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Its text, at most 80 characters."
+                },
+                "family": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number",
+                  "description": "Font size, CSS px."
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "tracking": {
+                  "type": "number",
+                  "description": "Letter spacing in em; 0 for `normal`."
+                },
+                "color": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^#[0-9a-f]{6}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "background": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^#[0-9a-f]{6}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "tag",
+                "text",
+                "family",
+                "size",
+                "weight",
+                "tracking",
+                "color",
+                "background"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "buttons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string",
+                  "description": "Element, e.g. `h1`, `button`, `a`."
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Its text, at most 80 characters."
+                },
+                "family": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number",
+                  "description": "Font size, CSS px."
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "tracking": {
+                  "type": "number",
+                  "description": "Letter spacing in em; 0 for `normal`."
+                },
+                "color": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^#[0-9a-f]{6}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "background": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^#[0-9a-f]{6}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "tag",
+                "text",
+                "family",
+                "size",
+                "weight",
+                "tracking",
+                "color",
+                "background"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "videos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Video URLs the page plays, recorded and never downloaded."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "finalUrl",
+          "capturedAt",
+          "title",
+          "ok",
+          "reason",
+          "textLength",
+          "files",
+          "colors",
+          "accent",
+          "fonts",
+          "variables",
+          "headings",
+          "buttons",
+          "videos",
+          "warnings"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "$id": "https://frameshell.dev/schema/v1/brand.json"
+}

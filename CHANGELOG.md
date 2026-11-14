@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Brand capture from a URL, slice 3 of #467 (ADR 0044, epic #451; protocol 127): `frameshell brand capture <url>` (MCP
+  `brand_capture`, job kind `brand`) opens a public `http`/`https` page in the managed headless Chrome, whose only way out
+  is a daemon-local guarded proxy (public unicast addresses, ports 80/443, each host resolved once and dialed by the checked
+  IP, every redirect hop re-checked; `--proxy-bypass-list=<-loopback>`, `--disable-quic`,
+  `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; at most 120 s and 150 MB). It saves logo candidates
+  (sanitised SVG or the image), icons, the share image, `hero.png` and `page.png` under `assets/brand/<id>/`, copies a
+  font into `assets/fonts/` only when the font file's own name table names OFL-1.1, Apache-2.0 or UFL (amends ADR 0028
+  decision 7), and records colours with an accent, fonts by use, `:root` variables, headings, buttons and video URLs in a
+  new root `brand.json` (published schema). Every saved file gets a credits entry with its source URL and no licence.
+  `style.json` is never written: the result suggests `style set` calls. A page with almost no text and nothing to keep
+  returns `ok: false`, `reason: little-text`. `file:`, `data:`, `chrome:` and every non-http(s) URL, URLs with
+  credentials, other ports and private or loopback hosts are refused.
 - Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 126):
   `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`
   too, once declared) writes the face-following framing into the clip's override there, so the clip, the primary and

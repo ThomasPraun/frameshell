@@ -125,6 +125,12 @@ Optional `credits.json`: where third-party assets came from. `asset_import` reco
 
 `render` also adds a warning for placed assets with no verified provenance, but only in a project whose ledger already holds an entry.
 
+## Brand capture (ADR 0044)
+
+| Tool | Use |
+|---|---|
+| `brand_capture(url)` | Job (kind `brand`): open a public `http`/`https` page in headless Chrome behind the capture proxy (public addresses, ports 80/443, no cookies, 120 s, 150 MB) and save logo candidates, icons, the share image, `hero.png` and `page.png` under `assets/brand/<id>/`, open-licensed fonts (the file's own name table names OFL-1.1, Apache-2.0 or UFL) under `assets/fonts/`, and the findings (colours with an accent, fonts by use, `:root` variables, headings, buttons, video URLs) in `brand.json`. Each file gets a credits entry with its source URL and no licence. Never writes `style.json`: `style` lists suggested `style_set` calls. `capture.ok: false` with `reason: little-text` when the page gave almost nothing. Idempotent per `idempotencyKey`. |
+
 `render` with `loop: true` (ADR 0039) exports a file meant to repeat: audio ends faded, refused with `cover`, warnings for a broken cycle or a black end, and the finished job's `warnings` (`job_list`) says when the last frame repeats frame 0. `render` with `preset: "gif"` (ADR 0039) writes a silent looping GIF with the same loop rules, fitted inside 1200x1200, at most 30 fps and 350 frames (more is refused before queuing); `warnings` in the job report a file over 15 MB.
 
 ## People (ADR 0020)
