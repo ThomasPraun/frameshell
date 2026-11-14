@@ -426,6 +426,20 @@ _Avoid_: built-in model, bundled model
 A model file the user registered on one machine under an id (`frameshell model add`), kept with its SHA-256 in `models.json` in the config dir. Projects name only the id, so the same project uses whichever file each machine registered.
 _Avoid_: custom model path, local model
 
+## 3D in generated clips (ADR 0042)
+
+**3D composition**:
+A HyperFrames composition whose page paints a three.js scene into one canvas on the motion runtime's clock: the scaffold copies the pinned three.js bundle (`frameshell-three.js`) beside the motion runtime, and every render uses the software GL renderer.
+_Avoid_: 3D clip, three.js clip (there is no clip type for it), WebGL clip
+
+**Studio**:
+The lighting rig a 3D template builds once: warm key (the only shadow caster), cool fill, white rim, and a code-built reflection environment, with neutral tone mapping. The playbook's defaults are measured numbers for it.
+_Avoid_: scene preset, light kit, HDRI
+
+**Glint**:
+The thin light that sweeps once across a 3D subject early in the shot, as the hook.
+_Avoid_: shine, flare, sparkle
+
 ## Blender clips (ADR 0035)
 
 **Blender clip**:

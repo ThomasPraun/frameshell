@@ -4,7 +4,7 @@ status: accepted
 
 # three.js in generated clips: a pinned bundle copied into HyperFrames compositions, rendered on SwiftShader
 
-3D product shots, titles and logos for launch films ([#473](https://github.com/ThomasPraun/frameshell/issues/473), epic #451), the lighter 3D route beside Blender (ADR 0035). The owner chose option A of the proposal on #473 on 2026-11-11 with every recommendation, after a spike; the spike ([`docs/research/three-in-hyperframes.md`](../research/three-in-hyperframes.md), PR #531) was approved on 2026-11-13 with its five corrections, which this ADR records. Extends ADR 0033 (motion runtime); ADR 0033 is unchanged except a cross-link. **Slices 1 and 2 are built; slices 3 to 5 are not.**
+3D product shots, titles and logos for launch films ([#473](https://github.com/ThomasPraun/frameshell/issues/473), epic #451), the lighter 3D route beside Blender (ADR 0035). The owner chose option A of the proposal on #473 on 2026-11-11 with every recommendation, after a spike; the spike ([`docs/research/three-in-hyperframes.md`](../research/three-in-hyperframes.md), PR #531) was approved on 2026-11-13 with its five corrections, which this ADR records. Extends ADR 0033 (motion runtime); ADR 0033 is unchanged except a cross-link. **Slices 1, 2 and 4 are built; slices 3 and 5 are not.**
 
 ## Context (verified)
 
@@ -35,12 +35,17 @@ status: accepted
 - `product-shot` (`plugins/hyperframes/src/templates/product-shot.ts`) on the shared studio of `templates/three-kit.ts` (renderer, PMREM, key, fill and rim light, ground, `ready`): the built-in rounded box or a GLB fitted to the same size, a label texture, finish presets, a push-in, a glint sweep, spin and orbit props, a DOM headline, layout per format through `M.pick`. Transparent unless `backdrop`.
 - `plugins/hyperframes/test/three-real.test.ts` (opt-in) renders it with a generated GLB and a texture: the model is in the first frame, alpha is kept, `clip.verify` passes with tolerance 0, and a missing model fails the render naming the file. `templates-real` lays it out in the four formats.
 
+### Settled in slice 4
+
+- The playbook is `plugins/hyperframes/skills/hyperframes/3d-playbook.md`, in the plugin skill beside `SKILL.md` (plugin skills are linked as a directory, so the page reaches the agent with it), linked from the skill's 3D section and from the motion-films page of the frameshell skill. It separates what the `product-shot` template does (studio, finishes, glint, push-in, creep) from what a hand-written scene adds (vignette, grain, parts that open, the full beat sheet), and names no command or template that does not exist: there is no 3D title or logo template yet, so it sends those to DOM text over the canvas or a supplied GLB.
+- `Chrome.launch` (`packages/core/src/inspect/chrome.ts`, the headless Chrome of `clip.verify`, `inspect.point` and brand capture) passes `--enable-unsafe-swiftshader` (`chromeLaunchArgs`, unit-tested), so a machine without a GPU still gets a WebGL context there instead of depending on the Chrome build's fallback.
+
 ### Slices
 
 1. `gen:three`, drift test, GPU-mode pin, seek-safety rules, 3D-aware check (done).
 2. `product-shot` template with a real-render test (done).
 3. `title-3d` (Archivo Black typeface JSON at build time, converter licence to check) and `logo-3d` (SVG extrude, `SVGLoader` +29 KB).
-4. The 3D playbook reference in the plugin skill (studio defaults, materials, camera, beat sheet, failure and fix, Blender bridge), GLOSSARY.
+4. The 3D playbook reference in the plugin skill (studio defaults, materials, camera, beat sheet, failure and fix, Blender bridge), GLOSSARY, the Chrome SwiftShader flag (done).
 5. Motion blur cap for 3D once #501 lands; hardware GL and the live-vs-export parity only if needed.
 
 ## Consequences
@@ -48,7 +53,7 @@ status: accepted
 - **Plugin size** grows by the bundle (0.82 MB raw in `dist`), and each 3D composition carries a copy, hashed on every key check.
 - **A re-pin is a deliberate PR:** bump `three`, `pnpm gen:three`, run the opt-in `three-real` and `templates-real` tests. Old clips keep their copy until `update`.
 - **Pixels of existing clips** do not change: software GL was already the producer's default. Someone who had set `PRODUCER_BROWSER_GPU_MODE=hardware` now renders on SwiftShader; the GL mode is not in the cache key, so earlier hardware renders stay cached until something else changes.
-- **Live preview** in the app runs WebGL on the GPU while export and `clip.verify` (core's Chrome falls back to SwiftShader) do not: small shading differences between the live page and the export are expected (ADR 0010 already labels live clips).
+- **Live preview** in the app runs WebGL on the GPU while export and `clip.verify` (core's Chrome launches with `--enable-unsafe-swiftshader`) do not: small shading differences between the live page and the export are expected (ADR 0010 already labels live clips).
 - **Pick and element mode** see a 3D scene as one `<canvas>`: element mode moves or scales the whole picture; object changes are props.
 - **Coupling to HyperFrames internals** grows: `window.__hf.buildReady` is an undocumented hook of the 0.9.30 runtime. `three-real` must pass on every HyperFrames bump.
 - **Unchanged:** schema, JSON Schema, protocol (`PROTOCOL_VERSION`), plugin API, cache layout, core, desktop, the Remotion and Blender plugins.

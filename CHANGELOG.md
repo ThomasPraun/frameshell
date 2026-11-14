@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 3D playbook, slice 4 of #473 (ADR 0042, epic #451): the `hyperframes` skill gains `3d-playbook.md`, a reference for
+  3D product shots in three.js: which route to take (the `product-shot` template, a hand-written scene, Blender), the
+  studio defaults (lights, environment, tone mapping, VSM shadows), the four finishes with their numbers, the glint,
+  camera and modelling rules, the 6 s beat sheet, a failure and fix table, and how to bring a GLB from Blender
+  (glTF Binary, no compression, inside the composition directory). The headless Chrome of `clip verify`,
+  `inspect point` and `brand capture` now launches with `--enable-unsafe-swiftshader`, so WebGL works there without a
+  GPU. Not yet: the `title-3d` and `logo-3d` templates (slice 3).
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also
