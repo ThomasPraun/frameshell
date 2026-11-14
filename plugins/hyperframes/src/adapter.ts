@@ -1,7 +1,7 @@
 import { cp, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
-import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
-import { type FrameSize, projectResolution, sizeEntry, withLeadingStyle, withStyle } from "./frame-size.js";
+import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext, RenderMotionBlur } from "@frameshell/plugin-api";
+import { type FrameSize, projectResolution, sizeEntry, withLeadingStyle, withLeadingTag, withStyle } from "./frame-size.js";
 import { liveHead } from "./live.js";
 
 /** Clip type this adapter registers. */
@@ -15,6 +15,10 @@ export interface Producer {
     format: "webm";
     entryFile: string;
     variables: Record<string, unknown>;
+    /** Sub-frame accumulation (ADR 0041), in the producer's own option names. Absent: sharp. */
+    motionBlur?: ProducerMotionBlur;
+    /** Turns off the page-side `data-motion-blur` of HyperFrames, so a blurred clip is never blurred twice. */
+    pageMotionBlur?: "off";
   }): unknown;
   executeRenderJob(
     job: unknown,
@@ -23,6 +27,16 @@ export interface Producer {
     onProgress?: (job: { progress?: number }, message: string) => void | Promise<void>,
     signal?: AbortSignal,
   ): Promise<void>;
+}
+
+/** The producer's `motionBlur` option (`MotionBlurOptions` of `@hyperframes/engine`). */
+export interface ProducerMotionBlur {
+  samplesPerFrame: number;
+  /** Window width, degrees of one frame. */
+  shutterAngle: number;
+  /** Window start, degrees from the frame time. */
+  shutterPhase: number;
+  blend: "linear" | "srgb";
 }
 
 /** Options for {@link createHyperframesAdapter}. */
@@ -85,6 +99,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
     propsSchema,
     elementStyles: true,
     styleTokens: true,
+    motionBlur: true,
     async inputs(clip) {
       const { source } = clip as HyperframesClip;
       if (!source) return [];
@@ -121,14 +136,19 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
         entryFile: basename(source),
         // Overrides only: the page runtime merges them over the declared defaults; `{}` keeps every default.
         variables: props ?? {},
+        ...(ctx.motionBlur ? { motionBlur: producerMotionBlur(ctx.motionBlur), pageMotionBlur: "off" as const } : {}),
       });
-      await producer.executeRenderJob(
-        job,
-        composition,
-        output,
-        (state, message) => ctx.progress({ fraction: Math.min(1, Math.max(0, (state.progress ?? 0) / 100)), message }),
-        ctx.signal,
-      );
+      try {
+        await producer.executeRenderJob(
+          job,
+          composition,
+          output,
+          (state, message) => ctx.progress({ fraction: Math.min(1, Math.max(0, (state.progress ?? 0) / 100)), message }),
+          ctx.signal,
+        );
+      } catch (error) {
+        throw ctx.motionBlur ? motionBlurRefusal(id, error) : error;
+      }
       return { file: output, hasAlpha: true };
     },
     // The page is the composition directory as it is: the runtime loads sub-compositions and assets by relative URL.
@@ -158,7 +178,34 @@ async function prepareEntry(entry: string, ctx: RenderContext, project: FrameSiz
   let html = sizeEntry(original, ctx, project);
   if (ctx.elementCss) html = withStyle(html, "data-frameshell-elements", ctx.elementCss);
   if (ctx.styleCss) html = withLeadingStyle(html, "data-frameshell-style", ctx.styleCss);
+  // The motion runtime's cuts() guard finds each sample's frame instant with it (ADR 0041).
+  if (ctx.motionBlur) html = withLeadingTag(html, `<meta name="${FRAME_RATE_META}" content="${ctx.fps}">`);
   if (html !== original) await writeFile(entry, html);
+}
+
+/** `<meta name>` of the frame rate in a blurred render's entry; `FRAME_RATE_META` of packages/motion reads it. */
+const FRAME_RATE_META = "frameshell-fps";
+
+/**
+ * The producer's `motionBlur` for a clip's (ADR 0041): a fixed sample count, and the phase that centres a window of
+ * `shutter` degrees on the frame time (the producer's window starts `shutterPhase` degrees from it).
+ */
+export function producerMotionBlur(blur: RenderMotionBlur): ProducerMotionBlur {
+  return { samplesPerFrame: blur.samples, shutterAngle: blur.shutter, shutterPhase: -blur.shutter / 2, blend: blur.blend };
+}
+
+/**
+ * A render error of a blurred clip, with the producer's refusal (`[MotionBlur] ...`: HDR content and shader
+ * transitions take a capture route it cannot blur) said in the clip's terms.
+ */
+function motionBlurRefusal(id: string, error: unknown): unknown {
+  const message = (error as Error)?.message ?? String(error);
+  if (!message.includes("[MotionBlur]")) return error;
+  return new Error(
+    `hyperframes clip ${id} cannot be motion-blurred: ${message.replace(/^[\s\S]*?\[MotionBlur\]\s*/, "")} ` +
+      "Compositions with HDR content or shader transitions render only sharp: turn it off with `frameshell clip set <clip> --clear-motion-blur`.",
+    { cause: error },
+  );
 }
 
 /** Throws unless `source` names the composition's HTML entry. */

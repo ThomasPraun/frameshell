@@ -1403,6 +1403,46 @@ describe("operation properties", () => {
   });
 });
 
+describe("clip.set motionBlur (ADR 0041)", () => {
+  const supported = () => context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null, motionBlur: true }]]) });
+  const blurOf = (timeline: Timeline) => (clipsOf(timeline, "t_v")[0] as { motionBlur?: unknown }).motionBlur;
+  const withCard = async (ctx = supported()) =>
+    (await apply(base(), "clip.add", { track: "t_v", type: "hyperframes", source: "c/index.html", start: 0, duration: 5 }, ctx)).timeline;
+
+  it("turns it on with {}, merges field by field, clears with null, and the inverse restores what was there", async () => {
+    const ctx = supported();
+    const t0 = await withCard(ctx);
+    const on = await apply(t0, "clip.set", { clip: "c_0001", motionBlur: {} }, ctx);
+    expect(blurOf(on.timeline)).toEqual({});
+    expect(on.warnings).toEqual([]);
+    expect(parseTimeline(on.timeline).ok).toBe(true);
+    const tuned = (await apply(on.timeline, "clip.set", { clip: "c_0001", motionBlur: { shutter: 90, samples: 16 } }, ctx)).timeline;
+    const srgb = (await apply(tuned, "clip.set", { clip: "c_0001", motionBlur: { blend: "srgb" } }, ctx)).timeline;
+    expect(blurOf(srgb)).toEqual({ shutter: 90, samples: 16, blend: "srgb" });
+    const cleared = await apply(srgb, "clip.set", { clip: "c_0001", motionBlur: null }, ctx);
+    expect(clipsOf(cleared.timeline, "t_v")[0]).not.toHaveProperty("motionBlur");
+    expect(blurOf((await apply(cleared.timeline, "timeline.patch", cleared.inverse.args, ctx)).timeline)).toEqual({ shutter: 90, samples: 16, blend: "srgb" });
+    expect(clipsOf((await apply(on.timeline, "timeline.patch", on.inverse.args, ctx)).timeline, "t_v")).toEqual(clipsOf(t0, "t_v"));
+  });
+
+  it("stores it with a warning when the plugin does not apply it, and refuses media clips, a format and bad numbers", async () => {
+    const plain = context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null }]]) });
+    const stored = await apply(await withCard(plain), "clip.set", { clip: "c_0001", motionBlur: {} }, plain);
+    expect(blurOf(stored.timeline)).toEqual({});
+    expect(stored.warnings).toEqual([expect.stringMatching(/hyperframes plugin does not apply motion blur yet: c_0001 keeps rendering sharp/)]);
+
+    const ctx = supported();
+    expect((await rejection(apply((await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 10, in: 2, out: 8 }, ctx)).timeline, "clip.set", { clip: "c_0001", motionBlur: {} }, ctx))).message).toMatch(/only generated clips take `motionBlur`/);
+    const card = await withCard();
+    expect((await rejection(apply(card, "clip.set", { clip: "c_0001", format: "9x16", motionBlur: {} }, ctx))).message).toMatch(
+      /`motionBlur` is shared by every format/,
+    );
+    for (const bad of [{ shutter: 0 }, { shutter: 400 }, { samples: 0 }, { samples: 65 }, { samples: 2.5 }, { blend: "log" }, { phase: 10 }]) {
+      expect((await rejection(apply(card, "clip.set", { clip: "c_0001", motionBlur: bad }, ctx))).code).toBe(ErrorCode.InvalidParams);
+    }
+  });
+});
+
 describe("clip.set elements (ADR 0021)", () => {
   const supported = () =>
     context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null, elementStyles: true }]]) });
