@@ -35,7 +35,7 @@ import { CreditAssetSchema, ProvenanceParams } from "./credits.js";
 import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "./analyze.js";
 import { ReviewOutputSchema, ReviewResultSchema } from "./review.js";
 import { FacePointSchema, PeopleChangedSchema, PeopleScanResultSchema, PeopleSuggestionSchema, PersonInfoSchema, PersonTargetParams } from "./people.js";
-import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, MUSIC_BPM_RANGE, MUSIC_CHORD_PATTERN, MUSIC_LIMITS, MUSIC_LUFS, MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_METER_RANGE, MUSIC_PEAK_DBFS, MUSIC_PRESET_DEFAULTS, MUSIC_TAIL_SECONDS, MusicPresetSchema, MusicSectionSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VOICEOVER_LINE_GAP_S, VoiceoverLineSchema } from "@frameshell/schema";
+import { AudioEffectSchema, BeatsEditsSchema, CreditEntrySchema, DIRECTOR_TEMPLATE_IDS, FormatIdSchema, MAX_SOURCE_URL, MUSIC_BPM_RANGE, MUSIC_CHORD_PATTERN, MUSIC_LIMITS, MUSIC_LUFS, MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_METER_RANGE, MUSIC_PEAK_DBFS, MUSIC_PRESET_DEFAULTS, MUSIC_TAIL_SECONDS, MusicPresetSchema, MusicSectionSchema, ResolvedStyleSchema, SFX_JITTER, SFX_LENGTH_RANGE, SFX_PITCH_RANGE, SFX_SEED_MAX, SFX_VARIANTS, SOUND_KEY_GAP_MS, SOUND_MAX_PER_FRAME, SOUND_MAX_PLACEMENTS, SOUND_MIN_GAP_MS, SOUND_RISER_END_BEFORE_MS, SOUND_ROLE_OFFSETS, SOUND_TIER_OFFSETS_DB, SOUND_TYPING_RATE, SafeZoneSchema, ScriptMetaSchema, ScriptSceneSchema, SessionSoundSchema, SfxKindSchema, ShootMetaSchema, SoundRoleSchema, SoundTierSchema, ShootSceneSchema, ShootSessionIdSchema, TempoSchema, UserStyleIdSchema, VOICEOVER_LINE_GAP_S, VoiceoverLineSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   CaptionsSetResultSchema,
@@ -1683,7 +1683,7 @@ export const methods = {
       "Chrome cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
-      url: z.string().min(1).max(4096).describe("Public page to capture, `http` or `https`, e.g. `https://example.com/pricing`."),
+      url: z.string().min(1).max(MAX_SOURCE_URL).describe("Public page to capture, `http` or `https`, at most 2048 characters, e.g. `https://example.com/pricing`."),
     }),
     result: BrandCaptureResultSchema,
   },
@@ -2134,7 +2134,7 @@ export const methods = {
     mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json`, `people.json` and `style.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json`, `people.json`, `style.json` and `brand.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +

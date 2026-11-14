@@ -1,3 +1,4 @@
+import { brotliCompressSync, constants, deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { bestSource, coversLatinA, faceFor, fontExtension, fontLicence, isIconFamily, parseFontFaces, readFontNames } from "../src/brand/fonts.js";
 import { pickAccent, rankColors, suggestStyle } from "../src/brand/findings.js";
@@ -24,6 +25,16 @@ describe("font licence from the name table", () => {
     expect(fontLicence(new Map([[13, "Ubuntu Font Licence 1.0"]]))).toBe("UFL-1.0");
     expect(fontLicence(new Map([[13, "This font is licensed for use on example.com only. All rights reserved."]]))).toBeNull();
     expect(readFontNames(sfnt({ name: nameTable({ 1: "Closed Serif" }) })).licence).toBeNull();
+  });
+
+  it("refuses a compression bomb instead of decoding it", () => {
+    const zeros = Buffer.alloc(64 * 1024 * 1024);
+    const brotliBomb = brotliCompressSync(zeros, { params: { [constants.BROTLI_PARAM_QUALITY]: 1 } });
+    expect(() => readFontNames(woff2(OFL, undefined, { stream: brotliBomb }))).toThrow(/buffer|larger/i);
+    expect(() => readFontNames(woff2(OFL, undefined, { transformedLength: 100 * 1024 * 1024 }))).toThrow(/larger than Frameshell reads/);
+    const zlibBomb = deflateSync(zeros);
+    // Declared larger than the bomb's compressed bytes, so the reader inflates it.
+    expect(() => readFontNames(woff({ name: Buffer.alloc(512 * 1024) }, { name: zlibBomb }))).toThrow(/buffer|larger/i);
   });
 
   it("refuses a file that is no font", () => {
@@ -109,6 +120,24 @@ describe("colours and the accent", () => {
       "brand.url": "acme.test",
       "brand.mustShow": ["logo"],
     });
+  });
+
+  it("suggests the file of the face that draws the suggested weight", () => {
+    const face = (weight: string) => ({ weight, style: "normal", unicodeRange: null, url: null, file: `assets/fonts/Acme-${weight}.woff2`, licence: "OFL-1.1", note: "copied" });
+    const display = suggestStyle(
+      {
+        colors: [],
+        accent: null,
+        finalUrl: "https://acme.test/",
+        title: null,
+        files: [],
+        headings: [{ tag: "h1", text: "Fly", family: "Acme", size: 48, weight: 700, tracking: 0, color: null, background: null }],
+        fonts: [{ family: "Acme", uses: 9, weights: [400, 700], generic: false, icon: false, faces: [face("400"), face("700")] }],
+      },
+      null,
+      null,
+    ).find((one) => one.path === "fonts.display");
+    expect(display?.value).toEqual({ family: "Acme", file: "assets/fonts/Acme-700.woff2", weight: 700 });
   });
 });
 

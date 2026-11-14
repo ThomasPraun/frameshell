@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { type DaemonConnection, ErrorCode, RpcError, connectToDaemon } from "@frameshell/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Daemon, startDaemon } from "../src/index.js";
@@ -55,5 +56,10 @@ describe("brand.capture", () => {
       expect(error.data).toMatchObject({ reason: "address" });
       expect(error.message).toMatch(/non-public address/);
     }
+  });
+
+  it("refuses a brand.json that fails its schema through file.write", async () => {
+    const error = await conn.request("file.write", { path: join(project, "brand.json"), content: "{}" }).catch((caught: unknown) => caught);
+    expect((error as RpcError).code).toBe(ErrorCode.InvalidProjectFile);
   });
 });

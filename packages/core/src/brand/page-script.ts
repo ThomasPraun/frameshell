@@ -69,7 +69,7 @@ export const PAGE_SCRIPT = String.raw`(() => {
   const tracking = (s) => { const px = parseFloat(s.letterSpacing); const size = parseFloat(s.fontSize) || 16; return Number.isFinite(px) ? Math.round((px / size) * 1000) / 1000 : 0; };
   const textStyle = (el) => {
     const s = getComputedStyle(el);
-    return { tag: el.tagName.toLowerCase(), text: (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80), family: firstFamily(s.fontFamily), size: Math.round(parseFloat(s.fontSize) * 10) / 10, weight: Number(s.fontWeight) || 400, tracking: tracking(s), color: hex(s.color), background: hex(s.backgroundColor) };
+    return { tag: el.tagName.toLowerCase(), text: (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80), family: firstFamily(s.fontFamily), size: Math.round(parseFloat(s.fontSize) * 10) / 10, weight: Math.round(Number(s.fontWeight)) || 400, tracking: tracking(s), color: hex(s.color), background: hex(s.backgroundColor) };
   };
 
   const ALLOWED = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "lineargradient", "radialgradient", "stop", "clippath", "mask", "pattern", "symbol", "use", "title", "desc", "image", "filter", "feblend", "fecolormatrix", "fecomponenttransfer", "fecomposite", "feflood", "fegaussianblur", "feoffset", "femerge", "femergenode", "fefunca", "fefuncb", "fefuncg", "fefuncr", "fedropshadow", "femorphology"]);

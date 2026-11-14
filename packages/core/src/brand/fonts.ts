@@ -74,14 +74,22 @@ function nameTableOf(file: Uint8Array): Uint8Array {
       const offset = view.getUint32(entry + 4);
       const compressed = view.getUint32(entry + 8);
       const original = view.getUint32(entry + 12);
+      if (offset + compressed > file.byteLength || original > MAX_NAME_TABLE) throw new Error("bad WOFF table directory");
       const stored = file.subarray(offset, offset + compressed);
-      return compressed < original ? inflateSync(stored) : stored;
+      // The cap stops a zlib bomb: inflating past the declared length throws instead of filling memory.
+      return compressed < original ? inflateSync(stored, { maxOutputLength: original }) : stored;
     }
     throw new Error("font has no name table");
   }
   if (kind === "woff2") return woff2NameTable(file, view);
   throw new Error("not a TrueType, OpenType, WOFF or WOFF2 font");
 }
+
+/** Largest `name` table read. Real ones are a few KB; the cap bounds decoding of a page's untrusted bytes. */
+const MAX_NAME_TABLE = 1024 * 1024;
+
+/** Largest decoded WOFF2 table stream read: the name table may sit after glyf, so the whole prefix is decoded. */
+const MAX_WOFF2_STREAM = 32 * 1024 * 1024;
 
 /** WOFF2 table tags by their known-tag index (W3C WOFF2 §4.2). */
 const WOFF2_TAGS = [
@@ -128,7 +136,12 @@ function woff2NameTable(file: Uint8Array, view: DataView): Uint8Array {
     offset += length;
   }
   if (!found) throw new Error("font has no name table");
-  const stream = brotliDecompressSync(file.subarray(at, at + compressedLength));
+  // `offset` is now the whole stream's decoded length. Decoding is capped there, so a brotli bomb throws instead of
+  // filling memory; a directory declaring more than MAX_WOFF2_STREAM is refused before decoding.
+  if (offset > MAX_WOFF2_STREAM || found.length > MAX_NAME_TABLE) throw new Error("WOFF2 tables larger than Frameshell reads");
+  if (at + compressedLength > file.byteLength) throw new Error("bad WOFF2 table directory");
+  const stream = brotliDecompressSync(file.subarray(at, at + compressedLength), { maxOutputLength: Math.max(offset, 1) });
+  if (stream.byteLength !== offset) throw new Error("WOFF2 stream length does not match its table directory");
   return stream.subarray(found.offset, found.offset + found.length);
 }
 
@@ -206,7 +219,7 @@ export function coversLatinA(unicodeRange: string | null): boolean {
 }
 
 /** Weights a declared `font-weight` spans: `400`, `bold`, or a variable range `100 900`. */
-function weightSpan(weight: string): [number, number] {
+export function weightSpan(weight: string): [number, number] {
   const named: Record<string, number> = { normal: 400, bold: 700 };
   const parts = weight.trim().split(/\s+/).map((part) => named[part.toLowerCase()] ?? Number(part));
   const low = Number.isFinite(parts[0]) ? parts[0]! : 400;

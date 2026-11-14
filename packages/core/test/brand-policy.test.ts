@@ -52,4 +52,9 @@ describe("checkCaptureUrl", () => {
     expect(checked.ok && checked.url.href).toBe("https://example.com/pricing?plan=pro");
     expect(checkCaptureUrl("http://example.com:80/").ok).toBe(true);
   });
+
+  it("refuses a URL longer than credits.json records", () => {
+    const checked = checkCaptureUrl(`https://example.com/?q=${"a".repeat(2048)}`);
+    expect(!checked.ok && checked.problem.reason).toBe("url");
+  });
 });

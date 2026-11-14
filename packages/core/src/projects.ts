@@ -10,6 +10,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import {
+  BRAND_FILE,
   type FormatEntry,
   PEOPLE_FILE,
   STYLE_FILE,
@@ -19,6 +20,7 @@ import {
   createProjectConfig,
   createTimeline,
   parseBeatsFile,
+  parseBrandManifest,
   parsePeopleFile,
   parseProjectConfig,
   parseStyleFile,
@@ -352,6 +354,7 @@ const VALIDATED_FILES: { match: (rel: string) => boolean; parse: (input: unknown
   { match: (rel) => /^beats\/.+\.beats\.json$/.test(rel), parse: parseBeatsFile },
   { match: (rel) => rel === PEOPLE_FILE, parse: parsePeopleFile },
   { match: (rel) => rel === STYLE_FILE, parse: parseStyleFile },
+  { match: (rel) => rel === BRAND_FILE, parse: parseBrandManifest },
 ];
 
 /** `text` parsed as JSON; `InvalidProjectFile` for `path` when it is not JSON. */

@@ -1,6 +1,7 @@
 // Network rules of brand capture (ADR 0044): which URLs a capture may open and which addresses its proxy may dial.
 // Measured in docs/research/brand-capture-proxy.md; Node built-ins only.
 import { BlockList, isIP } from "node:net";
+import { MAX_SOURCE_URL } from "@frameshell/schema";
 
 /** The only ports capture traffic may reach. */
 export const CAPTURE_PORTS: readonly number[] = [80, 443];
@@ -108,5 +109,8 @@ export function checkCaptureUrl(input: string): { ok: true; url: URL } | { ok: f
     return { ok: false, problem: { reason: "port", message: `port ${port} is not allowed; capture reaches ports 80 and 443 only` } };
   }
   url.hash = "";
+  if (url.href.length > MAX_SOURCE_URL) {
+    return { ok: false, problem: { reason: "url", message: `the URL is longer than ${MAX_SOURCE_URL} characters, more than credits.json records` } };
+  }
   return { ok: true, url };
 }

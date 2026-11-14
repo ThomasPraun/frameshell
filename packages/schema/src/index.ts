@@ -230,6 +230,7 @@ export {
   createCreditsFile,
   creditLine,
   licenceInfo,
+  MAX_SOURCE_URL,
   parseCreditsFile,
 } from "./credits.js";
 export {

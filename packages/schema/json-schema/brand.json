@@ -22,12 +22,12 @@
           },
           "url": {
             "type": "string",
-            "maxLength": 4096,
+            "maxLength": 2048,
             "description": "URL asked for."
           },
           "finalUrl": {
             "type": "string",
-            "maxLength": 4096,
+            "maxLength": 2048,
             "description": "URL the page ended on after redirects."
           },
           "capturedAt": {
@@ -104,7 +104,7 @@
                 },
                 "sourceUrl": {
                   "type": "string",
-                  "maxLength": 4096,
+                  "maxLength": 2048,
                   "description": "Where the bytes came from: the file's URL, or the page for screenshots and inline SVG."
                 },
                 "width": {

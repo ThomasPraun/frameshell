@@ -10,9 +10,13 @@ export const CREDITS_FILE = "credits.json";
 /** Content hash as `asset.list` reports it: `sha256:` and 64 lowercase hex digits. */
 const HashSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, "must look like `sha256:<64 hex digits>`");
 
-const HttpUrl = z
+/** Longest source URL a credit (and so a brand capture, whose files get credits) records. */
+export const MAX_SOURCE_URL = 2048;
+
+/** An http or https URL of at most {@link MAX_SOURCE_URL} characters. */
+export const HttpUrl = z
   .string()
-  .max(2048)
+  .max(MAX_SOURCE_URL)
   .refine((value) => {
     try {
       const { protocol } = new URL(value);

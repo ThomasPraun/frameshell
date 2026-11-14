@@ -296,7 +296,9 @@ function requestOnce(proxyPort: number, url: URL, options: { maxBytes: number; t
         return;
       }
       const agent = new https.Agent({ keepAlive: false });
-      agent.createConnection = () => tls.connect({ socket, servername: isIP(url.hostname) ? undefined : url.hostname, ALPNProtocols: ["http/1.1"] });
+      // `host` is what the certificate is checked against; without it an IP-literal host is checked as `localhost`.
+      const host = url.hostname.replace(/^\[|\]$/g, "");
+      agent.createConnection = () => tls.connect({ socket, host, servername: isIP(host) ? undefined : host, ALPNProtocols: ["http/1.1"] });
       const request = https.request({ host: url.hostname, port, method: "GET", path: url.pathname + url.search, headers, agent }, read);
       cleanups.push(() => request.destroy());
       request.on("error", (error) => fail(error));

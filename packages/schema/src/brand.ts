@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
+import { HttpUrl } from "./credits.js";
 
 /** Canonical `$schema` URL for a project's `brand.json`. */
 export const BRAND_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/brand.json`;
@@ -11,18 +12,6 @@ export const BRAND_FILE = "brand.json";
 export const BRAND_DIR = "assets/brand";
 
 const Hex = z.string().regex(/^#[0-9a-f]{6}$/, "must be a lowercase hex colour `#rrggbb`");
-
-const HttpUrl = z
-  .string()
-  .max(4096)
-  .refine((value) => {
-    try {
-      const { protocol } = new URL(value);
-      return protocol === "http:" || protocol === "https:";
-    } catch {
-      return false;
-    }
-  }, "must be an http(s) URL");
 
 /** Roles a colour is seen in on the captured page. */
 export const BRAND_COLOR_ROLES = ["text", "background", "border", "heading", "link", "button"] as const;

@@ -44,8 +44,8 @@ export function sfnt(tables: Record<string, Buffer>): Buffer {
   return Buffer.concat([header, ...bodies]);
 }
 
-/** The same tables as a WOFF file, each zlib-compressed. */
-export function woff(tables: Record<string, Buffer>): Buffer {
+/** The same tables as a WOFF file, each zlib-compressed; `stored` replaces a table's compressed bytes. */
+export function woff(tables: Record<string, Buffer>, stored: Record<string, Buffer> = {}): Buffer {
   const tags = Object.keys(tables);
   const header = Buffer.alloc(44 + tags.length * 20);
   header.write("wOFF", 0, "latin1");
@@ -54,7 +54,7 @@ export function woff(tables: Record<string, Buffer>): Buffer {
   let offset = header.length;
   const bodies: Buffer[] = [];
   tags.forEach((tag, i) => {
-    const compressed = deflateSync(tables[tag]!);
+    const compressed = stored[tag] ?? deflateSync(tables[tag]!);
     const at = 44 + i * 20;
     header.write(tag.padEnd(4, " "), at, "latin1");
     header.writeUInt32BE(offset, at + 4);
@@ -76,17 +76,18 @@ function base128(value: number): Buffer {
 
 /**
  * A WOFF2 file: a transformed `glyf` (stored at `transformed` bytes, not its original length) before `name`, so
- * the reader must use the transform length to find `name` in the brotli stream.
+ * the reader must use the transform length to find `name` in the brotli stream. `stream` replaces the compressed
+ * stream; `transformedLength` replaces the length the directory declares for `glyf`.
  */
-export function woff2(name: Buffer, transformed = Buffer.from("TRANSFORMED")): Buffer {
+export function woff2(name: Buffer, transformed = Buffer.from("TRANSFORMED"), override: { stream?: Buffer; transformedLength?: number } = {}): Buffer {
   const directory = Buffer.concat([
     Buffer.from([10]), // glyf, transform version 0 = transformed
     base128(4000),
-    base128(transformed.length),
+    base128(override.transformedLength ?? transformed.length),
     Buffer.from([5]), // name, never transformed
     base128(name.length),
   ]);
-  const stream = brotliCompressSync(Buffer.concat([transformed, name]), { params: { [constants.BROTLI_PARAM_QUALITY]: 4 } });
+  const stream = override.stream ?? brotliCompressSync(Buffer.concat([transformed, name]), { params: { [constants.BROTLI_PARAM_QUALITY]: 4 } });
   const header = Buffer.alloc(48);
   header.write("wOF2", 0, "latin1");
   header.writeUInt32BE(0x00010000, 4);

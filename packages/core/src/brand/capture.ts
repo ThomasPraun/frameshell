@@ -10,6 +10,7 @@ import {
   BRAND_FILE,
   type BrandCapture,
   type BrandManifest,
+  MAX_SOURCE_URL,
   createBrandManifest,
   parseBrandManifest,
 } from "@frameshell/schema";
@@ -129,6 +130,9 @@ export class BrandService {
     const limits = this.#limits;
     const invalid = (reason: string, message: string) => new RpcError(ErrorCode.InvalidOperation, `brand.capture: ${message}`, { op: "brand.capture", reason, field: "url" });
     const proxy = await CaptureProxy.start({ maxBytes: limits.bytes, ...(this.#options.network ?? {}) });
+    const deadline = Date.now() + limits.seconds * 1000;
+    // Set once the project write starts: from then a timeout or cancel waits for it, so the answer matches the disk.
+    const commit = { started: false };
     let chrome: Chrome | null = null;
     const stop = new AbortController();
     const timer = setTimeout(() => stop.abort(invalid("timeout", `${url.href} was not captured within ${limits.seconds} s`)), limits.seconds * 1000);
@@ -149,10 +153,10 @@ export class BrandService {
           throw stop.signal.reason;
         }
         chrome = launched;
-        return this.#run(root, url, launched, proxy, stop.signal, hooks, invalid);
+        return this.#run(root, url, launched, proxy, { signal: stop.signal, deadline, commit }, hooks, invalid);
       })();
       work.catch(() => {});
-      return await Promise.race([work, aborted]);
+      return await Promise.race([work, aborted.catch((error: unknown) => (commit.started ? work : Promise.reject(error)))]);
     } finally {
       clearTimeout(timer);
       hooks.signal?.removeEventListener("abort", cancel);
@@ -166,7 +170,7 @@ export class BrandService {
     url: URL,
     chrome: Chrome,
     proxy: CaptureProxy,
-    signal: AbortSignal,
+    { signal, deadline, commit }: { signal: AbortSignal; deadline: number; commit: { started: boolean } },
     hooks: CaptureHooks,
     invalid: (reason: string, message: string) => RpcError,
   ): Promise<MethodResult<"brand.capture">> {
@@ -235,7 +239,7 @@ export class BrandService {
       await sleep(limits.settleMs);
       live();
       const { frameTree } = (await chrome.send("Page.getFrameTree", {}, sessionId)) as { frameTree: { frame: { id: string; url: string } } };
-      const finalUrl = /^https?:/.test(frameTree.frame.url) ? frameTree.frame.url : url.href;
+      const finalUrl = /^https?:/.test(frameTree.frame.url) && frameTree.frame.url.length <= MAX_SOURCE_URL ? frameTree.frame.url : url.href;
       const world = (await chrome.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "frameshell-brand" }, sessionId)) as { executionContextId: number };
       const evaluate = <T>(expression: string) => page.evaluate<T>(expression, 30_000, world.executionContextId);
       await evaluate(PAGE_SCRIPT);
@@ -266,9 +270,15 @@ export class BrandService {
       }
 
       stage("fetching logos, icons and fonts", 0.55);
+      // Fetches stop a tenth of the time limit (at most 10 s) before it, so what was found is still saved.
+      const fetchEnd = deadline - Math.min(10_000, limits.seconds * 100);
       const fetchFile = async (target: string) => {
         live();
-        return fetchThrough(proxy, target, { maxBytes: limits.fileBytes, timeoutMs: 30_000, referer: finalUrl });
+        const left = fetchEnd - Date.now();
+        if (left <= 0) throw new Error(`no time left to fetch it within the ${limits.seconds} s limit`);
+        const file = await fetchThrough(proxy, target, { maxBytes: limits.fileBytes, timeoutMs: Math.min(30_000, left), referer: finalUrl });
+        if (file.url.length > MAX_SOURCE_URL) throw new Error(`its URL is longer than ${MAX_SOURCE_URL} characters, more than credits.json records`);
+        return file;
       };
       const pending: Pending[] = [];
       let logoNumber = 0;
@@ -313,14 +323,13 @@ export class BrandService {
         const id = await freeId(root, manifest, url.hostname);
         const files: BrandCapture["files"] = [];
         for (const file of pending) {
-          const path = `${BRAND_DIR}/${id}/${file.name}`;
-          await writeTextAtomic(join(root, ...path.split("/")), file.bytes);
-          files.push({ path, role: file.role, kind: file.kind, origin: "captured", sourceUrl: file.sourceUrl, width: positive(file.width), height: positive(file.height) });
+          files.push({ path: `${BRAND_DIR}/${id}/${file.name}`, role: file.role, kind: file.kind, origin: "captured", sourceUrl: file.sourceUrl, width: positive(file.width), height: positive(file.height) });
         }
+        const planned = new Map<string, Uint8Array>();
         for (const font of fonts.files) {
-          font.path = await freeFontPath(root, font.path, font.bytes);
+          font.path = await freeFontPath(root, font.path, font.bytes, planned);
           font.face.file = font.path;
-          await writeTextAtomic(join(root, ...font.path.split("/")), font.bytes);
+          planned.set(font.path, font.bytes);
           files.push({ path: font.path, role: "font", kind: "font", origin: "captured", sourceUrl: font.sourceUrl, width: null, height: null });
         }
         const assets = files.filter((file) => file.role !== "hero" && file.role !== "page" && file.role !== "font").length + fonts.files.length;
@@ -346,7 +355,15 @@ export class BrandService {
           warnings,
         };
         const others = manifest.captures.filter((one) => one.id !== id);
-        await writeJsonAtomic(join(root, BRAND_FILE), { ...manifest, captures: [...others, capture] } satisfies BrandManifest);
+        // Page-derived values are checked before anything is written: a manifest that fails its own schema would
+        // make every later capture of the project fail.
+        const next = parseBrandManifest({ ...manifest, captures: [...others, capture] } satisfies BrandManifest);
+        if (!next.ok) throw new Error(`brand.capture: what the page yielded does not fit ${BRAND_FILE}: ${next.error}`);
+        live();
+        commit.started = true;
+        for (const file of pending) await writeTextAtomic(join(root, ...BRAND_DIR.split("/"), id, file.name), file.bytes);
+        for (const [path, bytes] of planned) await writeTextAtomic(join(root, ...path.split("/")), bytes);
+        await writeJsonAtomic(join(root, BRAND_FILE), next.value);
         return capture;
       });
       // Provenance after the files exist: a source URL and no licence, so `credits check` fails until the person
@@ -354,7 +371,11 @@ export class BrandService {
       const bySource = new Map<string, string[]>();
       for (const file of result.files.filter((one) => one.role !== "font")) bySource.set(file.sourceUrl, [...(bySource.get(file.sourceUrl) ?? []), file.path]);
       for (const [sourceUrl, assets] of bySource) await this.#options.credits(root, assets, { sourceUrl });
-      for (const font of fonts.files) await this.#options.credits(root, [font.path], { sourceUrl: font.sourceUrl, licence: font.licence, ...(font.maker ? { author: font.maker } : {}), title: font.family });
+      for (const font of fonts.files) {
+        // Name-table text is the file's own: cut to what credits.json takes (300 characters).
+        const author = font.maker?.trim().slice(0, 300);
+        await this.#options.credits(root, [font.path], { sourceUrl: font.sourceUrl, licence: font.licence, ...(author ? { author } : {}), title: font.family.trim().slice(0, 300) });
+      }
       hooks.progress?.(1);
       return { dir: root, manifest: BRAND_FILE, capture: result, style: suggestStyle(result, found.siteName, found.pageBackground), bytes: proxy.bytes };
     } finally {
@@ -412,7 +433,11 @@ export class BrandService {
       if (!family) continue;
       const entry = byFamily.get(family.toLowerCase()) ?? { family, uses: 0, weights: new Map<number, number>() };
       entry.uses += stack.uses;
-      for (const [weight, count] of Object.entries(stack.weights)) entry.weights.set(Number(weight), (entry.weights.get(Number(weight)) ?? 0) + count);
+      for (const [raw, count] of Object.entries(stack.weights)) {
+        // Computed weights of a variable face may be fractional (`350.5`); brand.json keeps integers 1-1000.
+        const weight = Math.min(1000, Math.max(1, Math.round(Number(raw))));
+        if (Number.isFinite(weight)) entry.weights.set(weight, (entry.weights.get(weight) ?? 0) + count);
+      }
       byFamily.set(family.toLowerCase(), entry);
     }
     const out: BrandCapture["fonts"] = [];
@@ -444,8 +469,11 @@ export class BrandService {
           let bytes: Uint8Array;
           let sourceUrl = pageUrl;
           try {
-            if (source.startsWith("data:")) bytes = Buffer.from(source.slice(source.indexOf(",") + 1), "base64");
-            else {
+            if (source.startsWith("data:")) {
+              // base64 decodes to 3/4 of its length: the same per-file cap as a fetched face.
+              if ((source.length - source.indexOf(",")) * 0.75 > this.#limits.fileBytes) throw new Error(`larger than ${Math.round(this.#limits.fileBytes / 1_048_576)} MB`);
+              bytes = Buffer.from(source.slice(source.indexOf(",") + 1), "base64");
+            } else {
               const file = await fetchFile(source);
               bytes = file.body;
               sourceUrl = file.url;
@@ -508,11 +536,19 @@ interface FontFile {
   face: BrandCapture["fonts"][number]["faces"][number];
 }
 
-/** `wanted`, or the same name with `-2`, `-3`… when another file holds it; a file with the same bytes is reused. */
-async function freeFontPath(root: string, wanted: string, bytes: Uint8Array): Promise<string> {
+/**
+ * `wanted`, or the same name with `-2`, `-3`… when another file holds it, on disk or `planned` by this capture;
+ * a file with the same bytes is reused.
+ */
+async function freeFontPath(root: string, wanted: string, bytes: Uint8Array, planned: ReadonlyMap<string, Uint8Array>): Promise<string> {
   const dot = wanted.lastIndexOf(".");
   for (let n = 1; ; n++) {
     const path = n === 1 ? wanted : `${wanted.slice(0, dot)}-${n}${wanted.slice(dot)}`;
+    const mine = planned.get(path);
+    if (mine) {
+      if (Buffer.from(mine).equals(Buffer.from(bytes))) return path;
+      continue;
+    }
     const full = join(root, ...path.split("/"));
     if (!(await stat(full).catch(() => null)) || (await sameFile(full, bytes))) return path;
   }

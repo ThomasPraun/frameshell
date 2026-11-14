@@ -1,6 +1,7 @@
 // Pure judgements over what the capture page script measured: colours by use, the accent, and the style patch
 // the agent may apply with `style set` after showing the findings to the person (ADR 0044 decision 7).
 import { BRAND_COLOR_ROLES, type BrandCapture } from "@frameshell/schema";
+import { weightSpan } from "./fonts.js";
 
 /** A colour role. */
 export type ColorRole = (typeof BRAND_COLOR_ROLES)[number];
@@ -82,7 +83,11 @@ export function suggestStyle(capture: Pick<BrandCapture, "colors" | "accent" | "
   const display = text.find((font) => font.family === headingFamily) ?? text[0];
   const ui = text.find((font) => font !== display) ?? null;
   const fontValue = (font: BrandCapture["fonts"][number], weight: number | undefined) => {
-    const file = font.faces.find((face) => face.file)?.file;
+    // Only a face drawing the suggested weight: a file of another weight would not match the suggestion.
+    const file = font.faces.find((face) => {
+      const [low, high] = weightSpan(face.weight);
+      return face.file && (weight === undefined || (low <= weight && weight <= high));
+    })?.file;
     return { family: font.family, ...(file ? { file } : {}), ...(weight !== undefined ? { weight } : {}) };
   };
   if (display) {
