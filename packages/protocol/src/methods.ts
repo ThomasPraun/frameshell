@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 130;
+export const PROTOCOL_VERSION = 134;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -338,9 +338,25 @@ const JobSchema = z.object({
         "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). `audio-fx`: absolute bake " +
         "file `.frameshell/audio-fx/<key>.pcm`. Null for `ingest`.",
     ),
+  priority: z
+    .enum(["interactive", "background"])
+    .describe(
+      "Order of a `queued` job in its queue. `background` waits behind every `interactive` job; the clip renders the daemon queues " +
+        "by itself for timelines nobody is looking at are `background`, and a `clip.renders` or export request for one makes it " +
+        "`interactive`. Every other job is `interactive` (first come, first served). A running job is never interrupted.",
+    ),
+  position: z
+    .int()
+    .min(1)
+    .nullable()
+    .describe(
+      "Place in the order a `queued` job starts in, 1 = next (clip renders run one at a time; other jobs two at a time, " +
+        "so 1 and 2 start together when both slots are free). Null unless `queued`. As of this snapshot: " +
+        "it moves when other jobs are queued, promoted, started or canceled.",
+    ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
-    .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
+    .describe("`canceled`: stopped by `job.cancel`, or the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
     .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats", "analyze", "capture"])
     .nullable()
@@ -451,6 +467,19 @@ const ProbeSchema = z.object({
           "The picture has an alpha plane (WebM with `alpha_mode`, ProRes 4444, PNG with alpha). Export never crops such a source " +
             "on an upper track to fill another format's frame (ADR 0027); the base track still crops it. Absent in probes cached before it existed.",
         ),
+      colorTransfer: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+          "ffprobe `color_transfer` tag of the picture (`bt709`, `smpte2084`, `arib-std-b67`, `log100`...); null when untagged. " +
+            "Colour grade warns on HDR and logarithmic curves (ADR 0031). Absent in probes cached before it existed.",
+        ),
+      colorPrimaries: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("ffprobe `color_primaries` tag (`bt709`, `bt2020`...); null when untagged. Absent in probes cached before it existed."),
     })
     .nullable()
     .describe("First video stream; null for audio-only files."),
@@ -1719,7 +1748,10 @@ export const methods = {
     description:
       "Background jobs of the enclosing project (ingest, render), with state and progress. Jobs keep running after the " +
       "caller disconnects. Poll this until every job you care about is `done` or `failed`, or read it once after " +
-      "subscribing to `job.progress` and follow the events instead.",
+      "subscribing to `job.progress` and follow the events instead. A `queued` job says its `position` (1 = next) and its " +
+      "`priority`: generated-clip renders (`clip` jobs) run one at a time, interactive ones (what the preview, a frame, an " +
+      "export or `clip.renders` asks for) before background ones, and a background one still starts after a few " +
+      "interactive ones, so a long render never waits forever.",
     params: z.strictObject({
       cwd: CwdParam,
       active: z.boolean().default(false).describe("Only `queued` and `running` jobs. Default false: also finished ones."),
@@ -1727,6 +1759,25 @@ export const methods = {
     result: z.object({
       dir: z.string().describe("Project root."),
       jobs: z.array(JobSchema).describe("Oldest first."),
+    }),
+  },
+  "job.cancel": {
+    mutating: true,
+    description:
+      "Cancel a generated-clip render (a `clip` job from `job.list`): a queued one is dropped at once and the next one starts, " +
+      "a running one is stopped and ends `canceled` (follow `job.progress`, or `job.list`). The clip is then `failed` in " +
+      "`clip.renders` with the cancel as its error, and the daemon does not render it again until its inputs change; an " +
+      "export or `render` that needs it renders it again. Other kinds of job cannot be canceled (an `ingest` would be " +
+      "queued again when the project reopens). Fails with InvalidOperation (data `{ op, reason, field: \"job\" }`; " +
+      "`reason`: `unknown-job`, no job of this project has that id (finished ones are dropped after a while), or `not-cancelable`, " +
+      "not a `clip` job). Canceling a finished job changes nothing. Example: `{ job: \"j_c7\" }`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      job: z.string().min(1).describe("Job id from `job.list` or `clip.renders`, e.g. `j_c7`."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      job: JobSchema.describe("The job after the request; `state` is `canceled` for a queued one, still `running` for a running one until it stops."),
     }),
   },
   "clip.renders": {
@@ -3669,11 +3720,17 @@ export const methods = {
       "its render does not change. Merged field by field, `null` clears. Glass is a style choice, never a default: use it when the " +
       "style's `glass.cards` is true, with the style's `glass` numbers (`style_show`), else only when asked. On the bottom video track " +
       "nothing is below: stored with a warning, not drawn. " +
+      "`motionBlur` (ADR 0041, generated clips) renders each frame as the average of `samples` (default 8) pictures across a shutter of " +
+      "`shutter` degrees (default 180, centred on the frame), averaged in `blend` space (default `linear`): fast moves smear like a camera's. " +
+      "`{}` turns it on with the defaults, merged field by field, `null` clears. The clip re-renders and the render costs about `samples` " +
+      "times a sharp one; preview and export wait for it. Use it on fast motion graphics, not on text that should read sharp while it " +
+      "moves. A composition that cuts between scenes inside itself declares the cut with the motion runtime's `cuts()`, else the frame " +
+      "at the cut blends both scenes. " +
       "`format` (ADR 0027, a format of `format.list` other than the primary) sets the clip in that format only, stored in its " +
       "`formats` override: `transform`, `props` (checked over the clip's own), `elements` and `hidden` (no picture there, the sound " +
       "still plays); `reset: true` drops the override first. Use it where the automatic layout of a format is wrong, e.g. a lower " +
       "third that sits too low in 9:16: `{ clip, format: \"9x16\", transform: { y: 520 } }`. Timing and sound are every format's: " +
-      "with `format`, speed, gain, muted, audio fades, audioEffects, backdrop and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
+      "with `format`, speed, gain, muted, audio fades, audioEffects, backdrop, motionBlur and scriptRef are refused. Check it with `frame` and `projectFormat`. " +
       "Example: `{ clip: \"c_1a2b3c\", gain: -6 }`.",
     params: operationArgs["clip.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
@@ -3859,6 +3916,17 @@ export const methods = {
       "\"beat\" | \"bar\" | \"marker\"`. Removing the `clip` clears the tempo with a warning. Fails with InvalidOperation (not a media clip " +
       "of a video or audio track, nothing to set).",
     params: operationArgs["tempo.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
+    result: OperationResultSchema,
+  },
+  "letterbox.set": {
+    mutating: true,
+    description:
+      "Set or clear the timeline's letterbox (ADR 0043): black bars over the whole finished picture, above every video track and " +
+      "under the captions, which stay where they are (over a bar when placed there). `{ aspect: 2.39 }` keeps a 2.39:1 picture: bars " +
+      "top and bottom when the aspect is wider than the frame, at the sides when narrower; `{ clear: true }` removes them. Export " +
+      "and the app's preview draw the same bars. Primary format only: other formats re-block without bars. Fails with " +
+      "InvalidOperation (nothing to set, `clear` with `aspect`).",
+    params: operationArgs["letterbox.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
   cleanup: {
@@ -5113,6 +5181,8 @@ export type FileWriteParams = MethodParams<"file.write">;
 export type FileWriteResult = MethodResult<"file.write">;
 /** Background job as reported by `status` and `job.list`. */
 export type JobInfo = z.output<typeof JobSchema>;
+/** Order of a queued {@link JobInfo}: see `priority` of `job.list`. */
+export type JobPriority = JobInfo["priority"];
 /** Step of a running {@link JobInfo}. */
 export type JobStep = NonNullable<JobInfo["step"]>;
 /** Result of `clip.renders`. */

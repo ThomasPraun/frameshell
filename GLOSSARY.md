@@ -166,6 +166,14 @@ _Avoid_: animation library, motion engine, timeline (a timeline is the project's
 A closed-form damped oscillator that carries a value to a target, set by `response` (period, seconds) and `damping` (ratio ζ: 1 never overshoots, lower bounces); the presets are snappy, default, heavy and playful.
 _Avoid_: bounce, elastic ease, physics animation
 
+**Motion blur** (`motionBlur`, ADR 0041):
+A generated clip rendered so each frame is the average of sub-frame pictures across a shutter (180° centred, 8 samples by default), as a camera smears fast moves. Part of the render and its cache key, not drawn at export.
+_Avoid_: blur (that is a backdrop's or an effect's), shutter blur, directional blur
+
+**Cut guard** (`cuts()`):
+The motion runtime's clamp that keeps a blurred frame's sub-frame times on its own side of a cut declared inside a composition.
+_Avoid_: scene split, cut detection
+
 ## Element adjustments (ADR 0021)
 
 **Element adjustment**:
@@ -201,6 +209,12 @@ _Avoid_: filter, colour correction (that is only the first half), look (that is 
 **LUT**:
 A `.cube` 3D lookup table in the project (up to 65 points per side, Rec.709 input), the look a grade applies after its correction, at `lutMix` strength.
 _Avoid_: preset, filter
+
+## Film finish (ADR 0043)
+
+**Letterbox** (`letterbox`):
+The timeline's black bars over the whole finished picture, keeping a picture of one aspect (2.39, 1.85): above every video track, under the captions, in the primary format only.
+_Avoid_: bars on a clip, matte (that is a subject's), the fit (a source of another aspect fitted whole into the frame, per layer)
 
 ## Transitions and keyframes (ADR 0018, ADR 0030)
 
@@ -278,7 +292,7 @@ _Avoid_: master, main format, default format
 
 **Cover**:
 How an untransformed footage clip fills the frame of a non-primary format: the centre of its picture is cropped to the frame's aspect and scaled to fill it. Sources with alpha on an upper track (lower thirds, logos) are fitted whole instead.
-_Avoid_: crop-to-fill (as a name), zoom, letterbox (the opposite)
+_Avoid_: crop-to-fill (as a name), zoom, letterbox (the timeline's bars; fitting a picture whole is the fit)
 
 **Format override**:
 What a clip or subtitle track looks like in one non-primary format instead of as in the primary (a clip's `formats.<id>`: placement, picture keys, hidden, a generated clip's props and elements; a subtitle track's style); never timing or sound.

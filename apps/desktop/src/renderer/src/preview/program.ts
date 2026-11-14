@@ -1,6 +1,6 @@
 // What the preview plays, derived from one `timeline.show` and `asset.list`. Pure: shared by the page and the engine worker.
 import type { AssetInfo, AudioBakeInfo, ClipRenderInfo, MatteStateInfo, TimelineView } from "@frameshell/protocol";
-import type { Angle, Backdrop, Clip, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
+import type { Angle, Backdrop, Clip, Letterbox, MediaClip, MulticamGroup, ProgramTrack, ShotClip, Timeline, Track, TransitionShape } from "@frameshell/schema";
 import {
   type AudioFades,
   type HostFade,
@@ -31,6 +31,7 @@ import {
 } from "@frameshell/schema/composite";
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
 import { type FormatLayout, formatCrop } from "@frameshell/schema/formats";
+import { letterboxBars } from "@frameshell/schema/finish";
 import { type GradeTable, gradeKey, gradeOf } from "@frameshell/schema/grade";
 import {
   type ClipEdges,
@@ -464,6 +465,11 @@ export interface Program {
    * the engine only tables it has not had yet (`PreviewPlayer.setProgram`).
    */
   grades?: Record<string, GradeTable>;
+  /**
+   * The timeline's letterbox (ADR 0043), which `PreviewPanel` draws over every picture and under the captions; absent
+   * when none, and in a format other than the primary (`formatTimeline` leaves it out of the view).
+   */
+  letterbox?: Letterbox;
 }
 
 /** Options of {@link compileProgram}. */
@@ -638,7 +644,16 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     });
   }
   audio.sort((a, b) => a.start - b.start);
-  return { fps, sampleRate: rate, resolution, frames, layers, audio, ...(Object.keys(grades).length > 0 ? { grades } : {}) };
+  return {
+    fps,
+    sampleRate: rate,
+    resolution,
+    frames,
+    layers,
+    audio,
+    ...(Object.keys(grades).length > 0 ? { grades } : {}),
+    ...(view.letterbox ? { letterbox: view.letterbox } : {}),
+  };
 }
 
 /** A placeholder span. */
@@ -670,6 +685,20 @@ export function placeholdersAt(program: Program, frame: number, output: Size = p
     else found.notes.push({ span, layer });
   });
   return found;
+}
+
+/**
+ * The program's letterbox bars (ADR 0043) on a frame of `output` pixels, as fractions of it for the panel's overlay:
+ * the pixels export paints with `drawbox` (`letterboxBars`). Empty when the program has no letterbox.
+ */
+export function letterboxOverlay(program: Program, output: Size): { left: number; top: number; width: number; height: number }[] {
+  if (!program.letterbox) return [];
+  return letterboxBars(output, program.letterbox.aspect).map((bar) => ({
+    left: bar.left / output.width,
+    top: bar.top / output.height,
+    width: bar.width / output.width,
+    height: bar.height / output.height,
+  }));
 }
 
 /** Span of `layer` (0 = base) at program frame `frame`; null in gaps, past the end and for a missing layer. */

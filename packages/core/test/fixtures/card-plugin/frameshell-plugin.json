@@ -4,7 +4,7 @@
   "apiVersion": "1",
   "main": "index.js",
   "contributes": {
-    "clipTypes": ["card", "still", "token-card"],
+    "clipTypes": ["card", "still", "token-card", "blur-card"],
     "skills": ["skills/card/SKILL.md"]
   }
 }

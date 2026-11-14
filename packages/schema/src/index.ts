@@ -89,10 +89,12 @@ export {
   type Marker,
   type MarkerColor,
   TempoSchema,
+  LetterboxSchema,
   MIN_TEMPO_BPM,
   MAX_TEMPO_BPM,
   MAX_TEMPO_METER,
   type Tempo,
+  type Letterbox,
   isGridRefLabel,
   markerLabelKey,
   findMarker,
@@ -293,10 +295,14 @@ export {
   gradeOf,
   gradeTable,
   gradeTableSize,
+  logFootageHint,
+  logFootageWarning,
+  type LogHint,
   isIdentityGrade,
   normalizeGrade,
   parseCube,
 } from "./grade.js";
+export { type FrameSize, type LetterboxBar, letterboxBars } from "./finish.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {
   SHOOT_SCHEMA_URL,
@@ -612,3 +618,12 @@ export {
   type SoundRole,
   type SoundTier,
 } from "./sound.js";
+export {
+  DEFAULT_MOTION_BLUR_BLEND,
+  MOTION_BLUR_BLENDS,
+  MOTION_BLUR_LIMITS,
+  type MotionBlur,
+  MotionBlurSchema,
+  type ResolvedMotionBlur,
+  motionBlurOf,
+} from "./motion-blur.js";

@@ -94,6 +94,8 @@ mutations print the new revision):
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
            [--grade-exposure stops] [--grade-temperature -1..1] [--grade-tint -1..1] [--grade-contrast x]
            [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
+           [--motion-blur] [--motion-blur-shutter deg] [--motion-blur-samples n] [--motion-blur-blend linear|srgb]
+           [--clear-motion-blur]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
            [--hidden | --shown] [--reset]]
                                --format <id> (a format other than the primary, see format list) sets the clip in
@@ -115,6 +117,11 @@ mutations print the new revision):
                                1 magenta), contrast and saturation factors (1 = unchanged), then a 3D .cube LUT (project
                                file, up to 65 points, Rec.709 input; none removes it) at --grade-lut-mix (default 1).
                                Export and the preview apply the same table; --clear-grade removes the grade
+                               --motion-blur blurs a generated clip's moves like a camera (ADR 0041): each frame is the
+                               average of --motion-blur-samples pictures (default 8, 1 to 64) across a shutter of
+                               --motion-blur-shutter degrees (default 180, centred on the frame), averaged in linear light
+                               (--motion-blur-blend srgb for the After Effects look). The clip re-renders, about samples
+                               times as long as sharp; --clear-motion-blur turns it off
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -241,6 +248,10 @@ mutations print the new revision):
   tempo clear                  Remove the timeline's tempo
   tempo show                   The stored tempo and its grid on the timeline clock: bpm, bars and beats in seconds;
                                says why there is no grid yet (no beats file for the clip)
+  letterbox set <aspect>       Black bars over the whole picture, under the captions, keeping a picture of <aspect>
+                               (2.39, 1.85, 4:3): top and bottom when wider than the frame, at the sides when
+                               narrower. Export and the preview draw the same bars; primary format only
+  letterbox clear              Remove the letterbox
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
@@ -333,7 +344,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "letterbox", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -391,6 +402,11 @@ export const TIMELINE_OPTIONS = {
   "grade-lut": { type: "string" },
   "grade-lut-mix": { type: "string" },
   "clear-grade": { type: "boolean" },
+  "motion-blur": { type: "boolean" },
+  "motion-blur-shutter": { type: "string" },
+  "motion-blur-samples": { type: "string" },
+  "motion-blur-blend": { type: "string" },
+  "clear-motion-blur": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -544,6 +560,11 @@ const ALLOWED: Record<string, string[]> = {
     "grade-lut",
     "grade-lut-mix",
     "clear-grade",
+    "motion-blur",
+    "motion-blur-shutter",
+    "motion-blur-samples",
+    "motion-blur-blend",
+    "clear-motion-blur",
     "script-ref",
     "clear-script-ref",
     "format",
@@ -560,6 +581,8 @@ const ALLOWED: Record<string, string[]> = {
   "tempo set": ["clip", "bpm", "offset", "meter"],
   "tempo clear": [],
   "tempo show": [],
+  "letterbox set": [],
+  "letterbox clear": [],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
   "multicam offset": [],
@@ -609,6 +632,8 @@ const ARITY: Record<string, [number, number]> = {
   "tempo set": [0, 0],
   "tempo clear": [0, 0],
   "tempo show": [0, 0],
+  "letterbox set": [1, 1],
+  "letterbox clear": [0, 0],
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
   "clip set": [1, 1],
@@ -646,6 +671,14 @@ export function timelineCommandFlags(): Map<string, string[]> {
   return new Map(
     Object.entries(ALLOWED).map(([command, flags]) => [command.trim(), command.startsWith("tx ") ? [...flags] : [...flags, "timeline"]]),
   );
+}
+
+/** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
+function aspectOf(raw: string): number {
+  const match = /^\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:[:/]\s*(\d+(?:\.\d+)?|\.\d+)\s*)?$/.exec(raw);
+  const aspect = match ? Number(match[1]) / (match[2] === undefined ? 1 : Number(match[2])) : Number.NaN;
+  if (!Number.isFinite(aspect) || aspect <= 0) throw new UsageError(`letterbox set: expected an aspect such as 2.39, 1.85 or 4:3, got "${raw}".`);
+  return aspect;
 }
 
 /**
@@ -942,6 +975,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "tempo show":
       method = "tempo.show";
       break;
+    case "letterbox set":
+      method = "letterbox.set";
+      params["aspect"] = aspectOf(args[0]!);
+      break;
+    case "letterbox clear":
+      method = "letterbox.set";
+      params["clear"] = true;
+      break;
     case "clip set": {
       method = "clip.set";
       if (values["muted"] === true && values["unmuted"] === true) throw new UsageError("Pass --muted or --unmuted, not both.");
@@ -983,6 +1024,18 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
                 lutMix: num("grade-lut-mix"),
               }
             : undefined;
+      const blurFlags = (["motion-blur-shutter", "motion-blur-samples", "motion-blur-blend"] as const).filter((flag) => str(flag) !== undefined);
+      if (values["clear-motion-blur"] === true && (values["motion-blur"] === true || blurFlags.length > 0)) {
+        throw new UsageError("Pass --clear-motion-blur alone, without --motion-blur or --motion-blur-*.");
+      }
+      const blend = str("motion-blur-blend");
+      if (blend !== undefined && blend !== "linear" && blend !== "srgb") throw new UsageError("--motion-blur-blend: expected linear or srgb.");
+      const motionBlur =
+        values["clear-motion-blur"] === true
+          ? null
+          : values["motion-blur"] === true || blurFlags.length > 0
+            ? { shutter: num("motion-blur-shutter"), samples: num("motion-blur-samples"), blend }
+            : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -994,6 +1047,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         backdrop,
         grade,
+        motionBlur,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -1267,6 +1321,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
   if (params["backdrop"]) params["backdrop"] = clean(params["backdrop"] as Record<string, unknown>);
   if (params["grade"]) params["grade"] = clean(params["grade"] as Record<string, unknown>);
+  if (params["motionBlur"]) params["motionBlur"] = clean(params["motionBlur"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
   const glassFromStyle = method === "clip.set" && values["glass"] === true;
   return {
@@ -1688,5 +1743,6 @@ function formatTimeline(view: TimelineView): string {
   }
   if (view.markers) lines.push(`Markers: ${view.markers.map((marker) => `${marker.id} ${marker.at} "${marker.label}"`).join(", ")}`);
   if (view.tempo) lines.push(`Tempo: ${Object.entries(view.tempo).map(([key, value]) => `${key} ${value}`).join(", ")} (grid: \`frameshell tempo show\`)`);
+  if (view.letterbox) lines.push(`Letterbox: ${Number(view.letterbox.aspect.toFixed(4))}:1`);
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }

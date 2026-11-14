@@ -18,7 +18,7 @@ export {
 } from "@frameshell/schema/motion";
 
 /** Version of this runtime; a composition's copy names it in its first line. */
-export const version = "0.3.0";
+export const version = "0.4.0";
 
 /** Paints the whole composition at `t` seconds; must depend on nothing but `t`. */
 export type Paint = (t: number) => void;
@@ -115,6 +115,53 @@ export function bind(compositionId: string, paint: Paint): MotionTimeline {
     repaintAll(page);
   });
   return timeline;
+}
+
+/** `<meta name>` a motion-blurred render carries with the project frame rate (ADR 0041); live pages have none. */
+export const FRAME_RATE_META = "frameshell-fps";
+
+/**
+ * Seconds before a cut that {@link cuts} paints for a sample on the earlier side: far under one sub-frame tick of
+ * the producer's sample grid (1/4096 frame, 2 µs at 120 fps), so it is the outgoing scene's last instant.
+ */
+const BEFORE_CUT = 1e-6;
+
+/** The frame rate a motion-blurred render declares in the page, or null. */
+function declaredFrameRate(): number | null {
+  // A literal selector: the HyperFrames linter refuses a template literal in querySelector (`template_literal_selector`).
+  const meta = (globalThis as unknown as PageWindow).document?.querySelector('meta[name="frameshell-fps"]');
+  const fps = Number(meta?.getAttribute("content"));
+  return fps > 0 && Number.isFinite(fps) ? fps : null;
+}
+
+/**
+ * A time guard for a composition that cuts between scenes inside itself (ADR 0041): wrap the paint with it,
+ * `bind(id, (t) => paint(guard(t)))`, so motion blur never mixes two scenes. A motion-blurred frame averages
+ * pictures at sub-frame times around its frame instant (the nearest frame of `t`; the window is centred and at
+ * most one frame wide). A time on the other side of a cut from its frame instant is clamped to the cut: the
+ * frame before a cut shows the outgoing scene up to its last instant, the frame on or after it only the new one.
+ * Times on the frame grid pass unchanged, so sharp renders and live preview are unaffected.
+ * `fps`: the render's frame rate; default the one a blurred render declares (`<meta name="frameshell-fps">`).
+ * Without either, the guard passes every time unchanged.
+ */
+export function cuts(seconds: readonly number[], fps?: number): (t: number) => number {
+  if (!seconds.every((cut) => Number.isFinite(cut) && cut >= 0)) throw new Error("cuts(): every cut must be seconds >= 0");
+  if (fps !== undefined && !(fps > 0 && Number.isFinite(fps))) throw new Error("cuts(): fps must be a positive number");
+  const sorted = [...seconds].sort((a, b) => a - b);
+  let rate: number | null | undefined = fps;
+  return (t) => {
+    rate ??= declaredFrameRate();
+    if (rate === null || !Number.isFinite(t)) return t;
+    const frame = Math.round(t * rate) / rate;
+    if (t > frame) {
+      const cut = sorted.find((at) => at > frame && at <= t);
+      return cut === undefined ? t : Math.max(frame, cut - BEFORE_CUT);
+    }
+    if (t < frame) {
+      for (let i = sorted.length - 1; i >= 0; i--) if (sorted[i]! > t && sorted[i]! <= frame) return sorted[i]!;
+    }
+    return t;
+  };
 }
 
 /**

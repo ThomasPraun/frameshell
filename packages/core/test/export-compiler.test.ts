@@ -232,6 +232,25 @@ describe("export compiler", () => {
     expect(plan.files["seg-0003.filter"]).not.toContain("ass=");
   });
 
+  it("paints the timeline's letterbox on every segment, the cover frame and captures, before the captions (golden, ADR 0043)", () => {
+    const boxed: Timeline = { ...timeline, letterbox: { aspect: 2.39 } };
+    const boxedPlan = compileRender({ timeline: boxed, fps: 30, preset: youtube1080, loudness: -17, sources, resolution, transcripts, segmentSeconds: 4, cover: { at: 1, layout: null } });
+    const capture = (letterbox: Timeline["letterbox"], format: "png" | "jpg") =>
+      compileFrame({ timeline: { ...timeline, letterbox }, fps: 30, sources, resolution, transcripts, width: 1280, height: 720, at: 1, output: `/out/frame.${format}`, format });
+    golden("letterbox-plan", { files: boxedPlan.files, frames: { scope: capture({ aspect: 2.39 }, "png"), jpg: capture({ aspect: 2.39 }, "jpg"), pillar: capture({ aspect: 4 / 3 }, "png") } });
+
+    const bars = "drawbox=x=0:y=0:w=1920:h=138:color=black:t=fill,drawbox=x=0:y=941:w=1920:h=139:color=black:t=fill";
+    // The cover frame, then frames 1-119 with captions burned over the bars, then the last segment with none.
+    expect(boxedPlan.files["seg-0001.filter"]).toMatch(new RegExp(`,${bars}\\[v\\]\n$`));
+    expect(boxedPlan.files["seg-0002.filter"]).toContain(`,${bars},setpts=PTS+0.033333/TB,ass=filename=subtitles.ass`);
+    expect(boxedPlan.files["seg-0004.filter"]).toMatch(new RegExp(`,${bars}\\[v\\]\n$`));
+    // A full-range JPEG capture gets limited-range bars, converted back: black stays 0.
+    expect(capture({ aspect: 2.39 }, "jpg").args.join(" ")).toContain(",format=yuv444p,drawbox=x=0:y=0:w=1280:h=92:color=black:t=fill,drawbox=x=0:y=628:w=1280:h=92:color=black:t=fill,format=yuvj444p,");
+    // Without a letterbox the plan is the one it always was.
+    expect(capture(undefined, "png").args.join(" ")).not.toContain("drawbox");
+    expect(Object.values(plan.files).join("")).not.toContain("drawbox");
+  });
+
   it("writes cue edges so ffmpeg's truncated millisecond clock shows each cue on exactly its frames", () => {
     for (const fps of [24, 25, 30000 / 1001, 30, 50, 60]) {
       for (let frame = 1; frame < 5000; frame++) {

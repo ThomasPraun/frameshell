@@ -7,6 +7,7 @@ import {
   DirectorRulesSchema,
   DuckSettingsSchema,
   ElementAdjustSchema,
+  MotionBlurSchema,
   ShapeSettingsSchema,
   FormatIdSchema,
   MAX_SNAP_WINDOW_S,
@@ -29,6 +30,7 @@ import {
   MAX_TEMPO_METER,
   MIN_TEMPO_BPM,
   TempoSchema,
+  LetterboxSchema,
   TakeIdSchema,
   TrackSchema,
   TransformSchema,
@@ -421,6 +423,13 @@ export const operationArgs = {
           "`exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project `.cube`) at `lutMix`. " +
           "Shots are skipped with a warning.",
       ),
+    motionBlur: MotionBlurSchema.nullable()
+      .optional()
+      .describe(
+        "Generated (adapter) clips only (ADR 0041): motion blur merged field by field into the clip's; `{}` turns it on with the defaults " +
+          "(`shutter` 180 degrees centred, `samples` 8, `blend` linear), `null` clears it. The render costs about `samples` times a sharp one. " +
+          "A plugin that does not apply it keeps the clip sharp, with a warning.",
+      ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
     elements: z
@@ -434,7 +443,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
     format: formatArg(
       "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
-        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `scriptRef` are shared by every format and refused with it.",
+        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `motionBlur`, `scriptRef` are shared by every format and refused with it.",
     ),
     hidden: z
       .boolean()
@@ -796,6 +805,14 @@ export const operationArgs = {
     meter: z.int().min(1).max(MAX_TEMPO_METER).optional().describe("With `bpm`: beats per bar. Default 4."),
     clear: z.boolean().optional().describe("True removes the timeline's tempo. Takes no other field."),
   }),
+  "letterbox.set": z.strictObject({
+    aspect: z
+      .number()
+      .positive()
+      .optional()
+      .describe("Picture aspect inside the bars, width / height: 2.39 (scope), 1.85 (flat), 1.3333 (4:3). Wider than the frame: bars top and bottom; narrower: at the sides."),
+    clear: z.boolean().optional().describe("True removes the letterbox. Takes no other field."),
+  }),
 } as const;
 
 /** Name of a public timeline operation. */
@@ -834,10 +851,11 @@ export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typ
  * Applied in order: `groups` (replace, insert or delete whole multicam
  * groups), `tracks` (replace, insert or delete whole tracks), then `clips`
  * (upsert or delete one clip in a track), then `order`; `markers` (upsert or
- * delete one marker) and `tempo` (replace or delete the beat grid spec) touch nothing else.
+ * delete one marker), `tempo` (replace or delete the beat grid spec) and `letterbox` (replace or delete it) touch nothing else.
  */
 const PatchShape = z.strictObject({
   tempo: TempoSchema.nullable().optional().describe("The timeline's whole `tempo`; null removes it."),
+  letterbox: LetterboxSchema.nullable().optional().describe("The timeline's whole `letterbox` (ADR 0043); null removes it."),
   markers: z
     .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
     .optional(),
@@ -1382,6 +1400,7 @@ export const TimelineViewSchema = z.object({
     .optional()
     .describe("Markers as stored (ADR 0029): id, timeline second `at`, label, colour; sorted by `at`; absent when the timeline has none."),
   tempo: TempoSchema.optional().describe("The beat grid the timeline follows as stored (ADR 0029); absent when none. `grid` (on request) holds its beats."),
+  letterbox: LetterboxSchema.optional().describe("Black bars over the picture as stored (ADR 0043): `aspect` of the picture inside them; absent when none."),
   grid: TempoGridSchema.optional().describe("Only with `grid: true`: the beat grid on the timeline clock; absent when there is no tempo or its beats are missing (`gridProblem`)."),
   gridProblem: z.string().optional().describe("Only with `grid: true`: why a `tempo` has no beats yet (no beats file for the music, a broken one)."),
   problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),

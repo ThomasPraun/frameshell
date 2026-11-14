@@ -37,6 +37,10 @@
       "types": "./dist/formats.d.ts",
       "default": "./dist/formats.js"
     },
+    "./finish": {
+      "types": "./dist/finish.d.ts",
+      "default": "./dist/finish.js"
+    },
     "./json-schema/*": "./json-schema/*"
   },
   "files": [

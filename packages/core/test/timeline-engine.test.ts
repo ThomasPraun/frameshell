@@ -495,6 +495,22 @@ describe("clip.move, trim, split, remove, set", () => {
     expect((await rejection(apply(card, "clip.set", { clip: "c_0002", grade: { exposure: 1 } }))).message).toMatch(/only media clips take `grade`/);
   });
 
+  it("warns, never refuses, when graded footage looks like LOG; stays quiet for other sources and unreadable ones (ADR 0031 decision 9)", async () => {
+    const footage = await withClip();
+    const logged = context({
+      source: async (asset) => ({ ...SOURCES[asset]!, log: asset === "assets/talk.mp4" ? { kind: "transfer", value: "arib-std-b67" } : null }),
+    });
+    const graded = await apply(footage, "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } }, logged);
+    expect(clipsOf(graded.timeline, "t_v")[0]).toMatchObject({ grade: { exposure: 0.5 } });
+    expect(graded.warnings).toHaveLength(1);
+    expect(graded.warnings[0]).toMatch(/assets\/talk\.mp4 may be LOG or HDR footage \(its transfer curve is tagged arib-std-b67\)/);
+    // Clearing the grade has nothing to warn about; a source that does not read leaves the grade valid.
+    expect((await apply(graded.timeline, "clip.set", { clip: "c_0001", grade: null }, logged)).warnings).toEqual([]);
+    const unreadable = context({ source: async () => Promise.reject(new Error("gone")) });
+    expect((await apply(footage, "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } }, unreadable)).warnings).toEqual([]);
+    expect((await apply(footage, "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } })).warnings).toEqual([]);
+  });
+
   it("merges a generated clip's backdrop field by field, clears it, warns on the bottom track, refuses other clips (ADR 0031)", async () => {
     const twoTracks = (await apply(await withClip(), "track.add", { kind: "video" }, context({ newId: () => "t_v2" }))).timeline;
     const card = (await apply(twoTracks, "clip.add", { track: "t_v2", type: "hyperframes", duration: 2, start: 10, props: { title: "A" } })).timeline;
@@ -1143,6 +1159,42 @@ describe("tempo (ADR 0029 slice 3)", () => {
   });
 });
 
+describe("letterbox (ADR 0043 slice 1)", () => {
+  it("letterbox.set stores the aspect, replaces it, and the inverse restores the previous one", async () => {
+    const set = await apply(base(), "letterbox.set", { aspect: 2.39 });
+    expect(set.timeline.letterbox).toEqual({ aspect: 2.39 });
+    expect(set.inverse.args).toEqual({ letterbox: null });
+    const flat = await apply(set.timeline, "letterbox.set", { aspect: 1.85 });
+    expect(flat.timeline.letterbox).toEqual({ aspect: 1.85 });
+    expect(flat.inverse.args).toEqual({ letterbox: { aspect: 2.39 } });
+    expect((await apply(flat.timeline, "timeline.patch", flat.inverse.args)).timeline.letterbox).toEqual({ aspect: 2.39 });
+    expect(parseTimeline(flat.timeline)).toMatchObject({ ok: true });
+  });
+
+  it("letterbox.set clears with `clear`, warns when there was none, and refuses mixed, empty or non-positive arguments", async () => {
+    const t = (await apply(base(), "letterbox.set", { aspect: 2.39 })).timeline;
+    const cleared = await apply(t, "letterbox.set", { clear: true });
+    expect(cleared.timeline).not.toHaveProperty("letterbox");
+    expect(cleared.warnings).toEqual([]);
+    expect((await apply(base(), "letterbox.set", { clear: true })).warnings).toEqual([expect.stringMatching(/no letterbox/)]);
+    expect((await rejection(apply(t, "letterbox.set", { clear: true, aspect: 2 }))).message).toMatch(/clear/);
+    expect((await rejection(apply(t, "letterbox.set", {}))).message).toMatch(/nothing to set/);
+    expect(() => op("letterbox.set", { aspect: 0 })).toThrow();
+    expect(parseTimeline({ ...base(), letterbox: { aspect: -1 } })).toMatchObject({ ok: false });
+  });
+
+  it("warns when the primary frame already has the aspect, and that other formats show no bars", async () => {
+    const formats = [
+      { id: "16x9", width: 1920, height: 1080 },
+      { id: "9x16", width: 1080, height: 1920 },
+    ];
+    expect((await apply(base(), "letterbox.set", { aspect: 16 / 9 }, context({ formats: formats.slice(0, 1) }))).warnings).toEqual([
+      expect.stringMatching(/1920x1080\) already has aspect/),
+    ]);
+    expect((await apply(base(), "letterbox.set", { aspect: 2.39 }, context({ formats }))).warnings).toEqual([expect.stringMatching(/primary format \(16x9\) only/)]);
+  });
+});
+
 // Property-style: random operation sequences from a seeded PRNG (no dependency).
 
 function prng(seed: number) {
@@ -1400,6 +1452,46 @@ describe("operation properties", () => {
       timeline = result.timeline;
     }
     expect(applied.size).toBeGreaterThanOrEqual(10);
+  });
+});
+
+describe("clip.set motionBlur (ADR 0041)", () => {
+  const supported = () => context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null, motionBlur: true }]]) });
+  const blurOf = (timeline: Timeline) => (clipsOf(timeline, "t_v")[0] as { motionBlur?: unknown }).motionBlur;
+  const withCard = async (ctx = supported()) =>
+    (await apply(base(), "clip.add", { track: "t_v", type: "hyperframes", source: "c/index.html", start: 0, duration: 5 }, ctx)).timeline;
+
+  it("turns it on with {}, merges field by field, clears with null, and the inverse restores what was there", async () => {
+    const ctx = supported();
+    const t0 = await withCard(ctx);
+    const on = await apply(t0, "clip.set", { clip: "c_0001", motionBlur: {} }, ctx);
+    expect(blurOf(on.timeline)).toEqual({});
+    expect(on.warnings).toEqual([]);
+    expect(parseTimeline(on.timeline).ok).toBe(true);
+    const tuned = (await apply(on.timeline, "clip.set", { clip: "c_0001", motionBlur: { shutter: 90, samples: 16 } }, ctx)).timeline;
+    const srgb = (await apply(tuned, "clip.set", { clip: "c_0001", motionBlur: { blend: "srgb" } }, ctx)).timeline;
+    expect(blurOf(srgb)).toEqual({ shutter: 90, samples: 16, blend: "srgb" });
+    const cleared = await apply(srgb, "clip.set", { clip: "c_0001", motionBlur: null }, ctx);
+    expect(clipsOf(cleared.timeline, "t_v")[0]).not.toHaveProperty("motionBlur");
+    expect(blurOf((await apply(cleared.timeline, "timeline.patch", cleared.inverse.args, ctx)).timeline)).toEqual({ shutter: 90, samples: 16, blend: "srgb" });
+    expect(clipsOf((await apply(on.timeline, "timeline.patch", on.inverse.args, ctx)).timeline, "t_v")).toEqual(clipsOf(t0, "t_v"));
+  });
+
+  it("stores it with a warning when the plugin does not apply it, and refuses media clips, a format and bad numbers", async () => {
+    const plain = context({ clipTypes: async () => new Map([["hyperframes", { validateProps: async () => null }]]) });
+    const stored = await apply(await withCard(plain), "clip.set", { clip: "c_0001", motionBlur: {} }, plain);
+    expect(blurOf(stored.timeline)).toEqual({});
+    expect(stored.warnings).toEqual([expect.stringMatching(/hyperframes plugin does not apply motion blur yet: c_0001 keeps rendering sharp/)]);
+
+    const ctx = supported();
+    expect((await rejection(apply((await apply(base(), "clip.add", { track: "t_v", asset: "assets/talk.mp4", start: 10, in: 2, out: 8 }, ctx)).timeline, "clip.set", { clip: "c_0001", motionBlur: {} }, ctx))).message).toMatch(/only generated clips take `motionBlur`/);
+    const card = await withCard();
+    expect((await rejection(apply(card, "clip.set", { clip: "c_0001", format: "9x16", motionBlur: {} }, ctx))).message).toMatch(
+      /`motionBlur` is shared by every format/,
+    );
+    for (const bad of [{ shutter: 0 }, { shutter: 400 }, { samples: 0 }, { samples: 65 }, { samples: 2.5 }, { blend: "log" }, { phase: 10 }]) {
+      expect((await rejection(apply(card, "clip.set", { clip: "c_0001", motionBlur: bad }, ctx))).code).toBe(ErrorCode.InvalidParams);
+    }
   });
 });
 

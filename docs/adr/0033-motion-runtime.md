@@ -79,6 +79,7 @@ Found while looking for why motion-blurred renders were not repeatable (owner de
 - **Whole-page raster on every seek.** Chrome re-rasters only the rectangles it thinks changed into the previous tile, and a few anti-aliased edge pixels kept an older pose when the producer seeked without capturing in between. Every seek of the bound timeline (and every `hf-seek` paint before it is driven) changes the document element's `filter` between `opacity(1)` and `brightness(1)`: both leave every pixel as it is (a sharp render is byte-identical with and without), and the change invalidates the whole page. The runtime owns the document element's inline `filter`.
 - **Measured** with both: a fixed-8 blurred render's 240 sub-frame samples equal the same times painted on a fresh page, and repeated renders are byte-identical as PNG and WebM. Capture time per frame is unchanged on the test compositions (flat colour); a page with large images or much text re-rasters in full on every seek, not measured.
 - **Version.** 0.3.0 moves elements by at most 1/64 px and 0.01° from where 0.2.0 put them; a scaffolded clip keeps its frozen 0.2.0 copy until `update`. The near-1 scale snap stays a cursor-kit function.
+- **0.4.0 (ADR 0041).** Adds `cuts(seconds[], fps?)`, a time guard for compositions that cut between scenes inside themselves, so motion blur never mixes two scenes; it reads the frame rate from `<meta name="frameshell-fps">`, which only a blurred render carries, and passes frame times unchanged. No pixel of an existing composition changes.
 
 ### Slices
 

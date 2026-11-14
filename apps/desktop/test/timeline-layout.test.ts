@@ -163,6 +163,30 @@ describe("audio effects of a clip", () => {
   });
 });
 
+describe("grade of a clip", () => {
+  it("fills every omitted number of a media clip's grade; none without one or on a generated clip", () => {
+    const layout = layoutTimeline(
+      view([
+        {
+          id: "t_v1",
+          kind: "video",
+          name: null,
+          follows: null,
+          clips: [
+            { ...media("c_warm", 0, 4), grade: { temperature: 0.3, lut: "luts/a.cube" } },
+            media("c_plain", 4, 8),
+            { id: "c_card", type: "hyperframes", source: "compositions/card.html", start: 8, end: 10, grade: { exposure: 1 } },
+          ],
+        },
+      ]),
+    );
+    const clip = (id: string) => layout.rows.flatMap((row) => row.clips).find((candidate) => candidate.id === id)!;
+    expect(clip("c_warm").grade).toEqual({ exposure: 0, temperature: 0.3, tint: 0, contrast: 1, saturation: 1, lut: "luts/a.cube", lutMix: 1 });
+    expect(clip("c_plain").grade).toBeNull();
+    expect(clip("c_card").grade).toBeNull();
+  });
+});
+
 describe("visibleClips", () => {
   const clips = layoutTimeline(
     view([
