@@ -73,7 +73,7 @@ export const BrandFontSchema = z.strictObject({
     })
     .nullable()
     .default(null)
-    .describe("Closest open font from Frameshell's curated table when no face of the family was copied (not for icon fonts); null otherwise. Taste data, not measured."),
+    .describe("Closest open font from Frameshell's curated table when no face of the family was copied (not for icon fonts or generic families); null otherwise. Taste data, not measured."),
 });
 
 /** A part of the captured page asked for by its text (`brand capture --sections`). */

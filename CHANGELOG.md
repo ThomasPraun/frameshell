@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Brand sections and substitute fonts, slice 4 of #467 (ADR 0044, epic #451; protocol 139):
   `frameshell brand capture <url> --sections "Pricing,Teams"` (daemon/MCP `sections`, up to 12 texts) also crops the
   part of the page around each text at 3x into `assets/brand/<id>/section-<text>.png`: the smallest element at least
-  500 CSS px wide holding the text, a heading before a nav link, never the heading line alone; `brand.json`
+  500 CSS px wide holding the text, a heading before a nav link, never the heading line alone, at most 2400 CSS px
+  tall with the text inside; `brand.json`
   `sections` records each crop's box and element, or `not found`. A font family whose face may not be copied now names
   the closest open font from a curated, licence-checked table in `packages/schema/src/font-substitutes.ts` (50 families
   from google/fonts with their folder; metric-compatible stand-ins for Arial, Times New Roman, Courier New, Calibri,

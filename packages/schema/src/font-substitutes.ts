@@ -157,11 +157,12 @@ export function openFont(family: string): OpenFont | null {
 /** Category and width a family's name states (`… Mono`, `… Condensed`, the CSS generic families); null when none. */
 export function fontClassFromName(family: string): { category: FontCategory | null; width: FontWidth | null } {
   const name = family.toLowerCase();
-  const category: FontCategory | null = /mono|code|courier|consol/.test(name)
+  // `code` only without sans/serif: "Encode Sans" is not a code face, "Source Code Pro" is.
+  const category: FontCategory | null = /mono|courier|consol/.test(name) || (/code/.test(name) && !/sans|serif/.test(name))
     ? "mono"
     : /slab/.test(name)
       ? "slab"
-      : /script|cursive|handwrit|brush/.test(name)
+      : /(?<!post)script|cursive|handwrit|brush/.test(name)
         ? "script"
         : /sans/.test(name) || /^(system-ui|-apple-system|blinkmacsystemfont)$/.test(name)
           ? "sans"

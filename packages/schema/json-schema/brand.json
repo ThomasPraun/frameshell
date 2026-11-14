@@ -293,7 +293,7 @@
                 },
                 "substitute": {
                   "default": null,
-                  "description": "Closest open font from Frameshell's curated table when no face of the family was copied (not for icon fonts); null otherwise. Taste data, not measured.",
+                  "description": "Closest open font from Frameshell's curated table when no face of the family was copied (not for icon fonts or generic families); null otherwise. Taste data, not measured.",
                   "anyOf": [
                     {
                       "type": "object",

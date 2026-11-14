@@ -62,5 +62,8 @@ describe("substituteFont", () => {
     expect(fontClassFromName("ui-monospace")).toEqual({ category: "mono", width: null });
     expect(fontClassFromName("cursive")).toEqual({ category: "script", width: null });
     expect(fontClassFromName("Acme Extended")).toEqual({ category: null, width: "expanded" });
+    expect(fontClassFromName("Encode Sans")).toEqual({ category: "sans", width: null });
+    expect(fontClassFromName("Source Code Pro")).toEqual({ category: "mono", width: null });
+    expect(fontClassFromName("Acme PostScript")).toEqual({ category: null, width: null });
   });
 });

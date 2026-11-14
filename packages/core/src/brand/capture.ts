@@ -363,7 +363,7 @@ export class BrandService {
           planned.set(font.path, font.bytes);
           files.push({ path: font.path, role: "font", kind: "font", origin: "captured", sourceUrl: font.sourceUrl, width: null, height: null });
         }
-        const assets = files.filter((file) => file.role !== "hero" && file.role !== "page" && file.role !== "font").length + fonts.files.length;
+        const assets = files.filter((file) => file.role !== "hero" && file.role !== "page" && file.role !== "section" && file.role !== "font").length + fonts.files.length;
         const little = found.textLength < limits.littleText && assets === 0;
         if (little) warnings.push(`Very little text (${found.textLength} characters) and no logo, icon, share image or font: the page is likely a login wall, a bot check or an empty app shell. Look at hero.png, then ask the person for the logo files or a screenshot.`);
         const capture: BrandCapture = {
@@ -417,7 +417,8 @@ export class BrandService {
 
   /**
    * Crop each text's section (the smallest element at least `sectionWidth` CSS px wide holding it) at
-   * `sectionScale`. Fixed and sticky elements are made static first, so a header does not cover a crop.
+   * `sectionScale`, at most `sectionHeight` tall around the text (`sectionWindow`). Fixed and sticky elements are
+   * made static first, so a header does not cover a crop.
    */
   async #sections(
     chrome: Chrome,
@@ -444,10 +445,10 @@ export class BrandService {
         out.push({ text, shot: null, box: null, note: "not found: no visible element of the page holds this text" });
         continue;
       }
-      const height = Math.min(box.height, limits.sectionHeight);
+      const { y, height } = sectionWindow(box, limits.sectionHeight);
       let bytes: Buffer;
       try {
-        bytes = await screenshot(chrome, sessionId, { x: box.x, y: box.y, width: box.width, height, scale: 1 });
+        bytes = await screenshot(chrome, sessionId, { x: box.x, y, width: box.width, height, scale: 1 });
       } catch (error) {
         out.push({ text, shot: null, box: null, note: `not cropped: ${(error as Error).message}` });
         continue;
@@ -456,11 +457,12 @@ export class BrandService {
       let name = base;
       for (let n = 2; names.has(name); n++) name = `${base}-${n}`;
       names.add(name);
-      const cut = height < box.height ? `; cut to its top ${limits.sectionHeight} of ${Math.round(box.height)} px` : "";
+      const below = Math.round(y - box.y);
+      const cut = height < box.height ? `; cut to ${limits.sectionHeight} of its ${Math.round(box.height)} px${below > 0 ? `, from ${below} px below its top so the ${box.tag} is inside` : ", from its top"}` : "";
       out.push({
         text,
         shot: { name: `${name}.png`, bytes },
-        box: { x: tenth(box.x), y: tenth(box.y), width: tenth(box.width), height: tenth(height) },
+        box: { x: tenth(box.x), y: tenth(y), width: tenth(box.width), height: tenth(height) },
         note: `${box.container === box.tag ? box.tag : `${box.container} holding the ${box.tag}`}, ${Math.round(box.width)}x${Math.round(height)} CSS px${cut}`,
       });
     }
@@ -516,6 +518,7 @@ export class BrandService {
       // The stack's later families say what kind of face it is: `"Acme", Georgia, serif`.
       const fallback = stack.stack.split(",").slice(1).map((one) => fontClassFromName(firstFamily(one)).category).find((category) => category !== null) ?? null;
       const entry = byFamily.get(family.toLowerCase()) ?? { family, uses: 0, weights: new Map<number, number>(), fallback };
+      entry.fallback ??= fallback;
       entry.uses += stack.uses;
       for (const [raw, count] of Object.entries(stack.weights)) {
         // Computed weights of a variable face may be fractional (`350.5`); brand.json keeps integers 1-1000.
@@ -534,6 +537,7 @@ export class BrandService {
       const faces: BrandCapture["fonts"][number]["faces"] = [];
       let traits: { category: FontCategory | null; width: FontWidth | null } = { category: null, width: null };
       if (!generic && !icon) {
+        const familyFiles = files.length;
         const chosen = new Set<DeclaredFace>();
         for (const weight of weights.slice(0, 3)) {
           const face = faceFor(declared, entry.family, weight);
@@ -606,10 +610,15 @@ export class BrandService {
           faces.push(saved);
           files.push({ path, bytes, sourceUrl, licence: names.licence, maker: names.maker, family: entry.family, face: saved });
         }
+        if (icon) {
+          // A later face showed the family is an icon font: no face of it stays copied.
+          files.length = familyFiles;
+          for (const [i, face] of faces.entries()) if (face.file !== null) faces[i] = { ...face, file: null, licence: null, note: "not copied: another face of this family is an icon font" };
+        }
         if (chosen.size === 0) faces.push({ weight: String(weights[0] ?? 400), style: "normal", unicodeRange: null, url: null, file: null, licence: null, note: "not copied: no @font-face found for it (a system font, or declared in a stylesheet the capture could not read)" });
       }
       const copied = faces.some((face) => face.file !== null);
-      const substitute = icon || copied ? null : substituteFont(entry.family, { category: traits.category ?? entry.fallback, width: traits.width });
+      const substitute = generic || icon || copied ? null : substituteFont(entry.family, { category: traits.category ?? entry.fallback, width: traits.width });
       out.push({ family: entry.family, uses: entry.uses, weights, generic, icon, faces, substitute });
     }
     return { found: out, files };
@@ -722,6 +731,16 @@ interface SectionShot {
   shot: { name: string; bytes: Buffer } | null;
   box: { x: number; y: number; width: number; height: number } | null;
   note: string;
+}
+
+/**
+ * Top and height (document CSS px) of the crop of `section`, at most `max` tall: its top when the element holding
+ * the text fits there, else starting at that element, moved up when the window would pass the section's bottom.
+ */
+export function sectionWindow(section: Pick<PageSection, "y" | "height" | "hitY" | "hitHeight">, max: number): { y: number; height: number } {
+  if (section.height <= max) return { y: section.y, height: section.height };
+  if (section.hitY + Math.min(section.hitHeight, max) <= section.y + max) return { y: section.y, height: max };
+  return { y: Math.max(section.y, Math.min(section.hitY, section.y + section.height - max)), height: max };
 }
 
 /** A file name part from section text: `Pricing & Plans` gives `pricing-plans`. */

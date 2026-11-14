@@ -44,11 +44,14 @@ export interface PageSection {
   tag: string;
   /** Ancestor cropped: the smallest at least `minWidth` CSS px wide. */
   container: string;
-  /** Box in document CSS px. */
+  /** Box of the container in document CSS px. */
   x: number;
   y: number;
   width: number;
   height: number;
+  /** Top and height of the element holding the text, in document CSS px. */
+  hitY: number;
+  hitHeight: number;
 }
 
 /** Installs `globalThis.__frameshellBrand` with `measure()`, `flatten()` and `section()`. */
@@ -269,7 +272,7 @@ export const PAGE_SCRIPT = String.raw`(() => {
   // outside header, nav and footer, an exact match before a partial one, then document order), lifted through
   // wrappers with the same text (a span in an h2 is the h2), then its smallest ancestor at least "minWidth" CSS px
   // wide: the section around a heading, never the heading line alone. Text split across elements is found within
-  // headings and short elements only. Box in document CSS px.
+  // headings and short elements only. Boxes (container and hit) in document CSS px.
   const norm = (text) => (text || "").replace(/\s+/g, " ").trim().toLowerCase();
   const section = (query, minWidth) => {
     const want = norm(query);
@@ -316,7 +319,8 @@ export const PAGE_SCRIPT = String.raw`(() => {
     const height = rect.bottom + scrollY - y;
     if (width < 1 || height < 1) return null;
     const label = (el) => el.tagName.toLowerCase() + (el.id ? "#" + el.id : "");
-    return { tag: label(hit.el), container: label(box), x, y, width, height };
+    const hitRect = hit.el.getBoundingClientRect();
+    return { tag: label(hit.el), container: label(box), x, y, width, height, hitY: hitRect.top + scrollY, hitHeight: hitRect.height };
   };
 
   globalThis.__frameshellBrand = { measure, flatten, section };

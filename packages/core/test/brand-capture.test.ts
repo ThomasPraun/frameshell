@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
 import { parseBrandManifest } from "@frameshell/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BrandService, type BrandServiceOptions, guardedChromeFlags } from "../src/brand/capture.js";
+import { BrandService, type BrandServiceOptions, guardedChromeFlags, sectionWindow } from "../src/brand/capture.js";
 import { CaptureProxy } from "../src/brand/proxy.js";
 import { Chrome, ChromePage } from "../src/inspect/chrome.js";
 import { checkCaptureUrl } from "../src/brand/policy.js";
@@ -33,6 +33,8 @@ function page(secretPort: number): string {
 @font-face { font-family: "Acme Sans"; src: url(/fonts/acme.ttf) format("truetype"); font-weight: 400; }
 @font-face { font-family: "Closed Serif"; src: url(/fonts/closed.woff) format("woff"); font-weight: 700; }
 @font-face { font-family: "Brand Marks"; src: url(/fonts/marks.ttf) format("truetype"); }
+@font-face { font-family: "Mixed Marks"; src: url(/fonts/acme.ttf) format("truetype"); font-weight: 400; }
+@font-face { font-family: "Mixed Marks"; src: url(/fonts/marks.ttf) format("truetype"); font-weight: 700; }
 :root { --brand: #ff5a1f; --ink: #1a1a2e; }
 body { margin: 0; background: #fafafa; color: #1a1a2e; font-family: "Acme Sans", sans-serif; }
 header { display: flex; gap: 20px; padding: 10px; }
@@ -48,6 +50,8 @@ h1, h2 { font-family: "Closed Serif", serif; font-weight: 700; color: #ff5a1f; l
 <section id="pricing" style="box-sizing: border-box; width: 800px; padding: 20px"><h2><span>Pricing</span></h2><p>Plans for every crew.</p></section>
 <div id="teams-row" style="width: 900px; display: flex"><div style="width: 300px"><h3>Teams</h3><p>Fly together.</p></div></div>
 <span style="font-family: 'Brand Marks'">A</span>
+<p style="font-family: 'Mixed Marks'"><span>A</span><span>B</span><b>C</b></p>
+<main id="flat"><p>Flat siblings follow.</p><div style="height: 2600px"></div><h2>Late heading</h2><p>Far below the top of main.</p></main>
 <div class="tall"></div><video src="/promo.mp4" preload="none"></video>
 <script>
 fetch("http://127.0.0.1:${secretPort}/leak", { mode: "no-cors" }).catch(() => {});
@@ -107,11 +111,11 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_CHROME"] === "1")("brand captur
       const root = tempDir();
       const url = checkCaptureUrl("http://brand.test/");
       if (!url.ok) throw new Error("fixture URL refused");
-      const result = await new BrandService(options).capture(root, url.url, {}, { sections: ["Pricing", "Teams", "Nowhere on the page"] });
+      const result = await new BrandService(options).capture(root, url.url, {}, { sections: ["Pricing", "Teams", "Nowhere on the page", "Late heading"] });
       const { capture } = result;
       expect(capture).toMatchObject({ id: "brand-test", ok: true, reason: null, title: "Acme Rockets | Fly anywhere", finalUrl: "http://brand.test/" });
       const byName = Object.fromEntries(capture.files.map((file) => [file.path.split("/").at(-1), file]));
-      expect(Object.keys(byName).sort()).toEqual(["AcmeSans-400.ttf", "hero.png", "icon-1.png", "logo-1.svg", "logo-2.svg", "og.png", "page.png", "section-pricing.png", "section-teams.png"]);
+      expect(Object.keys(byName).sort()).toEqual(["AcmeSans-400.ttf", "hero.png", "icon-1.png", "logo-1.svg", "logo-2.svg", "og.png", "page.png", "section-late-heading.png", "section-pricing.png", "section-teams.png"]);
       expect(byName["hero.png"]).toMatchObject({ role: "hero", width: 3200, height: 2000 });
       const shot = readFileSync(join(root, "assets/brand/brand-test/hero.png"));
       expect([shot.readUInt32BE(16), shot.readUInt32BE(20)]).toEqual([3200, 2000]);
@@ -140,10 +144,10 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_CHROME"] === "1")("brand captur
       const manifest = parseBrandManifest(JSON.parse(readFileSync(join(root, "brand.json"), "utf8")));
       expect(manifest.ok && manifest.value.captures.map((one) => one.id)).toEqual(["brand-test"]);
       expect(credited.find((entry) => entry.licence === "OFL-1.1")).toMatchObject({ assets: ["assets/fonts/AcmeSans-400.ttf"], sourceUrl: "http://brand.test/fonts/acme.ttf" });
-      expect(credited.filter((entry) => !entry.licence).flatMap((entry) => entry.assets).sort()).toHaveLength(8);
+      expect(credited.filter((entry) => !entry.licence).flatMap((entry) => entry.assets).sort()).toHaveLength(9);
 
       // Sections: the heading's section (not the nav link, not the heading line alone), a narrow card's wide row, at 3x.
-      const [pricing, teams, missing] = capture.sections;
+      const [pricing, teams, missing, late] = capture.sections;
       expect(pricing).toMatchObject({ text: "Pricing", file: "assets/brand/brand-test/section-pricing.png", box: { width: 800 } });
       expect(pricing!.note).toMatch(/^section#pricing holding the h2/);
       const crop = readFileSync(join(root, pricing!.file!));
@@ -154,6 +158,10 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_CHROME"] === "1")("brand captur
       expect(teams!.note).toMatch(/^div#teams-row holding the h3/);
       expect(missing).toMatchObject({ text: "Nowhere on the page", file: null, box: null });
       expect(missing!.note).toMatch(/not found/);
+      // A heading more than 2400 px down a tall flat main: the window starts at the heading, not at main's top.
+      expect(late).toMatchObject({ file: "assets/brand/brand-test/section-late-heading.png", box: { height: 2400 } });
+      expect(late!.note).toMatch(/^main#flat holding the h2, .*cut to 2400 of its \d+ px, from \d+ px below its top so the h2 is inside/);
+      expect(readFileSync(join(root, late!.file!)).readUInt32BE(20)).toBe(7200);
 
       // Fonts: the closed face names an open substitute; an OFL icon font is told by its cmap and never copied.
       expect(closed.substitute).toMatchObject({ family: "Source Serif 4", licence: "OFL-1.1", match: "class" });
@@ -163,6 +171,12 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_CHROME"] === "1")("brand captur
       expect(marks.faces[0]).toMatchObject({ file: null, licence: null });
       expect(marks.faces[0]!.note).toMatch(/icon font \(256 of the 282 characters/);
       expect(existsSync(join(root, "assets/fonts/BrandMarks-400.ttf"))).toBe(false);
+      // Its open 400 face is fetched first; the 700 face's cmap then shows an icon font, so neither stays copied.
+      const mixed = capture.fonts.find((font) => font.family === "Mixed Marks")!;
+      expect(mixed).toMatchObject({ icon: true, substitute: null });
+      expect(mixed.faces.map((face) => face.file)).toEqual([null, null]);
+      expect(mixed.faces.map((face) => face.note)).toEqual(["not copied: another face of this family is an icon font", expect.stringMatching(/icon font/)]);
+      expect(existsSync(join(root, "assets/fonts/MixedMarks-400.ttf"))).toBe(false);
 
       const again = await new BrandService(options).capture(root, url.url);
       expect(again.capture.id).toBe("brand-test-2");
@@ -213,6 +227,19 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_CHROME"] === "1")("brand captur
     },
     600_000,
   );
+});
+
+describe("section crop window", () => {
+  it("keeps a short section whole and a tall one's top when the text sits there", () => {
+    expect(sectionWindow({ y: 100, height: 800, hitY: 120, hitHeight: 40 }, 2400)).toEqual({ y: 100, height: 800 });
+    expect(sectionWindow({ y: 100, height: 6000, hitY: 2000, hitHeight: 40 }, 2400)).toEqual({ y: 100, height: 2400 });
+  });
+
+  it("starts at the text when it lies below the top window, and stays inside the section", () => {
+    expect(sectionWindow({ y: 100, height: 6000, hitY: 3000, hitHeight: 40 }, 2400)).toEqual({ y: 3000, height: 2400 });
+    expect(sectionWindow({ y: 100, height: 6000, hitY: 5900, hitHeight: 40 }, 2400)).toEqual({ y: 3700, height: 2400 });
+    expect(sectionWindow({ y: 100, height: 6000, hitY: 2480, hitHeight: 40 }, 2400)).toEqual({ y: 2480, height: 2400 });
+  });
 });
 
 describe("brand capture before Chrome starts", () => {
