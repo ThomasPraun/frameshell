@@ -182,6 +182,7 @@ import { planMusic, runMusicPlacement } from "./sound/music-place.js";
 import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
+import { GradeAnalyzer } from "./grade/analyze.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
@@ -744,6 +745,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
     beats,
+  });
+  const gradeAnalyzer = new GradeAnalyzer({
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    probe: (dir, asset) => media.probe(dir, asset),
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -1739,6 +1744,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
     "clip.verify": async ({ cwd, timeline, clip, probes, tolerance }) => clipVerifier.verify(clipRoot(await root(cwd)), { timeline, clip, probes, tolerance }),
+    "grade.analyze": async ({ cwd, timeline, clip, at, from, to, samples, view }, caller) => {
+      const dir = await root(cwd);
+      const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const analysis = await gradeAnalyzer.analyze(dir, shown.timeline, { timeline, fps: shown.fps, clip, at, from, to, samples });
+      return { view: shown.view, proposal: shown.proposal, ...analysis };
+    },
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));

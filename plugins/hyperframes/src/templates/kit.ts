@@ -136,6 +136,22 @@ export const COLOR_HELPERS = String.raw`
         return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2] > 0.4 ? "#0b1020" : "#ffffff";
       }`;
 
+/**
+ * Page-script helpers `flat` and `put`: a scale within about 0.6 % of 1 is written as exactly 1 (Chrome keeps the
+ * earlier raster of a layer there, so a frame would depend on the seek order). `put` is `M.write` with every scale
+ * made flat; use it for filled or masked shapes.
+ */
+export const FLAT_HELPERS = String.raw`
+      // Chrome keeps a layer's earlier raster for a scale within about 0.6 % of 1, so the same time would paint one pixel
+      // differently depending on where the player came from. A scale that close to 1 is written as exactly 1.
+      function flat(scale) {
+        return scale !== undefined && Math.abs(scale - 1) < 0.006 ? 1 : scale;
+      }
+      // M.write with every scale made flat.
+      function put(element, pose) {
+        M.write(element, { x: pose.x, y: pose.y, rotate: pose.rotate, scale: flat(pose.scale), scaleX: flat(pose.scaleX), scaleY: flat(pose.scaleY), opacity: pose.opacity });
+      }`;
+
 /** The two props of a template that can sit on its own background: a colour and how solid it is (0 = transparent over footage). */
 export function backdropVariables(tokens: BrandTokens): TemplateVariable[] {
   return [

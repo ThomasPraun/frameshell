@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Generated sound effects (ADR 0038): the kinds, their ranges and the placement offsets. */
-export const SFX_KINDS = ["click", "tick", "pop", "whoosh", "riser", "thump", "impact", "shutter"] as const;
+export const SFX_KINDS = ["click", "tick", "pop", "whoosh", "riser", "thump", "impact", "shutter", "glitch", "braaam", "swell", "bell", "notify", "sting"] as const;
 
 /** One of {@link SFX_KINDS}. */
 export type SfxKind = (typeof SFX_KINDS)[number];
@@ -31,6 +31,7 @@ export const SFX_PITCH_RANGE = { min: 0.5, max: 2 } as const;
 export const SFX_LENGTH_RANGE: Partial<Record<SfxKind, { min: number; max: number }>> = {
   whoosh: { min: 0.3, max: 2 },
   riser: { min: 0.8, max: 6 },
+  swell: { min: 0.5, max: 3 },
 };
 
 /** What a placed sound does to the picture, which decides where its anchor sits against the cue. */
@@ -84,9 +85,15 @@ export const SOUND_DEFAULT_ROLES: Readonly<Record<SfxKind, SoundRole | null>> = 
   thump: "pop",
   impact: "knock",
   shutter: "click",
+  glitch: "click",
+  braaam: "knock",
+  swell: "swell",
+  bell: "pop",
+  notify: "pop",
+  sting: "knock",
 };
 
-/** Tier a kind takes when the caller names none: ticks are texture, a shutter supports, everything else carries the picture. */
+/** Tier a kind takes when the caller names none: ticks are texture, a shutter, glitch, swell, bell and notify support, everything else carries the picture. */
 export const SOUND_DEFAULT_TIERS: Readonly<Record<SfxKind, SoundTier>> = {
   click: "primary",
   tick: "texture",
@@ -96,6 +103,12 @@ export const SOUND_DEFAULT_TIERS: Readonly<Record<SfxKind, SoundTier>> = {
   thump: "primary",
   impact: "primary",
   shutter: "secondary",
+  glitch: "secondary",
+  braaam: "primary",
+  swell: "secondary",
+  bell: "secondary",
+  notify: "secondary",
+  sting: "primary",
 };
 
 /** Fewest milliseconds between the anchors of two sounds of one kind before a warning (owner's numbers: ticks 66, pops 114). */
