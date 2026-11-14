@@ -495,6 +495,41 @@ describe("clip.move, trim, split, remove, set", () => {
     expect((await rejection(apply(card, "clip.set", { clip: "c_0002", grade: { exposure: 1 } }))).message).toMatch(/only media clips take `grade`/);
   });
 
+  it("merges a vignette field by field into media and generated clips, clears it, refuses nested timelines and audio (ADR 0043)", async () => {
+    const footage = (await apply(await withClip(), "clip.set", { clip: "c_0001", grade: { exposure: 0.5 } })).timeline;
+    const set = await apply(footage, "clip.set", { clip: "c_0001", vignette: { strength: 0.4, radius: 0.9 } });
+    expect(clipsOf(set.timeline, "t_v")[0]).toMatchObject({ grade: { exposure: 0.5 }, vignette: { strength: 0.4, radius: 0.9 } });
+    expect(set.warnings).toEqual([]);
+    expect(parseTimeline(set.timeline).ok).toBe(true);
+    const merged = (await apply(set.timeline, "clip.set", { clip: "c_0001", vignette: { softness: 0 } })).timeline;
+    expect((clipsOf(merged, "t_v")[0] as { vignette?: object }).vignette).toEqual({ strength: 0.4, radius: 0.9, softness: 0 });
+    const undone = (await applyOperation(merged, set.inverse, context())).timeline;
+    expect(clipsOf(undone, "t_v")[0]).not.toHaveProperty("vignette");
+    const cleared = (await apply(merged, "clip.set", { clip: "c_0001", vignette: null })).timeline;
+    expect(clipsOf(cleared, "t_v")[0]).not.toHaveProperty("vignette");
+    expect(clipsOf(cleared, "t_v")[0]).toMatchObject({ grade: { exposure: 0.5 } });
+    // `{}`: the defaults.
+    expect(clipsOf((await apply(footage, "clip.set", { clip: "c_0001", vignette: {} })).timeline, "t_v")[0]).toMatchObject({ vignette: {} });
+    expect((await rejection(apply(footage, "clip.set", { clip: "c_0001", vignette: { radius: 2 } }))).code).toBe(ErrorCode.InvalidParams);
+    const formats = context({
+      formats: [
+        { id: "16x9", width: 1920, height: 1080 },
+        { id: "9x16", width: 1080, height: 1920 },
+      ],
+    });
+    const perFormat = rejection(apply(footage, "clip.set", { clip: "c_0001", vignette: { strength: 0.3 }, format: "9x16" }, formats));
+    expect((await perFormat).message).toMatch(/`vignette` is shared by every format/);
+
+    const card = (await apply(footage, "clip.add", { track: "t_v", type: "hyperframes", duration: 2, start: 30, props: { title: "A" } })).timeline;
+    const lit = (await apply(card, "clip.set", { clip: "c_0002", vignette: { strength: 0.2 } })).timeline;
+    expect(clipsOf(lit, "t_v")[1]).toMatchObject({ type: "hyperframes", vignette: { strength: 0.2 } });
+    expect(parseTimeline(lit).ok).toBe(true);
+    const nested = (await apply(base(), "clip.add", { track: "t_v", type: "timeline", source: "timelines/intro.json" })).timeline;
+    expect((await rejection(apply(nested, "clip.set", { clip: "c_0001", vignette: { strength: 0.3 } }))).message).toMatch(/nested timeline clips take no `vignette`/);
+    const music = (await apply(base(), "clip.add", { track: "t_a", asset: "assets/music.wav", out: 2 })).timeline;
+    expect((await rejection(apply(music, "clip.set", { clip: "c_0001", vignette: { strength: 0.3 } }))).message).toMatch(/audio tracks take no `vignette`/);
+  });
+
   it("warns, never refuses, when graded footage looks like LOG; stays quiet for other sources and unreadable ones (ADR 0031 decision 9)", async () => {
     const footage = await withClip();
     const logged = context({

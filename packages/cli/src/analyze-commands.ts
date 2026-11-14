@@ -1,4 +1,4 @@
-import { ANALYZE_EVENT_KINDS, type AnalyzeDiffResult, type AnalyzeResult, type DaemonConnection, labelOf } from "@frameshell/protocol";
+import { ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type AnalyzeDiffResult, type AnalyzeResult, type DaemonConnection, labelOf } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `analyze` (#471), in `frameshell --help`. */
@@ -6,7 +6,8 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3]
                                Measure a reference video: shot table (cuts, cuts per minute, shot lengths), contact sheet
                                at 2 frames a second and a frame per shot, dominant colours and look (brightness, contrast,
                                saturation, warmth, colour grid) per shot and overall, rhythm (shot-length spread, still
-                               share, bursts), events (flashes, elements appearing or disappearing, holds, sound hits),
+                               share, bursts), cuts told apart (new scene, jump cut, punch-in or out with its scale: the
+                               ones the scene score misses are marked), events (flashes, elements appearing or disappearing, holds, sound hits),
                                the activity curve and its moves (start, duration, closest ease), ink (how much of the
                                picture graphics and text cover), mouth against voice (needs a people scan of the file),
                                loudness (EBU R128) and tempo, into .frameshell/analysis/<name>/ (default: the file name; a
@@ -136,6 +137,7 @@ function formatAnalyze(result: AnalyzeResult): string {
     `${tag(result, "palette")} Palette: ${result.palette.map((color) => `${color.hex} ${Math.round(color.share * 100)}%`).join("  ") || "none"}`,
     `${tag(result, "look")} Look: brightness ${result.look.brightness}, contrast ${result.look.contrast}, saturation ${result.look.saturation}, warmth ${result.look.warmth}`,
     `${tag(result, "rhythm")} Rhythm: shot-length CV ${rhythm.shotLengthCv}, ${Math.round(rhythm.stillShare * 100)}% still frames (longest hold ${rhythm.longestStill} s), ${rhythm.changeCount} big changes (${rhythm.changesPerMinute} a minute, largest gap ${rhythm.largestGap} s), ${rhythm.bursts.length} bursts${rhythm.bursts.length > 0 ? ` at ${rhythm.bursts.map((burst) => `${burst.start} s (${burst.count})`).join(", ")}` : ""}`,
+    `${tag(result, "cuts")} Cuts: ${cutCounts(result)}; ${result.cuts.jumpsPerMinute} jump cuts and punches a minute`,
     `${tag(result, "events")} Events: ${eventCounts(result)}`,
     `${tag(result, "curve")} Curve: mean change ${curve.mean}, peak ${curve.peak} at ${curve.peakAt} s, ${curve.moves.length} moves (${curve.values.length} values, one per ${curve.step} s)`,
     `${tag(result, "ink")} Ink: ${Math.round(ink.mean * 100)}% of the picture on average${ink.peakAt === null || ink.region === null ? ", none found" : `, up to ${Math.round(ink.peak * 100)}% at ${ink.peakAt} s (box ${[ink.region.x, ink.region.y, ink.region.width, ink.region.height].join(" ")})`}`,
@@ -152,6 +154,10 @@ function formatAnalyze(result: AnalyzeResult): string {
   for (const sheet of result.sheets) lines.push(`  ${sheet.path}  ${sheet.width}x${sheet.height}  ${sheet.kind}, ${sheet.tiles.length} tiles`);
   lines.push("Shots (start s, length s, palette, ink peak):");
   for (const shot of result.shots) lines.push(`  #${shot.index}  ${shot.start}  ${shot.length}  ${shot.palette.slice(0, 3).map((color) => color.hex).join(" ")}  ${shot.ink.peak > 0 ? `${Math.round(shot.ink.peak * 100)}%` : "-"}`);
+  const unshot = result.cuts.list.filter((cut) => cut.kind !== "cut" && cut.kind !== "change");
+  if (unshot.length > 0) lines.push("Jump cuts and punches (start s, kind, scale, similarity, scene cut found):");
+  for (const cut of unshot.slice(0, 60)) lines.push(`  ${cut.time}  ${cut.kind}  ${cut.scale ?? "-"}  ${cut.similarity}  ${cut.opensShot ? "yes" : "no"}`);
+  if (unshot.length > 60) lines.push(`  … ${unshot.length - 60} more (--json)`);
   const listed = result.events.filter((event) => event.kind !== "hold" && event.kind !== "hit");
   if (listed.length > 0) lines.push("Flashes and elements (start s, kind, region x y w h):");
   for (const event of listed) lines.push(`  ${event.start}  ${event.kind}${event.region ? `  ${[event.region.x, event.region.y, event.region.width, event.region.height].join(" ")}` : ""}`);
@@ -176,6 +182,12 @@ function formatDiff(result: AnalyzeDiffResult): string {
   if (energy.windows.length > 60) lines.push(`  … ${energy.windows.length - 60} more (--json)`);
   lines.push(...result.warnings.map((warning) => `warning: ${warning}`));
   return `${lines.join("\n")}\n`;
+}
+
+/** `5 cut, 3 jump, 2 punch-in`: how many big changes of each kind, in the order of {@link ANALYZE_CUT_KINDS}. */
+function cutCounts(result: AnalyzeResult): string {
+  const parts = ANALYZE_CUT_KINDS.filter((kind) => result.cuts.counts[kind] > 0).map((kind) => `${result.cuts.counts[kind]} ${kind}`);
+  return parts.join(", ") || "none";
 }
 
 /** `3 flash, 2 appear, 4 hold`: how many events of each kind, in the order of {@link ANALYZE_EVENT_KINDS}. */

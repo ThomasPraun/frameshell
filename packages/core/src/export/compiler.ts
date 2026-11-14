@@ -53,7 +53,9 @@ import {
   subtitleTracks,
   withTrackMutes,
   type Letterbox,
+  type ResolvedVignette,
   letterboxBars,
+  vignetteOf,
 } from "@frameshell/schema";
 import { tierFps, tierVideoArgs } from "../encoders/tiers.js";
 import { GIF_MAX_FPS, GIF_MAX_FRAMES } from "./presets.js";
@@ -77,6 +79,7 @@ import {
   zoomExpressions,
 } from "./animation.js";
 import { assSubtitles } from "./ass.js";
+import { vignettedPicture } from "./vignette.js";
 import { type CoverLayout, assCover } from "./cover.js";
 
 /**
@@ -426,6 +429,8 @@ interface Placed {
   glass?: Backdrop;
   /** Table file of the clip's colour grade (ADR 0031): its picture goes through `lut3d` before anything else. */
   grade?: string;
+  /** The clip's vignette (ADR 0043): after the grade, on the picture as it shows (its crop), before scale and shape. */
+  vignette?: ResolvedVignette;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -958,6 +963,8 @@ function layoutTimeline(
       const look = picture ? gradeOf(clip) : null;
       const grade = look ? grades.get(gradeKey(look)) : undefined;
       if (look && grade === undefined) warnings.push(`Clip ${clip.id} has a colour grade with no table; it was exported ungraded.`);
+      // The listed clip: a generated clip's footage stand-in (`asFootage`) keeps only what places it.
+      const vignette = picture ? vignetteOf(listed) : null;
       const cover = formatCrop(variant, clip, { size: picture, generated: render !== undefined, alpha: picture?.alpha === true, base }, output);
       placed.push({
         clip,
@@ -972,6 +979,7 @@ function layoutTimeline(
         ...(render ? { hold: true as const } : {}),
         ...(backdrop ? { glass: backdrop } : {}),
         ...(grade !== undefined ? { grade } : {}),
+        ...(vignette ? { vignette } : {}),
         ...(sound !== undefined ? { sound } : {}),
         ...(cover ? { cover } : {}),
         ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
@@ -1318,8 +1326,9 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Fades of the bottom track go to black: nothing is under it.
     const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
-    const fill = placed.cover ? `${staticCrop(placed.cover, false)},scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
-    lines.push(`${[gradedChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
+    const fill = placed.cover ? `scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
+    const cut = placed.cover ? staticCrop(placed.cover, false) : null;
+    lines.push(`${[lookedChain(placed, gradedChain(placed, start, end, fps, inputs), cut, rate, label, lines), fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -1350,9 +1359,10 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     // Ramps, keyed scale, keyed opacity and a wipe read timeline seconds: the piece's timestamps move there and back.
     const zoomed = shape?.zoom ? zoomedLayer(placed, shape.zoom, start, end, from, rect, out) : null;
     const timed = motion?.scale !== undefined || zoomed !== null || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
+    const picture = placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : gradedChain(placed, start, end, fps, inputs);
+    const cut = move ? movingCrop(move.path, move.clock + start / fps, (end - start) / fps) : crop ? staticCrop(crop, placed.tile?.exact === true) : null;
     const head = [
-      placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : gradedChain(placed, start, end, fps, inputs),
-      ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
+      lookedChain(placed, picture, cut, rate, `o${n}`, lines),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${zoomed?.scale ?? motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
@@ -1694,6 +1704,17 @@ function pieceChain(placed: Placed, start: number, end: number, fps: number, inp
   const last = Math.min(end, hi);
   const pad = [...(first > start ? [`start=${first - start}:start_mode=clone`] : []), ...(end > last ? [`stop=${end - last}:stop_mode=clone`] : [])];
   return `${sourceChain(placed, first, last, fps, inputs)},tpad=${pad.join(":")}`;
+}
+
+/**
+ * `picture` (a graded chain) cut by `crop` (a `crop` filter, null for none), then darkened by the clip's vignette
+ * (ADR 0043 order: grade, then vignette) on the picture as it shows; the plate's lines go to `lines`, named after
+ * `label`. In `gbrap` from before the crop, so the crop keeps odd edges and the plate's size is the crop's.
+ */
+function lookedChain(placed: Placed, picture: string, crop: string | null, rate: string, label: string, lines: string[]): string {
+  if (!placed.vignette || placed.tile) return crop ? `${picture},${crop}` : picture;
+  const size = placed.cover ?? placed.source.video!;
+  return vignettedPicture([picture, "format=gbrap", ...(crop ? [crop] : [])].join(","), size, placed.vignette, rate, label, lines);
 }
 
 /**

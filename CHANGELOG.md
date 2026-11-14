@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (glTF Binary, no compression, inside the composition directory). The headless Chrome of `clip verify`,
   `inspect point` and `brand capture` now launches with `--enable-unsafe-swiftshader`, so WebGL works there without a
   GPU. Not yet: the `title-3d` and `logo-3d` templates (slice 3).
+- Clip vignette, slice 2 of #500 (ADR 0043, epic #451; protocol 136): an optional `vignette { strength?, radius?, softness? }`
+  on media and generated clips darkens the clip's own picture smoothly towards its edges (`{}` = strength 0.35, full at
+  the corners, falloff 0.6 half-diagonals), after its colour grade and before scale, keys and transition shapes; in
+  another format it darkens the part the format shows. `frameshell clip set --vignette 0.4` (also `--vignette-radius`,
+  `--vignette-softness`, `--clear-vignette`; daemon and MCP `clip.set` `vignette`, merged, `null` clears; refused on nested
+  timeline clips, skipped on multicam shots with a warning). Export multiplies each piece by a one-frame `geq` plate of
+  `vignetteGain` (exactly its 8-bit levels, alpha kept); the app's preview draws the same formula in the grade's WebGL2
+  pass. Timelines without it export byte-identical plans. No inspector control yet.
 - Sharp and blurred renders of a clip with motion blur, slice 3 of #501 (ADR 0041 decision 11, epic #451; protocol 135):
   a generated clip with `motionBlur` keeps two cached renders. The sharp one (the key it had without blur) renders first
   and is what the live preview and `render --quality draft` use; the blurred one is queued after it in the background,
@@ -25,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shader transitions; plugin API `MOTION_BLUR_REFUSED`), exports use the sharp render and the render job gets a
   warning; `final.refused` says so and the refusal is not retried until the clip changes. Chat about this says
   `frame pending` while the blurred render is due. `gc` keeps both renders of every blurred clip.
+- `analyze` cuts told apart: jump cuts and punch-ins (#471 slice 4, epic #451; protocol 137): the result and `analysis.json`
+  of `frameshell analyze` gain `cuts`, every big change of the picture classified from the grey frame before and the frame
+  after it (one more pass at 96 px on the long side): `cut` (a new scene), `jump` (the same framing with time skipped),
+  `punch-in` / `punch-out` (the same shot scaled up or down, with its `scale`, searched from 1.08x to 2.5x and up to 4 %
+  off centre) and `change` (no cut: a flash, a caption). Each has its `time`, `score`, `similarity`, `changed` and
+  `opensShot`, false for the jump cuts and punches the scene score missed; `counts` and `jumpsPerMinute` sum them up
+  (labelled ESTIMATED in `labels`; at most 300 are classified, with a warning). The CLI prints a `Cuts` line and lists the
+  jump cuts and punches; the skill (`reference-video.md`), `docs/mcp.md` and SPEC say how to read them. New files in
+  `packages/core/src/analyze/` (`framing.ts`, `cuts.ts`), after HyperFrames' `measure` (Apache-2.0, #478).
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also
