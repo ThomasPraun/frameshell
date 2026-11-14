@@ -73,27 +73,58 @@ export function parseFontMetrics(file: Uint8Array): FontMetrics {
  * "Montserrat" in 16) must be named by its id 1.
  */
 function familyName(view: DataView, name: number): string | null {
+  const found = new Map<string, string>();
+  for (const record of nameRecords(view, name)) {
+    if (record.id !== 1 && record.id !== 16) continue;
+    const key = `${record.id}:${record.windows ? "w" : "m"}`;
+    if (!found.has(key)) found.set(key, record.text);
+  }
+  return found.get("1:w") ?? found.get("16:w") ?? found.get("1:m") ?? found.get("16:m") ?? null;
+}
+
+/** One readable string of a `name` table: Windows Unicode or Mac Roman, trimmed, never empty. */
+interface NameRecord {
+  id: number;
+  windows: boolean;
+  text: string;
+}
+
+function* nameRecords(view: DataView, name: number): Generator<NameRecord> {
   const count = view.getUint16(name + 2);
   const strings = name + view.getUint16(name + 4);
-  const found = new Map<string, string>();
   for (let i = 0; i < count; i++) {
     const record = name + 6 + i * 12;
     const platform = view.getUint16(record);
     const encoding = view.getUint16(record + 2);
-    const id = view.getUint16(record + 6);
-    if (id !== 1 && id !== 16) continue;
     const length = view.getUint16(record + 8);
     const start = strings + view.getUint16(record + 10);
+    if (start + length > view.byteLength) continue;
     let text = "";
     if (platform === 3 && (encoding === 1 || encoding === 10)) {
       for (let at = 0; at + 1 < length; at += 2) text += String.fromCharCode(view.getUint16(start + at));
     } else if (platform === 1 && encoding === 0) {
       for (let at = 0; at < length; at++) text += String.fromCharCode(view.getUint8(start + at));
     } else continue;
-    const key = `${id}:${platform === 3 ? "w" : "m"}`;
-    if (!found.has(key) && text.trim() !== "") found.set(key, text.trim());
+    if (text.trim() !== "") yield { id: view.getUint16(record + 6), windows: platform === 3, text: text.trim() };
   }
-  return found.get("1:w") ?? found.get("16:w") ?? found.get("1:m") ?? found.get("16:m") ?? null;
+}
+
+/**
+ * Strings of a font's `name` table by name id (0 copyright, 1 family, 8 manufacturer, 9 designer, 13 licence,
+ * 14 licence URL, 16 typographic family…), Windows Unicode preferred over Mac Roman. `table` is the table's bytes
+ * alone, as a WOFF or WOFF2 unwrapper hands it over. Throws when it is too short to be a `name` table.
+ */
+export function readNameTable(table: Uint8Array): Map<number, string> {
+  if (table.byteLength < 6) throw new Error("not a name table: too short");
+  const view = new DataView(table.buffer, table.byteOffset, table.byteLength);
+  const found = new Map<number, string>();
+  const mac = new Map<number, string>();
+  for (const record of nameRecords(view, 0)) {
+    const into = record.windows ? found : mac;
+    if (!into.has(record.id)) into.set(record.id, record.text);
+  }
+  for (const [id, text] of mac) if (!found.has(id)) found.set(id, text);
+  return found;
 }
 
 /** Glyph index of a code point (0, `.notdef`, when the face lacks it) from the best Unicode `cmap` subtable. */

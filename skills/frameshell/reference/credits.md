@@ -43,3 +43,19 @@ It reads every timeline and judges each placed asset (clips, multicam angles and
 Unverified never passes. Never edit `credits.json` to turn a failure green; fix the entry only with what the source states.
 
 When it passes, paste the printed credit block into the video description (MCP `credits_check` returns it as `text`) and tell the person which assets need credit and why. `render` warns about placed assets with no verified provenance once the project records any, but only `credits` is the gate.
+
+## Brand capture
+
+When the person names their site ("make it look like acme.com"), capture it instead of guessing colours or redrawing a logo:
+
+```sh
+frameshell brand capture https://acme.com
+```
+
+It opens the page in Frameshell's own headless Chrome (public addresses only, ports 80 and 443, no cookies or sign-in) and saves under `assets/brand/<id>/` the logo candidates from the header and nav, icons, the share image, `hero.png` and `page.png`; open-licensed fonts go to `assets/fonts/`. `brand.json` lists what was found: colours with their roles and the accent, fonts by use (each face with a note saying why it was or was not copied), `:root` variables, headings, buttons and video URLs.
+
+1. **List what was found to the person before you use it.** Name the logo files, the accent and the fonts, and ask whether this is their brand and which logo is right. Never invent product UI or redraw a logo: use the captured files, or ask for the real ones.
+2. **Credits fail until the person confirms.** Every captured file has a credits entry with its source URL and no licence, so `frameshell credits` fails on placed brand files. For the person's own brand, ask, then `frameshell credits set <file> --licence own`. For someone else's brand, do not use the files without their say.
+3. **Fonts:** a face is copied only when the font file itself names OFL-1.1, Apache-2.0 or UFL; its credits entry carries that licence and the foundry. Google Fonts serves subsets without licence text, so they are listed but not copied: fetch the family from the google/fonts repository and import it with `--licence OFL-1.1 --source-url <repo URL> --author <foundry>`. Any other face is listed by name only: pick an open font close to it and say so.
+4. **Style:** capture never changes `style.json`. It prints suggested `frameshell style set` lines (colours, fonts, `brand.product`, `brand.url`, `brand.mustShow`); run the ones the person agrees to.
+5. **A failed capture says so:** `Capture FAILED (little text)` means a login wall, a bot check or an empty app shell. Open `hero.png` to see what loaded, then ask the person for the logo and a screenshot. A local or staging page (`localhost`, a LAN address, port 3000) is refused: ask for screenshots or exported files.
