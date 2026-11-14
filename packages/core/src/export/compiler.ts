@@ -337,6 +337,13 @@ const ATEMPO_TAIL_SECONDS = 0.1;
 const LOUDNORM_LRA = 20;
 /** `loudnorm` true peak ceiling, dBTP. */
 const LOUDNORM_TP = -1;
+/**
+ * Ceiling of the true-peak limiter after `loudnorm`, dBTP. Half a dB under {@link LOUDNORM_TP}: the AAC encode adds
+ * about 0.3-0.5 dB of inter-sample overs to sharp transients (measured at 192-320 kbps).
+ */
+export const TRUE_PEAK_CEILING = -1.5;
+/** The limiter runs at this multiple of the export's sample rate, so its sample peaks are BS.1770 true peaks. */
+const TRUE_PEAK_OVERSAMPLE = 4;
 /** Pass-1 statistics file, relative to the work directory. */
 export const LOUDNESS_STATS_FILE = "loudness.json";
 /** Lossless audio mix, relative to the work directory. */
@@ -616,8 +623,9 @@ export function loudnessAnalysis(plan: RenderPlan): FfmpegStep | null {
 /**
  * Final step: joined video segments (stream copy) plus {@link MIX_FILE}
  * normalized with `measured` (`loudnorm` pass 2, linear when the measurement
- * allows; skipped when null), written to `output`. A silent export gets a
- * silent track of the exact length.
+ * allows; skipped when null), then held under {@link TRUE_PEAK_CEILING} by an
+ * oversampled limiter, written to `output`. A silent export gets a silent
+ * track of the exact length.
  */
 export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, output: string): FfmpegStep {
   const { sampleRate: rate, samples } = plan.audio;
@@ -631,7 +639,7 @@ export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, 
   // loudnorm works at 192 kHz: resample back, then cut to the exact length.
   const audio = silent
     ? `anullsrc=r=${rate}:cl=stereo,atrim=end_sample=${samples}[a]`
-    : `[1:a:0]${normalize}aresample=${rate},atrim=end_sample=${samples}${fade}[a]`;
+    : `[1:a:0]${normalize}aresample=${rate},${truePeakLimit(rate)},atrim=end_sample=${samples}${fade}[a]`;
   return {
     files: {},
     args: [
@@ -672,6 +680,16 @@ export function gifStep(output: string): FfmpegStep {
       ...["-map_metadata", "-1", "-loop", "0", "-f", "gif", output],
     ],
   };
+}
+
+/**
+ * Oversampled true-peak limiter on audio at `rate`: up to {@link TRUE_PEAK_OVERSAMPLE} x `rate`, `alimiter`
+ * at {@link TRUE_PEAK_CEILING}, back to `rate`. Its input must already be band-limited at `rate` (loudnorm's 192 kHz
+ * output limited there let 0.3 dB more through). `level=false` keeps the gain; `latency` keeps it sample-aligned.
+ */
+function truePeakLimit(rate: number): string {
+  const limit = (10 ** (TRUE_PEAK_CEILING / 20)).toFixed(4);
+  return `aresample=${rate * TRUE_PEAK_OVERSAMPLE},alimiter=limit=${limit}:level=false:latency=true,aresample=${rate}`;
 }
 
 /** Half-sine (`hsin`) fades over the first and last `S = round(0.002 x rate)` samples: the tail of a loop's audio chain. */

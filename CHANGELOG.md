@@ -861,6 +861,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Export holds true peak under -1 dBTP in the delivered file (#519, epic #451): after the second `loudnorm` pass the
+  mix goes up to 4x the export's sample rate, through `alimiter` at -1.5 dBFS (sample peaks there are true peaks) and
+  back, before the cut to length, the loop fades and the encode. `loudnorm` alone let sharp synthesized transients
+  through at -0.8 dBTP after the AAC encode; the half dB of headroom covers what the encoder adds. Only the final mux
+  step changes: golden plans differ in that filter chain, nothing on the wire.
 - Preview playback tests count two kinds of dropped frames (#567, ADR 0001 amendment): the engine reports, per play,
   the frames it passed over that a display tick wanted but were not decoded, or that followed a tick of its own longer
   than a frame (starved), and those no tick wanted while it was idle (cadence: the host gave it no tick in time), with
