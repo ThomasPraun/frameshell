@@ -822,6 +822,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A batch render no longer counts as running once its last job ended (#533): `batch.render` of the same `out` straight
+  after waited for the manifest to say `done` used to fail with "A batch is already rendering" when the run had not
+  yet been dropped, and `gc` kept clip renders until then. The run is finished as soon as every row ended; a new
+  render waits for the manifest write of the one before, so it reads the final manifest.
 - The preview keeps the pitch of a clip at speed ≠ 1, like export (#499, epic #451): its program audio stretches a
   sped-up clip's sound with WSOLA (2048-sample Hann frames, the window of export `atempo` at 48 kHz, each moved by up
   to 512 samples to line up with the one before) instead of resampling it, so a 1.25x clip no longer sounds higher in

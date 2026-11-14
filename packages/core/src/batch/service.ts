@@ -75,6 +75,8 @@ export class BatchService {
     const file = await readBatchFile(path);
     const out = request.out ?? join(root, "exports", batchName(path));
     const manifest = join(out, "manifest.json");
+    // A batch whose rows all ended may still be writing the manifest that says so: wait for it, so the manifest read below is final.
+    await this.#runs.get(canonicalPathSync(out))?.flushed();
     const earlier = await readManifest(manifest, path, request.failed);
     const ids = file.rows.map((row) => row.id);
     let chosen = chooseRows(ids, request.rows);
@@ -164,7 +166,9 @@ export class BatchService {
       this.#runs.delete(key);
       throw error;
     }
-    void run.ended.then(() => this.#runs.delete(key));
+    void run.ended.then(() => {
+      if (this.#runs.get(key) === run) this.#runs.delete(key);
+    });
     const jobs = run.start();
     return { ...base, manifest, dryRun: false, entries: run.snapshot().entries, jobs };
   }
@@ -172,7 +176,7 @@ export class BatchService {
   /** True while a batch of the project at `root` has rows left to render (gc keeps clip renders then). */
   active(root: string): boolean {
     const key = canonicalPathSync(root);
-    return [...this.#runs.values()].some((run) => canonicalPathSync(run.root) === key);
+    return [...this.#runs.values()].some((run) => !run.finished && canonicalPathSync(run.root) === key);
   }
 }
 
@@ -181,6 +185,11 @@ class BatchRun {
   readonly root: string;
   /** Resolves once the batch ended and the manifest says so. */
   readonly ended: Promise<void>;
+  /** True once every row ended, although the manifest may not say so yet. */
+  get finished(): boolean {
+    return this.#finishedAt !== null;
+  }
+
   readonly #where: { batch: string; template: string; out: string; manifest: string };
   readonly #rows: PlannedRow[];
   /** Entries of the rows this run does not render, as the manifest of the run before left them. */
@@ -212,6 +221,11 @@ class BatchRun {
     this.#order = order;
     this.#jobs = jobs;
     this.ended = new Promise((resolve) => (this.#resolveEnded = resolve));
+  }
+
+  /** Resolves once the manifest says `done` when the batch has finished; at once while it still has rows left. */
+  flushed(): Promise<void> {
+    return this.finished ? this.ended : Promise.resolve();
   }
 
   /** Queue the first row; returns its jobs. */
