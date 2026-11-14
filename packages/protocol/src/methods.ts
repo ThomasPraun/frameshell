@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 126;
+export const PROTOCOL_VERSION = 127;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1376,6 +1376,9 @@ export const methods = {
       "`metrics.seam` is the grey jump between the last frame and the first (a hard cut reads 40 to 80, under 10 is continuous); with `loop` a duplicate or a jump is a warning. " +
       "With `file` and `preset`, `metrics.delivery` checks the file against the export plan. The `safe` sheet and `safeZones` also flag graphics (generated clips with an alpha render: titles included) and faces (footage with a cached `people scan`) that reach into a zone, " +
       "and each is a `safe-zone` craft warning. " +
+      "A project's `requirements.json` (written with `file.write`) is judged on every run with metrics: `metrics.requirements` lists each expectation it states (film length, longest still stretch, a held end card, loudness of a `file`, " +
+      "smallest caption size, per clip `appearsBy`, `before` and `keepsMoving`) as pass, fail or skipped, with what was measured. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
+      "a `waivers` entry (check, optional clip, reason) lifts the warnings it covers out of `craft` into `metrics.waived` with its reason, never silently. `requirements.failed` counts what still fails. " +
       "The MCP tool returns the sheets as images. " +
       "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",

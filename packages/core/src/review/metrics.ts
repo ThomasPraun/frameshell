@@ -1,4 +1,4 @@
-import type { ReviewCraftWarning, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSpan, ReviewSync } from "@frameshell/protocol";
+import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSpan, ReviewSync } from "@frameshell/protocol";
 import type { ResolvedSubtitleTrack } from "@frameshell/schema";
 import { deliveryWarnings } from "./delivery.js";
 import { seamWarnings } from "./loop.js";
@@ -118,17 +118,25 @@ export function shortCues(tracks: readonly ResolvedSubtitleTrack[], range: { fro
   return { cues, short };
 }
 
+/**
+ * The stretches where the picture holds still: a run of samples `i..j` whose change since the sample before is under
+ * {@link STILL_ENERGY} is a still picture from sample `i - 1` to `j`.
+ */
+export function stillSpans(series: MotionSeries): ReviewSpan[] {
+  const { times, energy } = series;
+  return runs(times.length, 1, (i) => energy[i]! < STILL_ENERGY).map(({ first, last }) => span(times[first - 1]!, times[last]!));
+}
+
 /** The metrics of one run; see `ReviewMetricsSchema`. */
 export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   const { series, range } = input;
-  const { times, energy, spread } = series;
+  const { times, spread } = series;
   const samples = times.length;
   const spacing = samples > 1 ? (times[samples - 1]! - times[0]!) / (samples - 1) : 0;
   const end = (last: number) => Math.min(range.to, times[last]! + (spacing || 1 / input.fps));
-  const craft: ReviewCraftWarning[] = [];
+  const craft: ReviewFinding[] = [];
 
-  // Energy[i] is the change since sample i - 1, so a run of still samples i..j is a still picture from sample i - 1 to j.
-  const still = runs(samples, 1, (i) => energy[i]! < STILL_ENERGY).map(({ first, last }) => span(times[first - 1]!, times[last]!));
+  const still = stillSpans(series);
   const staticRuns = still.filter((run) => run.seconds > STILL_WARN_S);
   const longestStatic = still.reduce<ReviewSpan | null>((best, run) => (best === null || run.seconds > best.seconds ? run : best), null);
   for (const run of staticRuns) craft.push({ check: "static", from: run.from, to: run.to, message: `nothing changes in the picture for ${run.seconds} s (from ${run.from} to ${run.to} s).` });
@@ -189,6 +197,7 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   for (const { platform, flags } of input.safe ?? []) craft.push(...safeWarnings(platform, flags));
 
   craft.sort((a, b) => (a.from ?? -1) - (b.from ?? -1));
+  // Every finding is a warning until `requirements.json` is applied (`judgeRequirements`).
   return {
     picture: { samples, spacing: round(spacing), longestStatic, staticRuns, events: events.length, largestGap, blank, firstFrameEmpty },
     subtitles,
@@ -196,6 +205,8 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
     sync,
     seam,
     delivery,
-    craft,
+    craft: craft.map((finding) => ({ ...finding, severity: "warn" as const })),
+    waived: [],
+    requirements: null,
   };
 }

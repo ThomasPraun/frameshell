@@ -1,4 +1,4 @@
-import { type ReviewCraftWarning, type ReviewSafeFlag, SAFE_SUBJECTS, type ZoneEdge } from "@frameshell/protocol";
+import { type ReviewFinding, type ReviewSafeFlag, SAFE_SUBJECTS, type ZoneEdge } from "@frameshell/protocol";
 import { type FontMetrics, type ResolvedSubtitleTrack, type SafeZone, type Size, type SubtitleCue, type SubtitleStyle, cueTokens, subtitleLayout } from "@frameshell/schema";
 
 // Where a platform's UI covers the picture and which captions reach into it. Pure: the `safe` sheet of `review`.
@@ -158,7 +158,7 @@ export function subjectsAt(crossings: readonly CueCrossing[], frame: number): No
  * Craft warnings for the graphics and faces of `flags` that reach into the zones of `platform`. Captions are not
  * repeated here: they have their own line in `safeZones`.
  */
-export function safeWarnings(platform: string, flags: readonly ReviewSafeFlag[]): ReviewCraftWarning[] {
+export function safeWarnings(platform: string, flags: readonly ReviewSafeFlag[]): ReviewFinding[] {
   return flags
     .filter((flag) => flag.subject !== "subtitle")
     .map((flag) => ({

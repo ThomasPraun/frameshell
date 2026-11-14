@@ -17,6 +17,11 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                --file (LUFS, LRA, true peak, phone band), sounds against the picture events they belong
                                to (early over 45 ms, late over 75 ms, next to what random placement scores), the jump
                                from the last frame to the first, and craft warnings; written without --sheets.
+                               requirements.json (project root, written with file.write; see its JSON Schema): the
+                               film's expectations (length, longest still stretch, end card, loudness of a --file,
+                               smallest captions, per clip appearsBy/before/keepsMoving) are checked into metrics, a
+                               craft check listed in "fail" is a failure, and a waiver (check, clip, reason) moves its
+                               warnings to "waived" with the reason. Any failure makes review exit 1.
                                --loop: the film repeats, so a seam that holds a frame or jumps is a warning.
                                --preset p (with --file): check the file against the export plan of --timeline (and
                                --format) with that preset: size, frame rate, length, codecs, loudness.
@@ -111,9 +116,11 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
 }
 
 /** Run a parsed `review`; human output unless `json`. */
-export async function executeReview(conn: DaemonConnection, inv: ReviewInvocation, cwd: string, json: boolean): Promise<string> {
+export async function executeReview(conn: DaemonConnection, inv: ReviewInvocation, cwd: string, json: boolean, outcome: { code: number }): Promise<string> {
   const { kind: _kind, ...params } = inv;
   const result = await conn.request("review", { cwd, ...params });
+  // What `requirements.json` states and the film misses fails the command; warnings alone never do.
+  if (result.metrics?.requirements && result.metrics.requirements.failed > 0) outcome.code = 1;
   return json ? `${JSON.stringify(result, null, 2)}\n` : formatReview(result);
 }
 
@@ -164,6 +171,13 @@ function formatMetrics(metrics: ReviewMetrics): string[] {
     lines.push(`  delivery against ${delivery.timeline} with ${delivery.preset} (${delivery.format}): ${delivery.checks.every((check) => check.ok) ? "as planned" : "differs"}`);
     for (const check of delivery.checks) lines.push(`    ${check.ok ? "ok " : "BAD"} ${check.field}: ${check.actual ?? "missing"} (plan ${check.expected})`);
   }
-  lines.push(...metrics.craft.map((warning) => `  craft ${warning.check}: ${warning.message}`));
+  lines.push(...metrics.craft.map((warning) => `  craft ${warning.check}${warning.severity === "fail" ? " FAIL" : ""}: ${warning.message}`));
+  for (const warning of metrics.waived) lines.push(`  waived ${warning.check}${warning.clip ? ` (clip ${warning.clip})` : ""}: ${warning.message} Reason: ${warning.reason}`);
+  const { requirements } = metrics;
+  if (requirements) {
+    lines.push(`  ${requirements.file}: ${requirements.failed === 0 ? "met" : `${requirements.failed} failed`}, ${requirements.checks.filter((check) => check.status === "pass").length} of ${requirements.checks.length} checks pass`);
+    for (const check of requirements.checks) lines.push(`    ${check.status === "pass" ? "ok  " : check.status === "fail" ? "FAIL" : "skip"} ${check.id}${check.clip ? ` ${check.clip}` : ""}: ${check.message}`);
+    for (const waiver of requirements.waivers.filter((candidate) => candidate.matched === 0)) lines.push(`    unused waiver of ${waiver.check}${waiver.clip ? ` on ${waiver.clip}` : ""}: ${waiver.reason}`);
+  }
   return lines;
 }
