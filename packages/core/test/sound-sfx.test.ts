@@ -54,6 +54,24 @@ const HASHES: Record<string, string> = {
   "shutter 1": "edd9de71d38e2c2e",
   "shutter 2": "5b009d03986cd139",
   "shutter 3": "0747d87192a665dc",
+  "glitch 1": "0ca7cd8b0e026484",
+  "glitch 2": "b3e8af638286d51b",
+  "glitch 3": "7a8774baa3bf9402",
+  "braaam 1": "67fc026a077bf3a0",
+  "braaam 2": "357be6e94c4ba6ec",
+  "braaam 3": "143517a6681f4588",
+  "swell 1": "ac1b27d3c2afef08",
+  "swell 2": "5a7074e423c5c1b9",
+  "swell 3": "d13c8cb789157deb",
+  "bell 1": "f16a25799c6a0628",
+  "bell 2": "7734a27397c82844",
+  "bell 3": "f8efc7290180eaa9",
+  "notify 1": "1768fcddd477553a",
+  "notify 2": "8bb462badd9b1676",
+  "notify 3": "af8603f4d231388f",
+  "sting 1": "e81b37495d40cf37",
+  "sting 2": "89d1042d83e68c8f",
+  "sting 3": "ff7a62d909909897",
 };
 
 const cases = SFX_KINDS.flatMap((kind) => Array.from({ length: SFX_VARIANTS }, (_, i) => ({ kind, variant: i + 1 })));
@@ -106,6 +124,25 @@ describe("synthesizeSfx", () => {
     expect(riser.anchor).toBe(riser.channels[0]!.length);
   });
 
+  it("gives the later kinds their length and anchor: a hit at its onset, a swell at its peak, a sting where the chirp lands", () => {
+    const length = (kind: SfxSpec["kind"], variant: number) => synthesizeSfx({ kind, variant, seed: 1 }).channels[0]!.length / SOUND_SAMPLE_RATE;
+    expect(length("glitch", 1)).toBeCloseTo(6 * 0.042 + 0.032, 3);
+    expect(length("braaam", 1)).toBeCloseTo(1.85, 3);
+    expect(length("swell", 2)).toBeCloseTo(1.0, 3);
+    expect(length("notify", 2)).toBeCloseTo(0.09 + 0.35, 3);
+    for (const kind of ["glitch", "braaam", "bell", "notify"] as const) expect(synthesizeSfx({ kind, variant: 1, seed: 1 }).anchor).toBe(0);
+    expect(synthesizeSfx({ kind: "swell", variant: 1, seed: 1 }).anchor / SOUND_SAMPLE_RATE).toBeCloseTo(0.85 * 1.2, 2);
+    expect(synthesizeSfx({ kind: "sting", variant: 1, seed: 1 }).anchor / SOUND_SAMPLE_RATE).toBeCloseTo(0.085, 3);
+  });
+
+  it("builds a swell to its anchor and lets a bell ring out", () => {
+    const swell = synthesizeSfx({ kind: "swell", variant: 1, seed: 1 });
+    const at = swell.anchor / SOUND_SAMPLE_RATE;
+    expect(rms(swell, at - 0.05, at + 0.02)).toBeGreaterThan(rms(swell, 0, 0.2) * 5);
+    const bell = synthesizeSfx({ kind: "bell", variant: 1, seed: 1 });
+    expect(rms(bell, 0, 0.1)).toBeGreaterThan(rms(bell, 0.8, 0.9) * 5);
+  });
+
   it("swells a whoosh to its anchor, and builds a riser to its end", () => {
     const whoosh = synthesizeSfx({ kind: "whoosh", variant: 1, seed: 1 });
     const at = whoosh.anchor / SOUND_SAMPLE_RATE;
@@ -125,9 +162,12 @@ describe("synthesizeSfx", () => {
     expect(energy(channels[1]!, (3 * n) / 4, n)).toBeGreaterThan(energy(channels[0]!, (3 * n) / 4, n));
   });
 
-  it("takes a length for a whoosh and a riser", () => {
+  it("takes a length for a whoosh, a riser and a swell", () => {
     expect(synthesizeSfx({ kind: "whoosh", variant: 1, seed: 1, length: 1.5 }).channels[0]!.length).toBe(1.5 * SOUND_SAMPLE_RATE);
     expect(synthesizeSfx({ kind: "riser", variant: 1, seed: 1, length: 3 }).channels[0]!.length).toBe(3 * SOUND_SAMPLE_RATE);
+    const swell = synthesizeSfx({ kind: "swell", variant: 1, seed: 1, length: 2 });
+    expect(swell.channels[0]!.length).toBe(2 * SOUND_SAMPLE_RATE);
+    expect(swell.anchor / SOUND_SAMPLE_RATE).toBeCloseTo(1.7, 2);
   });
 
   it("refuses a variant outside 1 to 3", () => {
