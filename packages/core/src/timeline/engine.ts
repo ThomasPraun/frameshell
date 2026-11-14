@@ -969,16 +969,20 @@ class Edit {
         hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
       });
     }
-    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, transform, props, elements, scriptRef } = args;
-    if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, transform, props, elements, scriptRef].every((value) => value === undefined)) {
+    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, transform, props, elements, scriptRef } = args;
+    if (
+      [speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, transform, props, elements, scriptRef].every(
+        (value) => value === undefined,
+      )
+    ) {
       throw this.invalid("nothing to set.", {
-        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, transform, props, elements, scriptRef.",
+        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, transform, props, elements, scriptRef.",
       });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
-    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined || grade !== undefined)) {
-      // ADR 0031 decision 5: no effects on shots or angles in v1, skipped like transitions on program tracks.
-      const effects = { audioEffects, backdrop, grade };
+    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined || grade !== undefined || vignette !== undefined)) {
+      // ADR 0031 decision 5 (and ADR 0043 decision 9): no effects on shots or angles in v1, skipped like transitions on program tracks.
+      const effects = { audioEffects, backdrop, grade, vignette };
       const skipped = (Object.keys(effects) as (keyof typeof effects)[]).filter((field) => effects[field] !== undefined).join(" and ");
       this.warnings.push(`${clip.id} is a multicam shot: shots take no effects in this version; ${skipped} skipped.`);
       if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, transform, props, elements, motionBlur, scriptRef].every((value) => value === undefined)) return;
@@ -1030,6 +1034,7 @@ class Edit {
       if (grade !== null && isMedia(clip) && clip.grade) await this.warnLogFootage(clip.asset);
     }
     if (motionBlur !== undefined) await this.setMotionBlur(track, clip, motionBlur);
+    if (vignette !== undefined) this.setVignette(track, clip, vignette);
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
       clip.transform = { ...clip.transform, ...transform };
@@ -1059,7 +1064,7 @@ class Edit {
    */
   async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
     this.checkFormat(format);
-    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "motionBlur", "scriptRef"] as const).filter(
+    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "motionBlur", "vignette", "scriptRef"] as const).filter(
       (field) => args[field] !== undefined,
     );
     if (shared.length > 0) {
@@ -1191,6 +1196,25 @@ class Edit {
     if (!(await this.adapter(clip.type)).motionBlur) {
       this.warnings.push(`the ${clip.type} plugin does not apply motion blur yet: ${clip.id} keeps rendering sharp until it does.`);
     }
+  }
+
+  /**
+   * Merge `vignette` field by field into a media or generated clip's (ADR 0043; `null` clears, `{}` turns it on with the
+   * defaults). A nested timeline clip is refused: flattening would give each clip inside its own vignette.
+   */
+  setVignette(track: AnyClipTrack, clip: Clip, vignette: NonNullable<OperationArgs<"clip.set">["vignette"]> | null): void {
+    if (isNested(clip)) {
+      throw this.invalid(`nested timeline clips take no \`vignette\`; ${clip.id} is ${clip.type}.`, {
+        field: "vignette",
+        hint: "Set it on the clips inside the nested timeline, each of which is darkened at its own edges.",
+      });
+    }
+    if (track.kind === "audio") throw this.invalid("audio tracks take no `vignette`: they show no picture.", { field: "vignette" });
+    if (vignette === null) {
+      delete clip.vignette;
+      return;
+    }
+    clip.vignette = { ...clip.vignette, ...defined(vignette) };
   }
 
   /**

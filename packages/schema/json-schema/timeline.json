@@ -1041,6 +1041,31 @@
                           },
                           "additionalProperties": false,
                           "description": "Colour grade (ADR 0031): exposure and white balance, then contrast and saturation, then the LUT; export and the preview apply it as one 3D table. Media clips only; shots take none."
+                        },
+                        "vignette": {
+                          "type": "object",
+                          "properties": {
+                            "strength": {
+                              "description": "Darkening at the edge: 0 none, 1 black. Default 0.35.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "radius": {
+                              "description": "Where the darkening is full, from the centre in half-diagonals of the picture (1 = the corners). Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1.5
+                            },
+                            "softness": {
+                              "description": "Width of the falloff inside `radius`, in half-diagonals: 0 a hard edge. Default 0.6.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Vignette (ADR 0043): the clip's own picture darkens smoothly towards its edges, after the grade and before any transition shape. `{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none."
                         }
                       },
                       "required": [
@@ -2794,6 +2819,31 @@
                           },
                           "additionalProperties": false,
                           "description": "Motion blur of a generated clip (ADR 0041): each frame is the average of sub-frame pictures across the shutter window, so fast moves smear like a camera's. `{}` blurs with the defaults. It is a second render beside the sharp one (draft exports use the sharp one, the preview until the blurred one is ready) and costs about `samples` times a sharp render."
+                        },
+                        "vignette": {
+                          "type": "object",
+                          "properties": {
+                            "strength": {
+                              "description": "Darkening at the edge: 0 none, 1 black. Default 0.35.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "radius": {
+                              "description": "Where the darkening is full, from the centre in half-diagonals of the picture (1 = the corners). Default 1.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1.5
+                            },
+                            "softness": {
+                              "description": "Width of the falloff inside `radius`, in half-diagonals: 0 a hard edge. Default 0.6.",
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Vignette (ADR 0043): the clip's own picture darkens smoothly towards its edges, after the grade and before any transition shape. `{}` uses the defaults. Media and generated clips on video tracks; shots and nested timeline clips take none."
                         }
                       },
                       "required": [

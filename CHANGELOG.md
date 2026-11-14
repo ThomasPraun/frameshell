@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Clip vignette, slice 2 of #500 (ADR 0043, epic #451; protocol 136): an optional `vignette { strength?, radius?, softness? }`
+  on media and generated clips darkens the clip's own picture smoothly towards its edges (`{}` = strength 0.35, full at
+  the corners, falloff 0.6 half-diagonals), after its colour grade and before scale, keys and transition shapes; in
+  another format it darkens the part the format shows. `frameshell clip set --vignette 0.4` (also `--vignette-radius`,
+  `--vignette-softness`, `--clear-vignette`; daemon and MCP `clip.set` `vignette`, merged, `null` clears; refused on nested
+  timeline clips, skipped on multicam shots with a warning). Export multiplies each piece by a one-frame `geq` plate of
+  `vignetteGain` (exactly its 8-bit levels, alpha kept); the app's preview draws the same formula in the grade's WebGL2
+  pass. Timelines without it export byte-identical plans. No inspector control yet.
 - Sharp and blurred renders of a clip with motion blur, slice 3 of #501 (ADR 0041 decision 11, epic #451; protocol 135):
   a generated clip with `motionBlur` keeps two cached renders. The sharp one (the key it had without blur) renders first
   and is what the live preview and `render --quality draft` use; the blurred one is queued after it in the background,
