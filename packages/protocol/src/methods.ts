@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 131;
+export const PROTOCOL_VERSION = 132;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -338,9 +338,25 @@ const JobSchema = z.object({
         "`.frameshell/cache/clips/<key>` (the render lands at `<key>.webm`, or `<key>.mp4` when opaque). `audio-fx`: absolute bake " +
         "file `.frameshell/audio-fx/<key>.pcm`. Null for `ingest`.",
     ),
+  priority: z
+    .enum(["interactive", "background"])
+    .describe(
+      "Order of a `queued` job in its queue. `background` waits behind every `interactive` job; the clip renders the daemon queues " +
+        "by itself for timelines nobody is looking at are `background`, and a `clip.renders` or export request for one makes it " +
+        "`interactive`. Every other job is `interactive` (first come, first served). A running job is never interrupted.",
+    ),
+  position: z
+    .int()
+    .min(1)
+    .nullable()
+    .describe(
+      "Place in the order a `queued` job starts in, 1 = next (clip renders run one at a time; other jobs two at a time, " +
+        "so 1 and 2 start together when both slots are free). Null unless `queued`. As of this snapshot: " +
+        "it moves when other jobs are queued, promoted, started or canceled.",
+    ),
   state: z
     .enum(["queued", "running", "done", "failed", "canceled"])
-    .describe("`canceled`: the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
+    .describe("`canceled`: stopped by `job.cancel`, or the daemon stopped before the job finished; an `ingest` is queued again when the project reopens."),
   step: z
     .enum(["hash", "probe", "proxy", "sidecar", "waveform", "thumbnails", "clips", "audio-fx", "video", "mux", "render", "faces", "people", "transcribe", "matte", "beats", "analyze", "capture"])
     .nullable()
@@ -1732,7 +1748,10 @@ export const methods = {
     description:
       "Background jobs of the enclosing project (ingest, render), with state and progress. Jobs keep running after the " +
       "caller disconnects. Poll this until every job you care about is `done` or `failed`, or read it once after " +
-      "subscribing to `job.progress` and follow the events instead.",
+      "subscribing to `job.progress` and follow the events instead. A `queued` job says its `position` (1 = next) and its " +
+      "`priority`: generated-clip renders (`clip` jobs) run one at a time, interactive ones (what the preview, a frame, an " +
+      "export or `clip.renders` asks for) before background ones, and a background one still starts after a few " +
+      "interactive ones, so a long render never waits forever.",
     params: z.strictObject({
       cwd: CwdParam,
       active: z.boolean().default(false).describe("Only `queued` and `running` jobs. Default false: also finished ones."),
@@ -1740,6 +1759,25 @@ export const methods = {
     result: z.object({
       dir: z.string().describe("Project root."),
       jobs: z.array(JobSchema).describe("Oldest first."),
+    }),
+  },
+  "job.cancel": {
+    mutating: true,
+    description:
+      "Cancel a generated-clip render (a `clip` job from `job.list`): a queued one is dropped at once and the next one starts, " +
+      "a running one is stopped and ends `canceled` (follow `job.progress`, or `job.list`). The clip is then `failed` in " +
+      "`clip.renders` with the cancel as its error, and the daemon does not render it again until its inputs change; an " +
+      "export or `render` that needs it renders it again. Other kinds of job cannot be canceled (an `ingest` would be " +
+      "queued again when the project reopens). Fails with InvalidOperation (data `{ op, reason, field: \"job\" }`; " +
+      "`reason`: `unknown-job`, no job of this project has that id (finished ones are dropped after a while), or `not-cancelable`, " +
+      "not a `clip` job). Canceling a finished job changes nothing. Example: `{ job: \"j_c7\" }`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      job: z.string().min(1).describe("Job id from `job.list` or `clip.renders`, e.g. `j_c7`."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      job: JobSchema.describe("The job after the request; `state` is `canceled` for a queued one, still `running` for a running one until it stops."),
     }),
   },
   "clip.renders": {
@@ -5099,6 +5137,8 @@ export type FileWriteParams = MethodParams<"file.write">;
 export type FileWriteResult = MethodResult<"file.write">;
 /** Background job as reported by `status` and `job.list`. */
 export type JobInfo = z.output<typeof JobSchema>;
+/** Order of a queued {@link JobInfo}: see `priority` of `job.list`. */
+export type JobPriority = JobInfo["priority"];
 /** Step of a running {@link JobInfo}. */
 export type JobStep = NonNullable<JobInfo["step"]>;
 /** Result of `clip.renders`. */

@@ -38,6 +38,7 @@ import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeat
 import { BRAND_FLAGS, BRAND_USAGE, type BrandInvocation, executeBrand, parseBrand } from "./brand-commands.js";
 import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
+import { JOB_FLAGS, JOB_USAGE, type JobInvocation, executeJob, formatJob, parseJob } from "./job-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { BATCH_FLAGS, BATCH_USAGE, type BatchInvocation, batchOutcome, batchLabel, describeBatch, parseBatch } from "./batch-commands.js";
@@ -143,7 +144,7 @@ ${REVIEW_USAGE}${ANALYZE_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [
                                0 accepted (or nothing to wait for), 3 rejected, 4 stale, 5 aborted, 6 still
                                pending after the timeout (run it again)
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
-${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${SOUND_USAGE}${BEATS_USAGE}${STYLE_USAGE}${BRAND_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
+${JOB_USAGE}${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${SOUND_USAGE}${BEATS_USAGE}${STYLE_USAGE}${BRAND_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
                                and print its path: a grayscale video in .frameshell/cache/mattes/, white = the
                                person. Once per file content; estimated 1.5 min per minute of video. First run
                                downloads 0.5 MB (plus ONNX Runtime, 33 MB, if face detection never ran)
@@ -174,13 +175,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "brand", "skill", "model", "format", "batch", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "job", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "brand", "skill", "model", "format", "batch", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "rows", "failed", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "yes", "formats", "rows", "failed", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -190,6 +191,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   import: ["link", "wait", ...PROVENANCE_FLAGS],
   ...CREDITS_FLAGS,
   gc: ["dry-run"],
+  ...JOB_FLAGS,
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
@@ -267,6 +269,7 @@ type Invocation =
   | { kind: "proposal.wait"; timeout?: number }
   | { kind: "proposal.diff"; tx?: string }
   | StyleInvocation
+  | JobInvocation
   | ReviewInvocation
   | AnalyzeInvocation
   | AnalyzeDiffInvocation
@@ -328,6 +331,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           link: { type: "boolean", default: false },
           wait: { type: "boolean", default: false },
           "dry-run": { type: "boolean", default: false },
+          active: { type: "boolean", default: false },
           name: { type: "string", multiple: true },
           "no-skill": { type: "boolean", default: false },
           "no-verify": { type: "boolean", default: false },
@@ -467,7 +471,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "brand" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -511,6 +515,7 @@ function parseBuiltin(
     link: boolean;
     wait: boolean;
     "dry-run": boolean;
+    active?: boolean | undefined;
     provider?: string | undefined;
     model?: string | undefined;
     language?: string | undefined;
@@ -606,6 +611,7 @@ function parseBuiltin(
   if (command === "model") return parseModel(rest, options);
   if (command === "matte") return rest.length === 1 ? { kind: "matte", asset: rest[0]! } : null;
   if (command === "style") return parseStyle(rest, options);
+  if (command === "job") return parseJob(rest, options);
   if (command === "brand") return parseBrand(rest);
   if (command === "format") return parseFormat(rest, options);
   if (command === "batch") return parseBatch(rest, options);
@@ -888,6 +894,9 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "analyze":
     case "analyze.diff":
       return executeAnalyze(conn, inv, cwd, flags.json);
+    case "job.list":
+    case "job.cancel":
+      return executeJob(conn, inv, cwd, flags.json);
     case "style.show":
     case "style.set":
     case "style.apply":
@@ -1240,20 +1249,6 @@ function duration(ms: number): string {
 /** Seconds a job ran; null until it ended. */
 function seconds(job: JobInfo): number | null {
   return job.startedAt && job.finishedAt ? (Date.parse(job.finishedAt) - Date.parse(job.startedAt)) / 1000 : null;
-}
-
-function formatJob(job: JobInfo): string {
-  const what = `${job.kind} ${job.asset}`;
-  switch (job.state) {
-    case "running":
-      return `${what}: ${job.step ?? "starting"} ${Math.round(job.progress * 100)}% (${job.id})`;
-    case "done":
-      return `${what}: done${job.cached ? " (cached, nothing re-encoded)" : ""} (${job.id})`;
-    case "failed":
-      return `${what}: failed: ${job.error ?? "unknown error"} (${job.id})`;
-    default:
-      return `${what}: ${job.state} (${job.id})`;
-  }
 }
 
 /**

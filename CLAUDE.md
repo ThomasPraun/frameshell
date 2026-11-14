@@ -12,7 +12,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Past decisions and why | `docs/adr/` |
 | Tickets | `docs/agents/issue-tracker.md` |
 | Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts`; replay keys of `mutating` methods `packages/core/src/idempotency.ts` |
-| Media ingest (proxy recipe, cache, job queue; SVG + font files = non-media assets, `kind` in `asset.list`) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `media/kind.ts`, `jobs/queue.ts` |
+| Media ingest (proxy recipe, cache, job queue; SVG + font files = non-media assets, `kind` in `asset.list`; clip queue priority interactive/background + starvation limit, `job.cancel`: ADR 0035 d6) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `media/kind.ts`, `jobs/queue.ts`; clip priority set in `clips/renderer.ts` `#render`; CLI `packages/cli/src/job-commands.ts` |
 | Cache cleanup (`gc`: unused derived media, clip renders, temps; sweep on open) | `packages/core/src/gc.ts`; `MediaService.gc`, `ClipRenderer.gc` |
 | Managed binaries (ffmpeg, whisper.cpp, headless Chrome, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
 | People (`people.json`: model, links, `missing`, speaker name written into transcripts, confirm, review mode not holding it; ADR 0020) | `packages/schema/src/people.ts`, `packages/core/src/people/service.ts`, `packages/protocol/src/people.ts`; CLI `packages/cli/src/people-commands.ts`; acceptance `docs/acceptance/people.md` |

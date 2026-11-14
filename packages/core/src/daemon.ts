@@ -1752,6 +1752,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, jobs: listJobs({ project: dir, active }) };
     },
+    "job.cancel": async ({ cwd, job: id }) => {
+      const dir = await root(cwd);
+      const found = clipJobs.get(id) ?? jobs.get(id);
+      if (!found || canonicalPathSync(found.project) !== canonicalPathSync(dir)) {
+        throw new RpcError(ErrorCode.InvalidOperation, `job.cancel: no job ${id} in this project; \`job.list\` shows the current ones.`, { op: "job.cancel", reason: "unknown-job", field: "job" });
+      }
+      if (found.kind !== "clip") {
+        throw new RpcError(ErrorCode.InvalidOperation, `job.cancel: ${id} is a ${found.kind} job; only generated-clip renders (kind clip) can be canceled.`, { op: "job.cancel", reason: "not-cancelable", field: "job" });
+      }
+      return { dir, job: clipJobs.cancel(id) ?? found };
+    },
     "events.subscribe": async ({ cwd, events: names }, _caller, request) => {
       const dir = await root(cwd);
       return { dir, events: events.subscribe(request.sink, await canonicalPath(dir), dir, names) };

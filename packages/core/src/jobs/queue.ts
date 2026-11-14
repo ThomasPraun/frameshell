@@ -1,4 +1,4 @@
-import type { JobInfo, JobStep } from "@frameshell/protocol";
+import type { JobInfo, JobPriority, JobStep } from "@frameshell/protocol";
 
 /** What a running job may report. */
 export interface JobUpdate {
@@ -26,6 +26,11 @@ export interface JobRequest {
   asset: string;
   /** Absolute file a render writes; omit for ingest. */
   output?: string;
+  /**
+   * `interactive` (default) starts before every waiting `background` job; `background` still gets a slot
+   * after {@link JobQueueOptions.starvationLimit} interactive starts in a row. A running job is never preempted.
+   */
+  priority?: JobPriority;
   /** Resolve = done, reject = failed with the error's message. */
   run: (ctx: JobContext) => Promise<void>;
 }
@@ -41,6 +46,9 @@ export interface JobChange {
 /** Default {@link JobQueueOptions.progressIntervalMs}. */
 const PROGRESS_INTERVAL_MS = 200;
 
+/** Default {@link JobQueueOptions.starvationLimit}. */
+const STARVATION_LIMIT = 4;
+
 /** Options for {@link JobQueue}. */
 export interface JobQueueOptions {
   /** Jobs running at once. ffmpeg already uses every core, so keep it small. */
@@ -54,6 +62,11 @@ export interface JobQueueOptions {
    * Step and state changes always go out at once. Default 200 ms.
    */
   progressIntervalMs?: number;
+  /**
+   * Interactive jobs that may start in a row while a background job waits; the next start then goes to the
+   * oldest background job, so finals still progress under a steady stream of short renders. Default 4.
+   */
+  starvationLimit?: number;
   /** Job id prefix; queues sharing one daemon need distinct ones. Default `j_`. */
   idPrefix?: string;
 }
@@ -67,7 +80,7 @@ interface Entry {
 }
 
 /**
- * In-daemon FIFO of background work (SPEC §3.1). Jobs belong to the daemon,
+ * In-daemon queue of background work (SPEC §3.1), FIFO within a priority. Jobs belong to the daemon,
  * not to the client that queued them: a disconnect never stops one. State is
  * in memory; work lost to a daemon exit is found again from disk (ingest
  * re-queues assets without complete outputs when a project opens).
@@ -83,6 +96,9 @@ export class JobQueue {
   readonly #watchers = new Set<(change: JobChange) => void>();
   readonly #progressIntervalMs: number;
   readonly #idPrefix: string;
+  readonly #starvationLimit: number;
+  /** Interactive jobs started in a row while a background one waited. */
+  #streak = 0;
   #nextId = 1;
   #busy = false;
   #closed = false;
@@ -93,6 +109,7 @@ export class JobQueue {
     this.#onBusyChange = options.onBusyChange ?? (() => {});
     this.#progressIntervalMs = options.progressIntervalMs ?? PROGRESS_INTERVAL_MS;
     this.#idPrefix = options.idPrefix ?? "j_";
+    this.#starvationLimit = Math.max(1, options.starvationLimit ?? STARVATION_LIMIT);
   }
 
   /**
@@ -121,7 +138,8 @@ export class JobQueue {
         info.asset === request.asset &&
         info.output === (request.output ?? null);
       if (same) {
-        return { ...info };
+        if (request.priority !== "background") this.promote(info.id);
+        return this.#snapshot(entry);
       }
     }
     const info: JobInfo = {
@@ -130,6 +148,8 @@ export class JobQueue {
       project: request.project,
       asset: request.asset,
       output: request.output ?? null,
+      priority: request.priority ?? "interactive",
+      position: null,
       state: "queued",
       step: null,
       progress: 0,
@@ -145,27 +165,57 @@ export class JobQueue {
     this.#report(entry, true);
     if (this.#closed) {
       this.#finish(entry, "canceled", null);
-      return { ...info };
+      return this.#snapshot(entry);
     }
     this.#waiting.push(entry);
     this.#setBusy(true);
     this.#pump();
-    return { ...info };
+    return this.#snapshot(entry);
+  }
+
+  /**
+   * Make a queued background job interactive: it starts before the background jobs that wait, in the order it
+   * was queued among the interactive ones. False when it is not queued or already interactive.
+   */
+  promote(id: string): boolean {
+    const entry = this.#entries.get(id);
+    if (!entry || entry.info.state !== "queued" || entry.info.priority === "interactive") return false;
+    entry.info.priority = "interactive";
+    this.#report(entry, false);
+    return true;
+  }
+
+  /**
+   * Cancel a job: a queued one is dropped at once, a running one is aborted through its signal and ends
+   * `canceled` when its `run` settles. Snapshot (a finished job comes back unchanged), undefined when unknown.
+   */
+  cancel(id: string): JobInfo | undefined {
+    const entry = this.#entries.get(id);
+    if (!entry) return undefined;
+    const index = this.#waiting.indexOf(entry);
+    if (index >= 0) {
+      this.#waiting.splice(index, 1);
+      this.#finish(entry, "canceled", null);
+      this.#pump();
+    } else if (this.#running.has(entry)) {
+      entry.abort.abort();
+    }
+    return this.#snapshot(entry);
   }
 
   /** Snapshot of one job; undefined when unknown or already dropped. */
   get(id: string): JobInfo | undefined {
     const entry = this.#entries.get(id);
-    return entry ? { ...entry.info } : undefined;
+    return entry ? this.#snapshot(entry) : undefined;
   }
 
   /** Snapshots, oldest first. */
   list(filter: { project?: string; active?: boolean } = {}): JobInfo[] {
+    const order = this.#order();
     return [...this.#entries.values()]
-      .map(({ info }) => info)
-      .filter((info) => filter.project === undefined || info.project === filter.project)
-      .filter((info) => !filter.active || info.state === "queued" || info.state === "running")
-      .map((info) => ({ ...info }));
+      .filter(({ info }) => filter.project === undefined || info.project === filter.project)
+      .filter(({ info }) => !filter.active || info.state === "queued" || info.state === "running")
+      .map((entry) => this.#snapshot(entry, order));
   }
 
   /** Resolves once nothing is queued or running. */
@@ -183,9 +233,45 @@ export class JobQueue {
     await this.drained();
   }
 
+  /** Index in `waiting` of the entry that starts next, given `streak` interactive starts in a row. */
+  #nextIndex(waiting: readonly Entry[], streak: number): number {
+    const interactive = waiting.findIndex((entry) => entry.info.priority === "interactive");
+    const background = waiting.findIndex((entry) => entry.info.priority === "background");
+    if (interactive < 0) return background;
+    if (background < 0) return interactive;
+    return streak >= this.#starvationLimit ? background : interactive;
+  }
+
+  /** The waiting entries in the order they will start. */
+  #order(): Entry[] {
+    const rest = [...this.#waiting];
+    const order: Entry[] = [];
+    let streak = this.#streak;
+    while (rest.length > 0) {
+      const entry = rest.splice(this.#nextIndex(rest, streak), 1)[0]!;
+      streak = this.#streakAfter(entry, rest, streak);
+      order.push(entry);
+    }
+    return order;
+  }
+
+  /** `streak` after `started` took a slot while `rest` still waits. */
+  #streakAfter(started: Entry, rest: readonly Entry[], streak: number): number {
+    if (started.info.priority === "background") return 0;
+    return rest.some((entry) => entry.info.priority === "background") ? streak + 1 : streak;
+  }
+
+  /** A copy of the job's info; `position` is its place in the start order while queued, 1 = next. */
+  #snapshot(entry: Entry, order?: readonly Entry[]): JobInfo {
+    if (entry.info.state !== "queued") return { ...entry.info, position: null };
+    const index = (order ?? this.#order()).indexOf(entry);
+    return { ...entry.info, position: index >= 0 ? index + 1 : null };
+  }
+
   #pump(): void {
     while (!this.#closed && this.#running.size < this.#concurrency && this.#waiting.length > 0) {
-      const entry = this.#waiting.shift()!;
+      const entry = this.#waiting.splice(this.#nextIndex(this.#waiting, this.#streak), 1)[0]!;
+      this.#streak = this.#streakAfter(entry, this.#waiting, this.#streak);
       this.#running.add(entry);
       void this.#run(entry);
     }
@@ -238,9 +324,10 @@ export class JobQueue {
 
   #report(entry: Entry, stateChanged: boolean): void {
     entry.reportedAt = Date.now();
+    const snapshot = this.#snapshot(entry);
     for (const watcher of [...this.#watchers]) {
       try {
-        watcher({ job: { ...entry.info }, stateChanged });
+        watcher({ job: { ...snapshot }, stateChanged });
       } catch {
         // A watcher's bug must not fail the job.
       }

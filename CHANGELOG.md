@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Clip render queue priority (#502, ADR 0035 decision 6, epic #451; protocol 132): the generated-clip queue still runs one
+  render at a time, but a render somebody waits for (`clip.renders`, so the preview, `frame`, export and a format asked
+  for) now starts before the background ones the daemon queues after an edit or a file change for timelines nobody is
+  looking at, and a queued background render moves up when one of those asks for it. A background render still gets the
+  next slot after four interactive ones in a row, so a long final is delayed, never starved; a running render is never
+  interrupted. Jobs carry `priority` (`interactive` or `background`) and `position` (1 = next, null unless queued) in
+  `job.list`, `status` and `job.progress`. New `job.cancel` (MCP `job_cancel`, CLI `frameshell job cancel <id>`) drops a
+  queued clip render or stops a running one; the clip then shows `failed` (canceled) and is not rendered again until its
+  inputs change, while an export renders it again. New `frameshell job list [--active]`. Left for later: reordering from
+  `job list`, a second lane for renders over a duration threshold, and the app's view of what waits on what.
 - Motion blur of generated clips, slices 1, 2, 4, 5 and 6 of #501 (ADR 0041, SPEC decision 46, epic #451; protocol 131):
   an optional clip field `motionBlur { shutter?, samples?, blend? }` (`{}` = 180° shutter centred on the frame, 8 samples,
   linear light) makes each frame of a generated clip's render the average of sub-frame pictures across the shutter. Set

@@ -8,6 +8,8 @@ const job = (state: JobInfo["state"], step: JobInfo["step"] = null, progress?: n
   project: "/talk",
   asset: "assets/take 1.mp4",
   output: null,
+  priority: "interactive",
+  position: null,
   state,
   step,
   progress: progress ?? (state === "done" ? 1 : 0),
