@@ -279,6 +279,12 @@ const panelOwners = new Map<number, WindowState>();
 let quitting = false;
 /** Shells of closed windows still exiting; the app waits for them before it quits. */
 const exitingShells = new Set<Promise<void>>();
+/** Windows that finished entering full screen (`enter-full-screen` fires after macOS's animation, not at its start). */
+const fullScreenSettled = new WeakSet<BrowserWindow>();
+app.on("browser-window-created", (_event, window) => {
+  window.on("enter-full-screen", () => fullScreenSettled.add(window));
+  window.on("leave-full-screen", () => fullScreenSettled.delete(window));
+});
 
 function createWindow(projectDir?: string): BrowserWindow {
   const window = new BrowserWindow({
@@ -1791,6 +1797,16 @@ function registerIpc(): void {
     if (project) void layouts.save(project.dir, normalizeLayout(layout));
   });
   ipcMain.handle(Channel.panelsDetached, () => panelWindows.detached());
+  ipcMain.handle(Channel.panelsFullScreenSettled, async (event, panel: DetachablePanel | null) => {
+    const window = panel
+      ? [...stateOf(event.sender).panels].find(([, shown]) => shown === panel)?.[0]
+      : BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed() || !window.isFullScreen() || fullScreenSettled.has(window)) return;
+    await new Promise<void>((resolve) => {
+      window.once("enter-full-screen", () => resolve());
+      window.once("closed", () => resolve());
+    });
+  });
   ipcMain.handle(Channel.updatesStatus, () => updater.status());
   ipcMain.on(Channel.updatesRestart, () => void updater.restart());
   ipcMain.on(Channel.updatesDismiss, () => updater.dismiss());

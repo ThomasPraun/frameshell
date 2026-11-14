@@ -17,16 +17,18 @@ import { kineticHeadline } from "./kinetic-headline.js";
 import { logoLockup } from "./logo-lockup.js";
 import { lowerThird } from "./lower-third.js";
 import { notificationStack } from "./notification-stack.js";
+import { productShot } from "./product-shot.js";
 import { promptBar } from "./prompt-bar.js";
 import { sceneBackground } from "./scene-background.js";
 import { terminal } from "./terminal.js";
 import { typingField } from "./typing-field.js";
 
 export { type FontSetup, type Template, type TemplateInput, type TemplateVariable, fontSetup } from "./kit.js";
+export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
 /** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard];
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {

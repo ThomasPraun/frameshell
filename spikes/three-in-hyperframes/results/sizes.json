@@ -1,0 +1,90 @@
+{
+  "three": "0.187.0",
+  "sizes": {
+    "core-full": {
+      "rawKB": 731.8,
+      "gzipKB": 185.3,
+      "brotliKB": 151.8,
+      "inputs": 3,
+      "outsideThree": [
+        "out/entries/core-full.js"
+      ]
+    },
+    "core-curated": {
+      "rawKB": 588.6,
+      "gzipKB": 149.1,
+      "brotliKB": 123.8,
+      "inputs": 3,
+      "outsideThree": [
+        "out/entries/core-curated.js"
+      ]
+    },
+    "full-addons": {
+      "rawKB": 782.5,
+      "gzipKB": 200.4,
+      "brotliKB": 164.2,
+      "inputs": 10,
+      "outsideThree": [
+        "out/entries/full-addons.js"
+      ]
+    },
+    "curated-addons": {
+      "rawKB": 665.7,
+      "gzipKB": 169.5,
+      "brotliKB": 140.2,
+      "inputs": 10,
+      "outsideThree": [
+        "out/entries/curated-addons.js"
+      ]
+    },
+    "curated+RoomEnvironment": {
+      "rawKB": 596,
+      "gzipKB": 150.7,
+      "brotliKB": 125,
+      "inputs": 4,
+      "outsideThree": [
+        "out/entries/curated+RoomEnvironment.js"
+      ]
+    },
+    "curated+RoundedBoxGeometry": {
+      "rawKB": 590.2,
+      "gzipKB": 149.7,
+      "brotliKB": 124.2,
+      "inputs": 4,
+      "outsideThree": [
+        "out/entries/curated+RoundedBoxGeometry.js"
+      ]
+    },
+    "curated+GLTFLoader": {
+      "rawKB": 654.4,
+      "gzipKB": 166,
+      "brotliKB": 137.7,
+      "inputs": 6,
+      "outsideThree": [
+        "out/entries/curated+GLTFLoader.js"
+      ]
+    },
+    "curated+TextGeometry+FontLoader": {
+      "rawKB": 594.4,
+      "gzipKB": 151.2,
+      "brotliKB": 125.1,
+      "inputs": 5,
+      "outsideThree": [
+        "out/entries/curated+TextGeometry+FontLoader.js"
+      ]
+    },
+    "curated+SVGLoader": {
+      "rawKB": 617.4,
+      "gzipKB": 158.9,
+      "brotliKB": 131.7,
+      "inputs": 4,
+      "outsideThree": [
+        "out/entries/curated+SVGLoader.js"
+      ]
+    }
+  },
+  "upstream": {
+    "three.core.js": 1440.2,
+    "three.module.js": 643.5
+  }
+}

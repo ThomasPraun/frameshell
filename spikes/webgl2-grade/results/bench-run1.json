@@ -1,0 +1,727 @@
+{
+ "info": {
+  "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+  "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+  "max3d": 2048
+ },
+ "setup": {
+  "33": {
+   "parseMs": 10.1,
+   "uploadMs": 1.9
+  },
+  "65": {
+   "parseMs": 62.9,
+   "uploadMs": 7.3
+  }
+ },
+ "results": [
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.059,
+    "p50": 0.1,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "syncedMs": {
+    "mean": 2.039,
+    "p50": 1.9,
+    "p95": 3,
+    "max": 3.1
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.059,
+    "p50": 0.1,
+    "p95": 0.2,
+    "max": 0.2
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 16.7,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4970.2,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.051,
+    "p50": 0,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "syncedMs": {
+    "mean": 2.111,
+    "p50": 1.9,
+    "p95": 2.9,
+    "max": 3.1
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.056,
+    "p50": 0.1,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "ticks": {
+    "mean": 8.333,
+    "p50": 8.3,
+    "p95": 8.5,
+    "max": 10.3,
+    "over1_5x": 0,
+    "n": 597
+   },
+   "wallMs": 4967.7,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.055,
+    "p50": 0.1,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "syncedMs": {
+    "mean": 2.39,
+    "p50": 2.2,
+    "p95": 3.2,
+    "max": 3.3
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.051,
+    "p50": 0.1,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 16.7,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4970.5,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.183,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.4
+   },
+   "syncedMs": {
+    "mean": 3.877,
+    "p50": 3.8,
+    "p95": 4.3,
+    "max": 5.5
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.173,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.3
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 16.6,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4972.2,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.183,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.5
+   },
+   "syncedMs": {
+    "mean": 6.075,
+    "p50": 6.2,
+    "p95": 6.8,
+    "max": 7.8
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.162,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.3
+   },
+   "ticks": {
+    "mean": 8.376,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 33.4,
+    "over1_5x": 1,
+    "n": 594
+   },
+   "wallMs": 4972.1,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.223,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.5
+   },
+   "syncedMs": {
+    "mean": 8.251,
+    "p50": 8.1,
+    "p95": 9.1,
+    "max": 11.4
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.197,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.4
+   },
+   "ticks": {
+    "mean": 8.418,
+    "p50": 8.3,
+    "p95": 8.5,
+    "max": 41.6,
+    "over1_5x": 2,
+    "n": 591
+   },
+   "wallMs": 4967.7,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "960x540",
+   "layers": 1,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.039,
+    "p50": 0,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "syncedMs": {
+    "mean": 0.777,
+    "p50": 0.7,
+    "p95": 1,
+    "max": 1.9
+   }
+  },
+  {
+   "size": "960x540",
+   "layers": 1,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.053,
+    "p50": 0.1,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.5,
+    "max": 16.6,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4970.6,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "960x540",
+   "layers": 1,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.043,
+    "p50": 0,
+    "p95": 0.1,
+    "max": 0.1
+   },
+   "syncedMs": {
+    "mean": 1.157,
+    "p50": 1.1,
+    "p95": 2,
+    "max": 2.1
+   }
+  },
+  {
+   "size": "960x540",
+   "layers": 1,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.048,
+    "p50": 0,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 16.7,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4974.2,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "960x540",
+   "layers": 1,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.046,
+    "p50": 0,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "syncedMs": {
+    "mean": 1.271,
+    "p50": 1.2,
+    "p95": 1.9,
+    "max": 2.2
+   }
+  },
+  {
+   "size": "960x540",
+   "layers": 1,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.045,
+    "p50": 0,
+    "p95": 0.1,
+    "max": 0.2
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 16.6,
+    "over1_5x": 1,
+    "n": 595
+   },
+   "wallMs": 4966.8,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "960x540",
+   "layers": 4,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.19,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.3
+   },
+   "syncedMs": {
+    "mean": 1.921,
+    "p50": 1.8,
+    "p95": 2.7,
+    "max": 2.9
+   }
+  },
+  {
+   "size": "960x540",
+   "layers": 4,
+   "path": "2d",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.163,
+    "p50": 0.2,
+    "p95": 0.2,
+    "max": 0.3
+   },
+   "ticks": {
+    "mean": 8.347,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 16.6,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4970.5,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "960x540",
+   "layers": 4,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.179,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.4
+   },
+   "syncedMs": {
+    "mean": 4.631,
+    "p50": 4.6,
+    "p95": 5.5,
+    "max": 5.7
+   }
+  },
+  {
+   "size": "960x540",
+   "layers": 4,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.163,
+    "p50": 0.2,
+    "p95": 0.2,
+    "max": 0.3
+   },
+   "ticks": {
+    "mean": 8.375,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 24.8,
+    "over1_5x": 2,
+    "n": 594
+   },
+   "wallMs": 4967.8,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "960x540",
+   "layers": 4,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.237,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.5
+   },
+   "syncedMs": {
+    "mean": 4.555,
+    "p50": 4.4,
+    "p95": 5.3,
+    "max": 5.5
+   }
+  },
+  {
+   "size": "960x540",
+   "layers": 4,
+   "path": "gl-canvas",
+   "mode": 1,
+   "lut": 33,
+   "sync": false,
+   "paced": true,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.204,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.4
+   },
+   "ticks": {
+    "mean": 8.35,
+    "p50": 8.3,
+    "p95": 8.4,
+    "max": 18.2,
+    "over1_5x": 1,
+    "n": 596
+   },
+   "wallMs": 4973.7,
+   "expectedMs": 4966.7
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-bitmap",
+   "mode": 1,
+   "lut": 65,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.181,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.5
+   },
+   "syncedMs": {
+    "mean": 6.168,
+    "p50": 6.2,
+    "p95": 7.6,
+    "max": 8.4
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-bitmap",
+   "mode": 2,
+   "lut": 65,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 0.183,
+    "p50": 0.2,
+    "p95": 0.3,
+    "max": 0.4
+   },
+   "syncedMs": {
+    "mean": 6.287,
+    "p50": 6.3,
+    "p95": 6.8,
+    "max": 10.6
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 1,
+   "path": "gl-only",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 1.141,
+    "p50": 1.1,
+    "p95": 1.7,
+    "max": 2
+   },
+   "syncedMs": {
+    "mean": 1.142,
+    "p50": 1.1,
+    "p95": 1.7,
+    "max": 2
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-only",
+   "mode": 1,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 2.985,
+    "p50": 2.9,
+    "p95": 3.4,
+    "max": 5
+   },
+   "syncedMs": {
+    "mean": 2.985,
+    "p50": 2.9,
+    "p95": 3.4,
+    "max": 5
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-only",
+   "mode": 2,
+   "lut": 65,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 3.697,
+    "p50": 3.7,
+    "p95": 4.1,
+    "max": 6.3
+   },
+   "syncedMs": {
+    "mean": 3.697,
+    "p50": 3.7,
+    "p95": 4.1,
+    "max": 6.3
+   }
+  },
+  {
+   "size": "1920x1080",
+   "layers": 4,
+   "path": "gl-only",
+   "mode": 0,
+   "lut": 33,
+   "sync": true,
+   "paced": false,
+   "frames": 150,
+   "submitMs": {
+    "mean": 2.929,
+    "p50": 2.9,
+    "p95": 3.4,
+    "max": 3.6
+   },
+   "syncedMs": {
+    "mean": 2.931,
+    "p50": 2.9,
+    "p95": 3.4,
+    "max": 3.6
+   }
+  }
+ ]
+}

@@ -18,12 +18,13 @@ interface Rule {
 }
 
 /**
- * GSAP seek-safety rules that `@hyperframes/lint` has no rule for. The render
+ * GSAP and three.js seek-safety rules that `@hyperframes/lint` has no rule for. The render
  * and the live preview seek the paused timeline to a frame instead of playing
  * it, so anything that depends on wall time, scroll, callbacks or state read
  * at first render shows a wrong frame (GSAP skills, `gsap.totalTime(t)`).
  * Text patterns on inline scripts: they flag what is worth a look, never prove
- * a bug, so all but ScrollTrigger are warnings. Randomness is not here: the
+ * a bug, so they are warnings, except the ones that can never be seek-safe
+ * (ScrollTrigger, three.js render loops and clocks). Randomness is not here: the
  * linter's `non_deterministic_code` already blocks `Math.random()` and
  * `gsap.utils.random()`, string form included.
  */
@@ -55,6 +56,28 @@ const RULES: readonly Rule[] = [
     pattern: /\boverwrite\s*:\s*(?:"auto"|'auto'|true)/g,
     message: "`overwrite` kills or trims other tweens depending on what runs first, so a seek to the middle can differ from a play-through.",
     fix: "Animate each property once, or use `fromTo` with absolute values and no `overwrite`.",
+  },
+  // three.js (ADR 0042): the motion runtime's `bind` is the only clock; paint(t) sets every pose from t and renders once.
+  {
+    rule: "three_animation_loop",
+    severity: "error",
+    pattern: /\bsetAnimationLoop\s*\(/g,
+    message: "`setAnimationLoop` renders on the browser's frame clock, which a seeked render never advances: frames would not follow the seek time.",
+    fix: "Render from the paint function: `FrameshellMotion.bind(id, function (t) { pose(t); renderer.render(scene, camera); })`.",
+  },
+  {
+    rule: "three_clock",
+    severity: "error",
+    pattern: /\bTHREE\.Clock\b|\.getDelta\s*\(|\.getElapsedTime\s*\(/g,
+    message: "A `THREE.Clock` measures wall time, so a frame depends on how long the page took to get there.",
+    fix: "Compute every pose from the `t` that `FrameshellMotion.bind` passes to the paint function.",
+  },
+  {
+    rule: "three_mixer_update",
+    severity: "warning",
+    pattern: /\b\w*[mM]ixer\w*\.update\s*\(/g,
+    message: "`AnimationMixer.update(delta)` advances by a step, so the pose depends on the seeks before it.",
+    fix: "Set the absolute time instead: `mixer.setTime(t)` in the paint function.",
   },
 ];
 

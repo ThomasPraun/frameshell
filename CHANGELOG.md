@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `frameshell review` exit 1. `ReviewMetrics` gains `waived` and `requirements`, craft warnings gain `severity`; the check list
   moved to `@frameshell/schema` (`CRAFT_CHECKS`). Not yet: `staysInFrame` and other pixel-level clip assertions, the sound
   review list, waivers kept on the clip in the timeline.
+- 3D in generated clips, slices 1 and 2 of #473 (ADR 0042, epic #451): the `hyperframes` plugin template
+  `product-shot` (`frameshell hyperframes new <name> --template product-shot`) paints a three.js scene on the motion
+  runtime's clock: a product (a built-in rounded box with a label picture, or your GLB from the composition directory)
+  in studio light arrives on a push-in, a glint sweeps across it, it turns slowly while the camera creeps and orbits,
+  and a headline rises under it, laid out for 16:9, 1:1, 4:5 and 9:16; props `title`, `model`, `label`, `color`,
+  `accent`, `ink`, `finish`, `spin`, `orbit`, `size`, `shadows`, `bg`, `backdrop`. The scaffold copies a pinned three.js
+  0.187.0 bundle (MIT, notice in its header; `pnpm gen:three`) as `frameshell-three.js` beside the motion runtime, and
+  `hyperframes update` refreshes it. Models and textures hold the render until they have loaded, and a missing one
+  fails the render with its path. `hyperframes check` no longer blocks on the bundle's own code and flags
+  `setAnimationLoop`, `THREE.Clock` / `getDelta` (errors) and `mixer.update` (warning) in scene code. Every
+  HyperFrames render now uses the software WebGL renderer (SwiftShader) whatever `PRODUCER_BROWSER_GPU_MODE` says.
+
 - Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 126):
   `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`
   too, once declared) writes the face-following framing into the clip's override there, so the clip, the primary and
@@ -836,6 +848,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Leaving the preview's full screen no longer depends on a fixed 1.5 s wait (#533): macOS drops a request to leave
+  while it animates into full screen, and a slow machine took longer, so Escape did nothing. The window now reports
+  when it settled (`enter-full-screen`, `panels.fullScreenSettled` in the app's API) and the leave waits for that.
+- A batch render no longer counts as running once its last job ended (#533): `batch.render` of the same `out` straight
+  after waited for the manifest to say `done` used to fail with "A batch is already rendering" when the run had not
+  yet been dropped, and `gc` kept clip renders until then. The run is finished as soon as every row ended; a new
+  render waits for the manifest write of the one before, so it reads the final manifest.
 - The preview keeps the pitch of a clip at speed ≠ 1, like export (#499, epic #451): its program audio stretches a
   sped-up clip's sound with WSOLA (2048-sample Hann frames, the window of export `atempo` at 48 kHz, each moved by up
   to 512 samples to line up with the one before) instead of resampling it, so a 1.25x clip no longer sounds higher in
