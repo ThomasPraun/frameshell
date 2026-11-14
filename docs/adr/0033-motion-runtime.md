@@ -71,6 +71,15 @@ Motion clips whose picture is a pure function of time ([#465](https://github.com
 - **Live preview** still shows the composition at its own size: `LiveContext` carries the project resolution, and the preview's format switcher (ADR 0027 slice 2) draws generated clips fitted from their primary render.
 - Style tokens into compositions stay open: the other half of slice 4.
 
+### Settled in #501 (runtime 0.3.0)
+
+Found while looking for why motion-blurred renders were not repeatable (owner decision on PR #532, 2026-11-13); numbers in [`docs/research/motion-blur.md`](../research/motion-blur.md) "Why fixed 8 was not repeatable".
+
+- **Chrome's repaint threshold.** Chrome does not repaint a transform change smaller than about 1/80 px of screen translation, or about 1e-4 in the matrix (rotation, scale); the page keeps the raster of an older pose. A frame then depends on which frames were painted before it, which broke both a sequential render (a settling spring, 8/255 from the same frame painted alone) and, through the producer's uncaptured seeks, the repeatability of blurred renders. `write()` now puts `x` and `y` on a 1/32 px grid and `rotate` on a 0.02° grid (scale and opacity keep 0.001), so every change it writes is repainted. The limit is on screen: inside a container scaled below about 0.4 a 1/32 px step is again too small.
+- **Whole-page raster on every seek.** Chrome re-rasters only the rectangles it thinks changed into the previous tile, and a few anti-aliased edge pixels kept an older pose when the producer seeked without capturing in between. Every seek of the bound timeline (and every `hf-seek` paint before it is driven) changes the document element's `filter` between `opacity(1)` and `brightness(1)`: both leave every pixel as it is (a sharp render is byte-identical with and without), and the change invalidates the whole page. The runtime owns the document element's inline `filter`.
+- **Measured** with both: a fixed-8 blurred render's 240 sub-frame samples equal the same times painted on a fresh page, and repeated renders are byte-identical as PNG and WebM. Capture time per frame is unchanged on the test compositions (flat colour); a page with large images or much text re-rasters in full on every seek, not measured.
+- **Version.** 0.3.0 moves elements by at most 1/64 px and 0.01° from where 0.2.0 put them; a scaffolded clip keeps its frozen 0.2.0 copy until `update`. The near-1 scale snap stays a cursor-kit function.
+
 ### Slices
 
 1. Spike, pure math in `packages/schema`, `packages/motion` with `bind` and `write`, the bundle in the plugin, and an opt-in real render test (12 probes cold vs reseek, element CSS on a sprung element).

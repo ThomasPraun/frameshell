@@ -60,6 +60,22 @@ describe("bind", () => {
     expect(painted).toEqual([0, 0.5, 0.75, 1]);
   });
 
+  it("changes the document element's filter between two values that leave pixels alone on every seek", () => {
+    const page = fakePage();
+    const html = { style: { filter: "" } };
+    (globalThis as unknown as { document: Record<string, unknown> }).document["documentElement"] = html;
+    const timeline = bind("intro", () => {});
+    expect(html.style.filter).toBe("");
+    const filters: string[] = [];
+    page.hfSeek(0.5);
+    filters.push(html.style.filter);
+    for (const t of [1, 1, 2]) {
+      timeline.seek(t);
+      filters.push(html.style.filter);
+    }
+    expect(filters).toEqual(["opacity(1)", "brightness(1)", "opacity(1)", "brightness(1)"]);
+  });
+
   it("refuses a second binding of one composition", () => {
     fakePage();
     bind("intro", () => {});
@@ -79,10 +95,22 @@ describe("write", () => {
     });
     const element = { style } as unknown as { style: { transform: string; opacity: string } };
     write(element, { x: 12.34567, y: -3, rotate: 5, scale: 1.2, opacity: 1.3 });
-    expect(element.style).toEqual({ transform: "translate(12.346px, -3px) rotate(5deg) scale(1.2, 1.2)", opacity: "1" });
+    expect(element.style).toEqual({ transform: "translate(12.34375px, -3px) rotate(5deg) scale(1.2, 1.2)", opacity: "1" });
     write(element, { scaleY: 0.5, opacity: -0.2 });
     expect(element.style).toEqual({ transform: "translate(0px, 0px) rotate(0deg) scale(1, 0.5)", opacity: "0" });
     expect(new Set(writes)).toEqual(new Set(["transform", "opacity"]));
+  });
+
+  it("writes translation on a 1/32 px grid and rotation on a 0.02° grid, so no written change is too small to repaint", () => {
+    const element = { style: { transform: "", opacity: "" } };
+    write(element, { x: 0.015, y: -0.016, rotate: 11.989 });
+    expect(element.style.transform).toBe("translate(0px, -0.03125px) rotate(11.98deg) scale(1, 1)");
+    for (let i = 0; i < 500; i++) {
+      write(element, { x: -7 + i * 0.0291, rotate: -3 + i * 0.0137 });
+      const [x, rotate] = /^translate\((\S+)px, 0px\) rotate\((\S+)deg\)/.exec(element.style.transform)!.slice(1).map(Number);
+      expect(Number.isInteger(x! * 32)).toBe(true);
+      expect(Math.abs(rotate! * 50 - Math.round(rotate! * 50))).toBeLessThan(1e-9);
+    }
   });
 });
 
