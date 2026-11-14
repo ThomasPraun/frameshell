@@ -13,6 +13,7 @@ import type {
   MulticamGalleryResult,
   MulticamTurnsResult,
   MusicCandidatesResult,
+  MusicGridResult,
   MusicShapeResult,
   MusicFitResult,
   MethodName,
@@ -293,6 +294,16 @@ mutations print the new revision):
                                bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
                                keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
                                fit re-runs it when it moves the clip. --dry-run prints the dip curve. One transaction
+  music grid [--to beat|bar] [--max-shift s] [--skip g1,…] [--dry-run]
+                               Move picture cuts (two clips of a video track that meet) onto the timeline's beat grid
+                               (tempo set; a LOW grid is refused): each cut off its nearest beat (--to bar: bar start) by
+                               at most --max-shift s (0.25) gets an id g1, g2… and lands exactly on it. A move trims the
+                               tail of the clip before the cut with ripple: later clips move on every track with no clip
+                               across a cut (the music, a voice line, a background keep their timing); the next cut that
+                               does not move is put back, so only the shots between change length. Blocked: no more of
+                               the file, a clip would be empty or overlap, or a transcribed word would be cut or added.
+                               --dry-run lists every cut; --skip leaves moves (and duck) out. Duck keys on the music are
+                               written again. One transaction (revert it)
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -480,6 +491,7 @@ export const TIMELINE_OPTIONS = {
   loudness: { type: "string" },
   probes: { type: "string" },
   tolerance: { type: "string" },
+  "max-shift": { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -589,6 +601,7 @@ const ALLOWED: Record<string, string[]> = {
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
   "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "clear", "dry-run"],
+  "music grid": ["to", "max-shift", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -642,6 +655,7 @@ const ARITY: Record<string, [number, number]> = {
   "music fit": [1, 1],
   "music candidates": [2, 7],
   "music shape": [1, 1],
+  "music grid": [0, 0],
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
@@ -1276,6 +1290,18 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music grid": {
+      method = "music.grid";
+      const to = str("to");
+      if (to !== undefined && to !== "beat" && to !== "bar") throw new UsageError(`--to: expected beat or bar, got "${to}".`);
+      Object.assign(params, {
+        to,
+        maxShift: num("max-shift"),
+        skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
+    }
     case "history ":
       method = "history";
       params["since"] = str("since");
@@ -1364,6 +1390,7 @@ export async function executeTimeline(
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
   if (inv.method === "music.shape") return formatMusicShape(result as MusicShapeResult);
+  if (inv.method === "music.grid") return formatMusicGrid(result as MusicGridResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
   if (inv.method === "multicam.gallery") return formatMulticamGallery(result as MulticamGalleryResult);
   if (inv.method === "multicam.turns") return formatMulticamTurns(result as MulticamTurnsResult);
@@ -1428,6 +1455,23 @@ function formatMusicFit(result: MusicFitResult): string {
   if (hit.candidates.length > 1) lines.push(`Other strong hits (--hit): ${hit.candidates.slice(0, -1).map((candidate) => s(candidate.at)).join(", ")}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicGrid(result: MusicGridResult): string {
+  const { grid } = result;
+  const source = grid.source === "beats" ? `measured, confidence ${grid.confidence === null ? "?" : Math.round(grid.confidence * 100)} %` : "nominal";
+  const lines = [
+    `Music grid · ${result.moved} of ${result.cuts.length} cut${result.cuts.length === 1 ? "" : "s"} onto ${result.to === "bar" ? "bar starts" : "beats"} · ${grid.bpm} BPM (${source}${grid.clip ? `, clip ${grid.clip}` : ""}) · max shift ${result.maxShift} s${result.dryRun ? " · dry run" : ""}`,
+  ];
+  for (const cut of result.cuts) {
+    const off = cut.shiftMs === null ? "" : ` ${cut.shiftMs >= 0 ? "+" : ""}${cut.shiftMs} ms to ${cut.ref} (${cut.beat} s)`;
+    lines.push(`  ${(cut.id ?? "").padEnd(4)}${cut.at.toFixed(3).padStart(9)} s  ${cut.out} | ${cut.in}  ${cut.status}${off}${cut.reason ? `: ${cut.reason}` : ""}`);
+    for (const warning of cut.warnings) lines.push(`        warning: ${warning}`);
+  }
+  if (result.moved > 0) lines.push(`Ripple on ${result.ripple.join(", ") || "the cut's own track"}; the picture gets ${result.durationChange >= 0 ? "+" : ""}${result.durationChange} s`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }
 

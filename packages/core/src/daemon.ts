@@ -74,6 +74,7 @@ import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { musicCandidatesLabel, planMusicCandidates } from "./music/candidates.js";
 import { MUSIC_ENTRY_FADE_MS } from "./music/entry-fade.js";
+import { type GridWord, musicGridLabel, planGridMoves } from "./music/grid-moves.js";
 import { musicFitLabel, planMusicFit } from "./music/run.js";
 import { musicShapeLabel, planMusicShape } from "./music/shape-run.js";
 import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js";
@@ -154,6 +155,7 @@ import { StyleService } from "./style/service.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
+import { clipEnd } from "./timeline/timing.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
@@ -163,7 +165,7 @@ import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
 import { ModelRegistry, notRegistered } from "./transcripts/model-registry.js";
 import { type TranscriberTools, providerContext, resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
-import { verifyExport } from "./transcripts/verify.js";
+import { sourceTranscripts, verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
 import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
@@ -2374,6 +2376,37 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, candidates: placed, warnings: [...warnings] };
+    },
+    "music.grid": async ({ cwd, timeline, to, maxShift, dryRun, skip }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const grid = new FrameGrid(fps);
+      const nested = timelines.nestedDuration(dir, timeline, fps);
+      // Read on the first trimmed clip with sound only: hashing every asset is the slow part.
+      let transcripts: ReturnType<typeof sourceTranscripts> | undefined;
+      const { requests, duckAgain, ...plan } = await planGridMoves(loaded, fps, { to, maxShift, skip, dryRun }, {
+        loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
+        apply: (state, request) => timelines.applyInMemory(dir, timeline, { timeline: state, fps }, request),
+        end: (clip) => clipEnd(clip, grid, nested),
+        words: async (asset): Promise<readonly GridWord[] | "no-transcript" | "stale-transcript"> => {
+          transcripts ??= sourceTranscripts(dir, loaded, async (rel) => (await media.derivedAudio(dir, rel)).hash);
+          const source = (await transcripts).get(asset);
+          if (!source) return "no-transcript";
+          if ("unchecked" in source) return source.unchecked;
+          const { words, edits } = source.transcript;
+          return words.map((word) => ({ text: edits[word.id]?.text ?? word.text, start: word.start, end: word.end }));
+        },
+        hasAudio: async (asset) => (await media.probe(dir, asset)).audio !== null,
+      });
+      if (dryRun || requests.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...plan };
+      // Probing and reading transcripts can take a moment: trims planned on an older timeline would cut the wrong frames.
+      await assertFresh(dir, timeline, caller, "music.grid", loaded.revision, "the grid moves");
+      const warnings = new Set(plan.warnings);
+      const written = await writeSteps({ dir, cwd, timeline, caller, label: musicGridLabel(plan), revision: loaded.revision, warnings }, async (write) => {
+        for (const request of requests) await write(request);
+        if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
+      });
+      return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, warnings: [...warnings] };
     },
     "multicam.create": (params, caller) => createGroup(params, caller),
     "multicam.gallery": async ({ cwd, timeline, asset, names, name, at, group: into, mic }, caller) => {

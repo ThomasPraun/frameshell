@@ -176,3 +176,22 @@ describe("frameshell music shape", () => {
     expect(cleared.stdout).toContain("music keys removed");
   }, 120_000);
 });
+
+describe("frameshell music grid", () => {
+  it("parses its flags into music.grid params", () => {
+    expect(parseTimelineCommand(["music", "grid"], { to: "bar", "max-shift": "0.4", skip: ["g1,g3", "duck"], "dry-run": true })).toMatchObject({
+      method: "music.grid",
+      params: { to: "bar", maxShift: 0.4, skip: ["g1", "g3", "duck"], dryRun: true },
+    });
+    expect(parseTimelineCommand(["music", "grid"], {})!.params).toEqual({});
+    expect(() => parseTimelineCommand(["music", "grid"], { to: "half" })).toThrow(/expected beat or bar/);
+    expect(() => parseTimelineCommand(["music", "grid", "c_m"], {})).toThrow(/argument/);
+    expect(() => parseTimelineCommand(["music", "grid"], { end: "3" })).toThrow(/does not take --end/);
+  });
+
+  it("refuses a timeline with no tempo", () => {
+    const refused = frameshell(["music", "grid", "--dry-run"]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("music.grid: the timeline has no tempo");
+  }, 60_000);
+});
