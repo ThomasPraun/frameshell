@@ -233,9 +233,15 @@ importers:
       '@frameshell/schema':
         specifier: workspace:*
         version: link:../../packages/schema
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       puppeteer-core:
         specifier: 25.12.0
         version: 25.12.0
+      three:
+        specifier: 0.187.0
+        version: 0.187.0
 
   plugins/remotion:
     devDependencies:
@@ -4305,6 +4311,9 @@ packages:
     resolution: {integrity: sha512-bWnjSNscmuI+GJze6ZupnHP8G/cTcsJF+bXCeQknk2SHQsgbNJnLrqiH9jZ2W4STPVXH2mDKKRX3iwPhc9Cn/Q==}
     engines: {node: '>=10'}
     hasBin: true
+
+  three@0.187.0:
+    resolution: {integrity: sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==}
 
   tiny-async-pool@1.3.0:
     resolution: {integrity: sha512-01EAw5EDrcVrdgyCLgoSPvqznC0sVxDSVeiOz09FUpjh71G79VCqneOr+xvt7T1r76CF6ZZfPjHorN2+d+3mqA==}
@@ -8767,6 +8776,8 @@ snapshots:
       acorn: 8.18.0
       commander: 2.20.3
       source-map-support: 0.5.21
+
+  three@0.187.0: {}
 
   tiny-async-pool@1.3.0:
     dependencies:

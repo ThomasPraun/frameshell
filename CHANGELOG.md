@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 3D in generated clips, slices 1 and 2 of #473 (ADR 0042, epic #451): the `hyperframes` plugin template
+  `product-shot` (`frameshell hyperframes new <name> --template product-shot`) paints a three.js scene on the motion
+  runtime's clock: a product (a built-in rounded box with a label picture, or your GLB from the composition directory)
+  in studio light arrives on a push-in, a glint sweeps across it, it turns slowly while the camera creeps and orbits,
+  and a headline rises under it, laid out for 16:9, 1:1, 4:5 and 9:16; props `title`, `model`, `label`, `color`,
+  `accent`, `ink`, `finish`, `spin`, `orbit`, `size`, `shadows`, `bg`, `backdrop`. The scaffold copies a pinned three.js
+  0.187.0 bundle (MIT, notice in its header; `pnpm gen:three`) as `frameshell-three.js` beside the motion runtime, and
+  `hyperframes update` refreshes it. Models and textures hold the render until they have loaded, and a missing one
+  fails the render with its path. `hyperframes check` no longer blocks on the bundle's own code and flags
+  `setAnimationLoop`, `THREE.Clock` / `getDelta` (errors) and `mixer.update` (warning) in scene code. Every
+  HyperFrames render now uses the software WebGL renderer (SwiftShader) whatever `PRODUCER_BROWSER_GPU_MODE` says.
+
 - Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 126):
   `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`
   too, once declared) writes the face-following framing into the clip's override there, so the clip, the primary and

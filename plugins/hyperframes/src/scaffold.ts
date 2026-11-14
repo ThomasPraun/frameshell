@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/plugin-api";
 import { projectResolution } from "./frame-size.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "./motion-runtime.js";
-import { TEMPLATES, type Template, type TemplateVariable, findTemplate, fontSetup, readTokens } from "./templates/index.js";
+import { TEMPLATES, type Template, type TemplateVariable, findTemplate, fontSetup, readTokens, usesThree } from "./templates/index.js";
+import { THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "./three-runtime.js";
 
 /** Composition name: becomes a directory and the composition id. */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
@@ -47,7 +48,8 @@ function parseArgs(args: readonly string[]): NewArgs {
  * driven by the HyperFrames clock. With `--template` (ADR 0033, #466): a motion
  * composition painted by the Frameshell motion runtime, which is copied next
  * to it (frozen per composition; `hyperframes update` refreshes it), with typed
- * props and the brand values of `style.json` as their defaults. Never overwrites.
+ * props and the brand values of `style.json` as their defaults. A 3D template
+ * also gets the pinned three.js bundle the same way (ADR 0042). Never overwrites.
  */
 export const newComposition: PluginCommand = {
   description: "Scaffold compositions/hyperframes/<name>/index.html at the project resolution (--template for a motion template)",
@@ -75,6 +77,8 @@ export const newComposition: PluginCommand = {
       };
     }
     await writeFile(join(dir, MOTION_RUNTIME_FILE), MOTION_RUNTIME);
+    const three = usesThree(template);
+    if (three) await writeFile(join(dir, THREE_RUNTIME_FILE), THREE_RUNTIME);
     for (const { from, to } of fontSetup(tokens).copies) {
       await mkdir(dirname(join(dir, to)), { recursive: true });
       await copyFile(join(project.dir, ...from.split("/")), join(dir, to));
@@ -82,6 +86,12 @@ export const newComposition: PluginCommand = {
     const variables = template.variables(input);
     const lines = [
       `Created ${entry} from the ${template.id} template (${width}x${height}, ${duration} s) with ${MOTION_RUNTIME_FILE} (runtime ${MOTION_RUNTIME_VERSION}, frozen for this clip: \`frameshell hyperframes update\` refreshes it).`,
+      ...(three
+        ? [
+            `3D: ${THREE_RUNTIME_FILE} (three.js ${THREE_VERSION}, MIT, frozen the same way) renders on the software renderer, one frame at a time; ` +
+              "keep models and textures inside the composition directory.",
+          ]
+        : []),
       tokens.used.length > 0
         ? `From style.json: ${tokens.used.join(", ")}. Everything else is a placeholder default.`
         : "No style.json values used: colours, fonts and texts are placeholder defaults.",
@@ -100,6 +110,7 @@ export const newComposition: PluginCommand = {
         duration,
         template: template.id,
         runtime: MOTION_RUNTIME_VERSION,
+        ...(three ? { three: THREE_VERSION } : {}),
         tokens: tokens.used,
         props: variables,
       },
