@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Clip vignette, slice 2 of #500 (ADR 0043, epic #451; protocol 135): an optional `vignette { strength?, radius?, softness? }`
+- Clip vignette, slice 2 of #500 (ADR 0043, epic #451; protocol 136): an optional `vignette { strength?, radius?, softness? }`
   on media and generated clips darkens the clip's own picture smoothly towards its edges (`{}` = strength 0.35, full at
   the corners, falloff 0.6 half-diagonals), after its colour grade and before scale, keys and transition shapes; in
   another format it darkens the part the format shows. `frameshell clip set --vignette 0.4` (also `--vignette-radius`,
@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeline clips, skipped on multicam shots with a warning). Export multiplies each piece by a one-frame `geq` plate of
   `vignetteGain` (exactly its 8-bit levels, alpha kept); the app's preview draws the same formula in the grade's WebGL2
   pass. Timelines without it export byte-identical plans. No inspector control yet.
+- Sharp and blurred renders of a clip with motion blur, slice 3 of #501 (ADR 0041 decision 11, epic #451; protocol 135):
+  a generated clip with `motionBlur` keeps two cached renders. The sharp one (the key it had without blur) renders first
+  and is what the live preview and `render --quality draft` use; the blurred one is queued after it in the background,
+  the preview swaps it in when it is ready, and `render --quality final`, `render` without a quality and `frame` wait
+  for it. `clip.renders` reports the blurred render in a new `final` field (state `waiting` while the sharp one is not
+  ready yet), and the app follows its job. When the plugin refuses to blur a composition (HyperFrames: HDR content,
+  shader transitions; plugin API `MOTION_BLUR_REFUSED`), exports use the sharp render and the render job gets a
+  warning; `final.refused` says so and the refusal is not retried until the clip changes. Chat about this says
+  `frame pending` while the blurred render is due. `gc` keeps both renders of every blurred clip.
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also
@@ -47,8 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Motion runtime 0.4.0 adds `cuts(seconds[])`, a time guard that keeps samples from crossing a cut inside a composition
   (the render declares its frame rate in `<meta name="frameshell-fps">`); `frameshell hyperframes update` brings it to
   existing compositions. Opt-in real tests: blur smears the fast spring, a blurred clip renders twice to identical
-  frames, and a declared cut is never blurred across. Until the sharp/blurred variants of slice 3, a blurred clip has
-  one render that preview and every export wait for.
+  frames, and a declared cut is never blurred across.
 - Colour section of the clip inspector and LOG footage warning, second slice of #384 (ADR 0031, epic #451; protocol 130):
   a media clip on a video track shows Colour in the clip inspector: sliders for exposure, temperature, tint,
   contrast and saturation, a menu of the project's `.cube` LUTs with its mix, and Reset. A drag is one undoable step
@@ -869,6 +877,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Export holds true peak under -1 dBTP in the delivered file (#519, epic #451): after the second `loudnorm` pass the
+  mix goes up to 4x the export's sample rate, through `alimiter` at -1.5 dBFS (sample peaks there are true peaks) and
+  back, before the cut to length, the loop fades and the encode. `loudnorm` alone let sharp synthesized transients
+  through at -0.8 dBTP after the AAC encode; the half dB of headroom covers what the encoder adds. Only the final mux
+  step changes: golden plans differ in that filter chain, nothing on the wire.
 - Preview playback tests count two kinds of dropped frames (#567, ADR 0001 amendment): the engine reports, per play,
   the frames it passed over that a display tick wanted but were not decoded, or that followed a tick of its own longer
   than a frame (starved), and those no tick wanted while it was idle (cadence: the host gave it no tick in time), with

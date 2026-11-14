@@ -2818,7 +2818,7 @@
                             }
                           },
                           "additionalProperties": false,
-                          "description": "Motion blur of a generated clip (ADR 0041): each frame is the average of sub-frame pictures across the shutter window, so fast moves smear like a camera's. `{}` blurs with the defaults. Its render costs about `samples` times a sharp one."
+                          "description": "Motion blur of a generated clip (ADR 0041): each frame is the average of sub-frame pictures across the shutter window, so fast moves smear like a camera's. `{}` blurs with the defaults. It is a second render beside the sharp one (draft exports use the sharp one, the preview until the blurred one is ready) and costs about `samples` times a sharp render."
                         },
                         "vignette": {
                           "type": "object",

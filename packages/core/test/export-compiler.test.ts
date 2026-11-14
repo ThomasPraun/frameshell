@@ -35,6 +35,7 @@ import {
   paletteStep,
   parseLoudnessStats,
 } from "../src/index.js";
+import { TRUE_PEAK_CEILING } from "../src/export/compiler.js";
 
 // Golden files: reviewed ffmpeg plans. Regenerate with UPDATE_GOLDEN=1 and review the diff.
 const GOLDEN_DIR = fileURLToPath(new URL("./golden/", import.meta.url));
@@ -596,6 +597,14 @@ describe("export compiler", () => {
     expect(mixStep(silentPlan)).toBeNull();
     expect(loudnessAnalysis(silentPlan)).toBeNull();
     expect(muxStep(silentPlan, null, "/out/x.mp4").args).toContain("anullsrc=r=48000:cl=stereo,atrim=end_sample=384000[a]");
+  });
+
+  it("limits true peak at 4x the export's sample rate, with or without a loudness measurement", () => {
+    const rate44 = compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio: { ...youtube1080.audio, sampleRate: 44_100 } }, loudness: -17, sources, resolution });
+    for (const measured of [MEASURED, null]) {
+      const filter = muxStep(rate44, measured, "/out.mp4").args.find((arg) => arg.startsWith("[1:a:0]"))!;
+      expect(filter).toContain(`aresample=44100,aresample=176400,alimiter=limit=${(10 ** (TRUE_PEAK_CEILING / 20)).toFixed(4)}:level=false:latency=true,aresample=44100,atrim=`);
+    }
   });
 
   it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still, subtitles burned (golden)", () => {

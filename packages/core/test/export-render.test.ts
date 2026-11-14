@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ExportPreset, MediaClip, Timeline, Transcript } from "@frameshell/schema";
 import { backdropBlur } from "../src/export/compiler.js";
-import { type ExportSource, compileFrame, compileRender, executeRender } from "../src/index.js";
+import { type ExportSource, compileFrame, compileRender, executeRender, measureLoudness } from "../src/index.js";
 import { runTool } from "../src/media/ffmpeg.js";
 import { tempDir } from "./helpers.js";
 import { ffprobeJson, frameLuma } from "./media-fixtures.js";
@@ -173,6 +173,36 @@ describe("export render (real ffmpeg)", () => {
       expect(worst, `worst step ${worst} at sample ${worstAt} (${worstAt / 48_000} s), peak ${peak}`).toBeLessThan(naturalStep * 1.5);
 
       expect(Math.abs((await integratedLoudness(output)) - -17)).toBeLessThanOrEqual(1);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "keeps sharp transients under -1 dBTP in the exported AAC, where loudnorm alone lets them over",
+    async () => {
+      // A quiet bed with a 2 ms square burst every 250 ms, phased so its peaks fall between samples.
+      const path = join(dir, "clicks.mov");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "color=c=black:s=64x64:r=30:d=4"],
+        ...["-f", "lavfi", "-i", "aevalsrc='0.05*sin(2*PI*220*t)+if(lt(mod(t\\,0.25)\\,0.002)\\,0.9*sgn(sin(2*PI*3000*t+0.785))\\,0)':s=48000:d=4"],
+        ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", path],
+      ]);
+      const unlimited = await measureLoudness(ffmpeg, path, undefined, "loudnorm=I=-17:TP=-1:LRA=20,aresample=48000");
+      expect(unlimited!.truePeak!).toBeGreaterThan(-1);
+
+      const clip: MediaClip = { id: "a", type: "media", asset: "assets/clicks.mov", start: 0, in: 0, out: 4 };
+      const sources = new Map([["assets/clicks.mov", { path, video: { codec: "h264", still: false, width: 64, height: 64 }, audio: true }]]);
+      // The built-in presets' AAC bitrate.
+      const preset: ExportPreset = { ...TINY, audio: { codec: "aac", bitrateKbps: 320, sampleRate: 48_000 } };
+      const plan = compileRender({ timeline: oneTrack([clip]), fps: 30, preset, loudness: -17, sources, resolution });
+      const output = join(dir, "clicks.mp4");
+      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-clicks"), output });
+
+      const exported = await measureLoudness(ffmpeg, output);
+      expect(exported!.truePeak!).toBeLessThanOrEqual(-1);
+      expect(Math.abs(exported!.integrated! - -17)).toBeLessThanOrEqual(2);
+      expect(Math.abs((await audioSamples(output)).length - plan.audio.samples)).toBeLessThan(2048);
     },
     MEDIA_TIMEOUT,
   );

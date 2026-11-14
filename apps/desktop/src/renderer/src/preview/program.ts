@@ -1276,7 +1276,9 @@ function covered(picture: PlacedSpan | PlaceholderSpan | null, clip: Clip, info:
 }
 
 function generatedOf(clip: Clip, start: number, end: number, fps: number, info: ClipRenderInfo | undefined): PlacedSpan {
-  const ready = info?.state === "ready" && info.file ? info : null;
+  // A clip with motion blur plays its sharp draft until the blurred final is ready (ADR 0041 decision 11).
+  const final = info?.final?.state === "ready" && info.final.file ? info.final : null;
+  const ready = final ?? (info?.state === "ready" && info.file ? info : null);
   const render: LayerRender | null = ready
     ? { state: "ready", file: ready.file! }
     : info && info.state !== "ready"
