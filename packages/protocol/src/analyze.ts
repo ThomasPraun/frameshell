@@ -188,6 +188,46 @@ export interface AnalyzeRhythm {
   bursts: AnalyzeBurst[];
 }
 
+/** The kinds of {@link AnalyzeCut}. */
+export const ANALYZE_CUT_KINDS = ["cut", "jump", "punch-in", "punch-out", "change"] as const;
+
+/** Most cuts `analyze` lists; a film with more has its first ones listed and a warning. */
+export const ANALYZE_MAX_CUTS = 300;
+
+/** One big change of the picture, told apart by what it is. */
+export interface AnalyzeCut {
+  /** First frame (0-based) of the picture after the change. */
+  frame: number;
+  /** `frame` ÷ fps, rounded down to the millisecond. */
+  time: number;
+  /**
+   * `cut`: a new scene. `jump`: the same framing with time skipped (a jump cut: the subject moved, the camera did not).
+   * `punch-in` / `punch-out`: the same shot scaled up / down (a crop and zoom of it), see `scale`. `change`: not a cut: a
+   * flash, a caption or an element on a picture that stays.
+   */
+  kind: (typeof ANALYZE_CUT_KINDS)[number];
+  /** Mean grey change between the two frames, grey levels 0 to 255 on a 64 px wide picture, 2 decimals. */
+  score: number;
+  /** Zero-mean correlation of the frame before and the frame after, 0 to 1, 3 decimals: high is the same framing, but a moving subject lowers it. */
+  similarity: number;
+  /** A punch: how many times larger the picture after shows what the one before shows (1.3: 30 % bigger; under 1 a punch out), 2 decimals; null otherwise. */
+  scale: number | null;
+  /** Share of the picture that changed (grey levels past 16 after levelling the brightness), 0 to 1, 3 decimals. */
+  changed: number;
+  /** True when ffmpeg's scene score at `threshold` opened a shot here (it is in `shots`); false for what it missed. */
+  opensShot: boolean;
+}
+
+/** What the cuts of the film are. */
+export interface AnalyzeCuts {
+  /** How many of each kind, every kind present. */
+  counts: Record<(typeof ANALYZE_CUT_KINDS)[number], number>;
+  /** Jump cuts and punches (in and out) per minute of film, 2 decimals: the cutting a talking-head reel uses. */
+  jumpsPerMinute: number;
+  /** Every big change in time order, at most {@link ANALYZE_MAX_CUTS}. */
+  list: AnalyzeCut[];
+}
+
 /** The kinds of {@link AnalyzeEvent}. */
 export const ANALYZE_EVENT_KINDS = ["flash", "appear", "disappear", "hold", "hit"] as const;
 
@@ -280,6 +320,8 @@ export interface AnalyzeResultShape {
   look: AnalyzeLook;
   /** How the film moves in time. */
   rhythm: AnalyzeRhythm;
+  /** Every big change of the picture told apart: new scene, jump cut, punch in or out, or no cut. */
+  cuts: AnalyzeCuts;
   /** Flashes, appearing and disappearing elements, holds and sound hits, in time order. */
   events: AnalyzeEvent[];
   /** How much the picture changes over time, and the moves in it. */
@@ -396,6 +438,27 @@ const RhythmSchema = z.object({
   bursts: z.array(BurstSchema).describe("Stretches with 3 or more big changes within 1.5 s: a montage burst, a flurry of effects."),
 });
 
+const CutSchema = z.object({
+  frame: z.int().describe("First frame (0-based) of the picture after the change."),
+  time: z.number().describe("`frame` ÷ fps, rounded down to the millisecond."),
+  kind: z
+    .enum(ANALYZE_CUT_KINDS)
+    .describe(
+      "`cut`: a new scene. `jump`: the same framing with time skipped (the subject moved, the camera did not). `punch-in` / `punch-out`: the same shot scaled up / down (a crop and zoom), see `scale`. `change`: not a cut: a flash, a caption or an element on a picture that stays.",
+    ),
+  score: z.number().describe("Mean grey change between the two frames, grey levels 0 to 255 on a 64 px wide picture, 2 decimals."),
+  similarity: z.number().describe("Zero-mean correlation of the frame before and the frame after, 0 to 1, 3 decimals: high is the same framing, but a moving subject lowers it."),
+  scale: z.number().nullable().describe("A punch: how many times larger the picture after shows what the one before shows (1.3: 30 % bigger; under 1 a punch out), 2 decimals, good to a few percent; null otherwise."),
+  changed: z.number().describe("Share of the picture that changed (grey levels past 16 after levelling the brightness), 0 to 1, 3 decimals."),
+  opensShot: z.boolean().describe("True when ffmpeg's scene score at `threshold` opened a shot here (it is in `shots`); false for the jump cuts and punches it missed."),
+});
+
+const CutsSchema = z.object({
+  counts: z.object({ cut: z.int(), jump: z.int(), "punch-in": z.int(), "punch-out": z.int(), change: z.int() }).describe("How many big changes of each kind."),
+  jumpsPerMinute: z.number().describe("Jump cuts and punches (in and out) per minute of film, 2 decimals."),
+  list: z.array(CutSchema).describe("Every big change of the picture in time order, at most 300."),
+});
+
 const EventSchema = z.object({
   kind: z
     .enum(ANALYZE_EVENT_KINDS)
@@ -480,6 +543,7 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
   palette: z.array(ColorSchema).describe("Dominant colours of the whole film, up to 5, biggest first."),
   look: LookSchema.describe("How the whole film looks: brightness, contrast, saturation, warmth and an 8 x 6 colour grid."),
   rhythm: RhythmSchema.describe("How the film moves in time: shot-length spread, share of still frames, big changes, bursts."),
+  cuts: CutsSchema.describe("Every big change of the picture told apart: `cut` (new scene), `jump` (same framing, time skipped), `punch-in` / `punch-out` (same shot scaled, with `scale`) or `change` (a flash, a caption). Finds the jump cuts and punches the scene score misses (`opensShot: false`). A hint to check on the frames it names."),
   events: z.array(EventSchema).describe("Flashes, appearing and disappearing elements, holds and sound hits, in time order. A hint to check on the sheets, not a guarantee."),
   curve: CurveSchema.describe("How much the picture changes over time (every cut is a spike) and the steady moves in it, each with the closest ease."),
   ink: InkSchema.describe("How much of the picture graphics and text cover over the whole film; each shot's own is in `shots[].ink`."),
@@ -511,6 +575,11 @@ export const ANALYZE_RESULT_LABELS: Readonly<Record<string, AnalyzeLabel>> = {
   palette: "MEASURED",
   look: "MEASURED",
   rhythm: "MEASURED",
+  cuts: "ESTIMATED",
+  "cuts.list[].frame": "MEASURED",
+  "cuts.list[].time": "MEASURED",
+  "cuts.list[].score": "MEASURED",
+  "cuts.list[].opensShot": "MEASURED",
   events: "ESTIMATED",
   curve: "MEASURED",
   "curve.step": "DECISION",

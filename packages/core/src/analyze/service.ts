@@ -14,6 +14,7 @@ import { readRawFrames } from "../media/raw-frames.js";
 import { Frames, writeSheetImages } from "../review/images.js";
 import { type Critical, type FramePick, contactPicks, frameRange, sheetLayout } from "../review/plan.js";
 import { captureParallelism, fileSource } from "../review/source.js";
+import { classifyCuts } from "./cuts.js";
 import { curveOf } from "./curve.js";
 import { type AnalyzeDiffHooks, type AnalyzeDiffRequest, runDiff } from "./diff.js";
 import { elementEvents, flashes, hitEvents, holds, soundHits } from "./events.js";
@@ -137,12 +138,18 @@ export class AnalyzeService {
       looks,
       overall: overallLook,
       signal,
-      progress: (fraction) => hooks.progress?.(0.25 + 0.25 * fraction),
+      progress: (fraction) => hooks.progress?.(0.25 + 0.2 * fraction),
     });
     if (series.frames < 1) throw new RpcError(ErrorCode.InvalidOperation, `analyze: ffmpeg decoded no picture from ${request.file}.`, { op: "analyze", field: "file" });
     if (truncated) warnings.push(`look, rhythm and events: measured on the first ${MAX_PICTURE_S / 60} minutes of the film.`);
     const cutFrames = cuts.map((cut) => cut.frame);
     const { rhythm, changes } = rhythmOf(series.activity, fps, shots.map((shot) => shot.endFrame - shot.startFrame), cutFrames);
+    stage("Telling the cuts apart", 0.45);
+    const cutKinds = await classifyCuts(
+      { ffmpeg, file: request.file, film: { width, height, fps }, changes, shotFrames: cutFrames, signal, progress: (fraction) => hooks.progress?.(0.45 + 0.05 * fraction) },
+      series.frames,
+      warnings,
+    );
     const events: AnalyzeEvent[] = [...flashes(series.brightness, fps), ...holds(series.activity, fps), ...elementEvents(series, cutFrames, fps)];
     const { curve, truncated: movesCut } = curveOf(series.activity, fps, changes.map((change) => change.frame));
     if (movesCut) warnings.push("curve: more than 200 moves found, the first 200 are listed.");
@@ -218,6 +225,7 @@ export class AnalyzeService {
       palette: palettes.overall,
       look: wholeLook,
       rhythm,
+      cuts: cutKinds,
       events: listed,
       curve,
       ink: ink.film,
