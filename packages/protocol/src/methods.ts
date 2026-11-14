@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 138;
+export const PROTOCOL_VERSION = 139;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -2726,13 +2726,15 @@ export const methods = {
     description:
       "Generate a sound effect (ADR 0038): synthesized offline from a seed, no network and no third-party samples. Kinds: " +
       "`click`, `tick`, `pop`, `whoosh` (stereo, swells to a peak at 45 % of its length), `riser` (a build that ends at its " +
-      "peak), `thump`, `impact`, `shutter`; `variant` 1 to 3 is a different recipe of the kind. The same kind, variant, seed " +
+      "peak), `thump`, `impact`, `shutter`, `glitch` (a stutter of short tones), `braaam` (a low brass blast), `swell` (a quiet build that " +
+      "peaks near its end), `bell` (a soft bell), `notify` (a ping near 2 kHz) and `sting` (a chirp falling into a low hum, for a logo); " +
+      "`variant` 1 to 3 is a different recipe of the kind. The same kind, variant, seed " +
       "(and `pitch`, `length` when given) always give the same file, so a set of sounds made with one `seed` shares a " +
       "timbre; vary `variant` and `seed` between uses (the same whoosh on every cut is the tell of a bad edit). Without " +
       "`pitch` the take gets a seeded pitch between 0.9 and 1.3 and a level within 1.5 dB. The take is a 48 kHz 16-bit WAV " +
       "written to `assets/sound/<kind>-<key>.wav` and imported (ingest queued) with one `asset.import`; the peak sits at " +
       "-3 dBFS give or take the jitter. A RIFF chunk inside the file holds its cache key and `peakAt`, the second of the " +
-      "take that must land on the picture (the transient of a hit, the peak of a whoosh, the end of a riser): place a " +
+      "take that must land on the picture (the transient of a hit, the peak of a whoosh or swell, the end of a riser, where a sting's chirp lands): place a " +
       "take so that `peakAt` falls on the cue plus an offset by role (ms, negative = before the picture: tap -60, knock " +
       "-40, click -11, pop +30, whoosh peak +37, swell peak +42; a riser ends 75 ms before the hit). A take " +
       "that is already current is not written again (`cached`); nothing is placed on a timeline. When the project " +
@@ -2792,8 +2794,8 @@ export const methods = {
       "`assets/sound/` and imported) and put on an audio track so that the instant of the take that must meet the picture " +
       "(`peakAt`: the transient of a hit, the peak of a whoosh, the end of a riser) falls on its cue plus an offset by role " +
       `(ms, negative = before the picture: ${Object.entries(SOUND_ROLE_OFFSETS).map(([role, ms]) => `${role} ${ms}`).join(", ")}; ` +
-      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click and shutter \`click\`, tick \`tap\`, ` +
-      "pop and thump `pop`, whoosh `whoosh`, impact `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
+      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click, shutter and glitch \`click\`, tick \`tap\`, ` +
+      "pop, thump, bell and notify `pop`, whoosh `whoosh`, swell `swell`, impact, braaam and sting `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
       "a frame of where asked, and it plays whole frames (a sound shorter than one frame is skipped, with a reason). " +
       "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`), `cuts` (the edit point at the start of every clip after the first of a video " +
       "or audio `track`, or only the numbered ones in `which`) and `typing` (a run of keys between `from` and `to`, " +

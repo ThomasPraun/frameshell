@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- More sound effect kinds, slice 5 of #463 (ADR 0038, epic #451; protocol 139): `sound sfx` (and `sound place`, MCP
+  `sound_sfx` / `sound_place`) make `glitch` (a stutter of short square or saw tones), `braaam` (a low brass blast on a
+  root, detuned saws under a sweeping low-pass), `swell` (a quiet build that peaks near its end, `--length` 0.5 to 3 s),
+  `bell` (a soft bell of inharmonic partials), `notify` (a ping near 2 kHz with a partial at 3.4 times its pitch) and
+  `sting` (a chirp falling into a low hum, for a logo), three variants each, deterministic by seed. Placement defaults:
+  glitch `click`, braaam and sting `knock`, swell `swell`, bell and notify `pop`; all but braaam and sting are
+  secondary tier. The `sound` skill reference lists them with taste rules. Not yet: the CC0 set and the energetic music
+  preset.
 - 3D playbook, slice 4 of #473 (ADR 0042, epic #451): the `hyperframes` skill gains `3d-playbook.md`, a reference for
   3D product shots in three.js: which route to take (the `product-shot` template, a hand-written scene, Blender), the
   studio defaults (lights, environment, tone mapping, VSM shadows), the four finishes with their numbers, the glint,

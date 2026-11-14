@@ -18,7 +18,7 @@ status: accepted
 ## Decision
 
 1. **In core, not a plugin.** The synth lives in `packages/core/src/sound/`, exposed through daemon methods; the CLI group `sound` is built-in and reserved (`BUILTIN_COMMANDS`, cross rule 5), so plugins may not shadow it. It writes marked WAV takes into `assets/sound/` and imports them, like voiceover. No SPEC §13 amendment, and it works in untrusted projects. The same parameters and seed always give the same file (a PCM hash test per kind and variant; own transcendental functions if V8's ever differ across platforms).
-2. **Kinds in v1:** `click`, `tick`, `pop`, `whoosh`, `riser`, `thump`, `impact`, `shutter`, three variants each, a family seed and seeded jitter (pitch 0.9 to 1.3, level within 1.5 dB). Glitch, braaam, swell, bell and notify come later.
+2. **Kinds in v1:** `click`, `tick`, `pop`, `whoosh`, `riser`, `thump`, `impact`, `shutter`, three variants each, a family seed and seeded jitter (pitch 0.9 to 1.3, level within 1.5 dB). Glitch, braaam, swell, bell, notify and a logo sting came later (slice 5 as built).
 3. **Placement by a role table.** Every take records `peakAt` in its RIFF chunk. Placement puts it on the cue (a TimeRef: marker or seconds) plus an offset from `SOUND_ROLE_OFFSETS` in `packages/schema` (click -11 ms, tap -60, knock -40, pop +30, whoosh peak +37, swell peak +42; a riser ends 75 ms before the hit), overridable with `--offset`.
 4. **Credits.** An entry `licence: own`, author "Frameshell sound synth", only when the project already has a `credits.json` ledger.
 5. **Caps warn, never refuse:** more than 2 sounds on one frame, gaps below the per-kind minimum (tick 66 ms, key 87, pop 114), the same take twice in a row; the same rules are lint rules for #457.
@@ -34,7 +34,7 @@ Gain: clip `gain` relative to the voice from `style.sound.sfxUnderVoice` and `mu
 2. **Placement:** `sound.place` on TimeRef cues (the shared resolver of ADR 0037), on the cuts of a track and on typing runs, with gain from the style and the warnings of decision 5; CLI `sound place`, MCP `sound_place`, skill reference of the placement grammar. Built, see below.
 3. **Music:** a seeded 16-step sequencer (synthwave, lo-fi, minimal), sections, sidechain, `sound.music`, the exact beats file. Built, see below.
 4. Credits integration for music takes and the remaining docs.
-5. Later: the CC0 set, more kinds, an audition page.
+5. More kinds (built, see below); later: the CC0 set, an audition page.
 
 ## Slice 1 as built
 
@@ -74,6 +74,16 @@ Gain: clip `gain` relative to the voice from `style.sound.sfxUnderVoice` and `mu
 - **The exact beats file.** Beside the take, `beats/sound/music-<preset>-<key>.beats.json` (the beats store's naming, `resolveBeatsFile`): `detector: "exact"`, `confidence: 1`, `downbeat: 0`, the bpm and meter, beat `i` at `60 i / bpm` seconds (microseconds) through the final hit, and as `onsets` the final hit, the accents and the first beat of every drop and gap. `assetHash` is the SHA-256 of the WAV bytes, so `beats.show` says `current`. A grid that is already exact for these bytes is kept with its `edits`; any other (missing, measured, stale) is replaced. `music.fit` finds the final hit of a generated track on its energy and snaps it to that onset: a four-bar synthwave take fitted to a marker lands its hit at 8.000 s with confidence 0.63.
 - **Placement.** The clip starts at `at` on the frame grid, on the audio track named `Music` (made when absent), or `Music 2`, `Music 3`… when that time is taken; `track` names one, refused when its time is taken. Gain is minus `style.sound.musicUnderVoice` (12 dB), or `gain`. When the timeline has a tempo already it is kept, with a warning naming what it follows. The times are read before the take is made and the timeline again after: a changed revision fails with `StaleRevision` and places nothing (the take stays).
 - Protocol 112.
+
+## Slice 5 as built: more kinds
+
+- **Kinds.** `SFX_KINDS` grows by `glitch`, `braaam`, `swell`, `bell`, `notify` and `sting` (the logo sting chirp), three variants each, same seed, jitter, level and key rules as slice 1. New kinds only: no recipe of the first eight changed, so `SFX_KEY_VERSION` stays and takes already written keep their names.
+- **Recipes** (`sound/sfx.ts`, the numbers of the ticket's comments). `glitch`: 5 to 9 slices of 25 to 40 ms every 34 to 50 ms (variant 1: 7 of 32 ms every 42 ms), each a band-limited square or saw at a seeded frequency between 220 and 2600 Hz, anchor on the first slice. `braaam`: five saws detuned -18 to +19 cents on a root (C2, A1, D2 by variant), a low-pass that opens 250 to 1850 Hz and closes to 380 Hz, a saturated sub, 1.6 to 2.2 s (variant 1: 1.85 s), anchor on the onset. `swell`: band-passed noise sweeping up under a root and its fifth, gain growing as a power of 2.5 to a peak at 85 % of its length and a short release; anchor on the peak, `length` 0.5 to 3 s (`SFX_LENGTH_RANGE`). `bell`: four inharmonic partials (1, 2.76, 5.4, 8.93 times the base) dying faster the higher they are. `notify`: a tone near 2 kHz with a partial at 3.4 times its pitch, one note or two. `sting`: a chirp falling 1.5 kHz to 150 Hz in 70 to 100 ms into a 64 to 80 Hz hum with a second harmonic, anchor where the chirp lands on the hum (variant 1: 85 ms).
+- **DSP.** `sawBlep` and `squareBlep` (PolyBLEP, `sound/dsp.ts`) give the glitch and the braaam waveforms that do not alias under a filter sweep.
+- **Placement** (`SOUND_DEFAULT_ROLES`, `SOUND_DEFAULT_TIERS`). `glitch` role `click`, tier secondary; `braaam` `knock`, primary; `swell` `swell` (peak +42 ms), secondary; `bell` and `notify` `pop`, secondary; `sting` `knock`, primary. No new minimum gap.
+- **Tests.** The PCM hash table has an entry per new kind and variant (seed 7); the generic cases cover peak, head-room, faded tail and mono output for them; length and anchor of each are asserted.
+- Protocol 139 (the kind enum of `sound.sfx` and `sound.place` grew).
+- Not done: the CC0 set, the audition page, the energetic music preset. The owner listens to the new kinds before they are relied on.
 
 ## Considered options
 
