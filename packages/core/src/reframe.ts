@@ -24,6 +24,30 @@ export function parseFrameFormat(text: string): FrameFormat | null {
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
+/** Where a reframe writes: the frame it frames for, its aspect's name, and the project format whose override takes it. */
+export interface ReframeTarget {
+  frame: FrameFormat;
+  /** The frame's aspect in lowest terms, `<w>x<h>` (`9x16`; a `web-1600x900` format is `16x9`). */
+  aspect: string;
+  /** Id of a declared format other than the primary (ADR 0027): the framing goes into the clip's override there. Null: into the clip. */
+  format: string | null;
+}
+
+/**
+ * What `clip.reframe` frames for, from its `format` text and the project's formats (primary first): a declared format's
+ * id names that format (its override, or the clip itself for the primary), anything else is an aspect (`9x16`, `9:16`)
+ * written into the clip. Ids cannot hold `:`, so `9:16` always means the aspect. Null when the text is neither.
+ */
+export function reframeTarget(text: string, declared: readonly { id: string; width: number; height: number }[]): ReframeTarget | null {
+  const index = declared.findIndex((entry) => entry.id === text);
+  const named = declared[index];
+  const frame = named ? { width: named.width, height: named.height } : parseFrameFormat(text);
+  if (!frame) return null;
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const common = gcd(frame.width, frame.height);
+  return { frame, aspect: `${frame.width / common}x${frame.height / common}`, format: named && index > 0 ? named.id : null };
+}
+
 /** Placement fields a reframe sets: `x`, `y` in project pixels, `scale` as a factor of the fitted size. */
 export interface ReframePlacement {
   x: number;

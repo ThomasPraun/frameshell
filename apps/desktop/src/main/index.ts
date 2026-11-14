@@ -1710,8 +1710,10 @@ function registerIpc(): void {
       return daemon.request("matte.status", { cwd: project.dir, timeline, ...(view ? { view } : {}) });
     }),
   );
-  ipcMain.handle(Channel.clipsRenders, (event, timeline: string) =>
-    outcome(async () => daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline })),
+  ipcMain.handle(Channel.clipsRenders, (event, timeline: string, format?: string) =>
+    outcome(async () =>
+      daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, ...(typeof format === "string" ? { format } : {}) }),
+    ),
   );
   ipcMain.handle(Channel.multicamTurns, (event, timeline: string, group: string) =>
     outcome(async () => daemon.request("multicam.turns", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, group })),

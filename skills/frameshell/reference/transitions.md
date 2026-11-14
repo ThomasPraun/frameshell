@@ -89,15 +89,16 @@ frameshell clip key <clip> --prop scale --at 20 --value 1.2
 ## Reframe to vertical
 
 ```sh
-frameshell clip reframe <clip>                      # 9x16 around the largest face
+frameshell clip reframe <clip>                      # 9x16 around the largest face (format 9x16 only, once declared)
+frameshell clip reframe <clip> --format 4x5         # a declared format's framing, or an aspect for the clip itself
 frameshell clip reframe <clip> --person Ana         # that person's face, from `people scan`
 frameshell clip reframe <clip> --anchor 0.3         # no face: fixed horizontal position, 0 left edge, 1 right edge
 ```
 
-- It writes `scale` (the cover scale, static) and `x`/`y` (keys where the face moves, static where it holds) in one transaction; `revert <tx>` undoes it, and `clip key` or the inspector edit the keys after. It replaces the clip's own `x`, `y` and `scale`.
+- It writes `scale` (the cover scale, static) and `x`/`y` (keys where the face moves, static where it holds) in one transaction; `revert <tx>` undoes it, and `clip key` (with `--format <id>` for a format's framing) or the inspector edit the keys after. It replaces the `x`, `y` and `scale` of what it frames: the clip's own, or the format's.
 - The face lands centered, 30 % from the top, and the frame never shows outside the picture. Rotation metadata is applied first: a phone's portrait clip needs no more than the headroom.
 - Read `faces` against `samples` and every `warning:`. No face found leaves the clip as it was: look at a frame (`frame --at <s> --out <file.png>`), find where the speaker stands, pass `--anchor`.
-- In a 16:9 project the preview shows the clip zoomed; the framing shows in a `vertical-1080x1920` export (`frame --preset vertical-1080x1920` to check).
+- In a 16:9 project that delivers 9:16 too, declare the format first (`frameshell format add 9x16`): `clip reframe <clip>` (or `--format <id>` of any format in `format list` other than the primary) then frames the clip in that format only, in its override, and the 16:9 cut keeps its own framing. Each format can follow the face its own way: reframe once per format. Check with `frame --at <s> --out <file.png> --format 9x16`. An aspect such as `--format 9:16` frames the clip itself, for every format, so a 16:9 preview shows it zoomed (`warning:`).
 
 ## Music under a voice
 

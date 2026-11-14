@@ -12,6 +12,7 @@ import {
   type TrackRow,
   formatDuration,
   lowerBound,
+  markedFormats,
   rulerTicks,
   visibleClips,
 } from "./layout.js";
@@ -157,6 +158,8 @@ export interface PaintInput<Img> {
   selectedScene?: { script: string; slug: string } | null;
   /** A stroke being painted on a turn lane: tinted there until it is released. */
   stroke?: TurnStroke | null;
+  /** Ids of the project's formats other than the primary (ADR 0027): clips with an override in one get a corner mark. */
+  formats?: ReadonlySet<string>;
 }
 
 /** A stroke on a turn lane in progress, as the panel previews it. */
@@ -445,9 +448,25 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
     ctx.fill();
   }
 
-  if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme);
+  const formatMark = input.formats !== undefined && w > FORMAT_MARK.width * 3 && markedFormats(clip, input.formats).length > 0;
+  if (formatMark) paintFormatMark(ctx, left + w, y, theme);
+  if (w >= MIN_LABEL_WIDTH) paintLabel(ctx, clip, left, w, y, theme, formatMark ? FORMAT_MARK.width + FORMAT_MARK.inset : 0);
   paintKeys(ctx, input, clip, left, right, y + h - KEY_RADIUS - 3);
   return media;
+}
+
+/** Size of the format-override mark, px: a portrait frame, as a 9:16 canvas reads. */
+const FORMAT_MARK = { width: 6, height: 9, inset: 4 };
+
+/** A clip with a per-format override (ADR 0027): a small frame in its top-right corner, under the tally strip. */
+function paintFormatMark<Img>(ctx: Paint2D<Img>, right: number, y: number, theme: TimelineTheme): void {
+  const x = Math.round(right - FORMAT_MARK.inset - FORMAT_MARK.width) + 0.5;
+  const top = Math.round(y + FORMAT_MARK.inset) + 0.5;
+  ctx.fillStyle = theme.lane;
+  ctx.fillRect(x - 1, top - 1, FORMAT_MARK.width + 2, FORMAT_MARK.height + 2);
+  ctx.strokeStyle = theme.text;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, top, FORMAT_MARK.width, FORMAT_MARK.height);
 }
 
 /** Diamonds at the times a clip's properties have keys, along its bottom edge. */
@@ -720,9 +739,10 @@ function paintDrag<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, drag: DragGho
 }
 
 /** Name, then length (or why it is unknown) while it fits; sticks to the left edge of the view. */
-function paintLabel<Img>(ctx: Paint2D<Img>, clip: ClipBox, left: number, w: number, y: number, theme: TimelineTheme): void {
+function paintLabel<Img>(ctx: Paint2D<Img>, clip: ClipBox, left: number, w: number, y: number, theme: TimelineTheme, reserve: number): void {
   const textX = Math.max(left, 0) + 6;
-  const room = left + w - textX - 4;
+  // `reserve`: px kept free at the right end for a corner mark.
+  const room = left + w - textX - 4 - reserve;
   if (room <= 8) return;
   ctx.save();
   ctx.beginPath();

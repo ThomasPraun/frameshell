@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 126):
+  `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`
+  too, once declared) writes the face-following framing into the clip's override there, so the clip, the primary and
+  every other format keep theirs and each format can follow the face its own way; the result says where
+  (`inFormat`). An aspect (`9:16`) still frames the clip itself. Its warning no longer suggests the
+  `vertical-1080x1920` preset, refused in a 16:9 project since slice 1, but `format add`. In the app, the timeline
+  marks a clip with an override in a declared format with a small frame in its corner, and its tooltip names the
+  formats (English and Spanish); switching the preview to a format asks the daemon for that format's generated-clip
+  renders (queued when missing), so generated clips show at the format's size with their props there, as export
+  draws them.
+
 - The 5 ms fade in of #485 (ADR 0037), now that sample-accurate audio fades exist (#585): `music fit`, `music shape`
   and `music candidates` give the music clip's start `audio.fadeInMs` 5, as one more step of the same transaction
   (`revert` undoes it with the fit; one proposal in review mode), so a track cut mid-waveform does not click. A fade

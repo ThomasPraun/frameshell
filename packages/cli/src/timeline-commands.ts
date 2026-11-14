@@ -66,7 +66,7 @@ mutations print the new revision):
                                there now. --remove deletes the key at --at; --clear (no --at) every key of --prop.
                                --format <id> keys x, y, scale or opacity in that format only; with --clear the
                                clip moves there as in the primary again
-  clip reframe <clip> [--format 9x16] [--person <id|name> | --anchor 0-1]
+  clip reframe <clip> [--format 9x16|<id>] [--person <id|name> | --anchor 0-1]
                                Frame a video clip for another aspect (default 9x16, for reels), keeping a face in
                                it: scales the picture to cover the frame and positions it so the face sits centered,
                                30 % from the top, never showing outside the picture. Looks at 2 frames per second
@@ -75,7 +75,10 @@ mutations print the new revision):
                                moves gives a static placement). --person follows that person's face from the cached
                                people scan instead; --anchor (0 left edge, 1 right edge) fixes the picture's
                                horizontal position with no face detection. Replaces the clip's x, y and scale; one
-                               transaction, revert undoes it. Correct the keys with clip key or in the app
+                               transaction, revert undoes it. Correct the keys with clip key or in the app.
+                               --format with a format id of the project other than the primary (format list) writes
+                               the framing into the clip's override there only; the clip and the other formats keep
+                               theirs. An aspect (9:16 always is one) frames the clip itself, for every format
   clip verify <clip> [--probes n] [--tolerance 0-255]
                                Check that a generated clip (a motion clip, any adapter with a live preview) paints
                                a pure function of time: captures --probes frames (default 12, 2 to 48) at
@@ -1406,7 +1409,8 @@ function formatMulticamDirect(result: MulticamDirectResult): string {
 
 function formatClipReframe(result: ClipReframeResult): string {
   const follows = { face: `face in ${result.faces} of ${result.samples} frames`, person: `person's face in ${result.faces} of ${result.samples} frames`, anchor: "fixed anchor" }[result.follows];
-  const lines = [`Reframe ${result.clip} for ${result.format}: ${follows}`];
+  const where = result.inFormat === null ? "" : ` in format ${result.inFormat} only`;
+  const lines = [`Reframe ${result.clip} for ${result.format}${where}: ${follows}`];
   if (result.placement) {
     const { scale, x, y } = result.placement;
     const moves = result.keys > 0 ? `${result.keys} keys on x/y` : "static, no keys";

@@ -138,7 +138,7 @@ const api: FrameshellApi = {
     onProgress: (listener) => subscribe(Channel.segmentProgress, listener),
   },
   clips: {
-    renders: (timeline) => invokeOutcome(Channel.clipsRenders, timeline),
+    renders: (timeline, format) => invokeOutcome(Channel.clipsRenders, timeline, format),
     onJob: (listener) => subscribe(Channel.clipsJob, listener),
     live: (timeline, clip) => invokeOutcome(Channel.clipsLive, timeline, clip),
   },

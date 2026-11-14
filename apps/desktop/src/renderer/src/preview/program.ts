@@ -462,7 +462,10 @@ export interface ProgramOptions {
   resolution?: Size;
   /** Nested timelines by clip `source` (`timelines/<id>.json`); absent ones show a placeholder. */
   nested?: ReadonlyMap<string, TimelineView>;
-  /** Render cache states of generated clips by clip id (`clip.renders`); absent ones are not known yet. */
+  /**
+   * Render cache states of generated clips by clip id (`clip.renders`, with `format` for the format shown); absent ones
+   * are not known yet.
+   */
   renders?: ReadonlyMap<string, ClipRenderInfo>;
   /**
    * Ready bakes of clip audio effects by `bakeRef` of asset and chain (`audio.bakes`, ADR 0031): a clip with effects
@@ -476,7 +479,8 @@ export interface ProgramOptions {
   mattes?: ReadonlyMap<string, string>;
   /**
    * The project format shown (ADR 0027, `formatOf`): in one that covers, footage and stills get the `cover` crop export
-   * cuts (`formatCrop`). Generated clips stay fitted until renders per format reach the preview. Absent: the primary.
+   * cuts (`formatCrop`). Generated clips are fitted from `renders`: those of the format, made at its size, fill it as
+   * export's do. Absent: the primary.
    */
   format?: FormatLayout & Size;
 }

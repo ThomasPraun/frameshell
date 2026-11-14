@@ -432,10 +432,12 @@ export {
   type ReframeKey,
   type ReframePlacement,
   type ReframePlan,
+  type ReframeTarget,
   parseFrameFormat,
   planReframe,
   reframeBounds,
   reframePlacement,
+  reframeTarget,
 } from "./reframe.js";
 export {
   type DecoderOutput,

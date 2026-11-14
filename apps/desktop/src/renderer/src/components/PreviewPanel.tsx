@@ -72,7 +72,8 @@ const PLACEHOLDER_TEXT: Record<PlaceholderReason, string> = {
  * switcher shows the frame as that format exports it: untransformed footage
  * cut to cover it, overlays with alpha fitted, multicam shots reframed,
  * vertical captions larger, each clip with its override there; generated
- * clips stay fitted until renders per format reach the preview. There the
+ * clips play their renders at that format's size, which switching asks the
+ * daemon for (they render then, a slate meanwhile). There the
  * handles and the inspector edit that format's override; element mode,
  * picking and live pages stay in the primary format.
  * The header's button moves the panel to its own window and back

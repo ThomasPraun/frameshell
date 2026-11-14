@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
-import type { Clip, Timeline } from "@frameshell/schema";
+import { type Clip, type Timeline, clipInFormat } from "@frameshell/schema";
 import { type Daemon, type FaceScanRequest, angleFaceKeys, reframePlacement, startDaemon, writeFaceScan } from "../src/index.js";
 import { makeMarkerClip, markerDetector } from "./face-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -81,10 +81,10 @@ describe("clip.reframe", () => {
       expect(methods["clip.reframe"].result.parse(result)).toEqual(result);
       expect(scans).toHaveLength(1);
       expect(scans[0]!.range).toEqual({ from: 2, to: 8 });
-      expect(result).toMatchObject({ clip: id, format: "9x16", follows: "face", samples: 12, faces: 12 });
+      expect(result).toMatchObject({ clip: id, format: "9x16", inFormat: null, follows: "face", samples: 12, faces: 12 });
       expect(result.keys).toBe(2);
-      // Stage frame is 16:9 and the export 9:16: said once.
-      expect(result.warnings).toEqual([expect.stringContaining("vertical-1080x1920")]);
+      // Stage frame is 16:9 and no 9:16 format is declared: said once, with the way to frame one format alone.
+      expect(result.warnings).toEqual([expect.stringContaining("frameshell format add 9x16")]);
 
       const clip = (await clipOf(id)) as Extract<Clip, { type: "media" }>;
       const left = reframePlacement({ source: SOURCE, project: PROJECT, format: FORMAT }, { x: 0.1875, y: 0.5 });
@@ -243,6 +243,51 @@ describe("clip.reframe", () => {
       // A portrait picture already covers 9:16: only the headroom.
       expect(result.placement!.scale).toBeLessThan(1.003);
       expect(Math.abs(result.placement!.x)).toBeLessThan(2);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "with a declared format's id, frames the clip in that format's override only, and keeps the clip's own framing",
+    async () => {
+      await conn.request("format.add", { cwd: project, id: "9x16" });
+      await conn.request("format.add", { cwd: project, id: "web-4x5", width: 1080, height: 1350 });
+      try {
+        const id = await addClip("assets/talk.mp4", 180, 2, 8, { transform: { x: 30, scale: 1.1 } });
+        await solo.request("clip.key", { cwd: project, clip: id, prop: "y", time: 181, value: 12 });
+        // A key of the override that the reframe replaces.
+        await solo.request("clip.key", { cwd: project, clip: id, prop: "scale", time: 181, value: 2, format: "9x16" });
+        const result = await solo.request("clip.reframe", { cwd: project, clip: id });
+        expect(result).toMatchObject({ format: "9x16", inFormat: "9x16", follows: "face", keys: 2 });
+        expect(result.warnings).toEqual([expect.stringContaining("in format 9x16")]);
+        const clip = (await clipOf(id)) as Extract<Clip, { type: "media" }>;
+        // The clip itself, so the primary, is as it was.
+        expect(clip.transform).toEqual({ x: 30, scale: 1.1 });
+        expect(clip.keys?.y).toHaveLength(1);
+        const left = reframePlacement({ source: SOURCE, project: PROJECT, format: FORMAT }, { x: 0.1875, y: 0.5 });
+        const override = clip.formats?.["9x16"];
+        expect(override?.transform).toEqual({ scale: left.scale, x: left.x, y: left.y });
+        expect(override?.keys?.scale).toBeUndefined();
+        expect(override?.keys?.x?.map((key) => key.at)).toEqual([3.5, 4]);
+        expect(clipInFormat(clip, "9x16").keys?.y).toBeUndefined();
+        const history = await conn.request("history", { cwd: project });
+        expect(history.transactions.find((entry) => entry.tx === result.tx)!.operations.map((op) => op.op)).toEqual(["clip.key", "clip.set", "clip.key", "clip.key"]);
+        await solo.request("revert", { cwd: project, target: result.tx! });
+        expect((await clipOf(id)).formats?.["9x16"]).toEqual({ keys: { scale: [expect.objectContaining({ value: 2 })] } });
+
+        // A custom format frames for its own aspect; `4:5` is the aspect and frames the clip itself.
+        const custom = await solo.request("clip.reframe", { cwd: project, clip: id, anchor: 0.5, format: "web-4x5" });
+        expect(custom).toMatchObject({ format: "4x5", inFormat: "web-4x5" });
+        const square = reframePlacement({ source: SOURCE, project: PROJECT, format: { width: 4, height: 5 } }, { x: 0.5, y: 0.5 });
+        expect((await clipOf(id)).formats?.["web-4x5"]?.transform).toEqual({ scale: square.scale, x: square.x, y: square.y });
+        const aspect = await solo.request("clip.reframe", { cwd: project, clip: id, anchor: 0.5, format: "4:5" });
+        expect(aspect).toMatchObject({ format: "4x5", inFormat: null });
+        expect(aspect.warnings).toContainEqual(expect.stringContaining("reframe with format web-4x5"));
+        expect((await clipOf(id)).transform).toEqual({ scale: square.scale, x: square.x, y: square.y });
+      } finally {
+        await conn.request("format.remove", { cwd: project, id: "web-4x5" });
+        await conn.request("format.remove", { cwd: project, id: "9x16" });
+      }
     },
     MEDIA_TIMEOUT,
   );
