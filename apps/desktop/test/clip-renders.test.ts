@@ -51,6 +51,18 @@ describe("applyClipJob", () => {
     expect(next.get("c2")).toBe(renders.get("c2"));
   });
 
+  it("follows the blurred final render of a clip with motion blur in `final`, leaving its ready draft as it is (ADR 0041)", () => {
+    const final = { state: "queued" as const, key: "keyblur", file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null, refused: false };
+    const draft = info("c1", { job: null, state: "ready", file: ".frameshell/cache/clips/keyc1.webm", progress: 1, final });
+    const renders = new Map([["c1", draft]]);
+    const output = "/p/.frameshell/cache/clips/keyblur";
+    const { renders: next, refetch } = applyClipJob(renders, job({ id: "j_c9", output, progress: 0.4 }));
+    expect(refetch).toBe(false);
+    expect(next.get("c1")).toEqual({ ...draft, final: { ...final, state: "rendering", progress: 0.4, job: "j_c9" } });
+    expect(applyClipJob(next, job({ id: "j_c9", output, progress: 0.4 })).renders).toBe(next);
+    expect(applyClipJob(next, job({ id: "j_c9", output, state: "done", progress: 1 })).refetch).toBe(true);
+  });
+
   it("follows a render by its cache key when the read did not know the job yet (two clips sharing one render)", () => {
     const renders = new Map([["c1", info("c1", { job: null })], ["c3", info("c3", { key: "keyc1", job: null })]]);
     const { renders: next } = applyClipJob(renders, job({ id: "j_c7", progress: 0.5 }));

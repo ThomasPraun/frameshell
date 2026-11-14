@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sharp and blurred renders of a clip with motion blur, slice 3 of #501 (ADR 0041 decision 11, epic #451; protocol 135):
+  a generated clip with `motionBlur` keeps two cached renders. The sharp one (the key it had without blur) renders first
+  and is what the live preview and `render --quality draft` use; the blurred one is queued after it in the background,
+  the preview swaps it in when it is ready, and `render --quality final`, `render` without a quality and `frame` wait
+  for it. `clip.renders` reports the blurred render in a new `final` field (state `waiting` while the sharp one is not
+  ready yet), and the app follows its job. When the plugin refuses to blur a composition (HyperFrames: HDR content,
+  shader transitions; plugin API `MOTION_BLUR_REFUSED`), exports use the sharp render and the render job gets a
+  warning; `final.refused` says so and the refusal is not retried until the clip changes. Chat about this says
+  `frame pending` while the blurred render is due. `gc` keeps both renders of every blurred clip.
 - Timeline letterbox, slice 1 of #500 (ADR 0043, epic #451; protocol 133): an optional `letterbox { aspect }` on the
   timeline paints black bars over the whole finished picture, above every video track and under the captions: top and
   bottom when the aspect is wider than the frame, at the sides when narrower. `frameshell letterbox set 2.39` (also
@@ -39,8 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Motion runtime 0.4.0 adds `cuts(seconds[])`, a time guard that keeps samples from crossing a cut inside a composition
   (the render declares its frame rate in `<meta name="frameshell-fps">`); `frameshell hyperframes update` brings it to
   existing compositions. Opt-in real tests: blur smears the fast spring, a blurred clip renders twice to identical
-  frames, and a declared cut is never blurred across. Until the sharp/blurred variants of slice 3, a blurred clip has
-  one render that preview and every export wait for.
+  frames, and a declared cut is never blurred across.
 - Colour section of the clip inspector and LOG footage warning, second slice of #384 (ADR 0031, epic #451; protocol 130):
   a media clip on a video track shows Colour in the clip inspector: sliders for exposure, temperature, tint,
   contrast and saturation, a menu of the project's `.cube` LUTs with its mix, and Reset. A drag is one undoable step
