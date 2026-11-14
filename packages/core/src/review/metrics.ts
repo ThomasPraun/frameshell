@@ -1,8 +1,9 @@
-import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSpan, ReviewSync } from "@frameshell/protocol";
+import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSound, ReviewSpan, ReviewSync } from "@frameshell/protocol";
 import type { ResolvedSubtitleTrack } from "@frameshell/schema";
 import { deliveryWarnings } from "./delivery.js";
 import { seamWarnings } from "./loop.js";
 import { safeWarnings } from "./safe.js";
+import { soundListWarnings } from "./sound.js";
 import type { MotionSeries } from "./source.js";
 import { syncWarnings } from "./sync.js";
 
@@ -61,6 +62,8 @@ export interface MetricsInput {
   loop?: boolean;
   /** The file against its export plan; absent: not checked. */
   delivery?: ReviewDelivery | null;
+  /** The sound review list; absent: not measured. */
+  sound?: ReviewSound | null;
   /** Graphics and faces that cross each platform's zones. */
   safe?: readonly { platform: string; flags: readonly ReviewSafeFlag[] }[];
 }
@@ -190,11 +193,12 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
     craft.push({ check: "silent", from: null, to: null, message: `the film runs ${round(range.to - range.from)} s with no sound.` });
   }
 
-  const { sync = null, seam = null, delivery = null } = input;
+  const { sync = null, seam = null, delivery = null, sound = null } = input;
   if (sync) craft.push(...syncWarnings(sync));
   if (seam && input.loop) craft.push(...seamWarnings(seam));
   if (delivery) craft.push(...deliveryWarnings(delivery));
   for (const { platform, flags } of input.safe ?? []) craft.push(...safeWarnings(platform, flags));
+  if (sound) craft.push(...soundListWarnings(sound));
 
   craft.sort((a, b) => (a.from ?? -1) - (b.from ?? -1));
   // Every finding is a warning until `requirements.json` is applied (`judgeRequirements`).
@@ -205,6 +209,7 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
     sync,
     seam,
     delivery,
+    sound,
     craft: craft.map((finding) => ({ ...finding, severity: "warn" as const })),
     waived: [],
     requirements: null,

@@ -155,7 +155,13 @@
           "sync",
           "loop-seam",
           "delivery",
-          "safe-zone"
+          "safe-zone",
+          "voice-bed",
+          "sfx-repeat",
+          "machine-gun",
+          "chopped",
+          "ending",
+          "click"
         ]
       }
     },
@@ -178,7 +184,13 @@
               "sync",
               "loop-seam",
               "delivery",
-              "safe-zone"
+              "safe-zone",
+              "voice-bed",
+              "sfx-repeat",
+              "machine-gun",
+              "chopped",
+              "ending",
+              "click"
             ],
             "description": "The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."
           },

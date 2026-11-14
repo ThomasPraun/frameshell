@@ -15,6 +15,7 @@ import {
   type ReviewSeam,
   type ReviewSheet,
   type ReviewSheetKind,
+  type ReviewSound,
   type ReviewSync,
   RpcError,
   type TimelineViewName,
@@ -24,9 +25,12 @@ import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
 import { captionFontMetrics } from "../export/font-metrics.js";
-import type { ExportService, LoadedTimeline } from "../export/service.js";
+import { type ExportService, type LoadedTimeline, readTranscriptFile } from "../export/service.js";
+import { BINARY_ERRORS } from "../media/duck.js";
+import type { EnergyProfile } from "../media/energy.js";
 import { probeMedia } from "../media/ffmpeg.js";
 import type { ScannedAsset } from "../people/face-clusters.js";
+import { soundsOn } from "../sound/place.js";
 import type { TimelineService } from "../timeline/service.js";
 import {
   type Critical,
@@ -47,7 +51,8 @@ import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
 import { deliveryChecks } from "./delivery.js";
 import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
-import { fileOnsets, takeOnsets } from "./onsets.js";
+import { fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
+import { fileSound, heardClips, timelineSound } from "./sound.js";
 import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
 import { type ClipSpan, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
@@ -66,6 +71,8 @@ export interface ReviewServiceOptions {
   generated?(root: string, timeline: Timeline, size?: { width: number; height: number }): Promise<ReadonlyMap<string, GeneratedSource>>;
   /** The cached face scans of the project's videos (`people scan`); absent: faces are not placed against safe zones. */
   faceScans?(root: string): Promise<readonly ScannedAsset[]>;
+  /** The 10 ms envelope of a project asset (`EnergyStore.profile`); absent: a timeline's sound is not reviewed. */
+  soundProfile?(root: string, asset: string): Promise<EnergyProfile>;
   /** Platforms the project's style guide names (`style.json`); empty when there is none. */
   platforms(root: string): Promise<readonly PlatformId[]>;
   /** Absolute ffmpeg and ffprobe for the project rooted at `root`. */
@@ -212,7 +219,11 @@ export class ReviewService {
         const series = await motion();
         const seconds = { from: frameTime(range.first, source.fps), to: frameTime(range.end, source.fps) };
         const loudness = await this.#loudness(request, source, ffmpeg, warnings, signal);
-        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, critical, seconds, ffmpeg, scratch, warnings, signal);
+        let decoded: Promise<Float32Array> | undefined;
+        /** The 10 ms envelope of a file's sound, decoded once for the sync and the sound review list. */
+        const envelope = (file: string) => (decoded ??= fileEnvelope(ffmpeg, file, join(scratch, "sound")));
+        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, critical, seconds, envelope, warnings, signal);
+        const sound = await this.#sound(root, request, source, loaded ? flat : null, seconds, ffmpeg, envelope, scratch, warnings, signal);
         const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
         const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
         metrics = reviewMetrics({
@@ -226,6 +237,7 @@ export class ReviewService {
           seam,
           loop: request.loop === true,
           delivery,
+          sound,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
         });
         const requirements = await readRequirementsFile(root);
@@ -324,8 +336,7 @@ export class ReviewService {
     series: MotionSeries,
     critical: readonly Critical[],
     range: { from: number; to: number },
-    ffmpeg: string,
-    scratch: string,
+    envelope: (file: string) => Promise<Float32Array>,
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<ReviewSync | null> {
@@ -333,7 +344,7 @@ export class ReviewService {
       let sounds;
       if (request.file) {
         if (!source.audio) return null;
-        sounds = await fileOnsets(ffmpeg, request.file, join(scratch, "onsets"));
+        sounds = fileOnsets(await envelope(request.file));
       } else if (flat) {
         sounds = await takeOnsets(root, (await flat()).timeline);
       } else return null;
@@ -350,6 +361,62 @@ export class ReviewService {
     } catch (error) {
       signal?.throwIfAborted();
       warnings.push(`sync: the sounds could not be placed against the picture (${(error as Error).message.split("\n")[0]}).`);
+      return null;
+    }
+  }
+
+  /**
+   * The sound review list. A file: its decoded mix (ending, clicks). A timeline: each heard clip from its asset's envelope,
+   * by role (voice over bed, repeated effects, cut-off tails, the music on the last frame). Null when there is no sound, or
+   * with a warning when it cannot be read.
+   */
+  async #sound(
+    root: string,
+    request: ReviewRequest,
+    source: FilmSource,
+    flat: (() => Promise<Flat>) | null,
+    range: { from: number; to: number },
+    ffmpeg: string,
+    envelope: (file: string) => Promise<Float32Array>,
+    scratch: string,
+    warnings: string[],
+    signal?: AbortSignal,
+  ): Promise<ReviewSound | null> {
+    const filmEnd = source.frames / source.fps;
+    try {
+      if (request.file) {
+        if (!source.audio) return null;
+        const [decoded, clicks] = await Promise.all([envelope(request.file), fileClicks(ffmpeg, request.file, join(scratch, "clicks"), signal)]);
+        return fileSound({ envelope: decoded, clicks, range, filmEnd });
+      }
+      const { soundProfile } = this.#options;
+      if (!flat || !soundProfile) return null;
+      const { timeline, fps } = await flat();
+      const assets = new Set(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [] : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : [])))));
+      const transcribed = new Set<string>();
+      for (const asset of assets) {
+        if ((await readTranscriptFile(root, asset).catch(() => null)) !== null) transcribed.add(asset);
+      }
+      const kinds = new Map((await soundsOn(root, timeline)).map((item) => [item.file, item.kind] as const));
+      const clips = heardClips(timeline, fps, { transcribed, kinds }).filter((clip) => clip.end > range.from && clip.start < range.to);
+      const profiles = new Map<string, EnergyProfile>();
+      const unread = new Set<string>();
+      for (const asset of new Set(clips.map((clip) => clip.asset))) {
+        signal?.throwIfAborted();
+        try {
+          profiles.set(asset, await soundProfile(root, asset));
+        } catch (error) {
+          // No ffmpeg hears nothing: the outer catch drops the whole list with a warning instead of reviewing it as silence.
+          if (error instanceof RpcError && BINARY_ERRORS.includes(error.code)) throw error;
+          // A clip of a video track is only heard as a voice; a still there has no sound to miss.
+          if (clips.some((clip) => clip.asset === asset && timeline.tracks.find((track) => track.id === clip.track)?.kind !== "video")) unread.add(asset);
+        }
+      }
+      if (unread.size > 0) warnings.push(`sound: ${[...unread].join(", ")} cannot be decoded, so ${unread.size === 1 ? "it is" : "they are"} not heard in the sound review.`);
+      return timelineSound({ clips, profiles, range, filmEnd });
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`sound: the sound could not be reviewed (${(error as Error).message.split("\n")[0]}).`);
       return null;
     }
   }

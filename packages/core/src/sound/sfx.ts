@@ -7,7 +7,7 @@ import {
   SFX_VARIANTS,
   type SfxKind,
 } from "@frameshell/schema";
-import { Biquad, type Rng, SR, TAU, frames, noise, peakOf, rngOf, saturate } from "./dsp.js";
+import { Biquad, type Rng, SR, TAU, frames, noise, peakOf, rngOf, sawBlep, saturate, squareBlep } from "./dsp.js";
 
 /** Shortest take in seconds: a tick (35 ms) is padded with silence to it, so the engine, which keeps whole frames of a file, still has a frame to play at 20 fps and up. */
 export const SFX_MIN_LENGTH = 0.05;
@@ -109,6 +109,12 @@ const RECIPES: Record<SfxKind, (voice: Voice) => Layered> = {
   thump,
   impact,
   shutter,
+  glitch,
+  braaam,
+  swell,
+  bell,
+  notify,
+  sting,
 };
 
 /** Variant picks: `values[variant - 1]`. */
@@ -274,4 +280,133 @@ function riser(voice: Voice): Layered {
     out[i] = (0.8 * bp.process(noise(rng)) + 0.35 * saw) * Math.exp(5 * (u - 1));
   }
   return { channels: [out], anchor: length };
+}
+
+/** A stutter: short slices of a square or saw at random pitches, a fixed step apart, like a broken signal. The anchor is its first slice. */
+function glitch(voice: Voice): Layered {
+  const { rng, pitch, bright, variant } = voice;
+  const [count, slice, step] = pick<[number, number, number]>(voice, [7, 0.032, 0.042], [5, 0.04, 0.05], [9, 0.025, 0.034]);
+  const out = new Float64Array(frames((count - 1) * step + slice));
+  const fade = frames(0.001);
+  for (let n = 0; n < count; n++) {
+    const freq = Math.min(5000, 220 * Math.pow(2600 / 220, rng()) * pitch * bright);
+    const level = 0.6 + 0.4 * rng();
+    const saw = variant === 2 || (variant === 3 && n % 2 === 1);
+    const dt = freq / SR;
+    const start = frames(n * step) - 1;
+    const length = frames(slice);
+    let phase = 0;
+    for (let i = 0; i < length && start + i < out.length; i++) {
+      const edge = Math.min(1, i / fade, (length - 1 - i) / fade);
+      out[start + i]! += level * edge * (saw ? sawBlep(phase, dt) : squareBlep(phase, dt)) * 0.5;
+      phase = (phase + dt) % 1;
+    }
+  }
+  return { channels: [out], anchor: 0 };
+}
+
+/** A low brass blast: five detuned saws on a root, a low-pass that opens fast and closes slowly, and a sub. The anchor is the onset. */
+function braaam(voice: Voice): Layered {
+  const { pitch, bright } = voice;
+  const [root, length, open] = pick<[number, number, number]>(voice, [65.41, 1.85, 0.3], [55, 1.6, 0.25], [73.42, 2.2, 0.35]);
+  const cents = [-18, -9, 0, 10, 19];
+  const out = new Float64Array(frames(length));
+  const phases = cents.map(() => 0);
+  const lp = new Biquad();
+  let sub = 0;
+  for (let i = 0; i < out.length; i++) {
+    const u = i / out.length;
+    const t = i / SR;
+    const cutoff = u < open ? sweep(250, 1850, u / open) : sweep(1850, 380, (u - open) / (1 - open));
+    if (i % 16 === 0) lp.set("lowpass", cutoff * pitch * bright, 1.2);
+    let sum = 0;
+    cents.forEach((cent, k) => {
+      const dt = (root * pitch * Math.pow(2, cent / 1200)) / SR;
+      phases[k] = (phases[k]! + dt) % 1;
+      sum += sawBlep(phases[k]!, dt);
+    });
+    sub += (TAU * root * pitch) / SR;
+    const env = (1 - decay(t, 0.02)) * (0.35 + 0.65 * decay(t, length * 0.35));
+    out[i] = saturate(lp.process(sum / cents.length) * 1.4 + 0.5 * Math.sin(sub), 1.6) * env;
+  }
+  return { channels: [out], anchor: 0 };
+}
+
+/** A build that fades in and ends in a short release, as a reversed cymbal does: noise sweeping up over two soft tones. The anchor is its peak. */
+function swell(voice: Voice): Layered {
+  const { rng, pitch, bright } = voice;
+  const length = voice.length ?? pick(voice, 1.2, 1.0, 1.5);
+  const [from, to, tone] = pick<[number, number, number]>(voice, [400, 5000, 196], [300, 4200, 220], [500, 6000, 175]);
+  const out = new Float64Array(frames(length));
+  const bp = new Biquad();
+  const peak = 0.85;
+  let low = 0;
+  let fifth = 0;
+  for (let i = 0; i < out.length; i++) {
+    const u = i / out.length;
+    if (i % 16 === 0) bp.set("bandpass", sweep(from, to, u) * pitch * bright, 0.9);
+    low += (TAU * tone * pitch) / SR;
+    fifth += (TAU * tone * 1.5 * pitch) / SR;
+    const env = u < peak ? Math.pow(u / peak, 2.5) : Math.cos((Math.PI / 2) * ((u - peak) / (1 - peak)));
+    out[i] = (0.9 * bp.process(noise(rng)) + 0.25 * Math.sin(low) + 0.12 * Math.sin(fifth)) * env;
+  }
+  return { channels: [out], anchor: length * peak };
+}
+
+/** A soft bell: four inharmonic partials struck together, the higher ones dying first. */
+function bell(voice: Voice): Layered {
+  const { pitch } = voice;
+  const [base, tau] = pick<[number, number]>(voice, [880, 0.5], [1175, 0.4], [660, 0.65]);
+  const partials = [
+    { ratio: 1, level: 1, tau },
+    { ratio: 2.76, level: 0.6, tau: tau * 0.6 },
+    { ratio: 5.4, level: 0.35, tau: tau * 0.36 },
+    { ratio: 8.93, level: 0.2, tau: tau * 0.2 },
+  ].filter((partial) => base * partial.ratio * pitch < 12000);
+  const out = new Float64Array(frames(tau * 3.2));
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SR;
+    const strike = 1 - decay(t, 0.001);
+    let sum = 0;
+    for (const partial of partials) sum += partial.level * Math.sin(TAU * base * partial.ratio * pitch * t) * decay(t, partial.tau);
+    out[i] = sum * strike;
+  }
+  return { channels: [out], anchor: 0 };
+}
+
+/** A notification ping: a tone near 2 kHz with a partial at 3.4 times its pitch; variants 2 and 3 are two notes. */
+function notify(voice: Voice): Layered {
+  const { pitch } = voice;
+  const notes = pick<{ at: number; freq: number }[]>(voice, [{ at: 0, freq: 2000 }], [{ at: 0, freq: 1800 }, { at: 0.09, freq: 2250 }], [{ at: 0, freq: 2200 }, { at: 0.11, freq: 1800 }]);
+  const out = new Float64Array(frames(notes[notes.length - 1]!.at + 0.35));
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SR;
+    let sum = 0;
+    for (const note of notes) {
+      const local = t - note.at;
+      if (local < 0) continue;
+      const env = (1 - decay(local, 0.001)) * decay(local, 0.07);
+      sum += env * (Math.sin(TAU * note.freq * pitch * local) + 0.4 * Math.sin(TAU * note.freq * 3.4 * pitch * local) * decay(local, 0.04));
+    }
+    out[i] = sum;
+  }
+  return { channels: [out], anchor: 0 };
+}
+
+/** A logo sting: a chirp falling from 1.5 kHz to 150 Hz in under 0.1 s into a low hum that rings. The anchor is where the chirp lands on the hum. */
+function sting(voice: Voice): Layered {
+  const { pitch } = voice;
+  const [chirp, hum, length] = pick<[number, number, number]>(voice, [0.085, 64, 1.0], [0.07, 72, 0.8], [0.1, 80, 1.3]);
+  const out = new Float64Array(frames(length));
+  let swept = 0;
+  let low = 0;
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SR;
+    swept += (TAU * sweep(1500, 150, Math.min(1, t / chirp)) * pitch) / SR;
+    low += (TAU * hum * pitch) / SR;
+    const chirpGain = t < chirp ? 1 : decay(t - chirp, 0.008);
+    const humGain = (1 - decay(t, 0.03)) * decay(t, length * 0.3);
+    out[i] = 0.7 * Math.sin(swept) * chirpGain * (1 - decay(t, 0.0005)) + saturate(Math.sin(low) + 0.3 * Math.sin(2 * low), 1.8) * humGain;
+  }
+  return { channels: [out], anchor: chirp };
 }

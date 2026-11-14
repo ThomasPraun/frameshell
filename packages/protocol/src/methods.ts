@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { GRADE_ANALYZE_DEFAULT_SAMPLES, GRADE_ANALYZE_MAX_SAMPLES, GradeAnalyzeResultSchema } from "./grade.js";
 import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
 import { MUSIC_CANDIDATES_MAX, MUSIC_GRID_MAX_SHIFT_DEFAULT_S, MUSIC_GRID_MAX_SHIFT_LIMIT_S, MusicCandidatesResultSchema, MusicFitResultSchema, MusicGridResultSchema, MusicShapeResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
@@ -74,7 +75,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 139;
+export const PROTOCOL_VERSION = 142;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1913,6 +1914,38 @@ export const methods = {
     }),
     result: ClipVerifyResultSchema,
   },
+  "grade.analyze": {
+    description:
+      "Measure the picture of a media clip and suggest a colour correction (ADR 0031), without changing anything: the clip's SOURCE frames " +
+      "(before its own grade, crop and placement) are read through ffmpeg `signalstats` at video levels, and the answer is the " +
+      "measured `levels` (luma min, 10th percentile, mean, 90th percentile, max; saturation; warmth; tint), the clip's `current` grade, and a " +
+      "`suggestion` in the fields of `clip.set` `grade` (`exposure`, `temperature`, `tint`, `contrast`, `saturation`, absolute numbers for the source: a correction the clip already sets and the source does not need comes back neutral, so applying it replaces the clip's own), " +
+      "also as `flags` for `clip set`. Never applied: look at the result, then `clip.set` with `grade` (or `clip set --grade-*`) and check the look with " +
+      "`frame`. The correction comes first and the LUT after it (ADR 0031: correct first, then style), so a suggestion leaves the clip's LUT alone. It is a first pass " +
+      "from a grey-world reading, bounded (at most 1 stop of exposure, 0.4 of white balance, contrast 0.8 to 1.25, saturation 0.85 to 1.2, nothing " +
+      "when the picture is within the targets or has no range) and never pushes the highlights into clipping: judge it by eye, a sunset is meant " +
+      "to be warm. Scope: `at` (timeline seconds) measures one frame; `from` and `to` (timeline seconds inside the clip) measure `samples` frames " +
+      "spread evenly over that part; with none of them the whole clip, `samples` frames (a still is one frame). Footage tagged or named as LOG or HDR " +
+      "gets a warning: its levels are flat by design. Reads only: writes no file, takes about a second for a few frames. " +
+      "Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound (no such clip on a video track), InvalidOperation (not a media clip, a frame " +
+      "or range outside the clip, `at` with `from`/`to`, a source with no picture), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Media clip id on a video track, as `timeline.show` reports it."),
+      at: z.number().nonnegative().optional().describe("Timeline seconds of the one frame to measure, inside the clip. Not with `from` or `to`."),
+      from: z.number().nonnegative().optional().describe("Timeline seconds where the measured part starts. Default: the clip's start."),
+      to: z.number().nonnegative().optional().describe("Timeline seconds where the measured part ends. Default: the clip's end."),
+      samples: z
+        .int()
+        .min(1)
+        .max(GRADE_ANALYZE_MAX_SAMPLES)
+        .default(GRADE_ANALYZE_DEFAULT_SAMPLES)
+        .describe(`Frames to measure over a range, at the middle of equal parts of it. Default ${GRADE_ANALYZE_DEFAULT_SAMPLES}, at most ${GRADE_ANALYZE_MAX_SAMPLES}.`),
+      view: ViewParam,
+    }),
+    result: z.object({ ...ViewedShape, ...GradeAnalyzeResultSchema.shape }),
+  },
   "audio.bakes": {
     // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
     internal: true,
@@ -2735,13 +2768,15 @@ export const methods = {
     description:
       "Generate a sound effect (ADR 0038): synthesized offline from a seed, no network and no third-party samples. Kinds: " +
       "`click`, `tick`, `pop`, `whoosh` (stereo, swells to a peak at 45 % of its length), `riser` (a build that ends at its " +
-      "peak), `thump`, `impact`, `shutter`; `variant` 1 to 3 is a different recipe of the kind. The same kind, variant, seed " +
+      "peak), `thump`, `impact`, `shutter`, `glitch` (a stutter of short tones), `braaam` (a low brass blast), `swell` (a quiet build that " +
+      "peaks near its end), `bell` (a soft bell), `notify` (a ping near 2 kHz) and `sting` (a chirp falling into a low hum, for a logo); " +
+      "`variant` 1 to 3 is a different recipe of the kind. The same kind, variant, seed " +
       "(and `pitch`, `length` when given) always give the same file, so a set of sounds made with one `seed` shares a " +
       "timbre; vary `variant` and `seed` between uses (the same whoosh on every cut is the tell of a bad edit). Without " +
       "`pitch` the take gets a seeded pitch between 0.9 and 1.3 and a level within 1.5 dB. The take is a 48 kHz 16-bit WAV " +
       "written to `assets/sound/<kind>-<key>.wav` and imported (ingest queued) with one `asset.import`; the peak sits at " +
       "-3 dBFS give or take the jitter. A RIFF chunk inside the file holds its cache key and `peakAt`, the second of the " +
-      "take that must land on the picture (the transient of a hit, the peak of a whoosh, the end of a riser): place a " +
+      "take that must land on the picture (the transient of a hit, the peak of a whoosh or swell, the end of a riser, where a sting's chirp lands): place a " +
       "take so that `peakAt` falls on the cue plus an offset by role (ms, negative = before the picture: tap -60, knock " +
       "-40, click -11, pop +30, whoosh peak +37, swell peak +42; a riser ends 75 ms before the hit). A take " +
       "that is already current is not written again (`cached`); nothing is placed on a timeline. When the project " +
@@ -2801,8 +2836,8 @@ export const methods = {
       "`assets/sound/` and imported) and put on an audio track so that the instant of the take that must meet the picture " +
       "(`peakAt`: the transient of a hit, the peak of a whoosh, the end of a riser) falls on its cue plus an offset by role " +
       `(ms, negative = before the picture: ${Object.entries(SOUND_ROLE_OFFSETS).map(([role, ms]) => `${role} ${ms}`).join(", ")}; ` +
-      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click and shutter \`click\`, tick \`tap\`, ` +
-      "pop and thump `pop`, whoosh `whoosh`, impact `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
+      `a riser ends ${SOUND_RISER_END_BEFORE_MS} ms before the cue). Without \`role\` a kind takes its own (click, shutter and glitch \`click\`, tick \`tap\`, ` +
+      "pop, thump, bell and notify `pop`, whoosh `whoosh`, swell `swell`, impact, braaam and sting `knock`); `offset` (ms) replaces the table. A clip starts on a frame, so a sound lands within half " +
       "a frame of where asked, and it plays whole frames (a sound shorter than one frame is skipped, with a reason). " +
       "Three ways to say where: `cues` (each with `at`: seconds, a marker id or label, optionally `hook+0.5`), `cuts` (the edit point at the start of every clip after the first of a video " +
       "or audio `track`, or only the numbered ones in `which`) and `typing` (a run of keys between `from` and `to`, " +
@@ -5274,6 +5309,10 @@ export type ClipLiveResult = MethodResult<"clip.live">;
 export type ClipVerifyParams = MethodParams<"clip.verify">;
 /** Result of `clip.verify`. */
 export type ClipVerifyResult = MethodResult<"clip.verify">;
+/** `grade.analyze` params. */
+export type GradeAnalyzeParams = MethodParams<"grade.analyze">;
+/** Result of `grade.analyze`. */
+export type GradeAnalyzeResult = MethodResult<"grade.analyze">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 /** The final render of a generated clip that keeps two, as `clip.renders` reports it (ADR 0041). */

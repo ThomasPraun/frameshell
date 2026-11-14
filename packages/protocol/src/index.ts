@@ -4,6 +4,7 @@ export * from "./timeline.js";
 export * from "./cleanup.js";
 export * from "./music.js";
 export * from "./clip-verify.js";
+export * from "./grade.js";
 export * from "./history.js";
 export * from "./config.js";
 export * from "./proposals.js";
