@@ -21,3 +21,18 @@ describe("clip set --grade-* (#384)", () => {
     expect(() => parseTimelineCommand(["clip", "set", "c_talk"], { "clear-grade": true, "grade-tint": "0.1" })).toThrow(/--clear-grade alone/);
   });
 });
+
+describe("clip set --vignette (ADR 0043)", () => {
+  it("sends only the numbers given, merged by the daemon into the clip's vignette", () => {
+    expect(parseTimelineCommand(["clip", "set", "c_talk"], { vignette: "0.4" })!.params).toEqual({ clip: "c_talk", vignette: { strength: 0.4 } });
+    expect(parseTimelineCommand(["clip", "set", "c_talk"], { "vignette-radius": "0.8", "vignette-softness": "0" })!.params["vignette"]).toEqual({
+      radius: 0.8,
+      softness: 0,
+    });
+  });
+
+  it("removes the vignette with --clear-vignette, alone", () => {
+    expect(parseTimelineCommand(["clip", "set", "c_talk"], { "clear-vignette": true })!.params).toEqual({ clip: "c_talk", vignette: null });
+    expect(() => parseTimelineCommand(["clip", "set", "c_talk"], { "clear-vignette": true, vignette: "0.3" })).toThrow(/--clear-vignette alone/);
+  });
+});

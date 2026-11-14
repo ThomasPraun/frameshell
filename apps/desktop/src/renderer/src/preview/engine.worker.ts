@@ -4,10 +4,11 @@
 import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
+import type { ResolvedVignette } from "@frameshell/schema/finish";
 import type { GradeTable } from "@frameshell/schema/grade";
 import { type AudioRead, audioReads, renderRead, sourceWindow, stretchKey } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
-import { GradePass, type GradeSource } from "./grade.js";
+import { GradePass, type GradeSource, type PictureLook } from "./grade.js";
 import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
 import {
   type Anchor,
@@ -468,6 +469,8 @@ interface Part {
   glass?: Backdrop;
   /** Key of the picture's colour grade in `Program.grades` (ADR 0031): graded before anything else is done to it. */
   grade?: string;
+  /** The clip's vignette (ADR 0043): after the grade, on the pixels that show (`cover`, else all of them). */
+  vignette?: ResolvedVignette;
 }
 
 class Engine implements LayerHost {
@@ -644,8 +647,8 @@ class Engine implements LayerHost {
     for (const path of this.#sources.keys()) if (!used.has(path) && isReadWhole(path)) this.#sources.delete(path);
     this.#forgetStills(next);
     this.#gradeTables = this.#tablesOf(next);
-    // The grade pass starts with the first program that needs it, so the first graded frame does not wait for it.
-    this.#grader.prepare(this.#gradeTables);
+    // The pass starts with the first program that needs it, so the first graded frame does not wait for it.
+    this.#grader.prepare(this.#gradeTables, next.layers.some((layer) => layer.some((span) => "vignette" in span && span.vignette !== undefined)));
 
     while (this.#layers.length > next.layers.length) this.#layers.pop()!.dispose();
     for (const [i, pipeline] of this.#layers.entries()) {
@@ -736,8 +739,8 @@ class Engine implements LayerHost {
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
           const cover = coverPixels(span, { width: still.bitmap.width, height: still.bitmap.height });
-          const grade = span.grade ? { grade: span.grade } : {};
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover, ...grade });
+          const look = { ...(span.grade ? { grade: span.grade } : {}), ...(span.vignette ? { vignette: span.vignette } : {}) };
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover, ...look });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -755,7 +758,8 @@ class Engine implements LayerHost {
           const cover = coverPixels(span, decoded);
           const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
           const grade = span.kind === "media" && span.grade ? { grade: span.grade } : {};
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade });
+          const vignette = span.vignette ? { vignette: span.vignette } : {};
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -860,8 +864,8 @@ class Engine implements LayerHost {
         const alpha = part.image instanceof VideoFrame ? part.alpha : null;
         this.#glass.draw(context, backdropLayer(part.glass, output, project), { rect, alpha, opacity: part.placement.opacity });
       }
-      // ADR 0031 order: the grade first, on the picture as decoded, then alpha, placement and shape.
-      const graded = part.grade ? this.#graded(part.image as GradeSource, part.grade) : null;
+      // ADR 0031 and 0043 order: the grade, on the picture as decoded, then the vignette, then alpha, placement and shape.
+      const graded = part.grade || part.vignette ? this.#looked(part) : null;
       const image = graded ?? part.image;
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
@@ -895,10 +899,18 @@ class Engine implements LayerHost {
     return tables;
   }
 
-  /** `image` through the table of grade `key`; null (drawn as it is) when the pass cannot run or the table is unknown. */
-  #graded(image: GradeSource, key: string): ImageBitmap | null {
+  /**
+   * `part`'s picture through its grade and vignette; null (drawn as it is) when the pass cannot run, or the grade's
+   * table is unknown and there is no vignette.
+   */
+  #looked(part: Part): ImageBitmap | null {
+    const image = part.image as GradeSource;
     const [width, height] = image instanceof VideoFrame ? [image.displayWidth, image.displayHeight] : [image.width, image.height];
-    return this.#grader.apply(image, width, height, key);
+    const look: PictureLook = {
+      ...(part.grade ? { grade: part.grade } : {}),
+      ...(part.vignette ? { vignette: { vignette: part.vignette, crop: part.cover ?? { left: 0, top: 0, width, height } } } : {}),
+    };
+    return this.#grader.apply(image, width, height, look);
   }
 
   /**
