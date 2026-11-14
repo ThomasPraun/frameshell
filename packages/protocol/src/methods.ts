@@ -7,6 +7,7 @@ import {
   CLEANUP_PAUSES_DEFAULT_S,
   CleanupResultSchema,
 } from "./cleanup.js";
+import { GRADE_ANALYZE_DEFAULT_SAMPLES, GRADE_ANALYZE_MAX_SAMPLES, GradeAnalyzeResultSchema } from "./grade.js";
 import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
 import { MUSIC_CANDIDATES_MAX, MUSIC_GRID_MAX_SHIFT_DEFAULT_S, MUSIC_GRID_MAX_SHIFT_LIMIT_S, MusicCandidatesResultSchema, MusicFitResultSchema, MusicGridResultSchema, MusicShapeResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
@@ -74,7 +75,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 139;
+export const PROTOCOL_VERSION = 140;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -1903,6 +1904,38 @@ export const methods = {
         .describe(`Largest per-channel difference (of 255) that still counts as the same picture. Default ${VERIFY_DEFAULT_TOLERANCE}.`),
     }),
     result: ClipVerifyResultSchema,
+  },
+  "grade.analyze": {
+    description:
+      "Measure the picture of a media clip and suggest a colour correction (ADR 0031), without changing anything: the clip's SOURCE frames " +
+      "(before its own grade, crop and placement) are read through ffmpeg `signalstats` at video levels, and the answer is the " +
+      "measured `levels` (luma min, 10th percentile, mean, 90th percentile, max; saturation; warmth; tint), the clip's `current` grade, and a " +
+      "`suggestion` in the fields of `clip.set` `grade` (`exposure`, `temperature`, `tint`, `contrast`, `saturation`, absolute numbers for the source: a correction the clip already sets and the source does not need comes back neutral, so applying it replaces the clip's own), " +
+      "also as `flags` for `clip set`. Never applied: look at the result, then `clip.set` with `grade` (or `clip set --grade-*`) and check the look with " +
+      "`frame`. The correction comes first and the LUT after it (ADR 0031: correct first, then style), so a suggestion leaves the clip's LUT alone. It is a first pass " +
+      "from a grey-world reading, bounded (at most 1 stop of exposure, 0.4 of white balance, contrast 0.8 to 1.25, saturation 0.85 to 1.2, nothing " +
+      "when the picture is within the targets or has no range) and never pushes the highlights into clipping: judge it by eye, a sunset is meant " +
+      "to be warm. Scope: `at` (timeline seconds) measures one frame; `from` and `to` (timeline seconds inside the clip) measure `samples` frames " +
+      "spread evenly over that part; with none of them the whole clip, `samples` frames (a still is one frame). Footage tagged or named as LOG or HDR " +
+      "gets a warning: its levels are flat by design. Reads only: writes no file, takes about a second for a few frames. " +
+      "Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound (no such clip on a video track), InvalidOperation (not a media clip, a frame " +
+      "or range outside the clip, `at` with `from`/`to`, a source with no picture), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Media clip id on a video track, as `timeline.show` reports it."),
+      at: z.number().nonnegative().optional().describe("Timeline seconds of the one frame to measure, inside the clip. Not with `from` or `to`."),
+      from: z.number().nonnegative().optional().describe("Timeline seconds where the measured part starts. Default: the clip's start."),
+      to: z.number().nonnegative().optional().describe("Timeline seconds where the measured part ends. Default: the clip's end."),
+      samples: z
+        .int()
+        .min(1)
+        .max(GRADE_ANALYZE_MAX_SAMPLES)
+        .default(GRADE_ANALYZE_DEFAULT_SAMPLES)
+        .describe(`Frames to measure over a range, at the middle of equal parts of it. Default ${GRADE_ANALYZE_DEFAULT_SAMPLES}, at most ${GRADE_ANALYZE_MAX_SAMPLES}.`),
+      view: ViewParam,
+    }),
+    result: z.object({ ...ViewedShape, ...GradeAnalyzeResultSchema.shape }),
   },
   "audio.bakes": {
     // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
@@ -5267,6 +5300,10 @@ export type ClipLiveResult = MethodResult<"clip.live">;
 export type ClipVerifyParams = MethodParams<"clip.verify">;
 /** Result of `clip.verify`. */
 export type ClipVerifyResult = MethodResult<"clip.verify">;
+/** `grade.analyze` params. */
+export type GradeAnalyzeParams = MethodParams<"grade.analyze">;
+/** Result of `grade.analyze`. */
+export type GradeAnalyzeResult = MethodResult<"grade.analyze">;
 /** Render cache state of one generated clip, as `clip.renders` reports it. */
 export type ClipRenderInfo = z.output<typeof ClipRenderSchema>;
 /** The final render of a generated clip that keeps two, as `clip.renders` reports it (ADR 0041). */
