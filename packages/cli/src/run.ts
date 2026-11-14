@@ -612,7 +612,7 @@ function parseBuiltin(
   if (command === "matte") return rest.length === 1 ? { kind: "matte", asset: rest[0]! } : null;
   if (command === "style") return parseStyle(rest, options);
   if (command === "job") return parseJob(rest, options);
-  if (command === "brand") return parseBrand(rest);
+  if (command === "brand") return parseBrand(rest, options);
   if (command === "format") return parseFormat(rest, options);
   if (command === "batch") return parseBatch(rest, options);
   if (command === "review") return parseReview(rest, options);

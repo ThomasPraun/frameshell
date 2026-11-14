@@ -97,6 +97,77 @@ export function woff2(name: Buffer, transformed = Buffer.from("TRANSFORMED"), ov
   return Buffer.concat([header, directory, stream]);
 }
 
+/** A WOFF2 file holding `tables` untransformed (tags from the WOFF2 known-tag list: cmap, name, OS/2). */
+export function woff2Tables(tables: Record<string, Buffer>): Buffer {
+  const known: Record<string, number> = { cmap: 0, name: 5, "OS/2": 6 };
+  const tags = Object.keys(tables);
+  const directory = Buffer.concat(tags.flatMap((tag) => [Buffer.from([known[tag]!]), base128(tables[tag]!.length)]));
+  const stream = brotliCompressSync(Buffer.concat(tags.map((tag) => tables[tag]!)), { params: { [constants.BROTLI_PARAM_QUALITY]: 4 } });
+  const header = Buffer.alloc(48);
+  header.write("wOF2", 0, "latin1");
+  header.writeUInt32BE(0x00010000, 4);
+  header.writeUInt32BE(48 + directory.length + stream.length, 8);
+  header.writeUInt16BE(tags.length, 12);
+  header.writeUInt32BE(stream.length, 20);
+  return Buffer.concat([header, directory, stream]);
+}
+
+/** A `cmap` table with one Windows Unicode BMP (format 4) subtable mapping each `[start, end]` range to glyphs 1… */
+export function cmap4(ranges: [number, number][]): Buffer {
+  const segments = [...ranges, [0xffff, 0xffff] as [number, number]];
+  const count = segments.length;
+  const sub = Buffer.alloc(16 + count * 8);
+  sub.writeUInt16BE(4, 0);
+  sub.writeUInt16BE(sub.length & 0xffff, 2);
+  sub.writeUInt16BE(count * 2, 6);
+  let glyph = 1;
+  segments.forEach(([start, end], i) => {
+    const last = i === count - 1;
+    sub.writeUInt16BE(end, 14 + i * 2);
+    sub.writeUInt16BE(start, 16 + count * 2 + i * 2);
+    // idDelta: start maps to `glyph`; the closing 0xFFFF segment maps to 0.
+    sub.writeInt16BE((((last ? -start : glyph - start) + 0x8000) & 0xffff) - 0x8000, 16 + count * 4 + i * 2);
+    if (!last) glyph += end - start + 1;
+  });
+  return cmapWith(3, 1, sub);
+}
+
+/** A `cmap` table with one Windows Unicode full-range (format 12) subtable mapping each range to glyphs 1… */
+export function cmap12(ranges: [number, number][]): Buffer {
+  const sub = Buffer.alloc(16 + ranges.length * 12);
+  sub.writeUInt16BE(12, 0);
+  sub.writeUInt32BE(sub.length, 4);
+  sub.writeUInt32BE(ranges.length, 12);
+  let glyph = 1;
+  ranges.forEach(([start, end], i) => {
+    sub.writeUInt32BE(start, 16 + i * 12);
+    sub.writeUInt32BE(end, 20 + i * 12);
+    sub.writeUInt32BE(glyph, 24 + i * 12);
+    glyph += end - start + 1;
+  });
+  return cmapWith(3, 10, sub);
+}
+
+function cmapWith(platform: number, encoding: number, sub: Buffer): Buffer {
+  const header = Buffer.alloc(12);
+  header.writeUInt16BE(1, 2);
+  header.writeUInt16BE(platform, 4);
+  header.writeUInt16BE(encoding, 6);
+  header.writeUInt32BE(12, 8);
+  return Buffer.concat([header, sub]);
+}
+
+/** An OS/2 table (version 4) with a width class, an IBM family class (high byte) and the first PANOSE digits. */
+export function os2({ widthClass, familyClass, panose = [] }: { widthClass: number; familyClass: number; panose?: number[] }): Buffer {
+  const table = Buffer.alloc(96);
+  table.writeUInt16BE(4, 0);
+  table.writeUInt16BE(400, 4);
+  table.writeUInt16BE(widthClass, 6);
+  table.writeUInt8(familyClass, 30);
+  panose.forEach((digit, i) => table.writeUInt8(digit, 32 + i));
+  return table;
+}
+
 /** The fake public address the fixture site answers on. */
 export const FAKE_PUBLIC_IP = "34.1.1.1";
 

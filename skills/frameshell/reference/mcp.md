@@ -7,7 +7,7 @@
 Both reach the same daemon, journal the same operations and take the same arguments (`clip.add` → `clip_add`, `--snap-window` → `snapWindow`). Pick per task:
 
 - **MCP only:** seeing pixels (`frame_capture`, `frames_strip`, `review`, `analyze` and `analyze_diff` return the image itself), the app (`ui_state`, `ui_*`), `history_diff`, `clip_renders`, `asset_list`, `export_presets`. `job_list` and `job_cancel` have CLI twins (`job list`, `job cancel`).
-- `brand_capture { url: "https://example.com" }` is the job behind `frameshell brand capture`: the same files, `brand.json`, credits entries and `style` suggestions; see [credits.md](credits.md#brand-capture).
+- `brand_capture { url: "https://example.com", sections: ["Pricing"] }` is the job behind `frameshell brand capture` (`sections` = `--sections`): the same files, `brand.json`, credits entries and `style` suggestions; see [credits.md](credits.md#brand-capture).
 - `brand_import_figma { dir: "/Users/me/Desktop/acme-figma" }` is `frameshell brand import-figma`; `brand_show {}` returns `brand.json` (captures and imports) for `frameshell brand show`.
 - **CLI:** loops over many operations from one shell call (dozens of `cut`s), and every environment where the MCP server is not registered.
 - **One channel per transaction.** A transaction groups one session's operations: the CLI's session is `FRAMESHELL_SESSION`, the server's is its own. Begin, edit and commit through the same one.
@@ -28,6 +28,7 @@ Look after every change the viewer would see: an overlay, a transform, a title, 
 - Without MCP: `frameshell frame --at 12.5 --out /tmp/f.png`, then open the PNG with your image-reading tool.
 - `inspect_point { at: 12.5, x: 0.71, y: 0.14 }` (or `unit: "pixel"` with project pixels): the clips under that point, topmost first, the one seen there (`target`), and in a generated clip the DOM element painting it, as the user's Pick tool reports it (`elements[0]`, then its ancestors). CLI: `frameshell inspect --at 12.5 --point 0.71,0.14`. `segment: true` (CLI `--segment`) on a photo of an image project also returns `segment` (see [image-projects.md](image-projects.md)).
 - `clip_verify { timeline, clip, probes?, tolerance? }`: whether a generated (motion) clip paints the same picture cold and after a reseek, within 2/255 per channel; `ok` false names the worst time, pixel and element. CLI: `frameshell clip verify <clip>`.
+- `grade_analyze { timeline, clip, at?, from?, to?, samples? }`: the levels of a media clip's source picture (luma min, shadows, mean, highlights, max; saturation; warmth; tint) and a bounded correction `suggestion` in the fields of `clip_set` `grade` (exposure, temperature, tint, contrast, saturation; absolute numbers, a LUT stays), with a reason per number. Never applied: check the look with `frame_capture`, then `clip_set` with `grade`. CLI: `frameshell grade analyze <clip>`.
 
 Done = you looked at a frame inside every changed visual element's time span and it shows what the user asked for.
 

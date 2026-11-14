@@ -30,7 +30,8 @@ export const ReviewOutputSchema = z
     `${ReviewSheetKindSchema.description} ` +
       "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, near-blank frames, " +
       "whether frame 0 is empty, subtitle cues shorter than they take to read, the loudness of a file (integrated LUFS, loudness range, true peak, phone band 200 Hz to 6 kHz), " +
-      "sounds against the picture events they belong to (`sync`), the jump from the last frame to the first (`seam`), a file against its export plan (`delivery`) and craft warnings.",
+      "sounds against the picture events they belong to (`sync`), the jump from the last frame to the first (`seam`), a file against its export plan (`delivery`), " +
+      "the sound review list (`sound`: voice over bed per window, repeated effect files, clips cut off, the music on the last frame, clicks) and craft warnings.",
   );
 
 /** Name in {@link REVIEW_OUTPUTS}. */
@@ -143,7 +144,10 @@ export const ReviewCraftWarningSchema = z.object({
       "`static`: nothing changes for over 3 s. `frame-0`: the first frame is empty (it is the thumbnail). `blank`: a near-blank picture after the first frame. " +
         "`reading`: a subtitle cue is on screen for less than it takes to read. `peak`: the true peak is above -1 dBTP. `phone-band`: the phone band is 6 LU or more under the whole mix. `silent`: over 15 s with no sound. " +
         "`sync`: a sound lands early or late against its picture event, or the sounds sit no nearer picture events than chance. `loop-seam`: with `loop`, the last frame repeats the first or jumps from it. " +
-        "`delivery`: the file differs from the export plan. `safe-zone`: a graphic or a face reaches into a platform zone.",
+        "`delivery`: the file differs from the export plan. `safe-zone`: a graphic or a face reaches into a platform zone. " +
+        "`voice-bed`: the bed comes within 6 dB of the voice. `sfx-repeat`: one effect file plays more than twice. `machine-gun`: one effect file 4 times or more in a row, each within 1 s of the last. " +
+        "`chopped`: a clip ends with its sound above -35 dB of its loudest. `ending`: the music is cut on the last frame, or a file's sound is not down at its end or peaks in its last 15 %. " +
+        "`click`: a click in a file's sound.",
     ),
   from: z.number().nullable().describe("Seconds the thing starts; null when it is about the whole film."),
   to: z.number().nullable(),
@@ -237,6 +241,99 @@ export const ReviewDeliverySchema = z.object({
 /** See {@link ReviewDeliverySchema}. */
 export type ReviewDelivery = z.output<typeof ReviewDeliverySchema>;
 
+/** Where the sound of a timeline clip belongs, as `review` sorts it. */
+export const SOUND_ROLES = ["voice", "music", "sfx", "other"] as const;
+
+/** One of {@link SOUND_ROLES}. */
+export type SoundRole = (typeof SOUND_ROLES)[number];
+
+/** A stretch where the bed comes too close to the voice. */
+export const ReviewVoiceSpanSchema = z.object({
+  from: z.number(),
+  to: z.number(),
+  margin: z.number().describe("Smallest voice-over-bed margin of the stretch, dB."),
+});
+
+/** Voice against the bed (everything else heard), window by window. */
+export const ReviewVoiceSchema = z.object({
+  window: z.number().describe("Seconds per window."),
+  windows: z.int().describe("Windows where the voice speaks: at least half their 10 ms steps above the voice clip's quiet level (speech level minus 40 dB, as cut snapping hears it)."),
+  withBed: z.int().describe("Of those, windows where music, effects or other sound play under it."),
+  minMargin: z.number().nullable().describe("Smallest margin, dB: voice minus bed, each the power mean over the window's speaking steps. Null with no bed under the voice."),
+  medianMargin: z.number().nullable().describe("Median margin of the windows with a bed, dB; null with none."),
+  low: z.array(ReviewVoiceSpanSchema).describe("Stretches of windows whose margin is under 6 dB (at most 20): the voice is not on top there."),
+});
+
+/** One effect file played more than once. */
+export const ReviewSoundRepeatSchema = z.object({
+  file: z.string().describe("Project-relative asset path."),
+  plays: z.int().describe("Clips of it heard in the range."),
+  at: z.array(z.number()).describe("Seconds each starts (at most 12)."),
+});
+
+/** A run of one effect file played again and again. */
+export const ReviewMachineGunSchema = z.object({
+  file: z.string(),
+  plays: z.int().describe("Plays in a row, each within 1 s of the last and no other effect between them."),
+  from: z.number().describe("Seconds the first starts."),
+  to: z.number().describe("Seconds the last starts."),
+});
+
+/** A clip whose sound is cut off at its end. */
+export const ReviewChoppedSchema = z.object({
+  clip: z.string(),
+  track: z.string(),
+  role: z.enum(SOUND_ROLES),
+  at: z.number().describe("Seconds the clip ends."),
+  level: z.number().describe("Level of its last 10 ms as heard (gain and fades applied) against its loudest, dB."),
+});
+
+/** How the film's sound ends. */
+export const ReviewEndingSchema = z.object({
+  measure: z
+    .enum(["music", "mix"])
+    .describe("`music` (a timeline): the music clips at the last frame against the music's loudest; `mix` (a file): the whole sound's last 50 ms."),
+  level: z
+    .number()
+    .nullable()
+    .describe("`music`: dB against the music's loudest at the last frame (0 = as loud as it gets); `mix`: RMS of the last 50 ms, dBFS. Null when nothing plays there."),
+  musicEndsAt: z.number().nullable().describe("`music`: seconds the last music clip ends; null for a file or a timeline with no music."),
+  loudestAt: z.number().nullable().describe("`mix`: seconds the loudest 400 ms (the EBU R128 momentary window) start: the first within 1 dB of the loudest, so a steady sound peaks where it starts. Null for a timeline."),
+  loudestShare: z.number().nullable().describe("The middle of the loudest 400 ms as a share of the film (0 to 1); over 0.85 the film peaks at its end instead of resolving. Null for a timeline."),
+});
+
+/** Clicks found in a file's sound. */
+export const ReviewClicksSchema = z.object({
+  count: z.int(),
+  at: z.array(z.number()).describe("Seconds of each (at most 20)."),
+});
+
+/**
+ * The sound review list: the measurable parts of "the voice is always on top, a sound only where something physical
+ * happens, no effect repeated more than twice, the music resolves on the final frame", plus mechanical faults.
+ */
+export const ReviewSoundSchema = z.object({
+  source: z.enum(["timeline", "file"]).describe("`timeline`: per clip from each asset's 10 ms envelope, gain and fades applied (no mix needed); `file`: the decoded mix."),
+  clips: z
+    .object({ voice: z.int(), music: z.int(), sfx: z.int(), other: z.int() })
+    .nullable()
+    .describe(
+      "Timeline clips heard in the range by role: `voice` on a `Voiceover` track, a track a duck names in `under`, or an asset with a transcript; `music` on a `Music` track, a music take or a ducked clip; " +
+        "`sfx` a generated effect or a clip on an `SFX` track; `other` the rest. Null for a file.",
+    ),
+  voice: ReviewVoiceSchema.nullable().describe("Null for a file or a timeline with no voice clip in the range."),
+  repeats: z.array(ReviewSoundRepeatSchema).nullable().describe("Effect files heard more than once (ticks and clicks left out: key runs repeat them by design); null for a file."),
+  machineGun: z.array(ReviewMachineGunSchema).nullable().describe("Runs of 4 or more plays of one effect file in a row, each within 1 s of the last (speed keeps pitch, so they sound the same); null for a file."),
+  chopped: z.array(ReviewChoppedSchema).nullable().describe("Clips ending inside the film with their sound still above -35 dB of their loudest (at most 20); null for a file."),
+  ending: ReviewEndingSchema.nullable().describe("Null when the range stops short of the film's end, or for a file with no sound."),
+  clicks: ReviewClicksSchema.nullable().describe(
+    "Clicks in a file's sound: a burst above 14 kHz peaking over 9 times the RMS of its 20 ms, with 80 % of that energy in 1 ms (none in the first 20 ms). Null for a timeline (render it and review the file).",
+  ),
+});
+
+/** See {@link ReviewSoundSchema}. */
+export type ReviewSound = z.output<typeof ReviewSoundSchema>;
+
 /** What a check finds, before `requirements.json` sets its severity. */
 export type ReviewFinding = Omit<ReviewCraftWarning, "severity">;
 
@@ -306,6 +403,7 @@ export const ReviewMetricsSchema = z.object({
   sync: ReviewSyncSchema.nullable().describe("Sounds against the picture events they belong to, with what random placement would score; null when there are no sounds to compare."),
   seam: ReviewSeamSchema.nullable().describe("Last frame against the first; null for a film of one frame."),
   delivery: ReviewDeliverySchema.nullable().describe("The file against the export plan; null unless a `file` is reviewed with a `preset`."),
+  sound: ReviewSoundSchema.nullable().describe("The sound review list: voice over bed per window, repeated effects, cut-off clips, the ending and clicks; null when there is no sound to review."),
   craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order, waived ones left out; empty when none."),
   waived: z.array(ReviewWaivedWarningSchema).describe("Craft warnings a waiver of `requirements.json` covers, with its reason: accepted, not gone; empty when none."),
   requirements: ReviewRequirementsSchema.nullable().describe("`requirements.json` judged: its checks, its waivers and what failed; null when the project has none."),

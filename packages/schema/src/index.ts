@@ -264,6 +264,7 @@ export {
   type BrandImport,
   BrandImportSchema,
   BrandCaptureSchema,
+  BrandSectionSchema,
   type BrandManifest,
   BrandManifestSchema,
   FIGMA_FRAME_WIDTH,
@@ -530,7 +531,21 @@ export {
   subtitleLayout,
   subtitleTracks,
 } from "./subtitles.js";
-export { type FontMetrics, parseFontMetrics, readNameTable } from "./font-file.js";
+export { type CmapCoverage, type FontMetrics, cmapCoverage, parseFontMetrics, readNameTable } from "./font-file.js";
+export {
+  FONT_CATEGORIES,
+  FONT_WIDTHS,
+  type FontCategory,
+  type FontSubstitute,
+  type FontWidth,
+  OPEN_FONTS,
+  OPEN_FONT_LICENCES,
+  type OpenFont,
+  type OpenFontLicence,
+  fontClassFromName,
+  openFont,
+  substituteFont,
+} from "./font-substitutes.js";
 export {
   type TransitionContext,
   type ClipHandles,

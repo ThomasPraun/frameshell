@@ -18,7 +18,7 @@ const PAUSE_MARGIN_S = 0.05;
 /** Fallback ties: levels this close to the minimum count as equal, nearest wins. */
 const TIE_DB = 0.5;
 /** dB of digital silence (avoids -Infinity in the envelope). */
-const SILENCE_DB = -120;
+export const SILENCE_DB = -120;
 
 /**
  * Streaming RMS envelope of interleaved s16le PCM: one dBFS value per hop

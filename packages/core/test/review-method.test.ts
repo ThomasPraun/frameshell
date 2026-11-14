@@ -229,7 +229,8 @@ describe("review method", () => {
       expect(plain.loudness!.integrated).toBeGreaterThan(-35);
       expect(Math.abs(plain.loudness!.integrated! - plain.loudness!.phoneBand!)).toBeLessThan(1);
       expect(plain.loudness!.truePeak).toBeLessThan(0);
-      expect(plain.craft).toEqual([]);
+      // The tone sounds to the last frame: only the sound list's ending says so.
+      expect(plain.craft.map((warning) => warning.check)).toEqual(["ending"]);
       const heavy = (await conn.request("review", { cwd: project, file: bass, sheets: ["metrics"] })).metrics!;
       expect(heavy.loudness!.integrated! - heavy.loudness!.phoneBand!).toBeGreaterThan(10);
       expect(heavy.craft.map((warning) => warning.check)).toContain("phone-band");

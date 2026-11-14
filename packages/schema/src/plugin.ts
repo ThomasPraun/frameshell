@@ -14,6 +14,8 @@ export const PLUGIN_MANIFEST_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHE
 export const BUILTIN_COMMANDS: readonly string[] = [
   "init", "status", "doctor", "import", "track", "clip", "cut", "timeline", "transcribe", "script",
   "tx", "history", "revert", "render", "frame", "mcp", "plugin", "help", "version", "voiceover", "beats", "sound", "analyze", "brand",
+  "grade", "captions", "multicam", "shot", "direct", "duck", "cleanup", "music", "transition", "marker", "tempo", "letterbox", "image",
+  "credits", "gc", "job", "cover", "review", "inspect", "proposal", "people", "shoot", "matte", "style", "skill", "model", "format", "batch",
 ];
 
 /** npm package name, scoped or not. */

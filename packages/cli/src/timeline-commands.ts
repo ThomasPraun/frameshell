@@ -5,6 +5,7 @@ import type {
   CleanupResult,
   ConfigOperation,
   DaemonConnection,
+  GradeAnalyzeResult,
   HistoryResult,
   MarkerListResult,
   MulticamCreateResult,
@@ -88,6 +89,13 @@ mutations print the new revision):
                                the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
                                naming the worst frame, pixel and element. Also warns when every probe is the same
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
+  grade analyze <clip> [--at s | --from s --to s] [--samples n]
+                               Measure the clip's source picture (before its own grade) with ffmpeg signalstats and
+                               suggest a bounded correction: exposure, white balance, contrast, saturation, in the
+                               fields of clip set --grade-*. --at (timeline seconds) measures one frame; --from and
+                               --to a range, --samples frames spread over it (default 8, 1 to 32); none: the whole
+                               clip. Prints the levels, why each number, and the clip set command to apply it.
+                               Changes nothing; judge it by eye with frame (a sunset is meant to be warm)
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -356,7 +364,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
 `;
 
 /** Timeline command words handled here. */
-export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "letterbox", "tx", "history", "revert", "image"]);
+export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip", "grade", "multicam", "shot", "direct", "duck", "cut", "cleanup", "music", "transition", "marker", "tempo", "letterbox", "tx", "history", "revert", "image"]);
 
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
@@ -438,6 +446,7 @@ export const TIMELINE_OPTIONS = {
   ease: { type: "string" },
   value: { type: "string" },
   at: { type: "string" },
+  samples: { type: "string" },
   from: { type: "string" },
   to: { type: "string" },
   since: { type: "string" },
@@ -550,6 +559,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to", "format"],
   "clip reframe": ["format", "person", "anchor"],
   "clip verify": ["probes", "tolerance"],
+  "grade analyze": ["at", "from", "to", "samples"],
   "clip set": [
     "speed",
     "gain",
@@ -664,6 +674,7 @@ const ARITY: Record<string, [number, number]> = {
   "letterbox clear": [0, 0],
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
+  "grade analyze": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -1239,6 +1250,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], probes, tolerance });
       break;
     }
+    case "grade analyze": {
+      method = "grade.analyze";
+      const samples = num("samples");
+      if (samples !== undefined && (!Number.isInteger(samples) || samples < 1 || samples > 32)) throw new UsageError("--samples: expected a whole number from 1 to 32.");
+      if (num("at") !== undefined && (num("from") !== undefined || num("to") !== undefined)) throw new UsageError("--at measures one frame, --from and --to a range: give one.");
+      Object.assign(params, { clip: args[0], at: num("at"), from: num("from"), to: num("to"), samples });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -1443,6 +1462,7 @@ export async function executeTimeline(
   if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
+  if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
@@ -1471,6 +1491,25 @@ export function formatClipVerify(result: ClipVerifyResult): string {
   if (!result.ok) {
     lines.push("The picture depends on the order frames are painted. Look for CSS transitions, timers, requestAnimationFrame, Date, unseeded random, will-change or 3D transforms on that element.");
   }
+  return `${lines.join("\n")}\n`;
+}
+
+/** `grade analyze` for people: what was measured, the levels, then the suggestion with its reasons and the command that applies it. */
+export function formatGradeAnalyze(result: GradeAnalyzeResult): string {
+  const { levels } = result;
+  const { luma } = levels;
+  const sign = (value: number) => (value > 0 ? `+${value}` : String(value));
+  const where = result.mode === "frame" ? `at ${result.from.toFixed(3)} s` : `${result.frames} frame${result.frames === 1 ? "" : "s"} from ${result.from.toFixed(3)} to ${result.to.toFixed(3)} s`;
+  const lines = [
+    `Grade analysis of ${result.clip} (${result.asset}) on ${result.timeline} · ${where}`,
+    `  luma  min ${luma.min}  shadows ${luma.low}  mean ${luma.mean}  highlights ${luma.high}  max ${luma.max}`,
+    `  saturation ${levels.saturation}  warmth ${sign(levels.warmth)} (red - blue)  tint ${sign(levels.tint)} (green - red/blue)`,
+  ];
+  if (result.current) lines.push(`  the clip's grade now: ${JSON.stringify(result.current)}`);
+  lines.push(result.flags === "" ? "No correction suggested:" : "Suggested correction (not applied):");
+  for (const reason of result.reasons) lines.push(`  ${reason}`);
+  if (result.flags !== "") lines.push(`Apply: frameshell clip set ${result.clip} ${result.flags}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n`;
 }
 

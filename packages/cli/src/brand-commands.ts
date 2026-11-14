@@ -1,11 +1,15 @@
 import type { DaemonConnection, MethodResult, Progress } from "@frameshell/protocol";
+import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `brand` commands (ADR 0044), in `frameshell --help`. */
 export const BRAND_USAGE = `  brand capture <url>          Capture a brand from a public http(s) page in headless Chrome: logos (header and nav SVG or
                                image), icons, share image, first screen and full page into assets/brand/<id>/, fonts into
                                assets/fonts/ only when the font file names OFL, Apache or UFL; colours with an accent, fonts by
                                use, :root variables, headings, buttons into brand.json. Never changes style.json: prints the
-                               style set commands to suggest. Public addresses only, ports 80/443, at most 120 s and 150 MB
+                               style set commands to suggest. Public addresses only, ports 80/443, at most 120 s and 150 MB.
+                               A font not copied names the closest open font to import instead.
+                               --sections "Pricing,Teams": also crop each text's section (the smallest element at least
+                               500 px wide holding it) at 3x into section-<text>.png, for sharp push-ins (at most 12)
   brand import-figma <dir>     Import a folder of SVG frames exported from Figma into assets/brand/<id>/: each sanitised (no
                                script, foreign content, event handlers or external references), one scale for the whole
                                folder (canvas width / widest frame), centred; recorded in brand.json with credits entries
@@ -16,18 +20,29 @@ export const BRAND_USAGE = `  brand capture <url>          Capture a brand from 
 
 /** Flags each `brand` command takes besides the global ones. */
 export const BRAND_FLAGS: Record<string, readonly string[]> = {
-  "brand capture": [],
+  "brand capture": ["sections"],
   "brand import-figma": [],
   "brand show": [],
 };
 
 /** A parsed `brand` command. */
-export type BrandInvocation = { kind: "brand.capture"; url: string } | { kind: "brand.importFigma"; dir: string } | { kind: "brand.show" };
+export type BrandInvocation = { kind: "brand.capture"; url: string; sections?: string[] } | { kind: "brand.importFigma"; dir: string } | { kind: "brand.show" };
 
-/** Parse `brand capture <url>`, `brand import-figma <dir>` or `brand show`; null when the shape is wrong. */
-export function parseBrand(rest: string[]): BrandInvocation | null {
+/** Most section texts one capture takes (`brand.capture` params). */
+const MAX_SECTIONS = 12;
+
+/** Parse `brand capture <url> [--sections a,b]`, `brand import-figma <dir>` or `brand show`; null when the shape is wrong. */
+export function parseBrand(rest: string[], options: { sections?: string | undefined } = {}): BrandInvocation | null {
   const [sub, ...args] = rest;
-  if (sub === "capture" && args.length === 1) return { kind: "brand.capture", url: args[0]! };
+  if (sub === "capture" && args.length === 1) {
+    if (options.sections === undefined) return { kind: "brand.capture", url: args[0]! };
+    const sections = options.sections.split(",").map((text) => text.trim()).filter((text) => text !== "");
+    if (sections.length === 0) throw new UsageError(`--sections: expected texts on the page, comma-separated, e.g. --sections "Pricing,Teams".`);
+    if (sections.length > MAX_SECTIONS) throw new UsageError(`--sections: at most ${MAX_SECTIONS} texts, got ${sections.length}.`);
+    const long = sections.find((text) => text.length > 200);
+    if (long) throw new UsageError(`--sections: "${long.slice(0, 40)}…" is longer than 200 characters.`);
+    return { kind: "brand.capture", url: args[0]!, sections };
+  }
   if (sub === "import-figma" && args.length === 1) return { kind: "brand.importFigma", dir: args[0]! };
   if (sub === "show" && args.length === 0) return { kind: "brand.show" };
   return null;
@@ -49,7 +64,7 @@ export async function executeBrand(
     const result = await conn.request("brand.importFigma", { cwd, dir: inv.dir });
     return json ? `${JSON.stringify(result, null, 2)}\n` : `${formatImport(result.import, `Imported ${result.import.frames.length} Figma frame${result.import.frames.length === 1 ? "" : "s"} into ${result.manifest}`).join("\n")}\n  Frames have credits entries without a licence: \`frameshell credits\` fails on placed ones until the person confirms (credits set --licence own).\n`;
   }
-  const result = await conn.request("brand.capture", { cwd, url: inv.url }, progress ? { onProgress: progress } : {});
+  const result = await conn.request("brand.capture", { cwd, url: inv.url, ...(inv.sections ? { sections: inv.sections } : {}) }, progress ? { onProgress: progress } : {});
   return json ? `${JSON.stringify(result, null, 2)}\n` : formatCapture(result);
 }
 
@@ -63,7 +78,9 @@ function formatShow(result: MethodResult<"brand.show">): string {
     for (const font of capture.fonts) {
       const faces = font.faces.map((face) => `${face.weight}: ${face.file ? `${face.file} (${face.licence})` : "not copied"}`).join("; ");
       lines.push(`  font ${font.family} (weights ${font.weights.join(" ")})${faces ? `: ${faces}` : font.generic ? ": system or generic" : ""}`);
+      if (font.substitute) lines.push(`    ${substituteLine(font.substitute)}`);
     }
+    for (const section of capture.sections) lines.push(`  section "${section.text}": ${section.file ?? section.note}`);
     for (const warning of capture.warnings) lines.push(`  ${warning}`);
   }
   for (const entry of result.imports) lines.push(...formatImport(entry, `Figma import ${entry.id}: ${entry.source}, ${entry.importedAt}`));
@@ -78,6 +95,11 @@ function formatImport(entry: MethodResult<"brand.importFigma">["import"], title:
   }
   for (const warning of entry.warnings) lines.push(`  ${warning}`);
   return lines;
+}
+
+/** The open font to import for a family that was not copied. */
+function substituteLine(sub: NonNullable<MethodResult<"brand.show">["captures"][number]["fonts"][number]["substitute"]>): string {
+  return sub.match === "same" ? `open itself: import ${sub.family} (${sub.licence}) from ${sub.source}` : `closest open font: ${sub.family} (${sub.licence}, ${sub.why}) from ${sub.source}`;
 }
 
 function round(value: number): number {
@@ -96,7 +118,9 @@ function formatCapture(result: MethodResult<"brand.capture">): string {
   for (const font of capture.fonts) {
     const what = font.generic ? "system or generic" : font.icon ? "icon font, skipped" : font.faces.map((face) => `${face.weight}: ${face.file ?? face.note}`).join("; ");
     lines.push(`  font ${font.family} (${font.uses} uses, weights ${font.weights.join(" ")}): ${what}`);
+    if (font.substitute) lines.push(`    ${substituteLine(font.substitute)}`);
   }
+  for (const section of capture.sections) lines.push(section.file ? `  section "${section.text}": ${section.file}  (${section.note})` : `  section "${section.text}": ${section.note}`);
   if (capture.videos.length > 0) lines.push(`  videos (not downloaded): ${capture.videos.join(", ")}`);
   for (const warning of capture.warnings) lines.push(`  ${warning}`);
   if (result.style.length > 0) {
