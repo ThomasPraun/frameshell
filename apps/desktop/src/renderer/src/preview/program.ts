@@ -31,7 +31,7 @@ import {
 } from "@frameshell/schema/composite";
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
 import { type FormatLayout, formatCrop } from "@frameshell/schema/formats";
-import { type ResolvedVignette, letterboxBars, vignetteOf } from "@frameshell/schema/finish";
+import { type ResolvedGrain, type ResolvedVignette, grainOf, letterboxBars, vignetteOf } from "@frameshell/schema/finish";
 import { type GradeTable, gradeKey, gradeOf } from "@frameshell/schema/grade";
 import {
   type ClipEdges,
@@ -100,6 +100,8 @@ export type VideoSpan =
       grade?: string;
       /** The clip's vignette (ADR 0043, `vignetteOf`): after the grade, on the pixels that show; absent: none. */
       vignette?: ResolvedVignette;
+      /** The clip's grain (ADR 0043, `grainOf`): after the vignette, on the pixels that show; absent: none. */
+      grain?: ResolvedGrain;
     }
   | {
       kind: "still";
@@ -120,6 +122,8 @@ export type VideoSpan =
       grade?: string;
       /** The clip's vignette (ADR 0043, `vignetteOf`): after the grade, on the pixels that show; absent: none. */
       vignette?: ResolvedVignette;
+      /** The clip's grain (ADR 0043, `grainOf`): after the vignette, on the pixels that show; absent: none. */
+      grain?: ResolvedGrain;
     }
   | {
       /**
@@ -147,6 +151,8 @@ export type VideoSpan =
       glass?: Backdrop;
       /** The clip's vignette (ADR 0043, `vignetteOf`): after the grade, on the pixels that show; absent: none. */
       vignette?: ResolvedVignette;
+      /** The clip's grain (ADR 0043, `grainOf`): after the vignette, on the pixels that show; absent: none. */
+      grain?: ResolvedGrain;
     }
   | {
       /** One angle of a multicam shot (ADR 0016): its proxy, cut into the shot's tile ({@link angleLayer}). */
@@ -591,7 +597,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         // Nothing is below the bottom track to blur, as in export.
         const glass = bottom || subjectOf(clip) ? null : backdropOf(clip);
         const glazed = glass && picture?.kind === "generated" ? { ...picture, glass } : picture;
-        const graded = vignetted(gradedPicture(glazed, clip, options.grades, grades), clip);
+        const graded = finished(gradedPicture(glazed, clip, options.grades, grades), clip);
         return options.format ? covered(graded, clip, info, bottom, options.format) : graded;
       });
       // A subject carries its plate clip's dissolve and shape, as export draws it.
@@ -1238,11 +1244,12 @@ function gradedPicture(
   return { ...picture, grade: key };
 }
 
-/** `picture` with `clip`'s vignette (ADR 0043), as export draws it: media, stills and generated renders; others as given. */
-function vignetted(picture: PlacedSpan | PlaceholderSpan | null, clip: Clip): PlacedSpan | PlaceholderSpan | null {
+/** `picture` with `clip`'s vignette and grain (ADR 0043), as export draws them: media, stills and generated renders; others as given. */
+function finished(picture: PlacedSpan | PlaceholderSpan | null, clip: Clip): PlacedSpan | PlaceholderSpan | null {
   if (picture?.kind !== "media" && picture?.kind !== "still" && picture?.kind !== "generated") return picture;
   const vignette = vignetteOf(clip);
-  return vignette ? { ...picture, vignette } : picture;
+  const grain = grainOf(clip);
+  return vignette || grain ? { ...picture, ...(vignette ? { vignette } : {}), ...(grain ? { grain } : {}) } : picture;
 }
 
 const tableSerials = new WeakMap<GradeTable, number>();

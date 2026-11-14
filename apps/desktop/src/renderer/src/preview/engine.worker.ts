@@ -4,7 +4,7 @@
 import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
-import type { ResolvedVignette } from "@frameshell/schema/finish";
+import { type ResolvedGrain, type ResolvedVignette, grainPhase, grainPlate } from "@frameshell/schema/finish";
 import type { GradeTable } from "@frameshell/schema/grade";
 import { type AudioRead, audioReads, renderRead, sourceWindow, stretchKey } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
@@ -471,6 +471,8 @@ interface Part {
   grade?: string;
   /** The clip's vignette (ADR 0043): after the grade, on the pixels that show (`cover`, else all of them). */
   vignette?: ResolvedVignette;
+  /** The clip's grain (ADR 0043): after the vignette, on the pixels that show, its pattern by program frame (`frame`). */
+  grain?: ResolvedGrain;
 }
 
 class Engine implements LayerHost {
@@ -648,7 +650,8 @@ class Engine implements LayerHost {
     this.#forgetStills(next);
     this.#gradeTables = this.#tablesOf(next);
     // The pass starts with the first program that needs it, so the first graded frame does not wait for it.
-    this.#grader.prepare(this.#gradeTables, next.layers.some((layer) => layer.some((span) => "vignette" in span && span.vignette !== undefined)));
+    const looks = next.layers.some((layer) => layer.some((span) => ("vignette" in span && span.vignette !== undefined) || ("grain" in span && span.grain !== undefined)));
+    this.#grader.prepare(this.#gradeTables, looks);
 
     while (this.#layers.length > next.layers.length) this.#layers.pop()!.dispose();
     for (const [i, pipeline] of this.#layers.entries()) {
@@ -734,12 +737,14 @@ class Engine implements LayerHost {
       const placement = span.kind === "angle" ? IDENTITY_PLACEMENT : spanPlacement(span, want, program.fps);
       const shape = span.kind === "angle" ? null : spanShape(span, want, program.fps);
       if (span.kind !== "angle" && span.motion) key += `|m${pipeline.layer}@${want}`;
+      // Grain changes every frame, even on a still or a held frame.
+      if (span.kind !== "angle" && span.grain) key += `|g${pipeline.layer}@${want}`;
       if (span.kind === "still") {
         const still = this.#still(span.image, span.version);
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
           const cover = coverPixels(span, { width: still.bitmap.width, height: still.bitmap.height });
-          const look = { ...(span.grade ? { grade: span.grade } : {}), ...(span.vignette ? { vignette: span.vignette } : {}) };
+          const look = { ...(span.grade ? { grade: span.grade } : {}), ...(span.vignette ? { vignette: span.vignette } : {}), ...(span.grain ? { grain: span.grain } : {}) };
           parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover, ...look });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
@@ -759,7 +764,8 @@ class Engine implements LayerHost {
           const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
           const grade = span.kind === "media" && span.grade ? { grade: span.grade } : {};
           const vignette = span.vignette ? { vignette: span.vignette } : {};
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette });
+          const grain = span.grain ? { grain: span.grain } : {};
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette, ...grain });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -864,8 +870,8 @@ class Engine implements LayerHost {
         const alpha = part.image instanceof VideoFrame ? part.alpha : null;
         this.#glass.draw(context, backdropLayer(part.glass, output, project), { rect, alpha, opacity: part.placement.opacity });
       }
-      // ADR 0031 and 0043 order: the grade, on the picture as decoded, then the vignette, then alpha, placement and shape.
-      const graded = part.grade || part.vignette ? this.#looked(part) : null;
+      // ADR 0031 and 0043 order: the grade, on the picture as decoded, then the vignette and grain, then alpha, placement and shape.
+      const graded = part.grade || part.vignette || part.grain ? this.#looked(part, placed, output) : null;
       const image = graded ?? part.image;
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
@@ -900,15 +906,22 @@ class Engine implements LayerHost {
   }
 
   /**
-   * `part`'s picture through its grade and vignette; null (drawn as it is) when the pass cannot run, or the grade's
-   * table is unknown and there is no vignette.
+   * `part`'s picture through its grade, vignette and grain; null (drawn as it is) when the pass cannot run, or the
+   * grade's table is unknown and there is nothing else. `placed`: where it is drawn on the `output` canvas, which sizes
+   * the grain in project pixels as export does (`grainPlate` of the layer and the source pixels that show).
    */
-  #looked(part: Part): ImageBitmap | null {
+  #looked(part: Part, placed: LayerRect, output: Size): ImageBitmap | null {
     const image = part.image as GradeSource;
     const [width, height] = image instanceof VideoFrame ? [image.displayWidth, image.displayHeight] : [image.width, image.height];
+    const crop = part.cover ?? { left: 0, top: 0, width, height };
+    const project = this.#program!.resolution;
+    const layer = { width: (placed.width * project.width) / output.width, height: (placed.height * project.height) / output.height };
+    // The cover crop is in decoded pixels; export counts the source's own.
+    const source = { width: Math.round((crop.width * part.size.width) / width), height: Math.round((crop.height * part.size.height) / height) };
     const look: PictureLook = {
       ...(part.grade ? { grade: part.grade } : {}),
-      ...(part.vignette ? { vignette: { vignette: part.vignette, crop: part.cover ?? { left: 0, top: 0, width, height } } } : {}),
+      ...(part.vignette ? { vignette: { vignette: part.vignette, crop } } : {}),
+      ...(part.grain ? { grain: { grain: part.grain, crop, phase: grainPhase(part.frame), plate: grainPlate(part.grain.size, layer, source) } } : {}),
     };
     return this.#grader.apply(image, width, height, look);
   }

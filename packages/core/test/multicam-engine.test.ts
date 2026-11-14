@@ -199,6 +199,9 @@ describe("shot edits", () => {
     expect(graded.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; grade skipped."]);
     const lens = await apply(base(), "clip.set", { clip: "c_s1", vignette: { strength: 0.4 } });
     expect(lens.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; vignette skipped."]);
+    const grainy = await apply(base(), "clip.set", { clip: "c_s1", grain: {}, vignette: {} });
+    expect(grainy.warnings).toEqual(["c_s1 is a multicam shot: shots take no effects in this version; vignette and grain skipped."]);
+    expect(shots(grainy.timeline)[0]).toEqual(shots(base())[0]);
     expect(shots(lens.timeline)[0]).toEqual(shots(base())[0]);
     expect(shots(graded.timeline)[0]).toEqual(shots(base())[0]);
     expect(shots(glass.timeline)[0]).toEqual(shots(base())[0]);

@@ -969,20 +969,20 @@ class Edit {
         hint: loose === "hidden" ? "To hide a clip in every format, remove it or hide its track (`track.set` `hidden`)." : "",
       });
     }
-    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, transform, props, elements, scriptRef } = args;
+    const { speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, grain, transform, props, elements, scriptRef } = args;
     if (
-      [speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, transform, props, elements, scriptRef].every(
+      [speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, grain, transform, props, elements, scriptRef].every(
         (value) => value === undefined,
       )
     ) {
       throw this.invalid("nothing to set.", {
-        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, transform, props, elements, scriptRef.",
+        hint: "Pass at least one of speed, gain, muted, audioFadeInMs, audioFadeOutMs, audioEffects, backdrop, grade, motionBlur, vignette, grain, transform, props, elements, scriptRef.",
       });
     }
     if (typeof scriptRef === "string") this.checkScriptRefShape(scriptRef);
-    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined || grade !== undefined || vignette !== undefined)) {
+    if (isShotClip(clip) && (audioEffects !== undefined || backdrop !== undefined || grade !== undefined || vignette !== undefined || grain !== undefined)) {
       // ADR 0031 decision 5 (and ADR 0043 decision 9): no effects on shots or angles in v1, skipped like transitions on program tracks.
-      const effects = { audioEffects, backdrop, grade, vignette };
+      const effects = { audioEffects, backdrop, grade, vignette, grain };
       const skipped = (Object.keys(effects) as (keyof typeof effects)[]).filter((field) => effects[field] !== undefined).join(" and ");
       this.warnings.push(`${clip.id} is a multicam shot: shots take no effects in this version; ${skipped} skipped.`);
       if ([speed, gain, muted, audioFadeInMs, audioFadeOutMs, transform, props, elements, motionBlur, scriptRef].every((value) => value === undefined)) return;
@@ -1035,6 +1035,7 @@ class Edit {
     }
     if (motionBlur !== undefined) await this.setMotionBlur(track, clip, motionBlur);
     if (vignette !== undefined) this.setVignette(track, clip, vignette);
+    if (grain !== undefined) this.setGrain(track, clip, grain);
     if (transform !== undefined) {
       if (track.kind === "audio") throw this.invalid("audio tracks take no `transform`.", { field: "transform" });
       clip.transform = { ...clip.transform, ...transform };
@@ -1064,7 +1065,7 @@ class Edit {
    */
   async clipSetInFormat(track: AnyClipTrack, clip: AnyClip, format: string, args: OperationArgs<"clip.set">): Promise<void> {
     this.checkFormat(format);
-    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "motionBlur", "vignette", "scriptRef"] as const).filter(
+    const shared = (["speed", "gain", "muted", "audioFadeInMs", "audioFadeOutMs", "audioEffects", "backdrop", "grade", "motionBlur", "vignette", "grain", "scriptRef"] as const).filter(
       (field) => args[field] !== undefined,
     );
     if (shared.length > 0) {
@@ -1215,6 +1216,25 @@ class Edit {
       return;
     }
     clip.vignette = { ...clip.vignette, ...defined(vignette) };
+  }
+
+  /**
+   * Merge `grain` field by field into a media or generated clip's (ADR 0043; `null` clears, `{}` turns it on with the
+   * defaults). A nested timeline clip is refused, as for the vignette.
+   */
+  setGrain(track: AnyClipTrack, clip: Clip, grain: NonNullable<OperationArgs<"clip.set">["grain"]> | null): void {
+    if (isNested(clip)) {
+      throw this.invalid(`nested timeline clips take no \`grain\`; ${clip.id} is ${clip.type}.`, {
+        field: "grain",
+        hint: "Set it on the clips inside the nested timeline that show footage.",
+      });
+    }
+    if (track.kind === "audio") throw this.invalid("audio tracks take no `grain`: they show no picture.", { field: "grain" });
+    if (grain === null) {
+      delete clip.grain;
+      return;
+    }
+    clip.grain = { ...clip.grain, ...defined(grain) };
   }
 
   /**

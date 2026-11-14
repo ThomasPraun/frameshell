@@ -83,6 +83,7 @@ export {
   BackdropSchema,
   GradeSchema,
   VignetteSchema,
+  GrainSchema,
   MARKER_COLORS,
   MARKER_LABEL_MAX,
   MarkerIdSchema,
@@ -136,6 +137,7 @@ export {
   type Backdrop,
   type Grade,
   type Vignette,
+  type Grain,
   type CaptionPhrase,
   type CaptionGap,
   type SubtitleEntry,
@@ -318,6 +320,17 @@ export {
   vignetteGain,
   vignetteLevel,
   vignetteOf,
+  type GrainFields,
+  type ResolvedGrain,
+  GRAIN_LIMITS,
+  GRAIN_PERIOD,
+  GRAIN_STRENGTH,
+  grainOf,
+  grainPhase,
+  grainPlate,
+  grainSeed,
+  grainSpread,
+  grainStrength,
 } from "./finish.js";
 export { generateJsonSchemas } from "./json-schema.js";
 export {

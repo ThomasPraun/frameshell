@@ -53,7 +53,12 @@ import {
   subtitleTracks,
   withTrackMutes,
   type Letterbox,
+  GRAIN_PERIOD,
+  type ResolvedGrain,
   type ResolvedVignette,
+  grainOf,
+  grainPhase,
+  grainPlate,
   letterboxBars,
   vignetteOf,
 } from "@frameshell/schema";
@@ -80,6 +85,7 @@ import {
 } from "./animation.js";
 import { assSubtitles } from "./ass.js";
 import { vignettedPicture } from "./vignette.js";
+import { grainedPicture } from "./grain.js";
 import { type CoverLayout, assCover } from "./cover.js";
 
 /**
@@ -431,6 +437,8 @@ interface Placed {
   grade?: string;
   /** The clip's vignette (ADR 0043): after the grade, on the picture as it shows (its crop), before scale and shape. */
   vignette?: ResolvedVignette;
+  /** The clip's grain (ADR 0043): after the vignette, on the picture as it shows, its pattern by timeline frame. */
+  grain?: ResolvedGrain;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -722,6 +730,13 @@ function loopWarnings(layout: Layout, fps: number, outFps: number): string[] {
   const last = layout.frames - 1;
   const closing = last > 0 ? emptyFrame(layout, last, fps) : null;
   if (closing) warnings.push(`Loop: the last frame (${last}) is ${closing}, so every pass ends on black. Remove the fade out.`);
+  const grained = [...layout.video, ...layout.overlays.flat()].find((span) => span.placed.grain);
+  if (grained && layout.frames % GRAIN_PERIOD !== 0) {
+    warnings.push(
+      `Loop: clip ${grained.placed.clip.id} has grain, whose pattern repeats every ${GRAIN_PERIOD} frames, and ${layout.frames} frames are not a multiple of ${GRAIN_PERIOD}: ` +
+        `the grain jumps at the seam. Make the timeline ${Math.max(GRAIN_PERIOD, Math.round(layout.frames / GRAIN_PERIOD) * GRAIN_PERIOD)} frames long, or remove the grain.`,
+    );
+  }
   return warnings;
 }
 
@@ -965,6 +980,7 @@ function layoutTimeline(
       if (look && grade === undefined) warnings.push(`Clip ${clip.id} has a colour grade with no table; it was exported ungraded.`);
       // The listed clip: a generated clip's footage stand-in (`asFootage`) keeps only what places it.
       const vignette = picture ? vignetteOf(listed) : null;
+      const grain = picture ? grainOf(listed) : null;
       const cover = formatCrop(variant, clip, { size: picture, generated: render !== undefined, alpha: picture?.alpha === true, base }, output);
       placed.push({
         clip,
@@ -980,6 +996,7 @@ function layoutTimeline(
         ...(backdrop ? { glass: backdrop } : {}),
         ...(grade !== undefined ? { grade } : {}),
         ...(vignette ? { vignette } : {}),
+        ...(grain ? { grain } : {}),
         ...(sound !== undefined ? { sound } : {}),
         ...(cover ? { cover } : {}),
         ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
@@ -1328,7 +1345,9 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
     const fill = placed.cover ? `scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
     const cut = placed.cover ? staticCrop(placed.cover, false) : null;
-    lines.push(`${[lookedChain(placed, gradedChain(placed, start, end, fps, inputs), cut, rate, label, lines), fill, ...timed].join(",")}[${label}]`);
+    const rect = placed.cover ? { left: 0, top: 0, width, height } : layerRect(placed.source.video, { width, height }, out.project, placed.placement);
+    const looked = lookedChain(placed, gradedChain(placed, start, end, fps, inputs), cut, { start, end, rect }, out, label, lines);
+    lines.push(`${[looked, fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -1362,7 +1381,7 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const picture = placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : gradedChain(placed, start, end, fps, inputs);
     const cut = move ? movingCrop(move.path, move.clock + start / fps, (end - start) / fps) : crop ? staticCrop(crop, placed.tile?.exact === true) : null;
     const head = [
-      lookedChain(placed, picture, cut, rate, `o${n}`, lines),
+      lookedChain(placed, picture, cut, { start, end, rect }, out, `o${n}`, lines),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${zoomed?.scale ?? motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
       ...(placed.tile?.backdrop ? [`pad=${width}:${height}:${rect.left}:${rect.top}:black`] : []),
@@ -1707,14 +1726,30 @@ function pieceChain(placed: Placed, start: number, end: number, fps: number, inp
 }
 
 /**
- * `picture` (a graded chain) cut by `crop` (a `crop` filter, null for none), then darkened by the clip's vignette
- * (ADR 0043 order: grade, then vignette) on the picture as it shows; the plate's lines go to `lines`, named after
- * `label`. In `gbrap` from before the crop, so the crop keeps odd edges and the plate's size is the crop's.
+ * `picture` (a graded chain) cut by `crop` (a `crop` filter, null for none), then darkened by the clip's vignette and
+ * grained (ADR 0043 order: grade, vignette, grain) on the picture as it shows; the plates' lines go to `lines`, named
+ * after `label`. In `gbrap` from before the crop, so the crop keeps odd edges and the plates' size is the crop's.
  */
-function lookedChain(placed: Placed, picture: string, crop: string | null, rate: string, label: string, lines: string[]): string {
-  if (!placed.vignette || placed.tile) return crop ? `${picture},${crop}` : picture;
+function lookedChain(placed: Placed, picture: string, crop: string | null, piece: LookedPiece, out: GraphTarget, label: string, lines: string[]): string {
+  if ((!placed.vignette && !placed.grain) || placed.tile) return crop ? `${picture},${crop}` : picture;
+  const rate = fpsRational(out.fps);
   const size = placed.cover ?? placed.source.video!;
-  return vignettedPicture([picture, "format=gbrap", ...(crop ? [crop] : [])].join(","), size, placed.vignette, rate, label, lines);
+  let chain = [picture, "format=gbrap", ...(crop ? [crop] : [])].join(",");
+  if (placed.vignette) chain = vignettedPicture(chain, size, placed.vignette, rate, label, lines);
+  if (placed.grain) {
+    // Grain cells are project pixels of the layer as placed (keys and zooms aside), whatever the source's size.
+    const layer = { width: (piece.rect.width * out.project.width) / out.width, height: (piece.rect.height * out.project.height) / out.height };
+    const plate = grainPlate(placed.grain.size, layer, size);
+    chain = grainedPicture(chain, size, plate, placed.grain, rate, grainPhase(piece.start), piece.end - piece.start, label, lines);
+  }
+  return chain;
+}
+
+/** Where a piece given to {@link lookedChain} plays: timeline frames [start, end) and its layer in output pixels. */
+interface LookedPiece {
+  start: number;
+  end: number;
+  rect: LayerRect;
 }
 
 /**

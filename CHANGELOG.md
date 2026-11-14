@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 139): an optional `grain { amount?, size?, seed? }` on media
+  and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
+  hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame
+  always gets the same grain, in one segment or split ones, a `frame` capture or the cover frame: the pattern is a
+  seeded ffmpeg `noise` plate of 64 frames, phased by the timeline frame, merged with `blend grainmerge` (alpha kept); a
+  subject-matte copy keeps its plate clip's seed. `frameshell clip set --grain 0.3` (also `--grain-size`, `--grain-seed`,
+  `--clear-grain`; daemon and MCP `clip.set` `grain`, merged, `null` clears; refused on nested timeline clips, skipped on
+  multicam shots with a warning). The app's preview draws grain of the same strength in the grade and vignette WebGL2
+  pass (statistically matched, not pixel for pixel). A `--loop` export with grain warns when its length is not a
+  multiple of 64 frames. The skill says never on screen recordings, UI or text. Timelines without it export
+  byte-identical plans. No inspector control yet.
 - 3D playbook, slice 4 of #473 (ADR 0042, epic #451): the `hyperframes` skill gains `3d-playbook.md`, a reference for
   3D product shots in three.js: which route to take (the `product-shot` template, a hand-written scene, Blender), the
   studio defaults (lights, environment, tone mapping, VSM shadows), the four finishes with their numbers, the glint,
