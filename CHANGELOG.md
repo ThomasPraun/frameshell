@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Emphasis and reveal templates, part of #466 (ADR 0033, epic #451): `frameshell hyperframes new <name> --template
+  emphasis-marker` draws a hand-drawn mark on a phrase of a sentence (`marker`: highlight, circle, underline,
+  strike-through, box or bracket; `mark` names the phrase, `rough`, `weight` and `seed` shape the wobble), `before-after`
+  sweeps a divider with a handle across a card and reveals the second picture, and `pull-back-reveal` opens tight on a
+  detail of a screen and pulls the camera back to the whole window before a title rises. Every mark and move is a pure
+  function of the time, so a seek paints the same pixels; a late start is pulled in so the move finishes before the
+  exit. The `hyperframes` skill lists them with their props. Not yet: the rest of #466 (beat freeze cut,
+  slot-machine roll, number wheel, code blocks, stretching tab indicator).
 - 3D playbook, slice 4 of #473 (ADR 0042, epic #451): the `hyperframes` skill gains `3d-playbook.md`, a reference for
   3D product shots in three.js: which route to take (the `product-shot` template, a hand-written scene, Blender), the
   studio defaults (lights, environment, tone mapping, VSM shadows), the four finishes with their numbers, the glint,

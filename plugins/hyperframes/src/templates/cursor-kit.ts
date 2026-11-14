@@ -1,4 +1,4 @@
-import { type TemplateVariable, kitScript } from "./kit.js";
+import { FLAT_HELPERS, type TemplateVariable, kitScript } from "./kit.js";
 
 /** The two props every template with a cursor shares: the arrow's colour and its size. */
 export function cursorVariables(): TemplateVariable[] {
@@ -150,15 +150,7 @@ export const CURSOR_MATH = kitScript(String.raw`
         return 1 - 0.16 * d * (1 - r);
       }
 
-      // Chrome keeps a layer's earlier raster for a scale within about 0.6 % of 1, so the same time would paint one pixel
-      // differently depending on where the player came from. A scale that close to 1 is written as exactly 1.
-      function flat(scale) {
-        return scale !== undefined && Math.abs(scale - 1) < 0.006 ? 1 : scale;
-      }
-      // M.write with every scale made flat.
-      function put(element, pose) {
-        M.write(element, { x: pose.x, y: pose.y, rotate: pose.rotate, scale: flat(pose.scale), scaleX: flat(pose.scaleX), scaleY: flat(pose.scaleY), opacity: pose.opacity });
-      }
+      ${FLAT_HELPERS}
 
       // Keeps a point inside the frame, "margin" (a fraction of the short side) from every edge.
       function inFrame(p, margin) {
