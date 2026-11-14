@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>spike #384 webgl2 grade</title>
+<body style="margin:0;background:#222">
+<canvas id="view" width="1920" height="1080" style="width:960px;height:540px"></canvas>
+<script>
+  // PROTOTYPE (#384 G0). Hands the visible canvas to the worker, like the preview engine does.
+  const { ipcRenderer } = require('electron');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const q = new URLSearchParams(location.search);
+  const media = q.get('media');
+  const read = (name) => { const b = fs.readFileSync(path.join(media, name)); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
+  const files = {};
+  for (const name of ['look33.cube', 'look65.cube']) files[name] = fs.readFileSync(path.join(media, name), 'utf8');
+  for (const name of ['random.png', 'blocks.tagged.h264', 'blocks.untagged.h264', 'bench1080.h264', 'bench540.h264']) files[name] = read(name);
+  const view = document.getElementById('view').transferControlToOffscreen();
+  const worker = new Worker('worker.js');
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.log) ipcRenderer.send('log', m.log);
+    if (m.raw) ipcRenderer.send('raw', m.raw, new Uint8Array(m.bytes));
+    if (m.json) ipcRenderer.send('json', m.json, m.data);
+    if (m.done !== undefined) ipcRenderer.send('done', m.done);
+  };
+  worker.onerror = (e) => { ipcRenderer.send('log', 'worker error ' + e.message); ipcRenderer.send('done', 1); };
+  worker.postMessage({ view, files, only: q.get('only') }, [view]);
+</script>
+</body>

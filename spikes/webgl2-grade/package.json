@@ -1,0 +1,11 @@
+{
+  "name": "spike-webgl2-grade",
+  "version": "0.0.0",
+  "private": true,
+  "description": "THROWAWAY spike (#384 G0): WebGL2 3D-LUT pass in the preview engine worker. Not part of any workspace. Findings: docs/research/webgl2-grade.md",
+  "type": "module",
+  "scripts": {
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "compare": "node scripts/compare.mjs && node scripts/yuv-check.mjs"
+  }
+}
