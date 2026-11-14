@@ -73,7 +73,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 125;
+export const PROTOCOL_VERSION = 126;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -3657,6 +3657,11 @@ export const methods = {
       "`left` (default), `right`, `up` or `down` is the way the incoming picture travels: `{ at: 12.5, kind: \"push\", direction: \"up\" }`. " +
       "`kind: \"iris\"` opens the incoming clip in a circle growing from the centre of `origin`, `[x0, y0, x1, y1]` in fractions of the " +
       "frame (the element that just lit up, from `inspect.point`; default the frame's centre): `{ at: 12.5, kind: \"iris\", origin: [0.6, 0.2, 0.8, 0.4] }`. " +
+      "`kind: \"zoom\"` dives the outgoing clip into the centre of `origin` (up to 4 times larger, by the size of `origin`: its larger side " +
+      "fills the frame; default the middle half) while the incoming clip grows out of that point, so use it where the eye is on one element " +
+      "and the next shot is about it. `kind: \"slats\"` uncovers the incoming clip in `count` strips at once (default 8, 2 to 64), each the " +
+      "`direction` way, on a rhythm beat. `kind: \"grid\"` shows it in square cells switching on in a scattered order, `count` across " +
+      "(default 12), to end a section on a grid image. " +
       "They play on every video track with an edge there, like a dissolve: on an upper track the outgoing clip shows only where the " +
       "incoming one does not (the shape cuts both, keeping a render's own alpha), so a title can wipe or push off over the picture below. " +
       "At an edge of a nested timeline clip the shape plays on its clips too, its upper tracks included. Audio tracks crossfade. " +
@@ -3670,9 +3675,10 @@ export const methods = {
       "An edge with no clip butted to it (a clip's start or end) fades in or out for any kind: `{ at: 58, kind: \"fade\", duration: 1 }` " +
       "fades the last clip out. Replaces any transition already on that edge. Multicam program tracks are skipped with a warning (hard " +
       "cuts). Short material never fails: it shortens the transition, or plays a dissolve with no spare source as a dip, and a `warnings` " +
-      "entry says so; a wipe, push or iris with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
+      "entry says so; a shape with no spare source holds the outgoing clip's last frame or the incoming clip's first instead. " +
       "Fails with InvalidOperation when no targeted track has a clip edge at `at` (the message lists the edges), `direction` comes " +
-      "with another kind than `wipe` or `push`, `origin` with another kind than `iris`, or a dip cut finds no clip ending at `at` on " +
+      "with another kind than `wipe`, `push` or `slats`, `origin` with another kind than `iris` or `zoom`, `count` with another kind than " +
+      "`slats` or `grid`, or a dip cut finds no clip ending at `at` on " +
       "the bottom video track; TrackNotFound.",
     params: operationArgs["transition.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,

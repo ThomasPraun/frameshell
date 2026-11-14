@@ -7,8 +7,14 @@ import {
   type ClipKeys,
   type NestHost,
   type TransitionShape,
+  GRID_RANKS,
   circleReach,
+  gridColumns,
+  gridRows,
   irisCentre,
+  shapeOrigin,
+  slatCount,
+  zoomFactor,
   nestingOf,
   placementAt,
   placementOf,
@@ -220,6 +226,49 @@ export function wipeAlpha(shape: TransitionShape, p: string, left: string, top: 
           ? `if(lt(${y},${num(height)}*(1-(${p}))),${low},${high})`
           : `if(lt(${y},${num(height)}*(${p})),${high},${low})`;
   return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${alpha}'`;
+}
+
+/**
+ * {@link wipeAlpha}'s twin for `slats`: keeps the layer where the pixel centre lies in the share of its strip that
+ * `shapeAt`'s `slats` shows (see `slatRects`), at shape progress `p`. `outgoing`: the rest of each strip instead.
+ */
+export function slatsAlpha(shape: TransitionShape, p: string, left: string, top: string, width: number, height: number, outgoing = false): string {
+  const [ux, uy] = shapeStep(shape);
+  const along = ux !== 0 ? `(X+${left}+0.5)*${slatCount(shape)}/${num(width)}` : `(Y+${top}+0.5)*${slatCount(shape)}/${num(height)}`;
+  const fromEnd = ux < 0 || uy < 0;
+  const shown = fromEnd ? `gte(mod(${along},1),1-(${p}))` : `lt(mod(${along},1),${p})`;
+  const keep = "alpha(X,Y)";
+  const [inside, outside] = outgoing ? ["0", keep] : [keep, "0"];
+  return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(${shown},${inside},${outside})'`;
+}
+
+/**
+ * {@link wipeAlpha}'s twin for a `grid`: keeps the layer where the pixel centre lies in a cell whose `gridRank` is
+ * below shape progress `p` times {@link GRID_RANKS}, in `gridRows` rows of the `width` x `height` frame. `outgoing`:
+ * the other cells instead. The rank is whole-number arithmetic, so it equals `gridRank` exactly.
+ */
+export function gridAlpha(shape: TransitionShape, p: string, left: string, top: string, width: number, height: number, outgoing = false): string {
+  const columns = gridColumns(shape);
+  const rows = gridRows(columns, width, height);
+  const column = `floor((X+${left}+0.5)*${columns}/${num(width)})`;
+  const row = `floor((Y+${top}+0.5)*${rows}/${num(height)})`;
+  const a = `mod(${column}*131+${row}*517,251)`;
+  const rank = `mod(${a}*${a}+${column}*${row}*89+${column}*7+${row}*3,${GRID_RANKS})`;
+  const keep = "alpha(X,Y)";
+  const [inside, outside] = outgoing ? ["0", keep] : [keep, "0"];
+  return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(${rank},${GRID_RANKS}*(${p})),${inside},${outside})'`;
+}
+
+/**
+ * A zoom's scale about its pivot (ADR 0030) as expressions of shape progress `p`, for one side of a `zoom` in a
+ * `width` x `height` frame: `s` the scale, `tx` and `ty` the pixel shift, so a point at pixel `x` lands at `s*x + tx`.
+ * The outgoing picture grows from 1 to {@link zoomFactor}, the incoming one from nothing to 1, about the centre of
+ * the shape's origin.
+ */
+export function zoomExpressions(shape: TransitionShape, side: "incoming" | "outgoing", p: string, width: number, height: number): { s: string; tx: string; ty: string } {
+  const [x0, y0, x1, y1] = shapeOrigin(shape);
+  const s = side === "incoming" ? `(${p})` : `(1+${num(zoomFactor(shape) - 1)}*(${p}))`;
+  return { s, tx: `${num(((x0 + x1) / 2) * width)}*(1-${s})`, ty: `${num(((y0 + y1) / 2) * height)}*(1-${s})` };
 }
 
 /**

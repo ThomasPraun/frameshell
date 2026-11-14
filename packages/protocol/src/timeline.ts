@@ -32,6 +32,9 @@ import {
   TrackSchema,
   TransformSchema,
   TRANSITION_DIRECTIONS,
+  DEFAULT_GRID_COLUMNS,
+  DEFAULT_SLATS,
+  SHAPE_COUNT_RANGE,
   TRANSITION_SHAPE_KINDS,
   FrameRectSchema,
 } from "@frameshell/schema";
@@ -450,7 +453,9 @@ export const operationArgs = {
       .describe(
         "`dissolve` (default): the clips mix, sound crossfades. `fade`: dip through black (transparent on upper tracks, silence for sound). " +
           "`wipe`: a straight edge crosses the frame and uncovers the incoming clip. `push`: the incoming clip slides in and pushes the " +
-          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `wipe`, `push` and `iris` play on any " +
+          "outgoing one out. `iris`: the incoming clip opens in a growing circle from `origin`. `zoom`: the outgoing clip dives into `origin` " +
+          "while the incoming one grows out of it. `slats`: `count` strips each uncover the incoming clip the `direction` way, like blinds. " +
+          "`grid`: the incoming clip shows in square cells that switch on one by one, `count` across. Every shape plays on any " +
           "video track (on an upper one the outgoing clip shows only where the incoming one does not) and at edges of nested clips; sound " +
           "crossfades as for a dissolve. A clip edge with nothing butted fades in or out for these kinds. " +
           "`dip-cut`: a hard cut, the outgoing bottom-track clip darkened 40 % over its last 3 frames (opacity keys); sound is not touched.",
@@ -459,13 +464,21 @@ export const operationArgs = {
       .enum(TRANSITION_DIRECTIONS)
       .optional()
       .describe(
-        "`wipe` and `push` only: the way the incoming picture travels. `left` (default: it enters from the right edge), `right`, " +
+        "`wipe`, `push` and `slats` only: the way the incoming picture travels. `left` (default: it enters from the right edge), `right`, " +
           "`up` (enters from the bottom) or `down`.",
       ),
     origin: FrameRectSchema.optional().describe(
-      "`iris` only: the element it opens from, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1; take it from " +
-        "`inspect.point`: `frameBox`, or `box` divided by the project size). The circle grows from its centre. Default: the frame's centre.",
+      "`iris` and `zoom` only: the element it opens from or dives into, `[x0, y0, x1, y1]` in fractions of the frame (x0 <= x1, y0 <= y1; take it from " +
+        "`inspect.point`: `frameBox`, or `box` divided by the project size). An iris grows from its centre (default: the frame's centre); a zoom dives " +
+        "into its centre by the factor that makes its larger side fill the frame, at most 4 (default: the middle half of the frame).",
     ),
+    count: z
+      .number()
+      .int()
+      .min(SHAPE_COUNT_RANGE.min)
+      .max(SHAPE_COUNT_RANGE.max)
+      .optional()
+      .describe(`\`slats\` and \`grid\` only: how many slats cross the frame (default ${DEFAULT_SLATS}) or how many cells the grid has across (default ${DEFAULT_GRID_COLUMNS}), ${SHAPE_COUNT_RANGE.min} to ${SHAPE_COUNT_RANGE.max}.`),
     duration: z
       .number()
       .positive()

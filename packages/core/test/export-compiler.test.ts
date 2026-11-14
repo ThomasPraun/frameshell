@@ -902,6 +902,42 @@ describe("export compiler", () => {
       expect(graphs).not.toContain("eval=frame");
     });
 
+    it("zooms: both pieces are scaled layers about the origin's centre, the base black under them, no mask (golden)", () => {
+      const plan = planOf(held(shaped({ kind: "zoom", origin: [0.6, 0.2, 0.8, 0.4] }, { kind: "zoom" })));
+      golden("shaped-zoom-plan", { segments: plan.segments, files: plan.files, audio: plan.audio });
+      const graphs = Object.values(plan.files).join("\n");
+      expect(graphs).not.toContain("geq");
+      expect(graphs).not.toContain("alpha=1");
+      // Each zoom: the outgoing tail and the incoming head are layers scaled per frame, the outgoing one up to 4x (by the 0.2 origin) and 2x by default.
+      expect(graphs).toContain("scale=w='max(1,floor(1920*((1+3*(");
+      expect(graphs).toContain("scale=w='max(1,floor(1920*((1+1*(");
+      expect(graphs).toContain("scale=w='max(1,floor(1920*((max(0,min(1,");
+      expect(graphs).toContain("overlay_w/2+0.5)");
+    });
+
+    it("slats: a geq alpha of strips on the incoming head only, the outgoing clip concatenated under it (golden)", () => {
+      const plan = planOf(shaped({ kind: "slats", direction: "left", count: 6 }, { kind: "slats", direction: "down" }));
+      golden("shaped-slats-plan", { segments: plan.segments, files: plan.files, audio: plan.audio });
+      const graphs = Object.values(plan.files).join("\n");
+      // c_talk2's head, and c_talk3's in two pieces: the segment join at its cut.
+      expect(graphs.match(/geq=/g)).toHaveLength(3);
+      expect(graphs).toContain("(X+0+0.5)*6/1920");
+      expect(graphs).toContain("(Y+0+0.5)*8/1080");
+      expect(graphs).not.toContain("eval=frame");
+    });
+
+    it("grids: a geq alpha of cells on the incoming head only, square cells in the output frame (golden)", () => {
+      const plan = planOf(shaped({ kind: "grid", count: 16 }, { kind: "grid" }));
+      golden("shaped-grid-plan", { segments: plan.segments, files: plan.files, audio: plan.audio });
+      const graphs = Object.values(plan.files).join("\n");
+      expect(graphs.match(/geq=/g)).toHaveLength(3);
+      // 16 columns of 120 px: 9 rows of 120 px; 12 columns of 160 px: 7 rows (6.75 rounded).
+      expect(graphs).toContain("floor((X+0+0.5)*16/1920)");
+      expect(graphs).toContain("floor((Y+0+0.5)*9/1080)");
+      expect(graphs).toContain("floor((Y+0+0.5)*7/1080)");
+      expect(graphs).not.toContain("eval=frame");
+    });
+
     /** `timeline` with its talk track lifted over a still on a new bottom track. */
     const lifted = (timeline: Timeline): Timeline => ({
       ...timeline,
@@ -920,6 +956,21 @@ describe("export compiler", () => {
       // The iris into c_talk3: its head inside the circle, c_talk2's tail outside it.
       expect(graphs).toMatch(/hypot\(X\+0\+0\.5-1344,Y\+0\+0\.5-324\)[^']*\),alpha\(X,Y\),0\)'/);
       expect(graphs).toMatch(/hypot\(X\+0\+0\.5-1344,Y\+0\+0\.5-324\)[^']*\),0,alpha\(X,Y\)\)'/);
+    });
+
+    it("zoom, slats and grid on an upper track: a zoom scales both pieces, the masks cut both, neither fades", () => {
+      const zoomed = Object.values(planOf(lifted(shaped({ kind: "zoom" }, { kind: "zoom", origin: [0.1, 0.1, 0.3, 0.3] }))).files).join("\n");
+      expect(zoomed).not.toContain("geq");
+      expect(zoomed).not.toContain("alpha=1");
+      // The outgoing tails and the incoming heads of both zooms are scaled layers.
+      expect(zoomed.match(/eval=frame:eof_action/g)!.length).toBeGreaterThanOrEqual(4);
+      for (const shape of [{ kind: "slats", count: 5 }, { kind: "grid", count: 10 }] as const) {
+        const graphs = Object.values(planOf(lifted(shaped(shape, shape))).files).join("\n");
+        expect(graphs).not.toContain("alpha=1");
+        // Incoming heads keep the picture where the shape shows it, outgoing tails where it does not; the alpha a picture has is kept.
+        expect(graphs).toMatch(/a='if\([^']*,alpha\(X,Y\),0\)'/);
+        expect(graphs).toMatch(/a='if\([^']*,0,alpha\(X,Y\)\)'/);
+      }
     });
 
     it("pushes on an upper track: both pieces moved, neither faded", () => {

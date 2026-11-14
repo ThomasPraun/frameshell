@@ -21,12 +21,15 @@ frameshell transition remove --at 12.5
 
 ## Shaped transitions: pick by cause
 
-A wipe, a push or an iris moves or cuts the picture instead of mixing it. It is stored as the incoming clip's `dissolve` plus `shape`, so everything above holds; sound still crossfades.
+A wipe, a push, an iris, a zoom, slats or a pixel grid moves or cuts the picture instead of mixing it. It is stored as the incoming clip's `dissolve` plus `shape`, so everything above holds; sound still crossfades.
 
 ```sh
 frameshell transition set --at 12.5 --kind push                          # the next topic slides in from the right, 0.5 s
 frameshell transition set --at 30 --kind wipe --direction down            # the incoming shot is uncovered from the top
 frameshell transition set --at 41 --kind iris --origin 0.6,0.2,0.8,0.4    # the next shot opens from the button that just lit up
+frameshell transition set --at 48 --kind zoom --origin 0.6,0.2,0.8,0.4    # dive into the card the eye is on; the next shot grows out of it
+frameshell transition set --at 62 --kind slats --count 6 --direction right # blinds on the downbeat
+frameshell transition set --at 70 --kind grid --count 16                # the section ends on a grid image
 frameshell transition set --at 55 --kind dip-cut                         # a hard cut, the outgoing frame darkened just before it
 ```
 
@@ -35,17 +38,22 @@ frameshell transition set --at 55 --kind dip-cut                         # a har
 | A new topic at the same level, nothing else added | `push`, in the film's one dominant direction |
 | A scan or sweep is already moving on screen | `wipe`, the way it moves |
 | Something on screen just lit up (a button, a card) and the next shot is about it | `iris`, from that element |
+| The eye is on one element and the next shot is what is inside or behind it | `zoom`, into that element (a zoom never crosses a cut: use it at the seam, not over a shot) |
+| A rhythm beat, a cut on the music | `slats`, `--count` strips (8 is a start) |
+| A section ends on a grid image (a wall of thumbnails, a dashboard) | `grid`, square cells switching on |
 | A hard cut that needs a beat of weight, without a mix | `dip-cut` |
 | Time passes, a mood or a place changes softly | `dissolve` |
 | A section opens or closes | `fade` |
 | A chapter slam, an impact | hard cut (no transition) |
 
-- `--direction` is the way the incoming picture travels: `left` (default, it enters from the right edge), `right`, `up` (enters from the bottom), `down`. Keep one dominant direction per film. Only `wipe` and `push` take it.
-- `--origin x0,y0,x1,y1` is the element an iris opens from, in fractions of the frame (0 to 1, x0 <= x1, y0 <= y1): a circle grows from its centre until it covers the frame. Take it from `frameshell inspect --at <s> --point x,y`: a photo mask's `frameBox` (`--segment`) as it is; a generated clip element's `box` (`x`, `y`, `width`, `height` in project pixels, for a clip that fills the frame) as `x/W, y/H, (x+width)/W, (y+height)/H` of the project size; or the point itself, `x,y,x,y`. Without it the iris opens from the frame's centre. Only `iris` takes it; fractions keep it right in every format.
+- `--direction` is the way the incoming picture travels: `left` (default, it enters from the right edge), `right`, `up` (enters from the bottom), `down`. Keep one dominant direction per film. Only `wipe`, `push` and `slats` take it.
+- `--origin x0,y0,x1,y1` is the element an iris opens from, in fractions of the frame (0 to 1, x0 <= x1, y0 <= y1): a circle grows from its centre until it covers the frame. Take it from `frameshell inspect --at <s> --point x,y`: a photo mask's `frameBox` (`--segment`) as it is; a generated clip element's `box` (`x`, `y`, `width`, `height` in project pixels, for a clip that fills the frame) as `x/W, y/H, (x+width)/W, (y+height)/H` of the project size; or the point itself, `x,y,x,y`. Without it the iris opens from the frame's centre. A `zoom` takes the same rectangle: it dives into its centre, by the factor that makes its larger side fill the frame (at most 4), so a small element is a deep zoom; without it, into the middle half of the frame. Only `iris` and `zoom` take it; fractions keep it right in every format.
+- `--count n` (2 to 64): how many slats cross the frame (`slats`, default 8: each strip uncovers the incoming shot from its edge, the `--direction` way) or how many square cells the grid has across (`grid`, default 12, in a scattered fixed order). Only `slats` and `grid` take it.
+- A `zoom` scales the outgoing picture up while the incoming one grows out of the same point, so it is also the right shape for a punch-in on a title: keep it to the seam (0.45 to 0.6 s).
 - 0.45 to 0.6 s fits most cuts; the default 0.5 s is fine.
 - Shapes play on every video track with the edge, like a dissolve; `--track` limits them. On an upper track the shape cuts both clips: the outgoing one shows only where the incoming one does not, over the tracks below, so a title or card can wipe, push or iris off and the next one on. A render's own transparency is kept. Audio tracks crossfade.
 - At an edge of a nested timeline clip the shape plays inside it too: on the clip starting its window on its own track, and on its upper tracks (a title inside a nested scene wipes in with the scene, instead of fading in over the outgoing picture).
-- The app's clip inspector offers the same kinds at each clip edge (a direction for `wipe` and `push`; `dip-cut` on the bottom track), and the timeline marks each kind; an iris picked there opens from the frame's centre, so set `--origin` yourself when it should open from an element.
+- The app's clip inspector offers the same kinds at each clip edge (a direction for `wipe`, `push` and `slats`, a count for `slats` and `grid`; `dip-cut` on the bottom track), and the timeline marks each kind; an iris or zoom picked there opens from the frame's centre (an iris) or dives into its middle half (a zoom), so set `--origin` yourself when it should work from an element.
 - With no spare source around the cut, a shaped transition holds the outgoing clip's last frame or the incoming clip's first (a warning says so) instead of dipping through black. Trim the neighbours less to keep the motion.
 - `--kind dissolve` or `fade`, `transition remove`, `clip split` and `cut` on that edge drop the shape.
 

@@ -36,11 +36,15 @@ import {
   type FrameRect,
   type ShapePart,
   type TransitionContext,
+  GRID_RANKS,
   circleReach,
   clipLength,
   edgeTransitions,
+  gridRank,
+  gridRows,
   hostShapes,
   shapeAt,
+  slatRects,
 } from "@frameshell/schema/transitions";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
@@ -268,26 +272,43 @@ export function spanShape(span: PlacedSpan, frame: number, fps: number): PartSha
   const incoming = comesIn ? shapeAt(comesIn.shape, dissolveProgress(comesIn.at, comesIn.half, t)).incoming : null;
   const outgoing = playing(motion.dissolveOut) ? outgoingPart(span, motion.dissolveOut.shape, dissolveProgress(motion.dissolveOut.at, motion.dissolveOut.half, t)) : null;
   if (!incoming || !outgoing) return incoming ?? outgoing;
-  // A clip shorter than both its dissolves: both move it; the incoming one cuts it.
-  return { dx: incoming.dx + outgoing.dx, dy: incoming.dy + outgoing.dy, clip: incoming.clip, ...(incoming.circle ? { circle: incoming.circle } : {}) };
+  // A clip shorter than both its dissolves: both move it; the incoming one cuts it. Zooms act in turn, the incoming one
+  // first and the outgoing one on what it drew: s = s1*s2, shift = t1 + s1*t2 (as export composes them).
+  const zoom =
+    incoming.zoom && outgoing.zoom
+      ? { s: incoming.zoom.s * outgoing.zoom.s, tx: incoming.zoom.tx + incoming.zoom.s * outgoing.zoom.tx, ty: incoming.zoom.ty + incoming.zoom.s * outgoing.zoom.ty }
+      : (incoming.zoom ?? outgoing.zoom);
+  const { circle, slats, grid } = incoming;
+  return {
+    dx: incoming.dx + outgoing.dx,
+    dy: incoming.dy + outgoing.dy,
+    clip: incoming.clip,
+    ...(circle ? { circle } : {}),
+    ...(slats ? { slats } : {}),
+    ...(grid ? { grid } : {}),
+    ...(zoom ? { zoom } : {}),
+  };
 }
 
-/** A {@link ShapePart} as the preview draws it: an uncovered outgoing picture an iris cuts shows outside the circle. */
+/** A {@link ShapePart} as the preview draws it: an uncovered outgoing picture a mask cuts shows outside it. */
 export interface PartShape extends ShapePart {
-  /** True: it shows outside `circle` instead of inside (the outgoing clip of an upper track, a subject, ADR 0032). */
+  /** True: it shows outside `circle`, `slats` or `grid` instead of inside (the outgoing clip of an upper track, a subject, ADR 0032). */
   outside?: true;
 }
 
 /**
  * The outgoing side of `shape` at progress `f` for `span`. Only the bottom track's outgoing clip is covered by the
- * incoming one; on an upper track, and on a subject (ADR 0032), it shows only where the incoming picture of a wipe or
- * iris does not: the complement of its strip or circle, as export masks it.
+ * incoming one; on an upper track, and on a subject (ADR 0032), it shows only where the incoming picture of a mask
+ * (wipe, iris, slats, grid) does not: the complement of its strip, circle, slats or cells, as export masks it. A push
+ * or a zoom moves the outgoing picture instead.
  */
 function outgoingPart(span: PlacedSpan, shape: TransitionShape, f: number): PartShape {
   const frame = shapeAt(shape, f);
-  if (shape.kind === "push" || span.motion?.track !== "upper") return frame.outgoing;
-  const { clip, circle } = frame.incoming;
+  if (shape.kind === "push" || shape.kind === "zoom" || span.motion?.track !== "upper") return frame.outgoing;
+  const { clip, circle, slats, grid } = frame.incoming;
   if (circle) return { dx: 0, dy: 0, clip: null, circle, outside: true };
+  if (slats) return { dx: 0, dy: 0, clip: null, slats, outside: true };
+  if (grid) return { dx: 0, dy: 0, clip: null, grid, outside: true };
   return clip ? { dx: 0, dy: 0, clip: complementStrip(clip) } : frame.outgoing;
 }
 
@@ -307,13 +328,42 @@ export interface ShapedCircle {
   outside: boolean;
 }
 
+/** The cells a slats or grid shape shows a picture in, in output pixels ({@link shapedRect}); `outside`: it shows between them. */
+export interface ShapedCells {
+  rects: LayerRect[];
+  outside: boolean;
+}
+
+/** What {@link shapedRect} gives: where and how large a picture draws, and what cuts it. */
+export interface ShapedPlace {
+  left: number;
+  top: number;
+  /** Its size: the placed rectangle's, scaled by a zoom. */
+  width: number;
+  height: number;
+  clip: LayerRect | null;
+  circle?: ShapedCircle;
+  cells?: ShapedCells;
+}
+
 /**
  * Where a picture placed at `rect` in an `output`-sized frame draws under `shape` ({@link spanShape}): its corner moved
- * by the offset, rounded as export rounds it, the frame rectangle it may show in (null: anywhere) and an iris's circle.
+ * by the offset, rounded as export rounds it, or scaled about its zoom's pivot, the frame rectangle it may show in
+ * (null: anywhere), an iris's circle and the cells of slats or a grid.
  */
-export function shapedRect(shape: PartShape, rect: LayerRect, output: Size): { left: number; top: number; clip: LayerRect | null; circle?: ShapedCircle } {
-  const left = rect.left + Math.floor(shape.dx * output.width + 0.5);
-  const top = rect.top + Math.floor(shape.dy * output.height + 0.5);
+export function shapedRect(shape: PartShape, rect: LayerRect, output: Size): ShapedPlace {
+  let { width, height } = rect;
+  let left = rect.left + Math.floor(shape.dx * output.width + 0.5);
+  let top = rect.top + Math.floor(shape.dy * output.height + 0.5);
+  if (shape.zoom) {
+    // As export sizes and places a zoomed layer: its size rounded, its centre moved by `s * centre + shift`.
+    const { s, tx, ty } = shape.zoom;
+    width = Math.max(1, Math.floor(rect.width * s + 0.5));
+    height = Math.max(1, Math.floor(rect.height * s + 0.5));
+    left = Math.floor(s * (rect.left + rect.width / 2) + tx * output.width - width / 2 + 0.5);
+    top = Math.floor(s * (rect.top + rect.height / 2) + ty * output.height - height / 2 + 0.5);
+  }
+  const cells = shapedCells(shape, output);
   const { circle: frameCircle } = shape;
   const circle = frameCircle
     ? {
@@ -325,10 +375,28 @@ export function shapedRect(shape: PartShape, rect: LayerRect, output: Size): { l
         },
       }
     : {};
-  if (!shape.clip) return { left, top, clip: null, ...circle };
+  const place = { left, top, width, height, ...circle, ...(cells ? { cells } : {}) };
+  if (!shape.clip) return { ...place, clip: null };
   const [x0, y0, x1, y1] = shape.clip;
   const clip = { left: x0 * output.width, top: y0 * output.height, width: (x1 - x0) * output.width, height: (y1 - y0) * output.height };
-  return { left, top, clip, ...circle };
+  return { ...place, clip };
+}
+
+/** The cells of `shape`'s slats or grid in an `output`-sized frame; undefined when it has neither. */
+function shapedCells(shape: PartShape, output: Size): ShapedCells | undefined {
+  const pixels = ([x0, y0, x1, y1]: FrameRect): LayerRect => ({ left: x0 * output.width, top: y0 * output.height, width: (x1 - x0) * output.width, height: (y1 - y0) * output.height });
+  const outside = shape.outside === true;
+  if (shape.slats) return { rects: slatRects(shape.slats).map(pixels), outside };
+  if (!shape.grid) return undefined;
+  const { count, r } = shape.grid;
+  const rows = gridRows(count, output.width, output.height);
+  const rects: LayerRect[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < count; column++) {
+      if (gridRank(column, row) < r * GRID_RANKS) rects.push(pixels([column / count, row / rows, (column + 1) / count, (row + 1) / rows]));
+    }
+  }
+  return { rects, outside };
 }
 
 /** Render cache state of a generated clip as the preview needs it (daemon `clip.renders`). */

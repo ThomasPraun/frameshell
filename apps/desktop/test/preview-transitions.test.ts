@@ -1,7 +1,7 @@
 import type { AssetInfo, ClipRenderInfo, TimelineView } from "@frameshell/protocol";
 import type { Clip, TransitionShape } from "@frameshell/schema";
 import { composePlacement, dissolveProgress, fadeWeight, gainAt, placementAt, soundCurve } from "@frameshell/schema/composite";
-import { shapeAt } from "@frameshell/schema/transitions";
+import { GRID_RANKS, gridRank, gridRows, shapeAt, slatRects } from "@frameshell/schema/transitions";
 import { describe, expect, it } from "vitest";
 import { envelopeGain, renderRead, sourceWindow } from "../src/renderer/src/preview/audio-plan.js";
 import { decodeSteps, syncTable } from "../src/renderer/src/preview/decode-plan.js";
@@ -196,6 +196,8 @@ describe("compileProgram with transitions", () => {
     expect(shapedRect(incoming, { left: 0, top: 0, width: 1920, height: 1080 }, { width: 640, height: 360 })).toEqual({
       left: 0,
       top: 0,
+      width: 1920,
+      height: 1080,
       clip: { left: 0, top: y0 * 360, width: 640, height: (1 - y0) * 360 },
     });
   });
@@ -210,6 +212,74 @@ describe("compileProgram with transitions", () => {
     // Centre (0.7, 0.3) of the frame; at r 1 the circle reaches the farthest corner, (0, 360).
     expect(circle).toEqual({ x: expect.closeTo(448, 9), y: expect.closeTo(108, 9), radius: expect.closeTo(incoming.circle!.r * Math.hypot(448, 252), 9), outside: false });
     expect(spanShape(programAt(program, 75, 0) as PlacedSpan, 75, 30)).toBeNull();
+  });
+
+  it("scales both pictures of a zoom about the origin's centre as export sizes and places them, opaque", () => {
+    const shape: TransitionShape = { kind: "zoom", origin: [0.6, 0.2, 0.8, 0.4] };
+    const program = compileProgram(view([video("v1", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })])]), A);
+    const output = { width: 640, height: 360 };
+    const full = { left: 0, top: 0, width: 640, height: 360 };
+    for (const frame of [46, 54, 60, 66, 74]) {
+      const expected = shapeAt(shape, dissolveProgress(2, 0.5, frame / 30));
+      const outgoing = spanShape(programAt(program, frame, 0) as PlacedSpan, frame, 30)!;
+      const incoming = spanShape(programAt(program, frame, 1) as PlacedSpan, frame, 30)!;
+      expect([outgoing, incoming], `frame ${frame}`).toEqual([expected.outgoing, expected.incoming]);
+      expect(opacityAt(program, frame, 1)).toBe(1);
+      for (const part of [outgoing, incoming]) {
+        const { s, tx, ty } = part.zoom!;
+        const placed = shapedRect(part, full, output);
+        expect(placed.width, `frame ${frame}`).toBe(Math.max(1, Math.floor(640 * s + 0.5)));
+        expect(placed.height).toBe(Math.max(1, Math.floor(360 * s + 0.5)));
+        // The centre of the picture goes where the zoom's map puts the frame's centre, to a pixel.
+        expect(Math.abs(placed.left + placed.width / 2 - (s * 320 + tx * 640))).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(placed.top + placed.height / 2 - (s * 180 + ty * 360))).toBeLessThanOrEqual(0.5);
+        expect(placed.clip).toBeNull();
+      }
+    }
+    // The pivot (0.7, 0.3) of the frame stays where it is in both pictures.
+    const mid = spanShape(programAt(program, 60, 0) as PlacedSpan, 60, 30)!;
+    const { s, tx, ty } = mid.zoom!;
+    expect([s * 0.7 + tx, s * 0.3 + ty]).toEqual([expect.closeTo(0.7, 9), expect.closeTo(0.3, 9)]);
+  });
+
+  it("cuts the incoming picture of slats and a grid to their cells in output pixels, the outgoing one untouched", () => {
+    const output = { width: 640, height: 360 };
+    const full = { left: 0, top: 0, width: 640, height: 360 };
+    const slats: TransitionShape = { kind: "slats", direction: "down", count: 5 };
+    const grid: TransitionShape = { kind: "grid", count: 8 };
+    for (const shape of [slats, grid]) {
+      const program = compileProgram(view([video("v1", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })])]), A);
+      const incoming = spanShape(programAt(program, 54, 1) as PlacedSpan, 54, 30)!;
+      expect(incoming).toEqual(shapeAt(shape, dissolveProgress(2, 0.5, 54 / 30)).incoming);
+      expect(spanShape(programAt(program, 54, 0) as PlacedSpan, 54, 30)).toEqual({ dx: 0, dy: 0, clip: null });
+      const cells = shapedRect(incoming, full, output).cells!;
+      expect(cells.outside).toBe(false);
+      if (incoming.slats) {
+        expect(cells.rects).toEqual(slatRects(incoming.slats).map(([x0, y0, x1, y1]) => ({ left: x0 * 640, top: y0 * 360, width: (x1 - x0) * 640, height: (y1 - y0) * 360 })));
+      } else {
+        // Square cells of 80 px: 8 columns, 5 rows (4.5 rounded); each on once the rank is below r * ranks.
+        const rows = gridRows(8, 640, 360);
+        let on = 0;
+        for (let row = 0; row < rows; row++) for (let column = 0; column < 8; column++) if (gridRank(column, row) < incoming.grid!.r * GRID_RANKS) on++;
+        expect(cells.rects).toHaveLength(on);
+        expect(on).toBeGreaterThan(0);
+        expect(on).toBeLessThan(rows * 8);
+        expect(cells.rects.every((rect) => Math.abs(rect.width - 80) < 1e-9 && Math.abs(rect.height - 360 / rows) < 1e-9)).toBe(true);
+      }
+    }
+  });
+
+  it("shows the outgoing picture of slats and a grid on an upper track only between the incoming cells", () => {
+    for (const shape of [{ kind: "slats" }, { kind: "grid", count: 6 }] as TransitionShape[]) {
+      const lower = video("v0", [clip("c0", 0, 0, 6)]);
+      const upper = { ...video("v1", [clip("c1", 0, 10, 12), clip("c2", 2, 20, 23, { dissolve: 1, shape })]), id: "v1" };
+      const program = compileProgram(view([lower, upper]), A);
+      const layer = program.layers.findIndex((spans) => spans.some((span) => "clip" in span && span.clip === "c1"));
+      const outgoing = spanShape(programAt(program, 54, layer) as PlacedSpan, 54, 30)!;
+      const expected = shapeAt(shape, dissolveProgress(2, 0.5, 54 / 30)).incoming;
+      expect(outgoing).toEqual({ dx: 0, dy: 0, clip: null, ...(expected.slats ? { slats: expected.slats } : { grid: expected.grid }), outside: true });
+      expect(shapedRect(outgoing, { left: 0, top: 0, width: 1920, height: 1080 }, { width: 1920, height: 1080 }).cells?.outside).toBe(true);
+    }
   });
 
   it("plays a shaped dissolve with no handle at full length, the edge frames held, never a dip", () => {

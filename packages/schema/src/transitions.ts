@@ -1,7 +1,7 @@
 // What a clip's `dissolve`, `fadeIn` and `fadeOut` play as (ADR 0018 decisions 2 to 5), and the geometry of a shaped
 // dissolve (ADR 0030). The file stores the requested lengths; export, preview and engine warnings all read the
 // effective ones from here.
-import type { Clip, ClipKeys, Transform, TransitionDirection, TransitionShape } from "./timeline.js";
+import { DEFAULT_GRID_COLUMNS, DEFAULT_SLATS, type Clip, type ClipKeys, type Transform, type TransitionDirection, type TransitionShape } from "./timeline.js";
 
 /**
  * A nested clip that a flattened clip plays inside (ADR 0018 decision 9), as `flattenTimeline` records it: what of
@@ -263,7 +263,37 @@ export interface FrameCircle {
   r: number;
 }
 
-/** Where one picture of a shaped dissolve draws (ADR 0030): moved, then cut to `clip` and to `circle`. */
+/**
+ * Blinds of a `slats` shape (ADR 0030): the frame is `count` equal strips across `axis`, and each shows the picture in
+ * the share `r` (0 to 1) of itself, counted from its own `from` edge.
+ */
+export interface FrameSlats {
+  count: number;
+  axis: "x" | "y";
+  from: "start" | "end";
+  r: number;
+}
+
+/**
+ * Cells of a `grid` shape (ADR 0030): `count` columns of square cells; a cell shows the picture once `r` (0 to 1)
+ * passes its {@link gridRank}.
+ */
+export interface FrameGrid {
+  count: number;
+  r: number;
+}
+
+/**
+ * A zoom's change of scale (ADR 0030), as a map of the frame: a point at `[u, v]` (fractions of the frame) lands at
+ * `[s * u + tx, s * v + ty]`, so `s` is the scale and the point it stays on is `[tx / (1 - s), ty / (1 - s)]`.
+ */
+export interface FrameZoom {
+  s: number;
+  tx: number;
+  ty: number;
+}
+
+/** Where one picture of a shaped dissolve draws (ADR 0030): moved, then cut to `clip`, `circle`, `slats` or `grid`. */
 export interface ShapePart {
   /** Horizontal offset from its own placement, fraction of the frame width (positive: right). */
   dx: number;
@@ -273,6 +303,12 @@ export interface ShapePart {
   clip: FrameRect | null;
   /** An iris's circle it shows inside; absent: no circle cuts it. */
   circle?: FrameCircle;
+  /** A `slats` shape's strips it shows in; absent: no strips cut it. */
+  slats?: FrameSlats;
+  /** A `grid` shape's cells it shows in; absent: no cells cut it. */
+  grid?: FrameGrid;
+  /** A zoom's scale about its point, applied to the picture as placed (after `dx` and `dy`, which a zoom leaves at 0). */
+  zoom?: FrameZoom;
 }
 
 /** Both pictures of a shaped dissolve at one moment. Their opacity is their own: a shape replaces the mix. */
@@ -313,19 +349,92 @@ export function shapeProgress(f: number): number {
   return w * w * (3 - 2 * w);
 }
 
+/** Most a zoom magnifies the outgoing picture: a larger one would make the layer too big to render. */
+export const ZOOM_MAX = 4;
+
+/** The rectangle a zoom dives into when `origin` is not given: the middle half of the frame. */
+export const DEFAULT_ZOOM_ORIGIN: FrameRect = [0.25, 0.25, 0.75, 0.75];
+
+/** The rectangle `shape` (an iris or a zoom) works from: its `origin`; none: the frame for an iris, the middle half for a zoom. */
+export function shapeOrigin(shape: TransitionShape): FrameRect {
+  return shape.origin ?? (shape.kind === "zoom" ? DEFAULT_ZOOM_ORIGIN : [0, 0, 1, 1]);
+}
+
+/** How much a zoom magnifies the outgoing picture by its end: its `origin`'s larger side fills the frame, 1 to {@link ZOOM_MAX}. */
+export function zoomFactor(shape: TransitionShape): number {
+  const [x0, y0, x1, y1] = shapeOrigin(shape);
+  return Math.min(ZOOM_MAX, Math.max(1, 1 / Math.max(x1 - x0, y1 - y0)));
+}
+
+/** Slats of a `slats` shape: its `count` or {@link DEFAULT_SLATS}. */
+export function slatCount(shape: TransitionShape): number {
+  return shape.count ?? DEFAULT_SLATS;
+}
+
+/** Columns of a `grid` shape: its `count` or {@link DEFAULT_GRID_COLUMNS}. */
+export function gridColumns(shape: TransitionShape): number {
+  return shape.count ?? DEFAULT_GRID_COLUMNS;
+}
+
+/** Rows of cells a grid of `columns` has in a `width` x `height` frame: as many as keep its cells about square. */
+export function gridRows(columns: number, width: number, height: number): number {
+  return Math.max(1, Math.round((columns * height) / width));
+}
+
+/** Number of distinct {@link gridRank}s; a cell shows once `r * GRID_RANKS` passes its rank. */
+export const GRID_RANKS = 257;
+
+/**
+ * When cell (`column`, `row`) of a grid shows: a whole number 0 to {@link GRID_RANKS} - 1 in a fixed scattered order,
+ * made of whole-number steps only so ffmpeg's `mod` and this agree to the bit.
+ */
+export function gridRank(column: number, row: number): number {
+  const a = (column * 131 + row * 517) % 251;
+  return (a * a + column * row * 89 + column * 7 + row * 3) % GRID_RANKS;
+}
+
+/** A zoom about `[px, py]` (frame fractions) by `s`: that point stays where it is. */
+function zoomAbout([px, py]: readonly [number, number], s: number): FrameZoom {
+  return { s, tx: px * (1 - s) + 0, ty: py * (1 - s) + 0 };
+}
+
+/** Strips of `slats` in frame fractions, the part of each that shows the picture. */
+export function slatRects(slats: FrameSlats): FrameRect[] {
+  const { count, axis, from, r } = slats;
+  return Array.from({ length: count }, (_, i): FrameRect => {
+    const a = i / count;
+    const b = (i + 1) / count;
+    const [lo, hi] = from === "start" ? [a, a + r / count] : [b - r / count, b];
+    return axis === "x" ? [lo, 0, hi, 1] : [0, lo, 1, hi];
+  });
+}
+
 /**
  * Geometry of `shape` at dissolve progress `f` (0 to 1, `dissolveProgress`), the one truth export and preview draw
  * (ADR 0030). `push`: both pictures travel one frame in the direction, the outgoing one out, the incoming one in.
  * `wipe`: the incoming picture shows in the strip of the frame its edge has crossed, over the outgoing one.
  * `iris`: the incoming picture shows in a circle that grows from {@link irisCentre} until it covers the frame.
+ * `zoom`: both pictures scale about the centre of {@link shapeOrigin}: the outgoing one up to {@link zoomFactor}, the
+ * incoming one from nothing to its size, over it. `slats`: the wipe, in each of {@link slatCount} strips at once.
+ * `grid`: the incoming picture shows in the cells whose {@link gridRank} the progress has passed.
  */
 export function shapeAt(shape: TransitionShape, f: number): ShapeFrame {
   const p = shapeProgress(f);
+  const still: ShapePart = { dx: 0, dy: 0, clip: null };
   if (shape.kind === "iris") {
     const [cx, cy] = irisCentre(shape);
-    return { outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 0, dy: 0, clip: null, circle: { cx, cy, r: p } } };
+    return { outgoing: still, incoming: { ...still, circle: { cx, cy, r: p } } };
   }
+  if (shape.kind === "zoom") {
+    const [x0, y0, x1, y1] = shapeOrigin(shape);
+    const pivot = [(x0 + x1) / 2, (y0 + y1) / 2] as const;
+    return { outgoing: { ...still, zoom: zoomAbout(pivot, 1 + (zoomFactor(shape) - 1) * p) }, incoming: { ...still, zoom: zoomAbout(pivot, p) } };
+  }
+  if (shape.kind === "grid") return { outgoing: still, incoming: { ...still, grid: { count: gridColumns(shape), r: p } } };
   const [ux, uy] = shapeStep(shape);
+  if (shape.kind === "slats") {
+    return { outgoing: still, incoming: { ...still, slats: { count: slatCount(shape), axis: ux !== 0 ? "x" : "y", from: ux < 0 || uy < 0 ? "end" : "start", r: p } } };
+  }
   // `+ 0` turns -0 into 0, so frames compare and print alike.
   if (shape.kind === "push") {
     return {
@@ -334,7 +443,7 @@ export function shapeAt(shape: TransitionShape, f: number): ShapeFrame {
     };
   }
   const clip: FrameRect = ux < 0 ? [1 - p, 0, 1, 1] : ux > 0 ? [0, 0, p, 1] : uy < 0 ? [0, 1 - p, 1, 1] : [0, 0, 1, p];
-  return { outgoing: { dx: 0, dy: 0, clip: null }, incoming: { dx: 0, dy: 0, clip } };
+  return { outgoing: still, incoming: { ...still, clip } };
 }
 
 /** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
