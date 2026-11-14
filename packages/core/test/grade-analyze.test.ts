@@ -135,6 +135,30 @@ describe("suggestGrade", () => {
     }
   });
 
+  it("gives back as neutral a correction the clip sets and the source does not need, and leaves a neutral or LUT field alone", () => {
+    const { correction, reasons } = suggestGrade(levelsOf({ lumaLow: 0.17, lumaHigh: 0.72 }), { exposure: 1, temperature: -0.3, tint: 0, saturation: 1.3, lut: "luts/a.cube", lutMix: 0.5 });
+    expect(correction).toEqual({ exposure: 0, temperature: 0, saturation: 1 });
+    expect(reasons).toHaveLength(3);
+    expect(correctionFlags(correction)).toBe("--grade-exposure 0 --grade-temperature 0 --grade-saturation 1");
+    // A field the suggestion sets keeps its suggested number, and no clip grade changes nothing.
+    expect(suggestGrade(levelsOf({ lumaMean: 0.2, lumaLow: 0.05, lumaHigh: 0.4 }), { exposure: 0.5 }).correction.exposure).toBe(1);
+    expect(suggestGrade(levelsOf({ lumaLow: 0.17, lumaHigh: 0.72 }), null).correction).toEqual({});
+  });
+
+  it("sizes saturation for the chroma the suggested contrast adds, and white balance by the mean, not the lifted mean", () => {
+    // Flat and weakly coloured: contrast 1.25 is suggested, which scales the colour by as much.
+    const flat = levelsOf({ lumaLow: 0.35, lumaHigh: 0.55, saturation: 0.15 });
+    const { correction } = suggestGrade(flat);
+    expect(correction.contrast).toBe(1.25);
+    // 0.15 * 1.25 is 0.1875: the target 0.15 asks for 0.8, held at 0.85. Without the contrast it would ask for nothing.
+    expect(correction.saturation).toBe(0.85);
+    // A dark mean: exposure lifts, but the temperature is sized by the mean, not by the lifted one.
+    const dark = levelsOf({ lumaMean: 0.3, lumaLow: 0.1, lumaHigh: 0.6, warmth: 0.02 });
+    const lifted = suggestGrade(dark).correction;
+    expect(lifted.exposure).toBeGreaterThan(0);
+    expect(lifted.temperature).toBe(Math.round(((-GRADE_SUGGEST.castShare * 0.02) / (GRADE_SUGGEST.temperatureGain * 0.3)) * 100) / 100);
+  });
+
   it("writes flags in the grade's order, negative numbers with =", () => {
     expect(correctionFlags({ saturation: 1.1, exposure: -0.4, temperature: 0.2, contrast: 1.05 })).toBe("--grade-exposure=-0.4 --grade-temperature 0.2 --grade-contrast 1.05 --grade-saturation 1.1");
   });
@@ -238,6 +262,41 @@ describe("grade.analyze", () => {
       expect(again.levels).toEqual(result.levels);
       expect(again.current).toEqual(result.suggestion);
       expect(again.warnings.join(" ")).toMatch(/already has a grade/);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "replaces a clip's own correction: fields the source does not need come back neutral, so applying the flags leaves no leftover",
+    async () => {
+      const clip = await addClip("assets/neutral.mp4", 70);
+      await conn.request("clip.set", { cwd: project, clip, grade: { exposure: 1, temperature: -0.3 } });
+      const result = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip, samples: 2 });
+      expect(result.suggestion).toEqual({ exposure: 0, temperature: 0 });
+      expect(result.flags).toBe("--grade-exposure 0 --grade-temperature 0");
+      expect(result.reasons).toHaveLength(2);
+      await conn.request("clip.set", { cwd: project, clip, grade: result.suggestion as Grade });
+      const clips = (await read()).tracks.flatMap((entry) => ("clips" in entry ? (entry.clips as { id: string; grade?: Grade }[]) : []));
+      const stored = clips.find((entry) => entry.id === clip)!;
+      expect(stored.grade).toMatchObject({ exposure: 0, temperature: 0 });
+      const after = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip, samples: 2 });
+      expect(after.suggestion).toEqual({});
+      expect(after.flags).toBe("");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "lets a value copied from the rounded `valid` through, and refuses one further out than half a frame",
+    async () => {
+      const clip = await addClip("assets/neutral.mp4", 80);
+      const edge = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip, at: 84.01 });
+      expect(edge.mode).toBe("frame");
+      expect(edge.from).toBeGreaterThan(83.97);
+      expect(edge.from).toBeLessThan(84);
+      const range = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip, from: 79.99, to: 84.01, samples: 2 });
+      expect(range).toMatchObject({ from: 80, to: 84 });
+      await expect(conn.request("grade.analyze", { cwd: project, timeline: "main", clip, at: 84.2 })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
     },
     MEDIA_TIMEOUT,
   );

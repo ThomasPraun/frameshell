@@ -57,8 +57,15 @@ export interface GradeSuggestion {
 const clamp = (value: number, low: number, high: number): number => Math.min(high, Math.max(low, value));
 const signed = (value: number): string => (value > 0 ? `+${value}` : String(value));
 
-/** The bounded correction that moves `levels` towards the targets; empty when it is within them or has no range to work with. */
-export function suggestGrade(levels: FrameLevels): GradeSuggestion {
+/** The value of each correction field that does nothing. */
+export const NEUTRAL_CORRECTION = { exposure: 0, temperature: 0, tint: 0, contrast: 1, saturation: 1 } as const satisfies Required<GradeCorrection>;
+
+/**
+ * The bounded correction that moves `levels` towards the targets; empty when it is within them or has no range to work with.
+ * `clip.set` merges `grade` field by field, so a correction field `current` sets and the suggestion leaves out is
+ * put back to neutral: applying the suggestion then replaces the clip's own correction (its LUT stays).
+ */
+export function suggestGrade(levels: FrameLevels, current?: Grade | null): GradeSuggestion {
   const { lumaMean: mean, lumaLow: low, lumaHigh: high } = levels;
   if (mean < SUGGEST.minMean || high - low < SUGGEST.minSpread) {
     return { correction: {}, reasons: ["The picture has no range to correct by (black, or one flat colour): no suggestion."] };
@@ -87,13 +94,16 @@ export function suggestGrade(levels: FrameLevels): GradeSuggestion {
     contrast = Math.max(1, contrast);
   }
   contrast = round(contrast, 2);
+  let chromaGain = gain;
   if (Math.abs(contrast - 1) >= SUGGEST.contrastDeadband) {
+    chromaGain *= contrast;
     correction.contrast = contrast;
     reasons.push(`contrast ${contrast}: the shadows to highlights spread is ${round(afterHigh - afterLow, 2)}, the target ${SUGGEST.spreadTarget}.`);
   }
 
   // White balance: remove part of the mean cast; the cast in encoded levels per unit of the control scales with brightness.
-  const level = Math.max(mean * gain, 0.15);
+  // Exposure and white balance multiply in the grade's table, so the exposure gain cancels and the mean is the level.
+  const level = Math.max(mean, 0.15);
   const temperature = round(clamp((-SUGGEST.castShare * levels.warmth) / (SUGGEST.temperatureGain * level), -SUGGEST.maxCast, SUGGEST.maxCast), 2);
   if (Math.abs(levels.warmth) >= SUGGEST.castDeadband && temperature !== 0) {
     correction.temperature = temperature;
@@ -105,13 +115,21 @@ export function suggestGrade(levels: FrameLevels): GradeSuggestion {
     reasons.push(`tint ${signed(tint)}: the picture leans ${levels.tint > 0 ? "green" : "magenta"} (green against red and blue ${signed(round(levels.tint, 3))}).`);
   }
 
-  // Saturation: towards the usual colour strength of footage, not for a picture with hardly any.
+  // Saturation: towards the usual colour strength of footage, not for a picture with hardly any. The exposure and
+  // contrast suggested above scale the colour differences too, so the strength it starts from is theirs.
   if (levels.saturation >= SUGGEST.monochrome) {
-    const saturation = round(clamp(SUGGEST.saturationTarget / levels.saturation, ...SUGGEST.saturationRange), 2);
+    const saturation = round(clamp(SUGGEST.saturationTarget / (levels.saturation * chromaGain), ...SUGGEST.saturationRange), 2);
     if (Math.abs(saturation - 1) >= SUGGEST.saturationDeadband) {
       correction.saturation = saturation;
       reasons.push(`saturation ${saturation}: the mean colour strength is ${round(levels.saturation, 3)}, the target ${SUGGEST.saturationTarget}.`);
     }
+  }
+
+  for (const field of Object.keys(NEUTRAL_CORRECTION) as (keyof GradeCorrection)[]) {
+    const own = current?.[field];
+    if (correction[field] !== undefined || own === undefined || own === NEUTRAL_CORRECTION[field]) continue;
+    correction[field] = NEUTRAL_CORRECTION[field];
+    reasons.push(`${field} ${NEUTRAL_CORRECTION[field]}: the clip's own ${field} ${own} is replaced, the source needs none.`);
   }
 
   if (reasons.length === 0) reasons.push("The picture is within the targets: no correction suggested.");

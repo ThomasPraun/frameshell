@@ -14,6 +14,8 @@ const MEASURE_WIDTH = 480;
 const PARALLEL = 4;
 /** Distance kept from a clip's last frame when the measure lands on its end, source seconds. */
 const END_GUARD_S = 0.001;
+/** Source frame rate assumed when the probe has none. */
+const FALLBACK_FPS = 30;
 
 /** What {@link GradeAnalyzer} needs from the daemon. */
 export interface GradeAnalyzerOptions {
@@ -78,46 +80,61 @@ export class GradeAnalyzer {
     if (request.at !== undefined && (request.from !== undefined || request.to !== undefined)) {
       throw invalid("at-and-range", "`at` measures one frame, `from` and `to` a range: give one.", "at");
     }
+    // `valid` is rounded to 3 decimals, so a value read from it (or from `timeline show`) may sit a hair outside the clip: half a frame is let through and clamped.
+    const slack = 0.5 / request.fps;
     let times: number[];
     let mode: "frame" | "range" = "frame";
     let [from, to] = [start, end];
     if (request.at !== undefined) {
-      if (request.at < start || request.at >= end) throw invalid("outside-clip", `\`at\` ${request.at} is outside clip ${clip.id}, which plays from ${valid.from} to ${valid.to} s of the timeline.`, "at", valid);
-      [times, from, to] = [[request.at], request.at, request.at];
+      if (request.at < start - slack || request.at > end + slack) throw invalid("outside-clip", `\`at\` ${request.at} is outside clip ${clip.id}, which plays from ${valid.from} to ${valid.to} s of the timeline.`, "at", valid);
+      // Half a frame before the end is the middle of the last frame: a seek to its very end finds none.
+      const at = Math.max(start, Math.min(end - slack, request.at));
+      [times, from, to] = [[at], at, at];
     } else if (still) {
       times = [start];
       to = start;
     } else {
       from = request.from ?? start;
       to = request.to ?? end;
-      if (from < start || to > end || to <= from) {
-        throw invalid("outside-clip", `the range ${from} to ${to} s is not inside clip ${clip.id}, which plays from ${valid.from} to ${valid.to} s of the timeline.`, "from", valid);
+      const outside = from < start - slack || to > end + slack;
+      [from, to] = [Math.max(start, from), Math.min(end, to)];
+      if (outside || to <= from) {
+        throw invalid("outside-clip", `the range ${request.from ?? start} to ${request.to ?? end} s is not inside clip ${clip.id}, which plays from ${valid.from} to ${valid.to} s of the timeline.`, "from", valid);
       }
       // A range never takes more frames than it holds.
       const frames = Math.max(1, Math.min(request.samples, Math.floor((to - from) * request.fps)));
       times = Array.from({ length: frames }, (_, i) => from + ((i + 0.5) * (to - from)) / frames);
       mode = "range";
     }
-    const sourceAt = (time: number): number => Math.min(media.out - END_GUARD_S, media.in + (time - start) * speed);
+    // A seek lands on the first frame at or after it: the last seek is the start of the clip's last source frame, since one into its tail finds none.
+    const lastSeek = media.out - 1 / (probe.video.fps || FALLBACK_FPS) - END_GUARD_S;
+    const sourceAt = (time: number): number => Math.max(media.in, Math.min(lastSeek, media.in + (time - start) * speed));
 
     const ffmpeg = await this.#options.ffmpeg(root);
     const file = join(root, ...media.asset.split("/"));
     const measured: (FrameLevels | null)[] = new Array<FrameLevels | null>(times.length).fill(null);
+    let firstFailure = "";
     await pool(times, PARALLEL, async (time, index) => {
       signal?.throwIfAborted();
-      measured[index] = parseSignalstats(await statsAt(ffmpeg, file, still ? null : sourceAt(time), signal));
+      try {
+        measured[index] = parseSignalstats(await statsAt(ffmpeg, file, still ? null : sourceAt(time), signal));
+      } catch (error) {
+        // One undecodable frame is left out; a cancelled call is not a failed frame.
+        signal?.throwIfAborted();
+        firstFailure ||= error instanceof Error ? error.message.split("\n")[0]! : String(error);
+      }
     });
     const warnings: string[] = [];
     const taken = times.flatMap((time, index) => (measured[index] ? [{ time, levels: measured[index]! }] : []));
-    if (taken.length === 0) throw invalid("no-frame", `ffmpeg read no picture from ${media.asset} for the frames asked.`, "clip");
+    if (taken.length === 0) throw invalid("no-frame", `ffmpeg read no picture from ${media.asset} for the frames asked${firstFailure ? `: ${firstFailure}` : ""}.`, "clip");
     if (taken.length < times.length) warnings.push(`${times.length - taken.length} of ${times.length} frames could not be read and are left out.`);
 
     const levels = meanLevels(taken.map((entry) => entry.levels));
-    const { correction, reasons } = suggestGrade(levels);
+    const { correction, reasons } = suggestGrade(levels, media.grade);
     const hint = logFootageHint(media.asset, probe.video);
     if (hint) warnings.push(logFootageWarning(media.asset, hint));
     if (media.grade && Object.keys(media.grade).length > 0) {
-      warnings.push(`${clip.id} already has a grade. The levels are of its source, and the suggestion replaces the clip's correction numbers (a LUT stays); read them against \`current\`.`);
+      warnings.push(`${clip.id} already has a grade. The levels are of its source, and the suggestion replaces the clip's correction numbers (a correction field it does not need is set back to neutral; a LUT stays); read it against \`current\`.`);
     }
     return {
       timeline: request.timeline,
