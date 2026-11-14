@@ -166,6 +166,14 @@ _Avoid_: animation library, motion engine, timeline (a timeline is the project's
 A closed-form damped oscillator that carries a value to a target, set by `response` (period, seconds) and `damping` (ratio ζ: 1 never overshoots, lower bounces); the presets are snappy, default, heavy and playful.
 _Avoid_: bounce, elastic ease, physics animation
 
+**Motion blur** (`motionBlur`, ADR 0041):
+A generated clip rendered so each frame is the average of sub-frame pictures across a shutter (180° centred, 8 samples by default), as a camera smears fast moves. Part of the render and its cache key, not drawn at export.
+_Avoid_: blur (that is a backdrop's or an effect's), shutter blur, directional blur
+
+**Cut guard** (`cuts()`):
+The motion runtime's clamp that keeps a blurred frame's sub-frame times on its own side of a cut declared inside a composition.
+_Avoid_: scene split, cut detection
+
 ## Element adjustments (ADR 0021)
 
 **Element adjustment**:

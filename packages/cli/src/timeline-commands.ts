@@ -93,6 +93,8 @@ mutations print the new revision):
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
            [--grade-exposure stops] [--grade-temperature -1..1] [--grade-tint -1..1] [--grade-contrast x]
            [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
+           [--motion-blur] [--motion-blur-shutter deg] [--motion-blur-samples n] [--motion-blur-blend linear|srgb]
+           [--clear-motion-blur]
            [--format <id> [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json]
            [--hidden | --shown] [--reset]]
                                --format <id> (a format other than the primary, see format list) sets the clip in
@@ -114,6 +116,11 @@ mutations print the new revision):
                                1 magenta), contrast and saturation factors (1 = unchanged), then a 3D .cube LUT (project
                                file, up to 65 points, Rec.709 input; none removes it) at --grade-lut-mix (default 1).
                                Export and the preview apply the same table; --clear-grade removes the grade
+                               --motion-blur blurs a generated clip's moves like a camera (ADR 0041): each frame is the
+                               average of --motion-blur-samples pictures (default 8, 1 to 64) across a shutter of
+                               --motion-blur-shutter degrees (default 180, centred on the frame), averaged in linear light
+                               (--motion-blur-blend srgb for the After Effects look). The clip re-renders, about samples
+                               times as long as sharp; --clear-motion-blur turns it off
   multicam create <asset> <asset>… [--name <angle>…] [--mic-file <file>…] [--mic-name <n>…] [--sound <s>…]
                   [--group-name n]
                                One video file per camera or person: measures every file's offset against all the
@@ -384,6 +391,11 @@ export const TIMELINE_OPTIONS = {
   "grade-lut": { type: "string" },
   "grade-lut-mix": { type: "string" },
   "clear-grade": { type: "boolean" },
+  "motion-blur": { type: "boolean" },
+  "motion-blur-shutter": { type: "string" },
+  "motion-blur-samples": { type: "string" },
+  "motion-blur-blend": { type: "string" },
+  "clear-motion-blur": { type: "boolean" },
   "script-ref": { type: "string" },
   "clear-script-ref": { type: "boolean" },
   track: { type: "string", multiple: true },
@@ -536,6 +548,11 @@ const ALLOWED: Record<string, string[]> = {
     "grade-lut",
     "grade-lut-mix",
     "clear-grade",
+    "motion-blur",
+    "motion-blur-shutter",
+    "motion-blur-samples",
+    "motion-blur-blend",
+    "clear-motion-blur",
     "script-ref",
     "clear-script-ref",
     "format",
@@ -993,6 +1010,18 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
                 lutMix: num("grade-lut-mix"),
               }
             : undefined;
+      const blurFlags = (["motion-blur-shutter", "motion-blur-samples", "motion-blur-blend"] as const).filter((flag) => str(flag) !== undefined);
+      if (values["clear-motion-blur"] === true && (values["motion-blur"] === true || blurFlags.length > 0)) {
+        throw new UsageError("Pass --clear-motion-blur alone, without --motion-blur or --motion-blur-*.");
+      }
+      const blend = str("motion-blur-blend");
+      if (blend !== undefined && blend !== "linear" && blend !== "srgb") throw new UsageError("--motion-blur-blend: expected linear or srgb.");
+      const motionBlur =
+        values["clear-motion-blur"] === true
+          ? null
+          : values["motion-blur"] === true || blurFlags.length > 0
+            ? { shutter: num("motion-blur-shutter"), samples: num("motion-blur-samples"), blend }
+            : undefined;
       Object.assign(params, {
         clip: args[0],
         speed: num("speed"),
@@ -1004,6 +1033,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
           values["voice"] === true ? undefined : values["clear-audio-effects"] === true ? null : jsonList("audio-effects"),
         backdrop,
         grade,
+        motionBlur,
         transform: transform(),
         props: json("props"),
         elements: values["clear-elements"] === true ? null : json("elements"),
@@ -1265,6 +1295,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
   if (params["style"]) params["style"] = clean(params["style"] as Record<string, unknown>);
   if (params["backdrop"]) params["backdrop"] = clean(params["backdrop"] as Record<string, unknown>);
   if (params["grade"]) params["grade"] = clean(params["grade"] as Record<string, unknown>);
+  if (params["motionBlur"]) params["motionBlur"] = clean(params["motionBlur"] as Record<string, unknown>);
   const voiceFromStyle = method === "clip.set" && values["voice"] === true;
   const glassFromStyle = method === "clip.set" && values["glass"] === true;
   return {

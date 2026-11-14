@@ -3,6 +3,7 @@
 // Live preview (ADR 0010): the page is `live.html` next to the card; the card's { liveRoot, liveEntry, liveFail }
 // override or break it. `still` renders the same cards but has no live preview. `token-card` takes the style's token
 // sheet (ADR 0028); a card's { requireStyle } fails the render unless the sheet it got contains that text.
+// `blur-card` applies motion blur (ADR 0041); a card's { requireBlur } fails the render unless it got exactly that blur.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -39,6 +40,7 @@ export function activate(api) {
     async render(clip, ctx) {
       const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
+      if (card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
       if (card.requireStyle && !ctx.styleCss?.includes(card.requireStyle)) throw new Error(`card ${clip.source} got no style sheet with ${card.requireStyle}`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
@@ -82,4 +84,5 @@ export function activate(api) {
   };
   api.registerClipType(card);
   api.registerClipType({ ...card, type: "token-card", styleTokens: true });
+  api.registerClipType({ ...card, type: "blur-card", motionBlur: true });
 }

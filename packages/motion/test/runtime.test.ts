@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { MOTION_RUNTIME } from "../../../plugins/hyperframes/src/motion-runtime.js";
-import { bind, formatClass, pick, props, resolveProps, stage, write } from "../src/index.js";
+import { FRAME_RATE_META, bind, cuts, formatClass, pick, props, resolveProps, stage, write } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
@@ -80,6 +80,50 @@ describe("bind", () => {
     fakePage();
     bind("intro", () => {});
     expect(() => bind("intro", () => {})).toThrow(/already registered/);
+  });
+});
+
+describe("cuts", () => {
+  // Fixed-8 sample times of the producer at 30 fps, shutter 180 centred: frame f +/- (k + 0.5) / 8 * 0.5 frame - 0.25 frame.
+  const samples = (frame: number) => Array.from({ length: 8 }, (_, k) => (frame - 0.25 + ((k + 0.5) / 8) * 0.5) / 30);
+
+  it("holds the earlier samples of the frame on a cut at the cut, and leaves the frame before it alone", () => {
+    const guard = cuts([2], 30);
+    // Frame 59's window ends a quarter frame before the cut at frame 60.
+    expect(samples(59).map(guard)).toEqual(samples(59));
+    // Frame 60 sits on the cut: its earlier samples would show the outgoing scene, so they hold the cut.
+    const on = samples(60).map(guard);
+    expect(on.every((t) => t >= 2)).toBe(true);
+    expect(on.slice(0, 4)).toEqual([2, 2, 2, 2]);
+    expect(on.slice(4)).toEqual(samples(60).slice(4));
+  });
+
+  it("leaves frame times and frames away from a cut alone", () => {
+    const guard = cuts([2, 0.5], 30);
+    for (let frame = 0; frame < 90; frame++) expect(guard(frame / 30)).toBe(frame / 30);
+    expect(samples(30).map(guard)).toEqual(samples(30));
+  });
+
+  it("clamps a sample across a cut between two frames to that side's edge: before it, the outgoing scene's last instant", () => {
+    // Both cuts lie between frame 30 (1.0 s) and frame 31 (1.0333 s): 1.01 s in frame 30's window, 1.025 s in frame 31's.
+    const early = cuts([1.01], 30);
+    expect(early(1.012)).toBeCloseTo(1.01 - 1e-6, 9);
+    expect(early(1.005)).toBe(1.005);
+    const late = cuts([1.025], 30);
+    expect(late(1.02)).toBe(1.025);
+    expect(late(1.03)).toBe(1.03);
+  });
+
+  it("reads the frame rate a blurred render declares, and passes every time unchanged without one", () => {
+    Object.assign(globalThis, { document: { querySelector: (selector: string) => (selector.includes(FRAME_RATE_META) ? { getAttribute: () => "30" } : null) } });
+    expect(cuts([2])(1.996)).toBe(2);
+    delete (globalThis as Record<string, unknown>)["document"];
+    expect(cuts([2])(1.996)).toBe(1.996);
+  });
+
+  it("refuses negative cuts and a bad frame rate", () => {
+    expect(() => cuts([-1])).toThrow(/seconds >= 0/);
+    expect(() => cuts([1], 0)).toThrow(/fps/);
   });
 });
 
@@ -221,7 +265,7 @@ describe("motion runtime bundle", () => {
     const scope: Record<string, unknown> = {};
     new Function("self", `${MOTION_RUNTIME}\nself.FrameshellMotion = FrameshellMotion;`)(scope);
     const motion = scope["FrameshellMotion"] as Record<string, unknown>;
-    for (const name of ["bind", "write", "spring", "springStep", "settle", "track", "ease", "stagger", "durationFromDistance", "SPRING_PRESETS", "version", "pick", "stage", "props", "formatClass", "resolveProps"]) {
+    for (const name of ["bind", "cuts", "write", "spring", "springStep", "settle", "track", "ease", "stagger", "durationFromDistance", "SPRING_PRESETS", "version", "pick", "stage", "props", "formatClass", "resolveProps"]) {
       expect(motion[name], name).toBeDefined();
     }
     expect((motion["spring"] as (p: string, t: number) => number)("heavy", 10)).toBeCloseTo(1, 9);

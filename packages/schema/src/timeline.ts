@@ -3,6 +3,7 @@ import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
 import { GRADE_LIMITS, MAX_LUT_SIZE } from "./grade.js";
+import { MotionBlurSchema } from "./motion-blur.js";
 import { FormatIdSchema } from "./format-id.js";
 import { TakeIdSchema } from "./shoot.js";
 
@@ -470,6 +471,7 @@ export const AdapterClipSchema = z.strictObject({
   props: z.record(z.string(), z.unknown()).optional().describe("Adapter-specific properties, validated by the adapter."),
   elements: ElementsSchema.optional(),
   backdrop: BackdropSchema.optional(),
+  motionBlur: MotionBlurSchema.optional(),
 });
 
 /** Clip of a video or audio track. `type` selects the variant. */

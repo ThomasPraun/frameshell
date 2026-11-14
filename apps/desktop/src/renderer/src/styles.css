@@ -4725,3 +4725,43 @@ button.track-head:focus-visible {
 .shoot-deviation-done {
   color: var(--diff-added);
 }
+
+/* Colour grade of a media clip: a head row, five sliders, then the LUT and its mix. */
+.colour-grade {
+  flex: 1 0 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.colour-grade-head,
+.colour-grade-sliders,
+.colour-grade-lut {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+}
+
+.colour-slider-input {
+  width: 96px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.colour-slider-value {
+  min-width: 34px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.colour-grade-log {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding-left: 5px;
+  border-left: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  white-space: normal;
+}

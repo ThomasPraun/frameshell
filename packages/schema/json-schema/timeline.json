@@ -2767,6 +2767,33 @@
                           ],
                           "additionalProperties": false,
                           "description": "Glass under a generated clip (ADR 0031): the picture below it blurred, saturated and dimmed where the clip's alpha is above about 3 %, then the clip on top; its render is unchanged. Upper video tracks only: on the bottom track nothing is below."
+                        },
+                        "motionBlur": {
+                          "type": "object",
+                          "properties": {
+                            "shutter": {
+                              "description": "Shutter angle in degrees of one frame, centred on the frame time. Default 180.",
+                              "type": "number",
+                              "minimum": 1,
+                              "maximum": 360
+                            },
+                            "samples": {
+                              "description": "Sub-frame pictures averaged into each frame; the render costs about this many sharp renders. Default 8.",
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 64
+                            },
+                            "blend": {
+                              "description": "Average in `linear` light (physical) or `srgb` (the After Effects look). Default linear.",
+                              "type": "string",
+                              "enum": [
+                                "linear",
+                                "srgb"
+                              ]
+                            }
+                          },
+                          "additionalProperties": false,
+                          "description": "Motion blur of a generated clip (ADR 0041): each frame is the average of sub-frame pictures across the shutter window, so fast moves smear like a camera's. `{}` blurs with the defaults. Its render costs about `samples` times a sharp one."
                         }
                       },
                       "required": [
