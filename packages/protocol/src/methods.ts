@@ -8,7 +8,7 @@ import {
   CleanupResultSchema,
 } from "./cleanup.js";
 import { ClipVerifyResultSchema, VERIFY_DEFAULT_PROBES, VERIFY_DEFAULT_TOLERANCE, VERIFY_MAX_PROBES } from "./clip-verify.js";
-import { MUSIC_CANDIDATES_MAX, MusicCandidatesResultSchema, MusicFitResultSchema, MusicShapeResultSchema } from "./music.js";
+import { MUSIC_CANDIDATES_MAX, MUSIC_GRID_MAX_SHIFT_DEFAULT_S, MUSIC_GRID_MAX_SHIFT_LIMIT_S, MusicCandidatesResultSchema, MusicFitResultSchema, MusicGridResultSchema, MusicShapeResultSchema } from "./music.js";
 import { ProposalConfigChangeSchema } from "./config.js";
 import { ConfigOperationSchema, HistoryDiffResultSchema, HistoryResultSchema, OpenTransactionSchema, TransactionInfoSchema } from "./history.js";
 import {
@@ -74,7 +74,7 @@ import {
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 129;
+export const PROTOCOL_VERSION = 130;
 
 /**
  * One daemon method as declared in {@link methods}.
@@ -4023,6 +4023,39 @@ export const methods = {
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
     }),
     result: MusicShapeResultSchema,
+  },
+  "music.grid": {
+    mutating: true,
+    description:
+      "Move picture cuts onto the timeline's beat grid (ADR 0037): list the cuts that are off the grid and land each on its nearest beat " +
+      "(`to: \"bar\"`: bar start). The grid is the timeline's `tempo` (`tempo.set`: the measured grid of a music clip, or a nominal BPM); a LOW " +
+      "confidence grid is refused. A cut is where two clips of a video track meet. Each cut off the grid by at most `maxShift` seconds (default 0.25) " +
+      "gets an id (`g1`, `g2`… in time order) and moves exactly onto its beat; the others stay where they are. A move is a ripple trim of the clip " +
+      "before the cut: its tail grows or shrinks, and the clip after the cut and everything later move with it on every track that has no clip " +
+      "running across a cut (`ripple`); the music the grid follows runs across the cuts, so it and its beats stay put, as does a voice line or " +
+      "a long background clip. Clips of a rippled track that end at the cut are trimmed with it, so sound cut with the picture stays in sync. " +
+      "Every cut keeps its own place: after a move the next cut that does not move is put back where it was, so only the shots between them " +
+      "change length. A move is `blocked` (with a `reason`) when the material is not there (no more of the file after the clip's end), a clip " +
+      "would be empty or overlap, a multicam shot would be trimmed, or a transcribed word would be cut, dropped or added at the trimmed end " +
+      "(clips with sound but no transcript are moved with a warning). `skip` leaves moves out by id; `dryRun: true` changes nothing and returns " +
+      "every cut with its `status`. If the music clip carries duck keys (`track.duck`), duck runs again in the same transaction, since the voice " +
+      "moved with the picture (`skip: [\"duck\"]` leaves them). Markers stay where they are unless every track ripples (no music under the cuts). One transaction labelled `Music grid: …` (`revert` " +
+      "undoes it whole; with review mode on it is one proposal). Example: `{ dryRun: true }`, then `{ skip: [\"g3\"] }`. Fails with " +
+      "InvalidOperation (no tempo, no beats file yet, a LOW confidence grid, a `skip` id that is no move) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      to: z.enum(["beat", "bar"]).default("beat").describe("Land cuts on beats (default) or on bar starts."),
+      maxShift: z
+        .number()
+        .positive()
+        .max(MUSIC_GRID_MAX_SHIFT_LIMIT_S)
+        .default(MUSIC_GRID_MAX_SHIFT_DEFAULT_S)
+        .describe(`Farthest a cut moves, seconds. Default ${MUSIC_GRID_MAX_SHIFT_DEFAULT_S} (half a beat at 120 BPM); cuts farther off are listed as \`far\`.`),
+      dryRun: z.boolean().default(false).describe("Only return the cuts and the planned moves; change nothing."),
+      skip: z.array(z.string().min(1)).optional().describe("Move ids (`g1`…) from a dry run to leave out, and `duck` to leave the duck keys as they are."),
+    }),
+    result: MusicGridResultSchema,
   },
   "tx.begin": {
     mutating: true,

@@ -56,6 +56,24 @@ The music steps down **before** a hit instead of ducking after it (MCP `music_sh
 - **Not here.** The rising high-pass build before a drop is a later slice. You cannot hear the result: read the `curve` of a `--dry-run` and look at the keys with `timeline show`.
 - One transaction labelled `Music shape: …`; `revert <tx>` undoes it whole.
 
+## Grid: cuts onto the beat
+
+```sh
+frameshell tempo set --clip <music clip>
+frameshell music grid --dry-run
+frameshell music grid --skip g3
+frameshell music grid --to bar --max-shift 0.5
+```
+
+Moves picture cuts onto the timeline's beat grid (MCP `music_grid`). The grid is the timeline's `tempo`: `tempo set --clip` on a music clip with a measured beats file (`beats measure`), or a nominal `--bpm`. A LOW confidence grid is refused, like `--snap-to beat`. A cut is where two clips of a video track meet.
+
+- **What moves.** Each cut off its nearest beat by at most `--max-shift` seconds (default 0.25, half a beat at 120 BPM) gets an id (`g1`, `g2`… in time order) and lands exactly on that beat; `--to bar` uses bar starts. A cut already on its beat's frame is `on-grid`, a farther one `far` (raise `--max-shift` to reach it), one the music does not run across `outside`.
+- **How.** A move trims the tail of the clip before the cut with ripple: the clip after the cut and everything later move with it on every track that has no clip running across a cut. The music runs across the cuts, so it and its beats stay put; a voice line or background clip across a cut keeps its timing too (`ripple` lists the tracks that move). Sound on a rippled track that ends with the cut (the shot's own audio) is trimmed with it, so it stays in sync. The next cut that does not move is put back where it was, so only the shots between change length, and the end of the film only moves when the last cut does (`durationChange`).
+- **Blocked** (`reason`): no more of the file after the clip's out point, a clip would be empty or overlap, a multicam shot would be trimmed, or a transcribed word would be cut from or added to the trimmed end. A clip with sound and no transcript is moved with a warning: transcribe it first when it is speech.
+- **`--dry-run`** lists every cut with its beat (`beat:17`), `shiftMs` and status, and changes nothing. Then run it with `--skip g2,g5` to leave moves out. You cannot see the result: check the cuts that move with `frames strip` around them.
+- **Duck keys** on the music clip are written again in the same transaction, since the voice moved with the picture (`--skip duck` leaves them). Markers stay where they are (a warning names a marker on a cut that moved), and so do `music shape` keys (a warning names hits whose shot moved: run `music shape` again).
+- One transaction labelled `Music grid: …`; `revert <tx>` undoes it whole.
+
 ## Order
 
-Cut the picture first, then fit the music, then `music shape` and `duck`. Fitting after the last cut keeps the cut the hit is for. If a later cut moves the end, run `music fit` again with the same marker: it plans from the clip as it is now (and runs `music shape` and `duck` again for you).
+Cut the picture first, then fit the music, then `music grid` if cuts should sit on its beat (fitting moves the music and its grid; a grid move keeps the end-card cut where it is unless that cut itself moves), then `music shape` and `duck`. Fitting after the last cut keeps the cut the hit is for. If a later cut moves the end, run `music fit` again with the same marker: it plans from the clip as it is now (and runs `music shape` and `duck` again for you).

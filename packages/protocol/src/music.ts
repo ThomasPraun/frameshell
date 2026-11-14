@@ -185,3 +185,70 @@ export type MusicShapeResult = z.output<typeof MusicShapeResultSchema>;
 export type MusicCandidatesResult = z.output<typeof MusicCandidatesResultSchema>;
 /** See {@link MusicCandidateSchema}. */
 export type MusicCandidate = z.output<typeof MusicCandidateSchema>;
+
+// `music.grid` (#485 slice 5, ADR 0037 decision 8): move picture cuts onto the timeline's beat grid.
+
+/** Default of `maxShift`: the farthest a cut moves onto a beat, seconds (half a beat at 120 BPM). */
+export const MUSIC_GRID_MAX_SHIFT_DEFAULT_S = 0.25;
+
+/** Largest `maxShift` a call may ask for, seconds. */
+export const MUSIC_GRID_MAX_SHIFT_LIMIT_S = 2;
+
+/** One picture cut of the timeline and what grid moves do with it. */
+export const MusicGridCutSchema = z.object({
+  id: z.string().nullable().describe("`g1`, `g2`… in time order for a cut off the grid within `maxShift` (a move `skip` can name); null otherwise."),
+  at: z.number().describe("Timeline seconds of the cut before the moves."),
+  track: z.string().describe("Video track the cut is on (the first in track order when several cut on the same frame)."),
+  out: z.string().describe("Clip before the cut: its tail is trimmed to move the cut."),
+  in: z.string().describe("Clip after the cut: it moves with the cut, unchanged."),
+  beat: z.number().nullable().describe("Timeline seconds of the nearest beat (bar start with `to: \"bar\"`); null when the grid has none within a beat."),
+  ref: z.string().nullable().describe("That beat as a time reference, e.g. `beat:17` or `bar:5`; null with `beat`."),
+  shiftMs: z.number().nullable().describe("`beat - at` in milliseconds: how far the cut is off the grid (negative: it moves earlier)."),
+  status: z
+    .enum(["move", "on-grid", "far", "outside", "skipped", "blocked"])
+    .describe(
+      "`move`: moved onto `beat`. `on-grid`: already on its frame. `far`: farther than `maxShift`. `outside`: no beat near it, or not inside the music " +
+        "clip the grid follows. `skipped`: named in `skip`. `blocked`: it cannot move (`reason`). A cut that does not move is kept at `at`.",
+    ),
+  reason: z.string().nullable().describe("Why a cut is `blocked`, `outside` or `far`; null otherwise."),
+  landsAt: z.number().describe("Timeline seconds of the cut after the moves: `beat` for a move, else `at` unless a warning says otherwise."),
+  warnings: z.array(z.string()).describe("What the move does to the sound or sync around this cut."),
+});
+
+/** Result of `music.grid`. */
+export const MusicGridResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  revision: z.int().describe("Revision after the moves; the revision it was planned from when nothing was written."),
+  dryRun: z.boolean(),
+  applied: z.boolean().describe("True when cuts were moved (a review-mode proposal counts: it waits for the person)."),
+  tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
+  to: z.enum(["beat", "bar"]).describe("What cuts move onto."),
+  maxShift: z.number().describe("Seconds a cut may move."),
+  grid: z.object({
+    source: z.enum(["beats", "nominal"]).describe("`beats`: measured, from the music's beats file. `nominal`: from a BPM."),
+    bpm: z.number(),
+    meter: z.int(),
+    clip: z.string().nullable().describe("Music clip the grid follows; null for a nominal grid on the timeline clock."),
+    confidence: z.number().nullable().describe("Confidence of a measured grid, 0 to 1; null for a nominal one."),
+  }),
+  cuts: z.array(MusicGridCutSchema).describe("Every picture cut of the timeline, in time order."),
+  moved: z.int().describe("Cuts moved onto the grid (status `move`)."),
+  ripple: z
+    .array(z.string())
+    .describe("Tracks whose later clips move with a cut. A track with a clip running across a cut (the music, a voice line, a long background) keeps its timing."),
+  durationChange: z.number().describe("Seconds the picture gets longer (+) or shorter (-); 0 unless the last cut that moves has nothing after it to absorb the move."),
+  duck: z
+    .object({
+      under: z.array(z.string()).describe("Tracks listened to for speech."),
+      rerun: z.boolean().describe("True when duck ran again in the same transaction."),
+      parameters: z.enum(["stored", "defaults"]).describe("`stored`: the parameters of the duck that wrote the keys (`audio.duck`). `defaults`: none stored."),
+    })
+    .nullable()
+    .describe("Set when the music clip carries `auto: \"duck\"` keys and cuts moved; null otherwise."),
+  warnings: z.array(z.string()),
+});
+
+/** See {@link MusicGridResultSchema}. */
+export type MusicGridResult = z.output<typeof MusicGridResultSchema>;
+/** See {@link MusicGridCutSchema}. */
+export type MusicGridCut = z.output<typeof MusicGridCutSchema>;

@@ -376,6 +376,11 @@ export class TimelineService {
     return applyOperation(loaded.timeline, request, this.#context(root, id, loaded.fps, request.op));
   }
 
+  /** Duration of the nested timeline files timeline `id` of `root` plays, for {@link clipEnd}. Throws {@link NestedTimelineError}. */
+  nestedDuration(root: string, id: string, fps: number): (source: string) => Promise<number> {
+    return this.#nestedDurations(root, [timelineRel(id)], new FrameGrid(fps));
+  }
+
   /**
    * Undo a transaction or one operation (SPEC §6.2): apply the stored inverses
    * newest first, as one new journaled `revert` operation. Throws
