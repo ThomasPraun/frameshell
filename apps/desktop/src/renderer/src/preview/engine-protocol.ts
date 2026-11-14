@@ -45,6 +45,8 @@ export interface EngineStats {
   audioChunks: number;
   /** `VideoDecoder`s open now: one per layer that decoded something, plus one per alpha stream (a multicam shot: one per angle slot). */
   decoders: number;
+  /** Pictures put through the colour grade pass (ADR 0031): stays 0 while no drawn clip has a grade. */
+  graded: number;
   /** Frames the current (or last) play passed over by kind, and its tick times (ADR 0001: CI fails on starved only). */
   dropped: PlayDrops;
 }
@@ -56,6 +58,7 @@ export type ToEngine =
   /** Port to the program AudioWorklet (absent when audio is unavailable). */
   | { type: "audio"; port: MessagePort }
   | { type: "size"; width: number; height: number }
+  /** `program.grades` holds only the tables the engine has not had yet (`PreviewPlayer.setProgram`). */
   | { type: "program"; program: Program }
   | { type: "clock"; sample: ClockSample }
   | { type: "play"; anchor: Anchor; clock: ClockSample }
@@ -86,7 +89,9 @@ export type FromEngine =
    * After a new program, until its first draw: `frame` NaN and no layers.
    */
   | { type: "alpha"; id: number; frame: number; layers: LayerAlpha[] }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** Sent once per engine: WebGL2 cannot run the colour grade pass (`reason`), so graded clips show ungraded (ADR 0031). */
+  | { type: "gradeOff"; reason: string };
 
 /** Engine worker to the program AudioWorklet. */
 export type ToMixer = { type: "chunk"; chunk: MixChunk } | { type: "cut"; at: number } | { type: "stop" };

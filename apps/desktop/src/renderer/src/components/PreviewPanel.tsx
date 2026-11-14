@@ -135,6 +135,7 @@ export function PreviewPanel({
         },
         onError: (message) => setNotice(message),
         onSilent: () => setNotice(t.preview.noAudio),
+        onGradeOff: () => setNotice(t.preview.gradeOff),
       },
       { probe: PROBE },
     );

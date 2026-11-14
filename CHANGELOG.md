@@ -46,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails the render with its path. `hyperframes check` no longer blocks on the bundle's own code and flags
   `setAnimationLoop`, `THREE.Clock` / `getDelta` (errors) and `mixer.update` (warning) in scene code. Every
   HyperFrames render now uses the software WebGL renderer (SwiftShader) whatever `PRODUCER_BROWSER_GPU_MODE` says.
+- Colour grade of media clips, export and preview (#384, ADR 0031, epic #451; protocol 129): a media clip on a video
+  track takes `grade { exposure, temperature, tint, contrast, saturation, lut, lutMix }`: exposure in stops and white
+  balance on light, then contrast and saturation, then a project `.cube` 3D LUT (Adobe Cube 1.0, up to 65 points,
+  Rec.709 input) mixed in by `lutMix`. Both are baked into one 3D table (33 points, or the LUT's own size) that export
+  applies with ffmpeg `lut3d=interp=trilinear` on the picture as decoded, before crop, scale, alpha and shape, and that
+  the preview applies with a WebGL2 pass in the engine worker, sampling it the way `lut3d` does (8 taps, the result
+  truncated to 8 bit): on a still the preview frame and `frameshell frame` agree to the level. Where WebGL2 is
+  unavailable the preview draws graded clips ungraded and says so once (English and Spanish). `clip set
+  --grade-exposure/--grade-temperature/--grade-tint/--grade-contrast/--grade-saturation/--grade-lut/--grade-lut-mix`
+  set one number each (`--grade-lut none` removes the LUT), `--clear-grade` removes the grade; `clip.set` `grade`
+  merges field by field and refuses a LUT path outside the project, MCP `clip_set` follows. A LUT that is missing,
+  outside the project or not a 3D `.cube` fails the export naming the clip. Editing the `.cube` file updates the
+  preview as it does export. Shots take none (skipped with a warning); timelines without grades export as before.
 
 - Face framing per format and format renders in the preview, slice 5 of #469 (ADR 0027, epic #451; protocol 126):
   `clip reframe <clip> --format <id>` with a format of `format list` other than the primary (the default `9x16`

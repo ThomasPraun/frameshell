@@ -194,6 +194,14 @@ _Avoid_: render (that is a generated clip's), proxy, sidecar (that is the dry so
 The picture below a generated clip, blurred, saturated and dimmed wherever the clip's alpha shows, drawn just before the clip; the render itself is unchanged. A style choice (`style.json` `glass`), never a default.
 _Avoid_: frosted glass, backdrop-filter (that is the CSS inside a composition, which blurs nothing in a render), blur effect
 
+**Grade** (`grade`):
+A media clip's colour change: a correction (exposure, white balance, contrast, saturation), then an optional LUT. Baked into one 3D table that export and the preview both apply.
+_Avoid_: filter, colour correction (that is only the first half), look (that is what a LUT gives)
+
+**LUT**:
+A `.cube` 3D lookup table in the project (up to 65 points per side, Rec.709 input), the look a grade applies after its correction, at `lutMix` strength.
+_Avoid_: preset, filter
+
 ## Transitions and keyframes (ADR 0018, ADR 0030)
 
 **Transition**:

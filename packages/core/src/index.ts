@@ -265,6 +265,7 @@ export {
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
+export { type GradeFiles, gradeFile, gradeFiles } from "./export/grade.js";
 export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";
 export { bundledFontMetrics, captionFontMetrics, fontFileMetrics } from "./export/font-metrics.js";
 export { readCaptionTokens } from "./style/captions.js";

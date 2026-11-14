@@ -25,6 +25,8 @@ import {
   backdropMatrix,
   backdropOf,
   bakeRef,
+  gradeKey,
+  gradeOf,
   type TransitionContext,
   type TransitionShape,
   clipHandles,
@@ -140,6 +142,12 @@ export interface RenderInput {
    * (ADR 0031): the clip's sound is read from it instead of the asset. A clip whose bake is missing plays dry, with a warning.
    */
   audioFx?: ReadonlyMap<string, string>;
+  /**
+   * Table file of every colour grade the timeline's media clips draw with, by `gradeKey` (ADR 0031): a `.cube` the
+   * caller writes into the work directory (`gradeFile`), read by `lut3d`. A graded clip whose table is missing is drawn
+   * ungraded, with a warning.
+   */
+  grades?: ReadonlyMap<string, string>;
   /**
    * Subject matte of every moving-picture asset a subject layer plays (`isSubjectClip`, ADR 0032), by asset path. A
    * subject clip whose asset has none is left out, with a warning: the tracks behind its plate stay in front.
@@ -280,6 +288,8 @@ export interface FrameInput {
   generated?: ReadonlyMap<string, GeneratedSource>;
   /** See {@link RenderInput.mattes}. */
   mattes?: ReadonlyMap<string, MatteSource>;
+  /** See {@link RenderInput.grades}. */
+  grades?: ReadonlyMap<string, string>;
   /** See {@link RenderInput.variant}. */
   variant?: FormatLayout;
   width: number;
@@ -405,6 +415,8 @@ interface Placed {
   windows?: [number, number][];
   /** A generated clip's glass on an upper track (ADR 0031): what is below it is blurred where it shows, then it is drawn. */
   glass?: Backdrop;
+  /** Table file of the clip's colour grade (ADR 0031): its picture goes through `lut3d` before anything else. */
+  grade?: string;
 }
 
 /** Timeline frames [from, to) of a placed clip drawn by one chain: the clip, its handles, or part of them. */
@@ -456,7 +468,19 @@ interface GraphTarget {
  */
 export function compileRender(input: RenderInput): RenderPlan {
   const { timeline, fps, preset } = input;
-  const layout = layoutTimeline(timeline, fps, input.sources, preset.video, input.transcripts, input.generated, input.variant, input.audioFx, input.mattes, input.captions);
+  const layout = layoutTimeline(
+    timeline,
+    fps,
+    input.sources,
+    preset.video,
+    input.transcripts,
+    input.generated,
+    input.variant,
+    input.audioFx,
+    input.mattes,
+    input.captions,
+    input.grades,
+  );
   const tiered = input.encode && preset.video.codec === "h264" ? input.encode : null;
   const gif = preset.container === "gif";
   const outFps = gif ? Math.min(preset.video.fps ?? fps, GIF_MAX_FPS) : tiered ? tierFps(tiered.tier, preset.video.fps ?? fps) : (preset.video.fps ?? fps);
@@ -694,6 +718,7 @@ export function compileFrame(input: FrameInput): FramePlan {
     undefined,
     input.mattes,
     input.captions,
+    input.grades,
   );
   const frame = frameAt(input.timeline.id, input.at, fps, layout.frames);
   const encoding = frameEncoding(input.format ?? "png", input.quality ?? DEFAULT_FRAME_QUALITY);
@@ -817,6 +842,7 @@ function layoutTimeline(
   audioFx: ReadonlyMap<string, string> = new Map(),
   mattes: ReadonlyMap<string, MatteSource> = new Map(),
   captions?: CaptionTokens,
+  grades: ReadonlyMap<string, string> = new Map(),
 ): Layout {
   // Flattened timelines have their mutes folded already; a compiler test may pass one that has not.
   const timeline = withTrackMutes(stored);
@@ -895,6 +921,9 @@ function layoutTimeline(
       }
       const placement = fixedPlacement(clip);
       const picture = track.kind === "video" ? source.video : null;
+      const look = picture ? gradeOf(clip) : null;
+      const grade = look ? grades.get(gradeKey(look)) : undefined;
+      if (look && grade === undefined) warnings.push(`Clip ${clip.id} has a colour grade with no table; it was exported ungraded.`);
       const cover = formatCrop(variant, clip, { size: picture, generated: render !== undefined, alpha: picture?.alpha === true, base }, output);
       placed.push({
         clip,
@@ -908,6 +937,7 @@ function layoutTimeline(
         ...(edges ? { edges } : {}),
         ...(render ? { hold: true as const } : {}),
         ...(backdrop ? { glass: backdrop } : {}),
+        ...(grade !== undefined ? { grade } : {}),
         ...(sound !== undefined ? { sound } : {}),
         ...(cover ? { cover } : {}),
         ...(matte ? { matte, windows: subject!.windows.map(([a, b]) => [frameOfSource(a), frameOfSource(b)] as [number, number]) } : {}),
@@ -1255,7 +1285,7 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const fades = fadeFilters(pictureRamps(placed, start, end, fps, false), false);
     const timed = fades.length > 0 ? [`setpts=PTS+${num(start / fps)}/TB`, ...fades, "setpts=PTS-STARTPTS"] : [];
     const fill = placed.cover ? `${staticCrop(placed.cover, false)},scale=${width}:${height},setsar=1,format=${pixFmt}` : fit;
-    lines.push(`${[pieceChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
+    lines.push(`${[gradedChain(placed, start, end, fps, inputs), fill, ...timed].join(",")}[${label}]`);
     labels.push(label);
   }
   if (to > cursor) black(to - cursor);
@@ -1287,7 +1317,7 @@ function videoGraph(layout: Layout, from: number, to: number, out: GraphTarget):
     const zoomed = shape?.zoom ? zoomedLayer(placed, shape.zoom, start, end, from, rect, out) : null;
     const timed = motion?.scale !== undefined || zoomed !== null || opacityKeys || fades.length > 0 || shape?.mask !== undefined;
     const head = [
-      placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : pieceChain(placed, start, end, fps, inputs),
+      placed.matte ? mattedPiece(placed, placed.matte, start, end, fps, inputs, lines, n) : gradedChain(placed, start, end, fps, inputs),
       ...(move ? [movingCrop(move.path, move.clock + start / fps, (end - start) / fps)] : crop ? [staticCrop(crop, placed.tile?.exact === true)] : []),
       ...(timed ? [`setpts=PTS+${num(start / fps)}/TB`] : []),
       `${zoomed?.scale ?? motion?.scale ?? `scale=${rect.width}:${rect.height}`},setsar=1,format=rgba`,
@@ -1379,7 +1409,7 @@ const MIXER_COEFFICIENTS = ["rr", "rg", "rb", "gr", "gg", "gb", "br", "bg", "bb"
  */
 function mattedPiece(placed: Placed, matte: ExportSource, start: number, end: number, fps: number, inputs: string[], lines: string[], n: number): string {
   const { width, height } = placed.source.video!;
-  const plate = pieceChain(placed, start, end, fps, inputs);
+  const plate = gradedChain(placed, start, end, fps, inputs);
   // `extractplanes` keeps the luma bytes as they are: the matte is full range, a gray conversion would rescale it.
   lines.push(`${pieceChain({ ...placed, source: matte }, start, end, fps, inputs)},extractplanes=y,scale=${width}:${height}[sm${n}]`);
   if (!placed.source.video!.alpha) {
@@ -1630,6 +1660,16 @@ function pieceChain(placed: Placed, start: number, end: number, fps: number, inp
   const last = Math.min(end, hi);
   const pad = [...(first > start ? [`start=${first - start}:start_mode=clone`] : []), ...(end > last ? [`stop=${end - last}:stop_mode=clone`] : [])];
   return `${sourceChain(placed, first, last, fps, inputs)},tpad=${pad.join(":")}`;
+}
+
+/**
+ * {@link pieceChain}, then the clip's colour grade (ADR 0031) at the source's own size, before crop, scale, alpha and
+ * shape, as the preview grades the decoded picture before it places it. `lut3d` on 8-bit RGBA: the preview's shader
+ * samples the same table the same way (`applyGradeTable`). The conversion to RGB is ffmpeg's automatic one.
+ */
+function gradedChain(placed: Placed, start: number, end: number, fps: number, inputs: string[]): string {
+  const chain = pieceChain(placed, start, end, fps, inputs);
+  return placed.grade === undefined ? chain : `${chain},format=rgba,lut3d=file=${placed.grade}:interp=trilinear`;
 }
 
 /** {@link pieceChain} reading only the source: frames past the source's end repeat its last one. */

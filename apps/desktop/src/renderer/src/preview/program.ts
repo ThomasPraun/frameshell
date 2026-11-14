@@ -31,6 +31,7 @@ import {
 } from "@frameshell/schema/composite";
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
 import { type FormatLayout, formatCrop } from "@frameshell/schema/formats";
+import { type GradeTable, gradeKey, gradeOf } from "@frameshell/schema/grade";
 import {
   type ClipEdges,
   type FrameRect,
@@ -94,6 +95,8 @@ export type VideoSpan =
       matte?: string;
       /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
       cover?: LayerRect;
+      /** Key of the clip's colour grade table (ADR 0031, {@link tableKey}), a key of {@link Program.grades}; absent: drawn as decoded. */
+      grade?: string;
     }
   | {
       kind: "still";
@@ -110,6 +113,8 @@ export type VideoSpan =
       motion?: SpanMotion;
       /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
       cover?: LayerRect;
+      /** Key of the clip's colour grade table (ADR 0031, {@link tableKey}), a key of {@link Program.grades}; absent: drawn as decoded. */
+      grade?: string;
     }
   | {
       /**
@@ -454,6 +459,11 @@ export interface Program {
   layers: VideoSpan[][];
   /** Sorted by start; spans may overlap (they are mixed). */
   audio: AudioSpan[];
+  /**
+   * Table of every colour grade a span draws with, by {@link tableKey} (ADR 0031); absent when none does. The player sends
+   * the engine only tables it has not had yet (`PreviewPlayer.setProgram`).
+   */
+  grades?: Record<string, GradeTable>;
 }
 
 /** Options of {@link compileProgram}. */
@@ -483,6 +493,11 @@ export interface ProgramOptions {
    * export's do. Absent: the primary.
    */
   format?: FormatLayout & Size;
+  /**
+   * Tables of the colour grades of media clips by `gradeKey` (`useGradeTables`, ADR 0031), the ones export applies. A
+   * graded clip whose table is absent (its LUT not read yet, or unreadable) is drawn ungraded.
+   */
+  grades?: ReadonlyMap<string, GradeTable>;
 }
 
 /** The ready entries of a `matte.status` list, by asset: {@link ProgramOptions.mattes}. */
@@ -511,6 +526,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
   const sample = (frames: number) => Math.round((frames / fps) * rate);
   const layers: VideoSpan[][] = [];
   const audio: AudioSpan[] = [];
+  const grades: Record<string, GradeTable> = {};
   let frames = 0;
 
   const resolution = options.resolution ?? DEFAULT_RESOLUTION;
@@ -563,7 +579,8 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
         // Nothing is below the bottom track to blur, as in export.
         const glass = bottom || subjectOf(clip) ? null : backdropOf(clip);
         const glazed = glass && picture?.kind === "generated" ? { ...picture, glass } : picture;
-        return options.format ? covered(glazed, clip, info, bottom, options.format) : glazed;
+        const graded = gradedPicture(glazed, clip, options.grades, grades);
+        return options.format ? covered(graded, clip, info, bottom, options.format) : graded;
       });
       // A subject carries its plate clip's dissolve and shape, as export draws it.
       const plate = kept.map(({ clip }) => subjectOf(clip)?.plate).find((id) => id !== undefined);
@@ -621,7 +638,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     });
   }
   audio.sort((a, b) => a.start - b.start);
-  return { fps, sampleRate: rate, resolution, frames, layers, audio };
+  return { fps, sampleRate: rate, resolution, frames, layers, audio, ...(Object.keys(grades).length > 0 ? { grades } : {}) };
 }
 
 /** A placeholder span. */
@@ -1165,6 +1182,48 @@ function subjectPicture(
   if (matte === undefined) return { kind: "placeholder", clip: clip.id, start, end, reason: "matte", type: clip.type };
   const picture = pictureOf(clip, info, start, end, fps, undefined);
   return picture?.kind === "media" ? { ...picture, matte } : null;
+}
+
+/**
+ * `picture` with the key of `clip`'s colour grade when `tables` holds its table, which is added to `used`; as given
+ * for other pictures, clips without a grade, and a table not ready (drawn ungraded meanwhile).
+ */
+function gradedPicture(
+  picture: PlacedSpan | PlaceholderSpan | null,
+  clip: Clip,
+  tables: ReadonlyMap<string, GradeTable> | undefined,
+  used: Record<string, GradeTable>,
+): PlacedSpan | PlaceholderSpan | null {
+  if (picture?.kind !== "media" && picture?.kind !== "still") return picture;
+  const grade = gradeOf(clip);
+  const table = grade ? tables?.get(gradeKey(grade)) : undefined;
+  if (!grade || !table) return picture;
+  const key = tableKey(gradeKey(grade), table);
+  used[key] = table;
+  return { ...picture, grade: key };
+}
+
+const tableSerials = new WeakMap<GradeTable, number>();
+let lastTableSerial = 0;
+
+/**
+ * Key of `table`, the table of the grade whose `gradeKey` is `grade`: a new table object (its LUT file edited) gets a
+ * new key, so the engine uploads it instead of keeping the old texture under the same `gradeKey`.
+ */
+export function tableKey(grade: string, table: GradeTable): string {
+  let serial = tableSerials.get(table);
+  if (serial === undefined) tableSerials.set(table, (serial = ++lastTableSerial));
+  return `${grade}#${serial}`;
+}
+
+/**
+ * `program` carrying only the grade tables whose key is not in `held` (the engine has them: a 65-point table is
+ * 3.3 MB, too much to copy to the worker on every revision). Keys name one table each ({@link tableKey}).
+ */
+export function withNewTables(program: Program, held: ReadonlySet<string>): Program {
+  const { grades, ...rest } = program;
+  const fresh = Object.entries(grades ?? {}).filter(([key]) => !held.has(key));
+  return fresh.length > 0 ? { ...rest, grades: Object.fromEntries(fresh) } : rest;
 }
 
 /** `picture` with the source pixels it keeps to cover `format`'s frame, as export cuts them (`formatCrop`). */

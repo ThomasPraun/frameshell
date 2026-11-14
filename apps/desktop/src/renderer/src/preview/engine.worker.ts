@@ -4,8 +4,10 @@
 import type { Backdrop } from "@frameshell/schema";
 import { IDENTITY_PLACEMENT, type LayerRect, type Placement, type Size, layerRect } from "@frameshell/schema/composite";
 import { backdropLayer } from "@frameshell/schema/effects";
+import type { GradeTable } from "@frameshell/schema/grade";
 import { type AudioRead, audioReads, renderRead, sourceWindow, stretchKey } from "./audio-plan.js";
 import { BackdropPass } from "./backdrop.js";
+import { GradePass, type GradeSource } from "./grade.js";
 import { type DecodeStep, type SpanTiming, decodeSteps, joinRuns } from "./decode-plan.js";
 import {
   type Anchor,
@@ -409,8 +411,8 @@ class AlphaMasker {
   readonly #outContext = this.#out.getContext("2d")!;
   #pixels: ImageData | null = null;
 
-  /** `frame` with `alpha` applied, `width` x `height` px (the drawn size). */
-  apply(frame: VideoFrame, alpha: AlphaPlane, width: number, height: number): OffscreenCanvas {
+  /** `frame` (a decoded frame, or the bitmap of its grade) with `alpha` applied, `width` x `height` px (the drawn size). */
+  apply(frame: CanvasImageSource, alpha: AlphaPlane, width: number, height: number): OffscreenCanvas {
     const { width: w, height: h } = alpha;
     if (!this.#pixels || this.#pixels.width !== w || this.#pixels.height !== h) {
       this.#pixels = new ImageData(w, h);
@@ -464,6 +466,8 @@ interface Part {
   cover?: LayerRect;
   /** A generated clip's backdrop (ADR 0031): laid on what is drawn so far before the picture. */
   glass?: Backdrop;
+  /** Key of the picture's colour grade in `Program.grades` (ADR 0031): graded before anything else is done to it. */
+  grade?: string;
 }
 
 class Engine implements LayerHost {
@@ -483,6 +487,9 @@ class Engine implements LayerHost {
   readonly #stills = new Map<string, Still>();
   readonly #masker = new AlphaMasker();
   readonly #glass = new BackdropPass();
+  readonly #grader = new GradePass((reason) => scope.postMessage({ type: "gradeOff", reason }));
+  /** Grade tables of the current program's spans by key: a program carries only the ones not sent before. */
+  #gradeTables = new Map<string, GradeTable>();
 
   #anchor: Anchor | null = null;
   #clock: ClockSample | null = null;
@@ -508,7 +515,7 @@ class Engine implements LayerHost {
   #stretches = new Map<string, { chain: StretchChain; tail: Promise<void> }>();
 
   readonly #drops = new DropLog();
-  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0, dropped: this.#drops.drops };
+  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0, graded: 0, dropped: this.#drops.drops };
 
   constructor(canvas: OffscreenCanvas, mediaUrl: string) {
     this.#canvas = canvas;
@@ -521,6 +528,7 @@ class Engine implements LayerHost {
 
   #postStats(): void {
     this.stats.decoders = this.#layers.reduce((sum, layer) => sum + layer.decoders, 0);
+    this.stats.graded = this.#grader.passes;
     scope.postMessage({ type: "stats", stats: { ...this.stats, dropped: this.#drops.drops } });
   }
 
@@ -635,6 +643,9 @@ class Engine implements LayerHost {
     // Renders are held in memory whole: drop the ones no longer played (proxy indexes are small, kept).
     for (const path of this.#sources.keys()) if (!used.has(path) && isReadWhole(path)) this.#sources.delete(path);
     this.#forgetStills(next);
+    this.#gradeTables = this.#tablesOf(next);
+    // The grade pass starts with the first program that needs it, so the first graded frame does not wait for it.
+    this.#grader.prepare(this.#gradeTables);
 
     while (this.#layers.length > next.layers.length) this.#layers.pop()!.dispose();
     for (const [i, pipeline] of this.#layers.entries()) {
@@ -725,7 +736,8 @@ class Engine implements LayerHost {
         if (still.state === "loading") complete = false;
         else if (still.state === "ready") {
           const cover = coverPixels(span, { width: still.bitmap.width, height: still.bitmap.height });
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover });
+          const grade = span.grade ? { grade: span.grade } : {};
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover, ...grade });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -742,7 +754,8 @@ class Engine implements LayerHost {
         } else {
           const cover = coverPixels(span, decoded);
           const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass });
+          const grade = span.kind === "media" && span.grade ? { grade: span.grade } : {};
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -847,22 +860,45 @@ class Engine implements LayerHost {
         const alpha = part.image instanceof VideoFrame ? part.alpha : null;
         this.#glass.draw(context, backdropLayer(part.glass, output, project), { rect, alpha, opacity: part.placement.opacity });
       }
+      // ADR 0031 order: the grade first, on the picture as decoded, then alpha, placement and shape.
+      const graded = part.grade ? this.#graded(part.image as GradeSource, part.grade) : null;
+      const image = graded ?? part.image;
       context.globalAlpha = part.placement.opacity;
       if (part.alpha && part.image instanceof VideoFrame) {
         // Covering: masked at the picture's own size, so the crop reads the same pixels as without alpha.
         const masked = cover
-          ? this.#masker.apply(part.image, part.alpha, part.image.displayWidth, part.image.displayHeight)
-          : this.#masker.apply(part.image, part.alpha, rect.width, rect.height);
+          ? this.#masker.apply(image, part.alpha, part.image.displayWidth, part.image.displayHeight)
+          : this.#masker.apply(image, part.alpha, rect.width, rect.height);
         const from = cover ?? { left: 0, top: 0, width: masked.width, height: masked.height };
         context.drawImage(masked, from.left, from.top, from.width, from.height, rect.left, rect.top, rect.width, rect.height);
       } else if (cover) {
-        context.drawImage(part.image, cover.left, cover.top, cover.width, cover.height, rect.left, rect.top, rect.width, rect.height);
+        context.drawImage(image, cover.left, cover.top, cover.width, cover.height, rect.left, rect.top, rect.width, rect.height);
       } else {
-        context.drawImage(part.image, rect.left, rect.top, rect.width, rect.height);
+        context.drawImage(image, rect.left, rect.top, rect.width, rect.height);
       }
+      graded?.close();
       if (cut) context.restore();
     }
     context.globalAlpha = 1;
+  }
+
+  /** The grade tables `next`'s spans draw with: the ones it carries, else those an earlier program brought. */
+  #tablesOf(next: Program): Map<string, GradeTable> {
+    const tables = new Map<string, GradeTable>();
+    for (const layer of next.layers) {
+      for (const span of layer) {
+        if ((span.kind !== "media" && span.kind !== "still") || !span.grade) continue;
+        const table = next.grades?.[span.grade] ?? this.#gradeTables.get(span.grade);
+        if (table) tables.set(span.grade, table);
+      }
+    }
+    return tables;
+  }
+
+  /** `image` through the table of grade `key`; null (drawn as it is) when the pass cannot run or the table is unknown. */
+  #graded(image: GradeSource, key: string): ImageBitmap | null {
+    const [width, height] = image instanceof VideoFrame ? [image.displayWidth, image.displayHeight] : [image.width, image.height];
+    return this.#grader.apply(image, width, height, key);
   }
 
   /**

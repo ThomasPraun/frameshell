@@ -3,6 +3,7 @@ import {
   AnyClipSchema,
   AudioEffectSchema,
   BackdropSchema,
+  GradeSchema,
   DirectorRulesSchema,
   DuckSettingsSchema,
   ElementAdjustSchema,
@@ -412,6 +413,14 @@ export const operationArgs = {
           "backdrop (`blur` needed once); `null` clears it. Glass of the motion kit: `{ blur: 46, saturate: 1.45, dim: 0.55 }`. Shots are " +
           "skipped with a warning.",
       ),
+    grade: GradeSchema.extend({ lut: GradeSchema.shape.lut.unwrap().nullable().optional().describe("Project-relative `.cube` 3D LUT; `null` removes it.") })
+      .nullable()
+      .optional()
+      .describe(
+        "`media` clips on video tracks only (ADR 0031): colour grade merged field by field into the clip's; `null` clears it. Correction " +
+          "`exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project `.cube`) at `lutMix`. " +
+          "Shots are skipped with a warning.",
+      ),
     transform: TransformSchema.optional().describe("Fields to change; omitted fields keep their value."),
     props: z.record(z.string(), z.unknown()).optional().describe("Adapter types only: replaces all props."),
     elements: z
@@ -425,7 +434,7 @@ export const operationArgs = {
     scriptRef: z.string().min(1).nullable().optional().describe("Script scene (`scripts/script.md#intro`) or whole script (`scripts/script.md`); null clears it."),
     format: formatArg(
       "video tracks only, `transform`, `props`, `elements` and `hidden` set the clip in that format; timing and sound " +
-        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `scriptRef` are shared by every format and refused with it.",
+        "(`speed`, `gain`, `muted`, `audioFadeInMs`, `audioFadeOutMs`, `audioEffects`) and `backdrop`, `grade`, `scriptRef` are shared by every format and refused with it.",
     ),
     hidden: z
       .boolean()
