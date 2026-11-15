@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Colour grade on generated clips and nested timeline clips, slice 8 of #384 (ADR 0031, epic #451; protocol 153):
+  `clip set --grade-*` (`clip.set` `grade`, MCP `clip_set`) now takes adapter clips and nested timeline clips on video
+  tracks too. A render is graded first in its part, before its alpha, as footage is (export `lut3d` right after it is
+  read; the preview grades the decoded colour before the alpha plane masks it). A nested timeline clip's grade follows
+  the own grade of every picture inside it, at any depth: flattening records the hosts' grades on each picture
+  (`hostGrades`) and export and the preview fold the chain into one table (`gradeChainOf`, `gradeChainTable`), so it
+  comes before that picture's vignette and grain; sound and shots are untouched. Plans of timelines without nested
+  grades are unchanged. Tests: chain tables, flattening two levels deep, two goldens, the managed ffmpeg on a nested
+  still and a VP9 alpha render, and the preview's tables against the ones export writes.
 - Motion film playbook refreshed, slice of #453 (epic #451; no protocol change): `reference/motion-films.md` and its router
   row in `SKILL.md` now cover what landed since the first version: the brief written as `requirements.json` at the
   storyboard gate and `review` exiting 1 on it at the critique gate, `analyze` audio fields (`pace`, `pitch`,

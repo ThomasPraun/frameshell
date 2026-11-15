@@ -2,8 +2,19 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type Grade, type Timeline, applyGradeTable, gradeOf, gradeTable, parseCube } from "@frameshell/schema";
-import { type ExportSource, compileFrame, gradeFiles } from "../src/index.js";
+import {
+  type Grade,
+  type GradeTable,
+  type Timeline,
+  applyGradeTable,
+  flattenTimeline,
+  gradeChainTable,
+  gradeOf,
+  gradeTable,
+  normalizeGrade,
+  parseCube,
+} from "@frameshell/schema";
+import { type ExportSource, type GeneratedSource, compileFrame, gradeFiles } from "../src/index.js";
 import { runTool } from "../src/media/ffmpeg.js";
 import { tempDir } from "./helpers.js";
 import { mediaTools, run, runBuffer } from "./media-tools.js";
@@ -74,7 +85,7 @@ const graded = (grade: Grade, upper = false): Timeline => {
 };
 
 /** RGB bytes of the frame export captures of `timeline`, through the same steps as `ExportService` (tables in the work dir). */
-async function exported(timeline: Timeline): Promise<Buffer> {
+async function exported(timeline: Timeline, generated?: ReadonlyMap<string, GeneratedSource>): Promise<Buffer> {
   const grades = await gradeFiles(root, timeline);
   const work = join(root, "work", String(Math.random()).slice(2));
   mkdirSync(work, { recursive: true });
@@ -85,6 +96,7 @@ async function exported(timeline: Timeline): Promise<Buffer> {
     sources: new Map([["assets/noise.png", stillSource()]]),
     resolution: { width: W, height: H },
     grades: grades.files,
+    ...(generated ? { generated } : {}),
     width: W,
     height: H,
     at: 0,
@@ -95,14 +107,18 @@ async function exported(timeline: Timeline): Promise<Buffer> {
   return runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", out, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
 }
 
-/** Max channel difference and the channels that differ at all, of `actual` against `source` through `table`. */
+/** Max channel difference and the channels that differ at all, of `actual` against `source` through `grade`'s table. */
 function compare(actual: Buffer, grade: Grade): { max: number; differing: number } {
   const lut = parseCube(lookCube());
-  const table = gradeTable(gradeOf({ type: "media", grade })!, grade.lut ? lut : null);
+  return compareTable(actual, gradeTable(gradeOf({ type: "media", grade })!, grade.lut ? lut : null));
+}
+
+/** Max channel difference and the channels that differ at all, of `actual` against `expected` (default `source`) through `table`. */
+function compareTable(actual: Buffer, table: GradeTable, expected: Buffer = source): { max: number; differing: number } {
   let max = 0;
   let differing = 0;
-  for (let i = 0; i < source.length; i += 3) {
-    const want = applyGradeTable(table, [source[i]!, source[i + 1]!, source[i + 2]!]);
+  for (let i = 0; i < expected.length; i += 3) {
+    const want = applyGradeTable(table, [expected[i]!, expected[i + 1]!, expected[i + 2]!]);
     for (let c = 0; c < 3; c++) {
       const diff = Math.abs(actual[i + c]! - want[c]!);
       max = Math.max(max, diff);
@@ -124,6 +140,77 @@ describe("colour grade export (real ffmpeg, ADR 0031)", () => {
       // Correction only: a 33-point table of its own.
       const correction: Grade = { exposure: -0.5, contrast: 0.8, saturation: 0.3 };
       const { max } = compare(await exported(graded(correction)), correction);
+      expect(max).toBeLessThanOrEqual(1);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "grades the pictures of a graded nested timeline clip through one table of both grades, as applyGradeTable does",
+    async () => {
+      const HOST: Grade = { exposure: -0.3, temperature: -0.25, saturation: 0.8, lut: "luts/look.cube", lutMix: 0.4 };
+      const scene = { ...graded(LOOK), id: "scene" };
+      const main: Timeline = {
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_scene", type: "timeline", source: "timelines/scene.json", start: 0, duration: 1, grade: HOST }] }],
+      };
+      const flat = flattenTimeline(main, (path) => (path === "timelines/scene.json" ? scene : null), 30);
+      const lut = parseCube(lookCube());
+      const table = gradeChainTable([LOOK, HOST].map((grade) => ({ grade: normalizeGrade(grade), lut })));
+      const { max, differing } = compareTable(await exported(flat), table);
+      expect(max).toBeLessThanOrEqual(1);
+      expect(differing / source.length).toBeLessThan(0.001);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "grades a generated render's colour and keeps its alpha: transparent pixels stay what is below",
+    async () => {
+      // A VP9 render of the noise, opaque on its left half and transparent on its right, as HyperFrames writes them.
+      const rgba = Buffer.alloc(W * H * 4);
+      for (let p = 0; p < W * H; p++) {
+        source.copy(rgba, p * 4, p * 3, p * 3 + 3);
+        rgba[p * 4 + 3] = p % W < W / 2 ? 255 : 0;
+      }
+      writeFileSync(join(root, "card.rgba"), rgba);
+      const render = join(root, "card.webm");
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${W}x${H}`, "-r", "30", "-i", join(root, "card.rgba")],
+        ...["-frames:v", "2", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-lossless", "1", render],
+      ]);
+      const generated = new Map<string, GeneratedSource>([["c_card", { path: render, hasAlpha: true, width: W, height: H }]]);
+      // On an upper track over the ungraded noise: alpha shows on upper tracks (the bottom track is drawn opaque).
+      const card = (grade?: Grade): Timeline => ({
+        schemaVersion: 1,
+        id: "main",
+        revision: 1,
+        tracks: [
+          { id: "v1", kind: "video", clips: [{ id: "c_base", type: "media", asset: "assets/noise.png", start: 0, in: 0, out: 1 }] },
+          { id: "v2", kind: "video", clips: [{ id: "c_card", type: "hyperframes", source: "c.html", start: 0, duration: 1, ...(grade ? { grade } : {}) }] },
+        ],
+      });
+      const correction: Grade = { exposure: 0.4, temperature: 0.3, contrast: 1.2 };
+      const plain = await exported(card(), generated);
+      const look = await exported(card(correction), generated);
+      const table = gradeTable(normalizeGrade(correction), null);
+      let max = 0;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 3;
+          const pixel: [number, number, number] = [plain[i]!, plain[i + 1]!, plain[i + 2]!];
+          if (x >= W / 2) {
+            // Transparent: the picture below, untouched by the card's grade.
+            expect([look[i], look[i + 1], look[i + 2]]).toEqual(pixel);
+            continue;
+          }
+          const want = applyGradeTable(table, pixel);
+          for (let c = 0; c < 3; c++) max = Math.max(max, Math.abs(look[i + c]! - want[c]!));
+        }
+      }
+      // The decoded colour reaches lut3d as RGBA, and reaches the ungraded frame through the same conversion.
       expect(max).toBeLessThanOrEqual(1);
     },
     MEDIA_TIMEOUT,

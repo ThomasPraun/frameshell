@@ -1,16 +1,18 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ExportSource, compileFrame, gradeFiles } from "@frameshell/core";
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
-import { type GradeTable, gradeKey, gradeOf, gradeTable, parseCube } from "@frameshell/schema/grade";
+import type { ClipRenderInfo } from "@frameshell/protocol";
+import { type GradeTable, type NormalizedGrade, gradeChainKey, gradeKey, gradeOf, gradeTable, parseCube } from "@frameshell/schema/grade";
 import { describe, expect, it } from "vitest";
-import { compileProgram, programAt, tableKey, withNewTables } from "../src/renderer/src/preview/program.js";
-import { gradesOf, tableOf } from "../src/renderer/src/preview/useGradeTables.js";
+import { compileProgram, flattenView, programAt, tableKey, withNewTables } from "../src/renderer/src/preview/program.js";
+import { gradeChains, tableOf } from "../src/renderer/src/preview/useGradeTables.js";
 
-// Seam under test: a media clip's colour grade (ADR 0031) in the preview program, against the table export writes
-// for `lut3d` for the same timeline. The shader that samples it is checked in e2e `grade-preview.spec.ts`.
+// Seam under test: a clip's colour grade (ADR 0031) in the preview program, against the table export writes for
+// `lut3d` for the same timeline: footage, stills, generated renders and the pictures of graded nested timeline clips.
+// The shader that samples it is checked in e2e `grade-preview.spec.ts`.
 
 const FPS = 30;
 const HD = { width: 1920, height: 1080 };
@@ -71,9 +73,13 @@ const key = (grade: object) => gradeKey(gradeOf({ type: "media", grade })!);
 /** Key a span and `Program.grades` use: the grade's, and which table of it. */
 const shown = (grade: object, tables: ReadonlyMap<string, GradeTable>) => tableKey(key(grade), tables.get(key(grade))!);
 
+/** The tables `useGradeTables` makes for `chains`, every LUT being {@link SWAP}. */
+const tablesOf = (chains: ReadonlyMap<string, NormalizedGrade[]>) =>
+  new Map([...chains].map(([k, chain]) => [k, tableOf(k, chain.map((grade) => ({ grade, lut: grade.lut ? parseCube(SWAP) : null })))]));
+
 describe("colour grade in the preview (ADR 0031)", () => {
-  const grades = gradesOf([view(timeline)]);
-  const tables = new Map([...grades].map(([k, grade]) => [k, tableOf(k, grade, grade.lut ? parseCube(SWAP) : null)]));
+  const grades = new Map([...gradeChains(view(timeline))].map(([k, chain]) => [k, chain[0]!]));
+  const tables = tablesOf(gradeChains(view(timeline)));
 
   it("marks graded footage and stills with their grade's key and carries only the tables in use", () => {
     expect([...grades.keys()].sort()).toEqual([key(WARM), key(LOOK)].sort());
@@ -125,5 +131,89 @@ describe("colour grade in the preview (ADR 0031)", () => {
     const graph = compileFrame({ timeline, fps: FPS, sources, resolution: HD, grades: written.files, width: 960, height: 540, at: 1.5, output: "/out/f.png" }).args.join(" ");
     expect(graph).toContain(`lut3d=file=${written.files.get(key(WARM))}:interp=trilinear`);
     expect(graph).toContain(`lut3d=file=${written.files.get(key(LOOK))}:interp=trilinear`);
+  });
+});
+
+describe("colour grade of generated clips and nested timeline clips in the preview (ADR 0031)", () => {
+  const CARD = { exposure: 0.5 };
+  const HOST = { saturation: 0.3, lut: LUT, lutMix: 0.5 };
+  /** The nested scene: graded footage on its v1, a generated card on its v2. */
+  const scene: Timeline = {
+    schemaVersion: 1,
+    id: "scene",
+    revision: 1,
+    tracks: [
+      { id: "v1", kind: "video", clips: [{ id: "c_cam", type: "media", asset: TALK, start: 0, in: 0, out: 2, grade: WARM }] },
+      { id: "v2", kind: "video", clips: [{ id: "c_card", type: "hyperframes", source: "c.html", start: 0, duration: 2, grade: CARD }] },
+    ],
+  };
+  /** A graded card on v1, then the graded scene nested at 2 s. */
+  const main: Timeline = {
+    schemaVersion: 1,
+    id: "main",
+    revision: 1,
+    tracks: [
+      {
+        id: "v1",
+        kind: "video",
+        clips: [
+          { id: "c_title", type: "hyperframes", source: "t.html", start: 0, duration: 2, grade: CARD },
+          { id: "c_scene", type: "timeline", source: "timelines/scene.json", start: 2, duration: 2, grade: HOST },
+        ],
+      },
+    ],
+  };
+  const withEnds = (source: Timeline): TimelineView => {
+    const tracks = source.tracks.map((track) => ({
+      ...track,
+      name: null,
+      follows: null,
+      clips: "clips" in track ? track.clips.map((clip) => ({ ...clip, end: clip.start + ("out" in clip ? clip.out - clip.in : (clip as { duration: number }).duration) })) : [],
+    }));
+    return { timeline: source.id, path: `timelines/${source.id}.json`, revision: 1, fps: FPS, duration: null, tracks, problems: [] } as unknown as TimelineView;
+  };
+  const nested = new Map([["timelines/scene.json", withEnds(scene)]]);
+  const ready = (clip: string): ClipRenderInfo => ({
+    clip,
+    track: "v1",
+    type: "hyperframes",
+    source: "c.html",
+    state: "ready",
+    key: clip,
+    file: `.frameshell/cache/clips/${clip}.webm`,
+    hasAlpha: true,
+    width: 1920,
+    height: 1080,
+    duration: 2,
+    job: null,
+    progress: 1,
+    error: null,
+  });
+  const renders = new Map(["c_title", "c_scene/c_card"].map((clip) => [clip, ready(clip)]));
+  const chains = gradeChains(withEnds(main), nested);
+  const tables = tablesOf(chains);
+  const chainKey = (...grades: object[]) => gradeChainKey(grades.map((grade) => gradeOf({ type: "media", grade })!));
+
+  it("grades a generated render, and every picture of a graded nested clip after its own grade", () => {
+    expect([...chains.keys()].sort()).toEqual([chainKey(CARD), chainKey(WARM, HOST), chainKey(CARD, HOST)].sort());
+    const program = compileProgram(withEnds(main), assets, { resolution: HD, nested, renders, grades: tables });
+    const shown = (k: string) => tableKey(k, tables.get(k)!);
+    expect(programAt(program, 15, 0)).toMatchObject({ kind: "generated", clip: "c_title", grade: shown(chainKey(CARD)) });
+    expect(programAt(program, 75, 0)).toMatchObject({ kind: "media", clip: "c_scene/c_cam", grade: shown(chainKey(WARM, HOST)) });
+    expect(programAt(program, 75, 1)).toMatchObject({ kind: "generated", clip: "c_scene/c_card", grade: shown(chainKey(CARD, HOST)) });
+    expect(Object.keys(program.grades!)).toHaveLength(3);
+  });
+
+  it("uploads the tables export writes for the same flattened timeline", async () => {
+    const root = mkdtempSync(join(tmpdir(), "grade-nested-"));
+    mkdirSync(join(root, "luts"));
+    writeFileSync(join(root, LUT), SWAP);
+    try {
+      const written = await gradeFiles(root, flattenView(withEnds(main), nested));
+      expect([...written.files.keys()].sort()).toEqual([...chains.keys()].sort());
+      for (const [k, file] of written.files) expect(parseCube(written.contents[file]!).data).toEqual(tables.get(k)!.data);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
