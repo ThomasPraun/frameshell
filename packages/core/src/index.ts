@@ -535,6 +535,7 @@ export { type GradeCorrection, type GradeSuggestion, SUGGEST as GRADE_SUGGEST, c
 export { type Look, LookBuilder, frameLook } from "./analyze/look.js";
 export { type Burst, type Rhythm, bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "./analyze/rhythm.js";
 export { type SoundHit, elementEvents, flashes, holds, hitEvents, soundHits } from "./analyze/events.js";
+export { type SuggestionInput, contrastRatio, styleSuggestions } from "./analyze/suggest.js";
 export { type SfxRender, type SfxSpec, synthesizeSfx } from "./sound/sfx.js";
 export { SFX_TRACK_NAME, type SoundItem, type SoundWish, soundWarnings } from "./sound/place.js";
 export { MUSIC_KEY_VERSION, type MusicMark, SFX_KEY_VERSION, SOUND_DIR, type SoundMark, musicFile, musicKey, musicMarkOf, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";

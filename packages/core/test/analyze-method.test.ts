@@ -182,6 +182,22 @@ describe("analyze method", () => {
     expect(tempo.beats[1]! - tempo.beats[0]!).toBeCloseTo(0.5, 1);
   });
 
+  it("suggests style values from the colours and the slow still cutting, never writes them, and style.apply takes them", async () => {
+    // A third each of black, white and gray: the first is the ground, the one most unlike it the ink; 4 s still shots read calm.
+    expect(result.suggestions.map(({ path, label }) => [path, label])).toEqual([
+      ["colors.bg", "ESTIMATED"],
+      ["colors.ink", "ESTIMATED"],
+      ["motion.personality", "DECISION"],
+    ]);
+    expect(result.suggestions[0]!.value).toBe(result.palette[0]!.hex);
+    expect(result.suggestions[2]!.value).toBe("calm");
+    expect(existsSync(join(project, "style.json"))).toBe(false);
+    const applied = await conn.request("style.apply", { cwd: project, analysis: result.name, paths: ["motion.personality"] });
+    expect(applied.changes).toEqual([{ path: "motion.personality", before: null, after: "calm" }]);
+    await conn.request("revert", { cwd: project, target: applied.op });
+    expect(existsSync(join(project, "style.json"))).toBe(false);
+  });
+
   it("runs as an analyze job and reports progress", async () => {
     const stages: string[] = [];
     await conn.request("analyze", { cwd: project, file: join(footage, "Reel One.mp4"), name: "again" }, { onProgress: (update) => stages.push(update.message ?? "") });

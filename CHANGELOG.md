@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 156): `analyze`
+  returns `suggestions` (also in `analysis.json`), values for `style.json` read from the film, each with `path`,
+  `value`, `why`, `from` (the result fields) and its own label: `colors.bg` (the palette's largest colour, a quarter of
+  the picture or more), `colors.ink` (most contrast against it, 4.5:1 or more), `colors.accent` (most saturated colour
+  that is not grey), `motion.personality` (the personality whose standard move is nearest the median eased move, else
+  energetic or calm from the pace of the cutting, a DECISION) and `sound.musicUnderVoice` (how far the voice sits over
+  the music). Never applied by `analyze`. `style.apply` takes `analysis` (and `paths`) instead of `name`, CLI
+  `frameshell style apply --from-analysis <analysis> [--only <path,...>]`: the picked suggestions merge value by value
+  as one journaled change that `revert` undoes, held by review mode. `labels` gains `suggestions` (DECISION); `analyze`
+  prints them. The analysis name pattern is one constant (`ANALYSIS_NAME_PATTERN`).
 - `logo-3d` template, slice 3 of #473 (ADR 0042, epic #451): `frameshell hyperframes new mark --template logo-3d
   [--component <svg of brand show>]` extrudes an SVG logo with three.js `SVGLoader` and `ExtrudeGeometry` in the
   `product-shot` studio, revealed by a rise (depth grows out of the flat logo), a swing or a drop, with a glint, a slow
