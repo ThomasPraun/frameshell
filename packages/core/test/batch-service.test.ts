@@ -43,6 +43,8 @@ function service(options: { transcribed?: readonly string[]; review?: BatchServi
     },
     source: async () => ({ duration: 5, video: false, audio: true }),
     hasTranscript: async (_root, asset) => (options.transcribed ?? ["assets/vo-es.wav", "assets/vo-fr.wav"]).includes(asset),
+    resolveTime: async (_root, ref) => Number(ref),
+    duration: async () => null,
     ...(options.review ? { review: options.review } : {}),
     planRender: async (root: string, params: RenderRequest): Promise<PlannedRender> => {
       planned.push(params.stem ?? "");
@@ -107,16 +109,19 @@ describe("BatchService", () => {
 
   it("swaps the asset without a transcript when no subtitle track follows the clip's track", async () => {
     const context = {
+      root: "/project",
       fps: 30,
       apply: async () => {
         throw new Error("unused");
       },
       source: async () => ({ duration: 5, video: false, audio: true }),
       hasTranscript: async () => false,
+      resolve: async (ref: number | string) => Number(ref),
+      duration: async () => null,
     };
     const alone = { ...template, tracks: [template.tracks[0]!] } as Timeline;
     const file = { schemaVersion: 1 as const, template: "main", slots: { voice: "c_vo.asset" }, rows: [] };
-    const variant = await rowVariant(alone, file, { id: "de", voice: "assets/vo-de.wav" }, context);
+    const { timeline: variant } = await rowVariant(alone, file, { id: "de", voice: "assets/vo-de.wav" }, context);
     expect((variant.tracks[0] as { clips: unknown[] }).clips[0]).toMatchObject({ asset: "assets/vo-de.wav", in: 0, out: 1 });
   });
 

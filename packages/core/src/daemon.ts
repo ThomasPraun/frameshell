@@ -155,7 +155,7 @@ import { StyleService } from "./style/service.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
-import { clipEnd } from "./timeline/timing.js";
+import { NestedTimelineError, clipEnd, timelineDuration } from "./timeline/timing.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
@@ -733,6 +733,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     applyInMemory: (dir, id, loaded, request) => timelines.applyInMemory(dir, id, loaded, request),
     source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
     hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
+    resolveTime: (dir, ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridLoaderFor(dir)(loaded)),
+    duration: async (dir, id, timeline, fps) => {
+      try {
+        return await timelineDuration(timeline, new FrameGrid(fps), timelines.nestedDuration(dir, id, fps));
+      } catch (error) {
+        if (error instanceof NestedTimelineError) return null;
+        throw error;
+      }
+    },
     planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
     // `reviews` is declared below: it is read when a batch asks for a review, not now.
     review: (dir, request) => reviews.run(dir, request),
