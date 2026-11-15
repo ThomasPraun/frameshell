@@ -199,10 +199,10 @@ export interface SoundHit {
 
 /**
  * Hits in an energy envelope (`db[i]` is dBFS of the 10 ms from `i / 100` s, see `energyEnvelope`): moments where the
- * level climbs {@link HIT_RISE_DB} over the 80 ms before it and reaches {@link HIT_FLOOR_DB}, at least
+ * level climbs `riseDb` ({@link HIT_RISE_DB} by default) over the 80 ms before it and reaches {@link HIT_FLOOR_DB}, at least
  * {@link HIT_REFRACTORY_S} apart. A word after a pause counts as much as an effect.
  */
-export function soundHits(db: ArrayLike<number>, hopSeconds = 0.01): SoundHit[] {
+export function soundHits(db: ArrayLike<number>, hopSeconds = 0.01, riseDb = HIT_RISE_DB): SoundHit[] {
   const hits: SoundHit[] = [];
   const refractory = Math.ceil(HIT_REFRACTORY_S / hopSeconds);
   for (let i = 1; i < db.length; ) {
@@ -211,14 +211,14 @@ export function soundHits(db: ArrayLike<number>, hopSeconds = 0.01): SoundHit[] 
     for (let j = from; j < i; j++) baseline += db[j]!;
     baseline /= i - from;
     // The first hop whose level has climbed over the baseline by half the rise is the onset; the full rise may come a hop or two later.
-    const onset = db[i]! - baseline >= HIT_RISE_DB / 2 ? i : -1;
+    const onset = db[i]! - baseline >= riseDb / 2 ? i : -1;
     if (onset < 0) {
       i++;
       continue;
     }
     let peak = -Infinity;
     for (let j = onset; j < Math.min(db.length, onset + HIT_PEAK_HOPS); j++) peak = Math.max(peak, db[j]!);
-    if (peak - baseline >= HIT_RISE_DB && peak >= HIT_FLOOR_DB) {
+    if (peak - baseline >= riseDb && peak >= HIT_FLOOR_DB) {
       hits.push({ time: onset * hopSeconds, rise: round(peak - baseline, 1), level: round(peak, 1) });
       i = onset + refractory;
     } else i++;

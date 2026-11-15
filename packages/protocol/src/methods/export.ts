@@ -365,7 +365,10 @@ export const exportMethods = {
       "`labels` (MEASURED, ESTIMATED or DECISION for every value, by field path), " +
       "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
-      "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
+      "result; `low: true` means do not trust it: speech and ambient sound read as low), the **audio** (all ESTIMATED, read from the mix, not from separated stems: `speech.sentences` " +
+      "recognised by the project's transcription provider, each with its `pace` in words per second, `pitch` range (Hz and semitones), `voice` level, the `music` level under it read from the gaps between its words and `voiceOverMusic` in dB; " +
+      "`effects`: sound hits that are neither a word nor the music's beat, with their level `overMusic`; `sections`: stretches where the level of the sound holds, with their bars when the tempo is steady). " +
+      "Recognising the speech needs a transcription provider and model (it may download the model on first use); without one, or with `speech: false`, `audio.speech.status` is `skipped` with its reason and `effects` is null. Sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
       "The scene score finds a hard cut only: a dissolve or a whip pan is not found (lower `threshold` to catch softer ones), and jump cuts and punch-ins are told apart in `cuts`, not in `shots`. " +
@@ -388,6 +391,10 @@ export const exportMethods = {
         .max(0.95)
         .optional()
         .describe("Scene score (how different a frame is from the one before, 0 to 1) from which a frame opens a new shot. Default 0.3: hard cuts. Lower finds softer ones and false ones (flashes, fast motion); higher keeps only violent changes."),
+      speech: z
+        .boolean()
+        .optional()
+        .describe("Recognise the speech (sentences, pace, pitch, voice against music, effects). Default true; false skips the transcription, which is the slow part and may download a model."),
     }),
     result: AnalyzeResultSchema,
   },
