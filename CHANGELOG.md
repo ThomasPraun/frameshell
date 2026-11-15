@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion film playbook refreshed, slice of #453 (epic #451; no protocol change): `reference/motion-films.md` and its router
+  row in `SKILL.md` now cover what landed since the first version: the brief written as `requirements.json` at the
+  storyboard gate and `review` exiting 1 on it at the critique gate, `analyze` audio fields (`pace`, `pitch`,
+  `voiceOverMusic`, `effects`, `sections`, `--no-speech`) as measured targets, a `grade analyze` / `grade compare` pass on
+  supplied footage, `beat:N` / `bar:N` in every time argument, `voiceover place --tempo`, `music shape --drop --build`,
+  the `beatsProblem` codes of generated clips that read beats and markers, and `batch` typed slots with `--review`. Links
+  go to the reference pages instead of repeating them.
 - Music fit follow-ups of #485 (ADR 0037 "Follow-ups as built", epic #451; protocol 152): `music shape --ending <time>
   --end-on-bar` (MCP `music_shape` `endOnBar`; result `endsAt`) stretches or shrinks the closing fade so it ends on the
   bar start of the grid nearest to `--ending + --fade`. `music grid` carries the hits stored by `music shape` with the
