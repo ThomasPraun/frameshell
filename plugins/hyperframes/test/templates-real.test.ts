@@ -186,6 +186,106 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     );
   });
 
+  // The code templates (#466): what the page leaves on screen once it has played, read from the live page.
+  describe("code templates", () => {
+    /** Opens the scaffolded template with `props` in managed Chrome, hands the page to `check`, closes everything. */
+    async function inPage(template: string, props: Record<string, unknown>, duration: number | undefined, check: (page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>) => Promise<void>) {
+      const manager = binaries();
+      const chrome = await manager.ensure("chrome-headless-shell");
+      const dir = await scaffold(template, 480, 270, duration);
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      const live = await adapter.livePreview!({ ...clip, props }, { projectDir: dir, fps: 30, width: 480, height: 270, ensureBinary: (name) => manager.ensure(name) });
+      const server = createServer((request, response) => {
+        const path = posix.join(live.root, decodeURIComponent(new URL(request.url ?? "/", "http://x").pathname));
+        readFile(join(dir, ...path.split("/"))).then(
+          (body) => {
+            const page = path === live.entry;
+            response.writeHead(200, { "content-type": page ? "text/html" : "text/javascript" });
+            response.end(page ? body.toString("utf8").replace(/<head>/i, () => `<head><script>${live.head}</script>`) : body);
+          },
+          () => response.writeHead(404).end(),
+        );
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const browser = await puppeteer.launch({ executablePath: chrome });
+      try {
+        const page = await browser.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(String(error)));
+        await page.setViewport({ width: 480, height: 270 });
+        await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/${posix.basename(live.entry)}`);
+        await page.evaluate("window.frameshellLive.ready");
+        await check(page);
+        expect(errors).toEqual([]);
+      } finally {
+        await browser.close();
+        server.close();
+      }
+    }
+    const seek = (page: { evaluate(code: string): Promise<unknown> }, t: number) => page.evaluate(`window.frameshellLive.seek(${t})`);
+    const rowTexts = (page: { evaluate(code: string): Promise<unknown> }) => page.evaluate("Array.from(document.querySelectorAll('.tx')).map(function (e) { return e.textContent; })");
+
+    it("code-typing has typed the whole snippet by the end, with an indent that arrives with its Enter, and shows none of it at the start", async () => {
+      await inPage("code-typing", { code: "if (ok) {\n  run();\n}", speed: 30 }, undefined, async (page) => {
+        await seek(page, 0.3);
+        expect(await rowTexts(page)).toEqual(["", "", ""]);
+        await seek(page, 5.5);
+        expect(await rowTexts(page)).toEqual(["if (ok) {", "  run();", "}"]);
+      });
+    }, 120_000);
+
+    it("code-typing waits after the named lines, and types faster in a clip too short for the code and the waits", async () => {
+      await inPage("code-typing", { code: "ab\ncd", speed: 20, startAt: 0.5, pauses: "1", pauseTime: 1 }, undefined, async (page) => {
+        const when = (await page.evaluate("when")) as number[];
+        expect(when).toHaveLength(5);
+        // a, b, Enter, c, d: the wait sits between the last character of line 1 and its Enter.
+        expect(when[2]! - when[1]!).toBeGreaterThanOrEqual(1);
+        expect(when[1]! - when[0]!).toBeLessThan(0.5);
+        expect(when[4]! - when[3]!).toBeLessThan(0.5);
+      });
+      await inPage("code-typing", { code: "x".repeat(30), speed: 10 }, 2, async (page) => {
+        const when = (await page.evaluate("when")) as number[];
+        expect(when).toHaveLength(30);
+        expect(when[29]!).toBeLessThan(2 - 0.3);
+        await seek(page, 1.7);
+        expect(await rowTexts(page)).toEqual(["x".repeat(30)]);
+      });
+    }, 180_000);
+
+    it("code-diff lights each change in turn: nothing added before its turn, every row there after", async () => {
+      await inPage("code-diff", { before: "a\nb\nc", after: "a\nB\nc\nd", changeAt: 1, lineGap: 0.5 }, undefined, async (page) => {
+        const rows = (await page.evaluate("diff.map(function (d) { return d.k; })")) as string[];
+        expect(rows).toEqual(["ctx", "del", "add", "ctx", "add"]);
+        const added = async (t: number) => {
+          await seek(page, t);
+          return (await page.evaluate("Array.from(document.querySelectorAll('.ln')).map(function (r) { return Number(r.style.opacity); })")) as number[];
+        };
+        // Before the first change only the unchanged and the removed line show; the first added line is not yet there.
+        expect((await added(0.8))[2]).toBe(0);
+        expect((await added(0.8))[1]).toBeGreaterThan(0.99);
+        // Its turn is 0.5 s after the removal, and the last addition 1 s after it.
+        expect((await added(1.9))[2]).toBeGreaterThan(0.99);
+        expect((await added(1.9))[4]).toBe(0);
+        expect((await added(3.5)).every((opacity) => opacity > 0.99)).toBe(true);
+      });
+    }, 120_000);
+
+    it("code-morph ends on the second snippet: every token of it in its place, none of the first's left", async () => {
+      await inPage("code-morph", { before: "x = 1", after: "y = x" }, undefined, async (page) => {
+        await seek(page, 4);
+        const shown = (await page.evaluate(
+          "Array.from(document.querySelectorAll('.tk')).filter(function (e) { return Number(e.style.opacity) > 0.99; }).map(function (e) { return e.textContent; }).sort()",
+        )) as string[];
+        expect(shown).toEqual(["=", "x", "y"]);
+        await seek(page, 0.8);
+        const first = (await page.evaluate(
+          "Array.from(document.querySelectorAll('.tk')).filter(function (e) { return Number(e.style.opacity) > 0.99; }).map(function (e) { return e.textContent; }).sort()",
+        )) as string[];
+        expect(first).toEqual(["1", "=", "x"]);
+      });
+    }, 120_000);
+  });
+
   // A wrong `clip set --props` never breaks the picture (ADR 0033): a paragraph with no word left falls back to the default one.
   it.each(["", "   "])("paints cursor-text-select with the text prop %j and no page error", async (text) => {
     const manager = binaries();

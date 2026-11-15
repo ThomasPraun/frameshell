@@ -3,6 +3,9 @@ import { beforeAfter } from "./before-after.js";
 import { bigWord } from "./big-word.js";
 import { chatBubble } from "./chat-bubble.js";
 import { checklist } from "./checklist.js";
+import { codeDiff } from "./code-diff.js";
+import { codeMorph } from "./code-morph.js";
+import { codeTyping } from "./code-typing.js";
 import { commentBox } from "./comment-box.js";
 import { comparison } from "./comparison.js";
 import { counter } from "./counter.js";
@@ -33,7 +36,7 @@ export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
 /** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d];
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeDiff, codeMorph, codeTyping];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {
