@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type DaemonConnection, ErrorCode, RpcError, connectToDaemon } from "@frameshell/protocol";
-import { parseBrandManifest } from "@frameshell/schema";
+import { fitFrames, parseBrandManifest } from "@frameshell/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FIGMA_LIMITS, fitFrames, readFigmaFolder } from "../src/brand/figma.js";
+import { FIGMA_LIMITS, readFigmaFolder, readFigmaFolderInWorker } from "../src/brand/figma.js";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
@@ -55,6 +55,16 @@ describe("readFigmaFolder", () => {
     const total = await readFigmaFolder(dir, { ...FIGMA_LIMITS, totalBytes: 300 });
     expect(total.frames.map((one) => one.name)).toEqual(["a.svg"]);
     expect(total.warnings[0]).toMatch(/^b\.svg and the files after it were skipped: the folder's SVG files pass/);
+  });
+
+  it("reads the same frames and warnings in a worker thread, limits included", async () => {
+    const dir = folder({ "a.svg": frame(10, 10), "b.svg": frame(10, 10, "<script>alert(1)</script>"), "c.svg": "<svg", "d.svg": frame(10, 10) });
+    const limits = { ...FIGMA_LIMITS, files: 3 };
+    const inWorker = await readFigmaFolderInWorker(dir, limits);
+    expect(inWorker).toEqual(await readFigmaFolder(dir, limits));
+    expect(inWorker.frames.map((one) => one.name)).toEqual(["a.svg", "b.svg"]);
+    expect(inWorker.frames[1]!.removed).not.toEqual([]);
+    expect(inWorker.warnings).toHaveLength(2);
   });
 });
 
