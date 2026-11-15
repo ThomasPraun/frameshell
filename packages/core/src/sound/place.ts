@@ -74,8 +74,8 @@ export interface PlanDeps {
   timeline: string;
   /** The timeline as the caller sees it, with its frame rate. */
   load(): Promise<{ timeline: Timeline; fps: number }>;
-  /** Seconds a time reference names on `timeline`; throws `TimeRefError`. */
-  resolve(ref: number | string, timeline: Timeline): number;
+  /** Seconds a time reference names on `loaded`'s timeline (markers, `beat:`, `bar:`); throws `TimeRefError`. */
+  resolve(ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
   /** Make (or reuse) a take; serialised with other sound work of the project by the caller. */
   take(spec: { kind: SfxKind; variant: number; seed: number; pitch?: number | undefined; length?: number | undefined }): Promise<SoundSfxResult>;
   /** dB the style puts sound effects under the voice. */
@@ -115,14 +115,17 @@ export interface SoundPlan {
   warnings: string[];
 }
 
+/** A timeline as the daemon loads it, with its frame rate. */
+type Loaded = { timeline: Timeline; fps: number };
+
 function invalid(field: string, message: string, extra: Record<string, unknown> = {}): RpcError {
   return new RpcError(ErrorCode.InvalidOperation, `sound.place: ${field}: ${message}`, { op: "sound.place", reason: message, field, ...extra });
 }
 
 /** Seconds `ref` names, with a time-reference failure turned into `InvalidOperation` that names the argument. */
-function resolveAt(resolve: PlanDeps["resolve"], timeline: Timeline, ref: number | string, field: string): number {
+async function resolveAt(resolve: PlanDeps["resolve"], loaded: Loaded, ref: number | string, field: string): Promise<number> {
   try {
-    return resolve(ref, timeline);
+    return await resolve(ref, loaded);
   } catch (error) {
     if (!(error instanceof TimeRefError)) throw error;
     throw invalid(field, error.message, { value: ref, ...(error.hint ? { hint: error.hint } : {}) });
@@ -170,16 +173,17 @@ function cutsOf(track: Track): number[] {
  * a seeded jitter apart. Throws `InvalidParams` for an empty call or too many sounds, `InvalidOperation` for an
  * unknown name, track or cut number.
  */
-export function wishesOf(params: PlaceParams, timeline: Timeline, deps: Pick<PlanDeps, "resolve">): SoundWish[] {
+export async function wishesOf(params: PlaceParams, loaded: Loaded, deps: Pick<PlanDeps, "resolve">): Promise<SoundWish[]> {
   const { cues, cuts, typing } = params;
+  const { timeline } = loaded;
   if (!cues && !cuts && !typing) {
     throw new RpcError(ErrorCode.InvalidParams, "sound.place: give `cues`, `cuts` or `typing`: nothing to place.", {
       issues: [{ path: ["cues"], message: "nothing to place" }],
     });
   }
   const wishes: SoundWish[] = [];
-  const at = (ref: number | string, field: string) => resolveAt(deps.resolve, timeline, ref, field);
-  cues?.forEach((cue, i) => wishes.push(wishOf("cue", at(cue.at, `cues[${i}].at`), cue, cue.tier ?? SOUND_DEFAULT_TIERS[cue.kind])));
+  const at = (ref: number | string, field: string) => resolveAt(deps.resolve, loaded, ref, field);
+  for (const [i, cue] of (cues ?? []).entries()) wishes.push(wishOf("cue", await at(cue.at, `cues[${i}].at`), cue, cue.tier ?? SOUND_DEFAULT_TIERS[cue.kind]));
   if (cuts) {
     const track = timeline.tracks.find((candidate) => candidate.id === cuts.track);
     if (!track) throw invalid("cuts.track", `no track "${cuts.track}" in timeline ${timeline.id}.`, { available: timeline.tracks.map((candidate) => candidate.id) });
@@ -192,8 +196,8 @@ export function wishesOf(params: PlaceParams, timeline: Timeline, deps: Pick<Pla
     }
   }
   if (typing) {
-    const from = at(typing.from, "typing.from");
-    const to = at(typing.to, "typing.to");
+    const from = await at(typing.from, "typing.from");
+    const to = await at(typing.to, "typing.to");
     if (to <= from) throw invalid("typing.to", `${to} s is not after typing.from (${from} s).`);
     const interval = 1 / typing.rate;
     // Per-interval jitter of ±10 %: at the top rate the gap stays above SOUND_KEY_GAP_MS.
@@ -328,8 +332,9 @@ function labelOf(wishes: SoundWish[]): string {
  * were made (the times were read from the older one).
  */
 export async function planSounds(params: PlaceParams, deps: PlanDeps): Promise<SoundPlan> {
-  const before = (await deps.load()).timeline;
-  const wishes = wishesOf(params, before, deps);
+  const first = await deps.load();
+  const before = first.timeline;
+  const wishes = await wishesOf(params, first, deps);
   rotateVariants(wishes, await soundsOn(deps.root, before));
 
   const takes = new Map<string, SoundSfxResult>();

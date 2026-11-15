@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- TimeRef in the last time arguments that took plain seconds, a slice of #458 (ADR 0029 slice 4, epic #451; protocol 149):
+  `sound.place` and `sound.music` now read `beat:N` and `bar:N` too (they took seconds and markers only: the `cues[].at`,
+  `typing.from`/`to`, `at`, `sections[].at` and `accents[]` times), and `captions.set` `from`/`to`, `multicam.direct`
+  `from`/`to`, `multicam.reframe` `time` (the timeline second; `at` stays group seconds) and `ui.seek` `at` (read on the
+  timeline the app shows) take a marker, `beat:N` or `bar:N` as well as seconds. All go through the one resolver, so the
+  messages are those of `--snap-to`: a timeline with no tempo, a clip with no beats file yet or a LOW confidence grid is
+  refused with the argument named (`sound.place: cues[1].at: ...`). The history records seconds. CLI `captions set`,
+  `direct`, `multicam reframe --time` and `sound place|music` pass the text through. `track.duck` and `music.shape` curve
+  times are computed by the daemon in seconds, not typed, and `multicam.paint` is on the group clock, so they stay numbers.
 - Brand pictures in motion templates, the last slice of #467 (ADR 0044, epic #451; no protocol change):
   `frameshell hyperframes new <name> --template <t> --component [<prop>=]<path>` copies a picture `brand.json` lists
   (a captured logo, icon, screenshot or `section-*.png` crop, or a Figma frame) into the composition as

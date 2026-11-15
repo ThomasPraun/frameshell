@@ -48,7 +48,7 @@ mutations print the new revision):
                                --format <id> (a format other than the primary) sets a subtitle track's style
                                fields in that format only; --reset first drops that format's style
   track remove <track> [--force]
-  captions set <track> (--text "…" | --file path) [--from s] [--to s] [--replace]
+  captions set <track> (--text "…" | --file path) [--from <time>] [--to <time>] [--replace]
                                Hand-chunked captions on a subtitle track: one phrase per line, chunks (one cue each)
                                split by |, the phrase's one keyword between asterisks, e.g.
                                'No need to | open any | *editor*'. Covers the words the track shows between --from
@@ -188,7 +188,7 @@ mutations print the new revision):
   multicam mic <group> <mic> [--name n] [--offset s] [--gain dB] [--muted | --unmuted]
                                Fix a separate mic: rename it, set the group second at which its file's time 0 plays
                                (absolute, >= 0) or its sound under every shot
-  multicam reframe <group> <angle> (--time s | --at s) [--x f] [--y f] [--remove]
+  multicam reframe <group> <angle> (--time <time> | --at s) [--x f] [--y f] [--remove]
   multicam reframe <group> <angle> --clear
                                Keep a face in frame when a tile cuts the angle's picture (solo and two-up shots of a
                                9:16 export of 16:9 cameras): a key at timeline second --time (or group second --at)
@@ -223,7 +223,7 @@ mutations print the new revision):
                                = keep (the mask of an inspect --segment point, or your own). Writes
                                assets/<photo>-cutout-<n>.png (the photo is not changed), one transaction; revert
                                removes the layer. Background removal: image cutout, then clip set <photo> --opacity 0
-  direct <group> [--template interview|podcast-calm|panel-dynamic] [--rules file] [--from s] [--to s] [--replace-human]
+  direct <group> [--template interview|podcast-calm|panel-dynamic] [--rules file] [--from <time>] [--to <time>] [--replace-human]
                                Shots from who speaks, by rules (director.json at the project root on top of the
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
@@ -361,7 +361,9 @@ mutations print the new revision):
   hides cues in that range (repeatable). Preview and export look the same.
   Negative values need =, e.g. --gain=-6.
   Times on the timeline clock (--at, --from, --to of cut, marker, transition, clip split and clip key; --start and
-  --end of clip add, clip move and clip trim) are seconds or a marker id or label, with an optional offset:
+  --end of clip add, clip move and clip trim; --from and --to of captions set and direct; --time of multicam
+  reframe; --at, --from, --to of sound place and sound music's --at, --sections and --accents) are seconds or a
+  marker id or label, with an optional offset:
   --at hook, --at hook+0.5, --from intro --to outro-1. The daemon turns the name into seconds before the change
   runs and the history records seconds. A label that looks like an offset (end-card) is tried whole first.
   beat:N and bar:N name a beat or a bar start counting from 1 in the music FILE (beat:1 = its first measured
@@ -370,6 +372,7 @@ mutations print the new revision):
   Past the measured part they continue at the tempo. With a pickup, bar:N is not beat:(meter*(N-1)+1). They need
   a tempo (tempo set) and are refused on a LOW confidence grid or with no beats file, like --snap-to beat|bar.
   music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit). word: names are still refused.
+  --group-clock times (multicam reframe --at, multicam paint) stay seconds.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
 app terminals), else generated per shell (sh-<pid>-<hash>): calls from one shell share it. Harnesses that start a
@@ -965,7 +968,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("text") === undefined && str("file") === undefined && values["replace"] !== true) {
         throw new UsageError("`frameshell captions set` needs --text <captions> or --file <path> (or --replace alone to clear the phrases).");
       }
-      Object.assign(params, { track: args[0], text: str("text"), file: str("file"), from: num("from"), to: num("to"), replace: values["replace"] === true ? true : undefined });
+      Object.assign(params, { track: args[0], text: str("text"), file: str("file"), from: when("from"), to: when("to"), replace: values["replace"] === true ? true : undefined });
       break;
     case "track remove":
       method = "track.remove";
@@ -1249,7 +1252,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         const other = ["time", "at", "x", "y", "remove"].find((flag) => values[flag] !== undefined);
         if (other) throw new UsageError(`--clear removes every key: pass it without --${other}.`);
       } else if ((at === undefined) === (time === undefined)) {
-        throw new UsageError("Pass the key time: --time <timeline seconds> or --at <group seconds>, one of them (or --clear).");
+        throw new UsageError("Pass the key time: --time <timeline seconds, a marker or beat:N / bar:N> or --at <group seconds>, one of them (or --clear).");
       } else if (values["remove"] === true && (values["x"] !== undefined || values["y"] !== undefined)) {
         throw new UsageError("--remove deletes the key: pass it without --x or --y.");
       } else if (values["remove"] !== true && values["x"] === undefined && values["y"] === undefined) {
@@ -1259,7 +1262,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         group: args[0],
         angle: args[1],
         at: at === undefined ? undefined : seconds(at, "--at"),
-        time: time === undefined ? undefined : seconds(time, "--time"),
+        time: time === undefined ? undefined : whenOf(time, "time"),
         x: num("x"),
         y: num("y"),
         remove: values["remove"] === true ? true : undefined,
@@ -1349,8 +1352,8 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         group: args[0],
         template: str("template"),
         rules: str("rules"),
-        from: num("from"),
-        to: num("to"),
+        from: when("from"),
+        to: when("to"),
         replaceHuman: values["replace-human"] === true ? true : undefined,
       });
       break;

@@ -416,3 +416,29 @@ describe("sound.music placement", () => {
   }, MEDIA_TIMEOUT);
 });
 
+
+describe("sound.music grid references", () => {
+  it("reads at, a part's @time and the accents on the timeline's grid: bar:N, beat:N and a marker with an offset", async () => {
+    await conn.request("tempo.set", { cwd: root, bpm: 120 });
+    await conn.request("marker.add", { cwd: root, at: 6, label: "reveal" });
+    // 120 BPM in 4/4: a bar is 2 s. Bar 2 starts at 2 s, so the track starts there and its part on bar:4 is two bars in.
+    const result = await music({ at: "bar:2", bars: 4, sections: [{ kind: "intro" }, { kind: "drop", at: "bar:4" }], accents: ["beat:9", "reveal+0"] });
+    expect(result.start).toBe(2);
+    expect(result.sections).toEqual([
+      { kind: "intro", bars: 2, start: 0 },
+      { kind: "drop", bars: 2, start: 4 },
+    ]);
+    expect(result.tempo).toBe("kept");
+    const track = timeline().tracks.find((candidate) => candidate.id === result.track!.id)!;
+    expect(track.kind !== "subtitles" && track.clips[0]).toMatchObject({ id: result.clip, start: 2 });
+  }, MEDIA_TIMEOUT);
+
+  it("refuses with the words of --snap-to when the timeline has no tempo, naming the argument", async () => {
+    const error = await rejection(music({ at: "bar:2" }));
+    expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, data: { op: "sound.music", field: "at", reason: expect.stringContaining("the timeline has no tempo") } });
+    const section = await rejection(music({ bars: 4, sections: [{ kind: "intro" }, { kind: "drop", at: "beat:5" }] }));
+    expect(section.data).toMatchObject({ field: "sections[1].at" });
+    expect((await rejection(music({ accents: ["bar:1"] }))).data).toMatchObject({ field: "accents[0]" });
+    expect(timeline().tracks).toEqual([]);
+  }, MEDIA_TIMEOUT);
+});

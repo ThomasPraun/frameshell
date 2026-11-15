@@ -345,3 +345,34 @@ describe("sound.place in review mode", () => {
     }
   }, MEDIA_TIMEOUT);
 });
+
+describe("sound.place grid references", () => {
+  it("puts cues and a typing run on beat:N and bar:N of the timeline's grid, with an offset like a marker", async () => {
+    await conn.request("tempo.set", { cwd: root, bpm: 120 });
+    // 120 BPM in 4/4: a beat is 0.5 s, a bar 2 s; beat 9 and bar 3 both start at 4 s.
+    const result = await place({
+      cues: [
+        { at: "bar:3", kind: "click" },
+        { at: "beat:9.5", kind: "pop", seed: 2 },
+      ],
+      typing: { from: "bar:5", to: "bar:5+0.5", kind: "tick", rate: 8 },
+    });
+    const cues = result.placed.filter((sound) => sound.from === "cue").map((sound) => [sound.kind, sound.cue]);
+    expect(cues).toEqual([
+      ["click", 4],
+      ["pop", 4.25],
+    ]);
+    const keys = result.placed.filter((sound) => sound.from === "typing");
+    expect(keys.length).toBeGreaterThan(2);
+    expect(keys[0]!.cue).toBe(8);
+    expect(Math.max(...keys.map((sound) => sound.cue))).toBeLessThan(8.5);
+  }, MEDIA_TIMEOUT);
+
+  it("refuses with the words of --snap-to when there is no tempo, naming the argument", async () => {
+    const none = await rejection(place({ cues: [{ at: 1, kind: "click" }, { at: "bar:2", kind: "click" }] }));
+    expect(none).toMatchObject({ code: ErrorCode.InvalidOperation, data: { op: "sound.place", field: "cues[1].at", reason: expect.stringContaining("the timeline has no tempo") } });
+    const typing = await rejection(place({ typing: { from: 1, to: "beat:9", kind: "tick" } }));
+    expect(typing.data).toMatchObject({ field: "typing.to" });
+    expect((await timeline()).tracks).toEqual([]);
+  }, MEDIA_TIMEOUT);
+});

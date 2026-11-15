@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OpIdSchema, TimelineIdSchema, TxIdSchema } from "../timeline.js";
+import { OpIdSchema, TimeRefParam, TimelineIdSchema, TxIdSchema } from "../timeline.js";
 import { TimeRangeSchema, UiStateSchema, UiViewIdSchema, UiViewSchema, WordRefSchema } from "../ui.js";
 import { type MethodSpec, CwdParam } from "./shared.js";
 
@@ -21,12 +21,13 @@ export const uiMethods = {
   },
   "ui.seek": {
     description:
-      "Move the app's playhead to timeline second `at` so the preview shows that frame (snapped to the frame, clamped " +
-      "to the timeline; playback continues from there if it was playing). Example: `{ at: 12.5 }`. Returns `ui.state` " +
-      "after the move. Fails with UiNotConnected when no app window shows the project.",
+      "Move the app's playhead to timeline time `at` so the preview shows that frame (snapped to the frame, clamped " +
+      "to the timeline; playback continues from there if it was playing). `at` is seconds or a TimeRef (a marker, `beat:N`, `bar:N`), " +
+      "read on the timeline the app shows. Example: `{ at: 12.5 }`, `{ at: \"hook\" }`. Returns `ui.state` " +
+      "after the move. Fails with UiNotConnected when no app window shows the project, InvalidOperation for a name it cannot resolve.",
     params: z.strictObject({
       cwd: CwdParam,
-      at: z.number().nonnegative().describe("Timeline seconds, e.g. `12.5`."),
+      at: TimeRefParam("Timeline time to move to, e.g. `12.5`. A name is read on the timeline the app shows (`ui.state` `timeline`)."),
     }),
     result: UiStateSchema,
   },
