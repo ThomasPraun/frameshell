@@ -33,6 +33,7 @@ import {
   MIN_TEMPO_BPM,
   TempoSchema,
   LetterboxSchema,
+  TimelineFormatsSchema,
   TakeIdSchema,
   TrackSchema,
   TransformSchema,
@@ -829,6 +830,10 @@ export const operationArgs = {
       .optional()
       .describe("Picture aspect inside the bars, width / height: 2.39 (scope), 1.85 (flat), 1.3333 (4:3). Wider than the frame: bars top and bottom; narrower: at the sides."),
     clear: z.boolean().optional().describe("True removes the letterbox. Takes no other field."),
+    format: FormatIdSchema.optional().describe(
+      "A format of the project other than the primary (`format.list`), e.g. `9x16`: the bars in that format only, stored in the timeline's `formats` " +
+        "(ADR 0027 decision 14). Without it the letterbox is the primary format's, and other formats show none.",
+    ),
   }),
 } as const;
 
@@ -873,6 +878,10 @@ export type ResolvedOperationArgs<K extends OperationName> = K extends keyof typ
 const PatchShape = z.strictObject({
   tempo: TempoSchema.nullable().optional().describe("The timeline's whole `tempo`; null removes it."),
   letterbox: LetterboxSchema.nullable().optional().describe("The timeline's whole `letterbox` (ADR 0043); null removes it."),
+  formatLetterbox: z
+    .record(FormatIdSchema, LetterboxSchema.nullable())
+    .optional()
+    .describe("Per format id, that format's whole letterbox override (`formats[id].letterbox`, ADR 0027 decision 14); null removes it."),
   markers: z
     .array(z.strictObject({ id: z.string().min(1), marker: MarkerSchema.nullable().describe("Full marker; null deletes it.") }))
     .optional(),
@@ -1418,6 +1427,7 @@ export const TimelineViewSchema = z.object({
     .describe("Markers as stored (ADR 0029): id, timeline second `at`, label, colour; sorted by `at`; absent when the timeline has none."),
   tempo: TempoSchema.optional().describe("The beat grid the timeline follows as stored (ADR 0029); absent when none. `grid` (on request) holds its beats."),
   letterbox: LetterboxSchema.optional().describe("Black bars over the picture as stored (ADR 0043): `aspect` of the picture inside them; absent when none."),
+  formats: TimelineFormatsSchema.optional().describe("Per-format timeline overrides as stored (ADR 0027 decision 14): `letterbox` bars in a format other than the primary; absent when none."),
   grid: TempoGridSchema.optional().describe("Only with `grid: true`: the beat grid on the timeline clock; absent when there is no tempo or its beats are missing (`gridProblem`)."),
   gridProblem: z.string().optional().describe("Only with `grid: true`: why a `tempo` has no beats yet (no beats file for the music, a broken one)."),
   problems: z.array(TimelineProblemSchema).describe("Clips whose nested timeline is missing or invalid; empty when none."),

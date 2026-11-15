@@ -479,7 +479,8 @@ export interface Program {
   grades?: Record<string, GradeTable>;
   /**
    * The timeline's letterbox (ADR 0043), which `PreviewPanel` draws over every picture and under the captions; absent
-   * when none, and in a format other than the primary (`formatTimeline` leaves it out of the view).
+   * when none; in a format other than the primary it is that format's own (`formatTimeline` swaps in the timeline's
+   * `formats` override, ADR 0027 decision 14), absent without one.
    */
   letterbox?: Letterbox;
 }

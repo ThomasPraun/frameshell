@@ -276,8 +276,10 @@ export const clipMethods = {
       "Set or clear the timeline's letterbox (ADR 0043): black bars over the whole finished picture, above every video track and " +
       "under the captions, which stay where they are (over a bar when placed there). `{ aspect: 2.39 }` keeps a 2.39:1 picture: bars " +
       "top and bottom when the aspect is wider than the frame, at the sides when narrower; `{ clear: true }` removes them. Export " +
-      "and the app's preview draw the same bars. Primary format only: other formats re-block without bars. Fails with " +
-      "InvalidOperation (nothing to set, `clear` with `aspect`).",
+      "and the app's preview draw the same bars. Without `format` they are the primary format's: other formats re-block without " +
+      "bars. `format` (a format of `format.list` other than the primary) sets or clears the bars in that format only, kept in the " +
+      "timeline's `formats` (ADR 0027 decision 14). Fails with InvalidOperation (nothing to set, `clear` with `aspect`, the " +
+      "primary as `format`) or FormatNotFound.",
     params: operationArgs["letterbox.set"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },

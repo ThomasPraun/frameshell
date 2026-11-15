@@ -154,6 +154,30 @@ describe("per-format overrides (ADR 0027 decision 5)", () => {
     expect(formatTimeline(view, "1x1")).toEqual({ tracks: [] });
   });
 
+  it("gives a format the bars of the timeline's `formats` override instead of the primary's (ADR 0027 decision 14)", () => {
+    const boxed: Timeline = { ...timeline, letterbox: { aspect: 2.39 }, formats: { "9x16": { letterbox: { aspect: 1 } } } };
+    expect(resolveFormat(boxed, config)!.timeline).toBe(boxed);
+    const shown = resolveFormat(boxed, config, "9x16")!.timeline;
+    expect(shown.letterbox).toEqual({ aspect: 1 });
+    expect(shown).not.toHaveProperty("formats");
+    // A format with no entry shows none, the primary's bars included; an entry of the primary or of another format is not read.
+    const three = { ...config, formats: [...config.formats, { id: "1x1", width: 1080, height: 1080 }] };
+    const other = resolveFormat(boxed, three, "1x1")!.timeline;
+    expect(other).not.toHaveProperty("letterbox");
+    expect(other).not.toHaveProperty("formats");
+    expect(resolveFormat({ ...timeline, formats: { "16x9": { letterbox: { aspect: 2 } } } }, three, "1x1")!.timeline).toEqual(timeline);
+    const view = { tracks: [], formats: { "1x1": { letterbox: { aspect: 1.85 } } } };
+    expect(formatTimeline(view, "1x1")).toEqual({ tracks: [], letterbox: { aspect: 1.85 } });
+    expect(formatTimeline(view, "9x16")).toEqual({ tracks: [] });
+  });
+
+  it("parses `formats` of a timeline strictly", () => {
+    expect(parseTimeline({ ...timeline, formats: { "9x16": { letterbox: { aspect: 1.85 } } } })).toMatchObject({ ok: true });
+    expect(parseTimeline({ ...timeline, formats: { "9x16": { letterbox: { aspect: 0 } } } })).toMatchObject({ ok: false });
+    expect(parseTimeline({ ...timeline, formats: { "9x16": { bars: 1 } } })).toMatchObject({ ok: false });
+    expect(parseTimeline({ ...timeline, formats: { "NOT AN ID": {} } })).toMatchObject({ ok: false });
+  });
+
   it("works on a timeline view, whose clips carry derived fields", () => {
     const view = { tracks: [{ id: "t_top", kind: "video", name: null, clips: [{ id: "c_a", end: 2, transform: { x: 5 }, formats: { "9x16": { transform: { x: 9 } } } }] }] };
     expect(formatTimeline(view, "9x16").tracks[0]!.clips[0]).toMatchObject({ end: 2, transform: { x: 9 } });

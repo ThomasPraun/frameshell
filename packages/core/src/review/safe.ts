@@ -84,6 +84,19 @@ export function cueBox(style: SubtitleStyle, cue: SubtitleCue, frame: Size, metr
   };
 }
 
+/**
+ * `spans` with each box cut to `picture`, the part of the frame a letterbox leaves (ADR 0043): the bars are black over
+ * graphics and faces, so what lies in a bar is not seen and no zone can cover it. A span whose box lies wholly in the bars goes.
+ */
+export function withinPicture<S extends { box: Box }>(spans: readonly S[], picture: { left: number; top: number; width: number; height: number } | null): S[] {
+  if (!picture) return [...spans];
+  const frame = { x0: picture.left, y0: picture.top, x1: picture.left + picture.width, y1: picture.top + picture.height };
+  return spans.flatMap((span) => {
+    const box = { x0: Math.max(span.box.x0, frame.x0), y0: Math.max(span.box.y0, frame.y0), x1: Math.min(span.box.x1, frame.x1), y1: Math.min(span.box.y1, frame.y1) };
+    return box.x0 < box.x1 && box.y0 < box.y1 ? [{ ...span, box }] : [];
+  });
+}
+
 /** A cue of a track, or a graphic or a face of a clip, that reaches into a zone. */
 export interface CueCrossing {
   /** Absent: a subtitle cue. */

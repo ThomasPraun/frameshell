@@ -15,6 +15,9 @@ export interface LetterboxBar {
   height: number;
 }
 
+/** A rectangle of a frame in pixels, top-left origin: what {@link letterboxPicture} returns. */
+export type PictureRect = LetterboxBar;
+
 /**
  * The black bars that show `frame` at picture aspect `aspect` (width / height): top and bottom when the aspect is
  * wider than the frame, left and right when narrower, none when it matches to the pixel. The picture keeps
@@ -39,6 +42,22 @@ export function letterboxBars(frame: FrameSize, aspect: number): LetterboxBar[] 
     ].filter((bar) => bar.width > 0);
   }
   return [];
+}
+
+/**
+ * The picture rectangle the bars of {@link letterboxBars} leave: the frame minus its bars, frame pixels. Null when
+ * there are no bars (no letterbox, or an aspect equal to the frame's to the pixel): the picture is the whole frame.
+ */
+export function letterboxPicture(frame: FrameSize, aspect: number | undefined): PictureRect | null {
+  const bars = aspect === undefined ? [] : letterboxBars(frame, aspect);
+  const first = bars[0];
+  if (!first) return null;
+  if (first.width === frame.width) {
+    const top = bars.find((bar) => bar.top === 0)?.height ?? 0;
+    return { left: 0, top, width: frame.width, height: frame.height - bars.reduce((sum, bar) => sum + bar.height, 0) };
+  }
+  const left = bars.find((bar) => bar.left === 0)?.width ?? 0;
+  return { left, top: 0, width: frame.width - bars.reduce((sum, bar) => sum + bar.width, 0), height: frame.height };
 }
 
 /** Range and default of each vignette number (ADR 0043 decision 8). */

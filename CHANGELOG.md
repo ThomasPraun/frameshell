@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Letterbox per format, slice 4 of #500 (ADR 0043 and ADR 0027 decision 14, epic #451; protocol 148): `letterbox set <aspect>
+  --format 9x16` (and `letterbox clear --format`; daemon and MCP `letterbox.set` `format`) gives one format its own black
+  bars, stored in the timeline's `formats`; a format without an entry still draws none, and export, `frame` and the
+  preview of that format draw them like the primary's. `inspect.point` reports `picture`, the rectangle the bars leave, and
+  `inBar` when the point lies in a bar (nothing is seen there), and the `safe` sheet of `review` gives `safeZones[].picture`
+  and measures graphics and faces inside it, since the bars cover what lies in them. `timeline show` lists the bars per
+  format. Inspector rows and a timeline control are still to come (#581).
 - The swept high-pass build before a drop, slice 6 of #485 (ADR 0037, epic #451; protocol 147): audio effects take a new
   kind `highpassSweep { from, to, startHz?, endHz? }` (seconds of the file; cutoff 40 to 300 Hz by default, rising
   exponentially, out of the signal before `from` and from `to` on). It is baked with the rest of the chain, so the preview

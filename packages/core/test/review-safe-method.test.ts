@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, type ReviewResult, connectToDaemon } from "@frameshell/protocol";
 import { SAFE_ZONES, type Transcript, VERTICAL_CAPTION_SCALE, parseTimeline, scaledCaptions, subtitleTracks } from "@frameshell/schema";
 import { type Daemon, bundledFontMetrics, startDaemon, writeFaceScan } from "../src/index.js";
-import { cueCrossings, filmInsets, safeFlags } from "../src/review/safe.js";
+import { cueCrossings, filmInsets, safeFlags, withinPicture } from "../src/review/safe.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
@@ -165,6 +165,35 @@ describe("review safe sheet", () => {
   );
 });
 
+describe("review safe sheet: letterbox (ADR 0043)", () => {
+  it(
+    "reports the picture the bars leave, per format, and absent without bars",
+    async () => {
+      const plain = await conn.request("review", { cwd: project, projectFormat: "9x16", platform: "instagram-reels", sheets: ["safe"], from: 0, to: 0.3 });
+      expect(plain.safeZones[0]).not.toHaveProperty("picture");
+      const set = await conn.request("letterbox.set", { cwd: project, aspect: 1, format: "9x16" });
+      const boxed = await conn.request("review", { cwd: project, projectFormat: "9x16", platform: "instagram-reels", sheets: ["safe"], from: 0, to: 0.3 });
+      expect(boxed.safeZones[0]!.picture).toEqual({ left: 0, top: 420, width: 1080, height: 1080 });
+      // The 9x16 override is not the primary's bars: the 16:9 film has none, so nothing is reported there.
+      const wide = await conn.request("review", { cwd: project, platform: "youtube", sheets: ["safe"], from: 0, to: 0.3 });
+      expect(wide.safeZones[0]).not.toHaveProperty("picture");
+      await conn.request("revert", { cwd: project, target: set.operation.tx });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it("cuts the boxes of graphics and faces to the picture and drops those wholly in a bar", () => {
+    const picture = { left: 0, top: 420, width: 1080, height: 1080 };
+    const spans = [
+      { id: "inside", box: { x0: 100, y0: 500, x1: 200, y1: 600 } },
+      { id: "straddles", box: { x0: 100, y0: 380, x1: 200, y1: 460 } },
+      { id: "bar", box: { x0: 100, y0: 1600, x1: 200, y1: 1700 } },
+    ];
+    expect(withinPicture(spans, picture)).toEqual([spans[0], { id: "straddles", box: { x0: 100, y0: 420, x1: 200, y1: 460 } }]);
+    expect(withinPicture(spans, null)).toEqual(spans);
+  });
+});
+
 describe("review safe sheet: faces", () => {
   it(
     "flags a face of the cached people scan that sits in a zone, on the sheet, in safeZones and as a craft warning",
@@ -183,6 +212,19 @@ describe("review safe sheet: faces", () => {
       expect(marked.every((tile) => tile.label.includes("!face"))).toBe(true);
       expect(result.metrics!.craft.filter((warning) => warning.check === "safe-zone")).toEqual([expect.objectContaining({ message: expect.stringContaining("a face of clip") })]);
       expect(result.warnings).toEqual([]);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "leaves a face that lies in a letterbox bar out of the safe-zone flags: the bar covers it",
+    async () => {
+      const set = await conn.request("letterbox.set", { cwd: project, aspect: 1, format: "9x16" });
+      const result = await conn.request("review", { cwd: project, projectFormat: "9x16", platform: "instagram-reels", sheets: ["safe", "metrics"], every: 0.25 });
+      expect(result.safeZones[0]!.picture).toEqual({ left: 0, top: 420, width: 1080, height: 1080 });
+      expect(result.safeZones[0]!.flags.filter((flag) => flag.subject === "face")).toEqual([]);
+      expect(result.metrics!.craft.filter((warning) => warning.check === "safe-zone")).toEqual([]);
+      await conn.request("revert", { cwd: project, target: set.operation.tx });
     },
     MEDIA_TIMEOUT,
   );

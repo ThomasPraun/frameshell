@@ -114,6 +114,33 @@ describe("inspect.point", () => {
   });
 });
 
+describe("inspect.point letterbox (ADR 0043)", () => {
+  const boxed = (aspect: number): InspectOptions["timeline"] => async () => ({ timeline: { ...timeline, letterbox: { aspect } }, fps: 30 });
+
+  it("reports the picture the bars leave, and no bar information without a letterbox", async () => {
+    const plain = await service().point("/p", { timeline: "main", at: 0.5, x: 0.5, y: 0.5 });
+    expect(plain).not.toHaveProperty("picture");
+    expect(plain).not.toHaveProperty("inBar");
+    const point = await service({ timeline: boxed(2.39) }).point("/p", { timeline: "main", at: 0.5, x: 0.5, y: 0.5 });
+    // 1920x1080 at 2.39: picture rows 138 to 941.
+    expect(point.picture).toEqual({ x0: 0, y0: 0.1278, x1: 1, y1: 0.8713 });
+    expect(point).toMatchObject({ target: "c_cam", layers: [{ clip: "c_cam", type: "media", paints: true }] });
+    expect(point).not.toHaveProperty("inBar");
+  });
+
+  it("sees nothing in a bar: black over every layer, no target, no live page", async () => {
+    const top = await service({ timeline: boxed(2.39) }).point("/p", { timeline: "main", at: 2, x: 0.5, y: 0.05 });
+    expect(top).toMatchObject({ inBar: true, target: null, elements: [], unavailable: null });
+    expect(top.layers).toEqual([{ clip: "c_cam", type: "media", paints: false }]);
+    const side = await service({ timeline: boxed(1) }).point("/p", { timeline: "main", at: 2, x: 0.1, y: 0.5 });
+    expect(side).toMatchObject({ inBar: true, target: null });
+    expect(side.picture).toEqual({ x0: 0.2188, y0: 0, x1: 0.7813, y1: 1 });
+    // The picture's first row belongs to the picture; the last row of the first bar does not.
+    expect(await service({ timeline: boxed(2.39) }).point("/p", { timeline: "main", at: 0.5, x: 10, y: 138, unit: "pixel" })).not.toHaveProperty("inBar");
+    expect(await service({ timeline: boxed(2.39) }).point("/p", { timeline: "main", at: 0.5, x: 10, y: 137, unit: "pixel" })).toMatchObject({ inBar: true });
+  });
+});
+
 // Seam under test: `inspect.point` with `segment` (ADR 0022): the point mapped through the photo's placement into
 // asset pixels, the masks written as PNGs under `.frameshell/context/`, and why nothing was segmented elsewhere.
 describe("inspect.point segment", () => {

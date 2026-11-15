@@ -8,6 +8,7 @@ import {
   grainSeed,
   grainSpread,
   letterboxBars,
+  letterboxPicture,
   parseTimeline,
   vignetteGain,
   vignetteLevel,
@@ -92,6 +93,34 @@ describe("letterbox bars (ADR 0043)", () => {
     expect(letterboxBars({ width: 1920, height: 1080 }, 1.7778)).toEqual([]);
     const [top, bottom] = letterboxBars({ width: 100, height: 100 }, 1e6);
     expect(top!.height + bottom!.height).toBe(99);
+  });
+});
+
+describe("letterbox picture (ADR 0043 slice 4)", () => {
+  it("is the frame minus the bars of letterboxBars, for bars top and bottom, at the sides and a single one", () => {
+    expect(letterboxPicture({ width: 1920, height: 1080 }, 2.39)).toEqual({ left: 0, top: 138, width: 1920, height: 803 });
+    expect(letterboxPicture({ width: 1080, height: 1920 }, 1)).toEqual({ left: 0, top: 420, width: 1080, height: 1080 });
+    expect(letterboxPicture({ width: 1920, height: 1080 }, 4 / 3)).toEqual({ left: 240, top: 0, width: 1440, height: 1080 });
+    // One row short of the frame: only the second bar exists, the picture starts at the top.
+    expect(letterboxBars({ width: 100, height: 57 }, 100 / 56)).toEqual([{ left: 0, top: 56, width: 100, height: 1 }]);
+    expect(letterboxPicture({ width: 100, height: 57 }, 100 / 56)).toEqual({ left: 0, top: 0, width: 100, height: 56 });
+  });
+
+  it("is null with no letterbox or no bars", () => {
+    expect(letterboxPicture({ width: 1920, height: 1080 }, undefined)).toBeNull();
+    expect(letterboxPicture({ width: 1920, height: 1080 }, 16 / 9)).toBeNull();
+  });
+
+  it("agrees with the bars on many frames and aspects: bars and picture tile the frame", () => {
+    for (const frame of [{ width: 1920, height: 1080 }, { width: 1080, height: 1350 }, { width: 99, height: 57 }]) {
+      for (const aspect of [2.39, 1.85, 4 / 3, 1, 0.5625, 3]) {
+        const bars = letterboxBars(frame, aspect);
+        const picture = letterboxPicture(frame, aspect);
+        const area = bars.reduce((sum, bar) => sum + bar.width * bar.height, 0) + (picture ? picture.width * picture.height : frame.width * frame.height);
+        expect(area, `${frame.width}x${frame.height} at ${aspect}`).toBe(frame.width * frame.height);
+        expect(picture === null, `${frame.width}x${frame.height} at ${aspect}`).toBe(bars.length === 0);
+      }
+    }
   });
 });
 

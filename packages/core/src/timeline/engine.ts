@@ -2545,27 +2545,46 @@ class Edit {
     else delete this.draft.tempo;
     if (next.letterbox) this.draft.letterbox = next.letterbox;
     else delete this.draft.letterbox;
+    if (next.formats) this.draft.formats = next.formats;
+    else delete this.draft.formats;
   }
 
   // Letterbox (ADR 0043)
 
   letterboxSet(args: OperationArgs<"letterbox.set">): void {
-    const { aspect, clear } = args;
+    const { aspect, clear, format } = args;
+    if (format !== undefined) this.checkFormat(format);
+    const where = format === undefined ? "the timeline" : `format ${format}`;
+    const current = format === undefined ? this.draft.letterbox : this.draft.formats?.[format]?.letterbox;
     if (clear === true) {
       if (aspect !== undefined) throw this.invalid("`clear` removes the letterbox: pass it without `aspect`.", { field: "clear" });
-      if (!this.draft.letterbox) this.warnings.push("the timeline has no letterbox: nothing to clear.");
-      delete this.draft.letterbox;
+      if (!current) this.warnings.push(`${where} has no letterbox: nothing to clear.`);
+      this.writeLetterbox(format, undefined);
       return;
     }
     if (aspect === undefined) throw this.invalid("nothing to set.", { hint: "Pass `aspect` (2.39, 1.85, 1.3333 for 4:3) or `clear: true`." });
-    const primary = this.context.formats?.[0];
-    if (primary && letterboxBars(primary, aspect).length === 0) {
-      this.warnings.push(`the frame (${primary.width}x${primary.height}) already has aspect ${aspect}: no bars show.`);
+    const shown = format === undefined ? this.context.formats?.[0] : this.context.formats?.find((entry) => entry.id === format);
+    if (shown && letterboxBars(shown, aspect).length === 0) {
+      this.warnings.push(`the frame (${shown.width}x${shown.height}) already has aspect ${aspect}: no bars show.`);
     }
-    if (primary && this.context.formats!.length > 1) {
-      this.warnings.push(`bars show in the primary format (${primary.id}) only: the other formats re-block without them.`);
+    if (format === undefined && shown && this.context.formats!.length > 1) {
+      this.warnings.push(`bars show in the primary format (${shown.id}) only: the other formats re-block without bars, unless you set them with \`format\`.`);
     }
-    this.draft.letterbox = { aspect };
+    this.writeLetterbox(format, { aspect });
+  }
+
+  /** Writes (or, with undefined, removes) the letterbox of the primary format, or of format `format`'s override in `formats`. */
+  writeLetterbox(format: string | undefined, letterbox: { aspect: number } | undefined): void {
+    if (format === undefined) {
+      if (letterbox) this.draft.letterbox = letterbox;
+      else delete this.draft.letterbox;
+      return;
+    }
+    const formats = { ...this.draft.formats };
+    if (letterbox) formats[format] = { ...formats[format], letterbox };
+    else delete formats[format];
+    if (Object.keys(formats).length > 0) this.draft.formats = formats;
+    else delete this.draft.formats;
   }
 
   // Tempo (ADR 0029)

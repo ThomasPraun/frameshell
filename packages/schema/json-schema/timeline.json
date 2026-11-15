@@ -4000,6 +4000,36 @@
       ],
       "additionalProperties": false,
       "description": "Black letterbox bars over the whole picture (ADR 0043), under the captions; the primary format only. Absent: none."
+    },
+    "formats": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+        "description": "Format id, e.g. `9x16` or `web-1600x900`: lowercase letters, digits and `-`, up to 40; not png, jpg, jpeg or webp."
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "letterbox": {
+            "description": "Bars in this format, as the timeline's own `letterbox` in the primary.",
+            "type": "object",
+            "properties": {
+              "aspect": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Picture aspect inside the bars, width / height: 2.39 (scope), 1.85 (flat), 1.3333 (4:3)."
+              }
+            },
+            "required": [
+              "aspect"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Per-format timeline overrides by format id (ADR 0027): `letterbox` bars in that format (other formats re-block without bars unless listed here). Ignored in the primary format and for a format the project no longer declares. Absent: none."
     }
   },
   "required": [

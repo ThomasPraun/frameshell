@@ -1,6 +1,6 @@
 import { type ExportSource, compileFrame } from "@frameshell/core";
 import type { AssetInfo, TimelineView } from "@frameshell/protocol";
-import type { Timeline } from "@frameshell/schema";
+import { type Timeline, resolveFormat } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import { compileProgram, letterboxOverlay } from "../src/renderer/src/preview/program.js";
 import { viewsInFormat } from "../src/renderer/src/preview/useProgram.js";
@@ -85,5 +85,29 @@ describe("preview letterbox (ADR 0043)", () => {
     const program = compileProgram(view!, new Map([[TALK, ASSET]]), { resolution: { width: 1920, height: 1080 } });
     expect(program).not.toHaveProperty("letterbox");
     expect(letterboxOverlay(program, { width: 1080, height: 1920 })).toEqual([]);
+  });
+
+  it("draws a format's own bars, the ones export paints in that format (ADR 0027 decision 14)", () => {
+    const stored: Timeline = { ...timeline(2.39), formats: { "9x16": { letterbox: { aspect: 1 } } } };
+    const view = { ...viewOf(stored), formats: stored.formats } as unknown as TimelineView;
+    const primary = compileProgram(viewsInFormat(view, new Map(), undefined).view!, new Map([[TALK, ASSET]]), { resolution: { width: 1920, height: 1080 } });
+    expect(primary.letterbox).toEqual({ aspect: 2.39 });
+    const { view: shown } = viewsInFormat(view, new Map(), "9x16");
+    const program = compileProgram(shown!, new Map([[TALK, ASSET]]), { resolution: { width: 1920, height: 1080 } });
+    expect(program.letterbox).toEqual({ aspect: 1 });
+    // A portrait capture in 9:16: the same rectangles `drawbox` gets from the format's timeline.
+    const formatted = resolveFormat(stored, { kind: "video", resolution: { width: 1920, height: 1080 }, formats: [{ id: "16x9", width: 1920, height: 1080 }, { id: "9x16", width: 1080, height: 1920 }] }, "9x16")!;
+    const bars = exportBars(formatted.timeline, 1080, 1920);
+    expect(bars.length).toBeGreaterThan(0);
+    const drawn = letterboxOverlay(program, { width: 1080, height: 1920 }).map((bar) => ({
+      left: Math.round(bar.left * 1080),
+      top: Math.round(bar.top * 1920),
+      width: Math.round(bar.width * 1080),
+      height: Math.round(bar.height * 1920),
+    }));
+    expect(drawn).toEqual(bars);
+    // Another format of the project with no entry draws none.
+    const other = viewsInFormat(view, new Map(), "1x1").view!;
+    expect(compileProgram(other, new Map([[TALK, ASSET]]), { resolution: { width: 1920, height: 1080 } })).not.toHaveProperty("letterbox");
   });
 });
