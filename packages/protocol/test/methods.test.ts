@@ -1,5 +1,20 @@
+import { readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ErrorCode, RpcError, methodJsonSchemas, methods, parseParams, parseRequest } from "../src/index.js";
+
+describe("method registry areas", () => {
+  it("merges every area module into methods with no name declared twice", async () => {
+    const dir = new URL("../src/methods/", import.meta.url);
+    const areas = readdirSync(dir).filter((file) => file.endsWith(".ts") && file !== "shared.ts");
+    const names: string[] = [];
+    for (const file of areas) {
+      const area = (await import(new URL(file, dir).href)) as Record<string, Record<string, unknown>>;
+      for (const entries of Object.values(area)) names.push(...Object.keys(entries));
+    }
+    expect(names.length).toBe(new Set(names).size);
+    expect(names.sort()).toEqual(Object.keys(methods).sort());
+  });
+});
 
 describe("method registry JSON Schema", () => {
   const schemas = methodJsonSchemas();

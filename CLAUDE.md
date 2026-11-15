@@ -11,7 +11,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 | Domain terms | `GLOSSARY.md` |
 | Past decisions and why | `docs/adr/` |
 | Tickets | `docs/agents/issue-tracker.md` |
-| Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts`; replay keys of `mutating` methods `packages/core/src/idempotency.ts` |
+| Daemon wire protocol (methods, error codes) | `packages/protocol/src/methods.ts` (registry type, errors, helpers); method entries one module per area `protocol/src/methods/*.ts`, shared schemas `methods/shared.ts`; replay keys of `mutating` methods `packages/core/src/idempotency.ts` |
 | Media ingest (proxy recipe, cache, job queue; SVG + font files = non-media assets, `kind` in `asset.list`; clip queue priority interactive/background + starvation limit, `job.cancel`: ADR 0035 d6) | `packages/core/src/media/recipe.ts`, `media/service.ts`, `media/kind.ts`, `jobs/queue.ts`; clip priority set in `clips/renderer.ts` `#render`; CLI `packages/cli/src/job-commands.ts` |
 | Cache cleanup (`gc`: unused derived media, clip renders, temps; sweep on open) | `packages/core/src/gc.ts`; `MediaService.gc`, `ClipRenderer.gc` |
 | Managed binaries (ffmpeg, whisper.cpp, headless Chrome, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
@@ -132,7 +132,7 @@ Status: walking skeleton. pnpm monorepo: `packages/{schema,protocol,core,cli,mcp
 - Renderer never writes project files: save via daemon `file.write`. Main only reads + watches. Only exception: Explorer Move to Trash (`main/trash.ts`, OS trash after confirm listing daemon `file.uses`).
 - node-pty = N-API: no electron-rebuild. `apps/desktop/scripts/prepare-native.mjs` fixes `spawn-helper` exec bit.
 - Zod model changed: run `pnpm gen:json-schema`, commit `packages/schema/json-schema/`. Drift test fails otherwise.
-- New daemon method: one entry in `methods` registry (`packages/protocol/src/methods.ts`): Zod params, Zod result, model-facing description. Never bare TS interface.
+- New daemon method: one entry in its area module `packages/protocol/src/methods/*.ts` (spread into `methods`; new area module also joins `MethodRegistry`): Zod params, Zod result, model-facing description. Never bare TS interface. Area d.ts hits TS7056: split area module or annotate big schema.
 - Wire change: bump `PROTOCOL_VERSION`.
 - `skills/frameshell/` changed: run `pnpm gen:skill`, commit `packages/core/src/skills/core-skill.ts`. Drift test fails otherwise.
 - `packages/motion/` or `packages/schema/src/motion.ts` changed: run `pnpm gen:motion`, commit `plugins/hyperframes/src/motion-runtime.ts`. Drift test fails otherwise.

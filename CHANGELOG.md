@@ -971,6 +971,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Internal: the daemon method registry is split into one module per area under `packages/protocol/src/methods/`
+  and merged into `methods` with a declared `MethodRegistry` type (#517), so its emitted declaration no longer grows
+  with every schema (TypeScript TS7056 limit). Wire, `PROTOCOL_VERSION`, method names, params, results, MCP tools and
+  CLI unchanged.
 - Export holds true peak under -1 dBTP in the delivered file (#519, epic #451): after the second `loudnorm` pass the
   mix goes up to 4x the export's sample rate, through `alimiter` at -1.5 dBFS (sample peaks there are true peaks) and
   back, before the cut to length, the loop fades and the encode. `loudnorm` alone let sharp synthesized transients
