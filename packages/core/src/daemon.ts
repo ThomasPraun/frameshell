@@ -159,7 +159,7 @@ import { clipEnd } from "./timeline/timing.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
-import { resolveTimeRef, resolveTimeRefAsync } from "./timeline/time-ref.js";
+import { type GridLoader, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -645,6 +645,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const replays = new IdempotencyCache();
   /** The beats file that records project-relative `asset`, or null when it was never measured. Throws `InvalidProjectFile` for a broken one. */
   const beatsOf = async (dir: string, asset: string) => (await ownBeatsFile(dir, asset))?.file ?? null;
+  /**
+   * Beat grid loader for a method that resolves TimeRefs of its own, one per call: however many `beat:`/`bar:`
+   * references the call holds, the grid is read once, and again only when a reference reaches further than it did.
+   */
+  const gridLoaderFor = (dir: string) => {
+    let grid: { horizon: number; result: Awaited<ReturnType<typeof tempoGrid>> } | undefined;
+    return (loaded: { timeline: Timeline; fps: number }): GridLoader =>
+      async (horizon) => {
+        if (!grid || grid.horizon < horizon) grid = { horizon, result: await tempoGrid({ fps: loaded.fps, timeline: loaded.timeline, horizon, beatsOf: (asset) => beatsOf(dir, asset) }) };
+        return grid.result;
+      };
+  };
   const timelines = new TimelineService({
     probe: (dir, asset) => media.probe(dir, asset),
     clipTypes: (dir) => plugins.clipTypes(dir),
@@ -894,7 +906,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // A nominal grid runs a little past the last clip, so a clip dragged past the end still has beats to land on.
       return await tempoGrid({ fps: viewed.fps, timeline: viewed.timeline, horizon: (duration ?? 0) + 30, beatsOf: (asset) => beatsOf(dir, asset) });
     } catch (error) {
-      if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return { grid: null, problem: error.message };
+      if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return { grid: null, problem: error.message, reason: "broken-beats" as const };
       throw error;
     }
   };
@@ -1941,16 +1953,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "voiceover.place": async (params, caller) => {
       const { cwd, timeline, dryRun } = params;
       const dir = await root(cwd);
-      // One grid load serves every beat or bar anchor of the call; a later anchor that reaches further loads again.
-      let grid: { horizon: number; result: Awaited<ReturnType<typeof tempoGrid>> } | undefined;
+      const gridOf = gridLoaderFor(dir);
       const plan = await planVoiceoverPlacement(params, {
         root: dir,
         load: async () => loadFor(dir, timeline, caller),
-        resolve: (ref, loaded) =>
-          resolveTimeRefAsync(ref, loaded.timeline, async (horizon) => {
-            if (!grid || grid.horizon < horizon) grid = { horizon, result: await tempoGrid({ fps: loaded.fps, timeline: loaded.timeline, horizon, beatsOf: (asset) => beatsOf(dir, asset) }) };
-            return grid.result;
-          }),
+        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
       });
       const report = { timeline, script: plan.script, track: plan.track, lines: plan.lines, dryRun };
       const planned = plan.clips.map((clip) => ({ line: clip.line, phrase: clip.phrase, file: clip.file, in: clip.in, out: clip.out, start: clip.start, end: clip.end, speed: clip.speed, duration: clip.duration, anchor: clip.anchor }));
@@ -2011,11 +2018,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "sound.place": async (params, caller) => {
       const { cwd, timeline } = params;
       const dir = await root(cwd);
+      const gridOf = gridLoaderFor(dir);
       const plan = await planSounds(params, {
         root: dir,
         timeline,
         load: async () => loadFor(dir, timeline, caller),
-        resolve: (ref, loaded) => resolveTimeRef(ref, { timeline: loaded }),
+        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
         take: (spec) => serialSound(dir, () => makeTake(dir, spec)),
         sfxUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.sfxUnderVoice.value,
       });
@@ -2072,10 +2080,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "sound.music": async (params, caller) => {
       const { cwd, timeline } = params;
       const dir = await root(cwd);
+      const gridOf = gridLoaderFor(dir);
       const plan = await planMusic(params, {
         load: async () => loadFor(dir, timeline, caller),
         duration: async () => (await timelines.show(dir, timeline, await viewOf(dir, caller, undefined))).duration,
-        resolve: (ref, loaded) => resolveTimeRef(ref, { timeline: loaded }),
+        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
         take: (spec) =>
           serialSound(dir, () => generateMusic({ root: dir, spec, importAssets: (files) => media.import(dir, files, "copy"), credit: (file) => creditTake(dir, file) })),
         musicUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.musicUnderVoice.value,
@@ -2855,9 +2864,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const result = await groupTurns(turnsSource, dir, found);
       return { timeline, revision: loaded.revision, group, ...result };
     },
-    "captions.set": async ({ cwd, timeline, track: trackId, text, file, from, to, replace }, caller) => {
+    "captions.set": async ({ cwd, timeline, track: trackId, text, file, from: fromRef, to: toRef, replace }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const gridOf = gridLoaderFor(dir)({ timeline: loaded, fps });
+      const from = fromRef === undefined ? undefined : await resolveTimeRefArg("captions.set", "from", fromRef, loaded, gridOf);
+      const to = toRef === undefined ? undefined : await resolveTimeRefArg("captions.set", "to", toRef, loaded, gridOf);
       const track = loaded.tracks.find((candidate) => candidate.id === trackId);
       const invalid = (message: string, field: string) =>
         new RpcError(ErrorCode.InvalidOperation, `captions.set: ${message}`, { op: "captions.set", reason: field, field });
@@ -2913,9 +2925,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         });
       return { ...result, track: trackId, phrases: phrases.length, words: covered, cues: source === undefined ? [] : cues, warnings: [...result.warnings, ...warnings] };
     },
-    "multicam.direct": async ({ cwd, timeline, group, template, rules, from, to, replaceHuman }, caller) => {
+    "multicam.direct": async ({ cwd, timeline, group, template, rules, from: fromRef, to: toRef, replaceHuman }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
+      const gridOf = gridLoaderFor(dir)({ timeline: loaded, fps });
+      const from = fromRef === undefined ? undefined : await resolveTimeRefArg("multicam.direct", "from", fromRef, loaded, gridOf);
+      const to = toRef === undefined ? undefined : await resolveTimeRefArg("multicam.direct", "to", toRef, loaded, gridOf);
       const found = groupOf(loaded, group, "multicam.direct");
       const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
       const measured = await groupTurns(turnsSource, dir, found);
@@ -3335,7 +3350,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { dir, target: id, references: await targets.wait(caller, key, id, (timeout ?? INBOX_WAIT_DEFAULT_S) * 1000) };
     },
     "ui.state": async ({ cwd }) => ui.state(await projectKey(cwd)),
-    "ui.seek": async ({ cwd, at }) => ui.command(await projectKey(cwd), { kind: "seek", at }),
+    "ui.seek": async ({ cwd, at }, caller) => {
+      const key = await projectKey(cwd);
+      if (typeof at === "number") return ui.command(key, { kind: "seek", at });
+      // A name is read on the timeline the app shows, as the person sees it.
+      const dir = await root(cwd);
+      const loaded = await loadFor(dir, ui.shown(key).timeline, caller);
+      return ui.command(key, { kind: "seek", at: await resolveTimeRefArg("ui.seek", "at", at, loaded.timeline, gridLoaderFor(dir)(loaded)) });
+    },
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
     "ui.pause": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "pause" }),
     "ui.select": async ({ cwd, clips, words, range, reveal, points, person }) => {

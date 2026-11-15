@@ -7,7 +7,7 @@
 Both reach the same daemon, journal the same operations and take the same arguments (`clip.add` → `clip_add`, `--snap-window` → `snapWindow`). Pick per task:
 
 - **MCP only:** seeing pixels (`frame_capture`, `frames_strip`, `review`, `analyze` and `analyze_diff` return the image itself), the app (`ui_state`, `ui_*`), `history_diff`, `clip_renders`, `asset_list`, `export_presets`. `job_list` and `job_cancel` have CLI twins (`job list`, `job cancel`).
-- `brand_capture { url: "https://example.com", sections: ["Pricing"] }` is the job behind `frameshell brand capture` (`sections` = `--sections`): the same files, `brand.json`, credits entries and `style` suggestions; see [credits.md](credits.md#brand-capture).
+- `brand_capture { url: "https://example.com", sections: ["Pricing"] }` is the job behind `frameshell brand capture` (`sections` = `--sections`): the same files, `brand.json`, credits entries and `style` suggestions; see [brand.md](brand.md#capture-from-a-site).
 - `brand_import_figma { dir: "/Users/me/Desktop/acme-figma" }` is `frameshell brand import-figma`; `brand_show {}` returns `brand.json` (captures and imports) for `frameshell brand show`.
 - **CLI:** loops over many operations from one shell call (dozens of `cut`s), and every environment where the MCP server is not registered.
 - **One channel per transaction.** A transaction groups one session's operations: the CLI's session is `FRAMESHELL_SESSION`, the server's is its own. Begin, edit and commit through the same one.
@@ -45,7 +45,7 @@ Navigation only; each returns `ui_state` after the move.
 
 | Tool | Use |
 |---|---|
-| `ui_seek { at }` | Put the playhead on a moment you want them to watch. |
+| `ui_seek { at }` | Put the playhead on a moment you want them to watch: seconds, a marker (`hook+0.5`) or `beat:N` / `bar:N`, read on the timeline the app shows. |
 | `ui_play` / `ui_pause` | Play from the playhead / stop. |
 | `ui_select { clips?, words?, range? }` | Point at what you mean; replaces their selection. |
 | `ui_select { person: { id, what? } }` | Show the user where someone speaks (`what: "onscreen"`: is on screen): their spans and words selected, as a click in the People panel does. `id` is the person id or exact name. |

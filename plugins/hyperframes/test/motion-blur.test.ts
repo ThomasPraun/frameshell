@@ -89,4 +89,45 @@ describe("hyperframes motion blur", () => {
     const other = createHyperframesAdapter({ projectDir: project, producer: async () => producer(new Error("Chrome crashed")).fake });
     await expect(other.render({ id: "c_1", source: SOURCE }, context(blur))).rejects.toThrow(/^Chrome crashed$/);
   });
+  describe("compositions that draw with WebGL (ADR 0042 decision 13)", () => {
+    const BLUR = { motionBlur: { shutter: 180, samples: 24, blend: "linear" as const } };
+
+    /** Renders `SOURCE` with the blur and returns the samples the producer got and what the adapter warned. */
+    async function render(blur: RenderContext["motionBlur"] = BLUR.motionBlur) {
+      const { fake, jobs } = producer();
+      const warnings: string[] = [];
+      await createHyperframesAdapter({ projectDir: project, producer: async () => fake }).render(
+        { id: "c_3d", source: SOURCE },
+        context({ motionBlur: blur!, warn: (message) => warnings.push(message) }),
+      );
+      return { samples: (jobs[0]!.config["motionBlur"] as { samplesPerFrame: number }).samplesPerFrame, warnings };
+    }
+
+    const dir = () => join(project, "compositions", "hyperframes", "intro");
+
+    it("caps the samples at 8 and warns for a composition with the three.js bundle", async () => {
+      writeFileSync(join(dir(), "frameshell-three.js"), "/* three */");
+      const { samples, warnings } = await render();
+      expect(samples).toBe(8);
+      expect(warnings).toEqual([expect.stringMatching(/^hyperframes clip c_3d draws with WebGL, so its motion blur renders 8 samples per frame, not the 24 asked for/)]);
+    });
+
+    it("caps a hand-written scene that makes a WebGL renderer or context, in a script file too", async () => {
+      writeFileSync(join(dir(), "scene.js"), "const r = new THREE.WebGLRenderer({ alpha: true });");
+      expect((await render()).samples).toBe(8);
+      writeFileSync(join(dir(), "scene.js"), "const gl = canvas.getContext('webgl2');");
+      expect((await render()).samples).toBe(8);
+    });
+
+    it("leaves a blur of 8 or fewer samples alone, without a warning", async () => {
+      writeFileSync(join(dir(), "frameshell-three.js"), "/* three */");
+      expect(await render({ shutter: 180, samples: 8, blend: "linear" })).toEqual({ samples: 8, warnings: [] });
+      expect(await render({ shutter: 180, samples: 3, blend: "linear" })).toEqual({ samples: 3, warnings: [] });
+    });
+
+    it("does not cap a composition without WebGL", async () => {
+      writeFileSync(join(dir(), "notes.js"), "// THREE is mentioned here, but nothing draws with it");
+      expect(await render()).toEqual({ samples: 24, warnings: [] });
+    });
+  });
 });

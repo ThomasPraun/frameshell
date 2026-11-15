@@ -127,7 +127,8 @@ describe("hand edits of config files in review mode", () => {
     const { dir, ui, withFormats, readConfig, journal, ids } = await setup();
     await ui().request("review.set", { cwd: dir, enabled: true });
     withFormats([WIDE, VERTICAL]);
-    await until(async () => (await ui().request("proposal.status", { cwd: dir })).proposal !== null, "the proposal");
+    // The edit's proposal is saved as building, then marked ready in a second save: wait for the second.
+    await until(async () => (await ui().request("proposal.status", { cwd: dir })).proposal?.state === "ready", "the ready proposal");
     const proposal = (await ui().request("proposal.status", { cwd: dir })).proposal!;
     expect(proposal).toMatchObject({ state: "ready", author: "file", config: [{ doc: "project", key: "format:9x16", before: null }] });
     await until(() => readConfig()["formats"] === undefined, "the formats put back");

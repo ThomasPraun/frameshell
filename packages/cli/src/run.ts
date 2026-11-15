@@ -1104,7 +1104,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return flags.json
         ? json(result)
         : `Wrote ${result.path} (frame ${result.frame} at ${result.at} s, ${result.clip ?? "gap"}, ${result.width}x${result.height}` +
-            `${params.projectFormat ? `, format ${result.projectFormat}` : ""})\n`;
+            `${params.projectFormat ? `, format ${result.projectFormat}` : ""})\n` +
+            result.warnings.map((warning) => `warning: ${warning}\n`).join("");
     }
     case "inspect": {
       const where = inv.point ? { ...inv.point, unit: "fraction" as const } : { ...inv.px!, unit: "pixel" as const };

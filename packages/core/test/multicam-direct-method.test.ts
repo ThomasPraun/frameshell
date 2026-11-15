@@ -105,6 +105,25 @@ describe("multicam.direct", () => {
     expect(whole.kept).toEqual([last.id]);
   }, MEDIA_TIMEOUT);
 
+  it("reads from and to as a marker or a point of the grid, records seconds, and refuses a grid there is none of", async () => {
+    await expect(agent.request("multicam.direct", { cwd: project, group, to: "bar:3" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      data: { op: "multicam.direct", field: "to", reason: "time reference" },
+      message: expect.stringContaining("the timeline has no tempo"),
+    });
+    await expect(agent.request("multicam.direct", { cwd: project, group, from: "nowhere" })).rejects.toMatchObject({ data: { field: "from", reason: "time reference" } });
+
+    await agent.request("tempo.set", { cwd: project, bpm: 120 });
+    await agent.request("marker.add", { cwd: project, at: 5, label: "mid" });
+    // 120 BPM in 4/4: a bar is 2 s, so bar:3 starts at 4 s and `bar:3+1` is the 5 s of `mid`.
+    const byMarker = await agent.request("multicam.direct", { cwd: project, group, from: "beat:1", to: "mid" });
+    expect(byMarker.operation.args).toMatchObject({ from: 0, to: 5 });
+    const byGrid = await agent.request("multicam.direct", { cwd: project, group, from: 0, to: "bar:3+1" });
+    expect(byGrid.operation.args).toMatchObject({ from: 0, to: 5 });
+    expect(byGrid.kept).toEqual(byMarker.kept);
+    await agent.request("multicam.direct", { cwd: project, group });
+  }, MEDIA_TIMEOUT);
+
   it("keeps a shot the person sets while the turns are still being measured", async () => {
     // A copy without the envelope cache decodes every angle again, so the app's change lands first.
     // Ingest jobs of earlier tests may still be writing proxies, thumbs and waveforms: copying them races their rename.

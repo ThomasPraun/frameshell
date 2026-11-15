@@ -88,6 +88,24 @@ describe("captions.set", () => {
     expect((await shown()).phrases).toHaveLength(2);
   });
 
+  it("reads from and to as a marker or a point of the grid, and refuses a grid there is none of", async () => {
+    const none = await conn.request("captions.set", { cwd: project, track: subtitles, text: "*editor*", from: "bar:1" }).catch((error: unknown) => error);
+    expect(none).toMatchObject({ code: ErrorCode.InvalidOperation, data: { op: "captions.set", field: "from", reason: "time reference" }, message: expect.stringContaining("the timeline has no tempo") });
+    await expect(conn.request("captions.set", { cwd: project, track: subtitles, text: "No need", to: "nowhere", replace: true })).rejects.toMatchObject({
+      data: { field: "to", reason: "time reference" },
+    });
+    // The refused calls changed nothing: the two phrases of the test before are still there.
+    expect((await shown()).phrases).toHaveLength(2);
+
+    await conn.request("tempo.set", { cwd: project, bpm: 120 });
+    await conn.request("marker.add", { cwd: project, at: 0.8, label: "late" });
+    // 120 BPM: beat 1 is 0 s, so `beat:1+0.4` is the 0.4 s of the plain test above.
+    await conn.request("captions.set", { cwd: project, track: subtitles, text: "No need", from: "beat:1", to: "beat:1+0.4", replace: true });
+    const result = await conn.request("captions.set", { cwd: project, track: subtitles, text: "*editor*", from: "late" });
+    expect(result.phrases).toBe(1);
+    expect((await shown()).phrases).toHaveLength(2);
+  });
+
   it("replaces the phrases it shares words with, and clears them with replace alone", async () => {
     await conn.request("captions.set", { cwd: project, track: subtitles, text: "*editor*", from: 0.8 });
     expect((await shown()).phrases).toHaveLength(2);

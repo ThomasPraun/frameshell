@@ -5,7 +5,8 @@
 // sheet (ADR 0028); a card's { requireStyle } fails the render unless the sheet it got contains that text.
 // `blur-card` applies motion blur (ADR 0041): a blurred render (one that got `motionBlur`) fails unless it is the card's
 // { requireBlur } when set, paints { blurColor } when set, waits { blurDelayMs } more, and with { refuseBlur } throws the
-// MOTION_BLUR_REFUSED error a plugin gives for a composition it cannot blur.
+// MOTION_BLUR_REFUSED error a plugin gives for a composition it cannot blur, and with { warn } says that text through
+// `ctx.warn` when the render is blurred.
 // `beat-card` asks for the card's { timing } kinds (ADR 0029 decision 8); a card's { requireTiming } fails the render
 // unless the timing it got is that JSON, and its live page sets `window.cardTiming` to what it got.
 import { execFile } from "node:child_process";
@@ -46,6 +47,7 @@ export function activate(api) {
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
       const blurred = ctx.motionBlur !== undefined;
       if (blurred && card.refuseBlur) throw Object.assign(new Error(`card ${clip.source} cannot be motion-blurred`), { code: "MOTION_BLUR_REFUSED" });
+      if (blurred && card.warn) ctx.warn?.(card.warn);
       if (blurred && card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
       if (card.requireStyle && !ctx.styleCss?.includes(card.requireStyle)) throw new Error(`card ${clip.source} got no style sheet with ${card.requireStyle}`);
       if (card.requireTiming && JSON.stringify(ctx.timing) !== JSON.stringify(card.requireTiming)) throw new Error(`card ${clip.source} got timing ${JSON.stringify(ctx.timing)}`);

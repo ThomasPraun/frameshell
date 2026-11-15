@@ -105,6 +105,36 @@ describe("ui.* methods", () => {
     expect(commands).toHaveLength(1);
   });
 
+  it("ui.seek reads a marker or a point of the grid on the timeline the app shows, and refuses what it cannot resolve", async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath() });
+    const mcp = await connect("mcp/test");
+    const app = await connect("desktop/test");
+    const dir = join(tempDir(), "talk");
+    await mcp.request("project.init", { dir });
+    // A name needs a window: it is read on the timeline that window shows.
+    await expect(mcp.request("ui.seek", { cwd: dir, at: "hook" })).rejects.toMatchObject({ code: ErrorCode.UiNotConnected });
+    fakeApp(app, "w1");
+    await app.request("ui.publish", { cwd: dir, view: "w1", state: idle });
+
+    await mcp.request("marker.add", { cwd: dir, at: 3, label: "hook" });
+    await expect(mcp.request("ui.seek", { cwd: dir, at: "hook+1.5" })).resolves.toMatchObject({ playhead: 4.5 });
+    await expect(mcp.request("ui.seek", { cwd: dir, at: "nowhere" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      data: { op: "ui.seek", field: "at", reason: "time reference" },
+    });
+    // No tempo yet: the grid is refused with the words of --snap-to, and the playhead stays.
+    await expect(mcp.request("ui.seek", { cwd: dir, at: "bar:2" })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      message: expect.stringContaining("the timeline has no tempo"),
+    });
+    await expect(mcp.request("ui.state", { cwd: dir })).resolves.toMatchObject({ playhead: 4.5 });
+
+    // 120 BPM in 4/4: a bar is 2 s, so bar 4 starts at 6 s and beat 9 at 4 s.
+    await mcp.request("tempo.set", { cwd: dir, bpm: 120 });
+    await expect(mcp.request("ui.seek", { cwd: dir, at: "bar:4" })).resolves.toMatchObject({ playhead: 6 });
+    await expect(mcp.request("ui.seek", { cwd: dir, at: "beat:9" })).resolves.toMatchObject({ playhead: 4 });
+  });
+
   it("forgets a detached window at once", async () => {
     daemon = await startDaemon({ socketPath: uniqueSocketPath() });
     const app = await connect("desktop/test");

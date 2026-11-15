@@ -61,6 +61,8 @@ export interface RenderedClip {
   height: number;
   /** Seconds; null when the container does not say. */
   duration: number | null;
+  /** What the adapter said about this render (`RenderContext.warn`); absent when nothing. */
+  warnings?: string[];
 }
 
 /** What the renderer learns from ffprobe about a finished render. */
@@ -138,7 +140,11 @@ export interface ClipEnsureOptions {
   size?: { width: number; height: number } | undefined;
   /** Render of a clip that keeps two to use. Default `final`. */
   tier?: ClipTier | undefined;
-  /** A clip exported with its draft render because the plugin refused the final one (motion blur, ADR 0041 decision 8). */
+  /**
+   * Something to tell about a clip's render in use: its draft render stands in because the plugin refused the final
+   * one (motion blur, ADR 0041 decision 8), or the adapter changed a setting to render it (`RenderContext.warn`).
+   * Called once per clip and render per call of `ensure`.
+   */
   onWarning?: ((warning: string) => void) | undefined;
 }
 
@@ -181,6 +187,8 @@ interface EntryMeta {
   width: number;
   height: number;
   duration: number | null;
+  /** What the adapter said while rendering (`RenderContext.warn`); left out when nothing. */
+  warnings?: string[];
   plugin: string;
   version: string;
   type: string;
@@ -418,7 +426,7 @@ export class ClipRenderer {
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const waits: { clip: AdapterClip; done: Promise<RenderedClip> }[] = [];
     const sharp = (clip: AdapterClip, draft: Variant, refusal: string): Promise<Obtained> => {
-      onWarning?.(`Clip ${clip.id} is exported without motion blur, from its sharp render: ${refusal}`);
+      onWarning?.(`Clip ${clip.id} is used without motion blur, from its sharp render: ${refusal}`);
       return this.#obtain(root, draft, clip, format);
     };
     for (const { clip } of placed) {
@@ -455,6 +463,7 @@ export class ClipRenderer {
       }
       onProgress?.(++done / placed.length);
     }
+    for (const { warnings = [] } of rendered.values()) for (const warning of warnings) onWarning?.(warning);
     return rendered;
   }
 
@@ -565,23 +574,41 @@ export class ClipRenderer {
     this.#timers.set(root, timer);
   }
 
+  /**
+   * Queue background renders of every generated clip, keyed as `status` and export key them: in its timeline
+   * flattened, so a nested clip hears its host's beats and markers. A clip that reads timing in a timeline file
+   * another one nests is keyed only through that host; keyed against its own file it would render a second time.
+   */
   async #refreshOnce(root: string): Promise<void> {
-    const placed: Sited[] = [];
+    const files: { id: string; timeline: Timeline }[] = [];
     for (const id of await this.#options.timelines(root)) {
       try {
-        placed.push(...sited(await this.#options.peek(root, id)));
+        files.push({ id, timeline: await this.#options.peek(root, id) });
       } catch {
         // Invalid or vanished timeline: its own errors surface where it is used.
       }
+    }
+    const hosted = nestedSources(files);
+    const placed: (Sited & { hosted: boolean })[] = [];
+    for (const { id, timeline } of files) {
+      let flat: Timeline;
+      try {
+        flat = await resolveNested(root, timeline, this.#options.readNested);
+      } catch {
+        continue;
+      }
+      const isHosted = hosted.has(`timelines/${id}.json`);
+      placed.push(...sited(flat).map((site) => ({ ...site, hosted: isHosted })));
     }
     // No generated clips: never load plugins (an untrusted project stays untouched).
     if (placed.length === 0) return;
     const adapters = await this.#options.adapters(root);
     const format = await this.#options.format(root);
-    for (const { clip, timeline } of placed) {
+    for (const { clip, timeline, hosted: isHosted } of placed) {
       if (this.#closed) return;
       const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
+      if (isHosted && keyed.timing) continue;
       const { final } = keyed;
       if (!(await this.#ready(root, keyed.key))) {
         // A final render waits for its draft: the refresh after the draft is ready queues it.
@@ -659,7 +686,16 @@ export class ClipRenderer {
     if (!meta || typeof meta.file !== "string" || meta.file.includes("/") || meta.file.includes("\\")) return null;
     const path = join(dir, meta.file);
     if (!(await stat(path).then((info) => info.isFile(), () => false))) return null;
-    return { path, file: `${CLIP_CACHE_DIR}/${meta.file}`, hasAlpha: meta.hasAlpha, width: meta.width, height: meta.height, duration: meta.duration };
+    const { warnings } = meta;
+    return {
+      path,
+      file: `${CLIP_CACHE_DIR}/${meta.file}`,
+      hasAlpha: meta.hasAlpha,
+      width: meta.width,
+      height: meta.height,
+      duration: meta.duration,
+      ...(Array.isArray(warnings) && warnings.length > 0 ? { warnings } : {}),
+    };
   }
 
   /**
@@ -734,6 +770,7 @@ export class ClipRenderer {
     await mkdir(outDir, { recursive: true });
     try {
       let result: Awaited<ReturnType<ClipAdapter["render"]>>;
+      const warnings: string[] = [];
       try {
         result = await registered.adapter.render(clip, {
           projectDir: root,
@@ -745,6 +782,9 @@ export class ClipRenderer {
           ...(styleCss ? { styleCss } : {}),
           ...(motionBlur ? { motionBlur } : {}),
           ...(timing ? { timing } : {}),
+          warn: (message) => {
+            if (typeof message === "string" && message !== "" && !warnings.includes(message)) warnings.push(message);
+          },
           progress: ({ fraction }) => {
             if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
           },
@@ -777,6 +817,7 @@ export class ClipRenderer {
         width: probed.width,
         height: probed.height,
         duration: probed.duration,
+        ...(warnings.length > 0 ? { warnings } : {}),
         plugin: registered.plugin.name,
         version: registered.plugin.version,
         type: clip.type,
@@ -826,6 +867,23 @@ export function generatedClips(timeline: Timeline): Placed[] {
     }
   }
   return placed;
+}
+
+/** Project-relative files that a nested clip of the timeline files shows, other than the timeline's own file. */
+function nestedSources(files: readonly { id: string; timeline: Timeline }[]): Set<string> {
+  const sources = new Set<string>();
+  for (const { id, timeline } of files) {
+    const own = `timelines/${id}.json`;
+    for (const track of timeline.tracks) {
+      if (track.kind === "subtitles" || track.kind === "program") continue;
+      for (const clip of track.clips) {
+        if (clip.type !== "timeline" || !("source" in clip) || !clip.source) continue;
+        const source = posix.normalize(clip.source.replaceAll("\\", "/"));
+        if (source !== own) sources.add(source);
+      }
+    }
+  }
+  return sources;
 }
 
 /** {@link generatedClips} of `timeline`, each with the timeline it sits in. */

@@ -4,6 +4,7 @@ import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, 
 import { type FrameSize, projectResolution, sizeEntry, withLeadingStyle, withLeadingTag, withStyle } from "./frame-size.js";
 import { liveHead } from "./live.js";
 import { timingKinds, timingScript, timingTag } from "./timing.js";
+import { WEBGL_BLUR_SAMPLES, usesWebGL } from "./webgl.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "hyperframes";
@@ -136,6 +137,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       // Render a copy: the producer may write scratch files next to the entry, which would count as composition edits.
       const composition = join(ctx.outDir, "composition");
       await cp(dir.path, composition, { recursive: true });
+      const blur = ctx.motionBlur ? await cappedForWebGL(id, dir.path, ctx) : undefined;
       await prepareEntry(join(composition, basename(source)), ctx, await projectResolution(projectDir));
       const output = join(ctx.outDir, "render.webm");
       const producer = await loadProducer();
@@ -147,7 +149,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
         entryFile: basename(source),
         // Overrides only: the page runtime merges them over the declared defaults; `{}` keeps every default.
         variables: props ?? {},
-        ...(ctx.motionBlur ? { motionBlur: producerMotionBlur(ctx.motionBlur), pageMotionBlur: "off" as const } : {}),
+        ...(blur ? { motionBlur: producerMotionBlur(blur), pageMotionBlur: "off" as const } : {}),
       });
       try {
         await producer.executeRenderJob(
@@ -158,7 +160,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
           ctx.signal,
         );
       } catch (error) {
-        throw ctx.motionBlur ? motionBlurRefusal(id, error) : error;
+        throw blur ? motionBlurRefusal(id, error) : error;
       }
       return { file: output, hasAlpha: true };
     },
@@ -197,6 +199,21 @@ async function prepareEntry(entry: string, ctx: RenderContext, project: FrameSiz
 
 /** `<meta name>` of the frame rate in a blurred render's entry; `FRAME_RATE_META` of packages/motion reads it. */
 const FRAME_RATE_META = "frameshell-fps";
+
+/**
+ * The clip's blur with at most {@link WEBGL_BLUR_SAMPLES} samples when its composition draws with WebGL (ADR 0041,
+ * ADR 0042 decision 13), saying so through `ctx.warn`. The cache key counts the samples the clip asks for, so a clip
+ * asking for 16 and one asking for 8 render the same picture under two keys.
+ */
+async function cappedForWebGL(id: string, dir: string, ctx: RenderContext): Promise<RenderMotionBlur> {
+  const blur = ctx.motionBlur!;
+  if (blur.samples <= WEBGL_BLUR_SAMPLES || !(await usesWebGL(dir, await listFiles(dir)))) return blur;
+  ctx.warn?.(
+    `hyperframes clip ${id} draws with WebGL, so its motion blur renders ${WEBGL_BLUR_SAMPLES} samples per frame, not the ${blur.samples} asked for ` +
+      "(every sample is a full frame on the software renderer).",
+  );
+  return { ...blur, samples: WEBGL_BLUR_SAMPLES };
+}
 
 /**
  * The producer's `motionBlur` for a clip's (ADR 0041): a fixed sample count, and the phase that centres a window of

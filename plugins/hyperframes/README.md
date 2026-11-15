@@ -6,11 +6,14 @@ Official [Frameshell](https://github.com/ThomasPraun/frameshell) clip adapter. I
 frameshell plugin install @frameshell/hyperframes
 frameshell hyperframes new title --duration 4
 frameshell hyperframes new hook --template kinetic-headline   # motion template: typed props, brand tokens from style.json
+frameshell hyperframes new closer --template logo-lockup --component assets/brand/acme-com/logo-1.svg   # a picture of brand.json as the logo
 frameshell hyperframes check            # lint every composition; exit 1 on errors
 frameshell hyperframes update           # refresh the frozen motion runtime copies
 ```
 
 `new --template <kinetic-headline|end-card|lower-third|logo-lockup|checklist|comparison|counter|big-word|cursor-click|cursor-drag-drop|cursor-marquee|cursor-text-select|app-window|typing-field|comment-box|terminal|chat-bubble|notification-stack|device-frame|scene-background|prompt-bar|glass-card|product-shot|emphasis-marker|before-after|pull-back-reveal>` scaffolds a composition painted by the Frameshell motion runtime (springs and eases as a pure function of time, ADR 0033), with `frameshell-motion.js` copied next to it so a plugin upgrade never changes an existing clip. Each template declares typed props (change one with `frameshell clip set <clip> --props '{...}'`), lays out for 16:9, 1:1, 4:5 and 9:16, and takes colours, fonts and brand texts from the project's `style.json` as defaults. `update [<composition>] [--dry-run] [--force]` refreshes older runtime copies; clips that use one render again. The 3D template `product-shot` also gets `frameshell-three.js`, a pinned three.js bundle (ADR 0042), frozen and refreshed the same way; HyperFrames renders always use the software WebGL renderer (SwiftShader).
+
+`--component [<prop>=]<path>` (repeatable) copies a picture `brand.json` lists (`frameshell brand show`: a captured logo or crop, a Figma frame) into the composition as `brand/<id>/<file>` and makes it the default of the template's image prop; `<prop>=` picks the prop on a template with two (`before-after`).
 
 `check [<composition>] [--strict] [--json]` runs the HyperFrames linter ([`@hyperframes/lint`](https://www.npmjs.com/package/@hyperframes/lint)) in the daemon, with no network and no telemetry, plus Frameshell's GSAP and three.js seek-safety rules (the vendored three.js bundle itself is not linted). It prints `file:line:column severity rule message` and a fix per finding; errors exit 1, warnings only with `--strict`. The plugin never uses the `hyperframes` CLI.
 

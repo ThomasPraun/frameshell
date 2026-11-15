@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isBuild, planBuildEffects } from "../src/music/builds.js";
+import { type AudioEffect, isBuild } from "@frameshell/schema";
+import { planBuildEffects } from "../src/music/builds.js";
 
 const build = { seconds: 2, startHz: 40, endHz: 300 };
 
@@ -22,7 +23,8 @@ describe("planBuildEffects", () => {
   });
 
   it("recognizes only marked sweeps as builds", () => {
-    expect(isBuild({ kind: "highpassSweep", from: 1, to: 2, auto: "music" })).toBe(true);
-    expect(isBuild({ kind: "highpassSweep", from: 1, to: 2 })).toBe(false);
+    const marked: AudioEffect = { kind: "highpassSweep", from: 1, to: 2, auto: "music" };
+    expect(isBuild(marked)).toBe(true);
+    expect(isBuild({ ...marked, auto: undefined })).toBe(false);
   });
 });
