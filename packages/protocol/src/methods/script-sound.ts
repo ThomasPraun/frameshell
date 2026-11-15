@@ -329,7 +329,7 @@ export const scriptSoundMethods = {
         .record(z.string().min(1), z.number().min(VOICEOVER_TEMPO_RANGE.min).max(VOICEOVER_TEMPO_RANGE.max))
         .optional()
         .describe(
-          `Speed of single phrases, ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max} (1 = as spoken, 1.1 = 10 % faster, pitch kept): keys are line ids (\`hook-1\`, the same as \`hook-1.1\`) or one phrase (\`hook-1.2\`). Phrases left out play at 1.`,
+          `Speed of single phrases, ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max} (1 = as spoken, 1.1 = 10 % faster, pitch kept): keys are one phrase (\`hook-1.2\`) or a line id (\`hook-1\`), which is its phrase 1 only, not the whole line. Phrases left out play at 1.`,
         ),
       start: TimeRefParam("Timeline time of the first line when it has no `at`. Default: right after the last clip of the voice track, else 0.").optional(),
       gap: z

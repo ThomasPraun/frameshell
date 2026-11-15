@@ -4,6 +4,9 @@ import { type DaemonConnection, ErrorCode, RpcError, connectToDaemon } from "@fr
 import type { Timeline } from "@frameshell/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Daemon, standInSpeechProvider, startDaemon } from "../src/index.js";
+import { FrameGrid } from "../src/timeline/grid.js";
+import { clipEnd } from "../src/timeline/timing.js";
+import { phraseEnd } from "../src/voiceover/place.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 
@@ -170,8 +173,10 @@ describe("voiceover.place", () => {
     expect(two!.duration).toBeCloseTo(length(two!) / FPS / 1.25, 3);
     expect(three!.duration).toBeCloseTo(length(three!) / FPS / 0.8, 3);
     expect(one!.duration).toBeCloseTo(length(one!) / FPS, 3);
-    expect(frames(two!.end) - frames(two!.start)).toBe(Math.round(length(two!) / 1.25));
-    expect(frames(three!.end) - frames(three!.start)).toBe(Math.round(length(three!) / 0.8));
+    // The end is the engine's: stored start plus stored (out - in) / speed, snapped to the grid.
+    const engineEnd = (clip: { start: number; in: number; out: number; speed: number }) => frames(clip.start + (clip.out - clip.in) / clip.speed);
+    expect(frames(two!.end)).toBe(engineEnd(two!));
+    expect(frames(three!.end)).toBe(engineEnd(three!));
     // The pause the take has between two phrases keeps its length whatever tempo the phrase before plays at.
     expect(frames(two!.start) - frames(one!.end)).toBe(frames(two!.in) - frames(one!.out));
     expect(frames(three!.start) - frames(two!.end)).toBe(frames(three!.in) - frames(two!.out));
@@ -188,6 +193,34 @@ describe("voiceover.place", () => {
     for (const [index, clip] of written.clips.entries()) {
       expect(Math.abs(clip.start - result.placed[index]!.start)).toBeLessThan(1e-6);
       expect(clip.audio).toEqual({ fadeInMs: 12, fadeOutMs: 12 });
+    }
+  });
+
+  it("counts a sped phrase's end as the engine does, at tempos where rounding whole frames differs", async () => {
+    // start frame 2, 31 frames from in frame 1 at 0.85: 38 by rounding frames, 39 by the engine's clipEnd.
+    const grid = new FrameGrid(FPS);
+    expect(phraseEnd(grid, 2, 1, 32, 0.85)).toBe(39);
+    const nested = async () => 0;
+    for (const speed of [0.85, 0.9, 1.15, 1.25]) {
+      for (let start = 0; start < 60; start += 7) {
+        for (let inFrame = 0; inFrame < 40; inFrame += 3) {
+          for (let length = 1; length < 60; length++) {
+            const clip = { id: "c", asset: "a", start: grid.seconds(start), in: grid.seconds(inFrame), out: grid.seconds(inFrame + length), speed };
+            const engine = Math.max(start + 1, grid.frame(await clipEnd(clip as never, grid, nested)));
+            expect(phraseEnd(grid, start, inFrame, inFrame + length, speed)).toBe(engine);
+          }
+        }
+      }
+    }
+
+    await generate();
+    for (const speed of [0.85, 1.15]) {
+      const result = await place({ replace: true, tempo: { "hook-1": speed, "hook-1.2": speed, "hook-1.3": speed, "hook-2": speed, "hook-2.2": speed, "fix-1": speed, "fix-1.2": speed } });
+      const written = timeline().tracks.find((candidate) => candidate.id === result.track.id)!;
+      if (written.kind !== "audio") throw new Error("not an audio track");
+      for (const [index, clip] of written.clips.entries()) {
+        expect(frames(await clipEnd(clip as never, grid, nested))).toBe(frames(result.placed[index]!.end));
+      }
     }
   });
 

@@ -129,6 +129,15 @@ function occupied(track: Track | undefined, grid: FrameGrid, removed: ReadonlySe
 }
 
 /**
+ * End frame of a phrase as the engine's `clipEnd` counts it: from the stored 3-decimal seconds, snapped to the grid,
+ * at least one frame. Rounding frames directly differs by one frame at some tempos.
+ */
+export function phraseEnd(grid: FrameGrid, start: number, inFrame: number, outFrame: number, speed: number): number {
+  const length = (grid.seconds(outFrame) - grid.seconds(inFrame)) / speed;
+  return Math.max(start + 1, grid.frame(grid.seconds(start) + length));
+}
+
+/**
  * Plan the call: read the script and the takes of its lines, split each take into phrases, find where each goes (given
  * by `at`, after the previous one, or at the track's end) and fit them on whole frames. Writes nothing. Throws
  * `ScriptNotFound`, `InvalidParams` (unknown line or `at` key) or `InvalidOperation` (no take, an unknown marker, overlap,
@@ -234,8 +243,7 @@ export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps:
         anchor = "spacing";
       }
       const speed = tempos.get(line.id)?.get(number) ?? 1;
-      // The clip lasts (out - in) / speed; the engine's overlap check counts it in whole frames, at least one.
-      const end = start + Math.max(1, Math.round((outFrame - inFrame) / speed));
+      const end = phraseEnd(grid, start, inFrame, outFrame, speed);
       if (last && start < last.end) {
         throw invalid(
           `at.${number === 1 ? line.id : `${line.id}.${number}`}`,
