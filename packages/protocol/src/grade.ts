@@ -60,3 +60,62 @@ export const GradeAnalyzeResultSchema = z.object({
 
 /** Result of `grade.analyze`. */
 export type GradeAnalyzeResultShape = z.infer<typeof GradeAnalyzeResultSchema>;
+
+// `grade.compare` (#384, ADR 0031): one frame of a clip under several looks next to a neutral baseline, as one image.
+
+/** Most looks one `grade.compare` renders. */
+export const GRADE_COMPARE_MAX_LOOKS = 16;
+/** Tile width of a `grade.compare` sheet when none is given, px. */
+export const GRADE_COMPARE_DEFAULT_TILE_WIDTH = 480;
+/** Narrowest tile of a `grade.compare` sheet, px. */
+export const GRADE_COMPARE_MIN_TILE_WIDTH = 160;
+/** Widest tile of a `grade.compare` sheet, px: 18 tiles of a vertical film stay under about 5,000 px a side. */
+export const GRADE_COMPARE_MAX_TILE_WIDTH = 960;
+/** Longest look name, characters. */
+export const GRADE_LOOK_NAME_MAX = 40;
+
+/** One candidate of `grade.compare`: a whole grade (the fields of `clip.set` `grade`) and the name its tile shows. */
+export const GradeLookSchema = GradeSchema.extend({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(GRADE_LOOK_NAME_MAX)
+    .optional()
+    .describe(`Label of the tile, at most ${GRADE_LOOK_NAME_MAX} characters, e.g. \`warm\`. Default \`look <n>\`.`),
+}).describe(
+  "A whole grade drawn in place of the clip's own, not merged with it: fields left out are neutral (exposure 0, temperature 0, tint 0, contrast 1, saturation 1, no LUT).",
+);
+
+/** One tile of a `grade.compare` sheet. */
+export const GradeCompareTileSchema = z.object({
+  label: z.string().describe("Text drawn on the tile: its number in reading order and its name, e.g. `3 warm`."),
+  kind: z.enum(["neutral", "current", "look"]).describe("`neutral`: the clip with no grade. `current`: its stored grade. `look`: one of `looks`, in their order."),
+  grade: GradeSchema.nullable().describe("The grade drawn, without the look's name; null for none."),
+  flags: z
+    .string()
+    .describe(
+      "`clip set` flags that give the clip this tile's grade: `--clear-grade` for `neutral`; for a look its fields plus the neutral value of each field the clip's grade sets and the look leaves out; empty when the clip has it already.",
+    ),
+});
+
+/** Result of `grade.compare`. */
+export const GradeCompareResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  clip: z.string().describe("The compared clip."),
+  asset: z.string().describe("Project-relative source file of the clip."),
+  frame: z.int().describe("Timeline frame rendered."),
+  at: z.number().describe("Start of that frame, timeline seconds, 3 decimals."),
+  path: z.string().describe("Absolute path of the PNG written."),
+  width: z.int().describe("Width of the image, px."),
+  height: z.int().describe("Height of the image, px."),
+  columns: z.int().describe("Tiles per row."),
+  rows: z.int().describe("Rows of tiles."),
+  tiles: z.array(GradeCompareTileSchema).describe("In reading order: left to right, then top to bottom."),
+  warnings: z.array(z.string()),
+});
+
+/** Result of `grade.compare`. */
+export type GradeCompareResultShape = z.infer<typeof GradeCompareResultSchema>;
+/** One look of `grade.compare`. */
+export type GradeLook = z.infer<typeof GradeLookSchema>;

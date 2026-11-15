@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `grade.compare`, slice 7 of the colour grade (#384, ADR 0031, epic #451; protocol 144): pick a look by eye. One frame of
+  a media clip (default its middle frame, or `at`) is rendered under up to 16 `looks` (each a whole `clip.set` `grade` plus
+  an optional `name`; fields left out are neutral), next to a neutral baseline and the clip's own grade when it has one, and
+  tiled into one labelled PNG (default `.frameshell/grade/compare-<clip>-<frame>.png`, tiles 160 to 960 px wide, default
+  480). Every tile goes through the `frame` export path on a copy of the loaded timeline with the clip's grade swapped, so
+  layers above, captions and the format are drawn as exported; the timeline is never changed. Each tile's `flags` are the
+  `clip set` flags that give the clip that grade. A look's LUT outside the project, missing or not a 3D `.cube` is
+  refused before rendering (`InvalidParams`). `frameshell grade compare <clip> --look warm:temperature=0.25,saturation=1.1
+  [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]`; MCP `grade_compare` returns the sheet as an
+  image. No built-in looks yet.
 - Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 143): an optional `grain { amount?, size?, seed? }` on media
   and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
   hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame

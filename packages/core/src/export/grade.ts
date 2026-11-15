@@ -55,7 +55,8 @@ export async function gradeFiles(root: string, timeline: Timeline): Promise<Grad
   return { files, contents };
 }
 
-async function readLut(root: string, path: string): Promise<CubeLut> {
+/** The 3D LUT at project-relative `path`; rejects with the reason (outside the project, no such file, not a 3D `.cube`) as the message. */
+export async function readLut(root: string, path: string): Promise<CubeLut> {
   const file = resolve(root, path);
   const inside = relative(root, file);
   if (inside.startsWith("..") || isAbsolute(inside)) throw new Error("it is outside the project.");
