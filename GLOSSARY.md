@@ -213,7 +213,7 @@ _Avoid_: preset, filter
 ## Film finish (ADR 0043)
 
 **Letterbox** (`letterbox`):
-The timeline's black bars over the whole finished picture, keeping a picture of one aspect (2.39, 1.85): above every video track, under the captions, in the primary format only.
+The timeline's black bars over the whole finished picture, keeping a picture of one aspect (2.39, 1.85): above every video track, under the captions. In the primary format, or in a format that has its own (`letterbox set --format`); the other formats show none.
 _Avoid_: bars on a clip, matte (that is a subject's), the fit (a source of another aspect fitted whole into the frame, per layer)
 
 ## Transitions and keyframes (ADR 0018, ADR 0030)

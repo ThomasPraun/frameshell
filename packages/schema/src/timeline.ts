@@ -954,6 +954,23 @@ export const LetterboxSchema: z.ZodType<Letterbox> = z
   })
   .describe("Black letterbox bars over the whole picture (ADR 0043), under the captions; the primary format only. Absent: none.");
 
+/** What a timeline overrides in one format (ADR 0027 decision 14); see {@link TimelineFormatsSchema}. */
+export interface TimelineFormatOverride {
+  letterbox?: Letterbox | undefined;
+}
+
+/**
+ * Timeline-level overrides by format id (ADR 0027 decision 14): in that format of `frameshell.json` the timeline's
+ * `letterbox` is the override's, and a format with none draws no bars. Ignored in the primary format and for a format
+ * the project no longer declares.
+ */
+export const TimelineFormatsSchema: z.ZodType<Record<string, TimelineFormatOverride>> = z
+  .record(FormatIdSchema, z.strictObject({ letterbox: LetterboxSchema.optional().describe("Bars in this format, as the timeline's own `letterbox` in the primary.") }))
+  .describe(
+    "Per-format timeline overrides by format id (ADR 0027): `letterbox` bars in that format (other formats re-block without bars unless listed here). " +
+      "Ignored in the primary format and for a format the project no longer declares. Absent: none.",
+  );
+
 /**
  * Zod model of a timeline file (SPEC §5.3). `revision` guards direct edits
  * (SPEC §6.4); duration is derived, never stored. Checks here need no project
@@ -973,6 +990,7 @@ export const TimelineSchema = z
       .describe("Named points on the timeline clock (ADR 0029), sorted by `at`; labels unique ignoring case. Absent when none."),
     tempo: TempoSchema.optional().describe("The beat grid the timeline follows (ADR 0029): a music clip's measured grid, or a nominal BPM. Absent: no grid."),
     letterbox: LetterboxSchema.optional(),
+    formats: TimelineFormatsSchema.optional(),
   })
   .superRefine((timeline, ctx) => {
     const seen = new Set<string>();

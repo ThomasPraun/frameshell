@@ -120,6 +120,13 @@ export const ReviewSafeZoneSchema = z.object({
   insets: z
     .object({ top: z.int(), right: z.int(), bottom: z.int(), left: z.int() })
     .describe("Pixels of the film's frame each edge's zone covers (the platform's reference numbers scaled to the film's size)."),
+  picture: z
+    .object({ left: z.int(), top: z.int(), width: z.int(), height: z.int() })
+    .optional()
+    .describe(
+      "Only when the timeline's letterbox (ADR 0043) shows bars in this format: the rectangle of the picture inside them, pixels of the film's frame. " +
+        "Graphics and faces are measured inside it (the bars cover what lies in them); captions are drawn over the bars, so they are measured on the whole frame. Absent: the picture is the whole frame.",
+    ),
   sheets: z.array(z.string()).describe("Absolute paths of the `safe` images of this platform."),
   flags: z.array(ReviewSafeFlagSchema).describe("Captions, graphics and faces that cross a zone, by subject, track, clip and zone; empty when none do. Only a timeline's are known: a file has no flags."),
 });

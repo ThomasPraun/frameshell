@@ -132,6 +132,47 @@ describe("formats of a project", () => {
     MEDIA_TIMEOUT,
   );
 
+  it(
+    "draws the letterbox of a format from its own override (ADR 0027 decision 14): none without one, each format's own bars",
+    async () => {
+      const bars = async (path: string, width: number) => ({ top: await topRowMean(path, width) });
+      await expect(conn.request("letterbox.set", { cwd: project, aspect: 2, format: "16x9" })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+      await expect(conn.request("letterbox.set", { cwd: project, aspect: 2, format: "4x5" })).rejects.toMatchObject({ code: ErrorCode.FormatNotFound });
+      const primary = await conn.request("letterbox.set", { cwd: project, aspect: 2.39 });
+      // The primary's bars show in the primary only: 9:16 re-blocks without them.
+      const wide = join(tempDir(), "bars-wide.png");
+      await conn.request("frame", { cwd: project, at: 0.5, out: wide });
+      expect((await bars(wide, 1920)).top).toBeLessThan(5);
+      const plain = join(tempDir(), "bars-plain.png");
+      await conn.request("frame", { cwd: project, at: 0.5, out: plain, projectFormat: "9x16" });
+      expect((await bars(plain, 1080)).top).toBeGreaterThan(20);
+      // A 1:1 picture in the 9:16 frame leaves 420 rows of bar above and below.
+      const set = await conn.request("letterbox.set", { cwd: project, aspect: 1, format: "9x16" });
+      expect(set.warnings).toEqual([]);
+      expect(await conn.request("timeline.show", { cwd: project })).toMatchObject({ letterbox: { aspect: 2.39 }, formats: { "9x16": { letterbox: { aspect: 1 } } } });
+      const tall = join(tempDir(), "bars-tall.png");
+      await conn.request("frame", { cwd: project, at: 0.5, out: tall, projectFormat: "9x16" });
+      expect((await bars(tall, 1080)).top).toBeLessThan(5);
+      const { ffmpeg } = await mediaTools();
+      const rows = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", tall, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+      const rowMean = (row: number) => rows.subarray(row * 1080 * 3, (row + 1) * 1080 * 3).reduce((sum, value) => sum + value, 0) / (1080 * 3);
+      expect(rowMean(419)).toBeLessThan(5);
+      expect(rowMean(420)).toBeGreaterThan(20);
+      expect(rowMean(1499)).toBeGreaterThan(20);
+      expect(rowMean(1500)).toBeLessThan(5);
+      // Revert the 9:16 bars (one value in the inverse patch, `letterbox:9x16`); the primary's stay.
+      await conn.request("revert", { cwd: project, target: set.operation.tx });
+      const reverted = await conn.request("timeline.show", { cwd: project });
+      expect(reverted).not.toHaveProperty("formats");
+      expect(reverted).toMatchObject({ letterbox: { aspect: 2.39 } });
+      const cleared = await conn.request("letterbox.set", { cwd: project, clear: true, format: "9x16" });
+      expect(cleared.warnings).toEqual([expect.stringMatching(/format 9x16 has no letterbox/)]);
+      await conn.request("revert", { cwd: project, target: primary.operation.tx });
+      expect(await conn.request("timeline.show", { cwd: project })).not.toHaveProperty("letterbox");
+    },
+    MEDIA_TIMEOUT,
+  );
+
   it("refuses a preset of another aspect than the format (the format owns the frame)", async () => {
     await expect(conn.request("frame", { cwd: project, at: 0.5, out: join(tempDir(), "x.png"), preset: "vertical-1080x1920" })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,

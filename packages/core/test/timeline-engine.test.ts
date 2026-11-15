@@ -1253,6 +1253,48 @@ describe("letterbox (ADR 0043 slice 1)", () => {
     expect(parseTimeline({ ...base(), letterbox: { aspect: -1 } })).toMatchObject({ ok: false });
   });
 
+  it("letterbox.set with `format` writes that format's override in `formats` and clears it again (ADR 0027 decision 14)", async () => {
+    const formats = [
+      { id: "16x9", width: 1920, height: 1080 },
+      { id: "9x16", width: 1080, height: 1920 },
+      { id: "1x1", width: 1080, height: 1080 },
+    ];
+    const withFormats = context({ formats });
+    const primary = (await apply(base(), "letterbox.set", { aspect: 2.39 }, withFormats)).timeline;
+    const set = await apply(primary, "letterbox.set", { aspect: 1.85, format: "9x16" }, withFormats);
+    expect(set.timeline.letterbox).toEqual({ aspect: 2.39 });
+    expect(set.timeline.formats).toEqual({ "9x16": { letterbox: { aspect: 1.85 } } });
+    expect(set.inverse.args).toEqual({ formatLetterbox: { "9x16": null } });
+    expect(parseTimeline(set.timeline).ok).toBe(true);
+    // Replace one format, add another; each inverse restores exactly its own.
+    const second = await apply(set.timeline, "letterbox.set", { aspect: 1, format: "1x1" }, withFormats);
+    expect(second.timeline.formats).toEqual({ "9x16": { letterbox: { aspect: 1.85 } }, "1x1": { letterbox: { aspect: 1 } } });
+    const replaced = await apply(second.timeline, "letterbox.set", { aspect: 2, format: "9x16" }, withFormats);
+    expect(replaced.inverse.args).toEqual({ formatLetterbox: { "9x16": { aspect: 1.85 } } });
+    expect((await apply(replaced.timeline, "timeline.patch", replaced.inverse.args)).timeline.formats).toEqual(second.timeline.formats);
+    // Undoing the last override removes the `formats` field.
+    expect((await apply(set.timeline, "timeline.patch", set.inverse.args)).timeline).not.toHaveProperty("formats");
+    const cleared = await apply(second.timeline, "letterbox.set", { clear: true, format: "1x1" }, withFormats);
+    expect(cleared.timeline.formats).toEqual({ "9x16": { letterbox: { aspect: 1.85 } } });
+    expect((await apply(cleared.timeline, "letterbox.set", { clear: true, format: "9x16" }, withFormats)).timeline).not.toHaveProperty("formats");
+    expect((await apply(primary, "letterbox.set", { clear: true, format: "9x16" }, withFormats)).warnings).toEqual([expect.stringMatching(/format 9x16 has no letterbox/)]);
+    // The primary's own letterbox is untouched by a format's clear.
+    expect(cleared.timeline.letterbox).toEqual({ aspect: 2.39 });
+  });
+
+  it("letterbox.set with `format` names the primary or an unknown format, and warns when the format already has the aspect", async () => {
+    const formats = [
+      { id: "16x9", width: 1920, height: 1080 },
+      { id: "9x16", width: 1080, height: 1920 },
+    ];
+    const withFormats = context({ formats });
+    expect((await rejection(apply(base(), "letterbox.set", { aspect: 2, format: "16x9" }, withFormats))).code).toBe(ErrorCode.InvalidOperation);
+    expect((await rejection(apply(base(), "letterbox.set", { aspect: 2, format: "4x5" }, withFormats))).code).toBe(ErrorCode.FormatNotFound);
+    expect((await apply(base(), "letterbox.set", { aspect: 9 / 16, format: "9x16" }, withFormats)).warnings).toEqual([expect.stringMatching(/1080x1920\) already has aspect/)]);
+    // The primary-only reminder is for the primary's own bars.
+    expect((await apply(base(), "letterbox.set", { aspect: 1.85, format: "9x16" }, withFormats)).warnings).toEqual([]);
+  });
+
   it("warns when the primary frame already has the aspect, and that other formats show no bars", async () => {
     const formats = [
       { id: "16x9", width: 1920, height: 1080 },

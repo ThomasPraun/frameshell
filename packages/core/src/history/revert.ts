@@ -94,7 +94,7 @@ export function planRevert(current: Timeline, entries: JournalEntry[], target: s
 
 /**
  * Ids of the multicam groups, tracks, clips and markers a patch changes, `tempo` when it replaces the beat grid and
- * `letterbox` when it replaces the bars (each named once, in that order).
+ * `letterbox` when it replaces the bars and `letterbox:<format>` for a format's bars (each named once, in that order).
  */
 export function touchedIds(patch: TimelinePatch): string[] {
   const ids = [
@@ -104,6 +104,7 @@ export function touchedIds(patch: TimelinePatch): string[] {
     ...(patch.markers ?? []).map((entry) => entry.id),
     ...(patch.tempo !== undefined ? ["tempo"] : []),
     ...(patch.letterbox !== undefined ? ["letterbox"] : []),
+    ...Object.keys(patch.formatLetterbox ?? {}).map((id) => `letterbox:${id}`),
   ];
   return [...new Set(ids)];
 }
@@ -226,6 +227,7 @@ function patchKeys(patch: TimelinePatch): string[] {
     ...(patch.markers ?? []).map((entry) => `marker:${entry.id}`),
     ...(patch.tempo !== undefined ? ["tempo"] : []),
     ...(patch.letterbox !== undefined ? ["letterbox"] : []),
+    ...Object.keys(patch.formatLetterbox ?? {}).map((id) => `letterbox:${id}`),
     ...(patch.order ? ["order"] : []),
   ];
 }
@@ -258,6 +260,7 @@ function value(timeline: Timeline, key: string): unknown {
   if (key === "order") return timeline.tracks.map((track) => track.id);
   if (key === "tempo") return timeline.tempo ?? null;
   if (key === "letterbox") return timeline.letterbox ?? null;
+  if (key.startsWith("letterbox:")) return timeline.formats?.[key.slice("letterbox:".length)]?.letterbox ?? null;
   const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
   if (kind === "track") return timeline.tracks.find((track) => track.id === id) ?? null;
   if (kind === "group") return timeline.groups?.find((group) => group.id === id) ?? null;
@@ -288,7 +291,7 @@ function patchRelates(patch: TimelinePatch, key: string, states: Timeline[]): bo
   if (key === "tempo") return followed.some((clip) => (patch.clips ?? []).some((entry) => entry.id === clip));
   if (patch.tempo !== undefined && key.startsWith("clip:") && followed.includes(key.slice("clip:".length))) return true;
   if (key.startsWith("track:")) return patchTracks(patch).has(key.slice("track:".length));
-  if (key === "letterbox" || key.startsWith("group:") || key.startsWith("marker:")) return false;
+  if (key === "letterbox" || key.startsWith("letterbox:") || key.startsWith("group:") || key.startsWith("marker:")) return false;
   const holders = states.map((state) => (value(state, key) as { track: string } | null)?.track).filter((track) => track !== undefined);
   return holders.some((track) => (patch.tracks ?? []).some((entry) => entry.id === track));
 }

@@ -191,7 +191,7 @@ People changes are not timeline operations: review mode does not hold them, `his
 
 | Tool | Does |
 |---|---|
-| `letterbox_set(timeline?, aspect? \| clear?)` | Black bars over the whole finished picture, above every video track and under the captions: `aspect` is the picture's width / height inside them (2.39, 1.85, 1.3333), bars top and bottom when wider than the frame, at the sides when narrower; `clear` removes them. Export and the app's preview draw the same pixels; primary format only. Journaled, revertible, a proposal in review mode; `timeline_show` lists it. |
+| `letterbox_set(timeline?, aspect? \| clear?, format?)` | Black bars over the whole finished picture, above every video track and under the captions: `aspect` is the picture's width / height inside them (2.39, 1.85, 1.3333), bars top and bottom when wider than the frame, at the sides when narrower; `clear` removes them. Export and the app's preview draw the same pixels. Without `format` they are the primary format's, other formats re-block without bars; `format` (a declared format other than the primary) sets or clears the bars in that format only (timeline `formats`, ADR 0027 decision 14). Journaled, revertible, a proposal in review mode; `timeline_show` lists it. |
 
 ## Style (ADR 0028)
 

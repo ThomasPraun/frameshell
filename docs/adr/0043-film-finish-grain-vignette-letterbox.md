@@ -4,7 +4,7 @@ status: accepted
 
 # Film finish: grain and vignette per clip, letterbox per timeline
 
-ADR 0031 decision 10 split grain, vignette and letterbox into their own ticket (#500, epic #451). #500 asked for all three per clip, like `grade`, plus `clip set --grain/--vignette/--letterbox`, inspector rows and a skill rule (never grain on screen recordings or UI). A #384 comment adds that these belong in ffmpeg at export, not in a generated page, and #478 says to build in core. The owner decided on 2026-11-11: option B of the proposed decision on #500, every recommendation accepted (the ten points below). It amends ADR 0031's per-part order and ADR 0027's override keys. It ships in slices; **slices 1 (letterbox), 2 (vignette) and 3 (grain) are built.**
+ADR 0031 decision 10 split grain, vignette and letterbox into their own ticket (#500, epic #451). #500 asked for all three per clip, like `grade`, plus `clip set --grain/--vignette/--letterbox`, inspector rows and a skill rule (never grain on screen recordings or UI). A #384 comment adds that these belong in ffmpeg at export, not in a generated page, and #478 says to build in core. The owner decided on 2026-11-11: option B of the proposed decision on #500, every recommendation accepted (the ten points below). It amends ADR 0031's per-part order and ADR 0027's override keys. It ships in slices; **slices 1 (letterbox), 2 (vignette) and 3 (grain) are built, and slice 4 in part (per-format `letterbox`, `inspect.point` and review); the inspector rows and the timeline control wait for #581 and image projects are not built.**
 
 ## Context (verified in the tree, 2026-11-11)
 
@@ -17,7 +17,7 @@ ADR 0031 decision 10 split grain, vignette and letterbox into their own ticket (
 ## Decision
 
 1. **Letterbox per timeline:** one optional timeline field `letterbox { aspect }` with its own operation (`letterbox.set`), not `clip set --letterbox`. Bars are black: top and bottom when `aspect` is wider than the frame, at the sides when narrower. Bars belong to the output frame: on a clip they would cut a picture-in-picture or vanish under overlays.
-2. **Other formats:** off by default. A per-format `letterbox` override joins ADR 0027 decision 5's key list in a later slice; until then ADR 0027's "re-block, never letterbox" holds there.
+2. **Other formats:** off by default. A per-format `letterbox` override joins ADR 0027 decision 5's key list (ADR 0027 decision 14, built in slice 4); a format without one re-blocks without bars.
 3. **Captions over the bars,** subtitle layout unchanged (a caption placed low reads over the bottom bar).
 4. **Whole timeline only** in v1: no ranges, no animated bars.
 5. **Per-part order:** grade → vignette → grain → transition shape → alpha or matte mask → backdrop (amends ADR 0031's cross decision: the lens darkens before the emulsion adds grain).
@@ -40,7 +40,7 @@ A preset or format of another aspect than the source *fits* a picture into the f
 1. **Letterbox:** timeline field, pure `letterboxBars`, engine operation with inverse and review-mode routing, wire method and `PROTOCOL_VERSION` bump, export `drawbox` on the final video line before the captions (primary format only), preview bars in the `PreviewPanel` overlay under the captions, CLI, skill, golden. Built, see below.
 2. **Vignette per clip:** schema field, `vignetteGain` and its parity test against the export plate, export overlay in the per-piece chain, the preview's per-part offscreen pass, `clip.set vignette`, shot warning, nested-host refusal, CLI `clip set --vignette`, golden. Built, see below.
 3. **Grain per clip:** schema field, `grainSeed`/`grainPhase`, the looped seeded plate and `blend grainmerge`, a framemd5 test that frame N is equal across segment splits, `frame` and the cover frame, the preview PRNG pass and its statistics test, the subject-matte copy keeping the seed, the ADR 0001 frame budget, CLI `clip set --grain`, skill rule, golden, the `--loop` seam warning. Built (the frame budget not measured yet), see below.
-4. Inspector rows for grain and vignette, a timeline letterbox control (en + es, e2e), the per-format `letterbox` override (ADR 0027 decision 5), the letterboxed rectangle in `inspect.point` and review (#457) text checks, image projects.
+4. Inspector rows for grain and vignette, a timeline letterbox control (en + es, e2e), the per-format `letterbox` override (ADR 0027 decision 14), the letterboxed rectangle in `inspect.point` and review (#457) safe-zone checks, image projects. The override, `inspect.point` and review are built (see below); the inspector rows and the control are blocked on #581; image projects are not built.
 
 ## Slice 1 as built
 
@@ -75,6 +75,13 @@ A preset or format of another aspect than the source *fits* a picture into the f
 - **Operation:** `clip.set` `grain` (protocol 143): merged field by field, `{}` turns it on with the defaults, `null` clears; journaled with the clip's inverse. Shared by every format (refused with `format`). Refused on nested timeline clips and audio tracks; skipped on multicam shots with the ADR 0031 effects warning.
 - **CLI:** `clip set --grain <amount>`, `--grain-size`, `--grain-seed` (each merged, each turns it on), `--clear-grain`; MCP `clip_set` follows from the registry. The skill names it footage only: never on screen recordings, UI captures or text.
 - Not in slice 3: inspector rows (slice 4, blocked on #581); the ADR 0001 frame budget of a grained part is not measured; image projects are not refused, and their `frame` export and preview draw it, but nothing is promised there yet.
+
+## Slice 4 as built (per-format letterbox, `inspect.point`, review)
+
+- **Per-format override** (ADR 0027 decision 14, `PROTOCOL_VERSION` 144): `formats: { <id>: { letterbox? } }` on the timeline (`TimelineFormatsSchema`, JSON Schema regenerated; older hosts reject files that carry it). `formatTimeline` (`packages/schema/src/formats.ts`, still the one rewrite for a format) replaces the timeline's `letterbox` with the override's, so a format without one has none and the compiler, `compileFrame` and the preview's `letterboxOverlay` needed no change: export of a format (`render --formats`, `frame --format`) draws the format's bars with the same `drawbox` chain, in its own frame size, before the captions. `letterbox.set` takes `format` (a declared format other than the primary) for set and `clear`; warnings: the frame of that format already has the aspect, and the primary-only reminder now says `--format` sets the others. The inverse patch carries `formatLetterbox` (`{ <id>: Letterbox | null }`, applied by `applyPatch`, diffed by `diffTimelines`); revert and review-mode rebase key it `letterbox:<id>`. `timeline show` lists `formats` and the CLI prints `Letterbox in <id>: 2.39:1`. CLI `letterbox set|clear --format <id>`.
+- **`inspect.point`:** with a letterbox, the result carries `picture` (the rectangle the bars leave, fractions of the frame as `x`/`y`, from `letterboxPicture` in `finish.ts`, the same rows and columns as `letterboxBars`) and `inBar: true` when the point lies in a bar: no clip is seen there (`target` null, no probe of a live page, every layer `paints: false`), because the bars are black over every layer. Without bars both are absent. `inspect.point` works in the primary frame, so it reads the timeline's own `letterbox`.
+- **Review safe-zone sheet:** a `safeZones[]` entry carries `picture` (the rectangle the bars leave in the film's pixels, in the format being reviewed) when the timeline shows bars there. Graphics and faces are measured inside it: their boxes are cut to the picture and one wholly in a bar is dropped (`withinPicture` in `review/safe.ts`), since the bars cover it. Captions are measured on the whole frame, since they are drawn over the bars (decision 3). The zone insets and the shaded sheet are the film's own frame, unchanged.
+- Not in this slice: inspector rows and a timeline control (blocked on #581), image projects.
 
 ## Consequences
 

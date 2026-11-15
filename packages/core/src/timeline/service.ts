@@ -1596,6 +1596,7 @@ export class TimelineService {
       ...(timeline.markers ? { markers: sortedMarkers(timeline) } : {}),
       ...(timeline.tempo ? { tempo: timeline.tempo } : {}),
       ...(timeline.letterbox ? { letterbox: timeline.letterbox } : {}),
+      ...(timeline.formats ? { formats: timeline.formats } : {}),
       problems,
     };
   }

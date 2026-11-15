@@ -20,7 +20,7 @@ import {
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type FormatEntry, type PlatformId, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type Timeline } from "@frameshell/schema";
+import { type FormatEntry, type PlatformId, letterboxPicture, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type Timeline } from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
@@ -56,7 +56,7 @@ import { fileSound, heardClips, timelineSound } from "./sound.js";
 import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
 import { type ClipSpan, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
-import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt } from "./safe.js";
+import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt, withinPicture } from "./safe.js";
 import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
 import { syncMetrics } from "./sync.js";
 
@@ -184,7 +184,9 @@ export class ReviewService {
           const picks = contactPicks(source.fps, range, critical, request.every, MAX_SAFE_TILES);
           // Every track of a project takes the one caption face of its style.
           const metrics = subtitles[0] ? await captionFontMetrics(root, subtitles[0].style.font) : null;
-          const boxes = loaded ? await this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, signal) : [];
+          // The bars of the timeline's letterbox in this format (ADR 0043) cover graphics and faces; captions are drawn over them.
+          const picture = loaded ? letterboxPicture(frame, await flat().then((resolved) => resolved.timeline.letterbox?.aspect, () => undefined)) : null;
+          const boxes = withinPicture(loaded ? await this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, signal) : [], picture);
           for (const platform of safePlatforms) {
             const zone = SAFE_ZONES[platform];
             const insets = filmInsets(zone, frame);
@@ -195,7 +197,7 @@ export class ReviewService {
               shade: { top: insets.top / frame.height, bottom: insets.bottom / frame.height, left: insets.left / frame.width, right: insets.right / frame.width },
               flags: (pick) => subjectsAt(crossing, pick.frame),
             });
-            safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, sheets: paths, flags: safeFlags(crossing, source.fps) });
+            safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, ...(picture ? { picture } : {}), sheets: paths, flags: safeFlags(crossing, source.fps) });
           }
         } else if (kind === "phone") await write("phone", phonePicks(source.fps, range), "phone");
         else if (kind === "seam") {

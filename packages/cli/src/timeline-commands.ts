@@ -268,10 +268,14 @@ mutations print the new revision):
   tempo clear                  Remove the timeline's tempo
   tempo show                   The stored tempo and its grid on the timeline clock: bpm, bars and beats in seconds;
                                says why there is no grid yet (no beats file for the clip)
-  letterbox set <aspect>       Black bars over the whole picture, under the captions, keeping a picture of <aspect>
+  letterbox set <aspect> [--format <id>]
+                               Black bars over the whole picture, under the captions, keeping a picture of <aspect>
                                (2.39, 1.85, 4:3): top and bottom when wider than the frame, at the sides when
-                               narrower. Export and the preview draw the same bars; primary format only
-  letterbox clear              Remove the letterbox
+                               narrower. Export and the preview draw the same bars. Without --format they are the
+                               primary format's; other formats re-block without bars. --format <id> (a format other
+                               than the primary, see format list) sets the bars in that format only
+  letterbox clear [--format <id>]
+                               Remove the letterbox (of that format with --format)
   cut [track…] --from s --to s [--no-snap] [--snap-window s]
                                Remove a timeline range and close the gap on every (or the given) track
   cleanup [--pauses s | --no-pauses] [--breath s] [--retakes] [--min-confidence 0-1] [--skip id…] [--dry-run]
@@ -619,8 +623,8 @@ const ALLOWED: Record<string, string[]> = {
   "tempo set": ["clip", "bpm", "offset", "meter"],
   "tempo clear": [],
   "tempo show": [],
-  "letterbox set": [],
-  "letterbox clear": [],
+  "letterbox set": ["format"],
+  "letterbox clear": ["format"],
   "multicam create": ["name", "group-name", "mic-file", "mic-name", "sound"],
   "multicam gallery": ["name", "group-name", "at", "into", "mic"],
   "multicam offset": [],
@@ -1017,10 +1021,12 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     case "letterbox set":
       method = "letterbox.set";
       params["aspect"] = aspectOf(args[0]!);
+      if (str("format") !== undefined) params["format"] = str("format");
       break;
     case "letterbox clear":
       method = "letterbox.set";
       params["clear"] = true;
+      if (str("format") !== undefined) params["format"] = str("format");
       break;
     case "clip set": {
       method = "clip.set";
@@ -1827,5 +1833,8 @@ function formatTimeline(view: TimelineView): string {
   if (view.markers) lines.push(`Markers: ${view.markers.map((marker) => `${marker.id} ${marker.at} "${marker.label}"`).join(", ")}`);
   if (view.tempo) lines.push(`Tempo: ${Object.entries(view.tempo).map(([key, value]) => `${key} ${value}`).join(", ")} (grid: \`frameshell tempo show\`)`);
   if (view.letterbox) lines.push(`Letterbox: ${Number(view.letterbox.aspect.toFixed(4))}:1`);
+  for (const [id, override] of Object.entries(view.formats ?? {})) {
+    if (override.letterbox) lines.push(`Letterbox in ${id}: ${Number(override.letterbox.aspect.toFixed(4))}:1`);
+  }
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
 }

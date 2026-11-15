@@ -76,6 +76,19 @@ export const InspectedPointSchema = z.object({
     .string()
     .nullable()
     .describe("Why the target's elements are unknown (untrusted project, no adapter, no live page); null otherwise."),
+  picture: z
+    .object({
+      x0: z.number().min(0).max(1).describe("Left edge, fraction of the frame width."),
+      y0: z.number().min(0).max(1).describe("Top edge, fraction of the frame height."),
+      x1: z.number().min(0).max(1).describe("Right edge, fraction of the frame width."),
+      y1: z.number().min(0).max(1).describe("Bottom edge, fraction of the frame height."),
+    })
+    .optional()
+    .describe("Only when the timeline's letterbox (ADR 0043) shows bars: the rectangle of the picture inside them, fractions of the frame, as `x`/`y`; absent: the picture is the whole frame."),
+  inBar: z
+    .literal(true)
+    .optional()
+    .describe("Present when the point lies in a letterbox bar: black is painted there over every layer (`paints` is false for all), `target` is null."),
   segment: SegmentedPointSchema.optional().describe("Masks of the part of the photo under the point; only when segmenting was asked and possible."),
   segmentUnavailable: z.string().optional().describe("Why nothing was segmented although it was asked: `not an image project`, `not a still image` or `black`."),
 });

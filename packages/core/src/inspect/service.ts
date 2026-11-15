@@ -14,7 +14,7 @@ import {
   type SegmentedPoint,
   markGenerated,
 } from "@frameshell/protocol";
-import { type AnyClip, type Size, type Timeline, isShotClip, isSubjectClip, layerRect, placementAt, programGroup, shotLayers, showsPicture } from "@frameshell/schema";
+import { type AnyClip, type Size, type Timeline, isShotClip, isSubjectClip, layerRect, letterboxPicture, placementAt, programGroup, shotLayers, showsPicture } from "@frameshell/schema";
 import type { InstallProgress } from "../binaries/manager.js";
 import { writeContext } from "../context.js";
 import { encodeGrayPng } from "../segment/png.js";
@@ -100,9 +100,25 @@ export class InspectService {
     const hits = await this.#hits(root, timeline, fps, frame, resolution, pixel);
     const at = frame / fps;
     const result: InspectedPoint = { x: params.x, y: params.y, at, layers: [], target: null, elements: [], unavailable: null };
+    // The bars are black over every layer (ADR 0043): a point in one sees no clip, and the picture is what the bars leave.
+    const picture = letterboxPicture(resolution, timeline.letterbox?.aspect);
+    const inBar = picture !== null && (pixel.x < picture.left || pixel.x >= picture.left + picture.width || pixel.y < picture.top || pixel.y >= picture.top + picture.height);
+    if (picture) {
+      const round = (value: number) => Math.round(value * 1e4) / 1e4;
+      result.picture = {
+        x0: round(picture.left / resolution.width),
+        y0: round(picture.top / resolution.height),
+        x1: round((picture.left + picture.width) / resolution.width),
+        y1: round((picture.top + picture.height) / resolution.height),
+      };
+    }
+    if (inBar) {
+      result.inBar = true;
+      for (const hit of hits) hit.paints = false;
+    }
     let chrome: Chrome | null = null;
     try {
-      for (const hit of hits) {
+      for (const hit of inBar ? [] : hits) {
         if (!hit.generated) {
           if (hit.paints) {
             result.target = hit.clip.id;

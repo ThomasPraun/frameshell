@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Letterbox per format, slice 4 of #500 (ADR 0043 and ADR 0027 decision 14, epic #451; protocol 144): `letterbox set <aspect>
+  --format 9x16` (and `letterbox clear --format`; daemon and MCP `letterbox.set` `format`) gives one format its own black
+  bars, stored in the timeline's `formats`; a format without an entry still draws none, and export, `frame` and the
+  preview of that format draw them like the primary's. `inspect.point` reports `picture`, the rectangle the bars leave, and
+  `inBar` when the point lies in a bar (nothing is seen there), and the `safe` sheet of `review` gives `safeZones[].picture`
+  and measures graphics and faces inside it, since the bars cover what lies in them. `timeline show` lists the bars per
+  format. Inspector rows and a timeline control are still to come (#581).
 - Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 143): an optional `grain { amount?, size?, seed? }` on media
   and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
   hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame

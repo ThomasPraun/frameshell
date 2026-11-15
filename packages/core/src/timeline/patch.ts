@@ -1,11 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import type { TimelinePatch } from "@frameshell/protocol";
-import type { AnyClip, AnyClipTrack, Marker, MulticamGroup, Timeline, Track } from "@frameshell/schema";
+import type { AnyClip, AnyClipTrack, Letterbox, Marker, MulticamGroup, Timeline, Track } from "@frameshell/schema";
 
 /**
  * Patch turning `from` into `to`, at clip granularity: whole tracks only when
  * a track appears, disappears or its own fields change; whole multicam groups
- * and markers; the timeline's `tempo` and `letterbox` each as one value. Diffing makes every operation's inverse correct by construction
+ * and markers; the timeline's `tempo` and `letterbox` each as one value, and each format's letterbox override as one value. Diffing makes every operation's inverse correct by construction
  * (`diff(after, before)`).
  */
 export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
@@ -45,6 +45,13 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
   const patch: TimelinePatch = {};
   if (!isDeepStrictEqual(from.tempo, to.tempo)) patch.tempo = to.tempo ? structuredClone(to.tempo) : null;
   if (!isDeepStrictEqual(from.letterbox, to.letterbox)) patch.letterbox = to.letterbox ? structuredClone(to.letterbox) : null;
+  const formatLetterbox: Record<string, Letterbox | null> = {};
+  for (const id of new Set([...Object.keys(from.formats ?? {}), ...Object.keys(to.formats ?? {})])) {
+    const before = from.formats?.[id]?.letterbox;
+    const after = to.formats?.[id]?.letterbox;
+    if (!isDeepStrictEqual(before, after)) formatLetterbox[id] = after ? structuredClone(after) : null;
+  }
+  if (Object.keys(formatLetterbox).length > 0) patch.formatLetterbox = formatLetterbox;
   if (markers.length > 0) patch.markers = markers;
   if (groups.length > 0) patch.groups = groups;
   if (tracks.length > 0) patch.tracks = tracks;
@@ -57,7 +64,7 @@ export function diffTimelines(from: Timeline, to: Timeline): TimelinePatch {
 
 /** True when `patch` changes nothing. */
 export function isEmptyPatch(patch: TimelinePatch): boolean {
-  return patch.tempo === undefined && patch.letterbox === undefined && !patch.markers && !patch.groups && !patch.tracks && !patch.clips && !patch.order;
+  return patch.tempo === undefined && patch.letterbox === undefined && patch.formatLetterbox === undefined && !patch.markers && !patch.groups && !patch.tracks && !patch.clips && !patch.order;
 }
 
 /**
@@ -74,6 +81,15 @@ export function applyPatch(timeline: Timeline, patch: TimelinePatch): Timeline {
   else if (patch.tempo) next.tempo = structuredClone(patch.tempo);
   if (patch.letterbox === null) delete next.letterbox;
   else if (patch.letterbox) next.letterbox = structuredClone(patch.letterbox);
+  for (const [id, letterbox] of Object.entries(patch.formatLetterbox ?? {})) {
+    const formats = next.formats ?? {};
+    if (letterbox === null) delete formats[id]?.letterbox;
+    else formats[id] = { ...formats[id], letterbox: structuredClone(letterbox) };
+    // An override with nothing in it is not kept, and the field goes with the last one.
+    if (formats[id] && Object.keys(formats[id]).length === 0) delete formats[id];
+    if (Object.keys(formats).length > 0) next.formats = formats;
+    else delete next.formats;
+  }
   if (patch.groups) {
     const groups: MulticamGroup[] = next.groups ?? [];
     for (const { id, group } of patch.groups) {

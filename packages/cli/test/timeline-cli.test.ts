@@ -718,4 +718,27 @@ describe("per-format overrides (ADR 0027)", () => {
       frameshell(["format", "remove", "9x16"]);
     }
   });
+
+  it("letterbox set and clear with --format write the timeline's `formats` override (ADR 0027 decision 14)", () => {
+    expect(frameshell(["format", "add", "9x16"]).code).toBe(0);
+    try {
+      expect(frameshell(["letterbox", "set", "2.39"]).code).toBe(0);
+      const set = json<{ operation: { id: string } }>(["letterbox", "set", "1:1", "--format", "9x16"]);
+      expect(onDisk()).toMatchObject({ letterbox: { aspect: 2.39 }, formats: { "9x16": { letterbox: { aspect: 1 } } } });
+      const shown = frameshell(["timeline", "show"]).stdout;
+      expect(shown).toMatch(/^Letterbox: 2.39:1$/m);
+      expect(shown).toMatch(/^Letterbox in 9x16: 1:1$/m);
+      expect(frameshell(["letterbox", "set", "2", "--format", "4x5"]).stderr).toMatch(/no format "4x5"/);
+      expect(frameshell(["letterbox", "set", "2", "--format", "16x9"]).stderr).toMatch(/primary format/);
+      expect(frameshell(["revert", set.operation.id]).code).toBe(0);
+      expect(onDisk()).not.toHaveProperty("formats");
+      expect(frameshell(["letterbox", "set", "1.85", "--format", "9x16"]).code).toBe(0);
+      expect(frameshell(["letterbox", "clear", "--format", "9x16"]).code).toBe(0);
+      expect(onDisk()).not.toHaveProperty("formats");
+      expect(onDisk().letterbox).toEqual({ aspect: 2.39 });
+      expect(frameshell(["letterbox", "clear"]).code).toBe(0);
+    } finally {
+      frameshell(["format", "remove", "9x16"]);
+    }
+  }, 120_000);
 });
