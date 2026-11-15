@@ -366,18 +366,19 @@ export const MatteStateSchema = z.object({
   error: z.string().nullable().describe("Why the matte could not be made; null otherwise."),
 });
 
-/** The final render of a generated clip that has two (ADR 0041 decision 11): its own cache entry and state. */
+/** The final render of a generated clip that has two (ADR 0041 decision 11, ADR 0035): its own cache entry and state. */
 export const ClipFinalRenderSchema = z.object({
   state: z
     .enum(["ready", "waiting", "queued", "rendering", "failed"])
     .describe(
       "`ready`: `file` holds it; the preview plays it instead of the draft. `waiting`: it is queued once the draft render is " +
-        "ready (a draft that failed must be fixed first). `queued` / `rendering`: a `clip` job is on it (`job`, `progress`), " +
+        "ready (a draft that failed must be fixed first); a plugin's own final (Blender's Cycles render) waits until a `render` with " +
+        "`quality: \"final\"` or no quality asks for it. `queued` / `rendering`: a `clip` job is on it (`job`, `progress`), " +
         "in the background unless an export or `frame` waits for it. `failed`: see `error`; final and untiered exports retry " +
         "it, except when the plugin refused it (motion blur on HDR content or shader transitions), where they use the draft " +
         "render with a warning.",
     ),
-  key: z.string().describe("Cache key: the draft's inputs plus the clip's `motionBlur` with its defaults filled in."),
+  key: z.string().describe("Cache key: the draft's inputs plus the clip's `motionBlur` with its defaults filled in, or plus the final tier of a plugin with finals."),
   file: z.string().nullable().describe("Project-relative cached render, `.frameshell/cache/clips/<key>.webm` or `.mp4`; null until ready."),
   hasAlpha: z.boolean().nullable().describe("True when `file` carries alpha; null until ready."),
   width: z.int().nullable().describe("Rendered width in pixels; null until ready."),
@@ -430,7 +431,10 @@ export const ClipRenderSchema = z.object({
     "Present when the clip keeps two renders (ADR 0041): one with `motionBlur`, on a plugin that applies it. The fields above " +
       "are then the draft render, sharp and rendered first (live preview, `render` with `quality: \"draft\"`), and `final` " +
       "the blurred one, queued after it (about `samples` times as long): the preview swaps it in once ready, and `render` " +
-      "with `quality: \"final\"` or no quality, and `frame`, wait for it. Absent: the clip has one render.",
+      "with `quality: \"final\"` or no quality, and `frame`, wait for it. Also present for a clip whose plugin renders finals " +
+      "(ADR 0035, Blender: EEVEE draft, Cycles final): its final is rendered only when `render` with `quality: \"final\"` or no " +
+      "quality needs it (over 5 minutes estimated asks for `yes`); `frame` and `review` use it when ready, else the draft with a " +
+      "warning. Absent: the clip has one render.",
   ),
 });
 

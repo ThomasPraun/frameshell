@@ -21,6 +21,8 @@ export interface ClipKeyInput {
   motionBlur?: ResolvedMotionBlur;
   /** The timeline's beats and markers inside the clip (ADR 0029 decision 8), for a clip that asks for them; absent otherwise. */
   timing?: RenderTiming;
+  /** True for the final render of an adapter with finals (ADR 0035); absent for its draft and for other adapters. */
+  final?: true;
 }
 
 /**
@@ -46,6 +48,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     motionBlur: input.motionBlur,
     // Absent drops out like `style`: only clips that ask for timing re-render when the music or a marker moves.
     timing: input.timing,
+    // Absent drops out like `style`: a draft keeps the key the clip had before its adapter rendered finals.
+    final: input.final,
   });
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
 }

@@ -9,6 +9,8 @@
 // `ctx.warn` when the render is blurred.
 // `beat-card` asks for the card's { timing } kinds (ADR 0029 decision 8); a card's { requireTiming } fails the render
 // unless the timing it got is that JSON, and its live page sets `window.cardTiming` to what it got.
+// `final-card` renders finals (ADR 0035): its final render (`ctx.tier` "final") paints { finalColor } and waits
+// { finalDelayMs } more; `finals.estimate` answers the card's { estimateSeconds } (default 1), or throws with { noEstimate }.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -46,6 +48,7 @@ export function activate(api) {
       const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
       const blurred = ctx.motionBlur !== undefined;
+      const final = ctx.tier === "final";
       if (blurred && card.refuseBlur) throw Object.assign(new Error(`card ${clip.source} cannot be motion-blurred`), { code: "MOTION_BLUR_REFUSED" });
       if (blurred && card.warn) ctx.warn?.(card.warn);
       if (blurred && card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
@@ -53,7 +56,7 @@ export function activate(api) {
       if (card.requireTiming && JSON.stringify(ctx.timing) !== JSON.stringify(card.requireTiming)) throw new Error(`card ${clip.source} got timing ${JSON.stringify(ctx.timing)}`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
-        await new Promise((resolve) => setTimeout(resolve, ((card.delayMs ?? 0) + (blurred ? (card.blurDelayMs ?? 0) : 0)) / steps));
+        await new Promise((resolve) => setTimeout(resolve, ((card.delayMs ?? 0) + (blurred ? (card.blurDelayMs ?? 0) : 0) + (final ? (card.finalDelayMs ?? 0) : 0)) / steps));
         if (ctx.signal.aborted) throw new Error("aborted");
         ctx.progress({ fraction: step / (steps + 1), message: "Painting" });
       }
@@ -61,7 +64,7 @@ export function activate(api) {
       const file = join(ctx.outDir, "card.webm");
       const size = `${ctx.width}x${ctx.height}`;
       const alpha = card.alpha ?? 1;
-      const color = (blurred ? card.blurColor : undefined) ?? card.color ?? "white";
+      const color = (final ? card.finalColor : undefined) ?? (blurred ? card.blurColor : undefined) ?? card.color ?? "white";
       await new Promise((resolve, reject) =>
         execFile(
           ffmpeg,
@@ -95,6 +98,18 @@ export function activate(api) {
   api.registerClipType(card);
   api.registerClipType({ ...card, type: "token-card", styleTokens: true });
   api.registerClipType({ ...card, type: "blur-card", motionBlur: true });
+  api.registerClipType({
+    ...card,
+    type: "final-card",
+    finals: {
+      async estimate(clip, ctx) {
+        const card = await readCard(clip);
+        if (card.noEstimate) throw new Error("no estimate");
+        if (ctx.projectDir !== project || !(ctx.width > 0 && ctx.height > 0 && ctx.fps > 0)) throw new Error("estimate got no format");
+        return card.estimateSeconds ?? 1;
+      },
+    },
+  });
   api.registerClipType({
     ...card,
     type: "beat-card",

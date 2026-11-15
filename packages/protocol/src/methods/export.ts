@@ -115,7 +115,11 @@ export const exportMethods = {
       "(16:9 is 1200x675, 9:16 is 675x1200, never scaled up), at most 30 fps (24 and 25 keep their rate), one palette over the whole file with " +
       "bayer dither, ~4 centisecond frame delays. A GIF always has the loop rules (refused with `cover`, the black-end and cycle warnings, the " +
       "repeated-last-frame warning on the job) and ignores `quality` (a warning says so). More than 350 output frames fails with InvalidOperation " +
-      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`.",
+      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`. " +
+      "Finals (ADR 0035): a generated clip whose plugin renders finals (Blender: EEVEE draft, Cycles final) keeps both; `quality: \"draft\"` " +
+      "exports its draft with a warning per clip, while `final` or no quality renders its missing final first and waits for it. When the " +
+      "missing finals are estimated over 5 minutes in all (or a plugin cannot say), nothing is queued: it fails with ConfirmationRequired " +
+      "(`data.finals` lists `{ clip, type, format, seconds }`, `data.seconds` the total) until called again with `yes: true` after the person agreed.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -148,6 +152,13 @@ export const exportMethods = {
         .describe(
           "Export a file meant to repeat (title loops, banners): frame 0 to the last frame, 2 ms half-sine audio fades at both ends of " +
             "MP4 and MOV, warnings for a broken cycle, black ends, and a last frame that repeats frame 0. Refused with `cover`. Default false.",
+        ),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "The person agreed to wait for the final renders of generated clips (Blender's Cycles finals) this export makes when they " +
+            "are estimated over 5 minutes in all. Never set it without their explicit agreement. Default false.",
         ),
     }),
     result: z.object({

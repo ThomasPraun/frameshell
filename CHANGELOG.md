@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Blender finals, slice 2 of #482 (ADR 0035 as amended by ADR 0041 decision 11, epic #451; protocol 152): every `blender`
+  clip keeps two renders. The draft (EEVEE, or Workbench) renders in the background for the preview and draft exports.
+  The final (Cycles: 80 samples, adaptive threshold 0.02, OpenImageDenoise, fixed seed, 6 bounces, no caustics,
+  persistent data, the first GPU backend Blender finds) is rendered only when a `render` with `quality: "final"` or no
+  quality needs it, and the export waits for it. `clip.renders` shows it as `final`, `waiting` until then. `render
+  --quality draft` adds a warning per clip exported from its draft. When the missing finals are estimated over 5 minutes
+  in all, `render` fails with `ConfirmationRequired` (`data.finals` lists each clip's estimate, `data.seconds` the total)
+  and queues nothing, until it is called again with `yes: true` (CLI `render --yes`, MCP `render` `yes`). Estimates are
+  frames x megapixels x the rate that `.blend`'s last final took on this machine (`.frameshell/blender/finals.json`),
+  else the project's last, else 5 s. `frame` and `review` use a cached final and otherwise the draft, with a warning;
+  they never start a final. Plugin API (additive, `apiVersion` stays 1): `ClipAdapter.finals` with `estimate`, and
+  `RenderContext.tier`; a final's key adds `final: true`, so draft keys are unchanged. Tests use the stand-in Blender and
+  a `final-card` fixture adapter; the opt-in real test renders a Cycles final.
+
 - Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 151): `voiceover place
   --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
   times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499
@@ -1071,6 +1085,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hyperframes update` command.
 
 ### Changed
+
+- The `blender` clip's `quality` prop is gone (owner decision on #501): props are `scene` and `camera`, and a `quality`
+  prop is refused with how to choose draft or final at export.
 
 - `brand import-figma` sanitises the folder in a worker thread (#467): a synthetic 13 MB frame took 4.7 s on a loaded
   host, long enough to stall every other daemon call.

@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 151;
+export const PROTOCOL_VERSION = 152;
 
 export {
   type MethodSpec,
@@ -717,8 +717,10 @@ export const ErrorCode = {
   /** data: `{ provider, line, details, written: string[] }`: the provider failed on line `line`; `written` lists the takes kept. */
   SpeechFailed: -32047,
   /**
-   * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`: a paid generation
-   * waits for the person to confirm its cost; call again with `yes` (CLI `--yes`) and the `confirmation` token only once they did.
+   * Something waits for the person to confirm it; call again with `yes` (CLI `--yes`) only once they did. `voiceover.generate`
+   * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`, a paid generation
+   * (pass the `confirmation` token too). `render` data: `{ finals: { clip, type, format, seconds }[], seconds, limit, hint }`,
+   * final renders of generated clips estimated over `limit` seconds in all (`seconds` null when a plugin could not say).
    */
   ConfirmationRequired: -32048,
   /**

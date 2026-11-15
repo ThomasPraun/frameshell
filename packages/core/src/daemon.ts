@@ -700,6 +700,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     clips: {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
       ensure: (dir, timeline, options) => clips.ensure(clipRoot(dir), timeline, options),
+      finals: (dir, timeline, size) => clips.finals(clipRoot(dir), timeline, size),
     },
     audioFx,
     mattes: {
@@ -1507,8 +1508,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return changeConfig(dir, caller, "project", (author, tx) => formats.remove(dir, id, author, tx));
     },
-    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
-      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
+    render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop, yes }) =>
+      exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop, yes }),
     "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, review, dryRun }) =>
       batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, review, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {

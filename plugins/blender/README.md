@@ -9,7 +9,7 @@ frameshell plugin install @frameshell/blender
 frameshell clip add <track> --type blender --source scenes/intro.blend --start 0 --duration 4
 ```
 
-`source` is a `.blend` inside the project. Optional `props`: `scene` and `camera` (default: the file's current scene and its active camera) and `quality` (`draft`, the only one in this version). The frame range is the clip's own `in` and duration, counted from the scene's first frame at the project's frame rate: a scene at another frame rate is refused with the fix, never remapped. Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Usage for agents: [`skills/blender/SKILL.md`](skills/blender/SKILL.md).
+`source` is a `.blend` inside the project. Optional `props`: `scene` and `camera` (default: the file's current scene and its active camera). Each clip has a draft render (EEVEE, or Workbench) for the preview and draft exports, and a final one (Cycles) that a final export renders and waits for, after asking when the finals are estimated over 5 minutes. The frame range is the clip's own `in` and duration, counted from the scene's first frame at the project's frame rate: a scene at another frame rate is refused with the fix, never remapped. Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Usage for agents: [`skills/blender/SKILL.md`](skills/blender/SKILL.md).
 
 ## Your Blender, your licence
 

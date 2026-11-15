@@ -51,7 +51,7 @@ if (first + request.frames - 1 > (model.frameEnd ?? 250)) refuse("range", { scen
 writeFileSync(join(here, "pid"), String(process.pid));
 mkdirSync(request.outDir, { recursive: true });
 let hung = false;
-emit({ event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
+emit(request.quality === "final" ? { event: "start", frameStart: first, frames: request.frames, engine: "CYCLES", device: "CPU" } : { event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
 for (let index = 0; index < request.frames; index++) {
   print(`Fra:${first + index} Mem:10.00M (Peak 10.00M) | Time:00:00.01 | Rendering`);
   if (config.crash && index === 1) {

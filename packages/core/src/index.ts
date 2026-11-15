@@ -364,6 +364,7 @@ export {
   type ClipRendererOptions,
   type ClipEnsureOptions,
   type ClipTier,
+  type FinalRenderState,
   type RegisteredClipType,
   type RenderProbe,
   type RenderedClip,

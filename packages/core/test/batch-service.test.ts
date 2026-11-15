@@ -55,6 +55,7 @@ function service(options: { transcribed?: readonly string[]; review?: BatchServi
       return {
         result,
         provenance: [],
+        finals: [],
         start: () =>
           ({
             ...result,
