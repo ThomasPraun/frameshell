@@ -59,7 +59,7 @@ for (let index = 0; index < request.frames; index++) {
     process.exit(1);
   }
   if (!(config.skipLast && index === request.frames - 1)) writeFileSync(join(request.outDir, `frame_${String(index).padStart(6, "0")}.png`), png(request.width, request.height));
-  emit({ event: "frame", index });
+  emit({ event: "frame", index, seconds: config.frameSeconds?.[index] ?? 0.05 });
   if (config.hangAfter === index + 1) {
     // Never finishes, as a long final render: only a kill ends it.
     setInterval(() => {}, 1000);

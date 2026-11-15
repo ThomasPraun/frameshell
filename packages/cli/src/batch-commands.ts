@@ -3,7 +3,7 @@ import { type BatchEntry, BatchManifestSchema, type BatchRenderResult } from "@f
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `batch` (ADR 0040), in `frameshell --help`. */
-export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--review] [--dry-run]
+export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--review] [--dry-run] [--yes]
                                Render variants of a template timeline from data rows: each row sets clip props or swaps
                                assets in memory (never under timelines/), every row x format is validated first, then the
                                rows render one at a time into exports/<batch name>/ with manifest.json. --dry-run checks only.
@@ -11,11 +11,14 @@ export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,
                                the manifest lists as not done (failed, canceled, or left running by a stopped daemon).
                                A row whose renders are all done with the files in place is skipped unless --force.
                                --review: review each rendered file (metrics only) and record pass/warn/fail in manifest.json
+                               Blender clips (and other plugins with finals): unless the batch quality is draft, the rows
+                               render their finals first. Over 5 minutes estimated for all rows: refused until --yes,
+                               which you pass only after the person agreed to wait
 `;
 
 /** Flags `batch` takes besides the global ones. */
 export const BATCH_FLAGS: Record<string, readonly string[]> = {
-  batch: ["out", "formats", "rows", "failed", "force", "review", "dry-run"],
+  batch: ["out", "formats", "rows", "failed", "force", "review", "dry-run", "yes"],
 };
 
 /** A parsed `batch` command. */
@@ -30,12 +33,14 @@ export interface BatchInvocation {
   force: boolean;
   review: boolean;
   dryRun: boolean;
+  /** The person agreed to wait for the final renders the rows make (ADR 0035). */
+  yes: boolean;
 }
 
 /** Parse `batch <file> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
 export function parseBatch(
   rest: string[],
-  options: { out?: string | undefined; formats?: string | undefined; rows?: string | undefined; failed: boolean; force?: boolean | undefined; review?: boolean | undefined; "dry-run": boolean },
+  options: { out?: string | undefined; formats?: string | undefined; rows?: string | undefined; failed: boolean; force?: boolean | undefined; review?: boolean | undefined; "dry-run": boolean; yes?: boolean | undefined },
 ): BatchInvocation | null {
   if (rest.length !== 1) return null;
   const formats = list(options.formats);
@@ -52,6 +57,7 @@ export function parseBatch(
     force: options.force === true,
     review: options.review === true,
     dryRun: options["dry-run"],
+    yes: options.yes === true,
   };
 }
 

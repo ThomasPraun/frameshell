@@ -12,6 +12,7 @@
 import json
 import os
 import sys
+import time
 
 import bpy
 
@@ -154,8 +155,9 @@ def main():
     for index in range(frames):
         scene.frame_set(first + index)
         render.filepath = os.path.join(out_dir, "frame_%06d" % index)
+        started = time.monotonic()
         bpy.ops.render.render(write_still=True, scene=scene.name)
-        emit(event="frame", index=index)
+        emit(event="frame", index=index, seconds=round(time.monotonic() - started, 4))
 
 
 main()

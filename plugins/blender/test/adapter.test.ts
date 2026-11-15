@@ -318,6 +318,19 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(other).toBeCloseTo(10 + 20 * measured.last, 3);
     });
 
+    it("measure the rate from the frames after the first, which also pays for start-up and kernel compiles", async () => {
+      // 5 frames at 64x36: a 600 s first frame (Metal kernels), then 2 s each.
+      stub.configure({ frameSeconds: [600, 2, 2, 2, 2] });
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "final" }).ctx);
+      const measured = JSON.parse(readFileSync(join(project, ".frameshell", "blender", "finals.json"), "utf8")) as { sources: Record<string, number> };
+      expect(measured.sources[SOURCE]).toBeCloseTo(2 / ((64 * 36) / 1e6), 2);
+    });
+
+    it("do not record a final of one frame, whose time is mostly start-up", async () => {
+      await adapter().render(clip({ duration: 0.1 }), renderContext(project, stub.path, { tier: "final" }).ctx);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+    });
+
     it("do not measure drafts, and never estimate a clip without a .blend source", async () => {
       await adapter().render(clip(), renderContext(project, stub.path, { tier: "draft" }).ctx);
       expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);

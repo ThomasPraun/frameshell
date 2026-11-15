@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type BatchManifest, ErrorCode, type RenderResult, type ReviewResult } from "@frameshell/protocol";
@@ -6,7 +6,7 @@ import type { Timeline } from "@frameshell/schema";
 import { BatchService, type BatchServiceOptions } from "../src/batch/service.js";
 import type { ReviewRequest } from "../src/review/service.js";
 import { rowVariant } from "../src/batch/variant.js";
-import type { PlannedRender, RenderRequest } from "../src/export/service.js";
+import type { DueFinal, PlannedRender, RenderRequest } from "../src/export/service.js";
 import { JobQueue } from "../src/jobs/queue.js";
 import { tempDir } from "./helpers.js";
 
@@ -33,7 +33,7 @@ afterEach(async () => {
   await queue?.close();
 });
 
-function service(options: { transcribed?: readonly string[]; review?: BatchServiceOptions["review"] } = {}): BatchService {
+function service(options: { transcribed?: readonly string[]; review?: BatchServiceOptions["review"]; finals?: DueFinal[] } = {}): BatchService {
   queue = new JobQueue();
   return new BatchService({
     jobs: queue,
@@ -55,7 +55,7 @@ function service(options: { transcribed?: readonly string[]; review?: BatchServi
       return {
         result,
         provenance: [],
-        finals: [],
+        finals: options.finals ?? [],
         start: () =>
           ({
             ...result,
@@ -154,6 +154,28 @@ describe("BatchService", () => {
     expect(batches.active(root)).toBe(true);
     finishers.shift()!();
     await until(() => !batches.active(root));
+  });
+
+  it("asks before any row queues when the finals of every row are estimated over 5 minutes in all (ADR 0035)", async () => {
+    const root = tempDir();
+    const file = batchFile(root, { rows: [{ id: "es", voice: "assets/vo-es.wav" }, { id: "fr", voice: "assets/vo-fr.wav" }] });
+    const out = join(root, "deliver");
+    // 200 s per row: each row alone is under the limit, the batch is not.
+    const batches = service({ finals: [{ clip: "c_3d", type: "blender", format: "1x1", seconds: 200 }] });
+    await expect(batches.render(root, root, { file, out, failed: false, force: false, dryRun: false })).rejects.toMatchObject({
+      code: ErrorCode.ConfirmationRequired,
+      message: expect.stringContaining("This batch renders the final renders of 2 generated clips first, estimated at about 6.7 min"),
+      data: { seconds: 400, limit: 300, finals: [{ clip: "c_3d", row: "es", seconds: 200 }, { clip: "c_3d", row: "fr", seconds: 200 }] },
+    });
+    expect(existsSync(join(out, "manifest.json"))).toBe(false);
+    expect(queue.list()).toEqual([]);
+    // A dry run only plans; `yes` is the person's agreement.
+    expect((await batches.render(root, root, { file, out, failed: false, force: false, dryRun: true })).dryRun).toBe(true);
+    const result = await batches.render(root, root, { file, out, failed: false, force: false, dryRun: false, yes: true });
+    expect(result.jobs).toHaveLength(1);
+    await finishNext();
+    await finishNext();
+    await manifestDone(out);
   });
 
   const manifestOf = (out: string): BatchManifest => JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as BatchManifest;

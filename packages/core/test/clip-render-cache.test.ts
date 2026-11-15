@@ -763,7 +763,7 @@ describe("finals of generated clips", () => {
     async () => {
       const quick = await add("quick", 0);
       const info = await until(quick, (state) => state.state === "ready");
-      expect(info.final).toMatchObject({ state: "waiting", file: null, job: null, refused: false });
+      expect(info.final).toMatchObject({ state: "waiting", file: null, job: null, refused: false, onDemand: true });
       expect(info.final!.key).not.toBe(info.key);
       await idle();
       await new Promise((resolve) => setTimeout(resolve, 400));

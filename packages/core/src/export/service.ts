@@ -193,6 +193,8 @@ export interface DueFinal {
   format: string;
   /** Estimated seconds; null when the plugin could not say. */
   seconds: number | null;
+  /** Batch row (ADR 0040) whose render makes it; absent for a plain `render`. */
+  row?: string;
 }
 
 /** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
@@ -848,32 +850,38 @@ function draftWarning(final: FinalRenderState): string {
 }
 
 /**
- * Throws ConfirmationRequired when the final renders an export would make are estimated over
+ * Throws ConfirmationRequired when the final renders an export (or a batch, `what`) would make are estimated over
  * {@link FINAL_CONFIRM_SECONDS} in all, or a plugin could not estimate one (ADR 0035 decision 4).
  */
-function confirmFinals(due: readonly DueFinal[]): void {
+export function confirmFinals(due: readonly DueFinal[], what = { subject: "This export", draft: "export with quality draft" }): void {
   if (due.length === 0) return;
   const known = due.every((final) => final.seconds !== null);
   const seconds = due.reduce((sum, final) => sum + (final.seconds ?? 0), 0);
   if (known && seconds <= FINAL_CONFIRM_SECONDS) return;
+  const formats = due.some((other) => other.format !== due[0]!.format);
   const each = due
-    .map((final) => `${final.type} clip ${final.clip}${due.some((other) => other.format !== final.format) ? ` [${final.format}]` : ""} ${final.seconds === null ? "unknown" : about(final.seconds)}`)
+    .map((final) => {
+      const where = [final.row, formats ? final.format : undefined].filter((part) => part !== undefined).join(" ");
+      return `${final.type} clip ${final.clip}${where ? ` [${where}]` : ""} ${final.seconds === null ? "unknown" : about(final.seconds)}`;
+    })
     .join(", ");
   const hint =
-    "Ask the person whether to wait; call again with `yes: true` (CLI `--yes`) only once they agreed, or export with " +
-    "quality draft to use the draft renders now (with a warning).";
+    "Ask the person whether to wait; call again with `yes: true` (CLI `--yes`) only once they agreed, or " +
+    `${what.draft} to use the draft renders now (with a warning).`;
   throw new RpcError(
     ErrorCode.ConfirmationRequired,
-    `This export renders the final ${due.length === 1 ? "render" : "renders"} of ${due.length} generated ${due.length === 1 ? "clip" : "clips"} ` +
+    `${what.subject} renders the final ${due.length === 1 ? "render" : "renders"} of ${due.length} generated ${due.length === 1 ? "clip" : "clips"} ` +
       `first, estimated at ${known ? about(seconds) : "an unknown time"} on this machine (${each}): more than ${FINAL_CONFIRM_SECONDS / 60} minutes ` +
       `needs the person's confirmation. ${hint}`,
     { finals: due, seconds: known ? seconds : null, limit: FINAL_CONFIRM_SECONDS, hint },
   );
 }
 
-/** `about 12 min` / `about 40 s`. */
+/** `about 12 min` / `about 5.1 min` / `about 40 s`: tenths rounded up below 10 minutes, so a total over the limit never reads as it. */
 function about(seconds: number): string {
-  return seconds >= 90 ? `about ${Math.round(seconds / 60)} min` : `about ${Math.max(1, Math.round(seconds))} s`;
+  if (seconds < 90) return `about ${Math.max(1, Math.round(seconds))} s`;
+  const minutes = seconds / 60;
+  return `about ${minutes < 10 ? Math.ceil(minutes * 10) / 10 : Math.round(minutes)} min`;
 }
 
 /** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */

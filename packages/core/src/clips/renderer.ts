@@ -339,7 +339,11 @@ export class ClipRenderer {
       if (keyed.final) {
         const queue = draft.state === "ready" && backgroundFinal(keyed.final) ? "background" : null;
         const final = await this.#stateOf(root, keyed.final, clip, format, queue);
-        info.final = { ...final, refused: this.#failed.get(entryId(root, keyed.final.key))?.refused === true };
+        info.final = {
+          ...final,
+          refused: this.#failed.get(entryId(root, keyed.final.key))?.refused === true,
+          ...(backgroundFinal(keyed.final) ? {} : { onDemand: true }),
+        };
       }
       clips.push(info);
     }

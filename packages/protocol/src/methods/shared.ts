@@ -390,6 +390,13 @@ export const ClipFinalRenderSchema = z.object({
   refused: z
     .boolean()
     .describe("True when `failed` because the plugin refused the motion blur: exports and `frame` then use the draft render, never waiting for this one."),
+  onDemand: z
+    .boolean()
+    .optional()
+    .describe(
+      "True for a plugin's own final (ADR 0035, Blender's Cycles render): made only when a final or untiered `render` waits for it; " +
+        "`frame` and `review` never wait for it (they use it when `ready`, else the draft). Absent or false: the blurred final of ADR 0041.",
+    ),
 });
 
 /** Render cache state of one generated clip (SPEC §6.5). */

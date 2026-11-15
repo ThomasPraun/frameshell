@@ -13,12 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clip keeps two renders. The draft (EEVEE, or Workbench) renders in the background for the preview and draft exports.
   The final (Cycles: 80 samples, adaptive threshold 0.02, OpenImageDenoise, fixed seed, 6 bounces, no caustics,
   persistent data, the first GPU backend Blender finds) is rendered only when a `render` with `quality: "final"` or no
-  quality needs it, and the export waits for it. `clip.renders` shows it as `final`, `waiting` until then. `render
+  quality needs it, and the export waits for it. `clip.renders` shows it as `final` with `onDemand: true`, `waiting`
+  until then; Chat about this does not hold its frame for it. `render
   --quality draft` adds a warning per clip exported from its draft. When the missing finals are estimated over 5 minutes
   in all, `render` fails with `ConfirmationRequired` (`data.finals` lists each clip's estimate, `data.seconds` the total)
-  and queues nothing, until it is called again with `yes: true` (CLI `render --yes`, MCP `render` `yes`). Estimates are
-  frames x megapixels x the rate that `.blend`'s last final took on this machine (`.frameshell/blender/finals.json`),
-  else the project's last, else 5 s. `frame` and `review` use a cached final and otherwise the draft, with a warning;
+  and queues nothing, until it is called again with `yes: true` (CLI `render --yes`, MCP `render` `yes`). `batch.render`
+  asks the same over the finals of every chosen row before the first row queues (`yes`, CLI `batch --yes`; entries of
+  `data.finals` name their `row`). Estimates are frames x megapixels x the per-frame rate that `.blend`'s last final
+  took on this machine, its first frame (start-up, kernel compile) left out (`.frameshell/blender/finals.json`), else
+  the project's last, else 5 s. `frame` and `review` use a cached final and otherwise the draft, with a warning;
   they never start a final. Plugin API (additive, `apiVersion` stays 1): `ClipAdapter.finals` with `estimate`, and
   `RenderContext.tier`; a final's key adds `final: true`, so draft keys are unchanged. Tests use the stand-in Blender and
   a `final-card` fixture adapter; the opt-in real test renders a Cycles final.

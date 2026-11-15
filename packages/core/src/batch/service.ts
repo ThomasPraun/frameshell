@@ -12,7 +12,7 @@ import {
   RpcError,
 } from "@frameshell/protocol";
 import { type BatchFile, type Timeline, parseBatchFile } from "@frameshell/schema";
-import type { PlannedRender, RenderRequest } from "../export/service.js";
+import { type PlannedRender, type RenderRequest, confirmFinals } from "../export/service.js";
 import { canonicalPathSync, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { JobChange, JobQueue } from "../jobs/queue.js";
 import type { AppliedOperation, OperationRequest, SourceInfo } from "../timeline/engine.js";
@@ -55,6 +55,8 @@ export interface BatchRequest {
   /** Review each rendered file once its render is done (see {@link BatchReview}). */
   review?: boolean | undefined;
   dryRun: boolean;
+  /** The person agreed to wait for the final renders of generated clips the rows make (ADR 0035 decision 4). */
+  yes?: boolean | undefined;
 }
 
 /** One row ready to queue. `entries` are the manifest's, updated in place. */
@@ -167,6 +169,11 @@ export class BatchService {
     const base = { dir: root, file: path, template: file.template, out, preset: first?.preset ?? null, quality: first?.quality ?? null, skipped };
     const merged = (): BatchEntry[] => orderEntries(ids, [...kept(), ...rows.flatMap((row) => row.entries)]);
     if (request.dryRun) return { ...base, manifest: null, dryRun: true, entries: merged(), jobs: [] };
+    // Every row's finals in one sum, before any row queues: a later row must not start hours of renders unasked.
+    if (request.yes !== true) {
+      const due = rows.flatMap((row) => row.planned.finals.map((final) => ({ ...final, row: row.id })));
+      confirmFinals(due, { subject: "This batch", draft: "set `\"quality\": \"draft\"` in the batch file" });
+    }
     // Rows left alone that were rendered without a finished review get one when it is asked for.
     const left = kept();
     const unreviewed = request.review ? await needReview(left) : [];

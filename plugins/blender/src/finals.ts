@@ -8,7 +8,7 @@ import { STATE_DIR } from "./deps.js";
  */
 export const DEFAULT_SECONDS_PER_MEGAPIXEL = 5;
 
-/** Blender start-up, scene load and the VP9 encode of a final, on top of its frames. */
+/** Blender start-up, scene load and the VP9 encode of a final, on top of its frames (the measured rate leaves them out). */
 const OVERHEAD_SECONDS = 10;
 
 /** Project-relative file of measured final rates; under `.frameshell/`, never an input of a key. */
@@ -39,7 +39,7 @@ export class FinalTimes {
     return OVERHEAD_SECONDS + frames * megapixels(width, height) * rate;
   }
 
-  /** Records a finished final of `source`: `seconds` of Blender for `frames` frames at `width` x `height`. */
+  /** Records a finished final of `source`: `seconds` Blender spent rendering `frames` frames at `width` x `height`. */
   async record(source: string, seconds: number, frames: number, width: number, height: number): Promise<void> {
     const rate = seconds / (frames * megapixels(width, height));
     if (!Number.isFinite(rate) || rate <= 0) return;

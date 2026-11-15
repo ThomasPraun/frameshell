@@ -1050,6 +1050,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         ...(inv.failed ? { failed: true } : {}),
         ...(inv.force ? { force: true } : {}),
         ...(inv.review ? { review: true } : {}),
+        ...(inv.yes ? { yes: true } : {}),
       };
       if (inv.dryRun) {
         const result = await conn.request("batch.render", { ...params, dryRun: true });

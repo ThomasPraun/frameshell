@@ -27,7 +27,7 @@ export function scriptPath(name: "render.py" | "deps.py"): string {
 /** Facts a run of the shipped scripts reports on a `FRAMESHELL <json>` line of Blender's output. */
 export type BlenderEvent =
   | { event: "start"; frameStart: number; frames: number; engine: string; device?: string }
-  | { event: "frame"; index: number }
+  | { event: "frame"; index: number; /** Seconds Blender spent on this frame. */ seconds?: number }
   | { event: "error"; code: string; [detail: string]: unknown };
 
 /** Options for {@link runBlender}. */

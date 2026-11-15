@@ -209,7 +209,11 @@ export const exportMethods = {
       "`pass`), `warnings`, `failed`, `checks` and the `run` whose `metrics.json` holds the detail, and the manifest says " +
       "`running` until the last review ended. Rows skipped as done are reviewed too when their entry has no finished " +
       "review. A review that cannot run leaves the render `done` and the entry's review `error`. In a props slot, `<clipId>.props` " +
-      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`.",
+      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`. " +
+      "Finals (ADR 0035): unless the batch file's `quality` is `draft`, each row renders the missing finals of its generated clips " +
+      "(Blender's Cycles renders) first; when those of every chosen row are estimated over 5 minutes in all (or a plugin cannot say), " +
+      "nothing is queued: it fails with ConfirmationRequired as `render` does (`data.finals` entries also name their `row`) until " +
+      "called again with `yes: true` after the person agreed. `dryRun` never asks.",
     params: z.strictObject({
       cwd: CwdParam,
       file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
@@ -234,6 +238,13 @@ export const exportMethods = {
         .default(false)
         .describe("Review each rendered file (`review` with `file`, metrics only) and record its verdict in the entry's `review`; slower, off by default."),
       dryRun: z.boolean().default(false).describe("Validate every chosen row × format and return the plan; nothing is rendered or written."),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "The person agreed to wait for the final renders of generated clips (Blender's Cycles finals) the chosen rows make when they " +
+            "are estimated over 5 minutes in all. Never set it without their explicit agreement. Default false.",
+        ),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),

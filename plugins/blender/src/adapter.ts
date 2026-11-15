@@ -119,7 +119,7 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       let first = 1;
       const rendering = quality === "final" ? "Rendering the final (Cycles)" : "Rendering";
       const fraction = (done: number) => ctx.progress({ fraction: RENDER_SHARE * Math.min(1, Math.max(0, done / frames)), message: rendering });
-      const started = performance.now();
+      const frameSeconds: number[] = [];
       const { error } = await runBlender(
         blender,
         join(projectDir, ...source.split("/")),
@@ -130,7 +130,10 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
           signal: ctx.signal,
           onEvent: (event: BlenderEvent) => {
             if (event.event === "start") first = event.frameStart;
-            else if (event.event === "frame") fraction(event.index + 1);
+            else if (event.event === "frame") {
+              fraction(event.index + 1);
+              if (typeof event.seconds === "number") frameSeconds.push(event.seconds);
+            }
           },
           onFrame: (frame) => fraction(frame - first),
         },
@@ -138,8 +141,13 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       if (error) throw new Error(describeRefusal(id, source, error, ctx.fps));
       const rendered = (await readdir(framesDir)).filter((name) => /^frame_\d{6}\.png$/.test(name)).length;
       if (rendered !== frames) throw new Error(`blender clip ${id}: Blender wrote ${rendered} of ${frames} frames of ${source}. Open the file in Blender and render it there to see why.`);
-      // A wrong estimate only changes when the next final asks first: it must never fail this render.
-      if (quality === "final") await times.record(source, (performance.now() - started) / 1000, frames, ctx.width, ctx.height).catch(() => {});
+      // The first frame also pays for scene sync and, once per Blender and GPU, the Metal kernel compile: only later frames
+      // measure the rate. A wrong estimate only changes when the next final asks first: it must never fail this render.
+      const later = frameSeconds.slice(1);
+      if (quality === "final" && later.length > 0) {
+        const seconds = later.reduce((sum, value) => sum + value, 0);
+        await times.record(source, seconds, later.length, ctx.width, ctx.height).catch(() => {});
+      }
       ctx.progress({ fraction: RENDER_SHARE, message: "Encoding" });
       const output = join(ctx.outDir, "render.webm");
       await encode(ffmpeg, framesDir, output, ctx.fps, ctx.signal);
