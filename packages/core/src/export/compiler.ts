@@ -25,8 +25,8 @@ import {
   backdropMatrix,
   backdropOf,
   bakeRef,
-  gradeKey,
-  gradeOf,
+  gradeChainKey,
+  gradeChainOf,
   type TransitionContext,
   type TransitionShape,
   clipHandles,
@@ -154,9 +154,9 @@ export interface RenderInput {
    */
   audioFx?: ReadonlyMap<string, string>;
   /**
-   * Table file of every colour grade the timeline's media clips draw with, by `gradeKey` (ADR 0031): a `.cube` the
-   * caller writes into the work directory (`gradeFile`), read by `lut3d`. A graded clip whose table is missing is drawn
-   * ungraded, with a warning.
+   * Table file of every colour grade chain the timeline's pictures draw with (media and generated clips, with the grades
+   * of the nested clips they play inside), by `gradeChainKey` (ADR 0031): a `.cube` the caller writes into the work
+   * directory (`gradeFile`), read by `lut3d`. A graded clip whose table is missing is drawn ungraded, with a warning.
    */
   grades?: ReadonlyMap<string, string>;
   /**
@@ -975,10 +975,10 @@ function layoutTimeline(
       }
       const placement = fixedPlacement(clip);
       const picture = track.kind === "video" ? source.video : null;
-      const look = picture ? gradeOf(clip) : null;
-      const grade = look ? grades.get(gradeKey(look)) : undefined;
-      if (look && grade === undefined) warnings.push(`Clip ${clip.id} has a colour grade with no table; it was exported ungraded.`);
       // The listed clip: a generated clip's footage stand-in (`asFootage`) keeps only what places it.
+      const look = picture ? gradeChainOf(listed) : null;
+      const grade = look ? grades.get(gradeChainKey(look)) : undefined;
+      if (look && grade === undefined) warnings.push(`Clip ${clip.id} has a colour grade with no table; it was exported ungraded.`);
       const vignette = picture ? vignetteOf(listed) : null;
       const grain = picture ? grainOf(listed) : null;
       const cover = formatCrop(variant, clip, { size: picture, generated: render !== undefined, alpha: picture?.alpha === true, base }, output);

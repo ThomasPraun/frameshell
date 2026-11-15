@@ -20,6 +20,7 @@ import type {
   Track,
   Transform,
 } from "./timeline.js";
+import { gradeOf, hostGradesOf } from "./grade.js";
 import { DEFAULT_SHOT_CORNER } from "./timeline.js";
 import { type ClipEdges, type NestHost, type Nesting, type TransitionContext, nestedFades, nestingOf } from "./transitions.js";
 
@@ -112,7 +113,8 @@ export type NestedTimelines = (source: string) => Timeline | null;
  * (on an audio track T, every nested track is sound). Clips are cut to the
  * window; ids become `<nested clip>/<clip>`. The nested clip's transform
  * composes with each video clip's ({@link composePlacement}), its gain adds,
- * its mute wins. Subtitle tracks of nested timelines are dropped.
+ * its mute wins, and its grade follows each picture's own (`hostGradesOf`,
+ * ADR 0031). Subtitle tracks of nested timelines are dropped.
  *
  * Keys and edges (ADR 0018 decision 9): a clip cut by the window loses its
  * own transition fields at the cut. When the nested clip has keys or fades,
@@ -281,6 +283,7 @@ function flattenTracks(tracks: readonly Track[], ownGroups: readonly MulticamGro
         // A shape reaches the pictures of the extra tracks (ADR 0030); the host track's own clips keep the fade.
         const shapeIn = fades?.shapeIn && w.video && !w.own ? { ...fades.shapeIn, fadeIn: fades.fadeIn } : undefined;
         composeHost(w, clip, from, to, fadeIn, fades?.fadeOut ?? 0, shapeIn);
+        if (w.video) recordHostGrade(w.placed, clip);
         if (w === opener) {
           w.placed.dissolve = clip.dissolve!;
           if (clip.shape && w.video) w.placed.shape = clip.shape;
@@ -465,6 +468,15 @@ function composeHost(
   };
   const nesting = nestingOf(placed);
   Object.assign(placed, { nesting: { ...nesting, hosts: [entry, ...(nesting?.hosts ?? [])] } satisfies Nesting });
+}
+
+/**
+ * `host`'s grade after the grades `placed` already carries from nested clips deeper down (ADR 0031): export and the
+ * preview fold the chain into one table ({@link gradeChainOf}), so each picture is graded before it is composited.
+ */
+function recordHostGrade(placed: Clip, host: NestedClip): void {
+  if (!gradeOf(host)) return;
+  Object.assign(placed, { hostGrades: [...hostGradesOf(placed), host.grade!] });
 }
 
 /** Properties of a picture's placement that keys can animate. */

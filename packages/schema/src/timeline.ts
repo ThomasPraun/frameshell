@@ -383,7 +383,7 @@ const clipBase = {
   formats: ClipFormatsSchema,
 };
 
-/** Colour grade of a media clip (ADR 0031): a correction first, then an optional LUT. */
+/** Colour grade of a media, generated or nested timeline clip (ADR 0031): a correction first, then an optional LUT. */
 export const GradeSchema = z
   .strictObject({
     exposure: z
@@ -427,7 +427,8 @@ export const GradeSchema = z
   })
   .describe(
     "Colour grade (ADR 0031): exposure and white balance, then contrast and saturation, then the LUT; export and the preview apply it " +
-      "as one 3D table. Media clips only; shots take none.",
+      "as one 3D table. Media, generated and nested timeline clips on video tracks; shots take none. A generated clip's render is " +
+      "graded before its alpha is applied; a nested timeline clip's grade follows the own grade of every picture inside it.",
   );
 
 /** Vignette of a media or generated clip (ADR 0043): its picture darkened towards the edges. */
@@ -509,6 +510,7 @@ export const TimelineClipSchema = z.strictObject({
   source: z.string().min(1).describe("Project-relative timeline file, e.g. `timelines/intro.json`."),
   in: Seconds.optional().describe("Nested-timeline seconds of the first frame. Default 0."),
   duration: z.number().positive().optional().describe("Seconds played. Default: the rest of the nested timeline after `in`."),
+  grade: GradeSchema.optional(),
 });
 
 /** Backdrop of a generated clip (ADR 0031): what is below it, blurred, saturated and dimmed, wherever the clip shows. */
@@ -559,6 +561,7 @@ export const AdapterClipSchema = z.strictObject({
   elements: ElementsSchema.optional(),
   backdrop: BackdropSchema.optional(),
   motionBlur: MotionBlurSchema.optional(),
+  grade: GradeSchema.optional(),
   vignette: VignetteSchema.optional(),
   grain: GrainSchema.optional(),
 });

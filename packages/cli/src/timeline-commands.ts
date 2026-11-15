@@ -131,11 +131,12 @@ mutations print the new revision):
                                glass; by default blur 46 px, saturate 1.45, dim 0.55): what is below the clip is
                                blurred, saturated and dimmed where the clip shows. Glass is a style choice, never a
                                default. --backdrop-* set one number each, over --glass (blur = Gaussian sigma in project px)
-                               --grade-* colour-grade a media clip on a video track, one number each, merged into its
-                               grade: exposure in stops, white balance (temperature -1 cool to 1 warm, tint -1 green to
-                               1 magenta), contrast and saturation factors (1 = unchanged), then a 3D .cube LUT (project
-                               file, up to 65 points, Rec.709 input; none removes it) at --grade-lut-mix (default 1).
-                               Export and the preview apply the same table; --clear-grade removes the grade
+                               --grade-* colour-grade a media, generated or nested timeline clip on a video track, one
+                               number each, merged into its grade: exposure in stops, white balance (temperature -1 cool
+                               to 1 warm, tint -1 green to 1 magenta), contrast and saturation factors (1 = unchanged),
+                               then a 3D .cube LUT (project file, up to 65 points, Rec.709 input; none removes it) at
+                               --grade-lut-mix (default 1). A nested timeline clip's grade follows the grades of the
+                               clips inside it. Export and the preview apply the same table; --clear-grade removes it
                                --motion-blur blurs a generated clip's moves like a camera (ADR 0041): each frame is the
                                average of --motion-blur-samples pictures (default 8, 1 to 64) across a shutter of
                                --motion-blur-shutter degrees (default 180, centred on the frame), averaged in linear light

@@ -1148,17 +1148,11 @@ class Edit {
   }
 
   /**
-   * Merge `grade` field by field into the clip's (ADR 0031; `null` clears, and so does a merge left with no field). Only
-   * media clips on video tracks take one; the LUT file is read when the clip is drawn or exported, and a LUT path
-   * outside the project is refused here, as export would refuse it.
+   * Merge `grade` field by field into the clip's (ADR 0031; `null` clears, and so does a merge left with no field).
+   * Media, generated and nested timeline clips on video tracks take one; the LUT file is read when the clip is drawn or
+   * exported, and a LUT path outside the project is refused here, as export would refuse it.
    */
   setGrade(track: AnyClipTrack, clip: Clip, grade: NonNullable<OperationArgs<"clip.set">["grade"]> | null): void {
-    if (!isMedia(clip)) {
-      throw this.invalid(`only media clips take \`grade\`; ${clip.id} is ${clip.type}.`, {
-        field: "grade",
-        hint: isNested(clip) ? "Grade the media clips inside the nested timeline." : "Grade the footage under the generated clip.",
-      });
-    }
     if (track.kind === "audio") throw this.invalid("audio tracks take no `grade`: they show no picture.", { field: "grade" });
     const lut = grade?.lut;
     // win32 rules: they take `/x`, `C:\x` and `\\host\x` as absolute.

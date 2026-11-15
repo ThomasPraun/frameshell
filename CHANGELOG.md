@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`pnpm gen:three`, +29 KB), and the studio's finish presets and asset loader move into `three-kit.ts` for both 3D
   templates. The 3D playbook gains an "A 3D logo" section. `title-3d` is not built (blocked on the Archivo licence). The
   opt-in real-render test checks both fills, alpha, `clip.verify` at tolerance 0 and the three failure messages.
+- Colour grade on generated clips and nested timeline clips, slice 8 of #384 (ADR 0031, epic #451; protocol 153):
+  `clip set --grade-*` (`clip.set` `grade`, MCP `clip_set`) now takes adapter clips and nested timeline clips on video
+  tracks too. A render is graded first in its part, before its alpha, as footage is (export `lut3d` right after it is
+  read; the preview grades the decoded colour before the alpha plane masks it). A nested timeline clip's grade follows
+  the own grade of every picture inside it, at any depth: flattening records the hosts' grades on each picture
+  (`hostGrades`) and export and the preview fold the chain into one table (`gradeChainOf`, `gradeChainTable`), so it
+  comes before that picture's vignette and grain; sound and shots are untouched. Plans of timelines without nested
+  grades are unchanged. Tests: chain tables, flattening two levels deep, two goldens, the managed ffmpeg on a nested
+  still and a VP9 alpha render, and the preview's tables against the ones export writes.
+- Motion film playbook refreshed, slice of #453 (epic #451; no protocol change): `reference/motion-films.md` and its router
+  row in `SKILL.md` now cover what landed since the first version: the brief written as `requirements.json` at the
+  storyboard gate and `review` exiting 1 on it at the critique gate, `analyze` audio fields (`pace`, `pitch`,
+  `voiceOverMusic`, `effects`, `sections`, `--no-speech`) as measured targets, a `grade analyze` / `grade compare` pass on
+  supplied footage, `beat:N` / `bar:N` in every time argument, `voiceover place --tempo`, `music shape --drop --build`,
+  the `beatsProblem` codes of generated clips that read beats and markers, and `batch` typed slots with `--review`. Links
+  go to the reference pages instead of repeating them.
 - Music fit follow-ups of #485 (ADR 0037 "Follow-ups as built", epic #451; protocol 152): `music shape --ending <time>
   --end-on-bar` (MCP `music_shape` `endOnBar`; result `endsAt`) stretches or shrinks the closing fade so it ends on the
   bar start of the grid nearest to `--ending + --fade`. `music grid` carries the hits stored by `music shape` with the
