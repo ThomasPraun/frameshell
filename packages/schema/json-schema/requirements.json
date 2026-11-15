@@ -161,7 +161,10 @@
           "machine-gun",
           "chopped",
           "ending",
-          "click"
+          "click",
+          "masking",
+          "edge-click",
+          "harsh"
         ]
       }
     },
@@ -190,7 +193,10 @@
               "machine-gun",
               "chopped",
               "ending",
-              "click"
+              "click",
+              "masking",
+              "edge-click",
+              "harsh"
             ],
             "description": "The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."
           },

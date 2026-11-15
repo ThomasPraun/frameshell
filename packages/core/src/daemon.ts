@@ -754,6 +754,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const shown = await timelines.viewConfig(dir, "style", "current");
       return (await styles.show(dir, shown.state)).style?.platforms.value ?? [];
     },
+    musicUnderVoice: async (dir) => {
+      const shown = await timelines.viewConfig(dir, "style", "current");
+      return ((await styles.show(dir, shown.state)).style ?? resolveStyle(null)).sound.musicUnderVoice;
+    },
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
     // `clips` and `faceScans` are declared below: they are read when a review runs, not now.

@@ -20,7 +20,7 @@ import {
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type FormatEntry, type PlatformId, letterboxPicture, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type Timeline } from "@frameshell/schema";
+import { type FormatEntry, type PlatformId, letterboxPicture, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type StyleSource, type Timeline } from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
@@ -51,7 +51,7 @@ import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
 import { deliveryChecks } from "./delivery.js";
 import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
-import { fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
+import { fileBandEnvelope, fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
 import { fileSound, heardClips, timelineSound } from "./sound.js";
 import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
 import { type ClipSpan, judgeRequirements } from "./requirements.js";
@@ -75,6 +75,8 @@ export interface ReviewServiceOptions {
   soundProfile?(root: string, asset: string): Promise<EnergyProfile>;
   /** Platforms the project's style guide names (`style.json`); empty when there is none. */
   platforms(root: string): Promise<readonly PlatformId[]>;
+  /** dB the project's style guide sets music under the voice (`style.json` `sound.musicUnderVoice`, or the default); absent: the default. */
+  musicUnderVoice?(root: string): Promise<{ value: number; source: StyleSource }>;
   /** Absolute ffmpeg and ffprobe for the project rooted at `root`. */
   ffmpeg(root: string): Promise<string>;
   ffprobe(root: string): Promise<string>;
@@ -368,8 +370,9 @@ export class ReviewService {
   }
 
   /**
-   * The sound review list. A file: its decoded mix (ending, clicks). A timeline: each heard clip from its asset's envelope,
-   * by role (voice over bed, repeated effects, cut-off tails, the music on the last frame). Null when there is no sound, or
+   * The sound review list. A file: its decoded mix (ending, clicks, harshness). A timeline: each heard clip from its asset's
+   * envelope, by role (voice over bed and over music, repeated effects, cut-off tails, cut-in starts, the music on the last
+   * frame). Null when there is no sound, or
    * with a warning when it cannot be read.
    */
   async #sound(
@@ -388,10 +391,14 @@ export class ReviewService {
     try {
       if (request.file) {
         if (!source.audio) return null;
-        const [decoded, clicks] = await Promise.all([envelope(request.file), fileClicks(ffmpeg, request.file, join(scratch, "clicks"), signal)]);
-        return fileSound({ envelope: decoded, clicks, range, filmEnd });
+        const [decoded, clicks, band] = await Promise.all([
+          envelope(request.file),
+          fileClicks(ffmpeg, request.file, join(scratch, "clicks"), signal),
+          fileBandEnvelope(ffmpeg, request.file, join(scratch, "band"), signal),
+        ]);
+        return fileSound({ envelope: decoded, clicks, band, range, filmEnd });
       }
-      const { soundProfile } = this.#options;
+      const { soundProfile, musicUnderVoice } = this.#options;
       if (!flat || !soundProfile) return null;
       const { timeline, fps } = await flat();
       const assets = new Set(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [] : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : [])))));
@@ -415,7 +422,13 @@ export class ReviewService {
         }
       }
       if (unread.size > 0) warnings.push(`sound: ${[...unread].join(", ")} cannot be decoded, so ${unread.size === 1 ? "it is" : "they are"} not heard in the sound review.`);
-      return timelineSound({ clips, profiles, range, filmEnd });
+      const style = musicUnderVoice
+        ? await musicUnderVoice(root).catch((error: unknown) => {
+            warnings.push(`sound: the style guide cannot be read, so music under the voice is judged by the default (${(error as Error).message.split("\n")[0]}).`);
+            return undefined;
+          })
+        : undefined;
+      return timelineSound({ clips, profiles, range, filmEnd, musicUnderVoice: style });
     } catch (error) {
       signal?.throwIfAborted();
       warnings.push(`sound: the sound could not be reviewed (${(error as Error).message.split("\n")[0]}).`);

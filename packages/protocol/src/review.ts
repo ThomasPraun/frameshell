@@ -1,4 +1,4 @@
-import { CRAFT_CHECKS, SafeZoneSchema } from "@frameshell/schema";
+import { CRAFT_CHECKS, STYLE_SOURCES, SafeZoneSchema } from "@frameshell/schema";
 import { z } from "zod";
 import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
@@ -31,7 +31,7 @@ export const ReviewOutputSchema = z
       "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, near-blank frames, " +
       "whether frame 0 is empty, subtitle cues shorter than they take to read, the loudness of a file (integrated LUFS, loudness range, true peak, phone band 200 Hz to 6 kHz), " +
       "sounds against the picture events they belong to (`sync`), the jump from the last frame to the first (`seam`), a file against its export plan (`delivery`), " +
-      "the sound review list (`sound`: voice over bed per window, repeated effect files, clips cut off, the music on the last frame, clicks) and craft warnings.",
+      "the sound review list (`sound`: voice over bed and over music per window, repeated effect files, clips cut off or cut in mid-sound, the music on the last frame, clicks, harshness) and craft warnings.",
   );
 
 /** Name in {@link REVIEW_OUTPUTS}. */
@@ -154,7 +154,8 @@ export const ReviewCraftWarningSchema = z.object({
         "`delivery`: the file differs from the export plan. `safe-zone`: a graphic or a face reaches into a platform zone. " +
         "`voice-bed`: the bed comes within 6 dB of the voice. `sfx-repeat`: one effect file plays more than twice. `machine-gun`: one effect file 4 times or more in a row, each within 1 s of the last. " +
         "`chopped`: a clip ends with its sound above -35 dB of its loudest. `ending`: the music is cut on the last frame, or a file's sound is not down at its end or peaks in its last 15 %. " +
-        "`click`: a click in a file's sound.",
+        "`click`: a click in a file's sound. `masking`: under the voice the music comes within the style's `musicUnderVoice` minus 3 dB of it. " +
+        "`edge-click`: a clip starts with no fade mid-sound, 19 dB or more over what played just before. `harsh`: a file's 2 to 6 kHz band comes over 6 dB above that band at its loudest moment.",
     ),
   from: z.number().nullable().describe("Seconds the thing starts; null when it is about the whole film."),
   to: z.number().nullable(),
@@ -309,6 +310,45 @@ export const ReviewEndingSchema = z.object({
   loudestShare: z.number().nullable().describe("The middle of the loudest 400 ms as a share of the film (0 to 1); over 0.85 the film peaks at its end instead of resolving. Null for a timeline."),
 });
 
+/** Voice against the music alone, window by window, judged by the margin the style guide asks for. */
+export const ReviewMusicSchema = z.object({
+  window: z.number().describe("Seconds per window (the `voice` windows)."),
+  musicUnderVoice: z.number().describe("dB the style guide sets music under the voice (`sound.musicUnderVoice` in `style.json`, 12 by default)."),
+  from: z.enum(STYLE_SOURCES).describe("`file`: written in `style.json`; `default`: Frameshell's."),
+  required: z.number().describe("Least margin before a window is `masking`, dB: `musicUnderVoice` minus 3 (a step anyone hears), never under 0."),
+  windows: z.int().describe("Windows where the voice speaks and music plays under it."),
+  minMargin: z.number().nullable().describe("Smallest margin, dB: voice minus music, each the power mean over the window's speaking steps. Null with no such window."),
+  medianMargin: z.number().nullable().describe("Median margin of those windows, dB; null with none."),
+  low: z.array(ReviewVoiceSpanSchema).describe("Stretches of windows whose margin is under `required` (at most 20): the music sits louder under the voice than the style asks."),
+});
+
+/** A clip edge with no fade that cuts into sound already going. */
+export const ReviewEdgeSchema = z.object({
+  clip: z.string(),
+  track: z.string(),
+  role: z.enum(SOUND_ROLES),
+  at: z.number().describe("Seconds the clip starts."),
+  level: z.number().describe("Level of its first 10 ms as heard (gain applied), dBFS."),
+  jump: z.number().describe("That level over the sound of the rest of the film in the 10 ms before, dB."),
+});
+
+/** A stretch of a file's sound with too much energy where a sound turns shrill. */
+export const ReviewHarshSpanSchema = z.object({
+  from: z.number(),
+  to: z.number(),
+  over: z.number().describe("Most the band comes over `reference` in the stretch, dB."),
+});
+
+/** A file's 2 to 6 kHz band window by window against that band at the mix's loudest moment. */
+export const ReviewHarshSchema = z.object({
+  band: z.tuple([z.number(), z.number()]).describe("Band measured, Hz."),
+  window: z.number().describe("Seconds per window (the EBU R128 momentary 400 ms)."),
+  reference: z.number().describe("Level of the band in the mix's loudest window, dBFS, at least 20 dB under the whole mix there: what the rest is judged against."),
+  loudestAt: z.number().describe("Seconds that loudest window starts."),
+  maxOver: z.number().describe("Most any window's band comes over `reference`, dB (negative: never over it)."),
+  spans: z.array(ReviewHarshSpanSchema).describe("Stretches whose band is over 6 dB above `reference` (at most 20)."),
+});
+
 /** Clicks found in a file's sound. */
 export const ReviewClicksSchema = z.object({
   count: z.int(),
@@ -336,6 +376,15 @@ export const ReviewSoundSchema = z.object({
   clicks: ReviewClicksSchema.nullable().describe(
     "Clicks in a file's sound: a burst above 14 kHz peaking over 9 times the RMS of its 20 ms, with 80 % of that energy in 1 ms (none in the first 20 ms). Null for a timeline (render it and review the file).",
   ),
+  music: ReviewMusicSchema.nullable().describe("Null for a file, or a timeline with no voice or no music clip in the range."),
+  edges: z
+    .array(ReviewEdgeSchema)
+    .nullable()
+    .describe(
+      "Clips starting with no fade into sound their asset already plays before their in point (a cut mid-sound), heard at or above -45 dBFS and 19 dB or more over the rest of the film's sound just before (at most 20). " +
+        "A clip played from its asset's start, or picking up the previous clip's sound, is no cut-in. Null for a file.",
+    ),
+  harsh: ReviewHarshSchema.nullable().describe("Null for a timeline (render it and review the file), a file with no sound, or a range shorter than one window."),
 });
 
 /** See {@link ReviewSoundSchema}. */
@@ -410,7 +459,7 @@ export const ReviewMetricsSchema = z.object({
   sync: ReviewSyncSchema.nullable().describe("Sounds against the picture events they belong to, with what random placement would score; null when there are no sounds to compare."),
   seam: ReviewSeamSchema.nullable().describe("Last frame against the first; null for a film of one frame."),
   delivery: ReviewDeliverySchema.nullable().describe("The file against the export plan; null unless a `file` is reviewed with a `preset`."),
-  sound: ReviewSoundSchema.nullable().describe("The sound review list: voice over bed per window, repeated effects, cut-off clips, the ending and clicks; null when there is no sound to review."),
+  sound: ReviewSoundSchema.nullable().describe("The sound review list: voice over bed and over music per window, repeated effects, cut-off and cut-in clips, the ending, clicks and harshness; null when there is no sound to review."),
   craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order, waived ones left out; empty when none."),
   waived: z.array(ReviewWaivedWarningSchema).describe("Craft warnings a waiver of `requirements.json` covers, with its reason: accepted, not gone; empty when none."),
   requirements: ReviewRequirementsSchema.nullable().describe("`requirements.json` judged: its checks, its waivers and what failed; null when the project has none."),
