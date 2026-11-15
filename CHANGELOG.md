@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `logo-3d` template, slice 3 of #473 (ADR 0042, epic #451): `frameshell hyperframes new mark --template logo-3d
+  [--component <svg of brand show>]` extrudes an SVG logo with three.js `SVGLoader` and `ExtrudeGeometry` in the
+  `product-shot` studio, revealed by a rise (depth grows out of the flat logo), a swing or a drop, with a glint, a slow
+  turn, a soft shadow on a wall behind it and an optional headline. Props `logo` (an SVG inside the composition; empty
+  shows a built-in mark), `depth`, `bevel`, `colors` (one colour or the SVG's own fills), `color`, `finish`, `reveal`,
+  `spin`, `title`, `size`, `shadows`, `backdrop`. Filled paths only (holes and even-odd fills work); a missing file, a
+  raster or an SVG with nothing filled fails the render naming the file. The three.js bundle gains `SVGLoader`
+  (`pnpm gen:three`, +29 KB), and the studio's finish presets and asset loader move into `three-kit.ts` for both 3D
+  templates. The 3D playbook gains an "A 3D logo" section. `title-3d` is not built (blocked on the Archivo licence). The
+  opt-in real-render test checks both fills, alpha, `clip.verify` at tolerance 0 and the three failure messages.
 - Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 151): `voiceover place
   --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
   times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499

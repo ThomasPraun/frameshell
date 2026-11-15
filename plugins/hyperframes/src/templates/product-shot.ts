@@ -9,7 +9,7 @@ import {
   fontSetup,
   trimScript,
 } from "./kit.js";
-import { SHADOWS_VARIABLE, STUDIO_SCRIPT, type ThreeTemplate, threePageHead } from "./three-kit.js";
+import { FINISH_PRESETS, SHADOWS_VARIABLE, STUDIO_SCRIPT, type ThreeTemplate, finishVariable, loadScript, threePageHead } from "./three-kit.js";
 
 /**
  * 3D product shot (#473, ADR 0042): a product in studio light (the built-in rounded box, or a GLB from the
@@ -43,18 +43,7 @@ export const productShot: ThreeTemplate = {
       { id: "color", type: "color", label: "Body colour of the built-in box", default: "#e9e6e1" },
       { id: "accent", type: "color", label: "Front panel colour of the built-in box", default: tokens.colors.accent ?? PLACEHOLDER.accent },
       { id: "ink", type: "color", label: "Headline colour", default: tokens.colors.ink ?? PLACEHOLDER.ink },
-      {
-        id: "finish",
-        type: "enum",
-        label: "Surface of the built-in box",
-        default: "satin",
-        options: [
-          { value: "satin", label: "Satin ceramic" },
-          { value: "gloss", label: "Gloss with clearcoat" },
-          { value: "chrome", label: "Chrome" },
-          { value: "matte", label: "Matte" },
-        ],
-      },
+      finishVariable("Surface of the built-in box"),
       { id: "spin", type: "number", label: "How far the product turns over the clip, degrees", default: 40, min: 0, max: 360, step: 5, unit: "°" },
       { id: "orbit", type: "number", label: "Camera orbit over the clip, degrees", default: 8, min: 0, max: 20, step: 1, unit: "°" },
       { id: "size", type: "number", label: "Size, 1 = the format's default", default: 1, min: 0.5, max: 1.4, step: 0.05 },
@@ -104,12 +93,7 @@ export const productShot: ThreeTemplate = {
 
       // The product: 1 unit = 10 cm, standing on the ground (y = 0), 1.6 high.
       var HIGH = 1.6, WIDE = 1.0, DEEP = 0.36;
-      var FINISH = {
-        satin: { roughness: 0.38, clearcoat: 0.35, clearcoatRoughness: 0.2, metalness: 0 },
-        gloss: { roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.08, metalness: 0 },
-        chrome: { roughness: 0.05, clearcoat: 0, clearcoatRoughness: 0, metalness: 1 },
-        matte: { roughness: 0.7, clearcoat: 0, clearcoatRoughness: 0, metalness: 0, specularIntensity: 0.3 },
-      }[P.finish] || {};
+      var FINISH = ${FINISH_PRESETS}[P.finish] || {};
       var hero = new THREE.Group();
       var turn = new THREE.Group();
       hero.add(turn);
@@ -129,11 +113,7 @@ export const productShot: ThreeTemplate = {
       box.add(body, panel);
 
       // The render waits for these loads (ready); a missing file fails the render with its path.
-      function load(loader, path, use) {
-        return loader.loadAsync(path).then(use, function (error) {
-          throw new Error("product-shot cannot load " + path + ": " + (error && error.message ? error.message : error));
-        });
-      }
+      ${loadScript("product-shot")}
       var loads = [];
       if (P.model) {
         loads.push(load(new THREE.GLTFLoader(), P.model, function (gltf) {

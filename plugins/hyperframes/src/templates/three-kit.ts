@@ -81,3 +81,43 @@ export const STUDIO_SCRIPT = String.raw`
         window.__hf.buildReady[key] = promise;
         return promise;
       }`;
+
+/**
+ * Page script source of the surface presets: an object of `MeshPhysicalMaterial` values per `finish` id
+ * (`satin`, `gloss`, `chrome`, `matte`), used as `FINISH_PRESETS[P.finish] || {}`. Shared by the 3D templates.
+ */
+export const FINISH_PRESETS = `{
+        satin: { roughness: 0.38, clearcoat: 0.35, clearcoatRoughness: 0.2, metalness: 0 },
+        gloss: { roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.08, metalness: 0 },
+        chrome: { roughness: 0.05, clearcoat: 0, clearcoatRoughness: 0, metalness: 1 },
+        matte: { roughness: 0.7, clearcoat: 0, clearcoatRoughness: 0, metalness: 0, specularIntensity: 0.3 },
+      }`;
+
+/** The `finish` prop of a 3D template: one of {@link FINISH_PRESETS}; `label` says what the surface belongs to. */
+export function finishVariable(label: string): TemplateVariable {
+  return {
+    id: "finish",
+    type: "enum",
+    label,
+    default: "satin",
+    options: [
+      { value: "satin", label: "Satin ceramic" },
+      { value: "gloss", label: "Gloss with clearcoat" },
+      { value: "chrome", label: "Chrome" },
+      { value: "matte", label: "Matte" },
+    ],
+  };
+}
+
+/**
+ * Page script of `load(loader, path, use)` for the template called `name`: loads one asset of the composition
+ * directory and fails the render, naming the file, when it is missing. The promise goes to `ready`.
+ */
+export function loadScript(name: string): string {
+  return String.raw`
+      function load(loader, path, use) {
+        return loader.loadAsync(path).then(use, function (error) {
+          throw new Error("${name} cannot load " + path + ": " + (error && error.message ? error.message : error));
+        });
+      }`;
+}

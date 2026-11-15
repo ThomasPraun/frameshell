@@ -208,8 +208,8 @@ describe("frameshell hyperframes new --template", () => {
 describe("3D templates (ADR 0042)", () => {
   const threeTemplates = TEMPLATES.filter(usesThree);
 
-  it("product-shot is a 3D template", () => {
-    expect(threeTemplates.map((t) => t.id)).toContain("product-shot");
+  it("product-shot and logo-3d are 3D templates", () => {
+    expect(threeTemplates.map((t) => t.id)).toEqual(expect.arrayContaining(["product-shot", "logo-3d"]));
   });
 
   it.each(threeTemplates.map((t) => t.id))("%s gets the pinned three.js bundle next to it and loads it after the motion runtime", async (id) => {
@@ -234,6 +234,8 @@ describe("3D templates (ADR 0042)", () => {
     expect(THREE_RUNTIME).toMatch(/^\/\*! three\.js \d+\.\d+\.\d+ for Frameshell \(ADR 0042\)/);
     expect(THREE_RUNTIME).toContain("The MIT License");
     expect(THREE_RUNTIME).toContain("three.js authors");
+    // logo-3d parses its SVG with the bundle's SVGLoader.
+    expect(THREE_RUNTIME).toContain("SVGLoader");
     expect(THREE_RUNTIME).not.toMatch(/https:\/\/cdn\.|import\(/);
   });
 
