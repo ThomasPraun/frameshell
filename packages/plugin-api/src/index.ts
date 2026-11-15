@@ -138,7 +138,8 @@ export interface ClipAdapter {
    * Optional. Which of the timeline's timing this clip's render reads (ADR 0029 decision 8): `beats` (the beat grid,
    * with bar starts) and `markers`. Only the kinds returned reach {@link RenderContext.timing} and count in the clip's
    * render key, so a clip that asks for none never re-renders when the music or a marker moves. Called on every key
-   * check, like {@link inputs}, with the same `context`. Absent or empty: none.
+   * check, like {@link inputs}, with the same `context`. Absent or empty: none. When it throws, or returns something
+   * other than an array, the clip has no render key: it is unavailable (preview and export say why) until it answers.
    */
   timing?(clip: unknown, context?: InputsContext): readonly RenderTimingKind[] | Promise<readonly RenderTimingKind[]>;
 }
@@ -159,11 +160,26 @@ export interface RenderTiming {
   readonly beats?: readonly RenderBeat[];
   /** Tempo of the grid on the timeline clock (a sped-up music clip is faster); absent when there is no usable grid. */
   readonly tempo?: { readonly bpm: number; readonly meter: number };
-  /** Why {@link beats} is empty although asked: no `tempo`, no beats file yet, a broken one, a LOW confidence grid. */
-  readonly beatsProblem?: string;
+  /** Why {@link beats} is empty although asked, as a stable code (part of the render key); absent when it is not. */
+  readonly beatsProblem?: RenderBeatsProblem;
   /** Markers of the timeline inside the clip, ascending; present when the clip asked for `markers`. */
   readonly markers?: readonly RenderMarker[];
 }
+
+/**
+ * Why a clip that asked for `beats` got none ({@link RenderTiming.beatsProblem}): the same grids `--snap-to` refuses.
+ * A code, not a sentence, so its render key only changes when the reason does; {@link RENDER_BEATS_PROBLEMS} words it.
+ */
+export type RenderBeatsProblem = "no-tempo" | "no-music-clip" | "no-beats" | "broken-beats" | "low-confidence";
+
+/** One sentence per {@link RenderBeatsProblem}, for an adapter or composition that shows why a clip has no beats. */
+export const RENDER_BEATS_PROBLEMS: Readonly<Record<RenderBeatsProblem, string>> = {
+  "no-tempo": "The timeline has no tempo: set one with `frameshell tempo set`.",
+  "no-music-clip": "The tempo follows a clip that is not a media clip of the timeline.",
+  "no-beats": "The music clip has no beat grid yet: run `frameshell beats measure` on its asset.",
+  "broken-beats": "The music's beats file cannot be read or is not valid.",
+  "low-confidence": "The music's beat grid is LOW confidence: check it with `frameshell beats show`, then correct or confirm it.",
+};
 
 /** One beat of {@link RenderTiming.beats}. */
 export interface RenderBeat {

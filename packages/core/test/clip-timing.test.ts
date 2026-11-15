@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RENDER_BEATS_PROBLEMS } from "@frameshell/plugin-api";
 import type { AdapterClip, BeatsFile, Timeline } from "@frameshell/schema";
 import { type ClipKeyInput, type ClipTimingInput, clipCacheKey, clipTiming } from "../src/index.js";
 
@@ -91,20 +92,32 @@ describe("clipTiming", () => {
     });
   });
 
-  it("gives no beats, saying why, when the grid is missing, broken or LOW confidence", async () => {
-    expect(await clipTiming(input({ timeline: timeline(null) }))).toEqual({ beats: [], beatsProblem: "the timeline has no tempo." });
-    expect((await clipTiming(input({ beatsOf: async () => null })))?.beatsProblem).toContain("has no beat grid yet");
-    const broken = await clipTiming(
-      input({
-        beatsOf: async () => {
-          throw new Error("beats/music.beats.json is not valid");
-        },
-      }),
-    );
-    expect(broken).toEqual({ beats: [], beatsProblem: "beats/music.beats.json is not valid" });
+  it("gives no beats, saying why as a stable code, when the grid is missing, broken or LOW confidence", async () => {
+    expect(await clipTiming(input({ timeline: timeline(null) }))).toEqual({ beats: [], beatsProblem: "no-tempo" });
+    expect(await clipTiming(input({ beatsOf: async () => null }))).toEqual({ beats: [], beatsProblem: "no-beats" });
+    const gone = timeline({ start: 0 }, { tempo: { clip: "c_gone" } });
+    expect(await clipTiming(input({ timeline: gone }))).toEqual({ beats: [], beatsProblem: "no-music-clip" });
+    const brokenBy = (message: string) =>
+      clipTiming(
+        input({
+          beatsOf: async () => {
+            throw new Error(message);
+          },
+        }),
+      );
+    expect(await brokenBy("beats/music.beats.json is not valid: beats[3]")).toEqual({ beats: [], beatsProblem: "broken-beats" });
+    expect(await brokenBy("beats/music.beats.json is not valid: bpm")).toEqual({ beats: [], beatsProblem: "broken-beats" });
     const low = await clipTiming(input({ beatsOf: async () => beatsFile({ detector: "onset-flux@1", confidence: 0.3 }) }));
-    expect(low?.beats).toEqual([]);
-    expect(low?.beatsProblem).toContain("LOW confidence");
+    expect(low).toEqual({ beats: [], beatsProblem: "low-confidence" });
+    // The code, not the words: another LOW confidence or another asset is the same timing, so the same key.
+    const lower = await clipTiming(input({ beatsOf: async () => beatsFile({ asset: "assets/other.wav", detector: "onset-flux@1", confidence: 0.2 }) }));
+    expect(lower).toEqual(low);
+  });
+
+  it("words every problem code for a composition that shows it", () => {
+    for (const code of ["no-tempo", "no-music-clip", "no-beats", "broken-beats", "low-confidence"] as const) {
+      expect(RENDER_BEATS_PROBLEMS[code]).toMatch(/\.$/);
+    }
   });
 
   it("reads a nominal grid on the timeline clock too", async () => {
@@ -142,5 +155,14 @@ describe("render keys with timing", () => {
     // A marker the clip did not ask for leaves its key alone.
     expect(await keyFor({ timeline: timeline({ start: 0 }, { markers: [{ id: "m_a", at: 5, label: "hook" }] }) })).toBe(asked);
     expect(await keyFor({ kinds: ["beats", "markers"], timeline: timeline({ start: 0 }, { markers: [{ id: "m_a", at: 5, label: "hook" }] }) })).not.toBe(asked);
+  });
+
+  it("without a usable grid, changes only when the reason does, never with the words of a refusal", async () => {
+    const broken = (message: string) => keyFor({ beatsOf: async () => Promise.reject(new Error(message)) });
+    const unreadable = await broken("beats/music.beats.json is not valid: beats[3]");
+    expect(await broken("beats/music.beats.json is not valid: bpm: expected a number")).toBe(unreadable);
+    const low = await keyFor({ beatsOf: async () => beatsFile({ detector: "onset-flux@1", confidence: 0.3 }) });
+    expect(await keyFor({ beatsOf: async () => beatsFile({ asset: "assets/b.wav", detector: "onset-flux@1", confidence: 0.25 }) })).toBe(low);
+    expect(new Set([unreadable, low, await keyFor({ beatsOf: async () => null }), await keyFor({ timeline: timeline(null) })]).size).toBe(4);
   });
 });
