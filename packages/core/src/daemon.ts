@@ -894,7 +894,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // A nominal grid runs a little past the last clip, so a clip dragged past the end still has beats to land on.
       return await tempoGrid({ fps: viewed.fps, timeline: viewed.timeline, horizon: (duration ?? 0) + 30, beatsOf: (asset) => beatsOf(dir, asset) });
     } catch (error) {
-      if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return { grid: null, problem: error.message };
+      if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return { grid: null, problem: error.message, reason: "broken-beats" as const };
       throw error;
     }
   };
