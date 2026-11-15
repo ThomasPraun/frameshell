@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import { ANALYSIS_DIR, ANALYSIS_MANIFEST, ANALYZE_RESULT_LABELS, type AnalyzeDiffResultShape, type AnalyzeEvent, type AnalyzeResultShape, type AnalyzeSheet, type AnalyzeShotLook, ErrorCode, RpcError } from "@frameshell/protocol";
+import { ANALYSIS_DIR, ANALYSIS_MANIFEST, ANALYZE_RESULT_LABELS, type AnalyzeAudio, type AnalyzeDiffResultShape, type AnalyzeEvent, type AnalyzeResultShape, type AnalyzeSheet, type AnalyzeShotLook, ErrorCode, RpcError } from "@frameshell/protocol";
 import { effectiveBeatGrid, isLowConfidence } from "@frameshell/schema";
 import { pool } from "../export/service.js";
 import { probeMedia, runTool } from "../media/ffmpeg.js";
@@ -10,10 +10,13 @@ import { type BeatsStore, beatsFileOf } from "../media/beats-store.js";
 import { wavData } from "../media/energy-store.js";
 import { ENERGY_HOP_S, energyEnvelope } from "../media/energy.js";
 import { alignedAudioFilter } from "../media/recipe.js";
+import { extractAudioWithFfmpeg } from "../transcripts/audio.js";
+import { type Pcm16, readPcmWav } from "../transcripts/window.js";
 import { readRawFrames } from "../media/raw-frames.js";
 import { Frames, writeSheetImages } from "../review/images.js";
 import { type Critical, type FramePick, contactPicks, frameRange, sheetLayout } from "../review/plan.js";
 import { captureParallelism, fileSource } from "../review/source.js";
+import { type AudioTempo, type SpeechInput, measureAudio } from "./audio.js";
 import { classifyCuts } from "./cuts.js";
 import { curveOf } from "./curve.js";
 import { type AnalyzeDiffHooks, type AnalyzeDiffRequest, runDiff } from "./diff.js";
@@ -28,7 +31,7 @@ import { rhythmOf } from "./rhythm.js";
 import { sceneScores } from "./scene.js";
 import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
 
-// `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness and tempo of a reference video, on the managed ffmpeg.
+// `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness, tempo and audio of a reference video, on the managed ffmpeg.
 // Frame sampling and sheet tiling are `review`'s (`review/plan.ts`, `review/images.ts`); the beat detector is `media/beats.ts`.
 
 /** Most tiles of the contact sheet in all images: a longer film is sampled more coarsely than 2 per second. */
@@ -43,6 +46,8 @@ const SHOT_IMAGE_SIDE = 640;
 const BEAT_SAMPLE_RATE = 44_100;
 /** Most events of one kind the result lists: a busier film is cut short, with a warning. */
 const MAX_EVENTS_PER_KIND = 300;
+/** Longest film whose speech is recognised, seconds: transcription time grows with it. */
+const MAX_SPEECH_S = 600;
 
 /** Options for {@link AnalyzeService}. */
 export interface AnalyzeServiceOptions {
@@ -50,6 +55,20 @@ export interface AnalyzeServiceOptions {
   ffmpeg(root: string): Promise<string>;
   ffprobe(root: string): Promise<string>;
   beats: Pick<BeatsStore, "measureAudio">;
+  /**
+   * Recognise the speech in `wav` (16 kHz mono PCM, the film's sound) for the project at `root`; rejects when it cannot (no provider,
+   * untrusted project, no model). Absent: the speech of every run is skipped.
+   */
+  transcribe?(root: string, wav: string, signal: AbortSignal | undefined): Promise<Recognised>;
+}
+
+/** What {@link AnalyzeServiceOptions.transcribe} heard. */
+export interface Recognised {
+  /** Seconds on the film's clock, in time order. */
+  words: readonly { text: string; start: number; end: number }[];
+  provider: string;
+  model: string | null;
+  language: string | null;
 }
 
 /** What one `analyze` run is asked for; see the `analyze` method. */
@@ -60,6 +79,8 @@ export interface AnalyzeRequest {
   name?: string | undefined;
   /** Scene score that opens a shot; default {@link DEFAULT_CUT_THRESHOLD}. */
   threshold?: number | undefined;
+  /** Recognise the speech (sentences, pace, pitch, voice against music, effects); default true. */
+  speech?: boolean | undefined;
 }
 
 /** What a run reports while it works. */
@@ -158,6 +179,7 @@ export class AnalyzeService {
     let loudness: AnalyzeResultShape["loudness"] = null;
     let tempo: TempoWithBeats | null = null;
     let voiceDb: Float32Array | null = null;
+    let audio: AnalyzeAudio | null = null;
     if (probe.audio) {
       stage("Measuring the loudness", 0.5);
       loudness = await measureLoudness(ffmpeg, request.file, signal);
@@ -169,6 +191,9 @@ export class AnalyzeService {
         voiceDb = energyEnvelope(pcm16(sound.data), sound.rate);
         events.push(...hitEvents(soundHits(voiceDb, ENERGY_HOP_S), changes.map((change) => change.frame), fps, series.frames));
         tempo = await this.#tempo(root, request.file, sound, warnings, signal, (fraction) => hooks.progress?.(0.55 + 0.1 * fraction));
+        stage("Listening to the speech", 0.58);
+        const speech = await this.#speech(root, ffmpeg, request, soundScratch, probe.duration, signal);
+        audio = measureAudio({ db: voiceDb, hop: ENERGY_HOP_S, fps, duration: frameStart(frames, fps), speech, tempo: tempo ? tempoOf(tempo) : null });
       } finally {
         await rm(soundScratch, { recursive: true, force: true });
       }
@@ -232,6 +257,7 @@ export class AnalyzeService {
       sync,
       loudness,
       tempo: tempo ? withoutBeats(tempo) : null,
+      audio,
       sheets,
       warnings,
       labels: { ...ANALYZE_RESULT_LABELS },
@@ -249,6 +275,29 @@ export class AnalyzeService {
   async diff(root: string, request: Omit<AnalyzeDiffRequest, "name"> & { name?: string | undefined }, hooks: AnalyzeDiffHooks = {}): Promise<AnalyzeDiffResultShape> {
     const name = request.name ?? diffName(request.file, request.reference);
     return runDiff({ root, ffmpeg: await this.#options.ffmpeg(root), ffprobe: await this.#options.ffprobe(root) }, { ...request, name }, hooks);
+  }
+
+  /**
+   * The speech of `request.file` as {@link measureAudio} takes it: the words the project's transcription heard in the film's sound, or
+   * the reason there are none. A failed recognition never fails the run (it is the `reason`); only an abort throws.
+   */
+  async #speech(root: string, ffmpeg: string, request: AnalyzeRequest, scratch: string, seconds: number | null, signal: AbortSignal | undefined): Promise<SpeechInput> {
+    const skipped = (reason: string): SpeechInput => ({ kind: "skipped", reason });
+    if (request.speech === false) return skipped("not asked for (speech: false).");
+    const { transcribe } = this.#options;
+    if (!transcribe) return skipped("no transcription is set up here.");
+    if (seconds !== null && seconds > MAX_SPEECH_S) return skipped(`the film is longer than ${MAX_SPEECH_S / 60} minutes, which is the most whose speech is recognised.`);
+    try {
+      const wav = join(scratch, "speech.wav");
+      await extractAudioWithFfmpeg({ path: request.file }, wav, async () => ffmpeg);
+      const pcm: Pcm16 | null = await readPcmWav(wav);
+      const heard = await transcribe(root, wav, signal);
+      return { kind: "heard", words: heard.words, pcm, provider: heard.provider, model: heard.model, language: heard.language };
+    } catch (error) {
+      signal?.throwIfAborted();
+      // No provider, an untrusted project or a missing model are answers about the project, not failures of the run: `speech.reason` says which.
+      return skipped(`the speech could not be recognised: ${(error as Error).message}`);
+    }
   }
 
   /** The tempo of `sound`, or null with a warning when it holds no steady beat. */
@@ -375,6 +424,11 @@ function fallbackLook(looks: readonly LookBuilder[], index: number, overall: Loo
 /** The four figures of a look, without its grid. */
 function shotLook({ brightness, contrast, saturation, warmth }: Look): AnalyzeShotLook {
   return { brightness, contrast, saturation, warmth };
+}
+
+/** The tempo as the audio measures use it. */
+function tempoOf(tempo: TempoWithBeats): AudioTempo {
+  return { bpm: tempo.bpm, low: tempo.low, beats: tempo.beats, downbeats: tempo.downbeats };
 }
 
 function withoutBeats({ beats: _beats, downbeats: _downbeats, ...tempo }: TempoWithBeats): NonNullable<AnalyzeResultShape["tempo"]> {

@@ -6,6 +6,8 @@
 // `blur-card` applies motion blur (ADR 0041): a blurred render (one that got `motionBlur`) fails unless it is the card's
 // { requireBlur } when set, paints { blurColor } when set, waits { blurDelayMs } more, and with { refuseBlur } throws the
 // MOTION_BLUR_REFUSED error a plugin gives for a composition it cannot blur.
+// `beat-card` asks for the card's { timing } kinds (ADR 0029 decision 8); a card's { requireTiming } fails the render
+// unless the timing it got is that JSON, and its live page sets `window.cardTiming` to what it got.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -46,6 +48,7 @@ export function activate(api) {
       if (blurred && card.refuseBlur) throw Object.assign(new Error(`card ${clip.source} cannot be motion-blurred`), { code: "MOTION_BLUR_REFUSED" });
       if (blurred && card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
       if (card.requireStyle && !ctx.styleCss?.includes(card.requireStyle)) throw new Error(`card ${clip.source} got no style sheet with ${card.requireStyle}`);
+      if (card.requireTiming && JSON.stringify(ctx.timing) !== JSON.stringify(card.requireTiming)) throw new Error(`card ${clip.source} got timing ${JSON.stringify(ctx.timing)}`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
         await new Promise((resolve) => setTimeout(resolve, ((card.delayMs ?? 0) + (blurred ? (card.blurDelayMs ?? 0) : 0)) / steps));
@@ -90,4 +93,15 @@ export function activate(api) {
   api.registerClipType(card);
   api.registerClipType({ ...card, type: "token-card", styleTokens: true });
   api.registerClipType({ ...card, type: "blur-card", motionBlur: true });
+  api.registerClipType({
+    ...card,
+    type: "beat-card",
+    async timing(clip) {
+      return clip.source ? ((await readCard(clip).catch(() => ({}))).timing ?? []) : [];
+    },
+    async livePreview(clip, ctx) {
+      const page = await card.livePreview(clip, ctx);
+      return { ...page, head: `${page.head} window.cardTiming = ${JSON.stringify(ctx.timing ?? null)};` };
+    },
+  });
 }

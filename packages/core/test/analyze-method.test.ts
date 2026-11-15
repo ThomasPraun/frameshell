@@ -136,6 +136,14 @@ describe("analyze method", () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it("measures the audio: no transcription plugin here, so the speech is skipped with its reason, and the sections are still there", () => {
+    expect(result.audio!.speech).toMatchObject({ status: "skipped", sentences: [], pitch: null });
+    expect(result.audio!.speech.reason).toMatch(/^the speech could not be recognised: /);
+    expect(result.audio!.effects).toBeNull();
+    expect(result.audio!.sections.length).toBeGreaterThanOrEqual(1);
+    expect(methods.analyze.result.parse(result).audio).toEqual(result.audio);
+  });
+
   it("writes the contact sheet at 2 frames a second with the cuts marked, a shots sheet and a JPEG per shot", () => {
     const contact = result.sheets.filter((sheet) => sheet.kind === "contact");
     const tiles = contact.flatMap((sheet) => sheet.tiles);
@@ -203,7 +211,7 @@ describe("analyze method", () => {
     "says a film with no sound has no loudness or tempo",
     async () => {
       const mute = await conn.request("analyze", { cwd: project, file: join(footage, "mute.mp4"), name: "mute" });
-      expect(mute).toMatchObject({ loudness: null, tempo: null, stats: { shotCount: 3 } });
+      expect(mute).toMatchObject({ loudness: null, tempo: null, audio: null, stats: { shotCount: 3 } });
       expect(mute.warnings).toEqual(["audio: the video has no sound, so there is no loudness, tempo or hits."]);
       const manifest = JSON.parse(readFileSync(join(mute.dir, "analysis.json"), "utf8")) as { tempo: unknown };
       expect(manifest.tempo).toBeNull();

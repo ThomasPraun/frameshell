@@ -79,8 +79,9 @@ export type CommandResult = string | void | { output?: string; data?: unknown; f
 /**
  * Clip adapter contract (SPEC §8.2). The host renders adapter clips in the
  * background into its clip render cache (SPEC §6.5), keyed by plugin name and
- * version, the clip's `source` and `props`, the content of {@link inputs} and
- * the project format. Preview plays the cached file; export overlays it.
+ * version, the clip's `source` and `props`, the content of {@link inputs},
+ * the project format and the timing the clip asks for ({@link timing}).
+ * Preview plays the cached file; export overlays it.
  */
 export interface ClipAdapter {
   /** Clip `type` in timeline files: lowercase, not `media`, `timeline` or `shot` (`CORE_CLIP_TYPES`, `ADAPTER_CLIP_TYPE_PATTERN` in `@frameshell/schema`). */
@@ -133,6 +134,55 @@ export interface ClipAdapter {
    * a clip's `motionBlur` and count it in the render key; clips of other adapters render sharp and `clip.set` warns.
    */
   readonly motionBlur?: boolean;
+  /**
+   * Optional. Which of the timeline's timing this clip's render reads (ADR 0029 decision 8): `beats` (the beat grid,
+   * with bar starts) and `markers`. Only the kinds returned reach {@link RenderContext.timing} and count in the clip's
+   * render key, so a clip that asks for none never re-renders when the music or a marker moves. Called on every key
+   * check, like {@link inputs}, with the same `context`. Absent or empty: none.
+   */
+  timing?(clip: unknown, context?: InputsContext): readonly RenderTimingKind[] | Promise<readonly RenderTimingKind[]>;
+}
+
+/** What a clip can ask of the timeline's timing through {@link ClipAdapter.timing}. */
+export type RenderTimingKind = "beats" | "markers";
+
+/**
+ * The timeline's timing inside one clip (ADR 0029 decision 8), in composition seconds (file time of the render: the
+ * clip shows composition second `in + t` at `t` seconds after its start). Only what falls inside the clip's part of
+ * the timeline is listed, so moving or trimming the clip, or moving the music, changes it and re-renders the clip.
+ */
+export interface RenderTiming {
+  /**
+   * Beats of the timeline's grid (`tempo`) inside the clip, ascending; present when the clip asked for `beats`. Empty
+   * when the timeline has no usable grid; {@link beatsProblem} says why.
+   */
+  readonly beats?: readonly RenderBeat[];
+  /** Tempo of the grid on the timeline clock (a sped-up music clip is faster); absent when there is no usable grid. */
+  readonly tempo?: { readonly bpm: number; readonly meter: number };
+  /** Why {@link beats} is empty although asked: no `tempo`, no beats file yet, a broken one, a LOW confidence grid. */
+  readonly beatsProblem?: string;
+  /** Markers of the timeline inside the clip, ascending; present when the clip asked for `markers`. */
+  readonly markers?: readonly RenderMarker[];
+}
+
+/** One beat of {@link RenderTiming.beats}. */
+export interface RenderBeat {
+  /** Composition seconds. */
+  readonly at: number;
+  /** Its number as `beat:N` names it: counted from 1 at the music file's first beat, not the clip's. */
+  readonly beat: number;
+  /** When the beat starts a bar, the bar's number as `bar:N` names it; absent otherwise. */
+  readonly bar?: number;
+}
+
+/** One marker of {@link RenderTiming.markers}. */
+export interface RenderMarker {
+  /** Composition seconds. */
+  readonly at: number;
+  readonly id: string;
+  readonly label: string;
+  /** `red`, `orange`, `yellow`, `green`, `blue` or `purple`; absent: the app's accent. */
+  readonly color?: string;
 }
 
 /**
@@ -155,6 +205,8 @@ export interface LiveContext {
   readonly height: number;
   /** See {@link RenderContext.ensureBinary}. */
   ensureBinary(name: string): Promise<string>;
+  /** See {@link RenderContext.timing}: the page shows what the render will, so it gets the same timing. */
+  readonly timing?: RenderTiming;
 }
 
 /**
@@ -247,6 +299,11 @@ export interface RenderContext {
    * with a warning, where the blurred one was asked for.
    */
   readonly motionBlur?: RenderMotionBlur;
+  /**
+   * The timeline's beats and markers inside the clip, of the kinds {@link ClipAdapter.timing} asked for (ADR 0029
+   * decision 8); absent when it asked for none. Part of the render key.
+   */
+  readonly timing?: RenderTiming;
 }
 
 /**

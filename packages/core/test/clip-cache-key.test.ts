@@ -109,3 +109,14 @@ describe("clip render cache key with motion blur (ADR 0041)", () => {
     }
   });
 });
+
+describe("clip render cache key with timing (ADR 0029 decision 8)", () => {
+  it("is the old key without timing, and changes with each beat or marker the clip asked for", () => {
+    expect(clipCacheKey(base)).toBe("860bfe02caf248cce3c57980b63d9441");
+    const timed = clipCacheKey({ ...base, timing: { beats: [{ at: 0.5, beat: 1, bar: 1 }], tempo: { bpm: 120, meter: 4 } } });
+    expect(timed).not.toBe(clipCacheKey(base));
+    expect(clipCacheKey({ ...base, timing: { tempo: { meter: 4, bpm: 120 }, beats: [{ bar: 1, beat: 1, at: 0.5 }] } })).toBe(timed);
+    expect(clipCacheKey({ ...base, timing: { beats: [{ at: 0.6, beat: 1, bar: 1 }], tempo: { bpm: 120, meter: 4 } } })).not.toBe(timed);
+    expect(clipCacheKey({ ...base, timing: { markers: [] } })).not.toBe(clipCacheKey({ ...base, timing: { markers: [{ at: 1, id: "m_a", label: "hook" }] } }));
+  });
+});
