@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `grade.compare`, slice 7 of the colour grade (#384, ADR 0031, epic #451; protocol 146): pick a look by eye. One frame of
+  a media clip (default its middle frame, or `at`) is rendered under up to 16 `looks` (each a whole `clip.set` `grade` plus
+  an optional `name`; fields left out are neutral), next to a neutral baseline and the clip's own grade when it has one, and
+  tiled into one labelled PNG (default `.frameshell/grade/compare-<clip>-<frame>.png`, tiles 160 to 960 px wide, default
+  480). Every tile goes through the `frame` export path on a copy of the loaded timeline with the clip's grade swapped, so
+  layers above, captions and the format are drawn as exported; the timeline is never changed. Each tile's `flags` are the
+  `clip set` flags that give the clip that grade. A look's LUT outside the project, missing or not a 3D `.cube` is
+  refused before rendering (`InvalidParams`). `frameshell grade compare <clip> --look warm:temperature=0.25,saturation=1.1
+  [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]`; MCP `grade_compare` returns the sheet as an
+  image. No built-in looks yet.
 - `analyze` audio: sentences, pace, pitch, voice against music, effects and sections, last part of #471 (epic #451; protocol 144):
   the result and `analysis.json` of `frameshell analyze` gain `audio` (null for a film without sound; every value
   ESTIMATED in `labels`, read from the mix, never from separated stems). `audio.speech` is recognised by the project's own

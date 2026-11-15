@@ -183,6 +183,7 @@ import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
+import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
@@ -761,6 +762,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const gradeAnalyzer = new GradeAnalyzer({
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     probe: (dir, asset) => media.probe(dir, asset),
+  });
+  const gradeComparer = new GradeComparer({
+    exports,
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -1762,6 +1767,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       const analysis = await gradeAnalyzer.analyze(dir, shown.timeline, { timeline, fps: shown.fps, clip, at, from, to, samples });
       return { view: shown.view, proposal: shown.proposal, ...analysis };
+    },
+    "grade.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
+      const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat };
+      return { view: shown, proposal, ...(await gradeComparer.compare(dir, { ...loaded, ...formats }, request)) };
     },
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);

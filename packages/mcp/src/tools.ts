@@ -71,6 +71,8 @@ const SHEETS_SUFFIX =
   ` Returns the sheets as images (scaled to fit ${REVIEW_MAX_SIDE} px, at most ${REVIEW_MAX_IMAGES}; the rest are at their \`path\`) ` +
   "followed by the run's facts: each sheet's path, size and its tiles' labels in reading order.";
 
+const GRADE_SHEET_SUFFIX = ` Returns the sheet as an image (scaled to fit ${REVIEW_MAX_SIDE} px; full size at its \`path\`) followed by the facts.`;
+
 /**
  * Every tool: one per public registry method, input schema generated from the
  * method's Zod params, plus the composed `frames_strip`. `cwd` becomes
@@ -95,6 +97,7 @@ export function buildTools(defaultCwd: string): ToolSpec[] {
       description += CAPTURE_SUFFIX;
     }
     if (method === "review" || method === "analyze" || method === "analyze.diff") description += SHEETS_SUFFIX;
+    if (method === "grade.compare") description += GRADE_SHEET_SUFFIX;
     tools.push({ name: toolName(method), description, inputSchema: input.schema, method, takesCwd: input.takesCwd });
   }
   const strip = withDefaultCwd(z.toJSONSchema(FramesStripParams, { target: "draft-2020-12", io: "input" }), defaultCwd);

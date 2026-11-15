@@ -6,6 +6,7 @@ import type {
   ConfigOperation,
   DaemonConnection,
   GradeAnalyzeResult,
+  GradeCompareResult,
   HistoryResult,
   MarkerListResult,
   MulticamCreateResult,
@@ -96,6 +97,15 @@ mutations print the new revision):
                                --to a range, --samples frames spread over it (default 8, 1 to 32); none: the whole
                                clip. Prints the levels, why each number, and the clip set command to apply it.
                                Changes nothing; judge it by eye with frame (a sunset is meant to be warm)
+  grade compare <clip> --look [name:]field=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px]
+                [--format id]
+                               Render one frame of a media clip under up to 16 looks next to a neutral baseline (and
+                               its current grade) as one labelled PNG, through the export frame path. A look is a whole
+                               grade: exposure, temperature, tint, contrast, saturation, lut, lut-mix (left out =
+                               neutral), e.g. --look warm:temperature=0.25,saturation=1.1. --at picks the frame (default
+                               the clip's middle); --out the image (default .frameshell/grade/compare-<clip>-<frame>.png);
+                               --tile-width 160 to 960 (default 480). Prints the clip set command that keeps each look.
+                               Changes nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -500,6 +510,8 @@ export const TIMELINE_OPTIONS = {
   "clear-gaps": { type: "boolean" },
   format: { type: "string" },
   reset: { type: "boolean" },
+  look: { type: "string", multiple: true },
+  "tile-width": { type: "string" },
   person: { type: "string" },
   anchor: { type: "string" },
   pauses: { type: "string" },
@@ -560,6 +572,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip reframe": ["format", "person", "anchor"],
   "clip verify": ["probes", "tolerance"],
   "grade analyze": ["at", "from", "to", "samples"],
+  "grade compare": ["look", "at", "out", "tile-width", "format"],
   "clip set": [
     "speed",
     "gain",
@@ -675,6 +688,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
   "grade analyze": [1, 1],
+  "grade compare": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -710,6 +724,43 @@ export function timelineCommandFlags(): Map<string, string[]> {
   return new Map(
     Object.entries(ALLOWED).map(([command, flags]) => [command.trim(), command.startsWith("tx ") ? [...flags] : [...flags, "timeline"]]),
   );
+}
+
+/** `--look` keys and the `grade` field each sets; `lut` takes a path, the rest numbers. */
+const LOOK_FIELDS: Record<string, string> = {
+  exposure: "exposure",
+  temperature: "temperature",
+  tint: "tint",
+  contrast: "contrast",
+  saturation: "saturation",
+  lut: "lut",
+  "lut-mix": "lutMix",
+  lutMix: "lutMix",
+};
+
+/** One `--look`: `[name:]field=value[,field=value...]`, e.g. `warm:temperature=0.25,saturation=1.1` or `teal:lut=luts/teal.cube,lut-mix=0.6`. */
+export function parseLook(raw: string): Record<string, string | number> {
+  const colon = raw.indexOf(":");
+  const named = colon >= 0 && colon < raw.indexOf("=");
+  const look: Record<string, string | number> = named ? { name: raw.slice(0, colon).trim() } : {};
+  const body = named ? raw.slice(colon + 1) : raw;
+  for (const pair of body.split(",")) {
+    const [key = "", value, ...more] = pair.split("=").map((part) => part.trim());
+    const field = LOOK_FIELDS[key];
+    if (!field || value === undefined || value === "" || more.length > 0) {
+      throw new UsageError(
+        `--look: expected [name:]field=value[,field=value...] with fields exposure, temperature, tint, contrast, saturation, lut, lut-mix, e.g. warm:temperature=0.25,saturation=1.1; got "${raw}".`,
+      );
+    }
+    if (field === "lut") {
+      look[field] = value;
+      continue;
+    }
+    const number = Number(value);
+    if (!Number.isFinite(number)) throw new UsageError(`--look: ${key} expects a number, got "${value}" in "${raw}".`);
+    look[field] = number;
+  }
+  return look;
 }
 
 /** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
@@ -1258,6 +1309,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], at: num("at"), from: num("from"), to: num("to"), samples });
       break;
     }
+    case "grade compare": {
+      method = "grade.compare";
+      const looks = (list("look") ?? []).map(parseLook);
+      if (looks.length === 0) throw new UsageError("`frameshell grade compare` needs at least one --look, e.g. --look warm:temperature=0.25,saturation=1.1.");
+      if (looks.length > 16) throw new UsageError(`--look: at most 16 looks, got ${looks.length}.`);
+      const tileWidth = num("tile-width");
+      if (tileWidth !== undefined && (!Number.isInteger(tileWidth) || tileWidth < 160 || tileWidth > 960)) throw new UsageError("--tile-width: expected a whole number of px from 160 to 960.");
+      Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -1463,6 +1524,7 @@ export async function executeTimeline(
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
+  if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
@@ -1510,6 +1572,21 @@ export function formatGradeAnalyze(result: GradeAnalyzeResult): string {
   for (const reason of result.reasons) lines.push(`  ${reason}`);
   if (result.flags !== "") lines.push(`Apply: frameshell clip set ${result.clip} ${result.flags}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** `grade compare` for people: the image, then each tile's number, name and the `clip set` flags that keep it. */
+export function formatGradeCompare(result: GradeCompareResult): string {
+  const lines = [
+    `Grade compare of ${result.clip} (${result.asset}) on ${result.timeline} · frame ${result.frame} at ${result.at.toFixed(3)} s · ${result.tiles.length} tiles, ${result.columns}x${result.rows}`,
+    `  ${result.path} (${result.width}x${result.height})`,
+  ];
+  for (const tile of result.tiles) {
+    const keep = tile.flags === "" ? "(the clip's grade now)" : `frameshell clip set ${result.clip} ${tile.flags}`;
+    lines.push(`  ${tile.label.padEnd(18)} ${keep}`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  lines.push("Nothing changed: open the image, then keep a look with its clip set command.");
   return `${lines.join("\n")}\n`;
 }
 
