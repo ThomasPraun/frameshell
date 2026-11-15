@@ -104,11 +104,8 @@ describe.skipIf(!BLENDER)("blender adapter with a real Blender", () => {
     const adapter = createBlenderAdapter({ projectDir: project });
     const clip = { id: "c1", type: "blender", source: "scene.blend", start: 0, duration: 1 };
     const size = { width: 320, height: 180 };
-    const events: string[] = [];
     const { ctx, progress } = renderContext(project, BLENDER!, { fps: 10, ...size, tier: "final" });
-    const started = performance.now();
     const result = await adapter.render(clip, ctx);
-    events.push(`final ${Math.round(performance.now() - started)} ms`);
     expect(progress.map((update) => update.message)).toContain("Rendering the final (Cycles)");
     const rgba = await decodeRgba(result.file);
     expect(rgba.length / (size.width * size.height * 4)).toBe(10);
@@ -122,7 +119,5 @@ describe.skipIf(!BLENDER)("blender adapter with a real Blender", () => {
 
     const again = await adapter.render(clip, renderContext(project, BLENDER!, { fps: 10, ...size, tier: "final" }).ctx);
     expect(readFileSync(again.file).equals(readFileSync(result.file))).toBe(true);
-    // Printed for ADR 0035's Evidence.
-    console.log(`${events.join(", ")}; ${measured.sources["scene.blend"]} s per frame and megapixel`);
   }, 600_000);
 });
