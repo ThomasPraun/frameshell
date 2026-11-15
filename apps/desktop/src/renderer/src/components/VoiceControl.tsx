@@ -3,7 +3,7 @@ import type { NormalizedAudioEffect } from "@frameshell/schema/effects";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { projectStyle } from "../project-style.js";
-import { EFFECT_PARAMS, type EffectKind, type VoiceKind, bypass, missingKinds, movedEarlier, paramOf, withEffect, withParam, withoutEffect } from "../voice/model.js";
+import { EFFECT_PARAMS, type EffectKind, type VoiceKind, bypass, hasVoice, missingKinds, movedEarlier, paramOf, voiceEffects, withEffect, withParam, withVoice, withoutEffect } from "../voice/model.js";
 import { NumberField } from "./inspector-fields.js";
 
 const EFFECT_NAMES: Record<EffectKind, () => { name: string; title: string }> = {
@@ -17,7 +17,8 @@ const EFFECT_NAMES: Record<EffectKind, () => { name: string; title: string }> = 
  * A media clip's voice chain (ADR 0031): a switch that sets the style's voice chain or bypasses the chain, and
  * while there is one, each effect in processing order with its numbers, a move-earlier and a remove button, and a
  * menu to add a kind the chain lacks. Every change writes the whole list through `clip.set audioEffects`; a bypassed
- * chain comes back from this window's memory (`bypass`), the saved clip holds no flag.
+ * chain comes back from this window's memory (`bypass`), the saved clip holds no flag. The switch, the preset and a
+ * bypass only replace voice effects: the builds of `music shape` stay in the list.
  */
 export function VoiceControl({
   clip,
@@ -34,10 +35,10 @@ export function VoiceControl({
     onSend({ op: "clip.set", args: { clip, audioEffects: list ? [...list] : null } }, { label });
   const styleChain = (label: string) =>
     projectStyle().then(
-      (style) => write(voiceChainOf(style.sound.voice), label),
+      (style) => write(withVoice(effects, voiceChainOf(style.sound.voice)), label),
       (failure: unknown) => onError((failure as Error).message),
     );
-  const on = effects.length > 0;
+  const on = hasVoice(effects);
   const addable = missingKinds(effects);
   return (
     <div className="clip-inspector-group voice-chain" role="group" aria-label={t.inspector.voice}>
@@ -48,12 +49,12 @@ export function VoiceControl({
           data-tip={on ? t.inspector.voiceOffTitle : t.inspector.voiceOnTitle}
           onClick={() => {
             if (on) {
-              bypass.keep(clip, effects);
-              write(null, "Bypass voice chain");
+              bypass.keep(clip, voiceEffects(effects));
+              write(withVoice(effects, null), "Bypass voice chain");
               return;
             }
             const kept = bypass.recall(clip);
-            if (kept) write(kept, "Add voice chain");
+            if (kept) write(withVoice(effects, kept), "Add voice chain");
             else void styleChain("Add voice chain");
           }}
         >

@@ -1,6 +1,6 @@
 import { MAX_AUDIO_EFFECTS, VOICE_CHAIN, normalizeAudioEffects } from "@frameshell/schema/effects";
 import { describe, expect, it } from "vitest";
-import { EFFECT_PARAMS, bypass, defaultEffect, missingKinds, movedEarlier, paramOf, withEffect, withParam, withoutEffect } from "../src/renderer/src/voice/model.js";
+import { EFFECT_PARAMS, bypass, defaultEffect, hasVoice, missingKinds, movedEarlier, paramOf, voiceEffects, withEffect, withParam, withVoice, withoutEffect } from "../src/renderer/src/voice/model.js";
 
 describe("voice chain edits", () => {
   it("withParam changes one number and leaves the rest of the list as it was", () => {
@@ -72,5 +72,31 @@ describe("voice chain edits", () => {
     bypass.keep("c_voice", VOICE_CHAIN);
     expect(bypass.recall("c_voice")).toEqual(VOICE_CHAIN);
     expect(bypass.recall("c_other")).toBeNull();
+  });
+
+  describe("music builds", () => {
+    const build = normalizeAudioEffects([{ kind: "highpassSweep", from: 8, to: 10, auto: "music" }])[0]!;
+    const handSet = normalizeAudioEffects([{ kind: "highpassSweep", from: 1, to: 3 }])[0]!;
+
+    it("reads the Voice switch as on only while there is a voice effect", () => {
+      expect(hasVoice([build])).toBe(false);
+      expect(hasVoice([handSet])).toBe(true);
+      expect(hasVoice([build, VOICE_CHAIN[0]!])).toBe(true);
+      expect(voiceEffects([build, VOICE_CHAIN[0]!, handSet])).toEqual([VOICE_CHAIN[0], handSet]);
+    });
+
+    it("sets the voice chain beside the builds, and replaces only voice effects", () => {
+      expect(withVoice([build], VOICE_CHAIN)).toEqual([...VOICE_CHAIN, build]);
+      expect(withVoice([], VOICE_CHAIN)).toEqual([...VOICE_CHAIN]);
+      const edited = [build, { ...VOICE_CHAIN[0]!, frequency: 120 } as (typeof VOICE_CHAIN)[number], VOICE_CHAIN[2]!];
+      expect(withVoice(edited, VOICE_CHAIN)).toEqual([build, ...VOICE_CHAIN]);
+    });
+
+    it("bypasses the voice and keeps the builds; a list that had none left is cleared", () => {
+      expect(withVoice([build, ...VOICE_CHAIN], null)).toEqual([build]);
+      expect(withVoice([...VOICE_CHAIN, build, build], null)).toEqual([build, build]);
+      expect(withVoice(VOICE_CHAIN, null)).toBeNull();
+      expect(withVoice([], null)).toBeNull();
+    });
   });
 });

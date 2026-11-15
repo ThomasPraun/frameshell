@@ -1,6 +1,7 @@
 // Voice section of the clip inspector (ADR 0031): edits of a clip's audio effect list as pure functions.
 // The list is always written whole through `clip.set audioEffects`; a list that became empty is written as null.
-import { AUDIO_EFFECT_KINDS, AUDIO_EFFECT_LIMITS, MAX_AUDIO_EFFECTS, type NormalizedAudioEffect, VOICE_CHAIN } from "@frameshell/schema/effects";
+// Builds (`music shape` sweeps, `isBuild`) are not voice: the switch, the preset and a bypass leave them in place.
+import { AUDIO_EFFECT_KINDS, AUDIO_EFFECT_LIMITS, MAX_AUDIO_EFFECTS, type NormalizedAudioEffect, VOICE_CHAIN, isBuild } from "@frameshell/schema/effects";
 
 /** Kind of one audio effect. */
 export type EffectKind = NormalizedAudioEffect["kind"];
@@ -15,6 +16,28 @@ export const EFFECT_PARAMS = {
   compressor: ["threshold", "ratio", "attack", "release", "makeup"],
   highpassSweep: ["startHz", "endHz"],
 } as const satisfies Record<EffectKind, readonly string[]>;
+
+/** The effects of `list` that are voice effects: everything but a build. */
+export function voiceEffects(list: readonly NormalizedAudioEffect[]): NormalizedAudioEffect[] {
+  return list.filter((effect) => !isBuild(effect));
+}
+
+/** True while `list` holds a voice effect; a clip with only builds has its Voice switch off. */
+export function hasVoice(list: readonly NormalizedAudioEffect[]): boolean {
+  return list.some((effect) => !isBuild(effect));
+}
+
+/**
+ * The list with its voice effects replaced by `voice` (none removes them) and every build kept. The new voice effects
+ * take the place of the first old one, ahead of the builds when the list had none; null when nothing is left.
+ */
+export function withVoice(list: readonly NormalizedAudioEffect[], voice: readonly NormalizedAudioEffect[] | null): NormalizedAudioEffect[] | null {
+  const first = list.findIndex((effect) => !isBuild(effect));
+  const at = first < 0 ? 0 : first; // every entry before `first` is a build
+  const kept = list.filter(isBuild);
+  const next = [...kept.slice(0, at), ...(voice ?? []), ...kept.slice(at)];
+  return next.length > 0 ? next : null;
+}
 
 /** The effect of `kind` with every parameter at the voice chain's number. */
 export function defaultEffect(kind: VoiceKind): NormalizedAudioEffect {

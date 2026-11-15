@@ -1,7 +1,9 @@
 // page.evaluate bodies run in the renderer.
 /// <reference lib="dom" />
+import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
@@ -20,6 +22,8 @@ const LANE_MIDDLE = 22 + 22;
 /** Timeline span the fitted zoom shows while the timeline is under 48 s (`layout.ts`). */
 const FIT_SPAN_S = 60;
 const ASSET = "assets/talk.mp4";
+const cliBin = join(import.meta.dirname, "..", "..", "..", "packages", "cli", "dist", "bin", "frameshell.js");
+const run = promisify(execFile);
 
 const VOICE = [
   { kind: "highpass", frequency: 85 },
@@ -144,4 +148,26 @@ test("every edit is one undoable step", async () => {
   await page.keyboard.press(`${modifier}+z`);
   await expect.poll(saved).toEqual([VOICE[0], VOICE[1], { ...VOICE[2], ratio: 4 }]);
   await expect(effect("compressor").getByRole("textbox", { name: "Ratio (:1)" })).toHaveValue("4");
+});
+
+test("a music build stays through the switch, the preset and Voice off, which count only voice effects", async () => {
+  const handWritten = { kind: "highpassSweep", from: 1, to: 2, auto: "music" };
+  // The inspector writes the list normalized: the defaults filled in, the music mark kept.
+  const build = { ...handWritten, startHz: 40, endHz: 300 };
+  await run(process.execPath, [cliBin, "clip", "set", "c_talk", "--audio-effects", JSON.stringify([handWritten])], {
+    cwd: box.projectDir,
+    env: { ...process.env, FRAMESHELL_SOCKET: box.socketPath, FRAMESHELL_DATA_DIR: box.dataDir, FRAMESHELL_CONFIG_DIR: box.configDir },
+    timeout: 60_000,
+  });
+  await expect.poll(saved).toEqual([handWritten]);
+  await expect(voice().getByRole("button", { name: "Voice", exact: true })).toHaveAttribute("aria-pressed", "false");
+
+  await voice().getByRole("button", { name: "Voice", exact: true }).click();
+  await expect.poll(() => (saved() as { kind: string }[]).map((entry) => entry.kind)).toEqual(["highpass", "denoise", "compressor", "highpassSweep"]);
+  await voice().getByRole("button", { name: "Voice preset" }).click();
+  await expect.poll(saved).toEqual([...VOICE, build]);
+
+  await voice().getByRole("button", { name: "Voice", exact: true }).click();
+  await expect.poll(saved).toEqual([build]);
+  await expect(voice().getByRole("button", { name: "Voice", exact: true })).toHaveAttribute("aria-pressed", "false");
 });

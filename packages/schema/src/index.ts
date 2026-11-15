@@ -293,6 +293,7 @@ export {
   backdropMatrix,
   backdropOf,
   bakeRef,
+  isBuild,
   normalizeAudioEffects,
   sweepCutoffAt,
 } from "./effects.js";
