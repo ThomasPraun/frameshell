@@ -574,23 +574,41 @@ export class ClipRenderer {
     this.#timers.set(root, timer);
   }
 
+  /**
+   * Queue background renders of every generated clip, keyed as `status` and export key them: in its timeline
+   * flattened, so a nested clip hears its host's beats and markers. A clip that reads timing in a timeline file
+   * another one nests is keyed only through that host; keyed against its own file it would render a second time.
+   */
   async #refreshOnce(root: string): Promise<void> {
-    const placed: Sited[] = [];
+    const files: { id: string; timeline: Timeline }[] = [];
     for (const id of await this.#options.timelines(root)) {
       try {
-        placed.push(...sited(await this.#options.peek(root, id)));
+        files.push({ id, timeline: await this.#options.peek(root, id) });
       } catch {
         // Invalid or vanished timeline: its own errors surface where it is used.
       }
+    }
+    const hosted = nestedSources(files);
+    const placed: (Sited & { hosted: boolean })[] = [];
+    for (const { id, timeline } of files) {
+      let flat: Timeline;
+      try {
+        flat = await resolveNested(root, timeline, this.#options.readNested);
+      } catch {
+        continue;
+      }
+      const isHosted = hosted.has(`timelines/${id}.json`);
+      placed.push(...sited(flat).map((site) => ({ ...site, hosted: isHosted })));
     }
     // No generated clips: never load plugins (an untrusted project stays untouched).
     if (placed.length === 0) return;
     const adapters = await this.#options.adapters(root);
     const format = await this.#options.format(root);
-    for (const { clip, timeline } of placed) {
+    for (const { clip, timeline, hosted: isHosted } of placed) {
       if (this.#closed) return;
       const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
+      if (isHosted && keyed.timing) continue;
       const { final } = keyed;
       if (!(await this.#ready(root, keyed.key))) {
         // A final render waits for its draft: the refresh after the draft is ready queues it.
@@ -849,6 +867,23 @@ export function generatedClips(timeline: Timeline): Placed[] {
     }
   }
   return placed;
+}
+
+/** Project-relative files that a nested clip of the timeline files shows, other than the timeline's own file. */
+function nestedSources(files: readonly { id: string; timeline: Timeline }[]): Set<string> {
+  const sources = new Set<string>();
+  for (const { id, timeline } of files) {
+    const own = `timelines/${id}.json`;
+    for (const track of timeline.tracks) {
+      if (track.kind === "subtitles" || track.kind === "program") continue;
+      for (const clip of track.clips) {
+        if (clip.type !== "timeline" || !("source" in clip) || !clip.source) continue;
+        const source = posix.normalize(clip.source.replaceAll("\\", "/"));
+        if (source !== own) sources.add(source);
+      }
+    }
+  }
+  return sources;
 }
 
 /** {@link generatedClips} of `timeline`, each with the timeline it sits in. */

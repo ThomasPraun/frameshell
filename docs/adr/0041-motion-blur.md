@@ -53,4 +53,4 @@ Motion blur for motion graphics ([#501](https://github.com/ThomasPraun/frameshel
 4. `cuts()` in `packages/motion`, `pnpm gen:motion` (done, runtime 0.4.0; a real test shows the frame on a declared cut has no trace of the scene before it).
 5. `clip.set motionBlur`, engine op and inverse, CLI, skill (done).
 6. Determinism: the same blurred clip rendered twice gives identical frames (done, opt-in real test). A blurred-render probe in `clip verify` waits for the owner's decision on the sequential probe.
-7. The 3D cap and the warnings (done, protocol 149): see "As built (slice 7)" under decision 11.
+7. The 3D cap and the warnings (done, protocol 150): see "As built (slice 7)" under decision 11.

@@ -10,6 +10,7 @@ import {
   MulticamGalleryResultSchema,
   MulticamTurnsResultSchema,
   OperationResultSchema,
+  TimeRef,
   TimelineIdSchema,
   TimelineProblemSchema,
   TimelineViewSchema,
@@ -544,8 +545,8 @@ export const timelineMethods = {
         .min(1)
         .optional()
         .describe("Rules file inside the project, absolute or relative to `cwd`. Default `director.json` at the project root, when it exists."),
-      from: z.number().nonnegative().optional().describe("Timeline seconds where directing starts. Default 0."),
-      to: z.number().nonnegative().optional().describe("Timeline seconds where it ends. Default: the end of the program track."),
+      from: TimeRef("Timeline time where directing starts. Default 0.").optional(),
+      to: TimeRef("Timeline time where it ends. Default: the end of the program track.").optional(),
       replaceHuman: z.boolean().optional().describe("Also replace shots a person chose in the app. Default false."),
     }),
     result: MulticamDirectResultSchema,
@@ -557,7 +558,7 @@ export const timelineMethods = {
       "line: chunks (one cue each) separated by `|`, the phrase's ONE emphasised word between asterisks, e.g. " +
       "`No need to | open any | *editor*`; an optional `[chars]`, `[words]`, `[line]` or `[none]` at the start of a line sets that " +
       "phrase's entry; blank lines and `#` lines are skipped. The text covers every word the track shows between `from` and `to` " +
-      "(timeline seconds, default the whole track), in order: the words are matched by position, so a text that loses or repeats a " +
+      "(timeline times, default the whole track), in order: the words are matched by position, so a text that loses or repeats a " +
       "word fails (the error names the first difference); typed words that differ from the transcript after case, accents and " +
       "punctuation only warn. Mapped onto transcript word ids, so cuts and transcript corrections keep the phrases (a word a cut " +
       "removed just leaves its chunk). Words no phrase holds keep the style's automatic grouping. A chunk lasts until the next cue " +
@@ -573,8 +574,8 @@ export const timelineMethods = {
       track: z.string().min(1).describe("Subtitle track id from `track.list`, e.g. `t_4d5e6f`."),
       text: z.string().optional().describe("The captions, one phrase per line. Give this or `file`; neither with `replace: true` clears the phrases."),
       file: z.string().min(1).optional().describe("Text file inside the project with the same format, absolute or relative to `cwd`."),
-      from: z.number().nonnegative().optional().describe("Timeline seconds where the captioned range starts: words from this frame on. Default 0."),
-      to: z.number().nonnegative().optional().describe("Timeline seconds where it ends: words that start before this frame. Default: the end of the track's words."),
+      from: TimeRef("Timeline time where the captioned range starts: words from this frame on. Default 0.").optional(),
+      to: TimeRef("Timeline time where it ends: words that start before this frame. Default: the end of the track's words.").optional(),
       replace: z.boolean().optional().describe("Also drop every other phrase of the track. Default false."),
     }),
     result: CaptionsSetResultSchema,

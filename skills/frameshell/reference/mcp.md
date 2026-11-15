@@ -45,7 +45,7 @@ Navigation only; each returns `ui_state` after the move.
 
 | Tool | Use |
 |---|---|
-| `ui_seek { at }` | Put the playhead on a moment you want them to watch. |
+| `ui_seek { at }` | Put the playhead on a moment you want them to watch: seconds, a marker (`hook+0.5`) or `beat:N` / `bar:N`, read on the timeline the app shows. |
 | `ui_play` / `ui_pause` | Play from the playhead / stop. |
 | `ui_select { clips?, words?, range? }` | Point at what you mean; replaces their selection. |
 | `ui_select { person: { id, what? } }` | Show the user where someone speaks (`what: "onscreen"`: is on screen): their spans and words selected, as a click in the People panel does. `id` is the person id or exact name. |

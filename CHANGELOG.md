@@ -10,13 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Motion blur of 3D compositions capped at 8 samples, and warnings for a blur that did not apply, slices of #473 and #501
-  (ADR 0041, ADR 0042 decision 13, epic #451; protocol 149): a HyperFrames composition that draws with WebGL (it holds the
+  (ADR 0041, ADR 0042 decision 13, epic #451; protocol 150): a HyperFrames composition that draws with WebGL (it holds the
   three.js bundle `frameshell-three.js`, or a script makes a `WebGLRenderer` or `webgl` context) renders its blur with at
   most 8 samples per frame, since each sample is a full frame on the software renderer. Adapters get `RenderContext.warn`:
   the note is kept with the cached render and shown wherever that render is used. `frame` returns `warnings` (CLI prints
   `warning:` lines; MCP `frame_capture` has them in its facts), `review` adds them to its own `warnings`, once each, and
   export jobs show them as before. Where the producer refuses a blur (HDR content, shader transitions) and the sharp
   render stands in, `frame` and `review` now say so too, where only `clip.renders` `final.error` did.
+- TimeRef in the last time arguments that took plain seconds, a slice of #458 (ADR 0029 slice 4, epic #451; protocol 149):
+  `sound.place` and `sound.music` now read `beat:N` and `bar:N` too (they took seconds and markers only: the `cues[].at`,
+  `typing.from`/`to`, `at`, `sections[].at` and `accents[]` times), and `captions.set` `from`/`to`, `multicam.direct`
+  `from`/`to`, `multicam.reframe` `time` (the timeline second; `at` stays group seconds) and `ui.seek` `at` (read on the
+  timeline the app shows) take a marker, `beat:N` or `bar:N` as well as seconds. All go through the one resolver, so the
+  messages are those of `--snap-to`: a timeline with no tempo, a clip with no beats file yet or a LOW confidence grid is
+  refused with the argument named (`sound.place: cues[1].at: ...`). The history records seconds. CLI `captions set`,
+  `direct`, `multicam reframe --time` and `sound place|music` pass the text through. `track.duck` and `music.shape` curve
+  times are computed by the daemon in seconds, not typed, and `multicam.paint` is on the group clock, so they stay numbers.
 - Brand pictures in motion templates, the last slice of #467 (ADR 0044, epic #451; no protocol change):
   `frameshell hyperframes new <name> --template <t> --component [<prop>=]<path>` copies a picture `brand.json` lists
   (a captured logo, icon, screenshot or `section-*.png` crop, or a Figma frame) into the composition as
@@ -76,9 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   music. An adapter says per clip which timing it reads (`ClipAdapter.timing`, `beats` and/or `markers`; plugin API
   stays "1") and gets `RenderContext.timing` (and `LiveContext.timing` for the live page): the beats of the timeline's
   grid with their `beat:N`/`bar:N` numbers and tempo, and the markers, that fall inside the clip, in composition seconds.
-  No usable grid (no tempo, no beats file, a broken or LOW confidence one) gives no beats and a `beatsProblem`, never a
-  failed render. Only clips that ask count it in their render key, so moving the music or a marker re-renders them and
-  nothing else; existing keys are unchanged. HyperFrames compositions ask with
+  No usable grid gives no beats and a `beatsProblem` code (`no-tempo`, `no-music-clip`, `no-beats`, `broken-beats`,
+  `low-confidence`; worded by `RENDER_BEATS_PROBLEMS`), never a failed render; the key counts the code, not an error's
+  words, so it holds while the reason does. Only clips that ask count it in their render key, so moving the music or a
+  marker re-renders them and nothing else; existing keys are unchanged. A clip that asks inside a nested timeline is
+  keyed through the timeline that shows it, in the background as in preview and export, so it renders once. An adapter
+  whose `timing()` throws leaves the clip unavailable. HyperFrames compositions ask with
   `<meta name="frameshell-timing" content="beats markers">` and read `window.frameshellTiming`. No wire change.
 - Batch slot defaults and a review column, slice 5 of #477 (ADR 0040, epic #451; protocol 145): a batch slot written
   `<clipId>.props` (no path) sets the prop named like the slot, so `"title": "c_8f2a1b.props"` is

@@ -1,3 +1,4 @@
+import type { RenderBeatsProblem } from "@frameshell/plugin-api";
 import { ErrorCode, RpcError, type SnapToKind, TIME_REF_FIELDS } from "@frameshell/protocol";
 import { type BeatsFile, type MediaClip, type Tempo, type Timeline, effectiveBeatGrid, findMarker, findMusicClip, isLowConfidence, nominalBeatFrame } from "@frameshell/schema";
 import { FrameGrid } from "./grid.js";
@@ -51,13 +52,14 @@ export interface TimelineGrid {
   barBase: number;
 }
 
-/** What {@link tempoGrid} found. */
-export interface TempoResult {
-  /** The grid; null when `tempo` is unset or its beats are not there (see `problem`). */
-  grid: TimelineGrid | null;
-  /** Why there is no grid although a `tempo` is set (no beats file, a broken one); null otherwise. */
-  problem: string | null;
-}
+/**
+ * What {@link tempoGrid} found: a grid, no tempo at all, or why a set tempo gives none (`problem` in words, `reason`
+ * as the stable code a render key counts, ADR 0029 decision 8).
+ */
+export type TempoResult =
+  | { grid: TimelineGrid; problem: null }
+  | { grid: null; problem: null }
+  | { grid: null; problem: string; reason: Extract<RenderBeatsProblem, "no-music-clip" | "no-beats" | "broken-beats"> };
 
 /** Input of {@link tempoGrid}. */
 export interface TempoInput {
@@ -89,12 +91,12 @@ export async function tempoGrid(input: TempoInput): Promise<TempoResult> {
   const frames = new FrameGrid(fps);
   if (tempo.clip === undefined) return { grid: nominalGrid(tempo, fps, input.horizon, frames), problem: null };
   const clip = findMusicClip(timeline, tempo.clip);
-  if (!clip) return { grid: null, problem: `tempo follows clip ${tempo.clip}, which is not a media clip of the timeline.` };
+  if (!clip) return { grid: null, problem: `tempo follows clip ${tempo.clip}, which is not a media clip of the timeline.`, reason: "no-music-clip" };
   const speed = clip.speed ?? 1;
   if (tempo.bpm !== undefined) return { grid: nominalClipGrid(tempo, clip, speed, fps, frames), problem: null };
 
   const file = await input.beatsOf(clip.asset);
-  if (!file) return { grid: null, problem: `${clip.asset} has no beat grid yet: run \`frameshell beats measure ${clip.asset}\`.` };
+  if (!file) return { grid: null, problem: `${clip.asset} has no beat grid yet: run \`frameshell beats measure ${clip.asset}\`.`, reason: "no-beats" };
   const effective = effectiveBeatGrid(file);
   const starts = barIndexes(effective.beats.length, effective.downbeat, effective.meter);
   const beats: number[] = [];
@@ -261,15 +263,15 @@ export async function snapRequest(request: OperationRequest, context: SnapContex
       }
     });
   }
-  const { grid, problem } = await tempoGrid({
+  const found = await tempoGrid({
     fps: context.fps,
     timeline: context.timeline,
     horizon: Math.max(...Object.values(resolved)),
     beatsOf: context.beatsOf,
   });
-  const unusable = unusableGrid({ grid, problem });
+  const unusable = unusableGrid(found);
   if (unusable) throw refuse(unusable.message, unusable.hint);
-  const usable = grid as TimelineGrid;
+  const usable = found.grid as TimelineGrid;
   return withSnapped(request, args, given, (field) => {
     try {
       return nearestBeat(usable,resolved[field]!, snapTo);
