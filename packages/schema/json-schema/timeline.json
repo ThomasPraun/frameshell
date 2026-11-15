@@ -212,6 +212,33 @@
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "description": "Seconds of the closing fade."
+                                },
+                                "build": {
+                                  "description": "Set when the run wrote `highpassSweep` builds (`audio.effects`, `auto: \"music\"`); `music.fit` aims them at the hits again after it moves the clip.",
+                                  "type": "object",
+                                  "properties": {
+                                    "seconds": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Timeline seconds of the rising high-pass before each hit."
+                                    },
+                                    "startHz": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Cutoff in Hz where it starts."
+                                    },
+                                    "endHz": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Cutoff in Hz just before the hit."
+                                    }
+                                  },
+                                  "required": [
+                                    "seconds",
+                                    "startHz",
+                                    "endHz"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -319,6 +346,49 @@
                                     ],
                                     "additionalProperties": false,
                                     "description": "Compressor: evens out loud and quiet passages."
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "highpassSweep"
+                                      },
+                                      "from": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "description": "Asset second (source clock, as the clip's `in`) where the build starts: the filter is out of the signal before it."
+                                      },
+                                      "to": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "description": "Asset second where the build ends and the full range is back: the drop."
+                                      },
+                                      "startHz": {
+                                        "description": "Cutoff in Hz at `from`, 10 to 2000. Default 40.",
+                                        "type": "number",
+                                        "minimum": 10,
+                                        "maximum": 2000
+                                      },
+                                      "endHz": {
+                                        "description": "Cutoff in Hz just before `to`, 10 to 2000. Default 300.",
+                                        "type": "number",
+                                        "minimum": 10,
+                                        "maximum": 2000
+                                      },
+                                      "auto": {
+                                        "description": "Set by `music.shape` (`build`) on the sweeps it wrote: running it again replaces them and keeps the effects you set by hand.",
+                                        "type": "string",
+                                        "const": "music"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "from",
+                                      "to"
+                                    ],
+                                    "additionalProperties": false,
+                                    "description": "Swept high-pass: the cutoff rises exponentially from `startHz` to `endHz` between asset seconds `from` and `to` (a build before a drop), then the filter is out of the signal again. Positions are on the asset's own clock, so they follow the music when the clip moves or is trimmed."
                                   }
                                 ]
                               }
@@ -1257,6 +1327,33 @@
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "description": "Seconds of the closing fade."
+                                },
+                                "build": {
+                                  "description": "Set when the run wrote `highpassSweep` builds (`audio.effects`, `auto: \"music\"`); `music.fit` aims them at the hits again after it moves the clip.",
+                                  "type": "object",
+                                  "properties": {
+                                    "seconds": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Timeline seconds of the rising high-pass before each hit."
+                                    },
+                                    "startHz": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Cutoff in Hz where it starts."
+                                    },
+                                    "endHz": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Cutoff in Hz just before the hit."
+                                    }
+                                  },
+                                  "required": [
+                                    "seconds",
+                                    "startHz",
+                                    "endHz"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -2087,6 +2184,33 @@
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "description": "Seconds of the closing fade."
+                                },
+                                "build": {
+                                  "description": "Set when the run wrote `highpassSweep` builds (`audio.effects`, `auto: \"music\"`); `music.fit` aims them at the hits again after it moves the clip.",
+                                  "type": "object",
+                                  "properties": {
+                                    "seconds": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Timeline seconds of the rising high-pass before each hit."
+                                    },
+                                    "startHz": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Cutoff in Hz where it starts."
+                                    },
+                                    "endHz": {
+                                      "type": "number",
+                                      "exclusiveMinimum": 0,
+                                      "description": "Cutoff in Hz just before the hit."
+                                    }
+                                  },
+                                  "required": [
+                                    "seconds",
+                                    "startHz",
+                                    "endHz"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -3484,6 +3608,33 @@
                           "type": "number",
                           "exclusiveMinimum": 0,
                           "description": "Seconds of the closing fade."
+                        },
+                        "build": {
+                          "description": "Set when the run wrote `highpassSweep` builds (`audio.effects`, `auto: \"music\"`); `music.fit` aims them at the hits again after it moves the clip.",
+                          "type": "object",
+                          "properties": {
+                            "seconds": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Timeline seconds of the rising high-pass before each hit."
+                            },
+                            "startHz": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Cutoff in Hz where it starts."
+                            },
+                            "endHz": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Cutoff in Hz just before the hit."
+                            }
+                          },
+                          "required": [
+                            "seconds",
+                            "startHz",
+                            "endHz"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
@@ -3661,6 +3812,33 @@
                           "type": "number",
                           "exclusiveMinimum": 0,
                           "description": "Seconds of the closing fade."
+                        },
+                        "build": {
+                          "description": "Set when the run wrote `highpassSweep` builds (`audio.effects`, `auto: \"music\"`); `music.fit` aims them at the hits again after it moves the clip.",
+                          "type": "object",
+                          "properties": {
+                            "seconds": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Timeline seconds of the rising high-pass before each hit."
+                            },
+                            "startHz": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Cutoff in Hz where it starts."
+                            },
+                            "endHz": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "description": "Cutoff in Hz just before the hit."
+                            }
+                          },
+                          "required": [
+                            "seconds",
+                            "startHz",
+                            "endHz"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [

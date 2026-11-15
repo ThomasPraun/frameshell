@@ -1,9 +1,10 @@
 import { ErrorCode, MUSIC_FIT_MIN_CONFIDENCE, type MusicFitResult, RpcError } from "@frameshell/protocol";
-import { type AnyClip, type ClipTrack, type DuckSettings, type MediaClip, type ShapeSettings, type Timeline, clipLength } from "@frameshell/schema";
+import { type AnyClip, type AudioEffect, type ClipTrack, type DuckSettings, type MediaClip, type ShapeSettings, type Timeline, clipLength } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
+import { planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";
@@ -47,7 +48,7 @@ export interface MusicFitPlan extends Omit<MusicFitResult, "timeline" | "revisio
    * Music shape to run again in the same transaction, before the duck: the clip's `music` keys sit on its own clock and the
    * hits they stepped down for are on the picture. `curve` is the stored shaping at the clip's new length. Null when none runs.
    */
-  shapeAgain: { clip: string; curve: DipPoint[]; settings: ShapeSettings } | null;
+  shapeAgain: { clip: string; curve: DipPoint[]; settings: ShapeSettings; effects: AudioEffect[] | null | undefined } | null;
 }
 
 const BINARY_ERRORS: readonly number[] = [ErrorCode.BinaryUnavailable, ErrorCode.BinaryNotFound, ErrorCode.BinaryInstallFailed, ErrorCode.BinaryChecksumMismatch];
@@ -143,7 +144,9 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
       // Shaping again drops the duck keys: without the duck to put them back, the keys stay as they are.
       warnings.push(`${clip.id} carries music keys, which no longer line up with the picture: not run again, since the duck keys could not be put back. Run \`music shape\` and \`duck\` again.`);
     } else {
-      shapeAgain = { clip: clip.id, curve: shapeCurve(settings, length), settings };
+      // The builds are on the file's clock but aimed at hits of the picture: aimed again at the clip's new place.
+      const { effects } = planBuildEffects({ id: clip.id, ...plan.after, audio: clip.audio }, settings.drops ?? [], settings.build, warnings);
+      shapeAgain = { clip: clip.id, curve: shapeCurve(settings, length), settings, effects };
       warnings.push(`${clip.id} carries music keys: music shape ${request.dryRun === true ? "would run" : "ran"} again with the settings of its last run, at the same times of the picture.`);
       steps.push({ id: "shape", detail: `run music shape again on ${clip.id} (hits at ${(settings.drops ?? []).join(", ") || "none"}${settings.ending === undefined ? "" : `, ending ${settings.ending} s`})`, skippable: true });
     }

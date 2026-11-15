@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
-import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS } from "./effects.js";
+import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS, SWEEP_SECONDS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
 import { GRAIN_LIMITS, VIGNETTE_LIMITS } from "./finish.js";
 import { GRADE_LIMITS, MAX_LUT_SIZE } from "./grade.js";
@@ -89,6 +89,14 @@ export const ShapeSettingsSchema = z.strictObject({
   release: z.number().positive().describe("Seconds the level took to come back."),
   ending: Seconds.optional().describe("Timeline second the music's closing fade began."),
   fade: z.number().positive().describe("Seconds of the closing fade."),
+  build: z
+    .strictObject({
+      seconds: z.number().positive().describe("Timeline seconds of the rising high-pass before each hit."),
+      startHz: z.number().positive().describe("Cutoff in Hz where it starts."),
+      endHz: z.number().positive().describe("Cutoff in Hz just before the hit."),
+    })
+    .optional()
+    .describe("Set when the run wrote `highpassSweep` builds (`audio.effects`, `auto: \"music\"`); `music.fit` aims them at the hits again after it moves the clip."),
 });
 
 /** See {@link ShapeSettingsSchema}. */
@@ -109,13 +117,14 @@ export const ClipAudioSchema = z.strictObject({
 const effectParam = (limit: { min: number; max: number; default: number }, what: string) =>
   z.number().min(limit.min).max(limit.max).optional().describe(`${what}, ${limit.min} to ${limit.max}. Default ${limit.default}.`);
 
-const { highpass: HPF, denoise: DENOISE, compressor: COMP } = AUDIO_EFFECT_LIMITS;
+const { highpass: HPF, denoise: DENOISE, compressor: COMP, highpassSweep: SWEEP } = AUDIO_EFFECT_LIMITS;
 
 /** One audio effect of a media clip; see {@link AudioEffectSchema}. */
 export type AudioEffect =
   | { kind: "highpass"; frequency?: number | undefined }
   | { kind: "denoise"; floor?: number | undefined; reduction?: number | undefined }
-  | { kind: "compressor"; threshold?: number | undefined; ratio?: number | undefined; attack?: number | undefined; release?: number | undefined; makeup?: number | undefined };
+  | { kind: "compressor"; threshold?: number | undefined; ratio?: number | undefined; attack?: number | undefined; release?: number | undefined; makeup?: number | undefined }
+  | { kind: "highpassSweep"; from: number; to: number; startHz?: number | undefined; endHz?: number | undefined; auto?: "music" | undefined };
 
 /**
  * One audio effect of a media clip (ADR 0031); `kind` selects it, omitted parameters take the voice chain's number.
@@ -142,6 +151,25 @@ export const AudioEffectSchema: z.ZodType<AudioEffect> = z.discriminatedUnion("k
       makeup: effectParam(COMP.makeup, "Gain in dB added after compression"),
     })
     .describe("Compressor: evens out loud and quiet passages."),
+  z
+    .strictObject({
+      kind: z.literal("highpassSweep"),
+      from: Seconds.describe("Asset second (source clock, as the clip's `in`) where the build starts: the filter is out of the signal before it."),
+      to: Seconds.describe("Asset second where the build ends and the full range is back: the drop."),
+      startHz: effectParam(SWEEP.startHz, "Cutoff in Hz at `from`"),
+      endHz: effectParam(SWEEP.endHz, "Cutoff in Hz just before `to`"),
+      auto: z
+        .literal("music")
+        .optional()
+        .describe("Set by `music.shape` (`build`) on the sweeps it wrote: running it again replaces them and keeps the effects you set by hand."),
+    })
+    .refine((sweep) => sweep.to - sweep.from >= SWEEP_SECONDS.min && sweep.to - sweep.from <= SWEEP_SECONDS.max, {
+      message: `\`to\` must be ${SWEEP_SECONDS.min} to ${SWEEP_SECONDS.max} seconds after \`from\`.`,
+    })
+    .describe(
+      "Swept high-pass: the cutoff rises exponentially from `startHz` to `endHz` between asset seconds `from` and `to` (a build before a drop), " +
+        "then the filter is out of the signal again. Positions are on the asset's own clock, so they follow the music when the clip moves or is trimmed.",
+    ),
 ]);
 
 /** Sound of a media clip: {@link ClipAudioSchema} plus its audio effects (ADR 0031). */

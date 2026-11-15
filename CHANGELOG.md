@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The swept high-pass build before a drop, slice 6 of #485 (ADR 0037, epic #451; protocol 144): audio effects take a new
+  kind `highpassSweep { from, to, startHz?, endHz? }` (seconds of the file; cutoff 40 to 300 Hz by default, rising
+  exponentially, out of the signal before `from` and from `to` on). It is baked with the rest of the chain, so the preview
+  and the export play the same samples, deterministically (ffmpeg `highpass` moved by `asendcmd`). `frameshell music shape
+  --drop <hit> --build 2` (also `--build-from`, `--build-to`; MCP `music_shape` `build`, `buildFrom`, `buildTo`) writes one
+  per hit, on the file's clock and aimed at the hit through the clip's place and speed, in the same transaction (one
+  `clip.set audioEffects`; marked `auto: "music"`, replaced by a re-run, removed by `--clear`, hand-set effects kept);
+  `music fit` aims them at the hits again when it moves the clip. The inspector's Voice group shows a build's two cutoffs.
+  A timeline with it is rejected by an older Frameshell (JSON Schema regenerated). Tests measure the low band before,
+  during and after the build on a synthetic signal, in the bake and in an export.
 - Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 143): an optional `grain { amount?, size?, seed? }` on media
   and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
   hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame

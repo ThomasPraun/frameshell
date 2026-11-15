@@ -3,13 +3,14 @@ import type { NormalizedAudioEffect } from "@frameshell/schema/effects";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { projectStyle } from "../project-style.js";
-import { EFFECT_PARAMS, type EffectKind, bypass, missingKinds, movedEarlier, paramOf, withEffect, withParam, withoutEffect } from "../voice/model.js";
+import { EFFECT_PARAMS, type EffectKind, type VoiceKind, bypass, missingKinds, movedEarlier, paramOf, withEffect, withParam, withoutEffect } from "../voice/model.js";
 import { NumberField } from "./inspector-fields.js";
 
 const EFFECT_NAMES: Record<EffectKind, () => { name: string; title: string }> = {
   highpass: () => ({ name: t.inspector.effectHighpass, title: t.inspector.effectHighpassTitle }),
   denoise: () => ({ name: t.inspector.effectDenoise, title: t.inspector.effectDenoiseTitle }),
   compressor: () => ({ name: t.inspector.effectCompressor, title: t.inspector.effectCompressorTitle }),
+  highpassSweep: () => ({ name: t.inspector.effectSweep, title: t.inspector.effectSweepTitle }),
 };
 
 /**
@@ -68,7 +69,7 @@ export function VoiceControl({
                 className="clip-field-select"
                 aria-label={t.inspector.voiceAdd}
                 value=""
-                onChange={(event) => write(withEffect(effects, event.target.value as EffectKind), "Add voice effect")}
+                onChange={(event) => write(withEffect(effects, event.target.value as VoiceKind), "Add voice effect")}
               >
                 <option value="">{t.inspector.voiceAddNone}</option>
                 {addable.map((kind) => (

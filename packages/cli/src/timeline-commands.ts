@@ -306,14 +306,20 @@ mutations print the new revision):
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
                                Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
                                gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
-  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s] [--clear] [--dry-run]
+  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
+                     [--build s [--build-from Hz] [--build-to Hz]] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
                                (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,
                                complete --lead s (0.4) before it, held --hold s (0.3) after, back over --release s (0.6);
                                from --ending it fades out over --fade s (2.5; a short one with --ending bar:N stops on a
                                bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
                                keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
-                               fit re-runs it when it moves the clip. --dry-run prints the dip curve. One transaction
+                               fit re-runs it when it moves the clip. --build s (e.g. 2) adds a rising high-pass before
+                               each --drop: a highpassSweep audio effect (marked auto "music") whose cutoff climbs from
+                               --build-from Hz (40) to --build-to Hz (300) over the s seconds before the hit and is out
+                               of the signal again at it, so the low end returns with the hit; it sits on the file's own
+                               clock, is baked like any audio effect, and a rerun replaces it. --dry-run prints the dip
+                               curve. One transaction
   music grid [--to beat|bar] [--max-shift s] [--skip g1,…] [--dry-run]
                                Move picture cuts (two clips of a video track that meet) onto the timeline's beat grid
                                (tempo set; a LOW grid is refused): each cut off its nearest beat (--to bar: bar start) by
@@ -515,6 +521,9 @@ export const TIMELINE_OPTIONS = {
   lead: { type: "string" },
   hold: { type: "string" },
   fade: { type: "string" },
+  build: { type: "string" },
+  "build-from": { type: "string" },
+  "build-to": { type: "string" },
   exact: { type: "boolean" },
   level: { type: "string" },
   loudness: { type: "string" },
@@ -638,7 +647,7 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
-  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "clear", "dry-run"],
+  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
   "music grid": ["to", "max-shift", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
@@ -1347,6 +1356,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         hold: num("hold"),
         release: num("release"),
         fade: num("fade"),
+        build: num("build"),
+        buildFrom: num("build-from"),
+        buildTo: num("build-to"),
         clear: values["clear"] === true ? true : undefined,
         dryRun: values["dry-run"] === true ? true : undefined,
       });
@@ -1567,6 +1579,7 @@ function formatMusicShape(result: MusicShapeResult): string {
     for (const at of result.drops) lines.push(`  steps down ${settings.depth} dB, complete ${s(settings.lead)} before the hit at ${s(at)}, stays down to ${s(at + settings.hold)}, back over ${s(settings.release)}`);
     if (result.ending !== null) lines.push(`  fades out from ${s(result.ending)} over ${s(settings.fade)}`);
   }
+  for (const sweep of result.sweeps) lines.push(`  high-pass build ${sweep.startHz} to ${sweep.endHz} Hz over ${s(sweep.to - sweep.from)} of the file (${s(sweep.from)}–${s(sweep.to)}), ending at the hit at ${s(sweep.at)}`);
   if (result.dryRun && result.curve.length > 0) lines.push(`  dip curve: ${result.curve.map((point) => `${point.time} s ${point.dip} dB`).join(", ")}`);
   for (const step of result.steps) lines.push(`  ${step.id.padEnd(6)}${step.detail}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);

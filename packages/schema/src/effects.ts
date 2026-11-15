@@ -4,7 +4,7 @@
 import type { AudioEffect, Backdrop, MediaClip } from "./timeline.js";
 
 /** Kinds of {@link AudioEffect}, in no particular order: a clip's list order is the processing order. */
-export const AUDIO_EFFECT_KINDS = ["highpass", "denoise", "compressor"] as const;
+export const AUDIO_EFFECT_KINDS = ["highpass", "denoise", "compressor", "highpassSweep"] as const;
 
 /** Longest `audio.effects` list. */
 export const MAX_AUDIO_EFFECTS = 8;
@@ -30,13 +30,18 @@ export const AUDIO_EFFECT_LIMITS = {
     release: { min: 0.01, max: 9000, default: 140 },
     makeup: { min: 0, max: 36, default: 2 },
   },
+  highpassSweep: { startHz: { min: 10, max: 2000, default: 40 }, endHz: { min: 10, max: 2000, default: 300 } },
 } as const satisfies Record<(typeof AUDIO_EFFECT_KINDS)[number], Record<string, EffectParamLimit>>;
+
+/** Shortest and longest window of a `highpassSweep`, seconds of the asset (ADR 0037 slice 6). */
+export const SWEEP_SECONDS = { min: 0.1, max: 30 } as const;
 
 /** An {@link AudioEffect} with every parameter given. */
 export type NormalizedAudioEffect =
   | { kind: "highpass"; frequency: number }
   | { kind: "denoise"; floor: number; reduction: number }
-  | { kind: "compressor"; threshold: number; ratio: number; attack: number; release: number; makeup: number };
+  | { kind: "compressor"; threshold: number; ratio: number; attack: number; release: number; makeup: number }
+  | { kind: "highpassSweep"; from: number; to: number; startHz: number; endHz: number };
 
 /**
  * The voice chain (#464): high-pass at 85 Hz, light FFT denoise, gentle 2.5:1 compression. `clip set --voice`
@@ -47,6 +52,17 @@ export const VOICE_CHAIN: readonly NormalizedAudioEffect[] = [
   { kind: "denoise", floor: -30, reduction: 8 },
   { kind: "compressor", threshold: -20, ratio: 2.5, attack: 8, release: 140, makeup: 2 },
 ];
+
+/**
+ * Cutoff in Hz of `effect` at asset second `at`, or null when the filter is out of the signal (before `from`, from
+ * `to` on: the build is over and the full range is back). Rises exponentially from `startHz` to `endHz`, so the
+ * climb sounds even in pitch. The one evaluator: the bake samples it, tests read it.
+ */
+export function sweepCutoffAt(effect: Extract<NormalizedAudioEffect, { kind: "highpassSweep" }>, at: number): number | null {
+  if (at < effect.from || at >= effect.to) return null;
+  const progress = (at - effect.from) / (effect.to - effect.from);
+  return effect.startHz * (effect.endHz / effect.startHz) ** progress;
+}
 
 /** `effects` with every omitted parameter at its default, fields in a fixed order. */
 export function normalizeAudioEffects(effects: readonly AudioEffect[]): NormalizedAudioEffect[] {
@@ -67,6 +83,16 @@ export function normalizeAudioEffects(effects: readonly AudioEffect[]): Normaliz
           attack: effect.attack ?? limits.attack.default,
           release: effect.release ?? limits.release.default,
           makeup: effect.makeup ?? limits.makeup.default,
+        };
+      }
+      case "highpassSweep": {
+        const limits = AUDIO_EFFECT_LIMITS.highpassSweep;
+        return {
+          kind: "highpassSweep",
+          from: effect.from,
+          to: effect.to,
+          startHz: effect.startHz ?? limits.startHz.default,
+          endHz: effect.endHz ?? limits.endHz.default,
         };
       }
     }

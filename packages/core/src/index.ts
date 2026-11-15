@@ -344,10 +344,13 @@ export {
   AudioFxService,
   type AudioFxServiceOptions,
   DENOISE_LATENCY_SAMPLES,
+  SWEEP_MAX_STEPS,
+  SWEEP_STEP_SECONDS,
   audioFxArgs,
   audioFxCacheKey,
   audioFxFilter,
   classifyAudioFx,
+  sweepCommands,
 } from "./media/audio-fx.js";
 export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";

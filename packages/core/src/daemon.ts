@@ -2327,17 +2327,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicFitLabel(report), revision: loaded.revision, warnings }, async (write) => {
         for (const { clip: id, ...operation } of operations) await write({ op: operation.op, args: { clip: id, ...operation.args } } as OperationRequest);
         // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
+        if (shapeAgain?.effects !== undefined) await write({ op: "clip.set", args: { clip: shapeAgain.clip, audioEffects: shapeAgain.effects } } as OperationRequest);
         if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
     },
-    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun }, caller) => {
+    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
-      const { operation, duckAgain, entryFade, noop, ...report } = await planMusicShape(
+      const { operation, effects, duckAgain, entryFade, noop, ...report } = await planMusicShape(
         loaded,
-        { clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun },
+        { clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
         (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
       );
       const result = { timeline, ...report };
@@ -2346,6 +2347,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(report.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicShapeLabel(report), revision: loaded.revision, warnings }, async (write) => {
         if (entryFade) await write({ op: "clip.set", args: { clip: operation.clip, audioFadeInMs: MUSIC_ENTRY_FADE_MS } } as OperationRequest);
+        if (effects !== undefined) await write({ op: "clip.set", args: { clip: operation.clip, audioEffects: effects } } as OperationRequest);
         await write({ op: "music.shape", args: { clip: operation.clip, curve: operation.curve, ...(operation.settings ? { settings: operation.settings } : {}) } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });

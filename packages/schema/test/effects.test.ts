@@ -9,6 +9,7 @@ import {
   backdropLayer,
   backdropMatrix,
   backdropOf,
+  type NormalizedAudioEffect,
   type Timeline,
   VOICE_CHAIN,
   audioEffectsKey,
@@ -16,6 +17,7 @@ import {
   bakeRef,
   normalizeAudioEffects,
   parseTimeline,
+  sweepCutoffAt,
 } from "../src/index.js";
 
 const withClip = (clip: Record<string, unknown>): unknown => ({
@@ -33,7 +35,43 @@ describe("audio effects (ADR 0031)", () => {
       const limits = AUDIO_EFFECT_LIMITS[effect.kind] as Record<string, { default: number }>;
       for (const [name, limit] of Object.entries(limits)) expect(effect[name as keyof typeof effect]).toBe(limit.default);
     }
-    expect(new Set(VOICE_CHAIN.map((effect) => effect.kind))).toEqual(new Set(AUDIO_EFFECT_KINDS));
+    // The sweep is not part of the voice chain: `music shape` writes it.
+    expect(new Set(VOICE_CHAIN.map((effect) => effect.kind))).toEqual(new Set(AUDIO_EFFECT_KINDS.filter((kind) => kind !== "highpassSweep")));
+  });
+
+  describe("highpassSweep (ADR 0037 slice 6)", () => {
+    const build = { kind: "highpassSweep", from: 8, to: 10 } as const;
+
+    it("takes the 40 to 300 Hz build as its defaults and keeps its times", () => {
+      expect(normalizeAudioEffects([build])).toEqual([{ kind: "highpassSweep", from: 8, to: 10, startHz: 40, endHz: 300 }]);
+    });
+
+    it("rises exponentially from startHz to endHz and is out of the signal outside the window", () => {
+      const [sweep] = normalizeAudioEffects([build]) as [Extract<NormalizedAudioEffect, { kind: "highpassSweep" }>];
+      expect(sweepCutoffAt(sweep, 7.99)).toBeNull();
+      expect(sweepCutoffAt(sweep, 8)).toBeCloseTo(40, 6);
+      expect(sweepCutoffAt(sweep, 9)).toBeCloseTo(Math.sqrt(40 * 300), 6);
+      expect(sweepCutoffAt(sweep, 9.999)).toBeGreaterThan(299);
+      expect(sweepCutoffAt(sweep, 10)).toBeNull();
+    });
+
+    it("keys by position and cutoffs, not by who wrote it", () => {
+      expect(audioEffectsKey([{ ...build, auto: "music" }])).toBe(audioEffectsKey([{ ...build, startHz: 40, endHz: 300 }]));
+      expect(audioEffectsKey([build])).not.toBe(audioEffectsKey([{ ...build, to: 11 }]));
+      expect(audioEffectsKey([build])).not.toBe(audioEffectsKey([{ ...build, endHz: 400 }]));
+    });
+
+    it("validates its window, cutoffs and mark", () => {
+      expect(AudioEffectSchema.safeParse(build).success).toBe(true);
+      expect(AudioEffectSchema.safeParse({ ...build, auto: "music" }).success).toBe(true);
+      expect(AudioEffectSchema.safeParse({ ...build, auto: "duck" }).success).toBe(false);
+      expect(AudioEffectSchema.safeParse({ kind: "highpassSweep", from: 8 }).success).toBe(false);
+      expect(AudioEffectSchema.safeParse({ ...build, to: 8.05 }).success).toBe(false);
+      expect(AudioEffectSchema.safeParse({ ...build, to: 39 }).success).toBe(false);
+      expect(AudioEffectSchema.safeParse({ ...build, to: 6 }).success).toBe(false);
+      expect(AudioEffectSchema.safeParse({ ...build, startHz: 5 }).success).toBe(false);
+      expect(AudioEffectSchema.safeParse({ ...build, endHz: 2001 }).success).toBe(false);
+    });
   });
 
   it("keys chains that process alike the same, whatever parameters are spelled out; order matters", () => {

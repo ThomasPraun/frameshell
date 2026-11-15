@@ -279,6 +279,7 @@ export {
   BACKDROP_LIMITS,
   GLASS,
   MAX_AUDIO_EFFECTS,
+  SWEEP_SECONDS,
   VOICE_CHAIN,
   type BackdropLayer,
   type EffectParamLimit,
@@ -290,6 +291,7 @@ export {
   backdropOf,
   bakeRef,
   normalizeAudioEffects,
+  sweepCutoffAt,
 } from "./effects.js";
 export {
   GRADE_LIMITS,
