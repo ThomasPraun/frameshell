@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `warning:` lines; MCP `frame_capture` has them in its facts), `review` adds them to its own `warnings`, once each, and
   export jobs show them as before. Where the producer refuses a blur (HDR content, shader transitions) and the sharp
   render stands in, `frame` and `review` now say so too, where only `clip.renders` `final.error` did.
+- Brand pictures in motion templates, the last slice of #467 (ADR 0044, epic #451; no protocol change):
+  `frameshell hyperframes new <name> --template <t> --component [<prop>=]<path>` copies a picture `brand.json` lists
+  (a captured logo, icon, screenshot or `section-*.png` crop, or a Figma frame) into the composition as
+  `brand/<id>/<file>` and makes it the default of the template's image prop (`logo`, `screenshot`, `picture`,
+  `before`/`after`, `label`). Fonts and files `brand.json` does not list are refused before anything is written. For a
+  Figma frame the output also gives its place at the folder's one scale on this canvas; while `credits.json` has no
+  licence for the source, it says so, since `frameshell credits` does not check files inside a composition. The
+  Frameshell skill gains a brand page (`reference/brand.md`: capture, findings listed before use, credits, fonts,
+  Figma, `--component`).
 
 - Letterbox per format, slice 4 of #500 (ADR 0043 and ADR 0027 decision 14, epic #451; protocol 148): `letterbox set <aspect>
   --format 9x16` (and `letterbox clear --format`; daemon and MCP `letterbox.set` `format`) gives one format its own black
@@ -1043,6 +1052,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `brand import-figma` sanitises the folder in a worker thread (#467): a synthetic 13 MB frame took 4.7 s on a loaded
+  host, long enough to stall every other daemon call.
 - Internal: the daemon method registry is split into one module per area under `packages/protocol/src/methods/`
   and merged into `methods` with a declared `MethodRegistry` type (#517), so its emitted declaration no longer grows
   with every schema (TypeScript TS7056 limit). Wire, `PROTOCOL_VERSION`, method names, params, results, MCP tools and
@@ -1119,6 +1130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
+  "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
+  switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.
 - Motion compositions paint each time the same whatever was painted before (#501, epic #451): motion runtime 0.3.0
   writes `x` and `y` on a 1/32 px grid and `rotate` on a 0.02° grid, because Chrome does not repaint a transform change
   under about 1/80 px and kept the older pose, so slow motion (a spring settling) rendered by frame differed from the

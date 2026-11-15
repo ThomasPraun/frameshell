@@ -2,6 +2,7 @@
 // all with one scale (canvas width / widest frame) centred on the canvas, so UI sizes match between screens.
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { runWorkerTask } from "../worker-task.js";
 import { type SvgLimits, sanitizeSvg } from "./svg.js";
 
 /** Limits of one Figma import: starting points, not measured. */
@@ -85,19 +86,14 @@ export async function readFigmaFolder(dir: string, limits: FigmaLimits = FIGMA_L
   return { frames, warnings };
 }
 
+const FIGMA_WORKER = import.meta.url.endsWith(".ts") ? new URL("../../dist/brand/figma-worker.js", import.meta.url) : new URL("./figma-worker.js", import.meta.url);
+
 /**
- * One scale for every frame (canvas width / widest frame) and each frame's top-left once centred on the canvas.
- * Positions are rounded to 1/1000 px.
+ * {@link readFigmaFolder} in a worker thread: sanitising the largest frame the limits allow takes seconds
+ * (a synthetic 13 MB Figma-shaped file: 4.7 s on a loaded host), which would stall every other daemon call.
  */
-export function fitFrames(frames: readonly { width: number; height: number }[], canvas: { width: number; height: number }): { reference: number; scale: number; places: { x: number; y: number }[] } {
-  const reference = Math.max(...frames.map((frame) => frame.width));
-  const scale = canvas.width / reference;
-  const round = (value: number) => Math.round(value * 1000) / 1000;
-  return {
-    reference,
-    scale,
-    places: frames.map((frame) => ({ x: round((canvas.width - frame.width * scale) / 2), y: round((canvas.height - frame.height * scale) / 2) })),
-  };
+export function readFigmaFolderInWorker(dir: string, limits: FigmaLimits = FIGMA_LIMITS): Promise<{ frames: FigmaFrame[]; warnings: string[] }> {
+  return runWorkerTask(FIGMA_WORKER, { dir, limits }, "Figma import", {});
 }
 
 /** `Home Screen.svg` → `home-screen.svg`, with `-2`, `-3`… when another frame of the import took it. */

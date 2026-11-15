@@ -127,6 +127,21 @@ export const BrandCaptureSchema = z.strictObject({
 /** Width Figma frames are usually designed at, CSS px (ADR 0044 decision 10). */
 export const FIGMA_FRAME_WIDTH = 1440;
 
+/**
+ * One scale for every frame (canvas width / widest frame) and each frame's top-left once centred on the canvas.
+ * Positions are rounded to 1/1000 px. Twin: `placeFrame` in `plugins/hyperframes/src/templates/components.ts`.
+ */
+export function fitFrames(frames: readonly { width: number; height: number }[], canvas: { width: number; height: number }): { reference: number; scale: number; places: { x: number; y: number }[] } {
+  const reference = Math.max(...frames.map((frame) => frame.width));
+  const scale = canvas.width / reference;
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+  return {
+    reference,
+    scale,
+    places: frames.map((frame) => ({ x: round((canvas.width - frame.width * scale) / 2), y: round((canvas.height - frame.height * scale) / 2) })),
+  };
+}
+
 /** One frame of a Figma import: a sanitised SVG and where it sits on the project canvas. */
 export const BrandFrameSchema = z.strictObject({
   path: z
