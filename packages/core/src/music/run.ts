@@ -4,7 +4,7 @@ import type { DipPoint } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
-import { planBuildEffects } from "./builds.js";
+import { isBuild, planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";
@@ -150,6 +150,8 @@ export async function planMusicFit(timeline: Timeline, fps: number, request: Mus
       warnings.push(`${clip.id} carries music keys: music shape ${request.dryRun === true ? "would run" : "ran"} again with the settings of its last run, at the same times of the picture.`);
       steps.push({ id: "shape", detail: `run music shape again on ${clip.id} (hits at ${(settings.drops ?? []).join(", ") || "none"}${settings.ending === undefined ? "" : `, ending ${settings.ending} s`})`, skippable: true });
     }
+  } else if (changes && clip.audio?.effects?.some(isBuild) === true) {
+    warnings.push(`${clip.id} carries builds (\`music shape\`) but no music keys, so they are not aimed again and stay on the same seconds of the file: run \`music shape\` again.`);
   }
   // `duck`, `shape` and `fade` are always accepted: an agent that passes them every time gets no error when there is nothing to skip.
   checkSkip(request.skip, [...new Set([...steps.filter((step) => step.skippable).map((step) => step.id), "duck", "shape", "fade"])]);

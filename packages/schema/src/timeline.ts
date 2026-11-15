@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
-import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS, SWEEP_SECONDS } from "./effects.js";
+import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS, GLASS, MAX_AUDIO_EFFECTS, SWEEP_EPSILON, SWEEP_SECONDS } from "./effects.js";
 import { ElementsSchema } from "./element-styles.js";
 import { GRAIN_LIMITS, VIGNETTE_LIMITS } from "./finish.js";
 import { GRADE_LIMITS, MAX_LUT_SIZE } from "./grade.js";
@@ -163,7 +163,7 @@ export const AudioEffectSchema: z.ZodType<AudioEffect> = z.discriminatedUnion("k
         .optional()
         .describe("Set by `music.shape` (`build`) on the sweeps it wrote: running it again replaces them and keeps the effects you set by hand."),
     })
-    .refine((sweep) => sweep.to - sweep.from >= SWEEP_SECONDS.min && sweep.to - sweep.from <= SWEEP_SECONDS.max, {
+    .refine((sweep) => sweep.to - sweep.from >= SWEEP_SECONDS.min - SWEEP_EPSILON && sweep.to - sweep.from <= SWEEP_SECONDS.max + SWEEP_EPSILON, {
       message: `\`to\` must be ${SWEEP_SECONDS.min} to ${SWEEP_SECONDS.max} seconds after \`from\`.`,
     })
     .describe(

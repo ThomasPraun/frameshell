@@ -35,13 +35,18 @@ export const AUDIO_EFFECT_LIMITS = {
 
 /** Shortest and longest window of a `highpassSweep`, seconds of the asset (ADR 0037 slice 6). */
 export const SWEEP_SECONDS = { min: 0.1, max: 30 } as const;
+/** Slack on {@link SWEEP_SECONDS}: window ends are rounded to the millisecond, so `5.3 - 5.2` must pass as 0.1. */
+export const SWEEP_EPSILON = 1e-6;
 
-/** An {@link AudioEffect} with every parameter given. */
+/**
+ * An {@link AudioEffect} with every parameter given. A build's `auto: "music"` mark stays (an edit that writes the list
+ * back must not turn it into a hand-set effect); it does not change the sound, so {@link audioEffectsKey} leaves it out.
+ */
 export type NormalizedAudioEffect =
   | { kind: "highpass"; frequency: number }
   | { kind: "denoise"; floor: number; reduction: number }
   | { kind: "compressor"; threshold: number; ratio: number; attack: number; release: number; makeup: number }
-  | { kind: "highpassSweep"; from: number; to: number; startHz: number; endHz: number };
+  | { kind: "highpassSweep"; from: number; to: number; startHz: number; endHz: number; auto?: "music" };
 
 /**
  * The voice chain (#464): high-pass at 85 Hz, light FFT denoise, gentle 2.5:1 compression. `clip set --voice`
@@ -93,6 +98,7 @@ export function normalizeAudioEffects(effects: readonly AudioEffect[]): Normaliz
           to: effect.to,
           startHz: effect.startHz ?? limits.startHz.default,
           endHz: effect.endHz ?? limits.endHz.default,
+          ...(effect.auto === undefined ? {} : { auto: effect.auto }),
         };
       }
     }
@@ -101,7 +107,13 @@ export function normalizeAudioEffects(effects: readonly AudioEffect[]): Normaliz
 
 /** Canonical text of a chain: equal for chains that process alike (omitted parameters = their defaults). */
 export function audioEffectsKey(effects: readonly AudioEffect[]): string {
-  return JSON.stringify(normalizeAudioEffects(effects));
+  return JSON.stringify(
+    normalizeAudioEffects(effects).map((effect) => {
+      if (effect.kind !== "highpassSweep") return effect;
+      const { auto: _auto, ...sound } = effect;
+      return sound;
+    }),
+  );
 }
 
 /** The audio effects of a media clip; null for other clips and an absent or empty list. */

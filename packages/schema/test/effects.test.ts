@@ -55,6 +55,16 @@ describe("audio effects (ADR 0031)", () => {
       expect(sweepCutoffAt(sweep, 10)).toBeNull();
     });
 
+    it("keeps the music mark when normalized, and leaves it out of the key", () => {
+      expect(normalizeAudioEffects([{ ...build, auto: "music" }])[0]).toMatchObject({ auto: "music" });
+      expect(normalizeAudioEffects([build])[0]).not.toHaveProperty("auto");
+      expect(audioEffectsKey([{ ...build, auto: "music" }])).not.toContain("auto");
+    });
+
+    it("accepts the shortest window although its ends round to 0.0999999 apart", () => {
+      expect(AudioEffectSchema.safeParse({ ...build, from: 5.2, to: 5.3 }).success).toBe(true);
+    });
+
     it("keys by position and cutoffs, not by who wrote it", () => {
       expect(audioEffectsKey([{ ...build, auto: "music" }])).toBe(audioEffectsKey([{ ...build, startHz: 40, endHz: 300 }]));
       expect(audioEffectsKey([build])).not.toBe(audioEffectsKey([{ ...build, to: 11 }]));

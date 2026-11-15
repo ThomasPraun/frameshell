@@ -1,5 +1,5 @@
 import type { MusicShapeResult } from "@frameshell/protocol";
-import { type AudioEffect, MAX_AUDIO_EFFECTS, SWEEP_SECONDS, type ShapeSettings } from "@frameshell/schema";
+import { type AudioEffect, MAX_AUDIO_EFFECTS, SWEEP_EPSILON, SWEEP_SECONDS, type ShapeSettings } from "@frameshell/schema";
 
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 
@@ -22,8 +22,9 @@ export interface BuildClip {
  * The swept high-pass builds that end at `drops` (timeline seconds) on `clip`, on the file's clock (the hits are on the
  * picture, so they are aimed again whenever the clip moves), and the clip's whole effects list with them: the builds a
  * run wrote earlier (`auto: "music"`) are replaced, every other effect stays. A window is `build.seconds` of the timeline
- * (so `speed` times that in the file) and never overlaps the previous hit's. A hit whose window does not reach the part of
- * the file the clip plays, or is too short, gets a warning and no build. Without `build` the old builds are only removed.
+ * (so `speed` times that in the file, at most {@link SWEEP_SECONDS}`.max`: a longer one starts later) and never overlaps
+ * the previous hit's. A hit whose window does not reach the part of the file the clip plays, or is too short, gets a
+ * warning and no build. Without `build` the old builds are only removed.
  * `effects` is undefined when the list stays as it is, null when it empties.
  */
 export function planBuildEffects(
@@ -37,10 +38,10 @@ export function planBuildEffects(
   let previous = 0;
   for (const at of build ? drops : []) {
     const to = round3(clip.in + (at - clip.start) * speed);
-    const from = round3(Math.max(0, previous, to - build!.seconds * speed));
+    const from = round3(Math.max(0, previous, to - build!.seconds * speed, to - SWEEP_SECONDS.max));
     if (to <= clip.in || from >= clip.out) {
       warnings.push(`The hit at ${at} s: its build is outside the part of the file ${clip.id} plays: none written.`);
-    } else if (to - from < SWEEP_SECONDS.min) {
+    } else if (to - from < SWEEP_SECONDS.min - SWEEP_EPSILON) {
       warnings.push(`The hit at ${at} s: no room for a build before it (the file starts or the previous hit is too close): none written.`);
     } else {
       sweeps.push({ at, from, to, startHz: build!.startHz, endHz: build!.endHz });

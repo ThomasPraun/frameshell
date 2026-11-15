@@ -279,6 +279,7 @@ export {
   BACKDROP_LIMITS,
   GLASS,
   MAX_AUDIO_EFFECTS,
+  SWEEP_EPSILON,
   SWEEP_SECONDS,
   VOICE_CHAIN,
   type BackdropLayer,
