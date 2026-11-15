@@ -2,7 +2,7 @@ import { ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type AnalyzeDiffResult, type An
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `analyze` (#471), in `frameshell --help`. */
-export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3]
+export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--no-speech]
                                Measure a reference video: shot table (cuts, cuts per minute, shot lengths), contact sheet
                                at 2 frames a second and a frame per shot, dominant colours and look (brightness, contrast,
                                saturation, warmth, colour grid) per shot and overall, rhythm (shot-length spread, still
@@ -10,10 +10,13 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3]
                                ones the scene score misses are marked), events (flashes, elements appearing or disappearing, holds, sound hits),
                                the activity curve and its moves (start, duration, closest ease), ink (how much of the
                                picture graphics and text cover), mouth against voice (needs a people scan of the file),
-                               loudness (EBU R128) and tempo, into .frameshell/analysis/<name>/ (default: the file name; a
+                               loudness (EBU R128), tempo and the audio (sentences with pace and pitch, voice against the
+                               music under it, effects over the music, sections; the speech is recognised by the project's
+                               transcription), into .frameshell/analysis/<name>/ (default: the file name; a
                                new run replaces it; project files untouched). Times are frame / fps, rounded down. Every
                                value is labelled MEASURED, ESTIMATED or DECISION (--json: "labels").
                                --threshold: scene score that opens a shot (0.05 to 0.95; lower finds softer cuts)
+                               --no-speech: skip recognising the speech (the slow part; no sentences or effects)
   analyze diff <film> <reference> [--name n] [--lag s] [--max-lag s] [--every s] [--snapshots n]
                                Compare our film with a reference: the two are lined up by activity curve, then SSIM at
                                matched times, the energy of each and a side-by-side sheet (ours left), into
@@ -25,7 +28,7 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3]
 
 /** Flags `analyze` takes besides the global ones. */
 export const ANALYZE_FLAGS: Record<string, readonly string[]> = {
-  analyze: ["name", "threshold", "lag", "max-lag", "every", "snapshots"],
+  analyze: ["name", "threshold", "no-speech", "lag", "max-lag", "every", "snapshots"],
 };
 
 /** A parsed `analyze` command. */
@@ -34,6 +37,7 @@ export interface AnalyzeInvocation {
   file: string;
   name?: string;
   threshold?: number;
+  speech?: false;
 }
 
 /** A parsed `analyze diff` command. */
@@ -56,6 +60,7 @@ export interface AnalyzeOptions {
   "max-lag"?: string | undefined;
   every?: string | undefined;
   snapshots?: string | undefined;
+  "no-speech"?: boolean | undefined;
 }
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -74,6 +79,7 @@ function numberFlag(raw: string | undefined, flag: string, expected: string, min
 function parseDiff(files: string[], options: AnalyzeOptions): AnalyzeDiffInvocation | null {
   if (files.length !== 2) return null;
   if (options.threshold !== undefined) throw new UsageError("`frameshell analyze diff` does not take --threshold (it cuts no shots).");
+  if (options["no-speech"]) throw new UsageError("`frameshell analyze diff` does not take --no-speech (it recognises no speech).");
   if (options.name !== undefined && !NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
@@ -109,7 +115,7 @@ export function parseAnalyze(rest: string[], options: AnalyzeOptions): AnalyzeIn
   if (options.name !== undefined && !NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
-  return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}) };
+  return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(options["no-speech"] ? { speech: false as const } : {}) };
 }
 
 /** Run a parsed `analyze` or `analyze diff`; human output unless `json`. */
@@ -151,6 +157,7 @@ function formatAnalyze(result: AnalyzeResult): string {
     const { bpm, meter, confidence, low } = result.tempo;
     lines.push(`${tag(result, "tempo")} Tempo: ${bpm} BPM in ${meter}, confidence ${confidence}${low ? " (low: do not trust it)" : ""}`);
   }
+  if (result.audio) lines.push(...audioLines(result, result.audio));
   for (const sheet of result.sheets) lines.push(`  ${sheet.path}  ${sheet.width}x${sheet.height}  ${sheet.kind}, ${sheet.tiles.length} tiles`);
   lines.push("Shots (start s, length s, palette, ink peak):");
   for (const shot of result.shots) lines.push(`  #${shot.index}  ${shot.start}  ${shot.length}  ${shot.palette.slice(0, 3).map((color) => color.hex).join(" ")}  ${shot.ink.peak > 0 ? `${Math.round(shot.ink.peak * 100)}%` : "-"}`);
@@ -182,6 +189,34 @@ function formatDiff(result: AnalyzeDiffResult): string {
   if (energy.windows.length > 60) lines.push(`  … ${energy.windows.length - 60} more (--json)`);
   lines.push(...result.warnings.map((warning) => `warning: ${warning}`));
   return `${lines.join("\n")}\n`;
+}
+
+/** The audio summary lines, then its sentences and sections as tables. */
+function audioLines(result: AnalyzeResult, audio: NonNullable<AnalyzeResult["audio"]>): string[] {
+  const { speech, effects, sections } = audio;
+  const hz = (pitch: NonNullable<typeof speech.pitch>) => `pitch ${pitch.low}-${pitch.high} Hz (median ${pitch.median}, ${pitch.range} semitones)`;
+  const lines: string[] = [];
+  if (speech.status === "skipped") lines.push(`${tag(result, "audio")} Speech: skipped, ${speech.reason}`);
+  else {
+    const over = speech.overMusic ? `; voice ${speech.overMusic.median} dB over the music (median of ${speech.overMusic.count} sentences, lowest ${speech.overMusic.lowest})` : "; no music under the voice";
+    lines.push(
+      `${tag(result, "audio")} Speech: ${speech.sentences.length} sentences, ${speech.words} words in ${speech.speakingTime} s${speech.wordsPerSecond === null ? "" : ` (${speech.wordsPerSecond} words/s)`}${speech.pitch ? `, ${hz(speech.pitch)}` : ""}${speech.sentences.length > 0 ? over : ""} (${speech.provider}${speech.model ? `, ${speech.model}` : ""})`,
+    );
+  }
+  if (effects) {
+    lines.push(
+      `${tag(result, "audio")} Effects: ${effects.count} (${effects.perMinute} a minute)${effects.overMusic ? `, ${effects.overMusic.median} dB over the music (loudest ${effects.overMusic.loudest})` : ""}${effects.onBeat > 0 ? `; ${effects.onBeat} on the beat left out` : ""}`,
+    );
+  }
+  lines.push(`${tag(result, "audio")} Sections: ${sections.length}${sections.length > 1 ? `, steps of ${sections.slice(1).map((section) => `${section.change! >= 0 ? "+" : ""}${section.change} dB at ${section.start} s`).join(", ")}` : ", one steady level"}`);
+  if (speech.sentences.length > 0) lines.push("Sentences (start s, end s, words, words/s, pitch Hz low-high, voice dB, music dB, voice over music dB):");
+  for (const sentence of speech.sentences.slice(0, 60)) {
+    lines.push(`  ${sentence.start}  ${sentence.end}  ${sentence.words}  ${sentence.pace ?? "-"}  ${sentence.pitch ? `${sentence.pitch.low}-${sentence.pitch.high}` : "-"}  ${sentence.voice ?? "-"}  ${sentence.music ?? "-"}  ${sentence.voiceOverMusic ?? "-"}  ${sentence.text.length > 60 ? `${sentence.text.slice(0, 57)}...` : sentence.text}`);
+  }
+  if (speech.sentences.length > 60) lines.push(`  … ${speech.sentences.length - 60} more (--json)`);
+  if (sections.length > 1) lines.push("Sections (start s, end s, level dBFS, change dB, bars, speech share):");
+  if (sections.length > 1) for (const section of sections) lines.push(`  ${section.start}  ${section.end}  ${section.level}  ${section.change ?? "-"}  ${section.bars ?? "-"}  ${section.speech ?? "-"}`);
+  return lines;
 }
 
 /** `5 cut, 3 jump, 2 punch-in`: how many big changes of each kind, in the order of {@link ANALYZE_CUT_KINDS}. */

@@ -290,6 +290,117 @@ export interface AnalyzeTempo {
   detector: string;
 }
 
+/** The pitch of a voice over some speech. Estimated from the mix, so loud music under the voice makes it less sure. */
+export interface AnalyzePitch {
+  /** 10th percentile of the voiced frames, Hz. */
+  low: number;
+  /** Median of the voiced frames, Hz. */
+  median: number;
+  /** 90th percentile of the voiced frames, Hz. */
+  high: number;
+  /** `low` to `high` in semitones, 1 decimal: how much the voice moves. */
+  range: number;
+  /** Voiced frames the figures are read from (one every 20 ms). */
+  frames: number;
+}
+
+/** One sentence the voice speaks. */
+export interface AnalyzeSentence {
+  startFrame: number;
+  /** The frame after the one the sentence ends in. */
+  endFrame: number;
+  /** `startFrame` ÷ fps, rounded down to the millisecond. */
+  start: number;
+  end: number;
+  /** What was recognised, words as the transcription writes them. */
+  text: string;
+  /** Words with a letter or digit in them. */
+  words: number;
+  /** Words per second from the first word's start to the last word's end, pauses inside included, 2 decimals; null under 0.3 s. */
+  pace: number | null;
+  /** Null when fewer than 8 voiced frames were found. */
+  pitch: AnalyzePitch | null;
+  /** Level of the voice alone over the words, dBFS RMS, 1 decimal: the mix with the music under it taken off. Null when the music is as loud as the mix. */
+  voice: number | null;
+  /** Level of the music under the sentence, dBFS RMS, 1 decimal, from the gaps between its words; null when there is no music under it (below -50 dBFS) or no gap to read. */
+  music: number | null;
+  /** `voice` minus `music`, dB, 1 decimal: how far the voice sits over the music. Null when either is. */
+  voiceOverMusic: number | null;
+}
+
+/** The spoken part of the sound. */
+export interface AnalyzeSpeech {
+  /** `skipped` when the speech could not be recognised (see `reason`); then there are no sentences, and no effects. */
+  status: "measured" | "skipped";
+  /** Why the speech was skipped; null when measured. */
+  reason: string | null;
+  /** Transcription provider and model the words came from; null when skipped. */
+  provider: string | null;
+  model: string | null;
+  /** Language the provider reported, when it did. */
+  language: string | null;
+  sentences: AnalyzeSentence[];
+  /** Words in all the sentences. */
+  words: number;
+  /** Seconds the sentences take together. */
+  speakingTime: number;
+  /** `words` over `speakingTime`, 2 decimals; null with no speech. */
+  wordsPerSecond: number | null;
+  /** The pitch over all the sentences; null with too little voiced speech. */
+  pitch: AnalyzePitch | null;
+  /** How far the voice sits over the music in the sentences that have music under them; null when none has. */
+  overMusic: { count: number; median: number; lowest: number } | null;
+}
+
+/** One sound effect found over the music. */
+export interface AnalyzeEffect {
+  frame: number;
+  /** `frame` ÷ fps, rounded down. */
+  time: number;
+  /** Peak of the effect together with what plays under it, dBFS, 1 decimal. */
+  level: number;
+  /** The effect alone over the bed under it, dB, 1 decimal; null when nothing plays under it (below -50 dBFS). */
+  overMusic: number | null;
+}
+
+/** Effects of the sound: hits that are neither a word nor the music's own beat. */
+export interface AnalyzeEffects {
+  count: number;
+  /** `count` per minute of sound, 2 decimals. */
+  perMinute: number;
+  /** Hits left out because they fall on the music's beat (only counted when the tempo is trustworthy). */
+  onBeat: number;
+  /** Over the effects that have music under them; null when none has. */
+  overMusic: { median: number; loudest: number } | null;
+  /** In time order, at most 100. */
+  list: AnalyzeEffect[];
+}
+
+/** A stretch of the sound that keeps one level. */
+export interface AnalyzeSection {
+  startFrame: number;
+  endFrame: number;
+  start: number;
+  end: number;
+  /** Mean level of the sound without the words (the whole mix when the speech was skipped), dBFS RMS, 1 decimal. */
+  level: number;
+  /** `level` minus the section before it, dB; null for the first. */
+  change: number | null;
+  /** Length in bars when both ends sit on the tempo's downbeats; null otherwise. */
+  bars: number | null;
+  /** Share of the section that the sentences cover, 0 to 1; null when the speech was skipped. */
+  speech: number | null;
+}
+
+/** What the sound does: speech, effects over the music and sections. */
+export interface AnalyzeAudio {
+  speech: AnalyzeSpeech;
+  /** Null when the speech was skipped: without it a word cannot be told from an effect. */
+  effects: AnalyzeEffects | null;
+  /** Where the level of the sound steps by 4 dB or more, at least 4 s apart; one section for a steady sound. */
+  sections: AnalyzeSection[];
+}
+
 /** One image `analyze` wrote: a `review` sheet of another kind. */
 export interface AnalyzeSheet extends Omit<ReviewSheet, "kind"> {
   kind: (typeof ANALYZE_SHEETS)[number];
@@ -334,6 +445,8 @@ export interface AnalyzeResultShape {
   loudness: AnalyzeLoudness | null;
   /** Null when there is no sound, or no steady beat in it (see `warnings`). */
   tempo: AnalyzeTempo | null;
+  /** Sentences with pace and pitch, voice against music, effects over the music and sections. Null when the video has no sound. */
+  audio: AnalyzeAudio | null;
   sheets: AnalyzeSheet[];
   warnings: string[];
   /** MEASURED, ESTIMATED or DECISION for every value: the key is the path of a field (`shots[].ink`, `events`), and covers everything inside it. */
@@ -511,6 +624,77 @@ const TempoSchema = z.object({
   detector: z.string().describe("Beat detector and version, as in a beats file."),
 });
 
+const PitchSchema = z.object({
+  low: z.number().describe("10th percentile of the voiced frames, Hz."),
+  median: z.number().describe("Median of the voiced frames, Hz."),
+  high: z.number().describe("90th percentile of the voiced frames, Hz."),
+  range: z.number().describe("`low` to `high` in semitones, 1 decimal: how much the voice moves."),
+  frames: z.int().describe("Voiced frames the figures are read from (one every 20 ms)."),
+});
+
+const SentenceSchema = z.object({
+  startFrame: z.int(),
+  endFrame: z.int().describe("The frame after the one the sentence ends in."),
+  start: z.number().describe("`startFrame` ÷ fps, rounded down to the millisecond."),
+  end: z.number().describe("`endFrame` ÷ fps, rounded down."),
+  text: z.string().describe("What was recognised, as the transcription writes it."),
+  words: z.int().describe("Words with a letter or digit in them."),
+  pace: z.number().nullable().describe("Words per second from the first word's start to the last word's end (pauses inside included), 2 decimals; null under 0.3 s."),
+  pitch: PitchSchema.nullable().describe("Null when fewer than 8 voiced frames were found."),
+  voice: z.number().nullable().describe("Level of the voice alone over the words, dBFS RMS, 1 decimal: the mix with the music under it taken off. Null when the music is as loud as the mix."),
+  music: z.number().nullable().describe("Level of the music under the sentence, dBFS RMS, 1 decimal, read from the gaps between its words; null when there is none under it (below -50 dBFS) or no gap to read."),
+  voiceOverMusic: z.number().nullable().describe("`voice` minus `music`, dB, 1 decimal: how far the voice sits over the music. Null when either is."),
+});
+
+const SpeechSchema = z.object({
+  status: z.enum(["measured", "skipped"]).describe("`skipped` when the speech could not be recognised (see `reason`, or `speech: false` was asked): no sentences, and no effects."),
+  reason: z.string().nullable().describe("Why the speech was skipped; null when measured."),
+  provider: z.string().nullable().describe("Transcription provider the words came from; null when skipped."),
+  model: z.string().nullable(),
+  language: z.string().nullable().describe("Language the provider reported, when it did."),
+  sentences: z.array(SentenceSchema),
+  words: z.int().describe("Words in all the sentences."),
+  speakingTime: z.number().describe("Seconds the sentences take together."),
+  wordsPerSecond: z.number().nullable().describe("`words` over `speakingTime`, 2 decimals; null with no speech."),
+  pitch: PitchSchema.nullable().describe("The pitch over all the sentences; null with too little voiced speech."),
+  overMusic: z
+    .object({ count: z.int(), median: z.number(), lowest: z.number() })
+    .nullable()
+    .describe("How far the voice sits over the music (dB) in the sentences that have music under them; null when none has."),
+});
+
+const EffectSchema = z.object({
+  frame: z.int(),
+  time: z.number().describe("`frame` ÷ fps, rounded down."),
+  level: z.number().describe("Peak of the effect together with what plays under it, dBFS, 1 decimal."),
+  overMusic: z.number().nullable().describe("The effect alone over the bed under it, dB, 1 decimal; null when nothing plays under it (below -50 dBFS)."),
+});
+
+const EffectsSchema = z.object({
+  count: z.int(),
+  perMinute: z.number().describe("`count` per minute of sound, 2 decimals."),
+  onBeat: z.int().describe("Hits left out because they fall on the music's beat (counted only when the tempo is trustworthy)."),
+  overMusic: z.object({ median: z.number(), loudest: z.number() }).nullable().describe("Over the effects that have music under them, dB; null when none has."),
+  list: z.array(EffectSchema).describe("In time order, at most 100."),
+});
+
+const SectionSchema = z.object({
+  startFrame: z.int(),
+  endFrame: z.int(),
+  start: z.number(),
+  end: z.number(),
+  level: z.number().describe("Mean level of the sound without the words (the whole mix when the speech was skipped), dBFS RMS, 1 decimal."),
+  change: z.number().nullable().describe("`level` minus the section before it, dB; null for the first."),
+  bars: z.int().nullable().describe("Length in bars when both ends sit on the tempo's downbeats; null otherwise."),
+  speech: z.number().nullable().describe("Share of the section the sentences cover, 0 to 1; null when the speech was skipped."),
+});
+
+const AudioSchema = z.object({
+  speech: SpeechSchema,
+  effects: EffectsSchema.nullable().describe("Hits of the sound that are neither a word nor the music's own beat, with their level over the music. Null when the speech was skipped: without it a word cannot be told from an effect."),
+  sections: z.array(SectionSchema).describe("Stretches where the level of the sound (without the words when the speech was recognised) holds: a step of 4 dB or more starts a new one, at least 4 s apart. One for a steady sound."),
+});
+
 const SheetSchema = z.object({
   kind: z
     .enum(ANALYZE_SHEETS)
@@ -550,6 +734,7 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
   sync: SyncSchema.describe("Mouth against voice for a talking face, from the face scan of `people scan` when this file has one cached; otherwise `reason` says why it is skipped."),
   loudness: LoudnessSchema.nullable().describe("Null when the video has no sound."),
   tempo: TempoSchema.nullable().describe("Null when there is no sound, or no steady beat in it (see `warnings`)."),
+  audio: AudioSchema.nullable().describe("What the sound does: `speech` (sentences with pace in words per second, pitch range, and the voice against the music under it), `effects` over the music and `sections` of steady level. All ESTIMATED: read from the mix by a heuristic, not from separated stems. Null when the video has no sound."),
   sheets: z.array(SheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
   warnings: z.array(z.string()).describe("What could not be measured (no sound, no beat, sound too long for the beat detector…); empty when none."),
   labels: LabelsSchema.describe("MEASURED (read from the frames or the sound), ESTIMATED (a heuristic's hint: check the frames it names) or DECISION (a choice of the run) for every value: the key is the path of a field (`shots[].ink`, `events`) and covers all inside it; the most specific key wins. Say these words when you report a number."),
@@ -591,6 +776,7 @@ export const ANALYZE_RESULT_LABELS: Readonly<Record<string, AnalyzeLabel>> = {
   loudness: "MEASURED",
   tempo: "MEASURED",
   "tempo.alternatives": "ESTIMATED",
+  audio: "ESTIMATED",
   sheets: "MEASURED",
   warnings: "MEASURED",
 };
