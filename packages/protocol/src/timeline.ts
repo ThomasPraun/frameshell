@@ -699,7 +699,7 @@ export const operationArgs = {
     group: z.string().min(1).describe("Group id from `timeline.show` (`groups`), e.g. `g_1a2b3c`."),
     angle: z.string().min(1).describe("Angle id of that group."),
     at: Seconds("Group-clock second of the key. Give this or `time`.").optional(),
-    time: Seconds("Timeline second of the key: it goes at the group second the group's program track plays then. Give this or `at`.").optional(),
+    time: TimeRef("Timeline time of the key: it goes at the group second the group's program track plays then. Give this or `at`.").optional(),
     x: z
       .number()
       .min(0)
@@ -854,6 +854,7 @@ export const TIME_REF_FIELDS = {
   "transition.set": ["at"],
   "transition.remove": ["at"],
   "clip.key": ["time"],
+  "multicam.reframe": ["time"],
   "marker.add": ["at"],
   "marker.set": ["at"],
 } as const satisfies { [K in OperationName]?: readonly (keyof z.output<(typeof operationArgs)[K]> & string)[] };

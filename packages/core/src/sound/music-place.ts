@@ -20,8 +20,8 @@ export interface MusicPlanDeps {
   load(): Promise<{ timeline: Timeline; fps: number }>;
   /** Seconds the timeline lasts as the caller sees it; null when unknown (a clip whose length cannot be read). */
   duration(): Promise<number | null>;
-  /** Seconds a time reference names on `timeline`; throws `TimeRefError`. */
-  resolve(ref: number | string, timeline: Timeline): number;
+  /** Seconds a time reference names on `loaded`'s timeline (markers, `beat:`, `bar:`); throws `TimeRefError`. */
+  resolve(ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
   /** Make (or reuse) the take; serialised with other sound work of the project by the caller. */
   take(spec: MusicSpec): Promise<MusicTake>;
   /** dB the style puts music under the voice. */
@@ -114,16 +114,16 @@ export async function planMusic(params: MusicParams, deps: MusicPlanDeps): Promi
   const refs = [params.at, ...(params.sections ?? []).map((section) => section.at), ...(params.accents ?? [])];
   const needsTimeline = place || !endKnown || refs.some((ref) => typeof ref === "string");
   const before = needsTimeline ? await deps.load() : null;
-  const at = (ref: number | string, field: string) => {
+  const at = async (ref: number | string, field: string): Promise<number> => {
     if (typeof ref === "number") return ref;
     try {
-      return deps.resolve(ref, before!.timeline);
+      return await deps.resolve(ref, before!);
     } catch (error) {
       if (!(error instanceof TimeRefError)) throw error;
       throw invalid(field, error.message, { value: ref, ...(error.hint ? { hint: error.hint } : {}) });
     }
   };
-  const start = at(params.at, "at");
+  const start = await at(params.at, "at");
 
   let total: number | null = null;
   if (params.bars !== undefined) total = params.bars;
@@ -136,12 +136,16 @@ export async function planMusic(params: MusicParams, deps: MusicPlanDeps): Promi
     total = Math.max(1, Math.round((duration - start) / bar));
   }
 
-  const asked: AskedSection[] = (params.sections ?? []).map((section, i) => {
-    if (section.at === undefined) return { kind: section.kind, bars: section.bars };
-    const time = at(section.at, `sections[${i}].at`);
+  const asked: AskedSection[] = [];
+  for (const [i, section] of (params.sections ?? []).entries()) {
+    if (section.at === undefined) {
+      asked.push({ kind: section.kind, bars: section.bars });
+      continue;
+    }
+    const time = await at(section.at, `sections[${i}].at`);
     if (time < start - bar / 2) throw invalid(`sections[${i}].at`, `${time.toFixed(3)} s is before the track starts (${start.toFixed(3)} s).`);
-    return { kind: section.kind, bars: section.bars, startBar: Math.round((time - start) / bar) };
-  });
+    asked.push({ kind: section.kind, bars: section.bars, startBar: Math.round((time - start) / bar) });
+  }
   const sections = asked.length > 0 ? arrangeSections(total, asked) : defaultSections(total!);
   const bars = sections.reduce((sum, section) => sum + section.bars, 0);
   if (bars > MUSIC_MAX_BARS || bars * bar > MUSIC_MAX_SECONDS) {
@@ -149,12 +153,12 @@ export async function planMusic(params: MusicParams, deps: MusicPlanDeps): Promi
   }
 
   const accents = new Set<number>();
-  (params.accents ?? []).forEach((ref, i) => {
-    const time = at(ref, `accents[${i}]`);
+  for (const [i, ref] of (params.accents ?? []).entries()) {
+    const time = await at(ref, `accents[${i}]`);
     const index = Math.round((time - start) / beat);
     if (index < 0 || index > bars * meter) throw invalid(`accents[${i}]`, `${time.toFixed(3)} s is outside the track (${start.toFixed(3)} s to ${(start + bars * bar).toFixed(3)} s).`);
     accents.add(index);
-  });
+  }
   const spec: MusicSpec = {
     preset,
     bpm,

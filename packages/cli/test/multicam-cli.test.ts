@@ -123,11 +123,20 @@ describe("frameshell multicam", () => {
     const first = frameshell(["multicam", "reframe", group, "ana", "--time", "1", "--x", "0.3"]);
     expect(first.stderr).toBe("");
     expect(first.stdout).toContain("multicam.reframe: updated");
+    // --time takes a marker or a point of the grid like every timeline time; with no tempo `bar:2` is refused.
+    const noTempo = frameshell(["multicam", "reframe", group, "ana", "--time", "bar:2", "--x", "0.9"]);
+    expect(noTempo.code).toBe(1);
+    expect(noTempo.stderr).toContain("multicam.reframe: time: ");
+    expect(noTempo.stderr).toContain("the timeline has no tempo");
+    expect(frameshell(["marker", "add", "--at", "1", "--label", "hook"]).code).toBe(0);
+    expect(frameshell(["multicam", "reframe", group, "ana", "--time", "hook", "--x", "0.6"]).code).toBe(0);
+    expect(frameshell(["tempo", "set", "--bpm", "120"]).code).toBe(0);
+    expect(frameshell(["multicam", "reframe", group, "ana", "--time", "beat:3", "--x", "0.35"]).code).toBe(0);
     expect(frameshell(["multicam", "reframe", group, "ana", "--at", "4", "--x", "0.7", "--y", "0.4"]).code).toBe(0);
     let angle = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout).groups[0].angles[0];
     // The grid shot plays group 0 at timeline 0: timeline 1 is group 1.
     expect(angle.reframe).toEqual([
-      { at: 1, x: 0.3, y: 0.5 },
+      { at: 1, x: 0.35, y: 0.5 },
       { at: 4, x: 0.7, y: 0.4 },
     ]);
     // Keys already set are kept, and nothing is downloaded for them.

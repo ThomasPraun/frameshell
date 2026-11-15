@@ -102,6 +102,13 @@ export class UiBroker {
     return window ? { connected: true, ...snapshot(window) } : { connected: false };
   }
 
+  /** What the project's newest window shows; throws `UiNotConnected` when none does. */
+  shown(key: string): UiState {
+    const window = this.#newest((project) => project.key === key);
+    if (!window) throw notConnected(key);
+    return snapshot(window);
+  }
+
   /**
    * Send `command` to the project's newest window and resolve with its state
    * after it. Rejects with `UiNotConnected` (no window, or it went away) or

@@ -74,6 +74,16 @@ Seconds and markers were built first with ADR 0037 slice 1 (see decision 7's ame
 - **Wire**: the `TimeRef` description names the new forms (model-facing); the argument types do not change. Protocol 97; #550 (protocol 107) counts from the music file and extrapolates.
 - **Word refs** (`"this#2"`, `"over+0.2"`) stay a separate owner decision and are refused with a pointer.
 
+### Slice 4 part 2 as built (the remaining time arguments)
+
+Every argument that still took plain seconds on the timeline clock now takes a TimeRef. Same resolver, same refusals; no verb gets a private parser.
+
+- **Operations** (the `TIME_REF_FIELDS` table): `multicam.reframe` `time`. `at` of that operation is the group clock and stays seconds.
+- **Methods that read times of their own**: `sound.place` (`cues[].at`, `typing.from`, `typing.to`) and `sound.music` (`at`, `sections[].at`, `accents[]`) already declared the TimeRef type but resolved markers only (a sync resolver with no grid), so a `bar:N` was refused as "needs the beat grid". They now resolve through `resolveTimeRefAsync` with the grid of the timeline as it is before the call (the new bed's own grid does not exist yet; with no `tempo` such a reference is refused, so use seconds or a marker for the first bed). `captions.set` `from`/`to`, `multicam.direct` `from`/`to` and `ui.seek` `at` are new TimeRef params; the daemon resolves them with `resolveTimeRefArg`, which names the method and argument in the refusal, and passes seconds on (the journal of `multicam.direct` shows `from`/`to` in seconds). `ui.seek` reads a name on the timeline the app shows (`ui.state` `timeline`), as the person sees it, and still fails with `UiNotConnected` when no window shows the project.
+- **One grid per call**: `gridLoaderFor` (daemon) reads the beat grid once per call and again only when a reference reaches further, shared by `voiceover.place`, `sound.place` and `sound.music`, which place many times in one call.
+- **Left as numbers on purpose**: group-clock times (`multicam.reframe` `at`, `multicam.paint` `start`/`end`, turns), source-clock `in`/`out`, the curves of the `track.duck` and `music.shape` operations (computed by the daemon from measured speech and hits, never typed by a caller; the hits and `ending` that shape them already take TimeRefs), and the `snapTo` option, which `multicam.reframe` does not offer.
+- **Wire**: protocol 149 (argument types of five methods widen from number to number or text).
+
 ### Decision 8 as built (timing for generated clips)
 
 - **Opt-in per clip, decided by the adapter.** `ClipAdapter.timing(clip, context)` (plugin API, optional, so `apiVersion` stays "1") returns the kinds the clip's render reads: `beats` (the grid with its bar starts) and `markers`. It is called on every key check, like `inputs`. Absent, empty or only unknown words: the clip gets nothing and its key is the one it had, so moving the music, changing the tempo or moving a marker re-renders no other clip.
@@ -95,4 +105,4 @@ Seconds and markers were built first with ADR 0037 slice 1 (see decision 7's ame
 
 - An older Frameshell rejects a timeline that carries `markers` (the timeline schema is strict); the CHANGELOG says so.
 - The export compiler and preview never read markers: they paint and play nothing.
-- Later slices: word refs, the rest of slice 4 (seconds, markers, `beat:` and `bar:` are built; `transition.set`, `clip.key`, `clip.split`, `cut`, `clip.move`, `clip.trim`, `clip.add` and `marker.*` take them).
+- Later slices: word refs, the rest of slice 4 (seconds, markers, `beat:` and `bar:` are built; `transition.set`, `clip.key`, `clip.split`, `cut`, `clip.move`, `clip.trim`, `clip.add`, `marker.*`, `multicam.reframe`, `captions.set`, `multicam.direct`, `sound.place`, `sound.music` and `ui.seek` take them).

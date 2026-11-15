@@ -31,8 +31,9 @@ export const SOUND_USAGE = `  sound sfx <kind> [--variant n] [--seed n] [--pitch
                [--role r] [--tier t] [--offset ms] [--gain dB] [--variant n] [--seed n] [--pitch x] [--length s]
                [--track id] [--timeline id]
                                Make the sound effect (like sound sfx) and place it on the audio track SFX in one
-                               transaction. Each <t> is seconds or a marker (hook, hook+0.5; commas separate the times, so a
-                               label with a comma needs its marker id); --cuts puts one on every
+                               transaction. Each <t> is seconds, a marker (hook, hook+0.5) or a beat or bar of the timeline's
+                               grid (beat:9, bar:3-0.2; need a tempo, refused on a LOW confidence grid); commas separate
+                               the times, so a label with a comma needs its marker id; --cuts puts one on every
                                edit point of a track (or the numbered ones); --typing a run of keys (tick or click, up
                                to ${SOUND_TYPING_RATE.max} a second). The take's peak lands on the time plus the offset of its role
                                (${SOUND_ROLES.join(", ")}; a riser ends before it); the gain comes from the style by
@@ -45,7 +46,7 @@ export const SOUND_USAGE = `  sound sfx <kind> [--variant n] [--seed n] [--pitch
                                Presets: ${MUSIC_PRESETS.map((preset) => `${preset} (${MUSIC_PRESET_DEFAULTS[preset].bpm} BPM)`).join(", ")}.
                                Length: --bars, or --length seconds, else to the end of the timeline. --sections
                                lists parts as kind[:bars][@time] (${MUSIC_SECTIONS.join(", ")}), e.g.
-                               intro:2,full:6,build:2,drop@reveal,outro; the track ends on a final hit that rings.
+                               intro:2,full:6,build:2,drop@reveal,outro (a time is read as above, so drop@bar:5 works); the track ends on a final hit that rings.
                                --accents adds a crash and a big kick on the nearest beat. --no-place only writes it
 `;
 
