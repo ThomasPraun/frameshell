@@ -519,8 +519,10 @@ export class ReviewService {
       loaded.fps,
       frames,
       async (at, out) => {
-        const { width, height } = await exports.frame(root, { timeline: request.timeline, at, out, projectFormat: request.projectFormat }, loaded);
-        return { width, height };
+        const shot = await exports.frame(root, { timeline: request.timeline, at, out, projectFormat: request.projectFormat }, loaded);
+        // Every frame of a film shows the same clips: say each warning once.
+        for (const warning of shot.warnings) if (!warnings.includes(warning)) warnings.push(warning);
+        return { width: shot.width, height: shot.height };
       },
       scratch,
     );

@@ -568,7 +568,7 @@ export class ExportService {
       readability: cover.readability,
       width: shot.width,
       height: shot.height,
-      warnings: cover.warnings,
+      warnings: [...cover.warnings, ...shot.warnings],
     };
   }
 
@@ -648,8 +648,11 @@ export class ExportService {
     const size = params.preset ? outputSize(await this.#preset(root, params.preset), shape, true, "frame") : { width: shape.width, height: shape.height };
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
     const renderSize = shape.primary ? undefined : { width: shape.width, height: shape.height };
+    const warnings = new Set<string>();
     const generated =
-      generatedClipIds(timeline).length > 0 && this.#options.clips ? await this.#options.clips.ensure(root, timeline, { size: renderSize }) : new Map();
+      generatedClipIds(timeline).length > 0 && this.#options.clips
+        ? await this.#options.clips.ensure(root, timeline, { size: renderSize, onWarning: (warning) => warnings.add(warning) })
+        : new Map();
     const sources = await this.#sources(root, timeline);
     const matted = subjectAssets(timeline, (asset) => movingPicture(sources.get(asset)), params.at);
     // Not in a job: the mattes of the subjects drawn at `at` are made here, as a render job would.
@@ -699,6 +702,7 @@ export class ExportService {
       projectFormat: shape.id,
       width: size.width,
       height: size.height,
+      warnings: [...warnings],
     };
   }
 

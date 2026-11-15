@@ -61,6 +61,8 @@ export interface RenderedClip {
   height: number;
   /** Seconds; null when the container does not say. */
   duration: number | null;
+  /** What the adapter said about this render (`RenderContext.warn`); absent when nothing. */
+  warnings?: string[];
 }
 
 /** What the renderer learns from ffprobe about a finished render. */
@@ -138,7 +140,11 @@ export interface ClipEnsureOptions {
   size?: { width: number; height: number } | undefined;
   /** Render of a clip that keeps two to use. Default `final`. */
   tier?: ClipTier | undefined;
-  /** A clip exported with its draft render because the plugin refused the final one (motion blur, ADR 0041 decision 8). */
+  /**
+   * Something to tell about a clip's render in use: its draft render stands in because the plugin refused the final
+   * one (motion blur, ADR 0041 decision 8), or the adapter changed a setting to render it (`RenderContext.warn`).
+   * Called once per clip and render per call of `ensure`.
+   */
   onWarning?: ((warning: string) => void) | undefined;
 }
 
@@ -181,6 +187,8 @@ interface EntryMeta {
   width: number;
   height: number;
   duration: number | null;
+  /** What the adapter said while rendering (`RenderContext.warn`); left out when nothing. */
+  warnings?: string[];
   plugin: string;
   version: string;
   type: string;
@@ -418,7 +426,7 @@ export class ClipRenderer {
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const waits: { clip: AdapterClip; done: Promise<RenderedClip> }[] = [];
     const sharp = (clip: AdapterClip, draft: Variant, refusal: string): Promise<Obtained> => {
-      onWarning?.(`Clip ${clip.id} is exported without motion blur, from its sharp render: ${refusal}`);
+      onWarning?.(`Clip ${clip.id} is used without motion blur, from its sharp render: ${refusal}`);
       return this.#obtain(root, draft, clip, format);
     };
     for (const { clip } of placed) {
@@ -455,6 +463,7 @@ export class ClipRenderer {
       }
       onProgress?.(++done / placed.length);
     }
+    for (const { warnings = [] } of rendered.values()) for (const warning of warnings) onWarning?.(warning);
     return rendered;
   }
 
@@ -659,7 +668,16 @@ export class ClipRenderer {
     if (!meta || typeof meta.file !== "string" || meta.file.includes("/") || meta.file.includes("\\")) return null;
     const path = join(dir, meta.file);
     if (!(await stat(path).then((info) => info.isFile(), () => false))) return null;
-    return { path, file: `${CLIP_CACHE_DIR}/${meta.file}`, hasAlpha: meta.hasAlpha, width: meta.width, height: meta.height, duration: meta.duration };
+    const { warnings } = meta;
+    return {
+      path,
+      file: `${CLIP_CACHE_DIR}/${meta.file}`,
+      hasAlpha: meta.hasAlpha,
+      width: meta.width,
+      height: meta.height,
+      duration: meta.duration,
+      ...(Array.isArray(warnings) && warnings.length > 0 ? { warnings } : {}),
+    };
   }
 
   /**
@@ -734,6 +752,7 @@ export class ClipRenderer {
     await mkdir(outDir, { recursive: true });
     try {
       let result: Awaited<ReturnType<ClipAdapter["render"]>>;
+      const warnings: string[] = [];
       try {
         result = await registered.adapter.render(clip, {
           projectDir: root,
@@ -745,6 +764,9 @@ export class ClipRenderer {
           ...(styleCss ? { styleCss } : {}),
           ...(motionBlur ? { motionBlur } : {}),
           ...(timing ? { timing } : {}),
+          warn: (message) => {
+            if (typeof message === "string" && message !== "" && !warnings.includes(message)) warnings.push(message);
+          },
           progress: ({ fraction }) => {
             if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
           },
@@ -777,6 +799,7 @@ export class ClipRenderer {
         width: probed.width,
         height: probed.height,
         duration: probed.duration,
+        ...(warnings.length > 0 ? { warnings } : {}),
         plugin: registered.plugin.name,
         version: registered.plugin.version,
         type: clip.type,

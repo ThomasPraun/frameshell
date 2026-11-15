@@ -278,6 +278,12 @@ export interface RenderContext {
   /** Report progress to the app and CLI (the job's `progress`). Cheap; call freely. */
   progress(update: RenderProgress): void;
   /**
+   * Say something about this render that the person should know (a setting the adapter changed to render it, say).
+   * The host keeps it with the cached render, so it is shown whenever that render is used: on export jobs, `frame`
+   * and `review`. One short sentence naming the clip. Absent on hosts older than this addition: ignore it then.
+   */
+  warn?(message: string): void;
+  /**
    * Style sheet made by the host from the clip's `elements` (moves and scales by
    * CSS selector, ADR 0021); absent when the clip has none. An adapter that sets
    * {@link ClipAdapter.elementStyles} inserts it last in the page's `<head>`,

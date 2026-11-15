@@ -246,7 +246,8 @@ export const exportMethods = {
       "compiler (single-frame plan), so it matches `render` and works with the app closed. This is how an image project " +
       "(ADR 0017) is exported: `at: 0`. `projectFormat` captures the frame as that format of the project lays it out " +
       "(ADR 0027), e.g. `9x16`; with `view: proposal` that includes a format only an open review proposal adds (ADR 0036). Size: the preset's when `preset` is given (it must have the format's aspect), else the " +
-      "format's (default: the primary, i.e. the project resolution). Fails with InvalidOperation (`at` outside the " +
+      "format's (default: the primary, i.e. the project resolution). A generated clip with motion blur whose blurred render was refused (HDR content, shader " +
+      "transitions) is drawn from its sharp render, and a 3D composition renders its blur with at most 8 samples: `warnings` says so. Fails with InvalidOperation (`at` outside the " +
       "timeline, data.valid has the range; a preset of another aspect), ExportUnsupported, PresetNotFound, " +
       "FormatNotFound, TimelineNotFound.",
     params: z.strictObject({
@@ -280,6 +281,12 @@ export const exportMethods = {
       projectFormat: z.string().describe("Format of the project the frame was laid out in."),
       width: z.int(),
       height: z.int(),
+      warnings: z
+        .array(z.string())
+        .describe(
+          "What the frame is not quite as asked: a generated clip with motion blur whose blurred render was refused (HDR content, shader transitions) " +
+            "shows its sharp render, and a 3D composition caps its blur samples; empty when none.",
+        ),
     }),
   },
   review: {
@@ -294,7 +301,7 @@ export const exportMethods = {
       "judge a loop). `safe` (with `platform`, or the platforms the style guide names on a vertical film): up to 36 frames chosen like the " +
       "contact sheet with the platform's UI zones (`style.show` safeZones, one source in `@frameshell/schema`) shaded red; a frame where the captions of a " +
       "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
-      "can measure; a file has none). A timeline is rendered frame by frame like `frame` (draft work: matches `render`, not a full " +
+      "can measure; a file has none). A timeline is rendered frame by frame like `frame` (what `frame` puts in its `warnings`, e.g. a refused motion blur, is in this result's `warnings`; draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
       "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). `metrics` (default on, or named in `sheets`) writes `metrics.json` and " +
