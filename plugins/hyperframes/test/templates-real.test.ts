@@ -270,6 +270,47 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       });
     }, 120_000);
 
+    // With no line numbers the number cell takes no room: the caret, the strike-through and the text all start where the layout says.
+    it.each(["on", "off"])("code-typing and code-diff keep text, caret and strike-through together with numbers %s", async (numbers) => {
+      const gutter = "Array.from(document.querySelectorAll('.ln')).map(function (r) { return r.offsetLeft + r.querySelector('.tx').offsetLeft - (lay.pad + lay.gw + lay.sg); })";
+      await inPage("code-typing", { code: "let a = 1;\nlet b = 2;", numbers, speed: 30 }, undefined, async (page) => {
+        expect(((await page.evaluate(gutter)) as number[]).every((gap) => Math.abs(gap) < 0.5)).toBe(true);
+        expect(Math.abs((await page.evaluate("document.querySelector('.no').offsetWidth - lay.gw")) as number)).toBeLessThan(1);
+        // The longest line ends inside the window's right padding.
+        const room = (await page.evaluate("document.querySelector('.ln').offsetWidth - (document.querySelector('.tx').offsetLeft + cols * lay.cw) - lay.pad")) as number;
+        expect(room).toBeGreaterThanOrEqual(-0.5);
+      });
+      await inPage("code-diff", { before: "a\n  keep(b)\nc", after: "a\nc", numbers, changeAt: 0.5 }, undefined, async (page) => {
+        expect(((await page.evaluate(gutter)) as number[]).every((gap) => Math.abs(gap) < 0.5)).toBe(true);
+        // The strike-through starts at the first character of the removed line's text (two spaces in).
+        const offset = (await page.evaluate("(function () { var row = document.querySelectorAll('.ln')[1]; return parseFloat(row.querySelector('.cut').style.left) - (row.offsetLeft + row.querySelector('.tx').offsetLeft + 2 * lay.cw); })()")) as number;
+        expect(Math.abs(offset)).toBeLessThan(0.5);
+      });
+    }, 180_000);
+
+    it("code-diff lights its last change before the exit even when the clip is too short for the asked timing", async () => {
+      const before = Array.from({ length: 10 }, (_, i) => `old ${i}`).join("\n");
+      const after = Array.from({ length: 10 }, (_, i) => `new ${i}`).join("\n");
+      await inPage("code-diff", { before, after, changeAt: 1.2, lineGap: 0.5 }, 3, async (page) => {
+        const turns = (await page.evaluate("turn")) as number[];
+        expect(Math.max(...turns)).toBeLessThanOrEqual(3 - 0.3 - 0.4);
+        await seek(page, 2.6);
+        const opacities = (await page.evaluate("Array.from(document.querySelectorAll('.ln')).map(function (r) { return Number(r.style.opacity); })")) as number[];
+        expect(opacities.every((opacity) => opacity > 0.99)).toBe(true);
+      });
+    }, 120_000);
+
+    it("highlight quiet leaves strings and numbers in the plain colour while keywords stay coloured", async () => {
+      await inPage("code-typing", { code: 'const n = 7 + "s";', highlight: "quiet", speed: 60 }, undefined, async (page) => {
+        await seek(page, 5);
+        const colorOf = (text: string) => page.evaluate(`Array.from(document.querySelectorAll('.tx span')).filter(function (e) { return e.textContent === ${JSON.stringify(text)}; }).map(function (e) { return getComputedStyle(e).color; })[0]`);
+        const plain = await colorOf("n");
+        expect(await colorOf("7")).toBe(plain);
+        expect(await colorOf('"s"')).toBe(plain);
+        expect(await colorOf("const")).not.toBe(plain);
+      });
+    }, 120_000);
+
     it("code-morph ends on the second snippet: every token of it in its place, none of the first's left", async () => {
       await inPage("code-morph", { before: "x = 1", after: "y = x" }, undefined, async (page) => {
         await seek(page, 4);

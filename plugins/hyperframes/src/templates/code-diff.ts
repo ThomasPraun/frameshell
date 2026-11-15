@@ -110,12 +110,15 @@ export const codeDiff: Template = {
       var OUT = 0.3;
       var START = 0.15;
       var rise = lay.fs * 0.5;
-      // The changes are lit one after another; a clip too short for them gets a shorter gap.
+      // The changes are lit one after another; a clip too short for them gets a shorter gap, then an earlier first change, so the last one is lit before the exit.
       var changes = [];
       diff.forEach(function (d, i) { if (d.k !== "ctx") changes.push(i); });
-      var gap = changes.length > 1 ? Math.max(0.12, Math.min(P.lineGap, (D - OUT - P.changeAt - 0.9) / changes.length)) : P.lineGap;
+      var last = D - OUT - 0.45;
+      var many = changes.length - 1;
+      var first = many > 0 ? Math.max(0.1, Math.min(P.changeAt, last - many * 0.12)) : Math.min(P.changeAt, Math.max(0.1, last));
+      var gap = many > 0 ? Math.max(0, Math.min(P.lineGap, (last - first) / many)) : P.lineGap;
       var turn = diff.map(function () { return 0; });
-      changes.forEach(function (row, order) { turn[row] = P.changeAt + order * gap; });
+      changes.forEach(function (row, order) { turn[row] = first + order * gap; });
 
       M.bind("${id}", function (t) {
         var out = M.ease("exit", (t - (D - OUT)) / OUT);

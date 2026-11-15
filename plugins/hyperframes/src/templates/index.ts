@@ -36,7 +36,7 @@ export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
 /** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeDiff, codeMorph, codeTyping];
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeTyping, codeDiff, codeMorph];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {

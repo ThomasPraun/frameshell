@@ -218,7 +218,7 @@ export const CODE_MATH = kitScript(String.raw`
             part.cut = cell(row, "i", "cut");
           }
           part.no = cell(row, "span", "no");
-          part.no.style.cssText += "width:" + lay.gw + "px;padding-right:" + lay.fs * 1.4 + "px";
+          part.no.style.cssText += "width:" + lay.gw + "px;padding-right:" + (lay.gw ? lay.fs * 1.4 : 0) + "px";
           part.sg = cell(row, "span", "sg");
           part.sg.style.cssText += "width:" + lay.sg + "px";
           part.tx = cell(row, "span", "tx");
