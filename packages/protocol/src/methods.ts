@@ -68,14 +68,7 @@ export {
   BatchManifestSchema,
 } from "./methods/shared.js";
 
-/**
- * Every method frameshelld serves: the single source for client and daemon
- * types, daemon param validation and generated tool schemas.
- * Entries live in one module per area under `methods/`, spread here in order (the order of
- * {@link methodJsonSchemas}). Adding a method = one entry in its area module plus its daemon
- * handler (the compiler enforces the handler); a new area module also joins {@link MethodRegistry}.
- */
-export const methods: MethodRegistry = {
+const merged = {
   ...connectionMethods,
   ...exportMethods,
   ...assetMethods,
@@ -92,6 +85,21 @@ export const methods: MethodRegistry = {
   ...peopleMethods,
   ...uiMethods,
 };
+
+/**
+ * Every method frameshelld serves: the single source for client and daemon
+ * types, daemon param validation and generated tool schemas.
+ * Entries live in one module per area under `methods/`, spread into `merged` in order (the order of
+ * {@link methodJsonSchemas}). Adding a method = one entry in its area module plus its daemon
+ * handler (the compiler enforces the handler); a new area module also joins {@link MethodRegistry}.
+ */
+export const methods: MethodRegistry = merged;
+
+// Spread members skip excess-property checks: fails to compile when an area is spread into `merged` but
+// missing from MethodRegistry, or the reverse (its methods would lack a type, so lack a daemon handler).
+type MustBeTrue<T extends true> = T;
+type SameKeys<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type _AreasMatch = MustBeTrue<SameKeys<keyof typeof merged, keyof MethodRegistry>>;
 
 /**
  * Type of {@link methods}, one area module per base. Declared rather than inferred so the emitted

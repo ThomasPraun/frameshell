@@ -58,18 +58,21 @@ export const IdempotencyKeySchema = z
 /** Absolute path on the daemon's machine; relative paths would resolve against the daemon's cwd, not the caller's. */
 export const AbsolutePath = z.string().refine(isAbsolute, { message: "must be an absolute path" });
 
+/** Who answered the handshake: protocol and daemon versions, process. */
 export const DaemonIdentitySchema = z.object({
   protocolVersion: z.int().describe("Wire protocol version the daemon speaks."),
   daemonVersion: z.string().describe("frameshelld package version."),
   pid: z.int().describe("Daemon process id."),
 });
 
+/** Summary of an open project in connection and project-setup results. */
 export const ProjectSummarySchema = z.object({
   dir: z.string().describe("Absolute directory holding `frameshell.json`."),
   name: z.string().describe("Project display name."),
   schemaVersion: z.int().describe("On-disk schema version of the project files."),
 });
 
+/** One managed binary in the `doctor` report. */
 export const BinaryReportSchema = z.object({
   name: z.string().describe("Executable name without extension, e.g. `ffmpeg`."),
   package: z.string().describe("Managed package that ships it, e.g. `ffmpeg` (also ships `ffprobe`)."),
@@ -99,6 +102,7 @@ export const BinaryReportSchema = z.object({
     ),
 });
 
+/** One ffmpeg codec in the `doctor` report. */
 export const CodecReportSchema = z.object({
   name: z.string().describe("ffmpeg codec implementation name, e.g. `libx264`, `libvpx-vp9`, `h264_nvenc`."),
   kind: z.enum(["encoder", "decoder"]),
@@ -111,10 +115,12 @@ export const CodecReportSchema = z.object({
     .describe("Hardware encoders only: a one-frame test encode succeeded on this machine. Null when not tested."),
 });
 
+/** H.264 encoder a render can use. */
 export const EncoderNameSchema = z
   .enum(["h264_videotoolbox", "h264_nvenc", "libx264"])
   .describe("H.264 encoder, in the order tried: VideoToolbox (macOS), NVENC (NVIDIA), x264 (software, always the last resort).");
 
+/** Encode quality tier of renders and proxies. */
 export const QualityTierSchema = z
   .enum(["master", "preview", "draft", "final"])
   .describe(
@@ -123,6 +129,7 @@ export const QualityTierSchema = z
       "(CRF 16 slow, bt709 tags, faststart). Hardware encoders use their own equivalent settings.",
   );
 
+/** Which H.264 encoder this machine uses, from test encodes. */
 export const EncoderReportSchema = z.object({
   picked: EncoderNameSchema.nullable().describe("The encoder renders use: the first candidate that encoded; null when none did."),
   cached: z.boolean().describe("The answer came from the per-machine cache (`encoders.json` in the data dir) instead of fresh test encodes."),
@@ -140,6 +147,7 @@ export const EncoderReportSchema = z.object({
     .describe("Every candidate in preference order."),
 });
 
+/** Speed class and resources of this machine in the `doctor` report. */
 export const MachineProfileSchema = z.object({
   class: z.enum(["fast", "medium", "slow"]).describe("Machine speed class from CPU cores, memory and whether a hardware encoder works."),
   cpuCores: z.int(),
@@ -162,10 +170,12 @@ export const TrustStateSchema = z
       "`trusted` (plugins load), `denied` (plugins stay off).",
   );
 
+/** Declared plugin pins of a project. */
 export const PinsSchema = z
   .record(z.string(), z.string())
   .describe("Declared plugins from `frameshell.json`: package name to pinned npm spec (exact version or git URL#commit).");
 
+/** One deleted (or deletable) entry of a `gc` result. */
 export const GcEntrySchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated; a directory ends with `/`."),
   kind: z
@@ -185,6 +195,7 @@ export const GcEntrySchema = z.object({
   bytes: z.int().describe("Size on disk; a directory counts its files."),
 });
 
+/** One measured beat grid of an asset (`beats.*`). */
 export const BeatsSummarySchema = z.object({
   asset: z.string().describe("Project-relative asset path."),
   file: z.string().describe("Project-relative beats file, e.g. `beats/theme.beats.json`."),
@@ -203,6 +214,7 @@ export const BeatsSummarySchema = z.object({
   onsetCount: z.int().describe("Number of strong hits measured."),
 });
 
+/** One area a `gc` run left alone. */
 export const GcSkipSchema = z.object({
   area: z
     .enum(["media", "clips", "audio", "audio-fx", "temp"])
@@ -210,6 +222,7 @@ export const GcSkipSchema = z.object({
   reason: z.string(),
 });
 
+/** `cwd` param shared by project methods. */
 export const CwdParam = AbsolutePath.describe(
   "Absolute directory inside the project, e.g. `/home/ana/videos/launch`. The project is found searching upwards.",
 );
@@ -222,6 +235,7 @@ export const PROPOSAL_WAIT_DEFAULT_S = 300;
 /** See {@link PROPOSAL_WAIT_DEFAULT_S}. */
 export const PROPOSAL_WAIT_MAX_S = 3600;
 
+/** One plugin as the `plugin.*` methods report it. */
 export const PluginInfoSchema = z.object({
   name: z.string().describe("npm package name."),
   pin: z.string().describe("Pinned spec from `frameshell.json`."),
@@ -244,6 +258,7 @@ export const PluginInfoSchema = z.object({
     .describe("Declared contributions; null unless the manifest was read."),
 });
 
+/** One background job as `job.list` reports it. */
 export const JobSchema = z.object({
   id: z.string().describe("Job id, e.g. `j_12`. Unique within one daemon run."),
   kind: z
@@ -419,6 +434,7 @@ export const ClipRenderSchema = z.object({
   ),
 });
 
+/** ffprobe facts of an asset. */
 export const ProbeSchema = z.object({
   duration: z.number().nullable().describe("Container duration in seconds; null when unknown (still images)."),
   format: z.string().describe("ffprobe container name, e.g. `mov,mp4,m4a,3gp,3g2,mj2`."),
@@ -459,6 +475,7 @@ export const ProbeSchema = z.object({
     .describe("First audio stream; null when silent."),
 });
 
+/** One project asset as the `asset.*` methods report it. */
 export const AssetSchema = z.object({
   path: z.string().describe("Project-relative, `/`-separated, e.g. `assets/raw-01.mp4`."),
   kind: z
@@ -526,6 +543,7 @@ export const EventNameSchema = z
       "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
   );
 
+/** Params of `events.subscribe` and `events.unsubscribe`. */
 export const EventsParams = z.strictObject({
   cwd: CwdParam,
   events: z.array(EventNameSchema).min(1).describe("Events to (un)subscribe, e.g. `[\"timeline.changed\"]`."),
@@ -545,6 +563,7 @@ export const SceneSpanSchema = z.object({
   words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them)."),
 });
 
+/** One export preset as `export.presets` lists it. */
 export const ExportPresetResultSchema = z.looseObject({
   id: z.string(),
   label: z.string().optional(),
@@ -602,6 +621,7 @@ export const CoverChoiceShape = {
     .describe("Word colour, `#rrggbb`; the outline turns black or white to contrast with it. Default yellow `#ffd426`."),
 };
 
+/** `preset` param of export methods. */
 export const PresetParam = z
   .string()
   .min(1)
@@ -740,11 +760,13 @@ export const VerifiedWordSchema = z.object({
     .describe("0..1 that this word really is missing from the export: source word confidence times the run's agreement, lower away from cuts."),
 });
 
+/** A kept word not heard at all in the export (`transcribe.verify`). */
 export const LostWordSchema = VerifiedWordSchema.describe(
   "A word kept by the timeline that the cut falls inside (`clipped` is always true), of which nothing was heard in the " +
     "export, not even when the audio around it was re-transcribed alone.",
 );
 
+/** A kept word heard doubtfully in the export (`transcribe.verify`). */
 export const UncertainWordSchema = VerifiedWordSchema.extend({
   reason: z
     .enum(["repeat", "garbled", "unheard"])
