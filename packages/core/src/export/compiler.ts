@@ -84,6 +84,7 @@ import {
   zoomExpressions,
 } from "./animation.js";
 import { assSubtitles } from "./ass.js";
+import { truePeakCeiling } from "./true-peak.js";
 import { vignettedPicture } from "./vignette.js";
 import { grainedPicture } from "./grain.js";
 import { type CoverLayout, assCover } from "./cover.js";
@@ -266,6 +267,8 @@ export interface RenderPlan {
     tracks: AudioItem[][];
     /** Encoder args of the final audio stream. */
     codec: string[];
+    /** Ceiling of the true-peak limiter, dBTP: by codec and bitrate, see `TRUE_PEAK_CEILINGS`. */
+    truePeak: number;
   };
 }
 
@@ -346,15 +349,12 @@ const ATEMPO_TAIL_SECONDS = 0.1;
 const LOUDNORM_LRA = 20;
 /** `loudnorm` true peak ceiling, dBTP. */
 const LOUDNORM_TP = -1;
-/**
- * Ceiling of the true-peak limiter after `loudnorm`, dBTP. Half a dB under {@link LOUDNORM_TP}: the AAC encode adds
- * about 0.3-0.5 dB of inter-sample overs to sharp transients (measured at 192-320 kbps).
- */
-export const TRUE_PEAK_CEILING = -1.5;
 /** The limiter runs at this multiple of the export's sample rate, so its sample peaks are BS.1770 true peaks. */
 const TRUE_PEAK_OVERSAMPLE = 4;
 /** Pass-1 statistics file, relative to the work directory. */
 export const LOUDNESS_STATS_FILE = "loudness.json";
+/** Statistics file of the loudness re-measure after the limiter ({@link limitedAnalysis}), relative to the work directory. */
+export const LIMITED_STATS_FILE = "limited.json";
 /** Lossless audio mix, relative to the work directory. */
 export const MIX_FILE = "mix.wv";
 /** Concat demuxer list, relative to the work directory. */
@@ -586,8 +586,12 @@ export function compileRender(input: RenderInput): RenderPlan {
   files[CONCAT_LIST] = segments.map((segment) => `file '${segment.file}'\n`).join("");
 
   const audio = preset.audio
-    ? { ...audioPlan(layout, fps, preset.audio.sampleRate ?? 48_000), codec: audioCodecArgs(preset.audio, preset.audio.sampleRate ?? 48_000, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined) }
-    : { sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [] };
+    ? {
+        ...audioPlan(layout, fps, preset.audio.sampleRate ?? 48_000),
+        codec: audioCodecArgs(preset.audio, preset.audio.sampleRate ?? 48_000, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined),
+        truePeak: truePeakCeiling(preset.audio.codec, audioBitrateKbps(preset.audio, tiered?.tier === "final" ? FINAL_AAC_KBPS : undefined)),
+      }
+    : { sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [], truePeak: truePeakCeiling("pcm") };
   return {
     timeline: timeline.id,
     preset: preset.id,
@@ -634,25 +638,45 @@ export function loudnessAnalysis(plan: RenderPlan): FfmpegStep | null {
 }
 
 /**
- * Final step: joined video segments (stream copy) plus {@link MIX_FILE}
- * normalized with `measured` (`loudnorm` pass 2, linear when the measurement
- * allows; skipped when null), then held under {@link TRUE_PEAK_CEILING} by an
- * oversampled limiter, written to `output`. A silent export gets a silent
- * track of the exact length.
+ * The mix as the export hears it, up to the encoder: {@link MIX_FILE} normalized with `measured` (`loudnorm` pass 2,
+ * linear when the measurement allows; skipped when null), `trimDb` more gain, then held under `plan.audio.truePeak`
+ * by an oversampled limiter. `loudnorm` works at 192 kHz, so the chain resamples back to the export rate.
  */
-export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, output: string): FfmpegStep {
-  const { sampleRate: rate, samples } = plan.audio;
-  const silent = plan.audio.tracks.length === 0;
+function limitedChain(plan: RenderPlan, measured: LoudnessMeasurement | null, trimDb: number): string {
+  const { sampleRate: rate } = plan.audio;
   const normalize = measured
     ? `loudnorm=I=${plan.loudness}:TP=${LOUDNORM_TP}:LRA=${LOUDNORM_LRA}` +
       `:measured_I=${measured.input_i}:measured_TP=${measured.input_tp}:measured_LRA=${measured.input_lra}` +
       `:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true,`
     : "";
+  const trim = trimDb === 0 ? "" : `volume=${trimDb.toFixed(2)}dB,`;
+  return `${normalize}${trim}aresample=${rate},${truePeakLimit(rate, plan.audio.truePeak)}`;
+}
+
+/**
+ * Loudness pass 3: the mix through the same chain as {@link muxStep} (with `trimDb`), then `loudnorm` in analysis
+ * mode writing {@link LIMITED_STATS_FILE}: the loudness the limiter leaves, which the export brings back to the
+ * target with `trimDb` (`settleTrim`). Null when silent.
+ */
+export function limitedAnalysis(plan: RenderPlan, measured: LoudnessMeasurement | null, trimDb: number): FfmpegStep | null {
+  if (plan.audio.tracks.length === 0) return null;
+  const analysis = `loudnorm=I=${plan.loudness}:TP=${LOUDNORM_TP}:LRA=${LOUDNORM_LRA}:print_format=json:stats_file=${LIMITED_STATS_FILE}`;
+  return { files: {}, args: [...BASE, "-i", MIX_FILE, "-af", `${limitedChain(plan, measured, trimDb)},${analysis}`, "-f", "null", "-"] };
+}
+
+/**
+ * Final step: joined video segments (stream copy) plus {@link MIX_FILE} through {@link limitedChain} (`trimDb`: the
+ * gain `settleTrim` found, default none), written to `output`. A silent export gets a silent track of the exact
+ * length.
+ */
+export function muxStep(plan: RenderPlan, measured: LoudnessMeasurement | null, output: string, trimDb = 0): FfmpegStep {
+  const { sampleRate: rate, samples } = plan.audio;
+  const silent = plan.audio.tracks.length === 0;
   const fade = plan.loop && !silent && (plan.container === "mp4" || plan.container === "mov") ? loopFades(rate, samples) : "";
-  // loudnorm works at 192 kHz: resample back, then cut to the exact length.
+  // Cut to the exact length after the chain.
   const audio = silent
     ? `anullsrc=r=${rate}:cl=stereo,atrim=end_sample=${samples}[a]`
-    : `[1:a:0]${normalize}aresample=${rate},${truePeakLimit(rate)},atrim=end_sample=${samples}${fade}[a]`;
+    : `[1:a:0]${limitedChain(plan, measured, trimDb)},atrim=end_sample=${samples}${fade}[a]`;
   return {
     files: {},
     args: [
@@ -697,11 +721,11 @@ export function gifStep(output: string): FfmpegStep {
 
 /**
  * Oversampled true-peak limiter on audio at `rate`: up to {@link TRUE_PEAK_OVERSAMPLE} x `rate`, `alimiter`
- * at {@link TRUE_PEAK_CEILING}, back to `rate`. Its input must already be band-limited at `rate` (loudnorm's 192 kHz
+ * at `ceiling` dBTP, back to `rate`. Its input must already be band-limited at `rate` (loudnorm's 192 kHz
  * output limited there let 0.3 dB more through). `level=false` keeps the gain; `latency` keeps it sample-aligned.
  */
-function truePeakLimit(rate: number): string {
-  const limit = (10 ** (TRUE_PEAK_CEILING / 20)).toFixed(4);
+function truePeakLimit(rate: number, ceiling: number): string {
+  const limit = (10 ** (ceiling / 20)).toFixed(4);
   return `aresample=${rate * TRUE_PEAK_OVERSAMPLE},alimiter=limit=${limit}:level=false:latency=true,aresample=${rate}`;
 }
 
@@ -1794,7 +1818,7 @@ function sourceChain(placed: Placed, start: number, end: number, fps: number, in
  * whose dissolve overlaps the clip before it (ADR 0018 decision 3) goes to
  * another sequence of its track, so both play through the crossfade.
  */
-function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<RenderPlan["audio"], "codec"> {
+function audioPlan(layout: Layout, fps: number, sampleRate: number): Omit<RenderPlan["audio"], "codec" | "truePeak"> {
   const at = (frame: number) => Math.round((frame / fps) * sampleRate);
   const samples = at(layout.frames);
   const inputs: string[] = [];
@@ -2038,10 +2062,15 @@ function videoCodecArgs(preset: ExportPreset): string[] {
 /** AAC bitrate of a `final` export. */
 const FINAL_AAC_KBPS = 320;
 
+/** The bitrate the encoder gets: `aacKbps` replaces the preset's own AAC bitrate. */
+function audioBitrateKbps(audio: NonNullable<ExportPreset["audio"]>, aacKbps?: number): number | undefined {
+  return audio.codec === "aac" && aacKbps ? aacKbps : audio.bitrateKbps;
+}
+
 /** `aacKbps` replaces the preset's own AAC bitrate. */
 function audioCodecArgs(audio: NonNullable<ExportPreset["audio"]>, rate: number, aacKbps?: number): string[] {
   const { codec } = audio;
-  const bitrateKbps = codec === "aac" && aacKbps ? aacKbps : audio.bitrateKbps;
+  const bitrateKbps = audioBitrateKbps(audio, aacKbps);
   const bitrate = bitrateKbps ? ["-b:a", `${bitrateKbps}k`] : [];
   switch (codec) {
     case "aac":

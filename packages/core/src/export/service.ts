@@ -55,6 +55,8 @@ import {
   loudnessAnalysis,
   mixStep,
   muxStep,
+  limitedAnalysis,
+  LIMITED_STATS_FILE,
   paletteStep,
   parseLoudnessStats,
 } from "./compiler.js";
@@ -70,6 +72,7 @@ import {
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { gradeFiles } from "./grade.js";
+import { limiterEngages, settleTrim } from "./true-peak.js";
 import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
@@ -142,6 +145,16 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     await measuring;
     const measured = analysis ? parseLoudnessStats(await readFile(join(workDir, LOUDNESS_STATS_FILE), "utf8")) : null;
 
+    // The limiter lowers the loudness a little (SPEC §3.5 step 4): measure it again and add the difference back.
+    const trim =
+      measured && plan.container !== "gif" && limiterEngages(measured, plan.audio.truePeak)
+        ? await settleTrim(plan.loudness, async (trimDb) => {
+            await run(limitedAnalysis(plan, measured, trimDb)!.args);
+            const limited = parseLoudnessStats(await readFile(join(workDir, LIMITED_STATS_FILE), "utf8"));
+            return limited ? Number(limited.input_i) : null;
+          })
+        : 0;
+
     report({ step: "mux", progress: VIDEO_SHARE });
     await mkdir(dirname(output), { recursive: true });
     const muxProgress = (from: number, to: number) => (seconds: number) =>
@@ -151,7 +164,7 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
       await run(paletteStep().args, muxProgress(0, 0.4));
       await run(gifStep(partial).args, muxProgress(0.4, 1));
     } else {
-      const mux = muxStep(plan, measured, partial);
+      const mux = muxStep(plan, measured, partial, trim);
       await writeFiles(workDir, mux.files);
       await run(mux.args, muxProgress(0, 1));
     }

@@ -178,14 +178,14 @@ describe("export render (real ffmpeg)", () => {
   );
 
   it(
-    "keeps sharp transients under -1 dBTP in the exported AAC, where loudnorm alone lets them over",
+    "keeps sharp transients under -1 dBTP in the exported file of each codec, where loudnorm alone lets them over, at the target within 0.15 LU",
     async () => {
-      // A quiet bed with a 2 ms square burst every 250 ms, phased so its peaks fall between samples.
+      // A bed with a 1 ms square burst every 250 ms, phased so its peaks fall between samples.
       const path = join(dir, "clicks.mov");
       await run(ffmpeg, [
         ...["-hide_banner", "-loglevel", "error", "-y"],
         ...["-f", "lavfi", "-i", "color=c=black:s=64x64:r=30:d=4"],
-        ...["-f", "lavfi", "-i", "aevalsrc='0.05*sin(2*PI*220*t)+if(lt(mod(t\\,0.25)\\,0.002)\\,0.9*sgn(sin(2*PI*3000*t+0.785))\\,0)':s=48000:d=4"],
+        ...["-f", "lavfi", "-i", "aevalsrc='0.15*sin(2*PI*220*t)+if(lt(mod(t\\,0.25)\\,0.001)\\,0.9*sgn(sin(2*PI*3000*t+0.785))\\,0)':s=48000:d=4"],
         ...["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", path],
       ]);
       const unlimited = await measureLoudness(ffmpeg, path, undefined, "loudnorm=I=-17:TP=-1:LRA=20,aresample=48000");
@@ -193,16 +193,25 @@ describe("export render (real ffmpeg)", () => {
 
       const clip: MediaClip = { id: "a", type: "media", asset: "assets/clicks.mov", start: 0, in: 0, out: 4 };
       const sources = new Map([["assets/clicks.mov", { path, video: { codec: "h264", still: false, width: 64, height: 64 }, audio: true }]]);
-      // The built-in presets' AAC bitrate.
-      const preset: ExportPreset = { ...TINY, audio: { codec: "aac", bitrateKbps: 320, sampleRate: 48_000 } };
-      const plan = compileRender({ timeline: oneTrack([clip]), fps: 30, preset, loudness: -17, sources, resolution });
-      const output = join(dir, "clicks.mp4");
-      await executeRender(plan, { ffmpeg, workDir: join(dir, "work-clicks"), output });
+      // The built-in presets' AAC bitrate, a lower one, a typical Opus one, and uncompressed.
+      const audios: [string, ExportPreset["audio"], ExportPreset["container"]][] = [
+        ["aac", { codec: "aac", bitrateKbps: 320, sampleRate: 48_000 }, "mp4"],
+        ["aac-128", { codec: "aac", bitrateKbps: 128, sampleRate: 48_000 }, "mp4"],
+        ["opus", { codec: "opus", bitrateKbps: 128, sampleRate: 48_000 }, "mp4"],
+        ["pcm", { codec: "pcm", sampleRate: 48_000 }, "mov"],
+      ];
+      for (const [name, audio, container] of audios) {
+        const preset: ExportPreset = { ...TINY, container, audio };
+        const plan = compileRender({ timeline: oneTrack([clip]), fps: 30, preset, loudness: -17, sources, resolution });
+        const output = join(dir, `clicks-${name}.${container}`);
+        await executeRender(plan, { ffmpeg, workDir: join(dir, `work-clicks-${name}`), output });
 
-      const exported = await measureLoudness(ffmpeg, output);
-      expect(exported!.truePeak!).toBeLessThanOrEqual(-1);
-      expect(Math.abs(exported!.integrated! - -17)).toBeLessThanOrEqual(2);
-      expect(Math.abs((await audioSamples(output)).length - plan.audio.samples)).toBeLessThan(2048);
+        const exported = await measureLoudness(ffmpeg, output);
+        expect(exported!.truePeak!, name).toBeLessThanOrEqual(-1);
+        // The limiter lowers this fixture by about 0.8 LU; the re-measure adds it back.
+        expect(Math.abs(exported!.integrated! - -17), name).toBeLessThanOrEqual(0.15);
+        expect(Math.abs((await audioSamples(output)).length - plan.audio.samples), name).toBeLessThan(2048);
+      }
     },
     MEDIA_TIMEOUT,
   );
