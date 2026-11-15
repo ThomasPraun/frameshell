@@ -306,6 +306,12 @@ export const VOICEOVER_WORDS_PER_SECOND = 2.5;
 /** Seconds of air `voiceover.place` leaves between one line and the next when neither is anchored (ADR 0034 decision 19). */
 export const VOICEOVER_LINE_GAP_S = 0.4;
 
+/**
+ * Tempo range of one voiceover phrase (#470: 0.8 to 1.25, never a whole take): the clip `speed` `voiceover.place`
+ * gives a phrase. Narrower than the clip's own `speed`, which only has to be positive: past this a voice sounds processed.
+ */
+export const VOICEOVER_TEMPO_RANGE = { min: 0.8, max: 1.25 } as const;
+
 /** Voiceover conventions from the frontmatter (ADR 0034). */
 export const VoiceoverMetaSchema = z.object({
   voiceover: z.boolean().describe("Frontmatter `voiceover: true`: the voiceover conventions apply."),

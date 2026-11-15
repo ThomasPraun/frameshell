@@ -69,7 +69,8 @@ frameshell voiceover place scripts/launch-vo.md --lines the-fix-1 --at the-fix-1
 - The voice never overlaps itself: a phrase that would start before the previous one ends, or on a clip already on the track, fails (`InvalidOperation`) naming both, and nothing is written. Move the anchor or drop it. Anchors run in script order: an `--at` earlier than the phrase before it fails the same way.
 - **Re-placing**: clips that already play these takes fail the call, naming them. After `voiceover generate` changed a take (the result warns when it replaced one a clip plays), run `place --replace`: it removes those clips and places the phrases again in the same transaction. Use `--lines` to place only some lines.
 - `--dry-run` plans and reports every clip (`clip: null`) without writing. A take said from older text than the line has now is placed with a warning: generate it again.
-- No per-phrase tempo yet. MCP: `voiceover_place`.
+- **Tempo per phrase**: `--tempo hook-1.2=1.1,the-fix-1=0.9` (the keys of `--at`: a line is its phrase 1) plays single phrases at 0.8 to 1.25 times their speed, 1 = as spoken, pitch kept in preview and export alike. The clip gets that `speed`, so it lasts `(out - in) / speed` on the timeline; every placed phrase reports `speed` and its effective `duration`, and `--dry-run` shows them before anything is written. The pause the take has before the next phrase keeps its length, so a faster phrase pulls the rest of the line earlier and a slower one pushes it later (an `--at` anchor that the slower phrase would cross fails as an overlap). Use it to fit one phrase to a beat or a cut, never a whole take: more than about 1.15 sounds hurried, under 0.9 drags. Tune it per phrase on a second `--replace` run; a hand-set `clip set --speed` changes that clip only and moves nothing after it, so use `--tempo` for a phrase of a line that has more after it.
+- MCP: `voiceover_place`.
 
 ## The `command` provider
 

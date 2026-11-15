@@ -1960,7 +1960,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
       });
       const report = { timeline, script: plan.script, track: plan.track, lines: plan.lines, dryRun };
-      const planned = plan.clips.map((clip) => ({ line: clip.line, phrase: clip.phrase, file: clip.file, in: clip.in, out: clip.out, start: clip.start, end: clip.end, anchor: clip.anchor }));
+      const planned = plan.clips.map((clip) => ({ line: clip.line, phrase: clip.phrase, file: clip.file, in: clip.in, out: clip.out, start: clip.start, end: clip.end, speed: clip.speed, duration: clip.duration, anchor: clip.anchor }));
       if (dryRun || plan.clips.length === 0) {
         const warnings = !dryRun && plan.remove.length > 0 ? [...plan.warnings, `Nothing was placed, so \`replace\` removed nothing: ${plan.remove.join(", ")} stay on the timeline.`] : plan.warnings;
         return { ...report, revision: plan.revision, tx: null, placed: planned.map((clip) => ({ ...clip, clip: null })), replaced: dryRun ? plan.remove : [], warnings };

@@ -428,6 +428,7 @@ export {
   type ShootScene,
   type ShootScript,
   VOICEOVER_LINE_GAP_S,
+  VOICEOVER_TEMPO_RANGE,
   VOICEOVER_WORDS_PER_SECOND,
   VoiceoverLineSchema,
   VoiceoverMetaSchema,
