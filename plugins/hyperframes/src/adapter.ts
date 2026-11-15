@@ -3,6 +3,7 @@ import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win
 import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext, RenderMotionBlur } from "@frameshell/plugin-api";
 import { type FrameSize, projectResolution, sizeEntry, withLeadingStyle, withLeadingTag, withStyle } from "./frame-size.js";
 import { liveHead } from "./live.js";
+import { timingKinds, timingScript, timingTag } from "./timing.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "hyperframes";
@@ -86,9 +87,12 @@ const SKIPPED_DIRS = new Set(["node_modules"]);
  * with the managed ffmpeg, ffprobe and headless Chrome. A composition laid
  * out for the project frame renders at a format's size when the format has
  * another aspect (ADR 0027), with the project style's tokens (ADR 0028) as its first
- * stylesheet. Live preview (ADR 0010) serves the composition
- * directory as it is, with the clip's variables and the HyperFrames runtime
- * in `head`.
+ * stylesheet. A composition whose entry carries
+ * `<meta name="frameshell-timing" content="beats markers">` gets the timeline's
+ * beats and markers inside the clip as `window.frameshellTiming` (ADR 0029
+ * decision 8). Live preview (ADR 0010) serves the composition
+ * directory as it is, with the clip's variables, that timing and the
+ * HyperFrames runtime in `head`.
  */
 export function createHyperframesAdapter(options: HyperframesAdapterOptions): ClipAdapter {
   const { projectDir } = options;
@@ -105,6 +109,13 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       if (!source) return [];
       const dir = await compositionDir(projectDir, clip as HyperframesClip & { source: string });
       return (await listFiles(dir.path)).map((file) => (dir.rel === "" ? file : `${dir.rel}/${file}`));
+    },
+    // The entry is an input, so editing its meta tag re-keys the clip anyway; a missing entry asks for nothing.
+    async timing(clip) {
+      const { id, source } = clip as HyperframesClip;
+      if (!source || extname(source).toLowerCase() !== ".html") return [];
+      const dir = await compositionDir(projectDir, { id, source });
+      return timingKinds(await readFile(join(dir.path, posix.basename(source)), "utf8").catch(() => ""));
     },
     async render(clip, ctx: RenderContext) {
       const { id, source, props } = clip as HyperframesClip;
@@ -152,7 +163,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       return { file: output, hasAlpha: true };
     },
     // The page is the composition directory as it is: the runtime loads sub-compositions and assets by relative URL.
-    async livePreview(clip, _ctx: LiveContext): Promise<LivePage> {
+    async livePreview(clip, ctx: LiveContext): Promise<LivePage> {
       const { id, source, props } = clip as HyperframesClip;
       requireEntry(id, source);
       const dir = await compositionDir(projectDir, { id, source });
@@ -162,7 +173,7 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       return {
         root,
         entry: dir.rel === "" ? name : `${dir.rel}/${name}`,
-        head: liveHead(props ?? {}, await loadRuntime(), root),
+        head: (ctx.timing ? `${timingScript(ctx.timing)}\n` : "") + liveHead(props ?? {}, await loadRuntime(), root),
       };
     },
   };
@@ -170,8 +181,8 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
 
 /**
  * The copied entry laid out at the render size (`sizeEntry`, ADR 0027 decision 8), with the clip's element CSS
- * (ADR 0021) as its last stylesheet and the style tokens (ADR 0028) as its first. Written only when it changed, so a
- * plain render reads the file as copied.
+ * (ADR 0021) as its last stylesheet, the style tokens (ADR 0028) as its first and the timing (ADR 0029) set before
+ * any of its scripts runs. Written only when it changed, so a plain render reads the file as copied.
  */
 async function prepareEntry(entry: string, ctx: RenderContext, project: FrameSize): Promise<void> {
   const original = await readFile(entry, "utf8");
@@ -180,6 +191,7 @@ async function prepareEntry(entry: string, ctx: RenderContext, project: FrameSiz
   if (ctx.styleCss) html = withLeadingStyle(html, "data-frameshell-style", ctx.styleCss);
   // The motion runtime's cuts() guard finds each sample's frame instant with it (ADR 0041).
   if (ctx.motionBlur) html = withLeadingTag(html, `<meta name="${FRAME_RATE_META}" content="${ctx.fps}">`);
+  if (ctx.timing) html = withLeadingTag(html, timingTag(ctx.timing));
   if (html !== original) await writeFile(entry, html);
 }
 

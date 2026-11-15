@@ -265,7 +265,7 @@ export {
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
-export { type GradeFiles, gradeFile, gradeFiles } from "./export/grade.js";
+export { type GradeFiles, gradeFile, gradeFiles, readLut } from "./export/grade.js";
 export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";
 export { bundledFontMetrics, captionFontMetrics, fontFileMetrics } from "./export/font-metrics.js";
 export { readCaptionTokens } from "./style/captions.js";
@@ -356,6 +356,7 @@ export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyAr
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
 export { type ClipKeyInput, clipCacheKey } from "./clips/cache-key.js";
+export { type ClipTimingInput, clipTiming } from "./clips/timing.js";
 export {
   CLIP_CACHE_DIR,
   ClipRenderer,
@@ -527,6 +528,7 @@ export { DEFAULT_CUT_THRESHOLD, type Cut, type Shot, type ShotStats, detectCuts,
 export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palette.js";
 export { type LoudnessReading, measureLoudness, parseLoudness } from "./analyze/loudness.js";
 export { GradeAnalyzer, type GradeAnalyzeRequest, type GradeAnalyzerOptions } from "./grade/analyze.js";
+export { GRADE_COMPARE_DIR, GradeComparer, type GradeCompareRequest, type GradeComparerOptions, columnsFor, lookFlags, withGrade } from "./grade/compare.js";
 export { type FrameLevels, meanLevels, parseSignalstats } from "./grade/levels.js";
 export { type GradeCorrection, type GradeSuggestion, SUGGEST as GRADE_SUGGEST, correctionFlags, suggestGrade } from "./grade/suggest.js";
 export { type Look, LookBuilder, frameLook } from "./analyze/look.js";
@@ -539,4 +541,4 @@ export { type MusicGrid, type MusicRender, type MusicSpec, defaultSections, musi
 export { type AskedSection, MUSIC_TRACK_NAME, arrangeSections } from "./sound/music-place.js";
 export { integratedLoudness, limitPeaks, normaliseLoudness } from "./sound/loudness.js";
 export { REVIEW_DIR, type ReviewRequest, ReviewService, type ReviewServiceOptions } from "./review/service.js";
-export { type SheetOptions, type SheetSize, type SheetTile, writeSheet } from "./review/sheet.js";
+export { SHEET_GAP, type SheetOptions, type SheetSize, type SheetTile, writeSheet } from "./review/sheet.js";

@@ -1,0 +1,146 @@
+import { describe, expect, it } from "vitest";
+import type { AdapterClip, BeatsFile, Timeline } from "@frameshell/schema";
+import { type ClipKeyInput, type ClipTimingInput, clipCacheKey, clipTiming } from "../src/index.js";
+
+// Timing of generated clips (ADR 0029 decision 8): the beats and markers inside a clip, in composition seconds, and
+// only for clips that ask, so the render key of every other clip stays as it was.
+const FPS = 30;
+const beatsFile = (overrides: Partial<BeatsFile> = {}): BeatsFile => ({
+  schemaVersion: 1,
+  asset: "assets/music.wav",
+  assetHash: `sha256:${"0".repeat(64)}`,
+  detector: "exact",
+  bpm: 120,
+  meter: 4,
+  downbeat: 0,
+  confidence: 1,
+  beats: Array.from({ length: 40 }, (_, index) => 0.5 + index * 0.5),
+  edits: {},
+  ...overrides,
+});
+
+const card: AdapterClip = { id: "c_card", type: "hyperframes", source: "compositions/hyperframes/drop/index.html", start: 4, in: 1, duration: 2 };
+
+/** A timeline with the music clip `music` (starting at `start`, from source second `in`) followed by the tempo. */
+function timeline(music: { start: number; in?: number } | null, extra: Partial<Timeline> = {}): Timeline {
+  return {
+    schemaVersion: 1,
+    id: "main",
+    revision: 1,
+    tracks: [
+      { id: "t_v", kind: "video", clips: [card] },
+      {
+        id: "t_a",
+        kind: "audio",
+        clips: music ? [{ id: "c_music", type: "media", asset: "assets/music.wav", start: music.start, in: music.in ?? 0, out: 20 }] : [],
+      },
+    ],
+    ...(music ? { tempo: { clip: "c_music" } } : {}),
+    ...extra,
+  } as Timeline;
+}
+
+const input = (over: Partial<ClipTimingInput> = {}): ClipTimingInput => ({
+  clip: card,
+  timeline: timeline({ start: 0 }),
+  fps: FPS,
+  kinds: ["beats"],
+  beatsOf: async () => beatsFile(),
+  ...over,
+});
+
+describe("clipTiming", () => {
+  it("is undefined for a clip that asks for nothing, or only for kinds it does not know", async () => {
+    expect(await clipTiming(input({ kinds: [] }))).toBeUndefined();
+    expect(await clipTiming(input({ kinds: ["bars", "words"] }))).toBeUndefined();
+  });
+
+  it("lists the beats inside the clip in composition seconds, numbered as beat:N and bar:N name them", async () => {
+    // The clip shows timeline 4..6 s as composition 1..3 s; the music starts at 0, so beats 4.0, 4.5, 5.0, 5.5 s.
+    expect(await clipTiming(input())).toEqual({
+      beats: [
+        { at: 1, beat: 8 },
+        { at: 1.5, beat: 9, bar: 3 },
+        { at: 2, beat: 10 },
+        { at: 2.5, beat: 11 },
+      ],
+      tempo: { bpm: 120, meter: 4 },
+    });
+  });
+
+  it("follows the music: moving it moves the beats, and a head trim keeps their numbers", async () => {
+    const moved = await clipTiming(input({ timeline: timeline({ start: 0.2 }) }));
+    expect(moved?.beats?.map((beat) => beat.at)).toEqual([1.2, 1.7, 2.2, 2.7]);
+    // The music clip starts 2 s into the song at timeline 0: the clip now hears the song's 6..8 s.
+    const trimmed = await clipTiming(input({ timeline: timeline({ start: 0, in: 2 }) }));
+    expect(trimmed?.beats?.[0]).toEqual({ at: 1, beat: 12 });
+  });
+
+  it("lists the markers inside the clip, sorted, with their colours", async () => {
+    const markers = [
+      { id: "m_c", at: 5.5, label: "drop", color: "red" as const },
+      { id: "m_a", at: 3.9, label: "before" },
+      { id: "m_b", at: 4, label: "hook" },
+      { id: "m_d", at: 6, label: "after" },
+    ];
+    expect(await clipTiming(input({ kinds: ["markers"], timeline: timeline(null, { markers }) }))).toEqual({
+      markers: [
+        { at: 1, id: "m_b", label: "hook" },
+        { at: 2.5, id: "m_c", label: "drop", color: "red" },
+      ],
+    });
+  });
+
+  it("gives no beats, saying why, when the grid is missing, broken or LOW confidence", async () => {
+    expect(await clipTiming(input({ timeline: timeline(null) }))).toEqual({ beats: [], beatsProblem: "the timeline has no tempo." });
+    expect((await clipTiming(input({ beatsOf: async () => null })))?.beatsProblem).toContain("has no beat grid yet");
+    const broken = await clipTiming(
+      input({
+        beatsOf: async () => {
+          throw new Error("beats/music.beats.json is not valid");
+        },
+      }),
+    );
+    expect(broken).toEqual({ beats: [], beatsProblem: "beats/music.beats.json is not valid" });
+    const low = await clipTiming(input({ beatsOf: async () => beatsFile({ detector: "onset-flux@1", confidence: 0.3 }) }));
+    expect(low?.beats).toEqual([]);
+    expect(low?.beatsProblem).toContain("LOW confidence");
+  });
+
+  it("reads a nominal grid on the timeline clock too", async () => {
+    const nominal = await clipTiming(input({ timeline: timeline(null, { tempo: { bpm: 60, offset: 0.5 } }) }));
+    expect(nominal?.beats).toEqual([
+      { at: 1.5, beat: 5, bar: 2 },
+      { at: 2.5, beat: 6 },
+    ]);
+  });
+});
+
+describe("render keys with timing", () => {
+  const base: ClipKeyInput = {
+    plugin: { name: "@frameshell/hyperframes", version: "0.1.0" },
+    clip: card,
+    inputs: [{ path: card.source!, hash: "sha256:aaa" }],
+    format: { fps: FPS, width: 1920, height: 1080 },
+  };
+  const keyFor = async (over: Partial<ClipTimingInput>) => {
+    const timing = await clipTiming(input(over));
+    return clipCacheKey({ ...base, ...(timing ? { timing } : {}) });
+  };
+
+  it("stays the same for a clip that does not ask, wherever the music and the markers go", async () => {
+    const plain = clipCacheKey(base);
+    expect(await keyFor({ kinds: [] })).toBe(plain);
+    expect(await keyFor({ kinds: [], timeline: timeline({ start: 0.25 }, { markers: [{ id: "m_a", at: 5, label: "hook" }] }) })).toBe(plain);
+  });
+
+  it("changes for a clip that asks when the beats move, and only then", async () => {
+    const asked = await keyFor({});
+    expect(asked).not.toBe(clipCacheKey(base));
+    expect(await keyFor({})).toBe(asked);
+    expect(await keyFor({ timeline: timeline({ start: 0.25 }) })).not.toBe(asked);
+    // A marker the clip did not ask for leaves its key alone.
+    expect(await keyFor({ timeline: timeline({ start: 0 }, { markers: [{ id: "m_a", at: 5, label: "hook" }] }) })).toBe(asked);
+    expect(await keyFor({ kinds: ["beats", "markers"], timeline: timeline({ start: 0 }, { markers: [{ id: "m_a", at: 5, label: "hook" }] }) })).not.toBe(asked);
+  });
+});

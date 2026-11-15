@@ -27,26 +27,34 @@ const SlotNameSchema = z
 /** What a slot points at, as {@link parseSlotTarget} splits it. */
 export type SlotTarget = { clip: string; kind: "asset" } | { clip: string; kind: "props"; path: string[] };
 
-const SLOT_PATTERN = /^([^.\s]+)\.(?:(asset)|props\.([^.\s]+(?:\.[^.\s]+)*))$/;
+const SLOT_PATTERN = /^([^.\s]+)\.(?:(asset)|props(?:\.([^.\s]+(?:\.[^.\s]+)*))?)$/;
 
-/** `<clipId>.asset` or `<clipId>.props.<dot.path>` split into its parts; null when it is neither. */
-export function parseSlotTarget(slot: string): SlotTarget | null {
+/**
+ * `<clipId>.asset`, `<clipId>.props.<dot.path>` or `<clipId>.props` split into its parts; null when it is none of them.
+ * The last form names no path: the prop is the slot's own name, so `name` (the slot's) becomes the path.
+ */
+export function parseSlotTarget(slot: string, name: string): SlotTarget | null {
   const match = SLOT_PATTERN.exec(slot);
   if (!match) return null;
-  return match[2] ? { clip: match[1]!, kind: "asset" } : { clip: match[1]!, kind: "props", path: match[3]!.split(".") };
+  if (match[2]) return { clip: match[1]!, kind: "asset" };
+  return { clip: match[1]!, kind: "props", path: match[3] === undefined ? [name] : match[3].split(".") };
 }
 
 const SlotSchema = z
   .string()
-  .regex(SLOT_PATTERN, "must be `<clipId>.asset` or `<clipId>.props.<path>`, e.g. `c_8f2a1b.props.title`")
+  .regex(SLOT_PATTERN, "must be `<clipId>.asset`, `<clipId>.props.<path>` or `<clipId>.props`, e.g. `c_8f2a1b.props.title`")
   .refine(
     (slot) => {
-      const target = parseSlotTarget(slot);
+      // The slot's name is the path of the bare `<clipId>.props` form, and slot names are checked on their own.
+      const target = parseSlotTarget(slot, "name");
       return target?.kind !== "props" || !target.path.some((key) => PROTOTYPE_KEYS.has(key));
     },
     { message: "a props path may not use `__proto__`, `prototype` or `constructor`" },
   )
-  .describe("`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props) or `<clipId>.asset` (a media clip's asset).");
+  .describe(
+    "`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props), `<clipId>.props` (the prop named like the slot: " +
+      "`\"title\": \"c_8f2a1b.props\"` is `c_8f2a1b.props.title`) or `<clipId>.asset` (a media clip's asset).",
+  );
 
 /** One row: its `id` and a value per slot it sets; a slot it leaves out keeps the template's value. */
 export const BatchRowSchema = z
@@ -70,7 +78,7 @@ export const BatchFileSchema = z
     slots: z
       .record(SlotNameSchema, SlotSchema)
       .refine((slots) => Object.keys(slots).length > 0, { message: "must name at least one slot" })
-      .describe("Slot name → what it sets: `<clipId>.props.<dot.path>` or `<clipId>.asset`."),
+      .describe("Slot name → what it sets: `<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot) or `<clipId>.asset`."),
     rows: z.array(BatchRowSchema).min(1).describe("One render per row (times each format), in order."),
     formats: z.array(FormatIdSchema).min(1).optional().describe("Formats of the project each row renders in (`format.list`); default the primary only."),
     preset: z.string().min(1).optional().describe("Export preset id; default the project's `export.defaultPreset`, else the built-in default."),
@@ -86,7 +94,7 @@ export const BatchFileSchema = z
         const slot = file.slots[key];
         if (slot === undefined) {
           ctx.addIssue({ code: "custom", message: `unknown slot ${key}; slots: ${Object.keys(file.slots).join(", ")}`, path: ["rows", index, key] });
-        } else if (parseSlotTarget(slot)?.kind === "asset" && (typeof value !== "string" || value.trim() === "")) {
+        } else if (parseSlotTarget(slot, key)?.kind === "asset" && (typeof value !== "string" || value.trim() === "")) {
           ctx.addIssue({ code: "custom", message: "an asset slot takes a project-relative path, e.g. `assets/vo-es.wav`", path: ["rows", index, key] });
         }
       }

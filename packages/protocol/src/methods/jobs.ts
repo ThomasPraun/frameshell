@@ -1,5 +1,15 @@
 import { z } from "zod";
-import { GRADE_ANALYZE_DEFAULT_SAMPLES, GRADE_ANALYZE_MAX_SAMPLES, GradeAnalyzeResultSchema } from "../grade.js";
+import {
+  GRADE_ANALYZE_DEFAULT_SAMPLES,
+  GRADE_ANALYZE_MAX_SAMPLES,
+  GRADE_COMPARE_DEFAULT_TILE_WIDTH,
+  GRADE_COMPARE_MAX_LOOKS,
+  GRADE_COMPARE_MAX_TILE_WIDTH,
+  GRADE_COMPARE_MIN_TILE_WIDTH,
+  GradeAnalyzeResultSchema,
+  GradeCompareResultSchema,
+  GradeLookSchema,
+} from "../grade.js";
 import {
   ClipVerifyResultSchema,
   VERIFY_DEFAULT_PROBES,
@@ -172,6 +182,48 @@ export const jobMethods = {
       view: ViewParam,
     }),
     result: z.object({ ...ViewedShape, ...GradeAnalyzeResultSchema.shape }),
+  },
+  "grade.compare": {
+    description:
+      "Pick a colour look by eye (ADR 0031): render one frame of a media clip under up to " +
+      `${GRADE_COMPARE_MAX_LOOKS} candidate \`looks\` next to a neutral baseline and write them as one labelled PNG contact image. ` +
+      "Each look is a whole grade in the fields of `clip.set` `grade` (`exposure`, `temperature`, `tint`, `contrast`, `saturation`, `lut`, `lutMix`) plus an optional `name`, " +
+      "drawn in place of the clip's own grade (fields left out are neutral, not the clip's). Tile 1 is the clip with no grade (`neutral`); tile 2 its " +
+      "stored grade (`current`) when it has one; then the looks in order. Every tile is the whole composed frame as `frame` renders it " +
+      "(export compiler, layers above, captions), so what you pick is what exports. Never changes the timeline: keep a look with `clip.set` `grade` " +
+      "(each tile's `flags` are the `clip set` flags). Correct first (`grade.analyze` suggests a correction: compare it as a look), then style with LUTs. " +
+      "`at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
+      "`.frameshell/grade/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. Takes about a second per tile. " +
+      'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "warm", temperature: 0.25, saturation: 1.1 }, { name: "teal", lut: "luts/teal.cube", lutMix: 0.6 }] }`. ' +
+      "Fails with ClipNotFound (no such clip on a video track), InvalidOperation (not a media clip, `at` outside the clip), InvalidParams (a look's LUT " +
+      "outside the project, missing or not a 3D `.cube`), FormatNotFound, TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Media clip id on a video track, as `timeline.show` reports it."),
+      looks: z
+        .array(GradeLookSchema)
+        .min(1)
+        .max(GRADE_COMPARE_MAX_LOOKS)
+        .describe(`Candidate grades, 1 to ${GRADE_COMPARE_MAX_LOOKS}, drawn in this order after the baseline.`),
+      at: z.number().nonnegative().optional().describe("Timeline seconds of the frame, inside the clip. Default: the clip's middle frame."),
+      out: z
+        .string()
+        .regex(/\.png$/i, { message: "must be a `.png` file" })
+        .optional()
+        .describe("PNG to write, absolute or relative to `cwd`; its folder is created. Default `.frameshell/grade/compare-<clip>-<frame>.png` in the project."),
+      tileWidth: z
+        .int()
+        .min(GRADE_COMPARE_MIN_TILE_WIDTH)
+        .max(GRADE_COMPARE_MAX_TILE_WIDTH)
+        .default(GRADE_COMPARE_DEFAULT_TILE_WIDTH)
+        .describe(
+          `Width of one tile, px, ${GRADE_COMPARE_MIN_TILE_WIDTH} to ${GRADE_COMPARE_MAX_TILE_WIDTH}; its height follows the frame. Default ${GRADE_COMPARE_DEFAULT_TILE_WIDTH}.`,
+        ),
+      projectFormat: FormatIdSchema.optional().describe("Format of the project to lay the frame out in (`format.list`), e.g. `9x16`. Default: the primary format."),
+      view: ViewParam,
+    }),
+    result: z.object({ ...ViewedShape, ...GradeCompareResultSchema.shape }),
   },
   "audio.bakes": {
     // The app's preview only: export bakes what it needs itself, so an agent never has to wait on this.
