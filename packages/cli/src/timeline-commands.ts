@@ -321,13 +321,14 @@ mutations print the new revision):
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
                                Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
                                gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
-  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
+  music shape <clip> [--drop <time>]… [--ending <time> [--end-on-bar]] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
                      [--build s [--build-from Hz] [--build-to Hz]] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
                                (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,
                                complete --lead s (0.4) before it, held --hold s (0.3) after, back over --release s (0.6);
-                               from --ending it fades out over --fade s (2.5; a short one with --ending bar:N stops on a
-                               bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
+                               from --ending it fades out over --fade s (2.5; --end-on-bar stretches or shrinks it so it
+                               ends on the bar start of the grid nearest to --ending + --fade, which stops the music on
+                               a bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
                                keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
                                fit re-runs it when it moves the clip. --build s (e.g. 2) adds a rising high-pass before
                                each --drop: a highpassSweep audio effect (marked auto "music") whose cutoff climbs from
@@ -335,16 +336,21 @@ mutations print the new revision):
                                of the signal again at it, so the low end returns with the hit; it sits on the file's own
                                clock, is baked like any audio effect, and a rerun replaces it. --dry-run prints the dip
                                curve. One transaction
-  music grid [--to beat|bar] [--max-shift s] [--skip g1,…] [--dry-run]
+  music grid [--to beat|bar] [--max-shift s] [--trim tail|head] [--tracks all|video] [--skip g1,…] [--dry-run]
                                Move picture cuts (two clips of a video track that meet) onto the timeline's beat grid
                                (tempo set; a LOW grid is refused): each cut off its nearest beat (--to bar: bar start) by
                                at most --max-shift s (0.25) gets an id g1, g2… and lands exactly on it. A move trims the
                                tail of the clip before the cut with ripple: later clips move on every track with no clip
                                across a cut (the music, a voice line, a background keep their timing); the next cut that
-                               does not move is put back, so only the shots between change length. Blocked: no more of
-                               the file, a clip would be empty or overlap, or a transcribed word would be cut or added.
-                               --dry-run lists every cut; --skip leaves moves (and duck) out. Duck keys on the music are
-                               written again. One transaction (revert it)
+                               does not move is put back, so only the shots between change length. --trim head makes
+                               it a roll edit instead (tail before the cut and head after it trimmed to the beat,
+                               nothing ripples). --tracks all (default) also reads the shot changes of program tracks
+                               (always a roll edit) and the entries of clips alone on upper video tracks (a title
+                               appearing: the clip moves whole); --tracks video reads video cuts only. Blocked: no more
+                               of the file, a clip would be empty or overlap, or a transcribed word would be cut or
+                               added. Stored music shape hits follow the shots that moved (music shape runs again).
+                               --dry-run lists every cut; --skip leaves moves, duck and shape out. Duck keys on the
+                               music are written again. One transaction (revert it)
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -538,6 +544,7 @@ export const TIMELINE_OPTIONS = {
   hit: { type: "string" },
   drop: { type: "string", multiple: true },
   ending: { type: "string" },
+  "end-on-bar": { type: "boolean" },
   lead: { type: "string" },
   hold: { type: "string" },
   fade: { type: "string" },
@@ -550,6 +557,8 @@ export const TIMELINE_OPTIONS = {
   probes: { type: "string" },
   tolerance: { type: "string" },
   "max-shift": { type: "string" },
+  trim: { type: "string" },
+  tracks: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -668,8 +677,8 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
-  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
-  "music grid": ["to", "max-shift", "skip", "dry-run"],
+  "music shape": ["drop", "ending", "end-on-bar", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
+  "music grid": ["to", "max-shift", "trim", "tracks", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -1422,6 +1431,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         clip: args[0],
         drop: list("drop")?.map((raw) => whenOf(raw, "drop")),
         ending: when("ending"),
+        endOnBar: values["end-on-bar"] === true ? true : undefined,
         lead: num("lead"),
         depth: num("depth"),
         hold: num("hold"),
@@ -1438,9 +1448,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = "music.grid";
       const to = str("to");
       if (to !== undefined && to !== "beat" && to !== "bar") throw new UsageError(`--to: expected beat or bar, got "${to}".`);
+      const trim = str("trim");
+      if (trim !== undefined && trim !== "tail" && trim !== "head") throw new UsageError(`--trim: expected tail or head, got "${trim}".`);
+      const tracks = str("tracks");
+      if (tracks !== undefined && tracks !== "all" && tracks !== "video") throw new UsageError(`--tracks: expected all or video, got "${tracks}".`);
       Object.assign(params, {
         to,
         maxShift: num("max-shift"),
+        trim,
+        tracks,
         skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
         dryRun: values["dry-run"] === true ? true : undefined,
       });
@@ -1648,10 +1664,16 @@ function formatMusicGrid(result: MusicGridResult): string {
   ];
   for (const cut of result.cuts) {
     const off = cut.shiftMs === null ? "" : ` ${cut.shiftMs >= 0 ? "+" : ""}${cut.shiftMs} ms to ${cut.ref} (${cut.beat} s)`;
-    lines.push(`  ${(cut.id ?? "").padEnd(4)}${cut.at.toFixed(3).padStart(9)} s  ${cut.out} | ${cut.in}  ${cut.status}${off}${cut.reason ? `: ${cut.reason}` : ""}`);
+    const clips = cut.out === null ? `${cut.in} (entry)` : `${cut.out} | ${cut.in}${cut.kind === "program" ? " (shots)" : ""}`;
+    lines.push(`  ${(cut.id ?? "").padEnd(4)}${cut.at.toFixed(3).padStart(9)} s  ${clips}  ${cut.status}${off}${cut.reason ? `: ${cut.reason}` : ""}`);
     for (const warning of cut.warnings) lines.push(`        warning: ${warning}`);
   }
-  if (result.moved > 0) lines.push(`Ripple on ${result.ripple.join(", ") || "the cut's own track"}; the picture gets ${result.durationChange >= 0 ? "+" : ""}${result.durationChange} s`);
+  if (result.shape) {
+    const list = result.shape.drops.map((drop) => `${drop.from} to ${drop.to} s`).join(", ");
+    lines.push(`Music shape hits of ${result.shape.clip} follow their shots: ${list}${result.shape.rerun ? "" : " (not run again: see the warnings)"}`);
+  }
+  if (result.moved > 0 && result.trim === "head") lines.push(`Roll edits: nothing ripples; the picture keeps its length`);
+  else if (result.moved > 0) lines.push(`Ripple on ${result.ripple.join(", ") || "the cut's own track"}; the picture gets ${result.durationChange >= 0 ? "+" : ""}${result.durationChange} s`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;

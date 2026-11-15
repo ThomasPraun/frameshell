@@ -150,6 +150,7 @@ describe("frameshell music shape", () => {
     });
     expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["slam"], build: "long" })).toThrow(/expected a number/);
     expect(() => parseTimelineCommand(["music", "fit", "c_m"], { end: "5", build: "2" })).toThrow(/does not take --build/);
+    expect(parseTimelineCommand(["music", "shape", "c_m"], { ending: "bar:17", "end-on-bar": true })!.params).toMatchObject({ ending: "bar:17", endOnBar: true });
     expect(parseTimelineCommand(["music", "shape", "c_m"], { clear: true })!.params).toEqual({ clip: "c_m", clear: true });
     expect(() => parseTimelineCommand(["music", "shape"], { drop: ["3"] })).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["3"], exact: true })).toThrow(/does not take --exact/);
@@ -192,6 +193,9 @@ describe("frameshell music grid", () => {
       params: { to: "bar", maxShift: 0.4, skip: ["g1", "g3", "duck"], dryRun: true },
     });
     expect(parseTimelineCommand(["music", "grid"], {})!.params).toEqual({});
+    expect(parseTimelineCommand(["music", "grid"], { trim: "head", tracks: "video" })!.params).toEqual({ trim: "head", tracks: "video" });
+    expect(() => parseTimelineCommand(["music", "grid"], { trim: "middle" })).toThrow(/--trim: expected tail or head/);
+    expect(() => parseTimelineCommand(["music", "grid"], { tracks: "audio" })).toThrow(/--tracks: expected all or video/);
     expect(() => parseTimelineCommand(["music", "grid"], { to: "half" })).toThrow(/expected beat or bar/);
     expect(() => parseTimelineCommand(["music", "grid", "c_m"], {})).toThrow(/argument/);
     expect(() => parseTimelineCommand(["music", "grid"], { end: "3" })).toThrow(/does not take --end/);
