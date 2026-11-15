@@ -10,7 +10,7 @@ One finished edit, many files: the same video in other languages, for other prod
 
 ## The batch file
 
-`launch.batch.json` (JSON Schema `batch.json`; JSON only, no CSV):
+`launch.batch.json` (JSON Schema `batch.json`):
 
 ```json
 {
@@ -27,7 +27,8 @@ One finished edit, many files: the same video in other languages, for other prod
 
 - `template` is a timeline of the project (default `main`); a single generated clip is a timeline holding that one clip.
 - A slot is `<clipId>.props.<dot.path>` (written over an adapter clip's props, checked by its props schema like `clip set`), `<clipId>.props` (the prop named like the slot: `"title": "c_8f2a1b.props"` is `c_8f2a1b.props.title`, so a template's declared props become slot names without repeating them) or `<clipId>.asset` (a media clip's file swapped). Read the ids with `frameshell timeline show`. Slots reach top-level clips only, not `elements`, nested timelines or per-format props.
-- A row is its `id` (lowercase letters, digits and `-`, unique: it names the file) plus one value per slot. A slot a row leaves out keeps the template's value.
+- A third slot kind, `voiceover`, places a script's takes per row (see Per-language rows below). A file has at most one.
+- A row is its `id` (lowercase letters, digits and `-`, unique: it names the file) plus one value per slot. A slot a row leaves out keeps the template's value. Rows are written in the file (`rows`) or read from a CSV file next to it (`"csv": "launch.csv"`, relative to the batch file; give one, not both).
 - Every row x format is checked before anything renders; a bad row fails the call naming its `row` and `slot`. Check with `--dry-run`.
 
 ```sh
@@ -36,6 +37,25 @@ frameshell batch launch.batch.json
 ```
 
 Rows render one at a time into `exports/launch/<row>.mp4` (`<row>-<format>.mp4` with formats), and `exports/launch/manifest.json` keeps each row x format's `status`, `output`, `error` and timings. Nothing is written to `timelines/`, so no history entry and no review proposal for a batch.
+
+## Rows from a CSV file
+
+For many rows or rows from a spreadsheet, write them as CSV and name the file in the batch file instead of `rows`:
+
+```
+id,title,price:number,voiceover
+en,Launch day,9.5,scripts/launch-en.md
+es,Día de lanzamiento,9.5,scripts/launch-es.md
+```
+
+```json
+{ "schemaVersion": 1, "slots": { "title": "c_8f2a1b.props.title", "price": "c_8f2a1b.props.price", "voiceover": "voiceover" }, "csv": "launch.csv" }
+```
+
+- The header is `id` and slot names, in any order; a slot with no column keeps the template's value for every row, and an empty cell leaves that slot to the template for that row (so a text prop cannot be set to an empty string). The delimiter is the comma, `;` or tab the header uses (Spanish spreadsheets export `;`); quoted cells may hold the delimiter, quotes doubled and line breaks.
+- A cell is read by the slot's type: a props slot takes the type of the value the template clip already has at that path (a number stays a number, `true`/`false`/`yes`/`no`/`1`/`0` for a boolean, a list or object as JSON); asset and voiceover cells are paths. A prop the template does not have is text unless the header says `price:number`, `:boolean`, `:json` or `:text`, which also overrides the template.
+- Every wrong cell is reported at once with its line and column (`line 4, column price: expected a number, got "x"`), the first 20 and a count of the rest; fix them and run `--dry-run` again.
+- Edit the CSV, then re-run with `--force` (or `--rows <id> --force`): the manifest does not know the data changed.
 
 ## Re-run a row
 
@@ -71,7 +91,10 @@ Each rendered file is reviewed as `frameshell review --file` does (metrics only,
 
 One row per language, swapping the voiceover file and setting the texts:
 
-- The voice slot is the `asset` of the voiceover clip; the new file must be at least as long as the clip's out and have an audio stream. Make the takes first with [voiceover.md](voiceover.md) (one take or mix per language under `assets/voiceover/`); batch **never calls `voiceover.generate`**, so it never spends money. Missing takes are made and confirmed with the person before the batch.
-- When a subtitle track follows the voiceover's track, each language's file needs its transcript first (`frameshell transcribe <asset>`); the row fails naming the file without one. A longer take in another language does not stretch the video: tell the person which rows are too long and shorten the text or the template first.
+- **One take or mix per language:** the voice slot is the `asset` of the voiceover clip; the new file must be at least as long as the clip's out and have an audio stream.
+- **A script per language (phrase clips):** a `voiceover` slot (`"voiceover": "voiceover"`) takes the script of the row, `"scripts/launch-es.md"`, or `{ "script": "scripts/launch-es.md", "lines": ["hook-1"], "at": { "hook-2": "hook" }, "tempo": { "hook-1.2": 1.1 }, "start": 0.5, "gap": 0.4, "track": "t_a", "replace": true }` with the arguments of `voiceover place` (see [voiceover.md](voiceover.md)). Each row gets the phrase clips `voiceover place` would put on the template, in memory, with its planner and rules: phrases at the spacing of the take, anchors in script order, no overlap, the 12 ms fades, tempo. The voice goes on the template's audio track named `Voiceover` (or `track`), made when absent, and starts after what is already there (or at `start`/`at`, and then must not overlap it): leave the template without a voiceover of its own, or pass `replace` to swap the clips that play the same takes.
+- Make the takes first with [voiceover.md](voiceover.md) (`voiceover generate` per script, under `assets/voiceover/<script>/`); batch **never calls `voiceover.generate`**, so it never spends money, and a line with no take fails the row naming it. Missing takes are made and confirmed with the person before the batch.
+- When a subtitle track follows the voiceover's track, each language's file (or each take) needs its transcript first (`frameshell transcribe <asset>`); the row fails naming the file without one.
+- A longer take in another language does not stretch the picture, but placed phrases do lengthen the video when the voice runs past the template: the row's warnings say so (`The voiceover makes the video 14.2 s long, 2.2 s longer than the template's 12 s`). Tell the person which rows are longer, and shorten the text or lengthen the template first.
 - On-screen text is an adapter clip's prop: a text slot per language. Render one row first (`--rows es`) and look at it with `frameshell review --file exports/<batch>/es.mp4` before the rest.
 - Every file a row swaps in goes through the credits check like any placed asset: the manifest entry carries the warnings, and `frameshell credits` lists what lacks a source.

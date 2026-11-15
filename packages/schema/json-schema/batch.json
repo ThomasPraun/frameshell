@@ -23,12 +23,12 @@
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "^([^.\\s]+)\\.(?:(asset)|props(?:\\.([^.\\s]+(?:\\.[^.\\s]+)*))?)$",
-        "description": "`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props), `<clipId>.props` (the prop named like the slot: `\"title\": \"c_8f2a1b.props\"` is `c_8f2a1b.props.title`) or `<clipId>.asset` (a media clip's asset)."
+        "description": "`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props), `<clipId>.props` (the prop named like the slot: `\"title\": \"c_8f2a1b.props\"` is `c_8f2a1b.props.title`), `<clipId>.asset` (a media clip's asset) or `voiceover` (the row's value is a voiceover script whose takes are placed as phrase clips, or `{ script, lines, at, tempo, start, gap, track, replace }`)."
       },
-      "description": "Slot name → what it sets: `<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot) or `<clipId>.asset`."
+      "description": "Slot name → what it sets: `<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot), `<clipId>.asset` or `voiceover`."
     },
     "rows": {
+      "description": "One render per row (times each format), in order. Give `rows` or `csv`, not both.",
       "minItems": 1,
       "type": "array",
       "items": {
@@ -45,8 +45,12 @@
         ],
         "additionalProperties": {},
         "description": "`id` plus one value per slot it sets, e.g. `{ \"id\": \"es\", \"title\": \"Hola\", \"voice\": \"assets/vo-es.wav\" }`."
-      },
-      "description": "One render per row (times each format), in order."
+      }
+    },
+    "csv": {
+      "description": "CSV file with the rows instead of `rows`, relative to this file's folder: a header of `id` and slot names (`price:number` types a column: `text`, `number`, `boolean`, `json`; otherwise the type of the template's value), one row per line, an empty cell leaves the slot to the template.",
+      "type": "string",
+      "minLength": 1
     },
     "formats": {
       "description": "Formats of the project each row renders in (`format.list`); default the primary only.",
@@ -74,8 +78,7 @@
   },
   "required": [
     "schemaVersion",
-    "slots",
-    "rows"
+    "slots"
   ],
   "additionalProperties": false,
   "$id": "https://frameshell.dev/schema/v1/batch.json"

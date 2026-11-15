@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-row voiceover and CSV rows for batch, a slice of #477 (ADR 0040 and 0034 slice 4, epic #451; protocol 152): a batch
+  slot written `voiceover` takes a voiceover script path per row (or `{ script, lines, at, tempo, start, gap, track,
+  replace }`) and places the script's existing takes as phrase clips on the row's variant, in memory, with the planner
+  and writer of `voiceover.place` (same spacing, anchors, tempo, fades, overlap rules), so a row per language gets its
+  own voice without a second placement path. Batch still never generates: a line with no take fails the row naming it.
+  A subtitle track that follows the voice track needs every take transcribed, and a voice that runs past the template
+  adds a warning with the new length to the entry. The rows may be a CSV file next to the batch file (`"csv":
+  "launch.csv"` instead of `rows`): header `id` and slot names (`price:number` types a column; otherwise the type of the
+  template's value), comma, `;` or tab, quoted cells, an empty cell leaves the slot to the template, and every wrong cell
+  is reported with its line and column. Tests: `batch-csv`, `batch-plan`, and a daemon test with the stand-in voice
+  that places, renders and refuses rows. Skill `batch.md`, `docs/mcp.md` and `batch.json` updated.
 - Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 151): `voiceover place
   --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
   times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499
