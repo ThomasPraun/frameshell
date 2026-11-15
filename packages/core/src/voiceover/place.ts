@@ -3,7 +3,7 @@
 // there is something to write. Times come from the shared TimeRef resolver (`deps.resolve`); nothing here parses a ref.
 import { join } from "node:path";
 import { ErrorCode, RpcError, type ValidatedParams, type VoiceoverPlaceResult } from "@frameshell/protocol";
-import { type Timeline, type Track, clipLength, shootSlug } from "@frameshell/schema";
+import { type Timeline, type Track, VOICEOVER_TEMPO_RANGE, clipLength, shootSlug } from "@frameshell/schema";
 import type { StepResult } from "../sound/place.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { TimeRefError } from "../timeline/time-ref.js";
@@ -47,6 +47,10 @@ export interface PlannedClip {
   out: number;
   start: number;
   end: number;
+  /** Clip `speed`: the phrase's tempo, 1 = as spoken. */
+  speed: number;
+  /** Seconds the clip lasts on the timeline, `(out - in) / speed` to the millisecond. */
+  duration: number;
   anchor: Anchor;
   scriptRef: string;
 }
@@ -80,10 +84,18 @@ async function resolveAt(deps: PlaceDeps, loaded: LoadedTimeline, ref: number | 
   }
 }
 
-/** `at` keys as `line id` → phrase number (from 1) → time reference. A key is a line id or `<line id>.<phrase>`. */
-function anchorsOf(at: NonNullable<VoiceoverPlaceParams["at"]>, lines: readonly { id: string }[], phraseCounts: ReadonlyMap<string, number>): Map<string, Map<number, number | string>> {
-  const found = new Map<string, Map<number, number | string>>();
-  for (const [key, ref] of Object.entries(at)) {
+/**
+ * The values of a per-phrase argument (`at`, `tempo`) as `line id` → phrase number (from 1) → value. A key is a line id
+ * (the same as its phrase 1) or `<line id>.<phrase>`.
+ */
+function phraseKeys<T>(
+  argument: "at" | "tempo",
+  given: Record<string, T>,
+  lines: readonly { id: string }[],
+  phraseCounts: ReadonlyMap<string, number>,
+): Map<string, Map<number, T>> {
+  const found = new Map<string, Map<number, T>>();
+  for (const [key, ref] of Object.entries(given)) {
     const dot = key.lastIndexOf(".");
     const tail = dot < 0 ? null : key.slice(dot + 1);
     const phrased = tail !== null && /^[1-9]\d*$/.test(tail);
@@ -91,13 +103,13 @@ function anchorsOf(at: NonNullable<VoiceoverPlaceParams["at"]>, lines: readonly 
     const phrase = phrased ? Number(tail) : 1;
     const count = phraseCounts.get(id);
     if (count === undefined) {
-      throw invalidParam("at", `\`at\` names ${key}, which is not a line of this call (lines: ${lines.map((line) => line.id).join(", ")}).`);
+      throw invalidParam(argument, `\`${argument}\` names ${key}, which is not a line of this call (lines: ${lines.map((line) => line.id).join(", ")}).`);
     }
     if (phrase > count) {
-      throw invalidParam("at", `\`at\` names phrase ${phrase} of ${id}, which has ${count} phrase${count === 1 ? "" : "s"}.`);
+      throw invalidParam(argument, `\`${argument}\` names phrase ${phrase} of ${id}, which has ${count} phrase${count === 1 ? "" : "s"}.`);
     }
-    const own = found.get(id) ?? new Map<number, number | string>();
-    if (own.has(phrase)) throw invalidParam("at", `\`at\` gives ${id} phrase ${phrase} twice (\`${id}\` is the same as \`${id}.1\`).`);
+    const own = found.get(id) ?? new Map<number, T>();
+    if (own.has(phrase)) throw invalidParam(argument, `\`${argument}\` gives ${id} phrase ${phrase} twice (\`${id}\` is the same as \`${id}.1\`).`);
     own.set(phrase, ref);
     found.set(id, own);
   }
@@ -143,7 +155,15 @@ export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps:
     }
     return { line, file: `${dir}/${take.name}`, duration: pcm.samples.length / pcm.sampleRate, phrases: splitPhrases(pcm) };
   });
-  const anchors = params.at ? anchorsOf(params.at, lines, new Map(spoken.map((entry) => [entry.line.id, entry.phrases.length]))) : new Map<string, Map<number, number | string>>();
+  const phraseCounts = new Map(spoken.map((entry) => [entry.line.id, entry.phrases.length] as const));
+  const anchors = params.at ? phraseKeys("at", params.at, lines, phraseCounts) : new Map<string, Map<number, number | string>>();
+  for (const [key, value] of Object.entries(params.tempo ?? {})) {
+    // The schema bounds it; the check keeps a direct caller of the planner (tests, other code) to the same range.
+    if (!(value >= VOICEOVER_TEMPO_RANGE.min && value <= VOICEOVER_TEMPO_RANGE.max)) {
+      throw invalidParam("tempo", `\`tempo\` gives ${key} ${value}; a phrase's tempo is ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max} (1 = as spoken).`);
+    }
+  }
+  const tempos = params.tempo ? phraseKeys("tempo", params.tempo, lines, phraseCounts) : new Map<string, Map<number, number>>();
 
   const loaded = await deps.load();
   const { timeline, fps } = loaded;
@@ -183,8 +203,8 @@ export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps:
 
   const clips: PlannedClip[] = [];
   const placed: VoiceoverPlan["lines"] = [];
-  // Where the last planned phrase starts in the take and on the timeline, and where it ends: the next one follows or must not cross it.
-  let last: { line: string; phrase: number; inFrame: number; start: number; end: number } | null = null;
+  // Where the last planned phrase ends in the take, and where it starts and ends on the timeline: the next one follows or must not cross it.
+  let last: { line: string; phrase: number; outFrame: number; start: number; end: number } | null = null;
 
   for (const { line, file, duration, phrases } of spoken) {
     const own = anchors.get(line.id);
@@ -209,10 +229,13 @@ export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps:
         start = last === null ? startFrame : last.end + gapFrames;
         anchor = last === null ? "start" : "follows";
       } else {
-        start = last!.start + (inFrame - last!.inFrame);
+        // The pause the take has between the two phrases keeps its length, at whatever tempo the phrase before it plays.
+        start = last!.end + (inFrame - last!.outFrame);
         anchor = "spacing";
       }
-      const end = start + (outFrame - inFrame);
+      const speed = tempos.get(line.id)?.get(number) ?? 1;
+      // The clip lasts (out - in) / speed; the engine's overlap check counts it in whole frames, at least one.
+      const end = start + Math.max(1, Math.round((outFrame - inFrame) / speed));
       if (last && start < last.end) {
         throw invalid(
           `at.${number === 1 ? line.id : `${line.id}.${number}`}`,
@@ -228,8 +251,20 @@ export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps:
           { clip: clash.id, hint: "Pass `start` or `at` after it, or another `track`." },
         );
       }
-      clips.push({ line: line.id, phrase: number, file, in: grid.seconds(inFrame), out: grid.seconds(outFrame), start: grid.seconds(start), end: grid.seconds(end), anchor, scriptRef });
-      last = { line: line.id, phrase: number, inFrame, start, end };
+      clips.push({
+        line: line.id,
+        phrase: number,
+        file,
+        in: grid.seconds(inFrame),
+        out: grid.seconds(outFrame),
+        start: grid.seconds(start),
+        end: grid.seconds(end),
+        speed,
+        duration: Math.round(((outFrame - inFrame) / fps / speed) * 1000) / 1000,
+        anchor,
+        scriptRef,
+      });
+      last = { line: line.id, phrase: number, outFrame, start, end };
     }
     if (clips.length === firstOfLine) {
       warnings.push(`Line ${line.id} has no phrase of a frame or more: nothing is placed for it.`);
@@ -263,7 +298,7 @@ export type VoiceoverStep =
   | { op: "track.add"; args: { kind: "audio"; name: string } }
   | {
       op: "clip.add";
-      args: { track: string; type: "media"; asset: string; start: number; in: number; out: number; scriptRef: string; audioFadeInMs: number; audioFadeOutMs: number };
+      args: { track: string; type: "media"; asset: string; start: number; in: number; out: number; speed?: number; scriptRef: string; audioFadeInMs: number; audioFadeOutMs: number };
     };
 
 /** What writing a plan produced: the parts of the result that only a write knows. */
@@ -299,6 +334,7 @@ export async function runVoiceoverPlan(plan: VoiceoverPlan, apply: (step: Voiceo
         start: clip.start,
         in: clip.in,
         out: clip.out,
+        ...(clip.speed !== 1 ? { speed: clip.speed } : {}),
         scriptRef: clip.scriptRef,
         audioFadeInMs: PHRASE_FADE_MS,
         audioFadeOutMs: PHRASE_FADE_MS,

@@ -116,7 +116,17 @@ describe("frameshell voiceover place", () => {
     expect(rows).toContainEqual(expect.stringMatching(/^hook-1 {2}0\.000 to \d+\.\d{3} s {2}start$/));
     expect(rows).toContainEqual(expect.stringMatching(/^why-1 {2}8\.000 to \d+\.\d{3} s {2}at$/));
     expect(rows.at(-1)).toMatch(/^ {2}transaction tx_/);
-  });
+  }, 30_000);
+
+  it("sets the tempo of single phrases and prints their effective length", () => {
+    const dry = frameshell(["voiceover", "place", "scripts/vo.md", "--replace", "--dry-run", "--tempo", "hook-1.2=1.25,why-1=0.8"]);
+    expect(dry.code).toBe(0);
+    expect(dry.stdout).toMatch(/^ {2}hook-1\.2 {2}speed 1\.25: \d+\.\d{3} s on the timeline$/m);
+    expect(dry.stdout).toMatch(/^ {2}why-1\.1 {2}speed 0\.8: \d+\.\d{3} s on the timeline$/m);
+    const json = JSON.parse(frameshell(["voiceover", "place", "scripts/vo.md", "--replace", "--dry-run", "--tempo", "hook-1.2=1.25", "--json"]).stdout) as { placed: { speed: number; duration: number }[] };
+    expect(json.placed.map((clip) => clip.speed)).toContain(1.25);
+    expect(json.placed.every((clip) => clip.duration > 0)).toBe(true);
+  }, 30_000);
 
   it("fails on clips already placed unless --replace, and a beat needs a tempo", () => {
     const again = frameshell(["voiceover", "place", "scripts/vo.md"]);
@@ -127,6 +137,14 @@ describe("frameshell voiceover place", () => {
     expect(beat.code).toBe(1);
     expect(beat.stderr).toContain("the timeline has no tempo");
   });
+
+  it("rejects a malformed --tempo, and --tempo on generate", () => {
+    expect(frameshell(["voiceover", "place", "scripts/vo.md", "--tempo", "hook-1"]).stderr).toContain("--tempo: expected line=speed entries");
+    expect(frameshell(["voiceover", "place", "scripts/vo.md", "--tempo", "hook-1=2"]).stderr).toContain("speed 0.8 to 1.25");
+    expect(frameshell(["voiceover", "place", "scripts/vo.md", "--tempo", "hook-1=fast"]).code).toBe(2);
+    expect(frameshell(["voiceover", "place", "scripts/vo.md", "--tempo", "hook-1=1.1,hook-1=0.9"]).stderr).toContain("--tempo: hook-1 is given twice");
+    expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--tempo", "hook-1=1.1"]).code).toBe(2);
+  }, 30_000);
 
   it("rejects a malformed --at, --gap, or a flag it does not take", () => {
     expect(frameshell(["voiceover", "place", "scripts/vo.md", "--at", "hook-1"]).stderr).toContain("--at: expected line=time entries");

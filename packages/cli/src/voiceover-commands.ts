@@ -1,5 +1,5 @@
 import { type DaemonConnection, type Progress, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult } from "@frameshell/protocol";
-import { VOICEOVER_LINE_GAP_S } from "@frameshell/schema";
+import { VOICEOVER_LINE_GAP_S, VOICEOVER_TEMPO_RANGE } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `voiceover` commands (ADR 0034), in `frameshell --help`. */
@@ -9,22 +9,24 @@ export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [-
                                Reports each take's phrases (split at silences) and, through the project's transcription
                                plugin, the misreads (--no-verify skips that).
                                A paid provider needs --yes after the person confirmed the cost it reports
-  voiceover place <script> [--lines id,id] [--at line=time,line.2=time,…] [--start t] [--gap s] [--track id]
-                           [--replace] [--dry-run] [--timeline id]
+  voiceover place <script> [--lines id,id] [--at line=time,line.2=time,…] [--tempo line.2=1.1,…] [--start t] [--gap s]
+                           [--track id] [--replace] [--dry-run] [--timeline id]
                                Put the takes of a voiceover script on the timeline as phrase clips (one per phrase of each
                                take, cut at its silences) on the audio track Voiceover, in one transaction. Run
                                \`voiceover generate\` first. --at anchors a line (hook-1) or one phrase of it (hook-1.2) at a
                                time: seconds, a marker (hook, hook+0.5) or a beat or bar of the grid (beat:9, bar:3; commas
                                separate the entries, so a label with a comma needs its marker id). A line with no --at follows
                                the one before it by --gap seconds (default ${VOICEOVER_LINE_GAP_S}); the first starts at --start, else after the
-                               track's last clip. Fails when voice would overlap, or when clips already play the takes
+                               track's last clip. --tempo sets the speed of single phrases (line or line.N: ${VOICEOVER_TEMPO_RANGE.min} to
+                               ${VOICEOVER_TEMPO_RANGE.max}, 1 = as spoken, pitch kept): the clip plays at that speed and the effective length is
+                               reported. Fails when voice would overlap, or when clips already play the takes
                                (--replace removes them first: use it after the takes changed)
 `;
 
 /** Flags each `voiceover` command takes besides the global ones. */
 export const VOICEOVER_FLAGS: Record<string, readonly string[]> = {
   "voiceover generate": ["lines", "provider", "voice", "yes", "no-verify"],
-  "voiceover place": ["lines", "at", "start", "gap", "track", "replace", "dry-run", "timeline"],
+  "voiceover place": ["lines", "at", "tempo", "start", "gap", "track", "replace", "dry-run", "timeline"],
 };
 
 /** A parsed `voiceover` command. */
@@ -44,6 +46,7 @@ export type VoiceoverInvocation =
       timeline: string;
       lines?: string[];
       at?: Record<string, number | string>;
+      tempo?: Record<string, number>;
       start?: number | string;
       gap?: number;
       track?: string;
@@ -62,6 +65,7 @@ export function parseVoiceover(
     "no-verify"?: boolean | undefined;
     timeline?: string | undefined;
     at?: string | undefined;
+    tempo?: string | undefined;
     start?: string | undefined;
     gap?: string | string[] | undefined;
     track?: string | string[] | undefined;
@@ -102,6 +106,23 @@ function anchors(raw: string): Record<string, number | string> {
   return found;
 }
 
+/** `hook-1.2=1.1,hook-2=0.9` as `{ "hook-1.2": 1.1, "hook-2": 0.9 }`; which phrases exist is the daemon's to check. */
+function tempos(raw: string): Record<string, number> {
+  const found: Record<string, number> = {};
+  for (const entry of raw.split(",")) {
+    const cut = entry.indexOf("=");
+    const key = cut < 0 ? "" : entry.slice(0, cut).trim();
+    const text = cut < 0 ? "" : entry.slice(cut + 1).trim();
+    const value = SECONDS_TEXT.test(text) ? Number(text) : Number.NaN;
+    if (key === "" || !(value >= VOICEOVER_TEMPO_RANGE.min && value <= VOICEOVER_TEMPO_RANGE.max)) {
+      throw new UsageError(`--tempo: expected line=speed entries separated by commas (hook-1.2=1.1), speed ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max}, got "${entry.trim()}".`);
+    }
+    if (key in found) throw new UsageError(`--tempo: ${key} is given twice.`);
+    found[key] = value;
+  }
+  return found;
+}
+
 function parsePlace(script: string, lines: string[] | undefined, options: Parameters<typeof parseVoiceover>[1]): VoiceoverInvocation {
   const single = (value: string | string[] | undefined, flag: string): string | undefined => {
     if (value === undefined) return undefined;
@@ -121,6 +142,7 @@ function parsePlace(script: string, lines: string[] | undefined, options: Parame
     timeline: options.timeline ?? "main",
     ...(lines ? { lines } : {}),
     ...(options.at !== undefined ? { at: anchors(options.at) } : {}),
+    ...(options.tempo !== undefined ? { tempo: tempos(options.tempo) } : {}),
     ...(start !== undefined ? { start: SECONDS_TEXT.test(start) ? Number(start) : start } : {}),
     ...(gap !== undefined ? { gap } : {}),
     ...(track !== undefined ? { track } : {}),
@@ -149,6 +171,9 @@ export async function executeVoiceover(
 
 function formatPlace(result: VoiceoverPlaceResult): string {
   const lines = result.lines.map((line) => `${line.id}  ${line.start.toFixed(3)} to ${line.end.toFixed(3)} s  ${line.anchor}`);
+  for (const phrase of result.placed.filter((placed) => placed.speed !== 1)) {
+    lines.push(`  ${phrase.line}.${phrase.phrase}  speed ${phrase.speed}: ${phrase.duration.toFixed(3)} s on the timeline`);
+  }
   const phrases = result.placed.length;
   const verb = result.dryRun ? "Would place" : "Placed";
   const made = result.track.created ? (result.dryRun ? ", to be made" : ", new") : "";

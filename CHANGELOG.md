@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 149): `voiceover place
+  --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
+  times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499
+  work, so no second time-stretch path. A phrase lasts `(out - in) / speed`; the pause the take has before the next
+  phrase stays as long as it was, and the next line follows the line's real end. Every placed phrase reports `speed` and
+  its effective `duration` (a dry run shows them first). A key that names no line or phrase, one given twice, or a tempo
+  outside the range fails before anything is written. Tests place phrases of the stand-in voice at 0.8, 1.1 and 1.25 and
+  check the clips, the pauses and the line ends.
+
 - Letterbox per format, slice 4 of #500 (ADR 0043 and ADR 0027 decision 14, epic #451; protocol 148): `letterbox set <aspect>
   --format 9x16` (and `letterbox clear --format`; daemon and MCP `letterbox.set` `format`) gives one format its own black
   bars, stored in the timeline's `formats`; a format without an entry still draws none, and export, `frame` and the

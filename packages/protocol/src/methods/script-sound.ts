@@ -33,6 +33,7 @@ import {
   SoundTierSchema,
   ShootSceneSchema,
   VOICEOVER_LINE_GAP_S,
+  VOICEOVER_TEMPO_RANGE,
   VoiceoverLineSchema,
 } from "@frameshell/schema";
 import { TimeRefParam, TimelineIdSchema } from "../timeline.js";
@@ -301,8 +302,12 @@ export const scriptSoundMethods = {
       "ranges no longer fit it). `dryRun` plans without writing. Every phrase clip gets the 12 ms phrase fade at both ends as sample-accurate " +
       "audio fades (`audio.fadeInMs`/`fadeOutMs`, as `clip.set` `audioFadeInMs`/`audioFadeOutMs` sets them), on top of the 20 ms before and 30 ms after " +
       "its sound each phrase keeps. A take said from older text than the line has now " +
-      "is placed with a warning. Per-phrase tempo is not here (it waits for the preview pitch fix, #499). Fails with ScriptNotFound, " +
-      "InvalidParams (unknown line id, `at` key or phrase number), InvalidOperation (not a voiceover script, a line with no take, an unknown " +
+      "is placed with a warning. `tempo` sets the speed of single phrases (keys as in `at`; " +
+      `${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max}, 1 = as spoken): the phrase clip gets that \`speed\` (pitch kept in preview and export), so it ` +
+      "lasts (out - in) / speed on the timeline; each placed phrase reports its `speed` and effective `duration`, the pause the take has before " +
+      "the next phrase of a line keeps its length, and the line's `end` follows the sped phrases. Tempo is per phrase, never a whole take. " +
+      "Fails with ScriptNotFound, " +
+      "InvalidParams (unknown line id, `at` or `tempo` key or phrase number, a tempo out of range), InvalidOperation (not a voiceover script, a line with no take, an unknown " +
       "marker, a `track` that is not an audio track, overlap, clips already placed) or TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -320,6 +325,12 @@ export const scriptSoundMethods = {
         .record(z.string().min(1), TimeRefParam("Timeline time of the first sound of the line or phrase."))
         .optional()
         .describe("Where lines or phrases go: keys are line ids (`hook-1`, the same as `hook-1.1`) or one phrase (`hook-1.2`); lines and phrases left out follow the one before."),
+      tempo: z
+        .record(z.string().min(1), z.number().min(VOICEOVER_TEMPO_RANGE.min).max(VOICEOVER_TEMPO_RANGE.max))
+        .optional()
+        .describe(
+          `Speed of single phrases, ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max} (1 = as spoken, 1.1 = 10 % faster, pitch kept): keys are line ids (\`hook-1\`, the same as \`hook-1.1\`) or one phrase (\`hook-1.2\`). Phrases left out play at 1.`,
+        ),
       start: TimeRefParam("Timeline time of the first line when it has no `at`. Default: right after the last clip of the voice track, else 0.").optional(),
       gap: z
         .number()
@@ -364,6 +375,8 @@ export const scriptSoundMethods = {
             out: z.number().describe("Source seconds where it ends."),
             start: z.number().describe("Timeline second the clip starts, on the frame grid."),
             end: z.number().describe("Timeline second just after its last frame."),
+            speed: z.number().describe("Tempo of the clip: 1 as spoken (`tempo` of the call, else 1)."),
+            duration: z.number().describe("Effective length in seconds on the timeline, (out - in) / speed, to the millisecond; `end - start` is that rounded to whole frames."),
             anchor: z.enum(["at", "start", "follows", "spacing"]).describe("`spacing`: a later phrase of a line, at the spacing the take has; the others as in `lines`."),
           }),
         )
