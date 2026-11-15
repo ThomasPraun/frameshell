@@ -9,6 +9,7 @@ import {
   type AnalyzeDiffResult,
   type AnalyzeResult,
   type FrameResult,
+  type GradeCompareResult,
   type Progress,
   type ReviewResult,
   RpcError,
@@ -207,6 +208,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     if (tool.name === "frames_strip") return strip(await link.get(), args);
     const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
     if (tool.method === "review" || tool.method === "analyze" || tool.method === "analyze.diff") return withSheets(result as ReviewResult | AnalyzeResult | AnalyzeDiffResult);
+    if (tool.method === "grade.compare") return withGradeSheet(result as GradeCompareResult);
     if (tool.method === "transcribe" || tool.method === "transcribe.speakers") {
       const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
       // Speakers rewrite an existing transcript: its resource changed, the list did not.
@@ -352,6 +354,17 @@ async function withSheets(result: ReviewResult | AnalyzeResult | AnalyzeDiffResu
   const facts = { ...result, sheets: result.sheets.map(({ tiles, ...sheet }) => ({ ...sheet, tiles: tiles.map((tile) => tile.label) })) };
   content.push({ type: "text", text: compact(facts) });
   return { content };
+}
+
+/** `grade.compare`: its sheet as an image, then the facts with each tile's label, kind and `clip set` flags. */
+async function withGradeSheet(result: GradeCompareResult): Promise<CallToolResult> {
+  const image = pngForModel(await readFile(result.path), REVIEW_MAX_SIDE, REVIEW_MAX_SIDE);
+  return {
+    content: [
+      { type: "image", data: image.data.toString("base64"), mimeType: "image/png" },
+      { type: "text", text: compact(result) },
+    ],
+  };
 }
 
 /** The PNG as is when it fits, else decoded, area-downscaled and re-encoded. */

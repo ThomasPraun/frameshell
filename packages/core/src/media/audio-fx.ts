@@ -10,6 +10,7 @@ import {
   audioEffectsOf,
   bakeRef,
   normalizeAudioEffects,
+  sweepCutoffAt,
   withTrackMutes,
 } from "@frameshell/schema";
 import { exists, renameRetrying } from "../fs-util.js";
@@ -32,6 +33,11 @@ export const AUDIO_FX_VERSION = 1;
  */
 export const DENOISE_LATENCY_SAMPLES = 1200;
 
+/** Seconds between two cutoff changes of a `highpassSweep` at best; longer sweeps use at most {@link SWEEP_MAX_STEPS}. */
+export const SWEEP_STEP_SECONDS = 0.02;
+/** Most cutoff changes one sweep sends: keeps eight sweeps inside Windows' 32 K command line. */
+export const SWEEP_MAX_STEPS = 64;
+
 const KEY = String.raw`[0-9a-f]{20}-[0-9a-f]{12}-x\d+`;
 const BAKE_FILE = new RegExp(String.raw`^(${KEY})\.pcm$`);
 const BAKE_TEMP = new RegExp(String.raw`^${KEY}\.pcm\..+\.partial$`);
@@ -50,18 +56,48 @@ export function classifyAudioFx(name: string, isDirectory: boolean): GcClass {
   return key ? { kind: "audio-fx", key } : null;
 }
 
-/** ffmpeg filter of one effect at {@link SIDECAR_SAMPLE_RATE}; dB and ms converted to what each filter takes. */
-function effectFilter(effect: NormalizedAudioEffect): string {
+/** Decimal text of `value`, at most `places` decimals, no trailing zeros. */
+const fixed = (value: number, places: number) => String(Number(value.toFixed(places)));
+
+/**
+ * The cutoff changes of `effect` as `asendcmd` commands for the filter instance `name`, `delay` seconds after the
+ * asset clock (what the denoises before it shifted the stream by). The cutoff is {@link sweepCutoffAt} at the start of
+ * each step, so the last step stops just under `endHz`; the filter is switched off at `to` by its `enable`.
+ */
+export function sweepCommands(effect: Extract<NormalizedAudioEffect, { kind: "highpassSweep" }>, name: string, delay: number): string {
+  const steps = Math.min(SWEEP_MAX_STEPS, Math.max(1, Math.ceil((effect.to - effect.from) / SWEEP_STEP_SECONDS - 1e-9)));
+  const span = (effect.to - effect.from) / steps;
+  const commands: string[] = [];
+  for (let step = 0; step < steps; step++) {
+    const at = effect.from + step * span;
+    commands.push(`${fixed(at + delay, 4)} ${name} frequency ${fixed(sweepCutoffAt(effect, at)!, 2)}`);
+  }
+  return commands.join(";");
+}
+
+/**
+ * ffmpeg filters of one effect at {@link SIDECAR_SAMPLE_RATE}; dB and ms converted to what each filter takes.
+ * `delay` is the seconds earlier effects (denoise) shifted the stream by; `index` names a sweep's filter instance.
+ */
+function effectFilters(effect: NormalizedAudioEffect, index: number, delay: number): string[] {
   switch (effect.kind) {
     case "highpass":
-      return `highpass=f=${effect.frequency}`;
+      return [`highpass=f=${effect.frequency}`];
     case "denoise":
-      return `afftdn=nf=${effect.floor}:nr=${effect.reduction}`;
+      return [`afftdn=nf=${effect.floor}:nr=${effect.reduction}`];
     case "compressor":
-      return (
+      return [
         `acompressor=threshold=${linear(effect.threshold)}:ratio=${effect.ratio}:attack=${effect.attack}` +
-        `:release=${effect.release}:makeup=${linear(effect.makeup)}`
-      );
+          `:release=${effect.release}:makeup=${linear(effect.makeup)}`,
+      ];
+    case "highpassSweep": {
+      // Runtime commands move the cutoff, `enable` takes the filter out before `from` and from `to` on (the drop).
+      const name = `highpass@sw${index}`;
+      return [
+        `asendcmd=c='${sweepCommands(effect, name, delay)}'`,
+        `${name}=f=${fixed(effect.startHz, 2)}:enable='gte(t,${fixed(effect.from + delay, 4)})*lt(t,${fixed(effect.to + delay, 4)})'`,
+      ];
+    }
   }
 }
 
@@ -73,16 +109,22 @@ function linear(db: number): string {
 /**
  * The bake's audio filter: the sidecar clock ({@link alignedAudioFilter}), mono like the sidecar, then the chain in
  * order. Each `denoise` delays by {@link DENOISE_LATENCY_SAMPLES}: the input is padded by that much and the start
- * trimmed, so the bake has the sidecar's length and timing.
+ * trimmed, so the bake has the sidecar's length and timing. A `highpassSweep` after one reads its times shifted by it.
  */
 export function audioFxFilter(effects: readonly AudioEffect[]): string {
   const chain = normalizeAudioEffects(effects);
   const delay = chain.filter((effect) => effect.kind === "denoise").length * DENOISE_LATENCY_SAMPLES;
+  let denoises = 0;
+  const filters = chain.flatMap((effect, index) => {
+    const found = effectFilters(effect, index, (denoises * DENOISE_LATENCY_SAMPLES) / SIDECAR_SAMPLE_RATE);
+    if (effect.kind === "denoise") denoises++;
+    return found;
+  });
   return [
     alignedAudioFilter(SIDECAR_SAMPLE_RATE),
     `aformat=channel_layouts=${SIDECAR_CHANNELS === 1 ? "mono" : "stereo"}`,
     ...(delay > 0 ? [`apad=pad_len=${delay}`] : []),
-    ...chain.map(effectFilter),
+    ...filters,
     ...(delay > 0 ? [`atrim=start_sample=${delay}`, "asetpts=PTS-STARTPTS"] : []),
   ].join(",");
 }

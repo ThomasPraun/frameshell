@@ -1,19 +1,21 @@
-import type { BatchEntry, BatchRenderResult } from "@frameshell/protocol";
+import { readFile } from "node:fs/promises";
+import { type BatchEntry, BatchManifestSchema, type BatchRenderResult } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `batch` (ADR 0040), in `frameshell --help`. */
-export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--dry-run]
+export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--review] [--dry-run]
                                Render variants of a template timeline from data rows: each row sets clip props or swaps
                                assets in memory (never under timelines/), every row x format is validated first, then the
                                rows render one at a time into exports/<batch name>/ with manifest.json. --dry-run checks only.
                                Re-run: --rows renders only those rows (ids, or first..last in file order), --failed the rows
                                the manifest lists as not done (failed, canceled, or left running by a stopped daemon).
-                               A row whose renders are all done with the files in place is skipped unless --force
+                               A row whose renders are all done with the files in place is skipped unless --force.
+                               --review: review each rendered file (metrics only) and record pass/warn/fail in manifest.json
 `;
 
 /** Flags `batch` takes besides the global ones. */
 export const BATCH_FLAGS: Record<string, readonly string[]> = {
-  batch: ["out", "formats", "rows", "failed", "force", "dry-run"],
+  batch: ["out", "formats", "rows", "failed", "force", "review", "dry-run"],
 };
 
 /** A parsed `batch` command. */
@@ -26,13 +28,14 @@ export interface BatchInvocation {
   rows?: string[];
   failed: boolean;
   force: boolean;
+  review: boolean;
   dryRun: boolean;
 }
 
 /** Parse `batch <file> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
 export function parseBatch(
   rest: string[],
-  options: { out?: string | undefined; formats?: string | undefined; rows?: string | undefined; failed: boolean; force?: boolean | undefined; "dry-run": boolean },
+  options: { out?: string | undefined; formats?: string | undefined; rows?: string | undefined; failed: boolean; force?: boolean | undefined; review?: boolean | undefined; "dry-run": boolean },
 ): BatchInvocation | null {
   if (rest.length !== 1) return null;
   const formats = list(options.formats);
@@ -47,6 +50,7 @@ export function parseBatch(
     ...(rows ? { rows } : {}),
     failed: options.failed,
     force: options.force === true,
+    review: options.review === true,
     dryRun: options["dry-run"],
   };
 }
@@ -72,8 +76,19 @@ export function describeBatch(result: BatchRenderResult): string {
 /** The outcome per row × format once every render ended. */
 export function batchOutcome(entries: readonly BatchEntry[]): string {
   return entries
-    .map((entry) => (entry.status === "done" ? `Rendered ${entry.output}\n` : `Render ${entry.status}: ${batchLabel(entry)}: ${entry.error ?? entry.status}\n`))
+    .map((entry) => (entry.status === "done" ? `Rendered ${entry.output}\n${reviewLine(entry)}` : `Render ${entry.status}: ${batchLabel(entry)}: ${entry.error ?? entry.status}\n`))
     .join("");
+}
+
+/** `  review: warn (2 warnings: static, peak), run 14`; empty when the entry has no review. */
+function reviewLine(entry: Pick<BatchEntry, "review">): string {
+  const review = entry.review;
+  if (!review) return "";
+  if (review.state === "error") return `  review failed: ${review.error ?? "unknown error"}\n`;
+  if (review.state === "pending") return "  review pending\n";
+  const what = review.failed > 0 ? `${review.failed} failed` : review.warnings > 0 ? `${review.warnings} warning${review.warnings === 1 ? "" : "s"}` : "";
+  const detail = [what, review.checks.length > 0 ? review.checks.join(", ") : ""].filter((part) => part !== "").join(": ");
+  return `  review: ${review.verdict}${detail ? ` (${detail})` : ""}, run ${review.run} (.frameshell/review/${review.run}/metrics.json)\n`;
 }
 
 /** `es [9x16]`: the row and its format. */
@@ -83,4 +98,25 @@ export function batchLabel(entry: Pick<BatchEntry, "row" | "format">): string {
 
 function rowCount(entries: readonly BatchEntry[]): number {
   return new Set(entries.map((entry) => entry.row)).size;
+}
+
+/**
+ * The entries of the manifest at `path` once it says `done`: the reviews finish after the render jobs, so the
+ * daemon's manifest is where they are read. Polls; gives up with no entries when the file is not a valid manifest.
+ */
+export async function waitReviews(path: string, pause = 400): Promise<BatchEntry[]> {
+  for (;;) {
+    let json: unknown;
+    try {
+      json = JSON.parse(await readFile(path, "utf8"));
+    } catch {
+      // Replaced atomically, so a read between two writes can only miss the file: ask again.
+      await new Promise((resolve) => setTimeout(resolve, pause));
+      continue;
+    }
+    const parsed = BatchManifestSchema.safeParse(json);
+    if (!parsed.success) return [];
+    if (parsed.data.state === "done") return parsed.data.entries;
+    await new Promise((resolve) => setTimeout(resolve, pause));
+  }
 }

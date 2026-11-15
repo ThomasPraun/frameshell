@@ -4,7 +4,7 @@ status: accepted
 
 # Batch variants: a template timeline patched in memory per data row
 
-#477 (epic #451) asks for `frameshell batch`: one edit, many variants (sizes, languages, product rows), each row setting clip props or swapping assets, every row rendered, and a manifest that lets a failed row be re-run alone. The owner decided option A on 2026-11-11, with every recommendation of the proposed decision accepted (the ten points below). **Slices 1 to 4 are built; the later work (slice 5) is not.**
+#477 (epic #451) asks for `frameshell batch`: one edit, many variants (sizes, languages, product rows), each row setting clip props or swapping assets, every row rendered, and a manifest that lets a failed row be re-run alone. The owner decided option A on 2026-11-11, with every recommendation of the proposed decision accepted (the ten points below). **Slices 1 to 4 are built, and slice 5 in part: slot defaults and the review column (below); per-line voiceover placement, CSV and slot names checked against a template's declared props are not.**
 
 ## Context (verified)
 
@@ -45,7 +45,7 @@ Outputs are `<out>/<row>.<container>`, with `-<format>` before the extension whe
 2. Render driver, manifest, MCP tool from the registry, protocol bump, short skill mention. Built.
 3. Re-run: `--rows`, `--failed` (including rows left `queued` or `running` by a daemon exit), `--force`. Built, see below.
 4. Skill: when to batch, the monetisation caution from #477, per-language rows, never paid generation from batch. Built: `skills/frameshell/reference/batch.md`.
-5. Later: #466 typed props, a #457 review column, ADR 0034 per-line placement, CSV.
+5. Slot defaults and the #457 review column: built, see below. Later: per-line placement (ADR 0034 slice 4), CSV, and slot names checked against a template's declared props.
 
 ## Re-runs (slice 3, as built)
 
@@ -60,6 +60,15 @@ Outputs are `<out>/<row>.<container>`, with `-<format>` before the extension whe
 ## Skill (slice 4, as built)
 
 `skills/frameshell/reference/batch.md` says when to batch (data varies, structure does not) and when not (different timing or structure per row; a longer swapped take never lengthens the video), carries the monetisation caution of the owner's comment on #477 (episodes need an original story, voice and visuals each time; batch is for sizes, languages and product rows, and the agent says so before building a template-filled series), explains the batch file, the manifest and re-runs, and per-language rows (swap the voiceover take, transcribe it first when captions follow it, never `voiceover.generate` from batch).
+
+## Slot defaults and the review column (slice 5, as built)
+
+- **Slot defaults.** Typed props (ADR 0033 slice 2, #466) are the `data-composition-variables` of a HyperFrames composition, which only the plugin reads, and core checks props through the adapter's `propsSchema` alone. So the default is a spelling, not a lookup: a slot value `<clipId>.props` with no path sets the prop named like the slot, `{ "title": "c_8f2a1b.props" }` meaning `c_8f2a1b.props.title`. `parseSlotTarget(slot, name)` takes the slot's name for that form; the explicit path forms are unchanged, and a slot name is already barred from `__proto__`, `prototype` and `constructor`. Checking slot names against a composition's declared variables, or exposing every declared prop at once, would need the adapter to say what it declares (a `plugin-api` addition) and is left for when a template author asks for it.
+- **Review column.** `batch.render` takes `review` (CLI `--review`, off by default: a review decodes the whole file). When a row's render job ends `done`, `ReviewService.run` reviews the file (`sheets: ["metrics"]`, `view: "current"`, so no sheet images are written), one review at a time in order, while the next row renders. The entry's new `review` is `{ state: pending | done | error, verdict: pass | warn | fail | null, warnings, failed, checks, run, error }`, null when not asked or when the render did not end `done`. `failed` is `metrics.requirements.failed` (0 without a `requirements.json`), `warnings` the length of `metrics.craft` (waived warnings are not in it), `verdict` is `fail` when `failed > 0`, else `warn` when `warnings > 0`, else `pass`, and `run` names `.frameshell/review/<run>/`, whose `metrics.json` holds the detail (only the last 10 runs are kept, as for any review, so a batch of more rows loses the oldest).
+- **Lifecycle.** The batch ends, and the manifest says `done`, only after the last review ended; `gc` keeps clip renders until then, and a second batch into the same `out` is refused meanwhile. A review that throws (no ffmpeg) becomes `state: "error"` with the first line of the message: the render stays `done`. Rows skipped as done are reviewed when their entry has no `done` review and the file exists, with no render queued; a run with only such rows queues no job and still returns the manifest. An older manifest has no `review` and reads as null.
+- **What it checks.** The review is of the file, as `frameshell review --file` is. The export check (`metrics.delivery`) runs only for a batch without `quality`, against the preset the rows used and, when the batch lists formats, the row's format; it plans the saved template, not the variant (the variant keeps the clip's in, out and placement, so the length is the template's). Requirements about clips (`clip.appearsBy`...) are skipped on a file, as for `review --file`.
+- **CLI.** `--review` waits for the manifest to say `done` (the reviews finish after the render jobs, so the CLI reads the manifest the daemon writes), prints `review: <verdict> (<n> warnings: <checks>), run <n>` under each file and exits 1 when a render failed or a verdict is `fail`.
+- **Wire.** Protocol 144: param `review`; `BatchEntry.review` (nullable, default null).
 
 ## Rejected
 

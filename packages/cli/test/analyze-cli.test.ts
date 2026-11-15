@@ -74,6 +74,8 @@ describe("frameshell analyze", () => {
       expect(result.stdout).toMatch(/\[MEASURED\] Curve: mean change [\d.]+, peak [\d.]+ at [\d.]+ s, \d+ moves/);
       expect(result.stdout).toMatch(/\[ESTIMATED\] Ink: \d+% of the picture on average/);
       expect(result.stdout).toMatch(/\[MEASURED\] Sync: skipped, /);
+      expect(result.stdout).toMatch(/\[ESTIMATED\] Speech: skipped, the speech could not be recognised: /);
+      expect(result.stdout).toMatch(/\[ESTIMATED\] Sections: 1, one steady level/);
       expect(existsSync(join(dir, "analysis.json"))).toBe(true);
       expect(existsSync(join(dir, "frames", "shot-001.jpg"))).toBe(true);
     },
@@ -88,6 +90,19 @@ describe("frameshell analyze", () => {
       const analysis = JSON.parse(result.stdout) as { name: string; threshold: number; shots: unknown[] };
       expect(analysis).toMatchObject({ name: "first", threshold: 0.6 });
       expect(analysis.shots).toHaveLength(1);
+    },
+    120_000,
+  );
+
+  it(
+    "skips the speech with --no-speech and says so",
+    () => {
+      const result = frameshell(["analyze", reference, "--name", "quiet", "--no-speech"]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("Speech: skipped, not asked for (speech: false).");
+      const json = JSON.parse(frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--json"]).stdout) as { audio: { speech: { status: string }; effects: unknown }; labels: Record<string, string> };
+      expect(json.audio).toMatchObject({ speech: { status: "skipped" }, effects: null });
+      expect(json.labels["audio"]).toBe("ESTIMATED");
     },
     120_000,
   );
@@ -136,6 +151,7 @@ describe("frameshell analyze diff", () => {
     expect(frameshell(["analyze", "diff", reference]).code).toBe(2);
     expect(frameshell(["analyze", "diff", reference, other, "extra"]).code).toBe(2);
     expect(frameshell(["analyze", "diff", reference, other, "--threshold", "0.3"]).stderr).toContain("does not take --threshold");
+    expect(frameshell(["analyze", "diff", reference, other, "--no-speech"]).stderr).toContain("does not take --no-speech");
     expect(frameshell(["analyze", "diff", reference, other, "--lag", "soon"]).stderr).toContain("--lag takes seconds");
     expect(frameshell(["analyze", "diff", reference, other, "--max-lag", "100"]).stderr).toContain("--max-lag takes seconds from 0.5 to 30");
     expect(frameshell(["analyze", "diff", reference, other, "--every", "0"]).stderr).toContain("--every takes seconds from 0.1 to 30");

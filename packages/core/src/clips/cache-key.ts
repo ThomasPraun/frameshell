@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { RenderTiming } from "@frameshell/plugin-api";
 import type { AdapterClip, ResolvedMotionBlur } from "@frameshell/schema";
 
 /** Bumped when the key recipe or the cache entry layout changes, so old entries are never reused. */
@@ -18,6 +19,8 @@ export interface ClipKeyInput {
   style?: string;
   /** The clip's motion blur, defaults filled in (ADR 0041), for an adapter that applies it; absent otherwise. */
   motionBlur?: ResolvedMotionBlur;
+  /** The timeline's beats and markers inside the clip (ADR 0029 decision 8), for a clip that asks for them; absent otherwise. */
+  timing?: RenderTiming;
 }
 
 /**
@@ -41,6 +44,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     style: input.style,
     // Absent drops out like `style`; resolved, so `{}` and the spelled-out defaults give one key.
     motionBlur: input.motionBlur,
+    // Absent drops out like `style`: only clips that ask for timing re-render when the music or a marker moves.
+    timing: input.timing,
   });
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
 }

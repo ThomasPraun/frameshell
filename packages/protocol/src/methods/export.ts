@@ -173,7 +173,7 @@ export const exportMethods = {
     description:
       "Render variants of one template timeline from data rows (ADR 0040): sizes, languages, product rows. The batch file " +
       "(`*.batch.json`, JSON Schema `batch.json`) names `template` (timeline id, default `main`), `slots` (name → " +
-      "`<clipId>.props.<dot.path>` or `<clipId>.asset`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
+      "`<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot) or `<clipId>.asset`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
       "used as file names; a slot a row leaves out keeps the template's value), and optional `formats`, `preset`, `quality`. " +
       "Each row patches the template in memory only, never under `timelines/` (no journal, no proposal): a props value is " +
       "written at its path over the clip's props and checked by the adapter like `clip.set`; an asset swap keeps the clip's " +
@@ -192,7 +192,13 @@ export const exportMethods = {
       "the daemon stopped) or no entry yet; both together = the failed ones among `rows`. Only the chosen rows are " +
       "validated, so a bad row elsewhere does not block them; the other rows keep their manifest entries. A chosen row " +
       "whose entries are all `done` with the files still there is skipped (listed in `skipped`) unless `force`: edit " +
-      "a row, then pass `force` or its id in `rows` with `force`.",
+      "a row, then pass `force` or its id in `rows` with `force`. `review: true` reviews each rendered file as soon as its render " +
+      "is done (`review` on the file, metrics only, one at a time while the next row renders; it needs a ready ffmpeg): " +
+      "the entry's `review` gets `verdict` (`fail` when `requirements.json` fails, `warn` for craft warnings, else " +
+      "`pass`), `warnings`, `failed`, `checks` and the `run` whose `metrics.json` holds the detail, and the manifest says " +
+      "`running` until the last review ended. Rows skipped as done are reviewed too when their entry has no finished " +
+      "review. A review that cannot run leaves the render `done` and the entry's review `error`. In a props slot, `<clipId>.props` " +
+      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`.",
     params: z.strictObject({
       cwd: CwdParam,
       file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
@@ -212,6 +218,10 @@ export const exportMethods = {
         .default(false)
         .describe("Only rows whose manifest entries are not all `done` (failed, canceled, left queued or running by a stopped daemon) or that have none; needs `<out>/manifest.json` of this batch file."),
       force: z.boolean().default(false).describe("Render chosen rows again although every entry is `done` and its file exists; without it they are skipped."),
+      review: z
+        .boolean()
+        .default(false)
+        .describe("Review each rendered file (`review` with `file`, metrics only) and record its verdict in the entry's `review`; slower, off by default."),
       dryRun: z.boolean().default(false).describe("Validate every chosen row × format and return the plan; nothing is rendered or written."),
     }),
     result: z.object({
@@ -365,7 +375,10 @@ export const exportMethods = {
       "`labels` (MEASURED, ESTIMATED or DECISION for every value, by field path), " +
       "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
-      "result; `low: true` means do not trust it: speech and ambient sound read as low), and sheets to look at: the **contact** sheet " +
+      "result; `low: true` means do not trust it: speech and ambient sound read as low), the **audio** (all ESTIMATED, read from the mix, not from separated stems: `speech.sentences` " +
+      "recognised by the project's transcription provider, each with its `pace` in words per second, `pitch` range (Hz and semitones), `voice` level, the `music` level under it read from the gaps between its words and `voiceOverMusic` in dB; " +
+      "`effects`: sound hits that are neither a word nor the music's beat, with their level `overMusic`; `sections`: stretches where the level of the sound holds, with their bars when the tempo is steady). " +
+      "Recognising the speech needs a transcription provider and model (it may download the model on first use); without one, or with `speech: false`, `audio.speech.status` is `skipped` with its reason and `effects` is null. Sheets to look at: the **contact** sheet " +
       "(a frame every half second, 2 per second, plus the first frame of every shot, 360 tiles at most) and the **shots** sheet (the middle frame " +
       "of every shot). Every time is a frame index ÷ fps rounded down to the millisecond, and `startFrame`/`endFrame` give the frames. " +
       "The scene score finds a hard cut only: a dissolve or a whip pan is not found (lower `threshold` to catch softer ones), and jump cuts and punch-ins are told apart in `cuts`, not in `shots`. " +
@@ -388,6 +401,10 @@ export const exportMethods = {
         .max(0.95)
         .optional()
         .describe("Scene score (how different a frame is from the one before, 0 to 1) from which a frame opens a new shot. Default 0.3: hard cuts. Lower finds softer ones and false ones (flashes, fast motion); higher keeps only violent changes."),
+      speech: z
+        .boolean()
+        .optional()
+        .describe("Recognise the speech (sentences, pace, pitch, voice against music, effects). Default true; false skips the transcription, which is the slow part and may download a model."),
     }),
     result: AnalyzeResultSchema,
   },

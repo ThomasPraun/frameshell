@@ -183,6 +183,7 @@ import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
+import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
@@ -721,6 +722,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
     hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
     planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
+    // `reviews` is declared below: it is read when a batch asks for a review, not now.
+    review: (dir, request) => reviews.run(dir, request),
   });
   const reviews = new ReviewService({
     timelines,
@@ -745,10 +748,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
     beats,
+    // The project's own transcription provider and model, as `transcribe` takes them; a missing one is the run's `speech.reason`.
+    transcribe: async (dir, wav) => {
+      const { config } = (await readEnclosingProject(dir))!;
+      const providerId = config.transcription?.provider ?? "whisper-cpp";
+      const provider = await plugins.transcriptionProvider(dir, providerId);
+      const model = await configuredModel(config, providerId);
+      const language = config.transcription?.language;
+      const heard = await provider.transcribe(wav, { ...(model ? { model } : {}), ...(language ? { language } : {}) }, providerContext(transcriberTools({ dir, binaries: config.binaries }), () => {}).context);
+      return { words: heard.words, provider: providerId, model: heard.model, language: heard.language ?? null };
+    },
   });
   const gradeAnalyzer = new GradeAnalyzer({
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     probe: (dir, asset) => media.probe(dir, asset),
+  });
+  const gradeComparer = new GradeComparer({
+    exports,
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
   });
   const clips = new ClipRenderer({
     jobs: clipJobs,
@@ -774,6 +791,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { width: probe.video?.width ?? 0, height: probe.video?.height ?? 0, duration: probe.duration };
     },
     ensureBinary: async (dir, name) => binaries.ensure(name, await projectBinaries(dir)),
+    beatsOf,
   });
   /** One spelling per project for the clip renderer, whatever spelling the caller used: its jobs and cache state are keyed by it. */
   const clipRoot = (dir: string): string => {
@@ -1479,8 +1497,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
-    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, dryRun }) =>
-      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, dryRun }),
+    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, review, dryRun }) =>
+      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, review, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
@@ -1508,7 +1526,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ...(projectFormat !== undefined ? await viewFormats(dir, reviewView) : {}),
       });
     },
-    analyze: async ({ cwd, file, name, threshold }, _caller, request) => {
+    analyze: async ({ cwd, file, name, threshold, speech }, _caller, request) => {
       const dir = await root(cwd);
       const path = resolve(cwd, file);
       const inside = relative(dir, path);
@@ -1517,7 +1535,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ctx.update({ step: "analyze", progress: 0 });
         return analyses.run(
           dir,
-          { file: path, name, threshold },
+          { file: path, name, threshold, speech },
           {
             signal: ctx.signal,
             progress: (progress) => ctx.update({ progress }),
@@ -1749,6 +1767,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const shown = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       const analysis = await gradeAnalyzer.analyze(dir, shown.timeline, { timeline, fps: shown.fps, clip, at, from, to, samples });
       return { view: shown.view, proposal: shown.proposal, ...analysis };
+    },
+    "grade.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
+      const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat };
+      return { view: shown, proposal, ...(await gradeComparer.compare(dir, { ...loaded, ...formats }, request)) };
     },
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
@@ -2327,17 +2352,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicFitLabel(report), revision: loaded.revision, warnings }, async (write) => {
         for (const { clip: id, ...operation } of operations) await write({ op: operation.op, args: { clip: id, ...operation.args } } as OperationRequest);
         // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
+        if (shapeAgain?.effects !== undefined) await write({ op: "clip.set", args: { clip: shapeAgain.clip, audioEffects: shapeAgain.effects } } as OperationRequest);
         if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
     },
-    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun }, caller) => {
+    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
-      const { operation, duckAgain, entryFade, noop, ...report } = await planMusicShape(
+      const { operation, effects, duckAgain, entryFade, noop, ...report } = await planMusicShape(
         loaded,
-        { clip, drop, ending, lead, depth, hold, release, fade, clear, dryRun },
+        { clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
         (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
       );
       const result = { timeline, ...report };
@@ -2346,6 +2372,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(report.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicShapeLabel(report), revision: loaded.revision, warnings }, async (write) => {
         if (entryFade) await write({ op: "clip.set", args: { clip: operation.clip, audioFadeInMs: MUSIC_ENTRY_FADE_MS } } as OperationRequest);
+        if (effects !== undefined) await write({ op: "clip.set", args: { clip: operation.clip, audioEffects: effects } } as OperationRequest);
         await write({ op: "music.shape", args: { clip: operation.clip, curve: operation.curve, ...(operation.settings ? { settings: operation.settings } : {}) } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });

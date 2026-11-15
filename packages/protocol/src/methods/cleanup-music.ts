@@ -1,3 +1,4 @@
+import { AUDIO_EFFECT_LIMITS, SWEEP_SECONDS } from "@frameshell/schema";
 import { z } from "zod";
 import {
   CLEANUP_BREATH_DEFAULT_S,
@@ -157,7 +158,11 @@ export const cleanupMusicMethods = {
       "a warning names it); `clear: true` removes them. The level they dip from is the clip's `audio.gain` or its own keys. The times of the hits are kept in the clip's `audio.shape`, " +
       "so `music.fit` runs the same shaping again after it moves the clip (`skip: [\"shape\"]` leaves the keys and says so). The keys replace the clip's duck keys (`track.duck`): " +
       "duck runs again in the same transaction with its stored parameters, so the voice still ducks the shaped music. The clip's start also gets a 5 ms fade in " +
-      "(`audio.fadeInMs`) unless it already has a fade in or a dissolve; `clear` leaves the clip's edges alone. Not done here: the rising high-pass build before a drop. " +
+      "(`audio.fadeInMs`) unless it already has a fade in or a dissolve; `clear` leaves the clip's edges alone. " +
+      "`build` (seconds, e.g. 2) adds the rising high-pass build before each hit: a `highpassSweep` effect (`audio.effects`, marked `auto: \"music\"`) whose cutoff " +
+      "climbs exponentially from `buildFrom` Hz (default 40) to `buildTo` Hz (default 300) over the `build` seconds before the hit and is out of the signal again at the hit, " +
+      "so the low end comes back with it. It is baked into the music like any audio effect and sits on the file's own clock, so a change of the clip's `in`, `start` or `speed` by `music.fit` aims it at the hit again (`music.fit` runs the shaping again with the settings kept on the clip); " +
+      "a run replaces the builds it wrote earlier and keeps the effects you set by hand (the list holds at most 8). `clear` removes the builds too. " +
       "`dryRun: true` changes nothing and returns the `curve` and `steps`. One transaction labelled `Music shape: …` (`revert` undoes it whole; with review mode on it is one proposal). " +
       "Example: `{ clip: \"c_1a2b3c\", drop: [\"hit\"], ending: 28 }`. Fails with InvalidOperation (not a music clip of an audio track, nothing to shape, `clear` with `drop` or `ending`, " +
       "no time falls on the clip), ClipNotFound or TimelineNotFound.",
@@ -177,7 +182,25 @@ export const cleanupMusicMethods = {
       hold: z.number().min(0).max(5).default(0.3).describe("Seconds after a hit the music stays down. Default 0.3."),
       release: z.number().min(0.05).max(5).default(0.6).describe("Seconds the level takes to come back after the hold. Default 0.6."),
       fade: z.number().min(0.05).max(15).default(2.5).describe("Seconds of the closing fade from `ending`. Default 2.5."),
-      clear: z.boolean().default(false).describe("Remove the clip's `music` keys instead; takes no `drop` or `ending`."),
+      build: z
+        .number()
+        .min(SWEEP_SECONDS.min)
+        .max(SWEEP_SECONDS.max)
+        .optional()
+        .describe("Seconds of a rising high-pass build that ends at each hit (needs `drop`). Default: no build. A typical build is 2."),
+      buildFrom: z
+        .number()
+        .min(AUDIO_EFFECT_LIMITS.highpassSweep.startHz.min)
+        .max(AUDIO_EFFECT_LIMITS.highpassSweep.startHz.max)
+        .optional()
+        .describe(`Cutoff in Hz the build starts at (needs \`build\`). Default ${AUDIO_EFFECT_LIMITS.highpassSweep.startHz.default}.`),
+      buildTo: z
+        .number()
+        .min(AUDIO_EFFECT_LIMITS.highpassSweep.endHz.min)
+        .max(AUDIO_EFFECT_LIMITS.highpassSweep.endHz.max)
+        .optional()
+        .describe(`Cutoff in Hz the build reaches just before the hit (needs \`build\`). Default ${AUDIO_EFFECT_LIMITS.highpassSweep.endHz.default}.`),
+      clear: z.boolean().default(false).describe("Remove the clip's `music` keys and builds instead; takes no `drop`, `ending` or `build`."),
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
     }),
     result: MusicShapeResultSchema,

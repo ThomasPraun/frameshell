@@ -709,6 +709,20 @@ export const RenderOutputSchema = z.object({
   warnings: z.array(z.string()).describe("Timeline content this export does not render, and a default preset whose size the format overrode; empty when none."),
 });
 
+/** What `review` found on one rendered row of a batch (ADR 0040, `batch.render` with `review`). */
+export const BatchReviewSchema = z.object({
+  state: z.enum(["pending", "done", "error"]).describe("`pending` until the render is done and its review ran; `error` when the review could not run (see `error`)."),
+  verdict: z
+    .enum(["pass", "warn", "fail"])
+    .nullable()
+    .describe("`fail` when `requirements.json` fails (`failed` > 0), else `warn` when `metrics.craft` holds a warning, else `pass`; null until the review ran."),
+  warnings: z.int().describe("Craft warnings left in `metrics.craft` (waived ones are not counted)."),
+  failed: z.int().describe("`requirements.failed` of the review: checks that failed plus craft warnings of severity `fail`; 0 without a `requirements.json`."),
+  checks: z.array(z.string()).describe("Craft check ids of the warnings, e.g. `static`, `peak`; each once."),
+  run: z.int().nullable().describe("`review` run number: the sheets and `metrics.json` are in `<project>/.frameshell/review/<run>/`; null until it ran."),
+  error: z.string().nullable().describe("Why the review could not run; null otherwise."),
+});
+
 /** One row × format of a batch (ADR 0040), as `batch.render` returns it and `<out>/manifest.json` keeps it. */
 export const BatchEntrySchema = z.object({
   row: z.string().describe("Row id of the batch file."),
@@ -723,6 +737,9 @@ export const BatchEntrySchema = z.object({
   finishedAt: z.string().nullable().describe("ISO time it ended; null before."),
   duration: z.number().nullable().describe("Seconds the render took; null until it ended."),
   warnings: z.array(z.string()).describe("What this render skips, and assets of the row without verified provenance (ADR 0026)."),
+  review: BatchReviewSchema.nullable()
+    .default(null)
+    .describe("The review of the rendered file (`batch.render` with `review`); null when the batch did not ask for one, the render has not ended `done` or a manifest of an older version has none."),
 });
 
 /** `<out>/manifest.json` of a batch (ADR 0040): one entry per row × format, rewritten atomically on each job change. */

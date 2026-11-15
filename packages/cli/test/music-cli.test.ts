@@ -142,6 +142,14 @@ describe("frameshell music shape", () => {
       method: "music.shape",
       params: { clip: "c_m", drop: ["slam", 12.5, "bar:9"], ending: "end-card", lead: 0.5, depth: 6, hold: 0.2, release: 0.8, fade: 3, dryRun: true },
     });
+    expect(parseTimelineCommand(["music", "shape", "c_m"], { drop: ["slam"], build: "2", "build-from": "50", "build-to": "250" })!.params).toMatchObject({
+      drop: ["slam"],
+      build: 2,
+      buildFrom: 50,
+      buildTo: 250,
+    });
+    expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["slam"], build: "long" })).toThrow(/expected a number/);
+    expect(() => parseTimelineCommand(["music", "fit", "c_m"], { end: "5", build: "2" })).toThrow(/does not take --build/);
     expect(parseTimelineCommand(["music", "shape", "c_m"], { clear: true })!.params).toEqual({ clip: "c_m", clear: true });
     expect(() => parseTimelineCommand(["music", "shape"], { drop: ["3"] })).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["3"], exact: true })).toThrow(/does not take --exact/);

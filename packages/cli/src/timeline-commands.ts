@@ -6,6 +6,7 @@ import type {
   ConfigOperation,
   DaemonConnection,
   GradeAnalyzeResult,
+  GradeCompareResult,
   HistoryResult,
   MarkerListResult,
   MulticamCreateResult,
@@ -96,6 +97,15 @@ mutations print the new revision):
                                --to a range, --samples frames spread over it (default 8, 1 to 32); none: the whole
                                clip. Prints the levels, why each number, and the clip set command to apply it.
                                Changes nothing; judge it by eye with frame (a sunset is meant to be warm)
+  grade compare <clip> --look [name:]field=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px]
+                [--format id]
+                               Render one frame of a media clip under up to 16 looks next to a neutral baseline (and
+                               its current grade) as one labelled PNG, through the export frame path. A look is a whole
+                               grade: exposure, temperature, tint, contrast, saturation, lut, lut-mix (left out =
+                               neutral), e.g. --look warm:temperature=0.25,saturation=1.1. --at picks the frame (default
+                               the clip's middle); --out the image (default .frameshell/grade/compare-<clip>-<frame>.png);
+                               --tile-width 160 to 960 (default 480). Prints the clip set command that keeps each look.
+                               Changes nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -310,14 +320,20 @@ mutations print the new revision):
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
                                Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
                                gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
-  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s] [--clear] [--dry-run]
+  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
+                     [--build s [--build-from Hz] [--build-to Hz]] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
                                (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,
                                complete --lead s (0.4) before it, held --hold s (0.3) after, back over --release s (0.6);
                                from --ending it fades out over --fade s (2.5; a short one with --ending bar:N stops on a
                                bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
                                keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
-                               fit re-runs it when it moves the clip. --dry-run prints the dip curve. One transaction
+                               fit re-runs it when it moves the clip. --build s (e.g. 2) adds a rising high-pass before
+                               each --drop: a highpassSweep audio effect (marked auto "music") whose cutoff climbs from
+                               --build-from Hz (40) to --build-to Hz (300) over the s seconds before the hit and is out
+                               of the signal again at it, so the low end returns with the hit; it sits on the file's own
+                               clock, is baked like any audio effect, and a rerun replaces it. --dry-run prints the dip
+                               curve. One transaction
   music grid [--to beat|bar] [--max-shift s] [--skip g1,…] [--dry-run]
                                Move picture cuts (two clips of a video track that meet) onto the timeline's beat grid
                                (tempo set; a LOW grid is refused): each cut off its nearest beat (--to bar: bar start) by
@@ -504,6 +520,8 @@ export const TIMELINE_OPTIONS = {
   "clear-gaps": { type: "boolean" },
   format: { type: "string" },
   reset: { type: "boolean" },
+  look: { type: "string", multiple: true },
+  "tile-width": { type: "string" },
   person: { type: "string" },
   anchor: { type: "string" },
   pauses: { type: "string" },
@@ -519,6 +537,9 @@ export const TIMELINE_OPTIONS = {
   lead: { type: "string" },
   hold: { type: "string" },
   fade: { type: "string" },
+  build: { type: "string" },
+  "build-from": { type: "string" },
+  "build-to": { type: "string" },
   exact: { type: "boolean" },
   level: { type: "string" },
   loudness: { type: "string" },
@@ -564,6 +585,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip reframe": ["format", "person", "anchor"],
   "clip verify": ["probes", "tolerance"],
   "grade analyze": ["at", "from", "to", "samples"],
+  "grade compare": ["look", "at", "out", "tile-width", "format"],
   "clip set": [
     "speed",
     "gain",
@@ -642,7 +664,7 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
-  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "clear", "dry-run"],
+  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
   "music grid": ["to", "max-shift", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
@@ -679,6 +701,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
   "grade analyze": [1, 1],
+  "grade compare": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -714,6 +737,43 @@ export function timelineCommandFlags(): Map<string, string[]> {
   return new Map(
     Object.entries(ALLOWED).map(([command, flags]) => [command.trim(), command.startsWith("tx ") ? [...flags] : [...flags, "timeline"]]),
   );
+}
+
+/** `--look` keys and the `grade` field each sets; `lut` takes a path, the rest numbers. */
+const LOOK_FIELDS: Record<string, string> = {
+  exposure: "exposure",
+  temperature: "temperature",
+  tint: "tint",
+  contrast: "contrast",
+  saturation: "saturation",
+  lut: "lut",
+  "lut-mix": "lutMix",
+  lutMix: "lutMix",
+};
+
+/** One `--look`: `[name:]field=value[,field=value...]`, e.g. `warm:temperature=0.25,saturation=1.1` or `teal:lut=luts/teal.cube,lut-mix=0.6`. */
+export function parseLook(raw: string): Record<string, string | number> {
+  const colon = raw.indexOf(":");
+  const named = colon >= 0 && colon < raw.indexOf("=");
+  const look: Record<string, string | number> = named ? { name: raw.slice(0, colon).trim() } : {};
+  const body = named ? raw.slice(colon + 1) : raw;
+  for (const pair of body.split(",")) {
+    const [key = "", value, ...more] = pair.split("=").map((part) => part.trim());
+    const field = LOOK_FIELDS[key];
+    if (!field || value === undefined || value === "" || more.length > 0) {
+      throw new UsageError(
+        `--look: expected [name:]field=value[,field=value...] with fields exposure, temperature, tint, contrast, saturation, lut, lut-mix, e.g. warm:temperature=0.25,saturation=1.1; got "${raw}".`,
+      );
+    }
+    if (field === "lut") {
+      look[field] = value;
+      continue;
+    }
+    const number = Number(value);
+    if (!Number.isFinite(number)) throw new UsageError(`--look: ${key} expects a number, got "${value}" in "${raw}".`);
+    look[field] = number;
+  }
+  return look;
 }
 
 /** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
@@ -1264,6 +1324,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], at: num("at"), from: num("from"), to: num("to"), samples });
       break;
     }
+    case "grade compare": {
+      method = "grade.compare";
+      const looks = (list("look") ?? []).map(parseLook);
+      if (looks.length === 0) throw new UsageError("`frameshell grade compare` needs at least one --look, e.g. --look warm:temperature=0.25,saturation=1.1.");
+      if (looks.length > 16) throw new UsageError(`--look: at most 16 looks, got ${looks.length}.`);
+      const tileWidth = num("tile-width");
+      if (tileWidth !== undefined && (!Number.isInteger(tileWidth) || tileWidth < 160 || tileWidth > 960)) throw new UsageError("--tile-width: expected a whole number of px from 160 to 960.");
+      Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -1353,6 +1423,9 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         hold: num("hold"),
         release: num("release"),
         fade: num("fade"),
+        build: num("build"),
+        buildFrom: num("build-from"),
+        buildTo: num("build-to"),
         clear: values["clear"] === true ? true : undefined,
         dryRun: values["dry-run"] === true ? true : undefined,
       });
@@ -1469,6 +1542,7 @@ export async function executeTimeline(
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
+  if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
@@ -1516,6 +1590,21 @@ export function formatGradeAnalyze(result: GradeAnalyzeResult): string {
   for (const reason of result.reasons) lines.push(`  ${reason}`);
   if (result.flags !== "") lines.push(`Apply: frameshell clip set ${result.clip} ${result.flags}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** `grade compare` for people: the image, then each tile's number, name and the `clip set` flags that keep it. */
+export function formatGradeCompare(result: GradeCompareResult): string {
+  const lines = [
+    `Grade compare of ${result.clip} (${result.asset}) on ${result.timeline} · frame ${result.frame} at ${result.at.toFixed(3)} s · ${result.tiles.length} tiles, ${result.columns}x${result.rows}`,
+    `  ${result.path} (${result.width}x${result.height})`,
+  ];
+  for (const tile of result.tiles) {
+    const keep = tile.flags === "" ? "(the clip's grade now)" : `frameshell clip set ${result.clip} ${tile.flags}`;
+    lines.push(`  ${tile.label.padEnd(18)} ${keep}`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  lines.push("Nothing changed: open the image, then keep a look with its clip set command.");
   return `${lines.join("\n")}\n`;
 }
 
@@ -1573,6 +1662,7 @@ function formatMusicShape(result: MusicShapeResult): string {
     for (const at of result.drops) lines.push(`  steps down ${settings.depth} dB, complete ${s(settings.lead)} before the hit at ${s(at)}, stays down to ${s(at + settings.hold)}, back over ${s(settings.release)}`);
     if (result.ending !== null) lines.push(`  fades out from ${s(result.ending)} over ${s(settings.fade)}`);
   }
+  for (const sweep of result.sweeps) lines.push(`  high-pass build ${sweep.startHz} to ${sweep.endHz} Hz over ${s(sweep.to - sweep.from)} of the file (${s(sweep.from)}–${s(sweep.to)}), ending at the hit at ${s(sweep.at)}`);
   if (result.dryRun && result.curve.length > 0) lines.push(`  dip curve: ${result.curve.map((point) => `${point.time} s ${point.dip} dB`).join(", ")}`);
   for (const step of result.steps) lines.push(`  ${step.id.padEnd(6)}${step.detail}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);

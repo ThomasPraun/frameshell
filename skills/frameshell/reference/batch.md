@@ -26,7 +26,7 @@ One finished edit, many files: the same video in other languages, for other prod
 ```
 
 - `template` is a timeline of the project (default `main`); a single generated clip is a timeline holding that one clip.
-- A slot is `<clipId>.props.<dot.path>` (written over an adapter clip's props, checked by its props schema like `clip set`) or `<clipId>.asset` (a media clip's file swapped). Read the ids with `frameshell timeline show`. Slots reach top-level clips only, not `elements`, nested timelines or per-format props.
+- A slot is `<clipId>.props.<dot.path>` (written over an adapter clip's props, checked by its props schema like `clip set`), `<clipId>.props` (the prop named like the slot: `"title": "c_8f2a1b.props"` is `c_8f2a1b.props.title`, so a template's declared props become slot names without repeating them) or `<clipId>.asset` (a media clip's file swapped). Read the ids with `frameshell timeline show`. Slots reach top-level clips only, not `elements`, nested timelines or per-format props.
 - A row is its `id` (lowercase letters, digits and `-`, unique: it names the file) plus one value per slot. A slot a row leaves out keeps the template's value.
 - Every row x format is checked before anything renders; a bad row fails the call naming its `row` and `slot`. Check with `--dry-run`.
 
@@ -52,7 +52,20 @@ frameshell batch launch.batch.json --rows es --force   # again although it is do
 - Only the chosen rows are checked and rendered, so a bad row elsewhere does not block the re-run. The other rows keep their manifest entries.
 - `--failed` needs the manifest of this batch file; `--failed --rows ...` re-runs the failed ones among those rows.
 
-MCP: `batch_render` takes `file`, `out`, `formats`, `rows` (an array of ids or `first..last`), `failed`, `force`, `dryRun`.
+MCP: `batch_render` takes `file`, `out`, `formats`, `rows` (an array of ids or `first..last`), `failed`, `force`, `review`, `dryRun`.
+
+## Review each row
+
+```sh
+frameshell batch launch.batch.json --review
+```
+
+Each rendered file is reviewed as `frameshell review --file` does (metrics only, one at a time while the next row renders; slower, so off by default). The manifest entry gets `review`: `verdict` (`fail` when `requirements.json` fails, `warn` for craft warnings such as `static` or `peak`, else `pass`), `warnings`, `failed`, `checks` and the `run` whose `.frameshell/review/<run>/metrics.json` holds the detail. The manifest says `running` until the last review ended; the command exits 1 when a render failed or a verdict is `fail`.
+
+- A failed render has no review; a review that cannot run (no ffmpeg) leaves the render `done` and the entry's review `error`.
+- A row skipped as done is reviewed too when its entry has no finished review, so `--review` on a finished batch only reviews. Re-reviewing after an edit needs `--force`.
+- Clip-specific requirements (`clip.appearsBy`...) are skipped on a file; the per-row export check against the preset is made only for a batch without `quality` (a draft differs by design) and plans the template, not the row.
+- A `fail` row is the one to look at: open `.frameshell/review/<run>/metrics.json`, or `frameshell review --file <output>` with sheets.
 
 ## Per-language rows
 
