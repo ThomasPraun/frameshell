@@ -353,6 +353,7 @@ export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyAr
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
 export { type ClipKeyInput, clipCacheKey } from "./clips/cache-key.js";
+export { type ClipTimingInput, clipTiming } from "./clips/timing.js";
 export {
   CLIP_CACHE_DIR,
   ClipRenderer,

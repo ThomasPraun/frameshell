@@ -774,6 +774,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { width: probe.video?.width ?? 0, height: probe.video?.height ?? 0, duration: probe.duration };
     },
     ensureBinary: async (dir, name) => binaries.ensure(name, await projectBinaries(dir)),
+    beatsOf,
   });
   /** One spelling per project for the clip renderer, whatever spelling the caller used: its jobs and cache state are keyed by it. */
   const clipRoot = (dir: string): string => {
