@@ -21,6 +21,7 @@ let conn: DaemonConnection;
 let project: string;
 let video = "";
 const shots: string[] = [];
+let musicClip = "";
 
 const request = <K extends Parameters<DaemonConnection["request"]>[0]>(method: K, params: Record<string, unknown> = {}) =>
   conn.request(method, { cwd: project, ...params } as never) as Promise<never>;
@@ -76,6 +77,7 @@ beforeAll(async () => {
   }
   const audio = ((await request("track.add", { kind: "audio" })) as { changes: { added: string[] } }).changes.added[0]!;
   const music = ((await request("clip.add", { track: audio, asset: musicAsset, start: 0, out: 11 })) as { changes: { added: string[] } }).changes.added[0]!;
+  musicClip = music;
   await request("tempo.set", { clip: music });
 }, MEDIA_TIMEOUT);
 
@@ -116,3 +118,79 @@ describe("music.grid", () => {
     await expect(grid({ skip: ["g7"] })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "skip" } });
   });
 });
+
+const shapeOf = () => {
+  const clip = timelineFile().tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === musicClip) as unknown as { audio?: { shape?: { drops?: number[] } } };
+  return clip.audio?.shape?.drops;
+};
+
+describe("music.grid and the hits of music.shape", () => {
+  it("moves a stored hit with the shot that moved and runs the shaping again in the same transaction", async () => {
+    const shaped = (await request("music.shape", { clip: musicClip, drop: [4, 5] })) as { tx: string };
+    expect(shapeOf()).toEqual([4, 5]);
+    const result = await grid();
+    expect(result.shape).toEqual({ clip: musicClip, drops: [{ from: 5, to: 5.1 }], rerun: true });
+    expect(result.warnings.join(" ")).toMatch(/hits that moved with their shots \(5 to 5\.1 s\)/);
+    // 4 s sits in the shot before the cut that moved (the 2.1 cut is blocked and stays), so only 5 s follows.
+    expect(shapeOf()).toEqual([4, 5.1]);
+    const history = (await request("history", { timeline: "main" })) as { transactions: { tx: string; operations: { op: string }[] }[] };
+    expect(history.transactions.at(-1)!.tx).toBe(result.tx);
+    expect(history.transactions.at(-1)!.operations.at(-1)!.op).toBe("music.shape");
+    await request("revert", { target: result.tx });
+    expect(shapeOf()).toEqual([4, 5]);
+    await request("revert", { target: shaped.tx });
+  }, MEDIA_TIMEOUT);
+
+  it("leaves the hits where they are with skip shape, and says so", async () => {
+    const shaped = (await request("music.shape", { clip: musicClip, drop: [5] })) as { tx: string };
+    const result = await grid({ skip: ["shape"] });
+    expect(result.shape).toEqual({ clip: musicClip, drops: [{ from: 5, to: 5.1 }], rerun: false });
+    expect(result.warnings.join(" ")).toMatch(/skipped; run `music shape` again/);
+    expect(shapeOf()).toEqual([5]);
+    await request("revert", { target: result.tx });
+    await request("revert", { target: shaped.tx });
+  }, MEDIA_TIMEOUT);
+
+  it("trim head rolls the cut: the shot before grows, the shot after loses its head and nothing else moves", async () => {
+    const shaped = (await request("music.shape", { clip: musicClip, drop: [5] })) as { tx: string };
+    const result = await grid({ trim: "head" });
+    expect(result).toMatchObject({ applied: true, trim: "head", tracks: "all", moved: 1, durationChange: 0, shape: null });
+    expect([placed(shots[0]!), placed(shots[1]!), placed(shots[2]!)]).toEqual([
+      { start: 0, end: 2.1 },
+      { start: 2.1, end: 4.5 },
+      // Its head went 0.1 s, its tail stays on 6.4 s: it did not shift.
+      { start: 4.5, end: 6.4 },
+    ]);
+    // No shot changed its time: the hit at 5 s stays.
+    expect(shapeOf()).toEqual([5]);
+    await request("revert", { target: result.tx });
+    await request("revert", { target: shaped.tx });
+    expect(placed(shots[2]!)).toEqual({ start: 4.4, end: 6.4 });
+  }, MEDIA_TIMEOUT);
+
+  it("a roll that would cut a word at the edge is blocked like a ripple", async () => {
+    const result = await grid({ trim: "head", dryRun: true });
+    expect(result.cuts[0]).toMatchObject({ at: 2.1, status: "blocked" });
+    expect(result.cuts[0]!.reason).toMatch(/would cut "okay" from the end of/);
+  }, MEDIA_TIMEOUT);
+});
+
+describe("music.shape endOnBar", () => {
+  // Bars start at 0.5 s and every 2 s after: 2.5, 4.5, 6.5, 8.5.
+  it("ends the closing fade on the nearest bar start", async () => {
+    const result = (await request("music.shape", { clip: musicClip, ending: 5, fade: 2, endOnBar: true, dryRun: true })) as { ending: number; endsAt: number; settings: { fade: number }; warnings: string[] };
+    expect(result).toMatchObject({ ending: 5, endsAt: 6.5, settings: { fade: 1.5 } });
+    expect(result.warnings.join(" ")).toMatch(/ends on bar line 6\.5 s \(bar:4\): 1\.5 s instead of 2 s/);
+  }, MEDIA_TIMEOUT);
+
+  it("changes nothing when the fade already ends on a bar", async () => {
+    const result = (await request("music.shape", { clip: musicClip, ending: 4, fade: 2.5, endOnBar: true, dryRun: true })) as { endsAt: number; settings: { fade: number }; warnings: string[] };
+    expect(result).toMatchObject({ endsAt: 6.5, settings: { fade: 2.5 } });
+    expect(result.warnings.join(" ")).not.toMatch(/bar line/);
+  }, MEDIA_TIMEOUT);
+
+  it("needs an ending", async () => {
+    await expect(request("music.shape", { clip: musicClip, drop: [5], endOnBar: true, dryRun: true })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "endOnBar", field: "ending" } });
+  });
+});
+

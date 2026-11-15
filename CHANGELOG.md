@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Music fit follow-ups of #485 (ADR 0037 "Follow-ups as built", epic #451; protocol 152): `music shape --ending <time>
+  --end-on-bar` (MCP `music_shape` `endOnBar`; result `endsAt`) stretches or shrinks the closing fade so it ends on the
+  bar start of the grid nearest to `--ending + --fade`. `music grid` carries the hits stored by `music shape` with the
+  shots that moved (result `shape`: the shaping, keys and builds, runs again in the same transaction before the duck;
+  `--skip shape` leaves them). `music grid --trim head` (`trim: "head"`) moves a cut as a roll edit (tail before it and
+  head after it trimmed to the beat, nothing ripples), and `--tracks all` (default; `video` keeps the old behaviour)
+  also reads program-track shot changes (`kind: "program"`, always rolled, since the group clock keeps running) and
+  entries of clips alone on upper video tracks (`kind: "entry"`, moved whole). Each cut of the result gains `kind`, and
+  `out` is null for an entry.
 - Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 151): `voiceover place
   --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
   times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499

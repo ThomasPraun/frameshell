@@ -157,6 +157,7 @@ export const MusicShapeResultSchema = z.object({
   cleared: z.boolean().describe("True when the call removed the clip's music keys (`clear`)."),
   drops: z.array(z.number()).describe("Timeline seconds of the hits the music steps down before, resolved and sorted; hits outside the clip are left out (a warning says so)."),
   ending: z.number().nullable().describe("Timeline seconds the closing fade begins; null when none."),
+  endsAt: z.number().nullable().describe("Timeline seconds the closing fade is over (`ending + settings.fade`); a bar start of the grid with `endOnBar`; null when there is no ending."),
   settings: z
     .object({
       drops: z.array(z.number()).optional(),
@@ -215,13 +216,25 @@ export const MUSIC_GRID_MAX_SHIFT_DEFAULT_S = 0.25;
 /** Largest `maxShift` a call may ask for, seconds. */
 export const MUSIC_GRID_MAX_SHIFT_LIMIT_S = 2;
 
-/** One picture cut of the timeline and what grid moves do with it. */
+/** How a grid move edits the clips at a cut (`trim`). */
+export const MusicGridTrimSchema = z.enum(["tail", "head"]);
+
+/** Which tracks grid moves read: every picture track and upper-track entries (`all`), or the cuts of video tracks only. */
+export const MusicGridTracksSchema = z.enum(["all", "video"]);
+
+/** One picture cut (or upper-track entry) of the timeline and what grid moves do with it. */
 export const MusicGridCutSchema = z.object({
   id: z.string().nullable().describe("`g1`, `g2`… in time order for a cut off the grid within `maxShift` (a move `skip` can name); null otherwise."),
-  at: z.number().describe("Timeline seconds of the cut before the moves."),
-  track: z.string().describe("Video track the cut is on (the first in track order when several cut on the same frame)."),
-  out: z.string().describe("Clip before the cut: its tail is trimmed to move the cut."),
-  in: z.string().describe("Clip after the cut: it moves with the cut, unchanged."),
+  kind: z
+    .enum(["cut", "program", "entry"])
+    .describe(
+      "`cut`: two clips of a video track meet. `program`: two shots of a program track (a multicam angle change) meet; always moved as a roll edit. " +
+        "`entry`: a clip alone on an upper video track (a title or an overlay appearing) starts; it is moved whole, nothing else changes.",
+    ),
+  at: z.number().describe("Timeline seconds of the cut (an entry: of the clip's first frame) before the moves."),
+  track: z.string().describe("Track the cut is on (the first in track order when several cut on the same frame)."),
+  out: z.string().nullable().describe("Clip before the cut: its tail is trimmed to move the cut; null for an entry."),
+  in: z.string().describe("Clip after the cut: it moves with the cut (head trimmed with `trim: head`, program shots always); for an entry, the clip that moves."),
   beat: z.number().nullable().describe("Timeline seconds of the nearest beat (bar start with `to: \"bar\"`); null when the grid has none within a beat."),
   ref: z.string().nullable().describe("That beat as a time reference, e.g. `beat:17` or `bar:5`; null with `beat`."),
   shiftMs: z.number().nullable().describe("`beat - at` in milliseconds: how far the cut is off the grid (negative: it moves earlier)."),
@@ -245,6 +258,8 @@ export const MusicGridResultSchema = z.object({
   tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
   to: z.enum(["beat", "bar"]).describe("What cuts move onto."),
   maxShift: z.number().describe("Seconds a cut may move."),
+  trim: MusicGridTrimSchema.describe("How video cuts move: `tail` ripples, `head` rolls. Program cuts always roll."),
+  tracks: MusicGridTracksSchema.describe("`all`: program cuts and upper-track entries were read too. `video`: video cuts only."),
   grid: z.object({
     source: z.enum(["beats", "nominal"]).describe("`beats`: measured, from the music's beats file. `nominal`: from a BPM."),
     bpm: z.number(),
@@ -266,6 +281,14 @@ export const MusicGridResultSchema = z.object({
     })
     .nullable()
     .describe("Set when the music clip carries `auto: \"duck\"` keys and cuts moved; null otherwise."),
+  shape: z
+    .object({
+      clip: z.string().describe("The music clip whose `music.shape` hits moved."),
+      drops: z.array(z.object({ from: z.number(), to: z.number() })).describe("Hits (timeline seconds) that moved with their shot: where they were stored and where they are now."),
+      rerun: z.boolean().describe("True when `music.shape` ran again in the same transaction (keys and builds on the new times)."),
+    })
+    .nullable()
+    .describe("Set when the music clip's stored `music.shape` hits sit in shots that moved; null otherwise."),
   warnings: z.array(z.string()),
 });
 
