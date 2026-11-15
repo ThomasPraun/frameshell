@@ -77,7 +77,7 @@ export const timelineMethods = {
       "program track's pictures out (the tracks below show through, its sound still plays); false undoes either. " +
       "`behind: \"<plate track>\"` puts a video track's pictures behind the person in front on a lower video track (ADR 0032): " +
       "a big word or a logo between the background and the person. Export draws the plate's media clips again above this " +
-      "track through each asset's subject matte (`matte.prepare`), waiting for a matte that is not made yet (about 1.5 min " +
+      "track through each asset's subject matte (`matte.prepare`), waiting for a matte that is not made yet (about 2 min " +
       "per min of video); the preview does not show it yet. Keep the word 30-55 % covered and never over the face. " +
       "`behind: null` clears it; removing or moving the plate track so it is no longer below clears it too, with a warning. " +
       "`format` (ADR 0027, a format other than the primary) with `style` sets a subtitle track's captions in that format only, " +
@@ -348,11 +348,13 @@ export const timelineMethods = {
       "Compute the subject matte of a video asset (ADR 0032): which pixels of each frame are the person in front, so text " +
       "or graphics can later sit behind them. Locally on CPU: MediaPipe's selfie segmenter (Apache-2.0; the first run " +
       "downloads 0.5 MB, plus ONNX Runtime Web, 33 MB, if face detection never ran) on every frame of the asset's proxy, " +
-      "smoothed over time and snapped to the picture's edges. The whole asset is matted once per content: the result is a " +
+      "smoothed over time and snapped to the picture's colour edges. The whole asset is matted once per content: the result is a " +
       "grayscale video at proxy size (white = subject, black = background, same frames as the proxy) cached in " +
-      "`.frameshell/cache/mattes/` (regenerable, swept by `gc`); a later call returns it at once (`cached: true`). " +
-      "Waits for the asset's ingest when its proxy is not built yet. Takes an estimated 1.5 minutes per minute of 30 fps video " +
-      "on an Apple M3 (`progress` notifications carry an ETA). It runs as a background job of kind `matte` (`job.list`), so " +
+      "`.frameshell/cache/mattes/` (regenerable, swept by `gc`); a later call returns it at once (`cached: true`). A source " +
+      "with a short side above 1080 px (1440p, 4K) also gets a matte refined on its own frames at its own size (short side " +
+      "at most 2160), which export uses (`full`). " +
+      "Waits for the asset's ingest when its proxy is not built yet. Takes an estimated 2 minutes per minute of 30 fps video, " +
+      "about 11 more for a 4K source's full-size matte, on an Apple M3 (`progress` notifications carry an ETA). It runs as a background job of kind `matte` (`job.list`), so " +
       "it goes on if the caller disconnects. Known limits: one merged matte for two or more people; thin hair strands " +
       "and mic stands are often left out. Export and frame captures use it for tracks `behind` a plate (`track.set`) and make " +
       "it when missing; calling this first lets them start at once. " +
@@ -376,7 +378,14 @@ export const timelineMethods = {
       size: z.object({ width: z.int(), height: z.int() }).describe("Matte pixels: the proxy's size (short side at most 540)."),
       fps: z.number().describe("Frames per second: the project fps, as the proxy."),
       frames: z.int().describe("Frames in the matte."),
-      cached: z.boolean().describe("True when the matte of this content existed already and nothing was computed."),
+      full: z
+        .object({
+          matte: z.string().describe("Project-relative matte video, `.frameshell/cache/mattes/<key>.full.mp4`, encoded as `matte`."),
+          size: z.object({ width: z.int(), height: z.int() }).describe("Matte pixels: the source's size, short side at most 2160."),
+        })
+        .nullable()
+        .describe("Full-size matte export uses, frame N = proxy frame N; null for a source with a short side of 1080 px or less."),
+      cached: z.boolean().describe("True when the mattes of this content existed already and nothing was computed."),
       seconds: z.number().describe("Seconds it took to compute (when it was computed, for a cached one)."),
     }),
   },

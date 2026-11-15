@@ -105,6 +105,8 @@ import {
 } from "./binaries/manifest.js";
 import { matteKey, mattePaths, readMatteInfo, type MatteInfo } from "./matte/cache.js";
 import { computeMatte } from "./matte/job.js";
+import type { PlaneSize } from "./matte/refine.js";
+import { fullMatteSize } from "./matte/video.js";
 import { MATTE_MODEL_PIN } from "./matte/models.js";
 import { workerSegmentEngine } from "./segment/engine.js";
 import type { SegmentEngine } from "./segment/segmenter.js";
@@ -193,6 +195,9 @@ export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../packag
 
 /** Five minutes: long enough to span an agent's think time between CLI calls. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+
+/** An ingested asset's content and proxy, and the size of the full-size matte to make too (null: none). */
+type MatteReady = { hash: string; proxy: string; full: PlaneSize | null };
 
 /** Options for {@link startDaemon}. */
 export interface DaemonOptions {
@@ -705,10 +710,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     audioFx,
     mattes: {
       prepare: async (dir, assets) => {
-        const ready: { asset: string; hash: string; proxy: string }[] = [];
+        const ready: ({ asset: string } & MatteReady)[] = [];
         for (const asset of assets) {
-          const { hash, proxy } = await media.ingested(dir, asset);
-          if (proxy) ready.push({ asset, hash, proxy });
+          const { hash, proxy, media: probe } = await media.ingested(dir, asset);
+          if (proxy) ready.push({ asset, hash, proxy, full: probe.video ? fullMatteSize(probe.video) : null });
         }
         return {
           assets: ready.map((one) => one.asset),
@@ -717,7 +722,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             for (const [index, one] of ready.entries()) {
               const share = (fraction: number) => onProgress?.((index + fraction) / ready.length);
               const made = await makeMatte(dir, one.asset, one, { signal, onProgress: share });
-              found.set(one.asset, { path: join(dir, ...mattePaths(made.key).video.split("/")), width: made.info.width, height: made.info.height });
+              // A large source's own full-size matte when it has one (ADR 0032 decision 9 as built).
+              const [variant, info] = made.full ? (["full", made.full] as const) : (["proxy", made.info] as const);
+              found.set(one.asset, { path: join(dir, ...mattePaths(made.key, variant).video.split("/")), width: info.width, height: info.height });
             }
             onProgress?.(1);
             return found;
@@ -1181,17 +1188,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
   };
   /** Mattes being made, by canonical root and cache key, with whether they were found made already. */
-  const matting = new Map<string, Promise<{ info: MatteInfo; cached: boolean }>>();
+  const matting = new Map<string, Promise<{ info: MatteInfo; full: MatteInfo | null; cached: boolean }>>();
   /**
-   * The matte of asset `rel`, ingested as `ready` (ADR 0032), made now when it is missing. Takes no slot of the
-   * job queue, so a render job can wait for it; a matte another caller is making is waited for, not made twice.
+   * The matte of asset `rel`, ingested as `ready` (ADR 0032), made now when it is missing, with its full-size one
+   * when `ready.full` asks for it. Takes no slot of the job queue, so a render job can wait for it; a matte another
+   * caller is making is waited for, not made twice.
    */
   const makeMatte = async (
     dir: string,
     rel: string,
-    ready: { hash: string; proxy: string },
+    ready: MatteReady,
     deps: { signal?: AbortSignal | undefined; onProgress?: ((fraction: number) => void) | undefined; report?: (update: Progress) => void },
-  ): Promise<{ key: string; info: MatteInfo; cached: boolean }> => {
+  ): Promise<{ key: string; info: MatteInfo; full: MatteInfo | null; cached: boolean }> => {
     const fps = (await readEnclosingProject(dir))?.config.fps ?? 30;
     const key = matteKey(ready.hash, matteModel, fps);
     const slot = `${canonicalPathSync(dir)}\0${key}`;
@@ -1200,11 +1208,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const tell = deps.report ?? (() => {});
     const run = (async () => {
       const known = await readMatteInfo(dir, key, ready.hash);
-      if (known) return { info: known, cached: true };
+      const knownFull = ready.full ? await readMatteInfo(dir, key, ready.hash, "full") : null;
+      if (known && (!ready.full || knownFull)) return { info: known, full: knownFull, cached: true };
       const overrides = await projectBinaries(dir);
-      const info = await computeMatte(
+      const made = await computeMatte(
         dir,
-        { asset: rel, hash: ready.hash, proxy: ready.proxy, fps, model: matteModel },
+        { asset: rel, hash: ready.hash, proxy: ready.proxy, fps, model: matteModel, proxyMatte: !known, full: knownFull ? null : ready.full },
         {
           ffmpeg: () => binaries.ensure("ffmpeg", overrides, { onProgress: tell }),
           ffprobe: () => binaries.ensure("ffprobe", overrides, { onProgress: tell }),
@@ -1220,7 +1229,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           signal: deps.signal ?? new AbortController().signal,
         },
       );
-      return { info, cached: false };
+      return { info: known ?? made.proxy!, full: knownFull ?? made.full, cached: false };
     })();
     matting.set(slot, run);
     try {
@@ -1233,7 +1242,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
    * Queue the `matte` job of asset `rel` (or join the one queued or running) and wait for it: `matte.prepare` and the
    * preview's `matte.status` share it, so a matte is never made twice.
    */
-  const matteInJob = (dir: string, rel: string, ready: { hash: string; proxy: string }, report?: (update: Progress) => void) =>
+  const matteInJob = (dir: string, rel: string, ready: MatteReady, report?: (update: Progress) => void) =>
     inJob({ kind: "matte", project: dir, asset: rel }, async (ctx) => {
       ctx.update({ step: "matte", progress: 0, cached: false });
       // Made already when a job or an export of the same content finished while this one waited.
@@ -3174,7 +3183,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const proxy = ready.proxy;
       const fps = project?.config.fps ?? 30;
       const key = matteKey(ready.hash, matteModel, fps);
-      const describe = (info: MatteInfo, cached: boolean): MethodResult<"matte.prepare"> => ({
+      const full = fullMatteSize(probe.video);
+      const describe = (info: MatteInfo, fullInfo: MatteInfo | null, cached: boolean): MethodResult<"matte.prepare"> => ({
         asset: rel,
         hash: ready.hash,
         model: matteModel,
@@ -3182,11 +3192,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         size: { width: info.width, height: info.height },
         fps: info.fps,
         frames: info.frames,
+        full: fullInfo ? { matte: mattePaths(key, "full").video, size: { width: fullInfo.width, height: fullInfo.height } } : null,
         cached,
         seconds: info.seconds,
       });
       const known = await readMatteInfo(dir, key, ready.hash);
-      if (known) return describe(known, true);
+      const knownFull = full ? await readMatteInfo(dir, key, ready.hash, "full") : null;
+      if (known && (!full || knownFull)) return describe(known, knownFull, true);
       // The caller may be gone (the job outlives it): its progress is then dropped.
       const tell = (update: Progress) => {
         try {
@@ -3195,8 +3207,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           // Connection closed.
         }
       };
-      const made = await matteInJob(dir, rel, { hash: ready.hash, proxy }, tell);
-      return describe(made.info, made.cached);
+      const made = await matteInJob(dir, rel, { hash: ready.hash, proxy, full }, tell);
+      return describe(made.info, made.full, made.cached);
     },
     "matte.status": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
@@ -3221,7 +3233,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           mattes.push({ ...base, state: "waiting" });
           continue;
         }
-        const ready = { hash: info.hash, proxy: info.proxy };
+        // The preview draws the proxy-size matte only; export makes the full-size one when it needs it.
+        const ready = { hash: info.hash, proxy: info.proxy, full: null };
         const key = matteKey(ready.hash, matteModel, fps);
         if (await readMatteInfo(dir, key, ready.hash)) {
           mattes.push({ ...base, state: "ready", matte: mattePaths(key).video, progress: 1 });

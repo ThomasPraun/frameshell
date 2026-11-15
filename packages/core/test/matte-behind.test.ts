@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
@@ -128,6 +129,60 @@ describe("tracks behind a subject (ADR 0032)", () => {
       expect(jobs).toEqual([expect.objectContaining({ state: "done", asset: "assets/mover.mp4" })]);
       // One matte, never made twice: `matte.prepare` finds the same file.
       expect(await conn.request("matte.prepare", { cwd: fresh, asset: "assets/mover.mp4" })).toMatchObject({ cached: true, matte: found[0]!.matte });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "a plate above 1080p: the preview's matte is proxy size, export makes and draws through a full-size one",
+    async () => {
+      const fresh = tempDir();
+      await conn.request("project.init", { dir: fresh });
+      // A 480 px square on 2560x1440 black, its left edge still at 600 px.
+      await makeMarkerClip(ffmpeg, join(footage, "big.mp4"), { width: 2560, height: 1440, box: 480, durationS: 1, x: "600" });
+      await conn.request("asset.import", { cwd: fresh, files: ["big.mp4", "word.png"].map((name) => join(footage, name)) });
+      const plate = (await conn.request("track.add", { cwd: fresh, kind: "video" })).changes.added[0]!;
+      const word = (await conn.request("track.add", { cwd: fresh, kind: "video" })).changes.added[0]!;
+      await conn.request("clip.add", { cwd: fresh, track: plate, asset: "assets/big.mp4", start: 0, in: 0, out: 1 });
+      await conn.request("clip.add", { cwd: fresh, track: word, asset: "assets/word.png", start: 0, duration: 1 });
+      await conn.request("track.set", { cwd: fresh, track: word, behind: plate });
+      let found = (await conn.request("matte.status", { cwd: fresh, timeline: "main" })).mattes;
+      for (const deadline = Date.now() + 180_000; found[0]?.state !== "ready" && found[0]?.state !== "failed" && Date.now() < deadline; ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        found = (await conn.request("matte.status", { cwd: fresh, timeline: "main" })).mattes;
+      }
+      expect(found[0]).toMatchObject({ state: "ready" });
+      const proxyMatte = found[0]!.matte!;
+      const fullMatte = proxyMatte.replace(/\.mp4$/, ".full.mp4");
+      expect(existsSync(join(fresh, ...fullMatte.split("/")))).toBe(false);
+
+      // The square spans x 600-1080 of 2560 (75-135 of 320), centered at y 90.
+      const out = join(tempDir(), "big.png");
+      await conn.request("frame", { cwd: fresh, at: 0.5, out });
+      expect(existsSync(join(fresh, ...fullMatte.split("/")))).toBe(true);
+      const lifted = await picture(out);
+      expect(white(lifted.at(105, 90))).toBe(true);
+      expect(red(lifted.at(280, 90))).toBe(true);
+      expect(red(lifted.at(105, 20))).toBe(true);
+
+      const prepared = await conn.request("matte.prepare", { cwd: fresh, asset: "assets/big.mp4" });
+      expect(prepared).toMatchObject({ cached: true, matte: proxyMatte, size: { width: 960, height: 540 }, full: { matte: fullMatte, size: { width: 2560, height: 1440 } } });
+      // Frame 15 (0.5 s), row 720: the full-size matte steps from 0 to 255 between two pixels at both edges of the
+      // square; the proxy-size matte scaled up as export used to scale it leaves soft pixels there.
+      const row = async (file: string, filter: string) => {
+        const bytes = await runBuffer(ffmpeg, ["-v", "error", "-i", join(fresh, ...file.split("/")), "-vf", `select=eq(n\\,15),${filter}`, "-frames:v", "1", "-f", "rawvideo", "-"]);
+        expect(bytes.length).toBe(2560 * 1440);
+        return bytes.subarray(720 * 2560, 721 * 2560);
+      };
+      const full = await row(fullMatte, "format=gray");
+      const scaled = await row(proxyMatte, "extractplanes=y,scale=2560:1440,format=gray");
+      expect([full[599]! < 10, full[600]! > 245, full[1079]! > 245, full[1080]! < 10]).toEqual([true, true, true, true]);
+      const soft = (line: Uint8Array) => line.filter((v) => v > 10 && v < 245).length;
+      expect(soft(full)).toBe(0);
+      expect(soft(scaled)).toBeGreaterThan(0);
+      // Same frames as the proxy: 1 s at the project's 30 fps.
+      const record = JSON.parse(readFileSync(join(fresh, ...fullMatte.replace(/\.mp4$/, ".json").split("/")), "utf8")) as { frames: number };
+      expect([record.frames, prepared.frames]).toEqual([30, 30]);
     },
     MEDIA_TIMEOUT,
   );

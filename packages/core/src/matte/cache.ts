@@ -9,20 +9,27 @@ import { RECIPE_VERSION, fpsRational } from "../media/recipe.js";
 /** Project-relative cache directory of subject mattes (regenerable, `gc`-swept). */
 export const MATTES_DIR = ".frameshell/cache/mattes";
 
-/** Bump when the refinement, the smoothing or the file layout changes: it is part of the cache key. */
-export const MATTE_VERSION = 1;
+/**
+ * Bump when the refinement, the smoothing, the full-size rule or the file layout changes: it is part of the cache
+ * key. 2: colour guide, full-size mattes of sources above 1080p.
+ */
+export const MATTE_VERSION = 2;
+
+/** Which matte of a key: at proxy size (preview, export of smaller sources) or at the source's size (export). */
+export type MatteVariant = "proxy" | "full";
 
 /**
  * Cache key of the matte of content `hash` (`sha256:<hex>`) made by `model` (`<id>@<revision>`, or
- * `stand-in`) on the proxy grid of `fps`. Its files are `<key>.mp4` and `<key>.json` in {@link MATTES_DIR}.
- * The proxy recipe is in the key: a matte follows its proxy's frames and size.
+ * `stand-in`) on the proxy grid of `fps`. Its files are `<key>.mp4` and `<key>.json` in {@link MATTES_DIR}, and
+ * `<key>.full.mp4` and `<key>.full.json` for the full-size one. The proxy recipe is in the key: a matte follows its
+ * proxy's frames.
  */
 export function matteKey(hash: string, model: string, fps: number): string {
   const setup = createHash("sha256").update(`${model}\0${fpsRational(fps)}\0${RECIPE_VERSION}`).digest("hex").slice(0, 8);
   return `${hash.replace(/^sha256:/, "").slice(0, 20)}-m${MATTE_VERSION}-${setup}`;
 }
 
-const MATTE_FILE = /^([0-9a-f]{20}-m\d+-[0-9a-f]{8})\.(mp4|json)$/;
+const MATTE_FILE = /^([0-9a-f]{20}-m\d+-[0-9a-f]{8})(?:\.full)?\.(mp4|json)$/;
 /** Encoder output before its rename (`.partial`), atomic-write temps (`.tmp`), the smoothing scratch file (`.coarse`). */
 const MATTE_TEMP = /^[0-9a-f]{20}-m\d+-[0-9a-f]{8}\..+\.(partial|tmp|coarse)$/;
 
@@ -53,17 +60,18 @@ const MatteInfoSchema = z.object({
 /** What `<key>.json` says about a finished matte. Written after the video: its presence marks it complete. */
 export type MatteInfo = z.infer<typeof MatteInfoSchema>;
 
-/** Project-relative paths of the matte with cache key `key`. */
-export function mattePaths(key: string): { video: string; info: string } {
-  return { video: `${MATTES_DIR}/${key}.mp4`, info: `${MATTES_DIR}/${key}.json` };
+/** Project-relative paths of the `variant` matte with cache key `key`. */
+export function mattePaths(key: string, variant: MatteVariant = "proxy"): { video: string; info: string } {
+  const stem = `${MATTES_DIR}/${key}${variant === "full" ? ".full" : ""}`;
+  return { video: `${stem}.mp4`, info: `${stem}.json` };
 }
 
 /**
- * The finished matte with cache key `key` of content `hash` under `root`, or null when there is none, its
+ * The finished `variant` matte with cache key `key` of content `hash` under `root`, or null when there is none, its
  * record is damaged, or it is another content's (keys keep 20 hex digits of the hash).
  */
-export async function readMatteInfo(root: string, key: string, hash: string): Promise<MatteInfo | null> {
-  const { video, info } = mattePaths(key);
+export async function readMatteInfo(root: string, key: string, hash: string, variant: MatteVariant = "proxy"): Promise<MatteInfo | null> {
+  const { video, info } = mattePaths(key, variant);
   const text = await readFile(join(root, ...info.split("/")), "utf8").catch(() => null);
   if (text === null) return null;
   let parsed: MatteInfo;
@@ -77,7 +85,7 @@ export async function readMatteInfo(root: string, key: string, hash: string): Pr
   return (await exists(join(root, ...video.split("/")))) ? parsed : null;
 }
 
-/** Mark the matte with cache key `key` complete: its video is in place already. */
-export async function writeMatteInfo(root: string, key: string, info: MatteInfo): Promise<void> {
-  await writeJsonAtomic(join(root, ...mattePaths(key).info.split("/")), info);
+/** Mark the `variant` matte with cache key `key` complete: its video is in place already. */
+export async function writeMatteInfo(root: string, key: string, info: MatteInfo, variant: MatteVariant = "proxy"): Promise<void> {
+  await writeJsonAtomic(join(root, ...mattePaths(key, variant).info.split("/")), info);
 }
