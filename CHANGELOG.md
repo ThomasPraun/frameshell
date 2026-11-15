@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Brand pictures in motion templates, the last slice of #467 (ADR 0044, epic #451; no protocol change):
+  `frameshell hyperframes new <name> --template <t> --component [<prop>=]<path>` copies a picture `brand.json` lists
+  (a captured logo, icon, screenshot or `section-*.png` crop, or a Figma frame) into the composition as
+  `brand/<id>/<file>` and makes it the default of the template's image prop (`logo`, `screenshot`, `picture`,
+  `before`/`after`, `label`). Fonts and files `brand.json` does not list are refused before anything is written. For a
+  Figma frame the output also gives its place at the folder's one scale on this canvas; while `credits.json` has no
+  licence for the source, it says so, since `frameshell credits` does not check files inside a composition. The
+  Frameshell skill gains a brand page (`reference/brand.md`: capture, findings listed before use, credits, fonts,
+  Figma, `--component`).
+
 - Letterbox per format, slice 4 of #500 (ADR 0043 and ADR 0027 decision 14, epic #451; protocol 148): `letterbox set <aspect>
   --format 9x16` (and `letterbox clear --format`; daemon and MCP `letterbox.set` `format`) gives one format its own black
   bars, stored in the timeline's `formats`; a format without an entry still draws none, and export, `frame` and the
@@ -1034,6 +1044,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `brand import-figma` sanitises the folder in a worker thread (#467): a synthetic 13 MB frame took 4.7 s on a loaded
+  host, long enough to stall every other daemon call.
 - Internal: the daemon method registry is split into one module per area under `packages/protocol/src/methods/`
   and merged into `methods` with a declared `MethodRegistry` type (#517), so its emitted declaration no longer grows
   with every schema (TypeScript TS7056 limit). Wire, `PROTOCOL_VERSION`, method names, params, results, MCP tools and

@@ -271,6 +271,7 @@ export {
   BrandManifestSchema,
   FIGMA_FRAME_WIDTH,
   createBrandManifest,
+  fitFrames,
   parseBrandManifest,
 } from "./brand.js";
 export { type PaintChange, paintStretches } from "./painted.js";

@@ -26,7 +26,8 @@ import { sceneBackground } from "./scene-background.js";
 import { terminal } from "./terminal.js";
 import { typingField } from "./typing-field.js";
 
-export { type FontSetup, type Template, type TemplateInput, type TemplateVariable, fontSetup } from "./kit.js";
+export { type FontSetup, type Template, type TemplateInput, type TemplateVariable, fontSetup, withComponents } from "./kit.js";
+export { type BrandComponent, type ComponentPick, pickComponents, placeFrame, readComponents } from "./components.js";
 export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 

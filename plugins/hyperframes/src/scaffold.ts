@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/plugin-api";
 import { projectResolution } from "./frame-size.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "./motion-runtime.js";
-import { TEMPLATES, type Template, type TemplateVariable, findTemplate, fontSetup, readTokens, usesThree } from "./templates/index.js";
+import { type ComponentPick, componentExists, pickComponents, placeFrame, readComponents, recordedLicence } from "./templates/components.js";
+import { TEMPLATES, type Template, type TemplateVariable, findTemplate, fontSetup, readTokens, usesThree, withComponents } from "./templates/index.js";
 import { THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "./three-runtime.js";
 
 /** Composition name: becomes a directory and the composition id. */
@@ -14,9 +15,11 @@ interface NewArgs {
   name: string;
   duration: number | undefined;
   template: Template | undefined;
+  /** `--component` values as given, in order. */
+  components: string[];
 }
 
-const USAGE = `usage: frameshell hyperframes new <name> [--template <${TEMPLATES.map((t) => t.id).join("|")}>] [--duration <seconds>]; <name> is lowercase letters, digits and dashes, e.g. \`intro\``;
+const USAGE = `usage: frameshell hyperframes new <name> [--template <${TEMPLATES.map((t) => t.id).join("|")}>] [--component [<prop>=]<brand file>]... [--duration <seconds>]; <name> is lowercase letters, digits and dashes, e.g. \`intro\``;
 
 function parseArgs(args: readonly string[]): NewArgs {
   const [name, ...rest] = args;
@@ -25,6 +28,7 @@ function parseArgs(args: readonly string[]): NewArgs {
   }
   let duration: number | undefined;
   let template: Template | undefined;
+  const components: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
     if (flag === "--duration") {
@@ -34,11 +38,16 @@ function parseArgs(args: readonly string[]): NewArgs {
       const id = rest[++i];
       template = id === undefined ? undefined : findTemplate(id);
       if (!template) throw new Error(`--template takes one of ${TEMPLATES.map((t) => t.id).join(", ")}${id ? `; got ${id}` : ""}`);
+    } else if (flag === "--component") {
+      const value = rest[++i];
+      if (!value) throw new Error("--component takes a picture of `frameshell brand show`, e.g. `--component assets/brand/acme-com/logo-1.svg` (`<prop>=<file>` for a template with several pictures)");
+      components.push(value);
     } else {
       throw new Error(`unknown argument ${flag}; ${USAGE}`);
     }
   }
-  return { name, duration, template };
+  if (components.length > 0 && !template) throw new Error("--component needs --template: the plain scaffold has no picture prop");
+  return { name, duration, template, components };
 }
 
 /**
@@ -49,7 +58,8 @@ function parseArgs(args: readonly string[]): NewArgs {
  * composition painted by the Frameshell motion runtime, which is copied next
  * to it (frozen per composition; `hyperframes update` refreshes it), with typed
  * props and the brand values of `style.json` as their defaults. A 3D template
- * also gets the pinned three.js bundle the same way (ADR 0042). Never overwrites.
+ * also gets the pinned three.js bundle the same way (ADR 0042). `--component` fills an image prop with a
+ * picture of `brand.json`, copied into the composition (ADR 0044). Never overwrites.
  */
 export const newComposition: PluginCommand = {
   description: "Scaffold compositions/hyperframes/<name>/index.html at the project resolution (--template for a motion template)",
@@ -61,7 +71,8 @@ export const newComposition: PluginCommand = {
     const dir = join(project.dir, "compositions", "hyperframes", name);
     const entry = `compositions/hyperframes/${name}/index.html`;
     const tokens = await readTokens(project.dir);
-    const input = { id: name, width, height, duration, tokens };
+    const picks = template && parsed.components.length > 0 ? await brandPicks(project.dir, template, parsed.components, { id: name, width, height, duration, tokens }) : [];
+    const input = { id: name, width, height, duration, tokens, components: Object.fromEntries(picks.map((pick) => [pick.prop, pick.file])) };
     await mkdir(dir, { recursive: true });
     try {
       await writeFile(join(dir, "index.html"), template ? template.render(input) : plainHtml(name, width, height, duration), { flag: "wx" });
@@ -83,7 +94,13 @@ export const newComposition: PluginCommand = {
       await mkdir(dirname(join(dir, to)), { recursive: true });
       await copyFile(join(project.dir, ...from.split("/")), join(dir, to));
     }
-    const variables = template.variables(input);
+    const used: Awaited<ReturnType<typeof componentReport>>[] = [];
+    for (const pick of picks) {
+      await mkdir(dirname(join(dir, pick.file)), { recursive: true });
+      await copyFile(join(project.dir, ...pick.component.path.split("/")), join(dir, ...pick.file.split("/")));
+      used.push(await componentReport(project.dir, pick, { width, height }));
+    }
+    const variables = withComponents(template.variables(input), input.components);
     const lines = [
       `Created ${entry} from the ${template.id} template (${width}x${height}, ${duration} s) with ${MOTION_RUNTIME_FILE} (runtime ${MOTION_RUNTIME_VERSION}, frozen for this clip: \`frameshell hyperframes update\` refreshes it).`,
       ...(three
@@ -96,6 +113,7 @@ export const newComposition: PluginCommand = {
         ? `From style.json: ${tokens.used.join(", ")}. Everything else is a placeholder default.`
         : "No style.json values used: colours, fonts and texts are placeholder defaults.",
       ...(tokens.problem ? [`Note: ${tokens.problem}.`] : []),
+      ...used.flatMap((component) => component.lines),
       "Props (change one with `frameshell clip set <clip> --props '{...}'`):",
       ...variables.map((variable) => `  ${variable.id}  ${describeVariable(variable)}`),
       "Add it to the timeline:",
@@ -112,11 +130,44 @@ export const newComposition: PluginCommand = {
         runtime: MOTION_RUNTIME_VERSION,
         ...(three ? { three: THREE_VERSION } : {}),
         tokens: tokens.used,
+        ...(used.length > 0 ? { components: used.map((component) => component.data) } : {}),
         props: variables,
       },
     };
   },
 };
+
+/** `--component` values resolved against `brand.json` and checked on disk, before anything is written. */
+async function brandPicks(projectDir: string, template: Template, specs: readonly string[], input: Parameters<Template["variables"]>[0]): Promise<ComponentPick[]> {
+  const picks = pickComponents(specs, template.id, template.variables(input), await readComponents(projectDir));
+  for (const { component } of picks) {
+    if (!(await componentExists(projectDir, component.path))) {
+      throw new Error(`--component: ${component.path} is listed in brand.json but missing on disk; capture or import it again`);
+    }
+  }
+  return picks;
+}
+
+/** What the scaffold says about one copied brand picture: output lines and `--json` data. */
+async function componentReport(projectDir: string, pick: ComponentPick, canvas: { width: number; height: number }): Promise<{ lines: string[]; data: Record<string, unknown> }> {
+  const { component, prop, file } = pick;
+  const licence = await recordedLicence(projectDir, component.path);
+  const frame = component.reference && component.width && component.height ? placeFrame({ width: component.width, height: component.height }, component.reference, canvas) : null;
+  const lines = [`Brand picture: ${prop} = ${file} (${component.origin} ${component.role}, ${component.kind}, copied from ${component.path}).`];
+  if (frame) {
+    lines.push(
+      `  Figma frame: the template fits it into its own box. At its folder's one scale on this ${canvas.width}x${canvas.height} canvas it is ` +
+        `scale ${Math.round(frame.scale * 10000) / 10000}, x ${frame.x}, y ${frame.y} (for a composition written by hand).`,
+    );
+  }
+  if (!licence) {
+    lines.push(
+      `  ${component.path} has no licence in credits.json, and \`frameshell credits\` does not check files inside a composition: ` +
+        `ask the person whether this is their brand, then \`frameshell credits set ${component.path} --licence own\`.`,
+    );
+  }
+  return { lines, data: { prop, file, source: component.path, origin: component.origin, role: component.role, kind: component.kind, licence, ...(frame ? { frame } : {}) } };
+}
 
 function describeVariable(variable: TemplateVariable): string {
   const shown = JSON.stringify(variable.default);

@@ -19,7 +19,7 @@ export {
 } from "./adapter.js";
 export { type CheckFinding, type CheckReport, type CheckedComposition, checkCompositions } from "./check.js";
 export { newComposition } from "./scaffold.js";
-export { TEMPLATES, type BrandTokens, type Template, type TemplateVariable, findTemplate, readTokens } from "./templates/index.js";
+export { TEMPLATES, type BrandComponent, type BrandTokens, type Template, type TemplateVariable, findTemplate, readComponents, readTokens } from "./templates/index.js";
 export { type RuntimeStatus, type RuntimeUpdate, type UpdateReport, updateRuntime } from "./update.js";
 
 /** Plugin entry point: registers the `hyperframes` clip type, `frameshell hyperframes new`, `frameshell hyperframes check` and `frameshell hyperframes update`. */
