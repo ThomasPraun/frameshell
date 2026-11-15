@@ -14,7 +14,7 @@ export const MusicFitStepSchema = z.object({
     .enum(["place", "intro", "speed", "fade", "duck", "shape"])
     .describe(
       "`place`: move the clip. `intro`: drop the start of the track (`in` later). `speed`: varispeed (`exact`). `fade`: the 5 ms fade in of the clip's start (`audio.fadeInMs`), written unless the clip already has a fade in. `duck`: run `track.duck` again on the clip's track. " +
-        "`shape`: run `music.shape` again with the settings stored on the clip (`audio.shape`).",
+        "`shape`: run `music.shape` again with the settings stored on the clip (`audio.shape`), its high-pass builds aimed at the hits again.",
     ),
   detail: z.string().describe("One sentence the person can read, e.g. `start 4.2 s -> 6 s`."),
   skippable: z.boolean().describe("True when `skip` may name this id."),
@@ -134,7 +134,13 @@ export const MusicCandidatesResultSchema = z.object({
 
 /** One thing a shaping does. */
 export const MusicShapeStepSchema = z.object({
-  id: z.enum(["fade", "shape", "duck"]).describe("`fade`: the 5 ms fade in of the clip's start (`audio.fadeInMs`), written first unless the clip already has a fade in. `shape`: write the `music` keys. `duck`: run `track.duck` again on the clip's track, since the keys replace its duck keys."),
+  id: z
+    .enum(["fade", "sweep", "shape", "duck"])
+    .describe(
+      "`fade`: the 5 ms fade in of the clip's start (`audio.fadeInMs`), written first unless the clip already has a fade in. " +
+        "`sweep`: write (or remove) the clip's `highpassSweep` build effects (`audio.effects`). `shape`: write the `music` keys. " +
+        "`duck`: run `track.duck` again on the clip's track, since the keys replace its duck keys.",
+    ),
   detail: z.string().describe("One sentence the person can read."),
 });
 
@@ -160,6 +166,10 @@ export const MusicShapeResultSchema = z.object({
       release: z.number().describe("Seconds the level takes to come back."),
       ending: z.number().optional(),
       fade: z.number().describe("Seconds of the closing fade."),
+      build: z
+        .object({ seconds: z.number(), startHz: z.number(), endHz: z.number() })
+        .optional()
+        .describe("The high-pass build asked for (`build`, `buildFrom`, `buildTo`); set when builds were written."),
     })
     .nullable()
     .describe("What was written to the clip's `audio.shape`; null for `clear`."),
@@ -174,6 +184,17 @@ export const MusicShapeResultSchema = z.object({
     })
     .nullable()
     .describe("Set when the clip carried `auto: \"duck\"` keys, which the new keys replace; null otherwise."),
+  sweeps: z
+    .array(
+      z.object({
+        at: z.number().describe("Timeline seconds of the hit the build ends at."),
+        from: z.number().describe("Seconds of the music file (source clock) where the cutoff starts to rise."),
+        to: z.number().describe("Seconds of the music file where the build ends and the full range is back."),
+        startHz: z.number().describe("Cutoff at `from`."),
+        endHz: z.number().describe("Cutoff just before `to`."),
+      }),
+    )
+    .describe("The swept high-pass builds written as `highpassSweep` effects (marked `auto: \"music\"`); empty without `build`."),
   steps: z.array(MusicShapeStepSchema).describe("What the call does or did, in order."),
   warnings: z.array(z.string()),
 });

@@ -155,6 +155,8 @@ const FIELDS = {
   attack: effect(t.inspector.fieldAttack, t.inspector.fieldAttackTitle, "ms", AUDIO_EFFECT_LIMITS.compressor.attack, 1, 1),
   release: effect(t.inspector.fieldRelease, t.inspector.fieldReleaseTitle, "ms", AUDIO_EFFECT_LIMITS.compressor.release, 10, 0),
   makeup: effect(t.inspector.fieldMakeup, t.inspector.fieldMakeupTitle, "dB", AUDIO_EFFECT_LIMITS.compressor.makeup, 0.5, 1),
+  startHz: effect(t.inspector.fieldStartHz, t.inspector.fieldStartHzTitle, "Hz", AUDIO_EFFECT_LIMITS.highpassSweep.startHz, 5, 0),
+  endHz: effect(t.inspector.fieldEndHz, t.inspector.fieldEndHzTitle, "Hz", AUDIO_EFFECT_LIMITS.highpassSweep.endHz, 5, 0),
   reframeX: point(t.inspector.fieldReframeX, t.inspector.fieldReframeXTitle),
   reframeY: point(t.inspector.fieldReframeY, t.inspector.fieldReframeYTitle),
 } satisfies Record<string, FieldSpec>;

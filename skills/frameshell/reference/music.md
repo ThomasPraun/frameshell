@@ -44,6 +44,7 @@ Puts 2 to 7 files under the same picture so the person can pick by ear (MCP `mus
 frameshell music shape <music clip> --drop slam --drop 41.6 --ending 74.2 --dry-run
 frameshell music shape <music clip> --drop slam --drop 41.6 --ending 74.2
 frameshell music shape <music clip> --ending bar:17 --fade 0.3
+frameshell music shape <music clip> --drop slam --build 2
 frameshell music shape <music clip> --clear
 ```
 
@@ -53,7 +54,8 @@ The music steps down **before** a hit instead of ducking after it (MCP `music_sh
 - **With duck.** The shaping replaces the clip's duck keys, so when the clip carries them `duck` runs again in the same transaction with the settings it was run with (`audio.duck`). Both dips hold: the voice ducks the shaped music. Shape before or after `duck`; either order ends the same.
 - **With `music fit`.** The hits are on the picture, the keys on the clip's clock. The times are kept in the clip's `audio.shape`, and `music fit` runs the shaping again after it moves the clip (`--skip shape` leaves the keys; a warning says they no longer line up). A hit outside the clip is left out with a warning.
 - **Entry fade.** Like `music fit`, it gives the clip's start a 5 ms fade in (`audio.fadeInMs`, the `fade` step) unless the clip already has a fade in or a dissolve; `--clear` leaves the edges alone. To drop the fade, `clip set --audio-fade-in 0` after it.
-- **Not here.** The rising high-pass build before a drop is a later slice. You cannot hear the result: read the `curve` of a `--dry-run` and look at the keys with `timeline show`.
+- **Rising high-pass build.** `--build <s>` (e.g. 2) adds a build before each `--drop`: a `highpassSweep` audio effect (`audio.effects`, marked `auto: "music"`) whose cutoff climbs exponentially from `--build-from` Hz (default 40) to `--build-to` Hz (300) over the `s` seconds of the picture before the hit and is out of the signal again at the hit, so the low end slams back in with it. It needs `--drop`. The effect sits on the music file's own clock (`from`/`to` are seconds of the file, like `in`) and is baked like any audio effect, so the preview and the export play the same sound; `music fit` aims it at the hit again when it moves the clip, and a hit too close to the file's start or to the previous hit gets a shorter build or none, with a warning. A run replaces the builds it wrote and keeps effects you set by hand (the list holds 8); a run without `--build` removes them; `--clear` removes them with the keys. Hand-written: `clip set <clip> --audio-effects` takes the same kind (`{"kind":"highpassSweep","from":96,"to":98}`; positions are seconds of the file, which replaces the whole list).
+- You cannot hear the result: read the `curve` and `sweeps` of a `--dry-run` and look at the keys and effects with `timeline show`.
 - One transaction labelled `Music shape: …`; `revert <tx>` undoes it whole.
 
 ## Grid: cuts onto the beat

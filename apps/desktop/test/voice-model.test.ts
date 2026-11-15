@@ -1,4 +1,4 @@
-import { MAX_AUDIO_EFFECTS, VOICE_CHAIN } from "@frameshell/schema/effects";
+import { MAX_AUDIO_EFFECTS, VOICE_CHAIN, normalizeAudioEffects } from "@frameshell/schema/effects";
 import { describe, expect, it } from "vitest";
 import { EFFECT_PARAMS, bypass, defaultEffect, missingKinds, movedEarlier, paramOf, withEffect, withParam, withoutEffect } from "../src/renderer/src/voice/model.js";
 
@@ -20,10 +20,33 @@ describe("voice chain edits", () => {
 
   it("every parameter an effect shows is one the effect stores", () => {
     for (const [kind, params] of Object.entries(EFFECT_PARAMS)) {
-      const effect = defaultEffect(kind as keyof typeof EFFECT_PARAMS);
+      if (kind === "highpassSweep") continue;
+      const effect = defaultEffect(kind as Exclude<keyof typeof EFFECT_PARAMS, "highpassSweep">);
       expect(Object.keys(effect).filter((key) => key !== "kind")).toEqual([...params]);
       for (const param of params) expect(paramOf(effect, param)).toEqual(expect.any(Number));
     }
+  });
+
+  it("shows the cutoffs of a build and edits them in range; the build's own times are not shown", () => {
+    const build = { kind: "highpassSweep", from: 8, to: 10, startHz: 40, endHz: 300 } as const;
+    expect(EFFECT_PARAMS.highpassSweep.map((param) => paramOf(build, param))).toEqual([40, 300]);
+    expect(withParam([build], 0, "endHz", 500)).toEqual([{ ...build, endHz: 500 }]);
+    expect(withParam([build], 0, "endHz", 5000)).toBeNull();
+    expect(withParam([build], 0, "from", 5)).toBeNull();
+  });
+
+  it("keeps a build's music mark through the inspector's edits, so music fit and shape still find it", () => {
+    const marked = normalizeAudioEffects([{ kind: "highpass" }, { kind: "highpassSweep", from: 8, to: 10, auto: "music" }]);
+    expect(marked[1]).toMatchObject({ auto: "music" });
+    expect(withParam(marked, 1, "endHz", 500)![1]).toMatchObject({ endHz: 500, auto: "music" });
+    expect(withParam(marked, 0, "frequency", 100)![1]).toMatchObject({ auto: "music" });
+    expect(movedEarlier(marked, 1)[0]).toMatchObject({ kind: "highpassSweep", auto: "music" });
+    expect(withEffect(marked, "denoise")[1]).toMatchObject({ auto: "music" });
+    expect(withoutEffect(marked, 0)![0]).toMatchObject({ auto: "music" });
+  });
+
+  it("never offers a build to add: music shape writes it", () => {
+    expect(missingKinds([])).not.toContain("highpassSweep");
   });
 
   it("offers the kinds the chain lacks, none once it is full", () => {

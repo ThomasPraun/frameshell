@@ -6,6 +6,7 @@ import {
   AUDIO_FX_DIR,
   AudioFxService,
   DENOISE_LATENCY_SAMPLES,
+  SWEEP_MAX_STEPS,
   audioFxArgs,
   audioFxCacheKey,
   audioFxFilter,
@@ -13,6 +14,7 @@ import {
   compileRender,
   executeRender,
   sidecarArgs,
+  sweepCommands,
 } from "../src/index.js";
 import { JobQueue } from "../src/jobs/queue.js";
 import { hashFile } from "../src/media/store.js";
@@ -158,6 +160,121 @@ describe("audio effects bake", () => {
     const [dry, fx] = ratios as [number, number];
     expect(db(dry)).toBeGreaterThan(-2);
     expect(db(fx) - db(dry)).toBeLessThan(-10);
+  }, MEDIA_TIMEOUT);
+});
+
+describe("swept high-pass bake (ADR 0037 slice 6)", () => {
+  // 60 Hz bass under a 1 kHz tone for 8 s, 0.2 each; the build runs from 2 s to 4 s, 40 to 300 Hz, and the drop is at 4 s.
+  const build: AudioEffect = { kind: "highpassSweep", from: 2, to: 4, startHz: 40, endHz: 300 };
+  const WINDOW = 9600;
+  /** 60 Hz against 1 kHz, in dB, over the 0.2 s window starting at `at` seconds (12 whole periods of 60 Hz). */
+  const bass = (x: Float64Array, at: number) => db(amplitude(x, 60, Math.round(at * RATE), WINDOW) / amplitude(x, 1000, Math.round(at * RATE), WINDOW));
+
+  async function bake(effects: AudioEffect[], name: string): Promise<{ dry: Float64Array; baked: Float64Array; bytes: Buffer }> {
+    const input = join(dir, "assets", "bass.wav");
+    if (!existsSync(input)) {
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", `aevalsrc=0.2*sin(2*PI*1000*t)+0.2*sin(2*PI*60*t):s=${RATE}:d=8`],
+        ...["-ac", "1", "-c:a", "pcm_s16le", input],
+      ]);
+    }
+    await run(ffmpeg, sidecarArgs(input, join(dir, `${name}.dry.pcm`)));
+    await run(ffmpeg, audioFxArgs(input, join(dir, `${name}.pcm`), effects));
+    const bytes = readFileSync(join(dir, `${name}.pcm`));
+    return { dry: samples(readFileSync(join(dir, `${name}.dry.pcm`))), baked: samples(bytes), bytes };
+  }
+
+  it("lowers the low band more and more through the build, and brings it back whole at the drop", async () => {
+    const { dry, baked } = await bake([build], "sweep");
+    expect(baked.length).toBe(dry.length);
+    const before = bass(baked, 1.0) - bass(dry, 1.0);
+    const climb = [2.0, 2.8, 3.4, 3.8].map((at) => bass(baked, at) - bass(dry, at));
+    const after = bass(baked, 4.3) - bass(dry, 4.3);
+    // Out of the signal before the build and from the drop on: the same bass as the dry sound.
+    expect(Math.abs(before)).toBeLessThan(0.5);
+    expect(Math.abs(after)).toBeLessThan(0.5);
+    // Each window is lower than the one before; by the end, the cutoff near 270 Hz takes the 60 Hz bass down by 15 dB or more.
+    for (let i = 1; i < climb.length; i++) expect(climb[i]!).toBeLessThan(climb[i - 1]! - 1);
+    expect(climb[3]!).toBeLessThan(-15);
+    // The tone well above the cutoff is not touched anywhere.
+    for (const at of [1.0, 3.8, 4.3]) expect(Math.abs(db(amplitude(baked, 1000, Math.round(at * RATE), WINDOW) / amplitude(dry, 1000, Math.round(at * RATE), WINDOW)))).toBeLessThan(0.3);
+  }, MEDIA_TIMEOUT);
+
+  it("is deterministic and keeps the sidecar's clock behind a denoise, whose delay shifts the commands", async () => {
+    const first = await bake([build], "sweep-a");
+    const second = await bake([build], "sweep-b");
+    expect(second.bytes.equals(first.bytes)).toBe(true);
+    const chain = await bake([{ kind: "denoise" }, build], "sweep-denoise");
+    expect(chain.baked.length).toBe(chain.dry.length);
+  }, MEDIA_TIMEOUT);
+
+  it("writes the commands on the asset clock, shifted by the denoises before it, in at most 64 steps", () => {
+    const sweep = { kind: "highpassSweep", from: 2, to: 4, startHz: 40, endHz: 300 } as const;
+    const plain = sweepCommands(sweep, "highpass@sw0", 0).split(";");
+    expect(plain).toHaveLength(SWEEP_MAX_STEPS);
+    expect(plain[0]).toBe("2 highpass@sw0 frequency 40");
+    expect(Number(plain.at(-1)!.split(" ").at(-1))).toBeLessThan(300);
+    const hz = plain.map((command) => Number(command.split(" ").at(-1)));
+    expect([...hz].sort((a, b) => a - b)).toEqual(hz);
+    expect(sweepCommands(sweep, "highpass@sw0", 0.025).split(";")[0]).toBe("2.025 highpass@sw0 frequency 40");
+    expect(sweepCommands({ ...sweep, to: 2.1 }, "x", 0).split(";")).toHaveLength(5);
+    expect(audioFxFilter([build])).toContain("enable='gte(t,2)*lt(t,4)'");
+    expect(audioFxFilter([{ kind: "denoise" }, build])).toContain("enable='gte(t,2.025)*lt(t,4.025)'");
+    expect(audioFxFilter([{ kind: "highpass" }, build])).toContain("enable='gte(t,2)*lt(t,4)'");
+  });
+
+  it("names each sweep's filter by its place in the chain, so two builds do not share one", () => {
+    const filter = audioFxFilter([build, { kind: "highpassSweep", from: 6, to: 7 }]);
+    expect(filter).toContain("highpass@sw0=f=40");
+    expect(filter).toContain("highpass@sw1=f=40");
+    expect(filter).toContain("6 highpass@sw1 frequency 40");
+  });
+
+  it("exports the swept clip with the low band down in the build and back after it, like the bake", async () => {
+    const TINY: ExportPreset = {
+      id: "tiny",
+      container: "mp4",
+      video: { codec: "h264", width: 64, height: 64, crf: 30 },
+      audio: { codec: "aac", bitrateKbps: 192, sampleRate: RATE },
+    };
+    const timeline = (effects?: AudioEffect[]): Timeline => ({
+      schemaVersion: 1,
+      id: "main",
+      revision: 1,
+      tracks: [{ id: "a1", kind: "audio", clips: [{ id: "c_bass", type: "media", asset: "assets/bass.wav", start: 0, in: 0, out: 8, ...(effects ? { audio: { effects } } : {}) }] }],
+    });
+    const source = { path: join(dir, "assets", "bass.wav"), video: null, audio: true };
+    const service = new AudioFxService({
+      jobs: new JobQueue(),
+      hash: async (root, rel) => hashFile(join(root, rel), statSync(join(root, rel)).size),
+      hasAudio: async () => true,
+      ffmpeg: async () => ffmpeg,
+      timelines: async () => ["main"],
+      flattened: async () => timeline([build]),
+    });
+    await bake([], "export-fixture");
+    const audioFx = await service.ensure(dir, timeline([build]));
+    const decoded: Float64Array[] = [];
+    for (const [name, line] of [["bass-dry", timeline()], ["bass-fx", timeline([build])]] as const) {
+      const plan = compileRender({
+        timeline: line,
+        fps: 30,
+        preset: TINY,
+        loudness: -16,
+        sources: new Map([["assets/bass.wav", source]]),
+        resolution: { width: 64, height: 64 },
+        audioFx,
+      });
+      expect(plan.warnings.filter((warning) => /audio effects/.test(warning))).toEqual([]);
+      const output = join(dir, `${name}.mp4`);
+      await executeRender(plan, { ffmpeg, workDir: join(dir, `work-${name}`), output });
+      decoded.push(samples(await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", output, "-map", "0:a:0", "-ac", "1", "-ar", String(RATE), "-f", "s16le", "-"])));
+    }
+    const [dry, fx] = decoded as [Float64Array, Float64Array];
+    expect(Math.abs(bass(fx, 1.0) - bass(dry, 1.0))).toBeLessThan(1);
+    expect(bass(fx, 3.8) - bass(dry, 3.8)).toBeLessThan(-12);
+    expect(Math.abs(bass(fx, 4.5) - bass(dry, 4.5))).toBeLessThan(1);
   }, MEDIA_TIMEOUT);
 });
 

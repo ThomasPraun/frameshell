@@ -1,7 +1,8 @@
 import { ErrorCode, type MusicShapeResult, RpcError } from "@frameshell/protocol";
-import type { ShapeSettings, Timeline } from "@frameshell/schema";
+import { AUDIO_EFFECT_LIMITS, type AudioEffect, type ShapeSettings, type Timeline } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
+import { type MusicBuild, isBuild, planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { clipEnd } from "./fit.js";
 import { type MusicFitPlan, findMusicClip, planDuckAgain } from "./run.js";
@@ -19,7 +20,13 @@ export interface MusicShapeRequest {
   hold: number;
   release: number;
   fade: number;
-  /** Remove the clip's music keys instead. */
+  /** Seconds of a swept high-pass build that ends at each hit (`highpassSweep` effects); none when absent. */
+  build?: number | undefined;
+  /** Cutoff in Hz the build starts at; default {@link AUDIO_EFFECT_LIMITS}. */
+  buildFrom?: number | undefined;
+  /** Cutoff in Hz the build reaches just before the hit. */
+  buildTo?: number | undefined;
+  /** Remove the clip's music keys (and builds) instead. */
   clear?: boolean | undefined;
   dryRun?: boolean | undefined;
 }
@@ -28,6 +35,11 @@ export interface MusicShapeRequest {
 export interface MusicShapePlan extends Omit<MusicShapeResult, "timeline" | "revision" | "dryRun" | "applied" | "tx"> {
   /** What the `music.shape` operation takes: the dip curve (empty to clear) and the settings kept on the clip. */
   operation: { clip: string; curve: DipPoint[]; settings: ShapeSettings | null };
+  /**
+   * The clip's whole `audio.effects` list to write with `clip.set audioEffects` before the keys (null clears it);
+   * undefined when the builds leave the list as it is.
+   */
+  effects: AudioEffect[] | null | undefined;
   /** Duck to run again after the keys are written (they replace the clip's duck keys); null when the clip has none. */
   duckAgain: MusicFitPlan["duckAgain"];
   /** True when the clip gets the {@link MUSIC_ENTRY_FADE_MS} fade in (`audio.fadeInMs`) before its keys. */
@@ -48,12 +60,21 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
   const { track, clip } = findMusicClip(timeline, request.clip, "music.shape");
   const warnings: string[] = [];
   const keyed = clip.keys?.gain?.some((key) => key.auto === "music" || key.baseAuto === "music") === true;
+  const existingBuilds = (clip.audio?.effects ?? []).some(isBuild);
   const ducked = clip.keys?.gain?.some((key) => key.auto === "duck") === true;
   const playsFrom = clip.start;
   const playsTo = clipEnd({ start: clip.start, in: clip.in, out: clip.out, speed: clip.speed ?? 1 });
 
   const given = (request.drop?.length ?? 0) > 0 || request.ending !== undefined;
-  if (request.clear === true && given) throw invalid("`clear` removes the clip's music keys and takes no `drop` or `ending`.", { reason: "clear", field: "clear" });
+  if (request.clear === true && (given || request.build !== undefined)) {
+    throw invalid("`clear` removes the clip's music keys and builds and takes no `drop`, `ending` or `build`.", { reason: "clear", field: "clear" });
+  }
+  if (request.build !== undefined && (request.drop?.length ?? 0) === 0) {
+    throw invalid("`build` is the rising high-pass before a hit: give `drop` too.", { reason: "build", field: "build", hint: "Example: `{ clip, drop: [\"hit\"], build: 2 }`." });
+  }
+  if (request.build === undefined && (request.buildFrom !== undefined || request.buildTo !== undefined)) {
+    throw invalid("`buildFrom` and `buildTo` set the cutoffs of a build: give `build` (its length in seconds) too.", { reason: "build", field: "build" });
+  }
   if (request.clear !== true && !given) {
     throw invalid("nothing to shape: give `drop` (the time of a hit to step down before), `ending` (where the closing fade begins), or `clear`.", {
       reason: "empty",
@@ -87,15 +108,33 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
     }
     if (drops.length > 0) settings.drops = drops;
     if (ending !== null) settings.ending = ending;
-  } else if (!keyed) {
+  } else if (!keyed && !existingBuilds) {
     warnings.push(`${clip.id} has no music keys: nothing to clear.`);
   }
+
+  // A run replaces the builds it wrote earlier (`auto: "music"`) and keeps every other effect, like it does for keys.
+  const { startHz, endHz } = AUDIO_EFFECT_LIMITS.highpassSweep;
+  const build: MusicBuild | undefined =
+    settings && request.build !== undefined ? { seconds: request.build, startHz: request.buildFrom ?? startHz.default, endHz: request.buildTo ?? endHz.default } : undefined;
+  const { sweeps, effects } = planBuildEffects(clip, settings ? drops : [], build, warnings);
+  if (settings && sweeps.length > 0 && build) settings.build = build;
 
   const curve = settings ? shapeCurve(settings, playsTo) : [];
   // A shaping re-shapes the music's entry too (ADR 0037); `clear` leaves the clip's edges alone.
   const entryFade = settings !== null && needsEntryFade(clip);
   const steps: MusicShapeResult["steps"] = [
     ...(entryFade ? [{ id: "fade" as const, detail: `${MUSIC_ENTRY_FADE_MS} ms fade in at the start of ${clip.id} (audio.fadeInMs)` }] : []),
+    ...(effects === undefined
+      ? []
+      : [
+          {
+            id: "sweep" as const,
+            detail:
+              sweeps.length > 0
+                ? `high-pass builds on ${clip.id}: ${sweeps.map((sweep) => `${sweep.startHz} to ${sweep.endHz} Hz over ${round3(sweep.to - sweep.from)} s of the file before ${sweep.at} s`).join(", ")}`
+                : `remove the high-pass builds of ${clip.id}`,
+          },
+        ]),
     {
       id: "shape",
       detail: settings
@@ -115,7 +154,25 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
     duckAgain = rerun.duckAgain;
     if (rerun.duckAgain) steps.push({ id: "duck", detail: `run duck again on ${track.id} over ${rerun.duck.under.join(", ")}` });
   }
-  return { clip: clip.id, track: track.id, asset: clip.asset, cleared: settings === null, drops, ending, settings, curve, duck, steps, warnings, operation: { clip: clip.id, curve, settings }, duckAgain, entryFade, noop: settings === null && !keyed };
+  return {
+    clip: clip.id,
+    track: track.id,
+    asset: clip.asset,
+    cleared: settings === null,
+    drops,
+    ending,
+    settings,
+    curve,
+    sweeps,
+    duck,
+    steps,
+    warnings,
+    operation: { clip: clip.id, curve, settings },
+    effects,
+    duckAgain,
+    entryFade,
+    noop: settings === null && !keyed && effects === undefined,
+  };
 }
 
 /** `Music shape: c_1a2b3c steps down before 12.4 s, fades out from 28 s` / `Music shape: c_1a2b3c cleared`. */

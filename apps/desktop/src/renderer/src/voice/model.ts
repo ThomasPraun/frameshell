@@ -5,15 +5,19 @@ import { AUDIO_EFFECT_KINDS, AUDIO_EFFECT_LIMITS, MAX_AUDIO_EFFECTS, type Normal
 /** Kind of one audio effect. */
 export type EffectKind = NormalizedAudioEffect["kind"];
 
+/** Kinds of the voice chain: the ones the inspector can add. A `highpassSweep` is written by `music shape` and only shown. */
+export type VoiceKind = Exclude<EffectKind, "highpassSweep">;
+
 /** Parameters of one kind, in the order the inspector shows them. */
 export const EFFECT_PARAMS = {
   highpass: ["frequency"],
   denoise: ["floor", "reduction"],
   compressor: ["threshold", "ratio", "attack", "release", "makeup"],
+  highpassSweep: ["startHz", "endHz"],
 } as const satisfies Record<EffectKind, readonly string[]>;
 
 /** The effect of `kind` with every parameter at the voice chain's number. */
-export function defaultEffect(kind: EffectKind): NormalizedAudioEffect {
+export function defaultEffect(kind: VoiceKind): NormalizedAudioEffect {
   return structuredClone(VOICE_CHAIN.find((effect) => effect.kind === kind)!);
 }
 
@@ -32,13 +36,13 @@ export function withParam(list: readonly NormalizedAudioEffect[], index: number,
 }
 
 /** The kinds `list` does not have yet, in the voice chain's order. Empty once the list is full. */
-export function missingKinds(list: readonly NormalizedAudioEffect[]): EffectKind[] {
+export function missingKinds(list: readonly NormalizedAudioEffect[]): VoiceKind[] {
   if (list.length >= MAX_AUDIO_EFFECTS) return [];
-  return AUDIO_EFFECT_KINDS.filter((kind) => !list.some((effect) => effect.kind === kind));
+  return AUDIO_EFFECT_KINDS.filter((kind): kind is VoiceKind => kind !== "highpassSweep" && !list.some((effect) => effect.kind === kind));
 }
 
 /** The list with a default effect of `kind` at the end. */
-export function withEffect(list: readonly NormalizedAudioEffect[], kind: EffectKind): NormalizedAudioEffect[] {
+export function withEffect(list: readonly NormalizedAudioEffect[], kind: VoiceKind): NormalizedAudioEffect[] {
   return [...list, defaultEffect(kind)];
 }
 

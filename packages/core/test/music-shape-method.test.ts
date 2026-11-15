@@ -220,4 +220,112 @@ describe("music.shape", () => {
     },
     MEDIA_TIMEOUT,
   );
+
+  it(
+    "builds a rising high-pass before a hit: dry run, one transaction, hand effects kept, a re-run replaces, clear removes, revert undoes",
+    async () => {
+      await conn.request("clip.set", { cwd: project, clip, audioEffects: [{ kind: "compressor" }] });
+      const dry = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"], build: 2, dryRun: true });
+      expect(dry.sweeps).toEqual([{ at: 5, from: 3, to: 5, startHz: 40, endHz: 300 }]);
+      expect(dry.settings?.build).toEqual({ seconds: 2, startHz: 40, endHz: 300 });
+      const ids = dry.steps.map((step) => step.id);
+      expect(ids.indexOf("sweep")).toBeGreaterThan(-1);
+      expect(ids.indexOf("sweep")).toBeLessThan(ids.indexOf("shape"));
+      expect((await clipOf(clip)).audio?.effects).toEqual([{ kind: "compressor" }]);
+
+      const result = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"], build: 2, buildFrom: 60, buildTo: 400 });
+      expect(await txOps(result.tx!)).toEqual(expect.arrayContaining(["clip.set", "music.shape"]));
+      const built = await clipOf(clip);
+      expect(built.audio?.effects).toEqual([{ kind: "compressor" }, { kind: "highpassSweep", from: 3, to: 5, startHz: 60, endHz: 400, auto: "music" }]);
+      expect(built.audio?.shape?.build).toEqual({ seconds: 2, startHz: 60, endHz: 400 });
+
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: [8], build: 1 });
+      expect((await clipOf(clip)).audio?.effects).toEqual([{ kind: "compressor" }, { kind: "highpassSweep", from: 7, to: 8, startHz: 40, endHz: 300, auto: "music" }]);
+
+      const cleared = await conn.request("music.shape", { cwd: project, timeline: "main", clip, clear: true });
+      expect(cleared.steps.map((step) => step.id)).toContain("sweep");
+      const after = await clipOf(clip);
+      expect(after.audio?.effects).toEqual([{ kind: "compressor" }]);
+      expect(after.audio?.shape).toBeUndefined();
+
+      const again = await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: [5], build: 2 });
+      await conn.request("revert", { cwd: project, target: again.tx! });
+      expect((await clipOf(clip)).audio?.effects).toEqual([{ kind: "compressor" }]);
+      // Without `build` a run leaves no build behind; a clip with only builds loses its whole list.
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: [5], build: 2 });
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: [5] });
+      expect((await clipOf(clip)).audio?.effects).toEqual([{ kind: "compressor" }]);
+      await conn.request("clip.set", { cwd: project, clip, audioEffects: null });
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: [5], build: 2 });
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, clear: true });
+      expect((await clipOf(clip)).audio?.effects).toBeUndefined();
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "puts the build on the file's clock: the clip's in and speed move it, and a hit with no room for a build gets a warning",
+    async () => {
+      const track = (await conn.request("track.add", { cwd: project, kind: "audio" })).changes.added[0]!;
+      const asset = (await clipOf(clip)).asset;
+      // Plays 10 s of the file from 10 s at double speed: 5 s of the film.
+      const fast = (await conn.request("clip.add", { cwd: project, track, asset, start: 0, in: 10, out: 20, speed: 2 })).changes.added[0]!;
+      const result = await conn.request("music.shape", { cwd: project, timeline: "main", clip: fast, drop: [4], build: 2 });
+      // The film's 2 s before the hit are 4 s of the file: 14 to 18.
+      expect(result.sweeps).toEqual([{ at: 4, from: 14, to: 18, startHz: 40, endHz: 300 }]);
+      expect((await clipOf(fast)).audio?.effects).toEqual([{ kind: "highpassSweep", from: 14, to: 18, startHz: 40, endHz: 300, auto: "music" }]);
+      // Two hits closer than the build: the second window starts where the first ends.
+      const close = await conn.request("music.shape", { cwd: project, timeline: "main", clip: fast, drop: [2, 3], build: 2 });
+      expect(close.sweeps.map((sweep) => [sweep.from, sweep.to])).toEqual([
+        [10, 14],
+        [14, 16],
+      ]);
+      // A hit just before the clip starts has its dip in the clip but its build in the part of the file the clip skips: none, and a warning.
+      const late = (await conn.request("clip.add", { cwd: project, track, asset, start: 6, in: 10, out: 12 })).changes.added[0]!;
+      const before = await conn.request("music.shape", { cwd: project, timeline: "main", clip: late, drop: [5.8], build: 2, dryRun: true });
+      expect(before.sweeps).toEqual([]);
+      expect(before.warnings.join(" ")).toContain("outside the part of the file");
+      // A hit 0.05 s into a clip that starts at the file's start has no room for the shortest build.
+      const first = (await conn.request("clip.add", { cwd: project, track, asset, start: 20, in: 0, out: 3 })).changes.added[0]!;
+      const room = await conn.request("music.shape", { cwd: project, timeline: "main", clip: first, drop: [20.05], build: 2, dryRun: true });
+      expect(room.sweeps).toEqual([]);
+      expect(room.warnings.join(" ")).toContain("no room for a build");
+      await conn.request("track.remove", { cwd: project, track, force: true });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "aims the build at the hit again when music.fit moves the clip",
+    async () => {
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: ["slam"], build: 2 });
+      const before = (await clipOf(clip)).audio?.effects?.[0];
+      expect(before).toMatchObject({ kind: "highpassSweep", from: 3, to: 5 });
+      const result = await conn.request("music.fit", { cwd: project, timeline: "main", clip, end: "end-card" });
+      expect(await txOps(result.tx!)).toEqual(expect.arrayContaining(["clip.trim", "clip.move", "clip.set", "music.shape"]));
+      const fitted = await clipOf(clip);
+      const sweep = fitted.audio?.effects?.find((effect) => effect.kind === "highpassSweep");
+      // The hit is still at 5 s of the film: the file second playing there is now clip.in + (5 - start).
+      expect(sweep).toMatchObject({ kind: "highpassSweep", auto: "music" });
+      const to = fitted.in + (5 - fitted.start) * (fitted.speed ?? 1);
+      expect((sweep as { to: number }).to).toBeCloseTo(to, 2);
+      expect((sweep as { to: number }).to - (sweep as { from: number }).from).toBeCloseTo(2, 2);
+      await conn.request("revert", { cwd: project, target: result.tx! });
+      expect((await clipOf(clip)).audio?.effects).toEqual([before]);
+      await conn.request("music.shape", { cwd: project, timeline: "main", clip, clear: true });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "refuses a build without a hit, cutoffs without a build, and a build with clear",
+    async () => {
+      const before = await revision();
+      expect((await rejection(conn.request("music.shape", { cwd: project, timeline: "main", clip, ending: 10, build: 2 }))).data).toMatchObject({ reason: "build" });
+      expect((await rejection(conn.request("music.shape", { cwd: project, timeline: "main", clip, drop: [5], buildFrom: 50 }))).data).toMatchObject({ reason: "build" });
+      expect((await rejection(conn.request("music.shape", { cwd: project, timeline: "main", clip, clear: true, build: 2 }))).data).toMatchObject({ reason: "clear" });
+      expect(await revision()).toBe(before);
+    },
+    MEDIA_TIMEOUT,
+  );
 });
