@@ -14,8 +14,17 @@ import {
   type JobPriority,
   RpcError,
 } from "@frameshell/protocol";
-import { type ClipAdapter, type LivePage, MOTION_BLUR_REFUSED } from "@frameshell/plugin-api";
-import { type AdapterClip, type FormatEntry, type ResolvedMotionBlur, type Timeline, clipInFormat, elementStyles, motionBlurOf } from "@frameshell/schema";
+import { type ClipAdapter, type LivePage, MOTION_BLUR_REFUSED, type RenderTiming } from "@frameshell/plugin-api";
+import {
+  type AdapterClip,
+  type BeatsFile,
+  type FormatEntry,
+  type ResolvedMotionBlur,
+  type Timeline,
+  clipInFormat,
+  elementStyles,
+  motionBlurOf,
+} from "@frameshell/schema";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
@@ -23,6 +32,7 @@ import { hashFile } from "../media/store.js";
 import { readStyleTokens } from "../style/tokens.js";
 import { type NestedReader, resolveNested, resolveNestedIn } from "../timeline/nested.js";
 import { clipCacheKey } from "./cache-key.js";
+import { clipTiming } from "./timing.js";
 
 /** Project-relative directory of the clip render cache (SPEC §5.1, §6.5). */
 export const CLIP_CACHE_DIR = ".frameshell/cache/clips";
@@ -91,6 +101,11 @@ export interface ClipRendererOptions {
   probe(root: string, file: string, signal: AbortSignal): Promise<RenderProbe>;
   /** Managed or overridden native tool for adapters; see `RenderContext.ensureBinary`. */
   ensureBinary(root: string, name: string): Promise<string>;
+  /**
+   * Beats file of a project-relative asset, or null; throws for a broken one. Feeds `RenderContext.timing` of clips
+   * that ask for beats (ADR 0029 decision 8). Default: none, so such clips get no beats.
+   */
+  beatsOf?(root: string, asset: string): Promise<BeatsFile | null>;
   /** Watch attached projects for composition edits. Default true. */
   watch?: boolean;
   /** Quiet time after the last file event before re-checking keys. Default 200 ms. */
@@ -101,6 +116,12 @@ export interface ClipRendererOptions {
 interface Placed {
   clip: AdapterClip;
   track: string;
+}
+
+/** A generated clip with the timeline it sits in, whose beats and markers its timing reads. */
+interface Sited {
+  clip: AdapterClip;
+  timeline: Timeline;
 }
 
 /**
@@ -123,13 +144,15 @@ export interface ClipEnsureOptions {
 
 /**
  * One cached render of a clip: its key and what the render gets beside the clip. `styleCss`: the token sheet the key
- * counts (ADR 0028); `motionBlur`: likewise the clip's resolved blur, for an adapter that applies it (ADR 0041).
+ * counts (ADR 0028); `motionBlur`: likewise the clip's resolved blur, for an adapter that applies it (ADR 0041);
+ * `timing`: the beats and markers inside the clip, for a clip that asks (ADR 0029 decision 8).
  */
 interface Variant {
   key: string;
   registered: RegisteredClipType;
   styleCss?: string;
   motionBlur?: ResolvedMotionBlur;
+  timing?: RenderTiming;
 }
 
 /** Keys of a clip, or why it has none: `key` its draft render's; `final` the blurred render beside it, when it has one. */
@@ -270,7 +293,7 @@ export class ClipRenderer {
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const clips: ClipRenderInfo[] = [];
     for (const { clip, track } of placed) {
-      const keyed = await this.#keyOf(root, clip, adapters, format);
+      const keyed = await this.#keyOf(root, clip, adapters, format, flat);
       const about = { clip: clip.id, track, type: clip.type, source: clip.source ?? null };
       if (keyed.key === null) {
         clips.push({ ...about, ...UNRENDERED, state: "unavailable", error: keyed.error });
@@ -327,7 +350,8 @@ export class ClipRenderer {
    */
   async live(root: string, id: string, clipId: string): Promise<ClipLiveResult> {
     const { timeline } = await this.#options.load(root, id);
-    const clips = generatedClips(await resolveNested(root, timeline, this.#options.readNested));
+    const flat = await resolveNested(root, timeline, this.#options.readNested);
+    const clips = generatedClips(flat);
     const clip = clips.find((placed) => placed.clip.id === clipId)?.clip;
     if (!clip) {
       const ids = clips.map((placed) => placed.clip.id);
@@ -345,7 +369,7 @@ export class ClipRenderer {
         details,
       });
     const format = await this.#options.format(root);
-    const keyed = await this.#keyOf(root, clip, await this.#options.adapters(root), format);
+    const keyed = await this.#keyOf(root, clip, await this.#options.adapters(root), format, flat);
     if (keyed.key === null) throw unavailable(keyed.error);
     const { adapter, plugin } = keyed.registered;
     if (!adapter.livePreview) throw unavailable(`the ${plugin.name} ${plugin.version} adapter has no live preview.`);
@@ -357,6 +381,7 @@ export class ClipRenderer {
         width: format.width,
         height: format.height,
         ensureBinary: (name) => this.#options.ensureBinary(root, name),
+        ...(keyed.timing ? { timing: keyed.timing } : {}),
       });
     } catch (error) {
       throw unavailable(`${plugin.name}: ${(error as Error)?.message ?? error}`);
@@ -397,7 +422,7 @@ export class ClipRenderer {
       return this.#obtain(root, draft, clip, format);
     };
     for (const { clip } of placed) {
-      const keyed = await this.#keyOf(root, clip, adapters, format);
+      const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
       if (keyed.key === null) throw renderFailed(timeline.id, clip, keyed.error);
       const { final } = keyed;
       const failed = final ? this.#failed.get(entryId(root, final.key)) : undefined;
@@ -454,7 +479,7 @@ export class ClipRenderer {
     const adapters = await this.#options.adapters(root);
     const format = await this.#options.format(root);
     for (const { clip } of placed) {
-      const keyed = await this.#keyOf(root, clip, adapters, format);
+      const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
       if (keyed.key === null) throw renderFailed(timeline.id, clip, keyed.error);
     }
   }
@@ -490,12 +515,13 @@ export class ClipRenderer {
 
   /** Keys of every generated clip on every timeline of `root`, at every format size, or why they cannot all be known. */
   async #currentKeys(root: string): Promise<Set<string> | string> {
-    const placed: Placed[] = [];
+    const placed: Sited[] = [];
     for (const id of await this.#options.timelines(root)) {
       try {
         const timeline = await this.#options.peek(root, id);
+        const flat = await resolveNested(root, timeline, this.#options.readNested);
         // Flattened too: a nested timeline file may live outside `timelines/`.
-        placed.push(...generatedClips(timeline), ...generatedClips(await resolveNested(root, timeline, this.#options.readNested)));
+        placed.push(...sited(timeline), ...sited(flat));
       } catch (error) {
         return `timelines/${id}.json could not be read (${(error as Error).message}); its clips may use any entry.`;
       }
@@ -507,9 +533,9 @@ export class ClipRenderer {
     const project = await this.#options.format(root);
     const sizes = (await this.#options.formatSizes?.(root)) ?? [];
     const formats = [{ id: undefined, ...project }, ...sizes.map((size) => ({ id: size.id, fps: project.fps, width: size.width, height: size.height }))];
-    for (const { clip } of placed) {
+    for (const { clip, timeline } of placed) {
       for (const { id, ...format } of formats) {
-        const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format);
+        const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format, timeline);
         if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
         keys.add(keyed.key);
         if (keyed.final) keys.add(keyed.final.key);
@@ -540,10 +566,10 @@ export class ClipRenderer {
   }
 
   async #refreshOnce(root: string): Promise<void> {
-    const placed: Placed[] = [];
+    const placed: Sited[] = [];
     for (const id of await this.#options.timelines(root)) {
       try {
-        placed.push(...generatedClips(await this.#options.peek(root, id)));
+        placed.push(...sited(await this.#options.peek(root, id)));
       } catch {
         // Invalid or vanished timeline: its own errors surface where it is used.
       }
@@ -552,9 +578,9 @@ export class ClipRenderer {
     if (placed.length === 0) return;
     const adapters = await this.#options.adapters(root);
     const format = await this.#options.format(root);
-    for (const { clip } of placed) {
+    for (const { clip, timeline } of placed) {
       if (this.#closed) return;
-      const keyed = await this.#keyOf(root, clip, adapters, format);
+      const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
       const { final } = keyed;
       if (!(await this.#ready(root, keyed.key))) {
@@ -568,19 +594,28 @@ export class ClipRenderer {
     }
   }
 
-  async #keyOf(root: string, clip: AdapterClip, adapters: ReadonlyMap<string, RegisteredClipType>, format: ClipFormat): Promise<Keyed> {
+  /** Keys of `clip`, placed on `timeline` (whose beats and markers a clip that asks for timing reads). */
+  async #keyOf(root: string, clip: AdapterClip, adapters: ReadonlyMap<string, RegisteredClipType>, format: ClipFormat, timeline: Timeline): Promise<Keyed> {
     const registered = adapters.get(clip.type);
     if (!registered) {
       const reason = (await this.#options.unavailable?.(root, clip.type)) ?? `No loaded plugin renders \`${clip.type}\` clips.`;
       return { key: null, error: reason };
     }
+    const context = { projectDir: root, ensureBinary: (name: string) => this.#options.ensureBinary(root, name) };
     let paths: string[];
     try {
-      paths = registered.adapter.inputs
-        ? await registered.adapter.inputs(structuredClone(clip), { projectDir: root, ensureBinary: (name) => this.#options.ensureBinary(root, name) })
-        : [];
+      paths = registered.adapter.inputs ? await registered.adapter.inputs(structuredClone(clip), context) : [];
     } catch (error) {
       return { key: null, error: `${registered.plugin.name} could not list the inputs of ${clip.id}: ${(error as Error)?.message ?? error}` };
+    }
+    let timing: RenderTiming | undefined;
+    try {
+      const kinds = registered.adapter.timing ? await registered.adapter.timing(structuredClone(clip), context) : [];
+      if (!Array.isArray(kinds)) throw new Error('timing() must return an array such as ["beats", "markers"]');
+      const beatsOf = this.#options.beatsOf;
+      timing = await clipTiming({ clip, timeline, fps: format.fps, kinds, beatsOf: async (asset) => (beatsOf ? beatsOf(root, asset) : null) });
+    } catch (error) {
+      return { key: null, error: `${registered.plugin.name} could not say which timing ${clip.id} reads: ${(error as Error)?.message ?? error}` };
     }
     const inputs = await Promise.all(paths.map(async (path) => ({ path, hash: await this.#hashInput(root, path) })));
     let sheet: Awaited<ReturnType<typeof readStyleTokens>> = null;
@@ -591,8 +626,8 @@ export class ClipRenderer {
         return { key: null, error: (error as Error).message };
       }
     }
-    const recipe = { plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}) };
-    const draft: Variant = { key: clipCacheKey(recipe), registered, ...(sheet ? { styleCss: sheet.css } : {}) };
+    const recipe = { plugin: registered.plugin, clip, inputs, format, ...(sheet ? { style: sheet.hash } : {}), ...(timing ? { timing } : {}) };
+    const draft: Variant = { key: clipCacheKey(recipe), registered, ...(sheet ? { styleCss: sheet.css } : {}), ...(timing ? { timing } : {}) };
     // A blurred clip keeps its sharp render as the draft and the blurred one as a second entry (ADR 0041 decision 11).
     const blur = registered.adapter.motionBlur ? motionBlurOf(clip) : null;
     const final: Variant | null = blur ? { ...draft, key: clipCacheKey({ ...recipe, motionBlur: blur }), motionBlur: blur } : null;
@@ -634,7 +669,7 @@ export class ClipRenderer {
    * ready (a draft, whose final render is queued then).
    */
   #render(root: string, variant: Variant, clip: AdapterClip, format: ClipFormat, priority: JobPriority, refreshAfter = false): Pending {
-    const { key, registered, styleCss, motionBlur } = variant;
+    const { key, registered } = variant;
     const id = entryId(root, key);
     const running = this.#pending.get(id);
     if (running) {
@@ -652,7 +687,7 @@ export class ClipRenderer {
       project: root,
       asset: clip.source ?? `${clip.type}:${clip.id}`,
       output: join(dir, key),
-      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx, styleCss, motionBlur),
+      run: (ctx) => this.#run(root, dir, key, snapshot, registered, format, ctx, variant),
     });
     const done = (async () => {
       const job = info.state === "canceled" ? info : await finished;
@@ -691,9 +726,9 @@ export class ClipRenderer {
     registered: RegisteredClipType,
     format: ClipFormat,
     ctx: JobContext,
-    styleCss?: string,
-    motionBlur?: ResolvedMotionBlur,
+    extras: Pick<Variant, "styleCss" | "motionBlur" | "timing">,
   ): Promise<void> {
+    const { styleCss, motionBlur, timing } = extras;
     ctx.update({ step: "render", progress: 0 });
     const outDir = join(dir, `.tmp-${key}-${randomBytes(4).toString("hex")}`);
     await mkdir(outDir, { recursive: true });
@@ -709,6 +744,7 @@ export class ClipRenderer {
           ...elementCssOf(clip),
           ...(styleCss ? { styleCss } : {}),
           ...(motionBlur ? { motionBlur } : {}),
+          ...(timing ? { timing } : {}),
           progress: ({ fraction }) => {
             if (Number.isFinite(fraction)) ctx.update({ progress: Math.min(0.99, Math.max(0, fraction)) });
           },
@@ -790,6 +826,11 @@ export function generatedClips(timeline: Timeline): Placed[] {
     }
   }
   return placed;
+}
+
+/** {@link generatedClips} of `timeline`, each with the timeline it sits in. */
+function sited(timeline: Timeline): Sited[] {
+  return generatedClips(timeline).map(({ clip }) => ({ clip, timeline }));
 }
 
 function renderFailed(timeline: string, clip: AdapterClip, details: string): RpcError {

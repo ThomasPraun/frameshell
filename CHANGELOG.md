@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `grade.compare`, slice 7 of the colour grade (#384, ADR 0031, epic #451; protocol 144): pick a look by eye. One frame of
+- `grade.compare`, slice 7 of the colour grade (#384, ADR 0031, epic #451; protocol 146): pick a look by eye. One frame of
   a media clip (default its middle frame, or `at`) is rendered under up to 16 `looks` (each a whole `clip.set` `grade` plus
   an optional `name`; fields left out are neutral), next to a neutral baseline and the clip's own grade when it has one, and
   tiled into one labelled PNG (default `.frameshell/grade/compare-<clip>-<frame>.png`, tiles 160 to 960 px wide, default
@@ -19,6 +19,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused before rendering (`InvalidParams`). `frameshell grade compare <clip> --look warm:temperature=0.25,saturation=1.1
   [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]`; MCP `grade_compare` returns the sheet as an
   image. No built-in looks yet.
+- `analyze` audio: sentences, pace, pitch, voice against music, effects and sections, last part of #471 (epic #451; protocol 144):
+  the result and `analysis.json` of `frameshell analyze` gain `audio` (null for a film without sound; every value
+  ESTIMATED in `labels`, read from the mix, never from separated stems). `audio.speech` is recognised by the project's own
+  transcription provider and model (the daemon asks it for the film's sound, nothing is written to the project; the first
+  run may download the model; no plugin, an untrusted project or a failure leaves `speech.status: "skipped"` with its
+  `reason`, and a film over 10 minutes is skipped): each sentence (a full stop or a pause of 0.8 s ends one) has its
+  `pace` in words per second, `pitch` (10th, 50th and 90th percentile of the voiced frames in Hz by the YIN method, and
+  the `range` in semitones) and the voice against the music under it: `music` is the median level of the hops no word
+  covers around the sentence (the gaps between its words), `voice` the mix over the words with that bed taken off as
+  power, `voiceOverMusic` their difference in dB (null when no music plays under it or the music is as loud as the mix).
+  `audio.effects` are sound hits (the `hit` detector of `events`, `soundHits`, taking a rise of 8 dB instead of the 12 dB of the `hit` events) that touch no word and, when the
+  tempo is steady, no beat, each with its `overMusic` (the effect alone over the bed, from the rise as a power ratio) and
+  `onBeat` counting those left out; null when the speech was skipped, since a word cannot be told from an effect.
+  `audio.sections` are stretches where the level of the sound without the words steps by 4 dB or more (at least 4 s
+  apart), snapped to a downbeat of a steady tempo with their `bars`, and the `speech` share they cover. The CLI prints
+  `Speech`, `Effects` and `Sections` lines with a sentence and a section table; `--no-speech` (`speech: false`) skips the
+  recognition, the slow part. New files in `packages/core/src/analyze/` (`audio.ts`, `speech.ts`, `pitch.ts`); the
+  skill (`reference-video.md`), `docs/mcp.md` and SPEC say how to read them.
+- Beats and markers for generated clips, ADR 0029 decision 8 (#458, epic #451): a generated clip can sync its motion to the
+  music. An adapter says per clip which timing it reads (`ClipAdapter.timing`, `beats` and/or `markers`; plugin API
+  stays "1") and gets `RenderContext.timing` (and `LiveContext.timing` for the live page): the beats of the timeline's
+  grid with their `beat:N`/`bar:N` numbers and tempo, and the markers, that fall inside the clip, in composition seconds.
+  No usable grid (no tempo, no beats file, a broken or LOW confidence one) gives no beats and a `beatsProblem`, never a
+  failed render. Only clips that ask count it in their render key, so moving the music or a marker re-renders them and
+  nothing else; existing keys are unchanged. HyperFrames compositions ask with
+  `<meta name="frameshell-timing" content="beats markers">` and read `window.frameshellTiming`. No wire change.
+- Batch slot defaults and a review column, slice 5 of #477 (ADR 0040, epic #451; protocol 145): a batch slot written
+  `<clipId>.props` (no path) sets the prop named like the slot, so `"title": "c_8f2a1b.props"` is
+  `c_8f2a1b.props.title` and a template's declared props become slot names without repeating them. `batch.render` takes
+  `review` (CLI `frameshell batch --review`): each rendered file is reviewed (`ReviewService.run` on the file, metrics
+  only, one at a time while the next row renders) and its manifest entry gets `review { state, verdict, warnings, failed,
+  checks, run, error }`: `fail` when `requirements.json` fails, `warn` for craft warnings, else `pass`. The manifest says
+  `running` until the last review ended, `gc` keeps clip renders until then, a failed render has no review and a review
+  that cannot run (`error`) never fails the render. Rows skipped as done are reviewed when they have no finished review.
+  The CLI prints each verdict under its file and exits 1 when a verdict is `fail`. Off by default (a review decodes the
+  file). Old manifests without the field still read (`review` null). Skill `batch.md` says so.
 - Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 143): an optional `grain { amount?, size?, seed? }` on media
   and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
   hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame

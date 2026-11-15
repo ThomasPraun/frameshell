@@ -56,3 +56,8 @@ export function settled(entry: BatchEntry): BatchEntry {
   if (entry.status !== "queued" && entry.status !== "running" && entry.status !== "planned") return entry;
   return { ...entry, status: "canceled", error: "The daemon stopped before this render ended.", finishedAt: null, duration: null };
 }
+
+/** `fail` when the project's requirements failed, `warn` for craft warnings, else `pass`. */
+export function reviewVerdict(warnings: number, failed: number): "pass" | "warn" | "fail" {
+  return failed > 0 ? "fail" : warnings > 0 ? "warn" : "pass";
+}

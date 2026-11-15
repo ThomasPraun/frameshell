@@ -722,6 +722,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
     hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
     planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
+    // `reviews` is declared below: it is read when a batch asks for a review, not now.
+    review: (dir, request) => reviews.run(dir, request),
   });
   const reviews = new ReviewService({
     timelines,
@@ -746,6 +748,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
     beats,
+    // The project's own transcription provider and model, as `transcribe` takes them; a missing one is the run's `speech.reason`.
+    transcribe: async (dir, wav) => {
+      const { config } = (await readEnclosingProject(dir))!;
+      const providerId = config.transcription?.provider ?? "whisper-cpp";
+      const provider = await plugins.transcriptionProvider(dir, providerId);
+      const model = await configuredModel(config, providerId);
+      const language = config.transcription?.language;
+      const heard = await provider.transcribe(wav, { ...(model ? { model } : {}), ...(language ? { language } : {}) }, providerContext(transcriberTools({ dir, binaries: config.binaries }), () => {}).context);
+      return { words: heard.words, provider: providerId, model: heard.model, language: heard.language ?? null };
+    },
   });
   const gradeAnalyzer = new GradeAnalyzer({
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
@@ -779,6 +791,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { width: probe.video?.width ?? 0, height: probe.video?.height ?? 0, duration: probe.duration };
     },
     ensureBinary: async (dir, name) => binaries.ensure(name, await projectBinaries(dir)),
+    beatsOf,
   });
   /** One spelling per project for the clip renderer, whatever spelling the caller used: its jobs and cache state are keyed by it. */
   const clipRoot = (dir: string): string => {
@@ -1484,8 +1497,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
-    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, dryRun }) =>
-      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, dryRun }),
+    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, review, dryRun }) =>
+      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, review, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
@@ -1513,7 +1526,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ...(projectFormat !== undefined ? await viewFormats(dir, reviewView) : {}),
       });
     },
-    analyze: async ({ cwd, file, name, threshold }, _caller, request) => {
+    analyze: async ({ cwd, file, name, threshold, speech }, _caller, request) => {
       const dir = await root(cwd);
       const path = resolve(cwd, file);
       const inside = relative(dir, path);
@@ -1522,7 +1535,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ctx.update({ step: "analyze", progress: 0 });
         return analyses.run(
           dir,
-          { file: path, name, threshold },
+          { file: path, name, threshold, speech },
           {
             signal: ctx.signal,
             progress: (progress) => ctx.update({ progress }),
