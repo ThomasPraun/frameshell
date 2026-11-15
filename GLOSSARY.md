@@ -451,5 +451,9 @@ A tool Frameshell uses but never downloads, because it belongs to the person (Bl
 _Avoid_: system binary, external binary, unmanaged tool
 
 **Draft**:
-The quality of a Blender render in this version: EEVEE or Workbench with a transparent film, fast and not final art. `quality: "final"` (Cycles) comes in a later slice.
+The fast render of a generated clip that keeps two (ADR 0041 decision 11): for a Blender clip, EEVEE or Workbench with a transparent film, not final art. The preview and `render --quality draft` use it.
 _Avoid_: preview render, low quality, proxy
+
+**Final**:
+The expensive render of a generated clip that keeps two: the blurred render of a clip with motion blur, or a Blender clip's Cycles render. Final and untiered exports wait for it; a Blender final is rendered only then, after a confirmation when estimated over 5 minutes.
+_Avoid_: master, high quality, delivery render

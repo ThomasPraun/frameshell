@@ -32,21 +32,22 @@ describe("supported Blender versions", () => {
 describe("props", () => {
   const validate = (props: unknown) => propsSchema["~standard"].validate(props) as { value?: unknown; issues?: { message: string }[] };
 
-  it("accept scene, camera and the draft quality, or nothing", () => {
-    for (const props of [{}, { scene: "Scene" }, { camera: "Camera.001" }, { scene: "A", camera: "B", quality: "draft" }]) {
+  it("accept scene and camera, or nothing", () => {
+    for (const props of [{}, { scene: "Scene" }, { camera: "Camera.001" }, { scene: "A", camera: "B" }]) {
       expect(validate(props).issues, JSON.stringify(props)).toBeUndefined();
     }
   });
 
-  it("refuse final quality in this version, with what to do", () => {
-    expect(validate({ quality: "final" }).issues?.[0]?.message).toMatch(/"final" is not available in this version.*"draft"/);
-    expect(validate({ quality: "medium" }).issues?.[0]?.message).toMatch(/must be "draft"/);
+  it("refuse a quality prop: draft or final is the export's choice, and the message says how to pick it", () => {
+    for (const quality of ["draft", "final"]) {
+      expect(validate({ quality }).issues?.[0]?.message).toMatch(/unknown prop quality: .*draft render \(EEVEE\) and a final one \(Cycles\).*--quality draft.*Remove quality/);
+    }
   });
 
   it("refuse frame ranges, scripts and the file (the .blend is the source), naming the fix", () => {
     const messages = (props: unknown) => (validate(props).issues ?? []).map((issue) => issue.message).join("\n");
     expect(messages({ file: "a.blend" })).toMatch(/the \.blend is the clip's `source`/);
-    expect(messages({ frameStart: 1 })).toMatch(/unknown prop frameStart.*in and duration.*no scripts run/);
+    expect(messages({ frameStart: 1 })).toMatch(/unknown prop frameStart: props are scene and camera.*in and duration.*no scripts run/);
     expect(messages({ script: "import os" })).toMatch(/unknown prop script/);
     expect(messages({ scene: "", camera: 3 })).toMatch(/scene must be the name.*\n.*camera must be the name/);
     expect(messages([])).toMatch(/props must be an object/);

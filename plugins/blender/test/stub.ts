@@ -22,6 +22,8 @@ export interface StubConfig {
   skipLast?: boolean;
   /** Stay alive after this many frames, until killed. */
   hangAfter?: number;
+  /** `seconds` each `frame` event reports, by frame index; default 0.05. */
+  frameSeconds?: number[];
 }
 
 /** Options of {@link stubBlender} that are not the stub's own behaviour. */

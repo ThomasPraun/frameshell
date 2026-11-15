@@ -5,6 +5,7 @@ import { join, posix, win32 } from "node:path";
 import type { ClipAdapter, InputsContext, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
 import { type BlenderEvent, SUPPORTED_BLENDER, VersionProbe, runBlender, scriptPath } from "./blender.js";
 import { BlendDeps, STATE_DIR, listingPath, marker } from "./deps.js";
+import { FinalTimes } from "./finals.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "blender";
@@ -15,8 +16,6 @@ export interface BlenderProps {
   scene?: string;
   /** Camera object to render through; default: the scene's active camera. */
   camera?: string;
-  /** `draft` (EEVEE or Workbench), the only one in this version; default `draft`. */
-  quality?: "draft";
 }
 
 /** Timeline clip fields the adapter reads. */
@@ -28,11 +27,11 @@ interface BlenderClip {
   props?: BlenderProps;
 }
 
-const EXAMPLE = '{ "scene": "Scene", "camera": "Camera", "quality": "draft" }';
+const EXAMPLE = '{ "scene": "Scene", "camera": "Camera" }';
 
 /**
- * `props` = `{ scene?, camera?, quality? }` and nothing else: no agent Python reaches Blender (ADR 0035
- * decision 8), and the frame range is the clip's own `in` and duration.
+ * `props` = `{ scene?, camera? }` and nothing else: no agent Python reaches Blender (ADR 0035 decision 8), the frame
+ * range is the clip's own `in` and duration, and draft or final is the export's choice, not a prop (ADR 0041 decision 11).
  */
 export const propsSchema: PropsSchema = {
   "~standard": {
@@ -42,25 +41,21 @@ export const propsSchema: PropsSchema = {
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return { issues: [{ message: `props must be an object, e.g. ${EXAMPLE}` }] };
       }
-      const { scene, camera, quality, ...rest } = value as Record<string, unknown>;
+      const { scene, camera, ...rest } = value as Record<string, unknown>;
       const issues: { message: string; path?: string[] }[] = [];
       for (const [key, name] of [["scene", scene], ["camera", camera]] as const) {
         if (name !== undefined && (typeof name !== "string" || name === "" || name.length > 255)) {
           issues.push({ message: `${key} must be the name of a ${key} in the .blend file, e.g. ${EXAMPLE}`, path: [key] });
         }
       }
-      if (quality !== undefined && quality !== "draft") {
-        const message =
-          quality === "final"
-            ? 'quality "final" is not available in this version: clips render as drafts (EEVEE or Workbench). Omit quality or use "draft".'
-            : 'quality must be "draft" (the only one in this version), or be omitted';
-        issues.push({ message, path: ["quality"] });
-      }
       for (const key of Object.keys(rest)) {
         const message =
           key === "file"
             ? "unknown prop file: the .blend is the clip's `source`, e.g. --source scenes/intro.blend"
-            : `unknown prop ${key}: props are scene, camera and quality. The frame range is the clip's own in and duration, and no scripts run.`;
+            : key === "quality"
+              ? "unknown prop quality: every blender clip has a draft render (EEVEE) and a final one (Cycles). `render --quality draft` " +
+                "exports the drafts; `render --quality final`, or no --quality, renders the finals. Remove quality from props."
+              : `unknown prop ${key}: props are scene and camera. The frame range is the clip's own in and duration, and no scripts run.`;
         issues.push({ message, path: [key] });
       }
       return issues.length > 0 ? { issues } : { value };
@@ -78,15 +73,20 @@ export interface BlenderAdapterOptions {
  * The `blender` clip adapter (ADR 0035). A clip's `source` is a `.blend` inside the project. Blender is the
  * person's own install (`binaries.blender`), run once per render as a separate process; the managed ffmpeg encodes
  * its PNG frames to VP9 WebM with alpha. The cache key covers the file, the in-project files it loads, the Blender
- * version and the length rendered.
+ * version and the length rendered. Each clip has a draft render (EEVEE or Workbench) and a final one (Cycles), which
+ * the host makes only when an export waits for it.
  */
 export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapter {
   const { projectDir } = options;
   const versions = new VersionProbe();
   const deps = new BlendDeps(projectDir);
+  const times = new FinalTimes(projectDir);
   return {
     type: CLIP_TYPE,
     propsSchema,
+    finals: {
+      estimate: (clip, ctx) => times.estimate(sourceOf(clip as BlenderClip), frameCount(clip as BlenderClip, ctx.fps), ctx.width, ctx.height),
+    },
     async inputs(clip, context?: InputsContext) {
       if (!context) throw new Error("this Frameshell is too old for the blender plugin: update Frameshell");
       const source = sourceOf(clip as BlenderClip);
@@ -111,22 +111,29 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       const version = await versions.version(blender);
       const ffmpeg = await ctx.ensureBinary("ffmpeg");
       const frames = frameCount(clip as BlenderClip, ctx.fps);
+      // Hosts older than finals pass no tier: they get the draft, as before.
+      const quality = ctx.tier === "final" ? "final" : "draft";
       const framesDir = join(ctx.outDir, "frames");
       await mkdir(framesDir, { recursive: true });
       ctx.progress({ fraction: 0, message: `Starting Blender ${version}` });
       let first = 1;
-      const fraction = (done: number) => ctx.progress({ fraction: RENDER_SHARE * Math.min(1, Math.max(0, done / frames)), message: "Rendering" });
+      const rendering = quality === "final" ? "Rendering the final (Cycles)" : "Rendering";
+      const fraction = (done: number) => ctx.progress({ fraction: RENDER_SHARE * Math.min(1, Math.max(0, done / frames)), message: rendering });
+      const frameSeconds: number[] = [];
       const { error } = await runBlender(
         blender,
         join(projectDir, ...source.split("/")),
         scriptPath("render.py"),
-        { scene: props.scene ?? null, camera: props.camera ?? null, width: ctx.width, height: ctx.height, fps: ctx.fps, frames, outDir: framesDir, quality: "draft" },
+        { scene: props.scene ?? null, camera: props.camera ?? null, width: ctx.width, height: ctx.height, fps: ctx.fps, frames, outDir: framesDir, quality },
         {
           cwd: ctx.outDir,
           signal: ctx.signal,
           onEvent: (event: BlenderEvent) => {
             if (event.event === "start") first = event.frameStart;
-            else if (event.event === "frame") fraction(event.index + 1);
+            else if (event.event === "frame") {
+              fraction(event.index + 1);
+              if (typeof event.seconds === "number") frameSeconds.push(event.seconds);
+            }
           },
           onFrame: (frame) => fraction(frame - first),
         },
@@ -134,6 +141,13 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       if (error) throw new Error(describeRefusal(id, source, error, ctx.fps));
       const rendered = (await readdir(framesDir)).filter((name) => /^frame_\d{6}\.png$/.test(name)).length;
       if (rendered !== frames) throw new Error(`blender clip ${id}: Blender wrote ${rendered} of ${frames} frames of ${source}. Open the file in Blender and render it there to see why.`);
+      // The first frame also pays for scene sync and, once per Blender and GPU, the Metal kernel compile: only later frames
+      // measure the rate. A wrong estimate only changes when the next final asks first: it must never fail this render.
+      const later = frameSeconds.slice(1);
+      if (quality === "final" && later.length > 0) {
+        const seconds = later.reduce((sum, value) => sum + value, 0);
+        await times.record(source, seconds, later.length, ctx.width, ctx.height).catch(() => {});
+      }
       ctx.progress({ fraction: RENDER_SHARE, message: "Encoding" });
       const output = join(ctx.outDir, "render.webm");
       await encode(ffmpeg, framesDir, output, ctx.fps, ctx.signal);

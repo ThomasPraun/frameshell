@@ -115,7 +115,11 @@ export const exportMethods = {
       "(16:9 is 1200x675, 9:16 is 675x1200, never scaled up), at most 30 fps (24 and 25 keep their rate), one palette over the whole file with " +
       "bayer dither, ~4 centisecond frame delays. A GIF always has the loop rules (refused with `cover`, the black-end and cycle warnings, the " +
       "repeated-last-frame warning on the job) and ignores `quality` (a warning says so). More than 350 output frames fails with InvalidOperation " +
-      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`.",
+      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`. " +
+      "Finals (ADR 0035): a generated clip whose plugin renders finals (Blender: EEVEE draft, Cycles final) keeps both; `quality: \"draft\"` " +
+      "exports its draft with a warning per clip, while `final` or no quality renders its missing final first and waits for it. When the " +
+      "missing finals are estimated over 5 minutes in all (or a plugin cannot say), nothing is queued: it fails with ConfirmationRequired " +
+      "(`data.finals` lists `{ clip, type, format, seconds }`, `data.seconds` the total) until called again with `yes: true` after the person agreed.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -148,6 +152,13 @@ export const exportMethods = {
         .describe(
           "Export a file meant to repeat (title loops, banners): frame 0 to the last frame, 2 ms half-sine audio fades at both ends of " +
             "MP4 and MOV, warnings for a broken cycle, black ends, and a last frame that repeats frame 0. Refused with `cover`. Default false.",
+        ),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "The person agreed to wait for the final renders of generated clips (Blender's Cycles finals) this export makes when they " +
+            "are estimated over 5 minutes in all. Never set it without their explicit agreement. Default false.",
         ),
     }),
     result: z.object({
@@ -202,7 +213,11 @@ export const exportMethods = {
       "`pass`), `warnings`, `failed`, `checks` and the `run` whose `metrics.json` holds the detail, and the manifest says " +
       "`running` until the last review ended. Rows skipped as done are reviewed too when their entry has no finished " +
       "review. A review that cannot run leaves the render `done` and the entry's review `error`. In a props slot, `<clipId>.props` " +
-      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`.",
+      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`. " +
+      "Finals (ADR 0035): unless the batch file's `quality` is `draft`, each row renders the missing finals of its generated clips " +
+      "(Blender's Cycles renders) first; when those of every chosen row are estimated over 5 minutes in all (or a plugin cannot say), " +
+      "nothing is queued: it fails with ConfirmationRequired as `render` does (`data.finals` entries also name their `row`) until " +
+      "called again with `yes: true` after the person agreed. `dryRun` never asks.",
     params: z.strictObject({
       cwd: CwdParam,
       file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
@@ -227,6 +242,13 @@ export const exportMethods = {
         .default(false)
         .describe("Review each rendered file (`review` with `file`, metrics only) and record its verdict in the entry's `review`; slower, off by default."),
       dryRun: z.boolean().default(false).describe("Validate every chosen row × format and return the plan; nothing is rendered or written."),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "The person agreed to wait for the final renders of generated clips (Blender's Cycles finals) the chosen rows make when they " +
+            "are estimated over 5 minutes in all. Never set it without their explicit agreement. Default false.",
+        ),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),

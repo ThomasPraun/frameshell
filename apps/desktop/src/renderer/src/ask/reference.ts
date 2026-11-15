@@ -11,6 +11,7 @@ const MAX_QUOTE = 48;
 /**
  * True when a `frame` capture would wait for a clip render: one queued, rendering or failed (a capture retries it).
  * With motion blur (ADR 0041) the capture waits for `final`, unless the plugin refused it (then it uses the draft).
+ * A plugin's own final (`onDemand`, ADR 0035) never holds it: the capture uses the draft until that final is cached.
  */
 export function framePending(renders: readonly ClipRenderInfo[]): boolean {
   return renders.some(
@@ -18,7 +19,7 @@ export function framePending(renders: readonly ClipRenderInfo[]): boolean {
       clip.state === "queued" ||
       clip.state === "rendering" ||
       clip.state === "failed" ||
-      (clip.final !== undefined && clip.final.state !== "ready" && !clip.final.refused),
+      (clip.final !== undefined && clip.final.state !== "ready" && !clip.final.refused && clip.final.onDemand !== true),
   );
 }
 

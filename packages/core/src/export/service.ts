@@ -36,7 +36,7 @@ import {
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
-import type { ClipEnsureOptions } from "../clips/renderer.js";
+import type { ClipEnsureOptions, FinalRenderState } from "../clips/renderer.js";
 import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
@@ -176,6 +176,25 @@ export interface RenderRequest {
   formats?: readonly string[] | undefined;
   /** A file meant to repeat (ADR 0039); refused with `cover`. */
   loop?: boolean | undefined;
+  /**
+   * The person agreed to wait for the final renders of generated clips this export makes (ADR 0035): without it
+   * {@link ExportService.render} refuses when they are estimated over {@link FINAL_CONFIRM_SECONDS} in all.
+   */
+  yes?: boolean | undefined;
+}
+
+/** Above this many seconds of missing final renders in all, a final or untiered export waits for a confirmation (ADR 0035 decision 4). */
+export const FINAL_CONFIRM_SECONDS = 5 * 60;
+
+/** A final render an export would make and wait for: the clip, the format it is rendered in, and its estimate. */
+export interface DueFinal {
+  clip: string;
+  type: string;
+  format: string;
+  /** Estimated seconds; null when the plugin could not say. */
+  seconds: number | null;
+  /** Batch row (ADR 0040) whose render makes it; absent for a plain `render`. */
+  row?: string;
 }
 
 /** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
@@ -184,6 +203,8 @@ export interface PlannedRender {
   result: Omit<RenderResult, "job" | "renders"> & { renders: Omit<RenderResult["renders"][number], "job">[] };
   /** Placed assets without verified provenance (ADR 0026), also at the end of `result.warnings`. */
   provenance: string[];
+  /** Final renders of generated clips the jobs would make and wait for (ADR 0035); empty for a draft export. */
+  finals: DueFinal[];
   /** Queue one job per format; synchronous. */
   start(): RenderResult;
 }
@@ -246,6 +267,11 @@ export interface ExportServiceOptions {
      * `tier`: `draft` takes the sharp render of a clip with motion blur, `final` or absent the blurred one (ADR 0041).
      */
     ensure(root: string, timeline: Timeline, options?: ClipEnsureOptions): Promise<ReadonlyMap<string, GeneratedSource>>;
+    /**
+     * Final renders of the clips whose plugin renders finals (ADR 0035), at `size` (absent: the project resolution);
+     * see `ClipRenderer.finals`. Absent: no clip has one.
+     */
+    finals?(root: string, timeline: Timeline, size?: { width: number; height: number }): Promise<FinalRenderState[]>;
   };
   /**
    * Audio effects bakes (ADR 0031): `needs` lists the bakes a flattened timeline plays, `ensure` bakes what is
@@ -301,7 +327,9 @@ export class ExportService {
    * Every format is checked and compiled before any job is queued. Returns at once.
    */
   async render(root: string, params: RenderRequest): Promise<RenderResult> {
-    return (await this.planRender(root, params)).start();
+    const planned = await this.planRender(root, params);
+    if (params.yes !== true) confirmFinals(planned.finals);
+    return planned.start();
   }
 
   /**
@@ -370,6 +398,10 @@ export class ExportService {
         : new Map<string, GeneratedSource>();
       const plan = compileRender({ ...input, generated: standIn, audioFx: standInBakes, mattes: standInMattes });
       const output = params.formats ? withSuffix(base, format.id) : base;
+      // ADR 0035: a draft export says which clips have a better render; a final one lists the finals it would wait for.
+      const finals = layered.length > 0 ? ((await this.#options.clips?.finals?.(root, own, renderSize)) ?? []) : [];
+      const drafts = params.quality === "draft" ? finals.map((final) => draftWarning(final)) : [];
+      const due = params.quality === "draft" ? [] : finals.flatMap((final) => (final.state === "missing" ? [{ clip: final.clip, type: final.type, format: format.id, seconds: final.seconds }] : []));
       // Before formats a configured default preset of another aspect letterboxed the project into its size.
       const overridden =
         params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && preset.video.fit === undefined && !sameAspect(preset.video, format)
@@ -379,7 +411,7 @@ export class ExportService {
                 "size, add and render the format of its aspect (`frameshell format add`).",
             ]
           : [];
-      return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...captions.warnings, ...plan.warnings] };
+      return { format, input, renderSize, plan, output, due, warnings: [...overridden, ...(cover?.warnings ?? []), ...captions.warnings, ...plan.warnings, ...drafts] };
     }));
     const provenance = (await this.#options.provenance?.(root, [...sources.keys()])) ?? [];
     const first = planned[0]!;
@@ -410,6 +442,7 @@ export class ExportService {
     return {
       result,
       provenance,
+      finals: planned.flatMap(({ due }) => due),
       start: () => {
         const queued = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
           const job = this.#options.jobs.enqueue({
@@ -427,6 +460,7 @@ export class ExportService {
                   onProgress: (fraction) => ctx.update({ progress: fraction }),
                   size: renderSize,
                   tier: params.quality,
+                  waitForFinals: true,
                   onWarning: (warning) => ctx.update({ warning }),
                 });
               }
@@ -805,6 +839,49 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** The warning of a draft export for a clip whose plugin renders finals (ADR 0035 decision 4). */
+function draftWarning(final: FinalRenderState): string {
+  return (
+    `Clip ${final.clip} (${final.type}) is exported from its draft render, not its final one: export with quality final ` +
+    "(or no quality) for the delivery."
+  );
+}
+
+/**
+ * Throws ConfirmationRequired when the final renders an export (or a batch, `what`) would make are estimated over
+ * {@link FINAL_CONFIRM_SECONDS} in all, or a plugin could not estimate one (ADR 0035 decision 4).
+ */
+export function confirmFinals(due: readonly DueFinal[], what = { subject: "This export", draft: "export with quality draft" }): void {
+  if (due.length === 0) return;
+  const known = due.every((final) => final.seconds !== null);
+  const seconds = due.reduce((sum, final) => sum + (final.seconds ?? 0), 0);
+  if (known && seconds <= FINAL_CONFIRM_SECONDS) return;
+  const formats = due.some((other) => other.format !== due[0]!.format);
+  const each = due
+    .map((final) => {
+      const where = [final.row, formats ? final.format : undefined].filter((part) => part !== undefined).join(" ");
+      return `${final.type} clip ${final.clip}${where ? ` [${where}]` : ""} ${final.seconds === null ? "unknown" : about(final.seconds)}`;
+    })
+    .join(", ");
+  const hint =
+    "Ask the person whether to wait; call again with `yes: true` (CLI `--yes`) only once they agreed, or " +
+    `${what.draft} to use the draft renders now (with a warning).`;
+  throw new RpcError(
+    ErrorCode.ConfirmationRequired,
+    `${what.subject} renders the final ${due.length === 1 ? "render" : "renders"} of ${due.length} generated ${due.length === 1 ? "clip" : "clips"} ` +
+      `first, estimated at ${known ? about(seconds) : "an unknown time"} on this machine (${each}): more than ${FINAL_CONFIRM_SECONDS / 60} minutes ` +
+      `needs the person's confirmation. ${hint}`,
+    { finals: due, seconds: known ? seconds : null, limit: FINAL_CONFIRM_SECONDS, hint },
+  );
+}
+
+/** `about 12 min` / `about 5.1 min` / `about 40 s`: tenths rounded up below 10 minutes, so a total over the limit never reads as it. */
+function about(seconds: number): string {
+  if (seconds < 90) return `about ${Math.max(1, Math.round(seconds))} s`;
+  const minutes = seconds / 60;
+  return `about ${minutes < 10 ? Math.ceil(minutes * 10) / 10 : Math.round(minutes)} min`;
 }
 
 /** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */

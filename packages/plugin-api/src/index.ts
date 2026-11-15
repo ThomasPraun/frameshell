@@ -135,6 +135,13 @@ export interface ClipAdapter {
    */
   readonly motionBlur?: boolean;
   /**
+   * Optional. The adapter renders an expensive final next to a fast draft (ADR 0035, ADR 0041 decision 11): the host
+   * keeps two cache entries per clip and says which one it wants in {@link RenderContext.tier}. The draft plays in the
+   * preview and in draft exports; final and untiered exports wait for the final, which is never rendered in the
+   * background. Final exports whose missing finals are estimated over 5 minutes in all need the person's confirmation.
+   */
+  readonly finals?: FinalRenders;
+  /**
    * Optional. Which of the timeline's timing this clip's render reads (ADR 0029 decision 8): `beats` (the beat grid,
    * with bar starts) and `markers`. Only the kinds returned reach {@link RenderContext.timing} and count in the clip's
    * render key, so a clip that asks for none never re-renders when the music or a marker moves. Called on every key
@@ -143,6 +150,29 @@ export interface ClipAdapter {
    */
   timing?(clip: unknown, context?: InputsContext): readonly RenderTimingKind[] | Promise<readonly RenderTimingKind[]>;
 }
+
+/** How an adapter with {@link ClipAdapter.finals} sizes a final render before anyone waits for it. */
+export interface FinalRenders {
+  /**
+   * Seconds the final render of `clip` (props validated) would take on this machine, from start to file, at the
+   * context's size and frame rate. A rough figure is fine: it only decides whether to ask the person first.
+   * Throwing counts as an unknown time, which is asked about too.
+   */
+  estimate(clip: unknown, context: EstimateContext): number | Promise<number>;
+}
+
+/** Project facts for {@link FinalRenders.estimate}: what the final would be rendered for. */
+export interface EstimateContext {
+  readonly projectDir: string;
+  /** Project frame rate. */
+  readonly fps: number;
+  /** Frame size of the render: the project resolution, or a format of the project (ADR 0027). */
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Which render of a clip with {@link ClipAdapter.finals} is being made: the fast draft or the expensive final. */
+export type RenderTier = "draft" | "final";
 
 /** What a clip can ask of the timeline's timing through {@link ClipAdapter.timing}. */
 export type RenderTimingKind = "beats" | "markers";
@@ -321,6 +351,11 @@ export interface RenderContext {
    * with a warning, where the blurred one was asked for.
    */
   readonly motionBlur?: RenderMotionBlur;
+  /**
+   * The render asked for, for an adapter with {@link ClipAdapter.finals}: `draft` (fast, for the preview and draft
+   * exports) or `final` (the delivery); absent for other adapters. The two have separate cache entries.
+   */
+  readonly tier?: RenderTier;
   /**
    * The timeline's beats and markers inside the clip, of the kinds {@link ClipAdapter.timing} asked for (ADR 0029
    * decision 8); absent when it asked for none. Part of the render key.

@@ -51,7 +51,7 @@ if (first + request.frames - 1 > (model.frameEnd ?? 250)) refuse("range", { scen
 writeFileSync(join(here, "pid"), String(process.pid));
 mkdirSync(request.outDir, { recursive: true });
 let hung = false;
-emit({ event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
+emit(request.quality === "final" ? { event: "start", frameStart: first, frames: request.frames, engine: "CYCLES", device: "CPU" } : { event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
 for (let index = 0; index < request.frames; index++) {
   print(`Fra:${first + index} Mem:10.00M (Peak 10.00M) | Time:00:00.01 | Rendering`);
   if (config.crash && index === 1) {
@@ -59,7 +59,7 @@ for (let index = 0; index < request.frames; index++) {
     process.exit(1);
   }
   if (!(config.skipLast && index === request.frames - 1)) writeFileSync(join(request.outDir, `frame_${String(index).padStart(6, "0")}.png`), png(request.width, request.height));
-  emit({ event: "frame", index });
+  emit({ event: "frame", index, seconds: config.frameSeconds?.[index] ?? 0.05 });
   if (config.hangAfter === index + 1) {
     // Never finishes, as a long final render: only a kill ends it.
     setInterval(() => {}, 1000);

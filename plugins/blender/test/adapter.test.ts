@@ -283,4 +283,58 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(stub.runs("render.py")).toEqual([]);
     });
   });
+
+  describe("finals", () => {
+    const estimate = (blender: ReturnType<typeof adapter>, fps = 10, width = 1000, height = 1000) =>
+      blender.finals!.estimate(clip({ duration: 2 }), { projectDir: project, fps, width, height });
+
+    it("render the draft when the host asks for it or names no tier, and the final with Cycles when it asks for the final", async () => {
+      for (const tier of ["draft", undefined] as const) {
+        await adapter().render(clip(), renderContext(project, stub.path, tier ? { tier } : {}).ctx);
+        expect(JSON.parse(stub.runs("render.py").at(-1)![9]!)).toMatchObject({ quality: "draft" });
+      }
+      const { ctx, progress } = renderContext(project, stub.path, { tier: "final" });
+      const result = await adapter().render(clip(), ctx);
+      expect(JSON.parse(stub.runs("render.py").at(-1)![9]!)).toMatchObject({ quality: "final", frames: 5 });
+      expect(progress.map((update) => update.message)).toContain("Rendering the final (Cycles)");
+      expect(alphaAt(await decodeRgba(result.file), { width: 64, height: 36 }, 0, 2, 2)).toBe(0);
+    });
+
+    it("estimate frames x megapixels x 5 s plus start-up before any final ran here, then the rate this .blend's last final took", async () => {
+      // 2 s at 10 fps = 20 frames of 1 megapixel.
+      expect(await estimate(adapter())).toBe(10 + 20 * 5);
+      expect(await estimate(adapter(), 10, 2000, 1000)).toBe(10 + 20 * 2 * 5);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "final" }).ctx);
+      const measured = JSON.parse(readFileSync(join(project, ".frameshell", "blender", "finals.json"), "utf8")) as { sources: Record<string, number>; last: number };
+      expect(measured.sources[SOURCE]).toBeGreaterThan(0);
+      expect(measured.last).toBe(measured.sources[SOURCE]);
+      // A new adapter (a daemon restart) reads it back.
+      expect(await estimate(adapter())).toBeCloseTo(10 + 20 * measured.sources[SOURCE]!, 3);
+      // Another .blend of the project takes the last rate measured.
+      writeBlend(project, "scenes/other.blend", { fps: 10 });
+      const other = await adapter().finals!.estimate({ ...clip({ duration: 2 }), source: "scenes/other.blend" }, { projectDir: project, fps: 10, width: 1000, height: 1000 });
+      expect(other).toBeCloseTo(10 + 20 * measured.last, 3);
+    });
+
+    it("measure the rate from the frames after the first, which also pays for start-up and kernel compiles", async () => {
+      // 5 frames at 64x36: a 600 s first frame (Metal kernels), then 2 s each.
+      stub.configure({ frameSeconds: [600, 2, 2, 2, 2] });
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "final" }).ctx);
+      const measured = JSON.parse(readFileSync(join(project, ".frameshell", "blender", "finals.json"), "utf8")) as { sources: Record<string, number> };
+      expect(measured.sources[SOURCE]).toBeCloseTo(2 / ((64 * 36) / 1e6), 2);
+    });
+
+    it("do not record a final of one frame, whose time is mostly start-up", async () => {
+      await adapter().render(clip({ duration: 0.1 }), renderContext(project, stub.path, { tier: "final" }).ctx);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+    });
+
+    it("do not measure drafts, and never estimate a clip without a .blend source", async () => {
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "draft" }).ctx);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+      await expect(Promise.resolve().then(() => adapter().finals!.estimate({ id: "c1", duration: 1 }, { projectDir: project, fps: 10, width: 64, height: 36 }))).rejects.toThrow(/needs `source`/);
+    });
+  });
 });
