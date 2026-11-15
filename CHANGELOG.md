@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Colour grade on generated clips and nested timeline clips, slice 8 of #384 (ADR 0031, epic #451; protocol 152):
+  `clip set --grade-*` (`clip.set` `grade`, MCP `clip_set`) now takes adapter clips and nested timeline clips on video
+  tracks too. A render is graded first in its part, before its alpha, as footage is (export `lut3d` right after it is
+  read; the preview grades the decoded colour before the alpha plane masks it). A nested timeline clip's grade follows
+  the own grade of every picture inside it, at any depth: flattening records the hosts' grades on each picture
+  (`hostGrades`) and export and the preview fold the chain into one table (`gradeChainOf`, `gradeChainTable`), so it
+  comes before that picture's vignette and grain; sound and shots are untouched. Plans of timelines without nested
+  grades are unchanged. Tests: chain tables, flattening two levels deep, two goldens, the managed ffmpeg on a nested
+  still and a VP9 alpha render, and the preview's tables against the ones export writes.
 - Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 151): `voiceover place
   --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
   times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499
