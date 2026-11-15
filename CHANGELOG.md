@@ -1110,6 +1110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
+  "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
+  switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.
 - Motion compositions paint each time the same whatever was painted before (#501, epic #451): motion runtime 0.3.0
   writes `x` and `y` on a 1/32 px grid and `rotate` on a 0.02° grid, because Chrome does not repaint a transform change
   under about 1/80 px and kept the older pose, so slow motion (a spring settling) rendered by frame differed from the

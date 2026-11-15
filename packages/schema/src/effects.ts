@@ -58,6 +58,9 @@ export const VOICE_CHAIN: readonly NormalizedAudioEffect[] = [
   { kind: "compressor", threshold: -20, ratio: 2.5, attack: 8, release: 140, makeup: 2 },
 ];
 
+/** True for a `highpassSweep` that `music.shape` wrote (`auto: "music"`): a build, not a hand-set voice effect. */
+export const isBuild = (effect: { kind: string; auto?: string | undefined }): boolean => effect.kind === "highpassSweep" && effect.auto === "music";
+
 /**
  * Cutoff in Hz of `effect` at asset second `at`, or null when the filter is out of the signal (before `from`, from
  * `to` on: the build is over and the full range is back). Rises exponentially from `startHz` to `endHz`, so the

@@ -1,12 +1,10 @@
 import type { MusicShapeResult } from "@frameshell/protocol";
-import { type AudioEffect, MAX_AUDIO_EFFECTS, SWEEP_EPSILON, SWEEP_SECONDS, type ShapeSettings } from "@frameshell/schema";
+import { type AudioEffect, MAX_AUDIO_EFFECTS, SWEEP_EPSILON, SWEEP_SECONDS, type ShapeSettings, isBuild } from "@frameshell/schema";
 
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 
 /** What the builds of a shaping are asked for; kept as {@link ShapeSettings}`.build`. */
 export type MusicBuild = NonNullable<ShapeSettings["build"]>;
-/** True for a `highpassSweep` that `music.shape` wrote (`auto: "music"`). */
-export const isBuild = (effect: AudioEffect) => effect.kind === "highpassSweep" && effect.auto === "music";
 
 /** The clip as the builds read it: where it plays the file, and the effects it has now. */
 export interface BuildClip {
