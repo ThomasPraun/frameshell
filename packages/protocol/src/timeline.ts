@@ -422,9 +422,10 @@ export const operationArgs = {
       .nullable()
       .optional()
       .describe(
-        "`media` clips on video tracks only (ADR 0031): colour grade merged field by field into the clip's; `null` clears it. Correction " +
-          "`exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project `.cube`) at `lutMix`. " +
-          "Shots are skipped with a warning.",
+        "Media, generated and nested timeline clips on video tracks (ADR 0031): colour grade merged field by field into the clip's; `null` " +
+          "clears it. Correction `exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project " +
+          "`.cube`) at `lutMix`. A generated clip's render is graded before its alpha; a nested timeline clip's grade applies to every " +
+          "picture inside it, after their own grades. Shots are skipped with a warning.",
       ),
     motionBlur: MotionBlurSchema.nullable()
       .optional()

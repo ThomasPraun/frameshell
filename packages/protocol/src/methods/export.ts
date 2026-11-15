@@ -184,8 +184,10 @@ export const exportMethods = {
     description:
       "Render variants of one template timeline from data rows (ADR 0040): sizes, languages, product rows. The batch file " +
       "(`*.batch.json`, JSON Schema `batch.json`) names `template` (timeline id, default `main`), `slots` (name → " +
-      "`<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot) or `<clipId>.asset`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
-      "used as file names; a slot a row leaves out keeps the template's value), and optional `formats`, `preset`, `quality`. " +
+      "`<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot), `<clipId>.asset` or `voiceover`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
+      "used as file names; a slot a row leaves out keeps the template's value) or `csv` (a CSV file next to the batch file with the rows: a header of `id` and slot names, " +
+      "a column typed `price:number` / `text` / `boolean` / `json` or else as the template's value is, an empty cell leaves the slot to the template; every wrong cell is " +
+      "reported with its line and column), and optional `formats`, `preset`, `quality`. " +
       "Each row patches the template in memory only, never under `timelines/` (no journal, no proposal): a props value is " +
       "written at its path over the clip's props and checked by the adapter like `clip.set`; an asset swap keeps the clip's " +
       "in, out and placement and fails when the new file lacks the stream the track plays, is shorter than `out`, or lacks a " +
@@ -193,8 +195,10 @@ export const exportMethods = {
       "time as ordinary `render` jobs, to `<out>/<row>.<container>` (`-<format>` added with formats), and the call returns at " +
       "once. `<out>/manifest.json` (default `<project>/exports/<batch file name>/`) holds every row × format with status, " +
       "output, job, error and timings, rewritten on each job change; follow the jobs with `job.list` or `job.progress`. " +
-      "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover: swap in takes " +
-      "that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
+      "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover. A `voiceover` slot takes a " +
+      "voiceover script path (or `{ script, lines, at, tempo, start, gap, track, replace }`) and places the takes `voiceover.generate` already made as phrase clips on " +
+      "the row's variant, with the planner and rules of `voiceover.place` (a line with no take fails; a subtitle track that follows the voice track needs each take " +
+      "transcribed; the video grows when the voice runs past the template, and the entry's warnings say by how much); `asset` slots swap in files that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
       "unknown clip, props the adapter refuses, an asset too short or without the stream or transcript; a batch already " +
       "running into the same `out`; a name in `rows` the file lacks; `failed` without a manifest of this batch file), " +
       "InvalidProjectFile (the batch file), and what `render` fails with, its data naming the `row`. Re-run: `rows` " +

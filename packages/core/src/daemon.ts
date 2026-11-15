@@ -155,7 +155,7 @@ import { StyleService } from "./style/service.js";
 import type { OperationRequest } from "./timeline/engine.js";
 import { TimelineService, type TxRef, projectPath, timelinePath } from "./timeline/service.js";
 import { FrameGrid } from "./timeline/grid.js";
-import { clipEnd } from "./timeline/timing.js";
+import { NestedTimelineError, clipEnd, timelineDuration } from "./timeline/timing.js";
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
@@ -734,6 +734,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     applyInMemory: (dir, id, loaded, request) => timelines.applyInMemory(dir, id, loaded, request),
     source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
     hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
+    resolveTime: (dir, ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridLoaderFor(dir)(loaded)),
+    duration: async (dir, id, timeline, fps) => {
+      try {
+        return await timelineDuration(timeline, new FrameGrid(fps), timelines.nestedDuration(dir, id, fps));
+      } catch (error) {
+        if (error instanceof NestedTimelineError) return null;
+        throw error;
+      }
+    },
     planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
     // `reviews` is declared below: it is read when a batch asks for a review, not now.
     review: (dir, request) => reviews.run(dir, request),
@@ -2368,12 +2377,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
     },
-    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun }, caller) => {
+    "music.shape": async ({ cwd, timeline, clip, drop, ending, endOnBar, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const { operation, effects, duckAgain, entryFade, noop, ...report } = await planMusicShape(
         loaded,
-        { clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
+        { clip, drop, ending, endOnBar, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
         (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
       );
       const result = { timeline, ...report };
@@ -2434,14 +2443,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, candidates: placed, warnings: [...warnings] };
     },
-    "music.grid": async ({ cwd, timeline, to, maxShift, dryRun, skip }, caller) => {
+    "music.grid": async ({ cwd, timeline, to, maxShift, trim, tracks, dryRun, skip }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const grid = new FrameGrid(fps);
       const nested = timelines.nestedDuration(dir, timeline, fps);
       // Read on the first trimmed clip with sound only: hashing every asset is the slow part.
       let transcripts: ReturnType<typeof sourceTranscripts> | undefined;
-      const { requests, duckAgain, ...plan } = await planGridMoves(loaded, fps, { to, maxShift, skip, dryRun }, {
+      const { requests, duckAgain, shapeAgain, ...plan } = await planGridMoves(loaded, fps, { to, maxShift, trim, tracks, skip, dryRun }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
         apply: (state, request) => timelines.applyInMemory(dir, timeline, { timeline: state, fps }, request),
         end: (clip) => clipEnd(clip, grid, nested),
@@ -2461,6 +2470,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(plan.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicGridLabel(plan), revision: loaded.revision, warnings }, async (write) => {
         for (const request of requests) await write(request);
+        // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
+        if (shapeAgain?.effects !== undefined) await write({ op: "clip.set", args: { clip: shapeAgain.clip, audioEffects: shapeAgain.effects } } as OperationRequest);
+        if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, warnings: [...warnings] };

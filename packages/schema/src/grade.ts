@@ -1,5 +1,5 @@
-// Colour grade of media clips (ADR 0031): a correction, then an optional `.cube` LUT, baked into one 3D table that
-// export applies with ffmpeg `lut3d` and the preview engine with a WebGL2 pass. Both sample the same numbers.
+// Colour grade of clips (ADR 0031): a correction, then an optional `.cube` LUT, baked into one 3D table that export
+// applies with ffmpeg `lut3d` and the preview engine with a WebGL2 pass. Both sample the same numbers.
 // No Zod here: the preview engine worker imports this file.
 import type { Grade } from "./timeline.js";
 
@@ -71,9 +71,12 @@ export function isIdentityGrade(grade: NormalizedGrade): boolean {
   );
 }
 
-/** The grade of a media clip that changes colours; null for other clips, none, and an identity grade. */
+/**
+ * The clip's own grade when it changes colours: a media, generated (adapter) or nested timeline clip; null for shots,
+ * none, and an identity grade.
+ */
 export function gradeOf(clip: { type: string; grade?: unknown }): NormalizedGrade | null {
-  if (clip.type !== "media") return null;
+  if (clip.type === "shot") return null;
   const grade = (clip as { grade?: Grade }).grade;
   if (!grade) return null;
   const normalized = normalizeGrade(grade);
@@ -83,6 +86,40 @@ export function gradeOf(clip: { type: string; grade?: unknown }): NormalizedGrad
 /** Canonical text of a grade: equal for grades that look alike (omitted numbers = their defaults). */
 export function gradeKey(grade: NormalizedGrade): string {
   return JSON.stringify(grade);
+}
+
+/**
+ * Grades of the nested timeline clips a flattened clip plays inside, innermost first, as `flattenTimeline` records
+ * them (the clip's field `hostGrades`); empty for other clips. Plain data, so it survives JSON and `structuredClone`.
+ */
+export function hostGradesOf(clip: object): readonly Grade[] {
+  return (clip as { hostGrades?: Grade[] }).hostGrades ?? [];
+}
+
+/**
+ * Every grade a picture is drawn through, in order: the clip's own ({@link gradeOf}), then those of the nested
+ * timeline clips it plays inside ({@link hostGradesOf}), innermost first; grades that change nothing are left out.
+ * Null when none changes colours. Export and the preview make one table of it ({@link gradeChainTable}).
+ */
+export function gradeChainOf(clip: { type: string; grade?: unknown }): NormalizedGrade[] | null {
+  const chain: NormalizedGrade[] = [];
+  const own = gradeOf(clip);
+  if (own) chain.push(own);
+  for (const grade of hostGradesOf(clip)) {
+    const normalized = normalizeGrade(grade);
+    if (!isIdentityGrade(normalized)) chain.push(normalized);
+  }
+  return chain.length > 0 ? chain : null;
+}
+
+/** Canonical text of a grade chain: a chain of one grade has that grade's {@link gradeKey}, so its file name stays. */
+export function gradeChainKey(chain: readonly NormalizedGrade[]): string {
+  return chain.length === 1 ? gradeKey(chain[0]!) : JSON.stringify(chain);
+}
+
+/** The `.cube` files a grade chain reads: each grade's LUT that it mixes in, in chain order, without repeats. */
+export function gradeChainLuts(chain: readonly NormalizedGrade[]): string[] {
+  return [...new Set(chain.flatMap((grade) => (grade.lut !== null && grade.lutMix > 0 ? [grade.lut] : [])))];
 }
 
 /** ffprobe `color_transfer` values of footage that is not Rec.709: HDR (HLG, PQ), cinema and logarithmic curves. */
@@ -228,14 +265,32 @@ export function gradeTableSize(lut: CubeLut | null): number {
  * correction (exposure and white balance on light, then contrast and saturation), then the LUT mixed in by `lutMix`.
  */
 export function gradeTable(grade: NormalizedGrade, lut: CubeLut | null): GradeTable {
-  const size = gradeTableSize(lut);
+  return gradeChainTable([{ grade, lut }]);
+}
+
+/** One grade of a chain with its LUT parsed (null when it has none). */
+export interface GradeStage {
+  grade: NormalizedGrade;
+  lut: CubeLut | null;
+}
+
+/**
+ * One table for grades applied one after the other (a clip's own, then its nested hosts', {@link gradeChainOf}): at
+ * every lattice point each stage's correction and LUT in turn, on the exact values the stage before left, so the
+ * chain is sampled once and not table after table. As large as its largest LUT, at least {@link GRADE_TABLE_SIZE}.
+ */
+export function gradeChainTable(stages: readonly GradeStage[]): GradeTable {
+  const size = Math.max(...stages.map((stage) => gradeTableSize(stage.lut)));
   const data = new Float32Array(size ** 3 * 3);
-  const gain = 2 ** grade.exposure;
-  const gains = [
-    gain * (1 + WHITE_BALANCE_SPAN * grade.temperature),
-    gain * (1 - WHITE_BALANCE_SPAN * grade.tint),
-    gain * (1 - WHITE_BALANCE_SPAN * grade.temperature),
-  ];
+  const steps = stages.map(({ grade, lut }) => {
+    const gain = 2 ** grade.exposure;
+    const gains = [
+      gain * (1 + WHITE_BALANCE_SPAN * grade.temperature),
+      gain * (1 - WHITE_BALANCE_SPAN * grade.tint),
+      gain * (1 - WHITE_BALANCE_SPAN * grade.temperature),
+    ];
+    return { grade, gains, lut: lut && grade.lutMix > 0 ? lut : null };
+  });
   const rgb = [0, 0, 0];
   const looked = [0, 0, 0];
   let n = 0;
@@ -245,13 +300,15 @@ export function gradeTable(grade: NormalizedGrade, lut: CubeLut | null): GradeTa
         rgb[0] = r / (size - 1);
         rgb[1] = g / (size - 1);
         rgb[2] = b / (size - 1);
-        for (let c = 0; c < 3; c++) rgb[c] = clamp01(clamp01(rgb[c]! ** DISPLAY_GAMMA * gains[c]!) ** (1 / DISPLAY_GAMMA));
-        for (let c = 0; c < 3; c++) rgb[c] = clamp01((rgb[c]! - CONTRAST_PIVOT) * grade.contrast + CONTRAST_PIVOT);
-        const luma = 0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!;
-        for (let c = 0; c < 3; c++) rgb[c] = clamp01(luma + (rgb[c]! - luma) * grade.saturation);
-        if (lut && grade.lutMix > 0) {
-          sampleLut(lut, rgb, looked);
-          for (let c = 0; c < 3; c++) rgb[c] = rgb[c]! + (looked[c]! - rgb[c]!) * grade.lutMix;
+        for (const { grade, gains, lut } of steps) {
+          for (let c = 0; c < 3; c++) rgb[c] = clamp01(clamp01(rgb[c]! ** DISPLAY_GAMMA * gains[c]!) ** (1 / DISPLAY_GAMMA));
+          for (let c = 0; c < 3; c++) rgb[c] = clamp01((rgb[c]! - CONTRAST_PIVOT) * grade.contrast + CONTRAST_PIVOT);
+          const luma = 0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!;
+          for (let c = 0; c < 3; c++) rgb[c] = clamp01(luma + (rgb[c]! - luma) * grade.saturation);
+          if (lut) {
+            sampleLut(lut, rgb, looked);
+            for (let c = 0; c < 3; c++) rgb[c] = rgb[c]! + (looked[c]! - rgb[c]!) * grade.lutMix;
+          }
         }
         for (let c = 0; c < 3; c++) data[n++] = Math.round(rgb[c]! * TABLE_DECIMALS) / TABLE_DECIMALS;
       }

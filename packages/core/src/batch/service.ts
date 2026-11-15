@@ -1,5 +1,5 @@
 import { mkdir, readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   type BatchEntry,
   type BatchManifest,
@@ -11,12 +11,13 @@ import {
   type ReviewResult,
   RpcError,
 } from "@frameshell/protocol";
-import { type BatchFile, type Timeline, parseBatchFile } from "@frameshell/schema";
+import { type BatchFile, type ResolvedBatchFile, type Timeline, parseBatchFile, withRows } from "@frameshell/schema";
 import { type PlannedRender, type RenderRequest, confirmFinals } from "../export/service.js";
 import { canonicalPathSync, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { JobChange, JobQueue } from "../jobs/queue.js";
 import type { AppliedOperation, OperationRequest, SourceInfo } from "../timeline/engine.js";
 import type { ReviewRequest } from "../review/service.js";
+import { rowsFromCsv, templateColumnTypes } from "./csv.js";
 import { chooseRows, notDone, reviewVerdict, settled } from "./select.js";
 import { rowError, rowVariant } from "./variant.js";
 
@@ -32,6 +33,10 @@ export interface BatchServiceOptions {
   source(root: string, asset: string): Promise<SourceInfo>;
   /** True when the project-relative asset has a transcript. */
   hasTranscript(root: string, asset: string): Promise<boolean>;
+  /** Seconds a TimeRef names on a loaded timeline of the project (markers, `beat:`, `bar:`); see `resolveTimeRefAsync`. */
+  resolveTime(root: string, ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
+  /** Seconds timeline `id` of the project runs when it is `timeline`; null when that cannot be told (a nested timeline fails to load). */
+  duration(root: string, id: string, timeline: Timeline, fps: number): Promise<number | null>;
   /** See `ExportService.planRender`. */
   planRender(root: string, params: RenderRequest, loaded: { timeline: Timeline; fps: number }): Promise<PlannedRender>;
   /** See `ReviewService.run`. Absent: `review` is refused. */
@@ -95,22 +100,26 @@ export class BatchService {
       throw new RpcError(ErrorCode.InvalidOperation, "This daemon cannot review rendered files.", { op: "batch.render", reason: "review unavailable", field: "review" });
     }
     const path = resolve(cwd, request.file);
-    const file = await readBatchFile(path);
+    const parsed = await readBatchFile(path);
     const out = request.out ?? join(root, "exports", batchName(path));
     const manifest = join(out, "manifest.json");
     // A batch whose rows all ended may still be writing the manifest that says so: wait for it, so the manifest read below is final.
     await this.#runs.get(canonicalPathSync(out))?.flushed();
     const earlier = await readManifest(manifest, path, request.failed);
+    const loaded = await this.#options.loadTimeline(root, parsed.template);
+    const file = await resolveRows(path, parsed, loaded.timeline);
     const ids = file.rows.map((row) => row.id);
     let chosen = chooseRows(ids, request.rows);
     if (request.failed) chosen = chosen.filter((id) => notDone(earlier, id));
-    const loaded = await this.#options.loadTimeline(root, file.template);
     const formats = request.formats ?? file.formats;
     const context = {
+      root,
       fps: loaded.fps,
       apply: async (timeline: Timeline, op: OperationRequest) => this.#options.applyInMemory(root, file.template, { timeline, fps: loaded.fps }, op),
       source: (asset: string) => this.#options.source(root, asset),
       hasTranscript: (asset: string) => this.#options.hasTranscript(root, asset),
+      resolve: (ref: number | string, at: { timeline: Timeline; fps: number }) => this.#options.resolveTime(root, ref, at),
+      duration: (timeline: Timeline) => this.#options.duration(root, file.template, timeline, loaded.fps),
     };
     const rows: PlannedRow[] = [];
     const skipped: string[] = [];
@@ -122,7 +131,7 @@ export class BatchService {
     const outputs = new Map<string, string>();
     for (const entry of earlier) if (!chosen.includes(entry.row)) outputs.set(entry.output, entry.row);
     for (const row of file.rows.filter((row) => chosen.includes(row.id))) {
-      const variant = await rowVariant(loaded.timeline, file, row, context);
+      const { timeline: variant, warnings: variantWarnings } = await rowVariant(loaded.timeline, file, row, context);
       let planned: PlannedRender;
       try {
         planned = await this.#options.planRender(
@@ -145,7 +154,7 @@ export class BatchService {
         startedAt: null,
         finishedAt: null,
         duration: null,
-        warnings: [...render.warnings, ...planned.provenance],
+        warnings: [...variantWarnings, ...render.warnings, ...planned.provenance],
         review: null,
       }));
       for (const entry of entries) {
@@ -489,6 +498,27 @@ function record(entry: BatchEntry, job: JobInfo): void {
 /** `launch.batch.json` → `launch`: the default output folder's name. */
 function batchName(path: string): string {
   return basename(path).replace(/(\.batch)?\.json$/i, "");
+}
+
+/**
+ * The batch file with its rows in hand: those written in it, or read from its `csv` (relative to the batch file's
+ * folder) and typed by the template's values. Throws AssetNotFound for a missing CSV file, InvalidProjectFile naming
+ * the line and column of every cell that is wrong.
+ */
+async function resolveRows(path: string, file: BatchFile, template: Timeline): Promise<ResolvedBatchFile> {
+  if (file.rows) return { ...file, rows: file.rows };
+  const csv = resolve(dirname(path), file.csv!);
+  let text: string;
+  try {
+    text = await readFile(csv, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    throw new RpcError(ErrorCode.AssetNotFound, `No rows file ${csv}, which ${path} names as its \`csv\`.`, { path: csv });
+  }
+  const rows = rowsFromCsv(text, csv, file.slots, templateColumnTypes(template, file.slots));
+  const resolved = withRows(file, rows);
+  if (!resolved.ok) throw new RpcError(ErrorCode.InvalidProjectFile, `Invalid rows file ${csv}:\n${resolved.error}`, { path: csv, details: resolved.error });
+  return resolved.value;
 }
 
 /** Parsed batch file; throws AssetNotFound when missing, InvalidProjectFile when it is not a valid one. */

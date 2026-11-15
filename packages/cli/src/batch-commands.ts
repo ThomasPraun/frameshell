@@ -4,9 +4,10 @@ import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `batch` (ADR 0040), in `frameshell --help`. */
 export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--review] [--dry-run] [--yes]
-                               Render variants of a template timeline from data rows: each row sets clip props or swaps
-                               assets in memory (never under timelines/), every row x format is validated first, then the
-                               rows render one at a time into exports/<batch name>/ with manifest.json. --dry-run checks only.
+                               Render variants of a template timeline from data rows (in the file or its csv): each row sets
+                               clip props, swaps assets or places a voiceover in memory (never under timelines/), every row x
+                               format is validated first, then the rows render one at a time into exports/<batch name>/ with
+                               manifest.json. --dry-run checks only.
                                Re-run: --rows renders only those rows (ids, or first..last in file order), --failed the rows
                                the manifest lists as not done (failed, canceled, or left running by a stopped daemon).
                                A row whose renders are all done with the files in place is skipped unless --force.

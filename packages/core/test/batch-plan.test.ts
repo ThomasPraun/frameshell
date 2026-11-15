@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type MediaClip, parseBatchFile, parseSlotTarget } from "@frameshell/schema";
+import { type MediaClip, parseBatchFile, parseSlotTarget, voiceoverOf, withRows } from "@frameshell/schema";
 import { assetSwapProblem, withValueAt } from "../src/batch/variant.js";
 
 const file = (extra: Record<string, unknown> = {}) => ({
@@ -20,7 +20,7 @@ describe("batch file", () => {
     [{ rows: [{ id: "ES" }] }, "rows.0.id: must be lowercase"],
     [{ rows: [{ id: "es", titel: "x" }] }, "rows.0.titel: unknown slot titel"],
     [{ rows: [{ id: "es", voice: 3 }] }, "rows.0.voice: an asset slot takes a project-relative path"],
-    [{ slots: { title: "c_card.title" } }, "slots.title: must be `<clipId>.asset`, `<clipId>.props.<path>` or `<clipId>.props`"],
+    [{ slots: { title: "c_card.title" } }, "slots.title: must be `<clipId>.asset`, `<clipId>.props.<path>`, `<clipId>.props` or `voiceover`"],
     [{ slots: { id: "c_card.asset" }, rows: [{ id: "es" }] }, "slots.id"],
     [{ slots: {} }, "slots: must name at least one slot"],
     [{ slots: { title: "c_card.props.__proto__.polluted" }, rows: [{ id: "es" }] }, "slots.title: a props path may not use `__proto__`"],
@@ -81,5 +81,51 @@ describe("assetSwapProblem", () => {
     expect(assetSwapProblem(clip, "audio", "assets/vo-es.wav", { duration: 1.9, video: false, audio: true }, 30)).toMatchObject({ reason: "asset too short" });
     expect(assetSwapProblem(clip, "audio", "assets/b-roll.mp4", { duration: 5, video: true, audio: false }, 30)).toMatchObject({ reason: "no audio stream" });
     expect(assetSwapProblem(clip, "video", "assets/vo-es.wav", { duration: 5, video: false, audio: true }, 30)).toMatchObject({ reason: "no video stream" });
+  });
+});
+
+describe("voiceover slot and CSV rows", () => {
+  const voiced = (extra: Record<string, unknown> = {}) => file({ slots: { title: "c_card.props.title", vo: "voiceover" }, rows: [{ id: "es", vo: "scripts/vo-es.md" }], ...extra });
+
+  it("reads `voiceover` as a slot target that names no clip, holding a script path or the object form", () => {
+    expect(parseSlotTarget("voiceover", "vo")).toEqual({ kind: "voiceover" });
+    expect(parseBatchFile(voiced())).toMatchObject({ ok: true });
+    const object = { script: "scripts/vo-es.md", lines: ["hook-1"], at: { "hook-1": "hook+0.5" }, tempo: { "hook-1.2": 1.1 }, gap: 0.2 };
+    expect(parseBatchFile(voiced({ rows: [{ id: "es", vo: object }] }))).toMatchObject({ ok: true });
+    expect(voiceoverOf("scripts/vo-es.md")).toEqual({ script: "scripts/vo-es.md" });
+    expect(voiceoverOf({ script: "scripts/vo-es.md", gap: 1 })).toEqual({ script: "scripts/vo-es.md", gap: 1 });
+  });
+
+  it.each([
+    [{ rows: [{ id: "es", vo: 3 }] }, "rows.0.vo: a voiceover slot takes a voiceover script path"],
+    [{ rows: [{ id: "es", vo: "" }] }, "rows.0.vo: a voiceover slot takes a voiceover script path"],
+    [{ rows: [{ id: "es", vo: { script: "a.md", tempo: { "hook-1": 3 } } }] }, "rows.0.vo: a voiceover slot takes"],
+    [{ rows: [{ id: "es", vo: { script: "a.md", dryRun: true } }] }, "rows.0.vo: a voiceover slot takes"],
+    [{ slots: { a: "voiceover", b: "voiceover" }, rows: [{ id: "es" }] }, "slots: at most one slot may be `voiceover`"],
+  ])("refuses %j", (extra, message) => {
+    const parsed = parseBatchFile(voiced(extra));
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toContain(message);
+  });
+
+  it("takes `csv` instead of `rows`, never both and never neither", () => {
+    const base = { schemaVersion: 1, slots: { title: "c_card.props.title" } };
+    expect(parseBatchFile({ ...base, csv: "launch.csv" })).toMatchObject({ ok: true, value: { csv: "launch.csv" } });
+    for (const extra of [{}, { csv: "launch.csv", rows: [{ id: "es" }] }]) {
+      const parsed = parseBatchFile({ ...base, ...extra });
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.error).toContain("give `rows`");
+    }
+  });
+
+  it("checks rows read from a CSV file like rows written in the file, and drops the csv name", () => {
+    const parsed = parseBatchFile({ schemaVersion: 1, slots: { title: "c_card.props.title" }, csv: "launch.csv" });
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(withRows(parsed.value, [{ id: "es", title: "Hola" }])).toEqual({
+      ok: true,
+      value: { schemaVersion: 1, template: "main", slots: { title: "c_card.props.title" }, rows: [{ id: "es", title: "Hola" }] },
+    });
+    expect(withRows(parsed.value, [{ id: "es" }, { id: "es" }])).toMatchObject({ ok: false, error: "rows.1.id: row id es is used twice; ids name output files" });
+    expect(withRows(parsed.value, [])).toMatchObject({ ok: false, error: "rows: has no rows" });
   });
 });
