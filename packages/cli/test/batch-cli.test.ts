@@ -101,6 +101,30 @@ describe("frameshell batch", () => {
   );
 
   it(
+    "--review prints each row's verdict after its file and exits 1 when requirements.json fails one",
+    async () => {
+      writeBatch([{ id: "a" }]);
+      const out = join(project, "exports", "launch");
+      const clean = frameshell(["batch", "launch.batch.json", "--force", "--review"]);
+      expect(clean.code, clean.stderr).toBe(0);
+      expect(clean.stdout).toContain(`Rendered ${join(out, "a.mp4")}\n  review: `);
+      expect(clean.stdout).toMatch(/, run \d+ \(\.frameshell\/review\/\d+\/metrics\.json\)\n/);
+      const requirements = join(project, "requirements.json");
+      writeFileSync(requirements, JSON.stringify({ schemaVersion: 1, film: { maxSeconds: 0.5 } }));
+      try {
+        const failing = frameshell(["batch", "launch.batch.json", "--force", "--review", "--json"]);
+        expect(failing.code, failing.stderr).toBe(1);
+        const entries = (JSON.parse(failing.stdout) as { entries: { status: string; review: { state: string; verdict: string; failed: number } }[] }).entries;
+        expect(entries[0]).toMatchObject({ status: "done", review: { state: "done", verdict: "fail" } });
+        expect(entries[0]!.review.failed).toBeGreaterThan(0);
+      } finally {
+        rmSync(requirements);
+      }
+    },
+    180_000,
+  );
+
+  it(
     "re-renders the row whose file is gone, skips the rest, and takes --rows, --failed and --force",
     async () => {
       writeBatch([{ id: "a" }, { id: "b", shot: "assets/long.mp4" }]);

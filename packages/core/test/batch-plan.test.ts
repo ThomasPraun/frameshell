@@ -20,7 +20,7 @@ describe("batch file", () => {
     [{ rows: [{ id: "ES" }] }, "rows.0.id: must be lowercase"],
     [{ rows: [{ id: "es", titel: "x" }] }, "rows.0.titel: unknown slot titel"],
     [{ rows: [{ id: "es", voice: 3 }] }, "rows.0.voice: an asset slot takes a project-relative path"],
-    [{ slots: { title: "c_card.title" } }, "slots.title: must be `<clipId>.asset` or `<clipId>.props.<path>`"],
+    [{ slots: { title: "c_card.title" } }, "slots.title: must be `<clipId>.asset`, `<clipId>.props.<path>` or `<clipId>.props`"],
     [{ slots: { id: "c_card.asset" }, rows: [{ id: "es" }] }, "slots.id"],
     [{ slots: {} }, "slots: must name at least one slot"],
     [{ slots: { title: "c_card.props.__proto__.polluted" }, rows: [{ id: "es" }] }, "slots.title: a props path may not use `__proto__`"],
@@ -34,9 +34,15 @@ describe("batch file", () => {
   });
 
   it("splits a slot into its clip and what it sets", () => {
-    expect(parseSlotTarget("c_8f2.props.inputProps.title")).toEqual({ clip: "c_8f2", kind: "props", path: ["inputProps", "title"] });
-    expect(parseSlotTarget("c_8f2.asset")).toEqual({ clip: "c_8f2", kind: "asset" });
-    expect(parseSlotTarget("c_8f2.props")).toBeNull();
+    expect(parseSlotTarget("c_8f2.props.inputProps.title", "headline")).toEqual({ clip: "c_8f2", kind: "props", path: ["inputProps", "title"] });
+    expect(parseSlotTarget("c_8f2.asset", "voice")).toEqual({ clip: "c_8f2", kind: "asset" });
+    expect(parseSlotTarget("c_8f2.title", "title")).toBeNull();
+  });
+
+  it("takes the slot's own name as the prop when the slot names no path (`<clipId>.props`)", () => {
+    expect(parseSlotTarget("c_8f2.props", "title")).toEqual({ clip: "c_8f2", kind: "props", path: ["title"] });
+    const parsed = parseBatchFile(file({ slots: { title: "c_card.props", accent: "c_card.props" }, rows: [{ id: "es", title: "Hola", accent: "#ff0000" }] }));
+    expect(parsed).toMatchObject({ ok: true, value: { slots: { title: "c_card.props" } } });
   });
 });
 

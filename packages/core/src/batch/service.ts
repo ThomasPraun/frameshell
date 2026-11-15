@@ -1,12 +1,23 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { type BatchEntry, type BatchManifest, BatchManifestSchema, type BatchRenderResult, ErrorCode, type JobInfo, RpcError } from "@frameshell/protocol";
+import {
+  type BatchEntry,
+  type BatchManifest,
+  BatchManifestSchema,
+  type BatchRenderResult,
+  type BatchReview,
+  ErrorCode,
+  type JobInfo,
+  type ReviewResult,
+  RpcError,
+} from "@frameshell/protocol";
 import { type BatchFile, type Timeline, parseBatchFile } from "@frameshell/schema";
 import type { PlannedRender, RenderRequest } from "../export/service.js";
 import { canonicalPathSync, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { JobChange, JobQueue } from "../jobs/queue.js";
 import type { AppliedOperation, OperationRequest, SourceInfo } from "../timeline/engine.js";
-import { chooseRows, notDone, settled } from "./select.js";
+import type { ReviewRequest } from "../review/service.js";
+import { chooseRows, notDone, reviewVerdict, settled } from "./select.js";
 import { rowError, rowVariant } from "./variant.js";
 
 /** Options for {@link BatchService}. */
@@ -23,6 +34,8 @@ export interface BatchServiceOptions {
   hasTranscript(root: string, asset: string): Promise<boolean>;
   /** See `ExportService.planRender`. */
   planRender(root: string, params: RenderRequest, loaded: { timeline: Timeline; fps: number }): Promise<PlannedRender>;
+  /** See `ReviewService.run`. Absent: `review` is refused. */
+  review?(root: string, request: ReviewRequest): Promise<ReviewResult>;
 }
 
 /** Params of {@link BatchService.render}; see the daemon method `batch.render`. */
@@ -39,6 +52,8 @@ export interface BatchRequest {
   failed: boolean;
   /** Render chosen rows although every entry is `done` and its file exists. */
   force: boolean;
+  /** Review each rendered file once its render is done (see {@link BatchReview}). */
+  review?: boolean | undefined;
   dryRun: boolean;
 }
 
@@ -56,6 +71,9 @@ interface PlannedRow {
  * the queue is never idle in between (gc and the daemon's idle exit see it busy). `<out>/manifest.json` follows
  * every job state change.
  *
+ * With `review`, each file is reviewed (`ReviewService.run` on the file, metrics only) one at a time while the next row
+ * renders, and the manifest stays `running` until the last review ended. A review that cannot run never fails the render.
+ *
  * A re-run (`rows`, `failed`, `force`) reads the manifest the earlier run left: only the chosen rows are planned and
  * rendered, the others keep their entries, and a chosen row whose renders are all done with the files in place is
  * skipped unless forced. Entries a stopped daemon left `queued` or `running` count as `canceled`.
@@ -71,6 +89,9 @@ export class BatchService {
 
   /** Validate every row × format, then queue the first row and return (or return the plan, `dryRun`). */
   async render(root: string, cwd: string, request: BatchRequest): Promise<BatchRenderResult> {
+    if (request.review && !this.#options.review) {
+      throw new RpcError(ErrorCode.InvalidOperation, "This daemon cannot review rendered files.", { op: "batch.render", reason: "review unavailable", field: "review" });
+    }
     const path = resolve(cwd, request.file);
     const file = await readBatchFile(path);
     const out = request.out ?? join(root, "exports", batchName(path));
@@ -123,6 +144,7 @@ export class BatchService {
         finishedAt: null,
         duration: null,
         warnings: [...render.warnings, ...planned.provenance],
+        review: null,
       }));
       for (const entry of entries) {
         const other = outputs.get(entry.output);
@@ -145,7 +167,10 @@ export class BatchService {
     const base = { dir: root, file: path, template: file.template, out, preset: first?.preset ?? null, quality: first?.quality ?? null, skipped };
     const merged = (): BatchEntry[] => orderEntries(ids, [...kept(), ...rows.flatMap((row) => row.entries)]);
     if (request.dryRun) return { ...base, manifest: null, dryRun: true, entries: merged(), jobs: [] };
-    if (rows.length === 0) return { ...base, manifest: earlier.length > 0 ? manifest : null, dryRun: false, entries: merged(), jobs: [] };
+    // Rows left alone that were rendered without a finished review get one when it is asked for.
+    const left = kept();
+    const unreviewed = request.review ? await needReview(left) : [];
+    if (rows.length === 0 && unreviewed.length === 0) return { ...base, manifest: earlier.length > 0 ? manifest : null, dryRun: false, entries: merged(), jobs: [] };
 
     // Keyed on the folder once it exists, so two spellings of it (a symlink, macOS `/tmp`) share one key.
     await mkdir(out, { recursive: true });
@@ -157,7 +182,11 @@ export class BatchService {
         { op: "batch.render", reason: "batch running", field: "out" },
       );
     }
-    const run = new BatchRun(root, { batch: path, template: file.template, out, manifest }, rows, kept(), ids, this.#options.jobs);
+    // A draft or other quality tier differs from the preset's plan by design, so only a render as the preset says is checked against it.
+    const reviewer = request.review
+      ? (entry: BatchEntry) => this.#review(root, file.template, entry, file.quality === undefined ? (first?.preset ?? null) : null, formats !== undefined)
+      : null;
+    const run = new BatchRun(root, { batch: path, template: file.template, out, manifest }, rows, left, ids, this.#options.jobs, reviewer, unreviewed);
     this.#runs.set(key, run);
     try {
       // Before any job: an out folder that cannot be written fails the call, and the manifest exists once it returns.
@@ -171,6 +200,34 @@ export class BatchService {
     });
     const jobs = run.start();
     return { ...base, manifest, dryRun: false, entries: run.snapshot().entries, jobs };
+  }
+
+  /** `review` of the file `entry` wrote: metrics only, as the batch's `view` of the project (`current`). Never throws. */
+  async #review(root: string, template: string, entry: BatchEntry, preset: string | null, listed: boolean): Promise<BatchReview> {
+    try {
+      const result = await this.#options.review!(root, {
+        timeline: template,
+        file: entry.output,
+        sheets: ["metrics"],
+        view: "current",
+        ...(preset ? { preset } : {}),
+        // Only for the delivery plan of a file: the primary format needs no name.
+        ...(preset && listed ? { projectFormat: entry.format } : {}),
+      });
+      const craft = result.metrics?.craft ?? [];
+      const failed = result.metrics?.requirements?.failed ?? 0;
+      return {
+        state: "done",
+        verdict: reviewVerdict(craft.length, failed),
+        warnings: craft.length,
+        failed,
+        checks: [...new Set(craft.map((warning) => warning.check))],
+        run: result.run,
+        error: null,
+      };
+    } catch (error) {
+      return { state: "error", verdict: null, warnings: 0, failed: 0, checks: [], run: null, error: (error as Error).message.split("\n")[0] ?? "The review failed." };
+    }
   }
 
   /** True while a batch of the project at `root` has rows left to render (gc keeps clip renders then). */
@@ -205,6 +262,12 @@ class BatchRun {
   #dirty = false;
   #writing = false;
   #resolveEnded: () => void = () => {};
+  /** Reviews the batch runs, or null; one at a time, so they never compete with each other for the CPU. */
+  readonly #reviewer: ((entry: BatchEntry) => Promise<BatchReview>) | null;
+  /** Entries `pending` a review, in the order they will run. */
+  readonly #reviewQueue: BatchEntry[] = [];
+  #reviewing = false;
+  readonly #unreviewed: readonly BatchEntry[];
 
   constructor(
     root: string,
@@ -213,14 +276,20 @@ class BatchRun {
     kept: BatchEntry[],
     order: readonly string[],
     jobs: JobQueue,
+    reviewer: ((entry: BatchEntry) => Promise<BatchReview>) | null,
+    /** Entries among `kept` that are rendered but have no finished review. */
+    unreviewed: readonly BatchEntry[],
   ) {
     this.root = root;
+    this.#reviewer = reviewer;
     this.#where = where;
     this.#rows = rows;
     this.#kept = kept;
     this.#order = order;
     this.#jobs = jobs;
     this.ended = new Promise((resolve) => (this.#resolveEnded = resolve));
+    this.#unreviewed = unreviewed;
+    for (const entry of unreviewed) entry.review = pendingReview();
   }
 
   /** Resolves once the manifest says `done` when the batch has finished; at once while it still has rows left. */
@@ -231,9 +300,10 @@ class BatchRun {
   /** Queue the first row; returns its jobs. */
   start(): JobInfo[] {
     this.#unwatch = this.#jobs.watch((change) => this.#changed(change));
-    const first = this.#next;
+    const first = this.#rows[this.#next];
+    for (const entry of this.#unreviewed) this.#queueReview(entry);
     this.#advance();
-    return this.#rows[first]!.entries.flatMap((entry) => {
+    return (first?.entries ?? []).flatMap((entry) => {
       const job = entry.job ? this.#jobs.get(entry.job) : undefined;
       return job ? [job] : [];
     });
@@ -253,9 +323,44 @@ class BatchRun {
     const entry = this.#byJob.get(job.id);
     if (!entry || !stateChanged) return;
     record(entry, job);
+    this.#settle(entry);
     const current = this.#rows[this.#next - 1];
     if (current?.entries.every(ended)) this.#advance();
     else this.#persist();
+  }
+
+  /** A render's entry ended: a `done` one is reviewed when asked, another has no file to review. */
+  #settle(entry: BatchEntry): void {
+    if (!ended(entry) || !this.#reviewer) return;
+    if (entry.status === "done") this.#queueReview(entry);
+    else entry.review = null;
+  }
+
+  #queueReview(entry: BatchEntry): void {
+    if (this.#reviewQueue.includes(entry)) return;
+    entry.review = pendingReview();
+    this.#reviewQueue.push(entry);
+    void this.#reviewNext();
+  }
+
+  /** Run the queued reviews in turn; each result is written to its entry and the manifest. */
+  async #reviewNext(): Promise<void> {
+    if (this.#reviewing) return;
+    this.#reviewing = true;
+    for (let entry = this.#reviewQueue.shift(); entry; entry = this.#reviewQueue.shift()) {
+      entry.review = await this.#reviewer!(entry);
+      this.#persist();
+    }
+    this.#reviewing = false;
+    this.#finish();
+  }
+
+  /** Ends the batch once every row ended and no review is left. */
+  #finish(): void {
+    if (this.#finishedAt || this.#next < this.#rows.length || !this.#rows.every((row) => row.entries.every(ended)) || this.#reviewing || this.#reviewQueue.length > 0) return;
+    this.#finishedAt = new Date().toISOString();
+    this.#unwatch();
+    this.#persist();
   }
 
   /**
@@ -271,14 +376,12 @@ class BatchRun {
         entry.job = render.job.id;
         this.#byJob.set(render.job.id, entry);
         record(entry, this.#jobs.get(render.job.id) ?? render.job);
+        this.#settle(entry);
       });
       if (!row.entries.every(ended)) break;
     }
-    if (this.#next >= this.#rows.length && this.#rows.every((row) => row.entries.every(ended))) {
-      this.#finishedAt = new Date().toISOString();
-      this.#unwatch();
-    }
     this.#persist();
+    this.#finish();
   }
 
   /** Write the manifest; writes never overlap, and the last one carries the latest state. */
@@ -296,6 +399,18 @@ class BatchRun {
       if (this.#finishedAt) this.#resolveEnded();
     })();
   }
+}
+
+/** The review of an entry whose render is queued or running, or whose file is waiting for its turn. */
+function pendingReview(): BatchReview {
+  return { state: "pending", verdict: null, warnings: 0, failed: 0, checks: [], run: null, error: null };
+}
+
+/** The entries of `entries` that are `done` with the file in place but have no finished review. */
+async function needReview(entries: readonly BatchEntry[]): Promise<BatchEntry[]> {
+  const found: BatchEntry[] = [];
+  for (const entry of entries) if (entry.status === "done" && entry.review?.state !== "done" && (await exists(entry.output))) found.push(entry);
+  return found;
 }
 
 /** `entries` by the batch file's row order, then the order they came in (format order within a row). */

@@ -23,10 +23,10 @@
       },
       "additionalProperties": {
         "type": "string",
-        "pattern": "^([^.\\s]+)\\.(?:(asset)|props\\.([^.\\s]+(?:\\.[^.\\s]+)*))$",
-        "description": "`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props) or `<clipId>.asset` (a media clip's asset)."
+        "pattern": "^([^.\\s]+)\\.(?:(asset)|props(?:\\.([^.\\s]+(?:\\.[^.\\s]+)*))?)$",
+        "description": "`<clipId>.props.<dot.path>` (a value written at that path of an adapter clip's props), `<clipId>.props` (the prop named like the slot: `\"title\": \"c_8f2a1b.props\"` is `c_8f2a1b.props.title`) or `<clipId>.asset` (a media clip's asset)."
       },
-      "description": "Slot name → what it sets: `<clipId>.props.<dot.path>` or `<clipId>.asset`."
+      "description": "Slot name → what it sets: `<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot) or `<clipId>.asset`."
     },
     "rows": {
       "minItems": 1,

@@ -721,6 +721,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
     hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
     planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
+    // `reviews` is declared below: it is read when a batch asks for a review, not now.
+    review: (dir, request) => reviews.run(dir, request),
   });
   const reviews = new ReviewService({
     timelines,
@@ -1479,8 +1481,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop }),
-    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, dryRun }) =>
-      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, dryRun }),
+    "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, review, dryRun }) =>
+      batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, review, dryRun }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));

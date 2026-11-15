@@ -30,7 +30,7 @@ export async function rowVariant(template: Timeline, file: BatchFile, row: Batch
   for (const [slot, target] of Object.entries(file.slots)) {
     if (!Object.hasOwn(row, slot)) continue;
     const value = row[slot];
-    const parsed = parseSlotTarget(target)!;
+    const parsed = parseSlotTarget(target, slot)!;
     const found = findClip(timeline, parsed.clip);
     if (!found) {
       throw rowError(row.id, slot, `no clip ${parsed.clip} in timeline ${template.id}. Slots name clip ids of the template (\`frameshell timeline show\`).`, { reason: "clip not found" });

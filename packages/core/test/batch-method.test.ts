@@ -204,6 +204,43 @@ describe("batch.render", () => {
     TIMEOUT,
   );
 
+  it(
+    "takes a bare `<clipId>.props` slot as the prop named like the slot, and reviews each rendered file with `review`",
+    async () => {
+      writeBatch("checked", { quality: "draft", slots: { label: `${card}.props` }, rows: [{ id: "es", label: "Hola" }] });
+      const out = join(project, "exports", "checked");
+      const manifestPath = join(out, "manifest.json");
+      const call = (more: Record<string, unknown>) => conn.request("batch.render", { cwd: project, file: "checked.batch.json", ...more });
+      const plan = await call({ dryRun: true, review: true });
+      expect(plan.entries.map((entry) => entry.review)).toEqual([null]);
+
+      const result = await call({ review: true });
+      expect(result.entries.map((entry) => entry.review?.state ?? null)).toEqual([null]);
+      const first = await ended(manifestPath);
+      expect(first.entries[0]).toMatchObject({ status: "done", review: { state: "done", error: null, failed: 0 } });
+      const review = first.entries[0]!.review!;
+      expect(["pass", "warn"]).toContain(review.verdict);
+      expect(existsSync(join(project, ".frameshell", "review", String(review.run), "metrics.json"))).toBe(true);
+      // The slot took the prop `label`: the card accepted it (a bad prop would have refused the row), and the template is untouched.
+      expect(readFileSync(join(project, "timelines", "main.json"), "utf8")).toBe(timelineBytes);
+
+      // A requirement the film breaks makes the verdict `fail`.
+      const requirements = join(project, "requirements.json");
+      writeFileSync(requirements, JSON.stringify({ schemaVersion: 1, film: { maxSeconds: 0.5 } }));
+      try {
+        const again = await call({ review: true, force: true });
+        expect(again.jobs).toHaveLength(1);
+        const second = await ended(manifestPath);
+        expect(second.entries[0]!.review).toMatchObject({ state: "done", verdict: "fail" });
+        expect(second.entries[0]!.review!.failed).toBeGreaterThan(0);
+        expect(second.entries[0]!.review!.run).toBeGreaterThan(review.run!);
+      } finally {
+        rmSync(requirements);
+      }
+    },
+    TIMEOUT,
+  );
+
   it("renders every row in each format of the project the batch lists", async () => {
     await conn.request("format.add", { cwd: project, id: "9x16" });
     writeBatch("sizes", { formats: ["64x36", "9x16"], rows: [{ id: "es", title: "Hola" }] });

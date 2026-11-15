@@ -1,9 +1,10 @@
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type BatchManifest, ErrorCode, type RenderResult } from "@frameshell/protocol";
+import { type BatchManifest, ErrorCode, type RenderResult, type ReviewResult } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
-import { BatchService } from "../src/batch/service.js";
+import { BatchService, type BatchServiceOptions } from "../src/batch/service.js";
+import type { ReviewRequest } from "../src/review/service.js";
 import { rowVariant } from "../src/batch/variant.js";
 import type { PlannedRender, RenderRequest } from "../src/export/service.js";
 import { JobQueue } from "../src/jobs/queue.js";
@@ -32,7 +33,7 @@ afterEach(async () => {
   await queue?.close();
 });
 
-function service(options: { transcribed?: readonly string[] } = {}): BatchService {
+function service(options: { transcribed?: readonly string[]; review?: BatchServiceOptions["review"] } = {}): BatchService {
   queue = new JobQueue();
   return new BatchService({
     jobs: queue,
@@ -42,6 +43,7 @@ function service(options: { transcribed?: readonly string[] } = {}): BatchServic
     },
     source: async () => ({ duration: 5, video: false, audio: true }),
     hasTranscript: async (_root, asset) => (options.transcribed ?? ["assets/vo-es.wav", "assets/vo-fr.wav"]).includes(asset),
+    ...(options.review ? { review: options.review } : {}),
     planRender: async (root: string, params: RenderRequest): Promise<PlannedRender> => {
       planned.push(params.stem ?? "");
       const renders = (params.formats ?? ["1x1"]).map((format) => ({
@@ -153,28 +155,29 @@ describe("BatchService", () => {
     await until(() => !batches.active(root));
   });
 
+  const manifestOf = (out: string): BatchManifest => JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as BatchManifest;
+  const states = (out: string) => manifestOf(out).entries.map((entry) => `${entry.row}:${entry.status}`);
+  const label = (entries: readonly { row: string; status: string }[]) => entries.map((entry) => `${entry.row}:${entry.status}`);
+  async function finishNext(error?: Error): Promise<void> {
+    await until(() => finishers.length > 0);
+    finishers.shift()!(error);
+  }
+  async function manifestDone(out: string): Promise<BatchManifest> {
+    await until(() => {
+      try {
+        return manifestOf(out).state === "done";
+      } catch {
+        return false;
+      }
+    });
+    return manifestOf(out);
+  }
+  const request = (file: string, more: Record<string, unknown> = {}) => ({ file, failed: false, force: false, dryRun: false, ...more });
+
   describe("re-runs", () => {
     const ids = ["a", "b", "c", "d"];
     const rows = ids.map((id) => ({ id }));
 
-    const manifestOf = (out: string): BatchManifest => JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as BatchManifest;
-    const states = (out: string) => manifestOf(out).entries.map((entry) => `${entry.row}:${entry.status}`);
-    const label = (entries: readonly { row: string; status: string }[]) => entries.map((entry) => `${entry.row}:${entry.status}`);
-    async function finishNext(error?: Error): Promise<void> {
-      await until(() => finishers.length > 0);
-      finishers.shift()!(error);
-    }
-    async function manifestDone(out: string): Promise<BatchManifest> {
-      await until(() => {
-        try {
-          return manifestOf(out).state === "done";
-        } catch {
-          return false;
-        }
-      });
-      return manifestOf(out);
-    }
-    const request = (file: string, more: Record<string, unknown> = {}) => ({ file, failed: false, force: false, dryRun: false, ...more });
     /** A first run of all four rows where `b` fails. */
     async function firstRun(batches: BatchService, root: string, file: string): Promise<string> {
       const out = join(root, "exports", "launch");
@@ -342,6 +345,138 @@ describe("BatchService", () => {
       expect(label(plain.entries)).toEqual(["a:planned", "b:planned", "c:planned", "d:planned"]);
       writeFileSync(join(out, "manifest.json"), "{ not json");
       await expect(batches.render(root, root, request(file, { failed: true }))).rejects.toMatchObject({ data: { reason: "manifest unreadable" } });
+    });
+  });
+  describe("review column", () => {
+    /** A stand-in `review` that answers per output file, in the order it is called, and can be held. */
+    function reviewer(answers: Record<string, { craft?: string[]; failed?: number; error?: string }>) {
+      const calls: ReviewRequest[] = [];
+      const holds: (() => void)[] = [];
+      let hold = false;
+      const review: NonNullable<BatchServiceOptions["review"]> = async (_root, request) => {
+        calls.push(request);
+        if (hold) await new Promise<void>((resolve) => holds.push(resolve));
+        const answer = answers[basename(request.file!)] ?? {};
+        if (answer.error) throw new Error(`${answer.error}\nsecond line`);
+        return {
+          run: calls.length,
+          metrics: { craft: (answer.craft ?? []).map((check) => ({ check, message: check, severity: "warn" })), requirements: answer.failed === undefined ? null : { failed: answer.failed } },
+        } as unknown as ReviewResult;
+      };
+      return {
+        review,
+        calls,
+        holds,
+        hold: (on: boolean) => {
+          hold = on;
+        },
+      };
+    }
+
+    it("reviews each rendered file while the next row renders, and says running until the last review ended", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows: [{ id: "a" }, { id: "b" }, { id: "c" }] });
+      const found = reviewer({ "a.mp4": { craft: ["static", "peak", "static"] }, "b.mp4": { craft: [], failed: 1 }, "c.mp4": {} });
+      found.hold(true);
+      const batches = service({ review: found.review });
+      const out = join(root, "exports", "launch");
+      await batches.render(root, root, request(file, { review: true }));
+      await finishNext();
+      await until(() => found.calls.length === 1);
+      // The first review is held, yet the second row's render is already running.
+      await until(() => finishers.length === 1);
+      await until(() => states(out).join() === "a:done,b:running,c:queued");
+      expect(manifestOf(out).entries[0]!.review).toMatchObject({ state: "pending" });
+      await finishNext();
+      await finishNext();
+      await queue.drained();
+      // Every render ended, but the batch is not over: reviews are left, one at a time.
+      expect(batches.active(root)).toBe(true);
+      expect(found.calls).toHaveLength(1);
+      found.hold(false);
+      found.holds.shift()!();
+      const manifest = await manifestDone(out);
+      expect(found.calls.map((call) => basename(call.file!))).toEqual(["a.mp4", "b.mp4", "c.mp4"]);
+      expect(manifest.entries.map((entry) => entry.review)).toEqual([
+        { state: "done", verdict: "warn", warnings: 3, failed: 0, checks: ["static", "peak"], run: 1, error: null },
+        { state: "done", verdict: "fail", warnings: 0, failed: 1, checks: [], run: 2, error: null },
+        { state: "done", verdict: "pass", warnings: 0, failed: 0, checks: [], run: 3, error: null },
+      ]);
+      expect(found.calls[0]).toMatchObject({ timeline: "main", file: join(out, "a.mp4"), sheets: ["metrics"], view: "current", preset: "youtube-1080p" });
+      expect(found.calls[0]).not.toHaveProperty("projectFormat");
+      expect(batches.active(root)).toBe(false);
+    });
+
+    it("names the format of a listed format and leaves the preset out of a draft", async () => {
+      const root = tempDir();
+      const found = reviewer({});
+      const batches = service({ review: found.review });
+      const out = join(root, "exports", "launch");
+      const listed = batchFile(root, { rows: [{ id: "a" }], formats: ["9x16"] });
+      await batches.render(root, root, request(listed, { review: true }));
+      await finishNext();
+      await manifestDone(out);
+      expect(found.calls[0]).toMatchObject({ file: join(out, "a-9x16.mp4"), preset: "youtube-1080p", projectFormat: "9x16" });
+
+      const draft = batchFile(root, { rows: [{ id: "a" }], quality: "draft" });
+      await batches.render(root, root, request(draft, { review: true, force: true }));
+      await finishNext();
+      await until(() => found.calls.length === 2);
+      expect(found.calls[1]).not.toHaveProperty("preset");
+    });
+
+    it("leaves a failed render without a review, and a review that cannot run never fails the render", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows: [{ id: "a" }, { id: "b" }] });
+      const found = reviewer({ "b.mp4": { error: "ffmpeg is not ready" } });
+      const batches = service({ review: found.review });
+      const out = join(root, "exports", "launch");
+      await batches.render(root, root, request(file, { review: true }));
+      await finishNext(new Error("encoder crashed"));
+      await finishNext();
+      const manifest = await manifestDone(out);
+      expect(manifest.entries.map((entry) => [entry.status, entry.review?.state ?? null])).toEqual([
+        ["failed", null],
+        ["done", "error"],
+      ]);
+      expect(manifest.entries[1]!.review).toMatchObject({ verdict: null, error: "ffmpeg is not ready" });
+      expect(found.calls.map((call) => basename(call.file!))).toEqual(["b.mp4"]);
+    });
+
+    it("writes no review unless asked, and refuses to when the daemon cannot review", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows: [{ id: "a" }] });
+      const found = reviewer({});
+      const out = join(root, "exports", "launch");
+      const batches = service({ review: found.review });
+      await batches.render(root, root, request(file));
+      await finishNext();
+      expect((await manifestDone(out)).entries[0]!.review).toBeNull();
+      expect(found.calls).toEqual([]);
+      await expect(service().render(root, root, request(file, { review: true }))).rejects.toMatchObject({ data: { reason: "review unavailable", field: "review" } });
+    });
+
+    it("reviews rows skipped as done only when they have no finished review, and starts no render for them", async () => {
+      const root = tempDir();
+      const file = batchFile(root, { rows: [{ id: "a" }, { id: "b" }] });
+      const found = reviewer({});
+      const batches = service({ review: found.review });
+      const out = join(root, "exports", "launch");
+      await batches.render(root, root, request(file));
+      await finishNext();
+      await finishNext();
+      await manifestDone(out);
+
+      const again = await batches.render(root, root, request(file, { review: true }));
+      expect(again).toMatchObject({ jobs: [], skipped: ["a", "b"] });
+      expect(again.entries.map((entry) => entry.review?.state)).toEqual(["pending", "pending"]);
+      const reviewed = await manifestDone(out);
+      expect(reviewed.entries.map((entry) => entry.review?.state)).toEqual(["done", "done"]);
+      expect(found.calls).toHaveLength(2);
+
+      // Reviewed already: nothing runs again.
+      expect(await batches.render(root, root, request(file, { review: true }))).toMatchObject({ jobs: [], skipped: ["a", "b"] });
+      expect(found.calls).toHaveLength(2);
     });
   });
 });

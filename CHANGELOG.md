@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Batch slot defaults and a review column, slice 5 of #477 (ADR 0040, epic #451; protocol 144): a batch slot written
+  `<clipId>.props` (no path) sets the prop named like the slot, so `"title": "c_8f2a1b.props"` is
+  `c_8f2a1b.props.title` and a template's declared props become slot names without repeating them. `batch.render` takes
+  `review` (CLI `frameshell batch --review`): each rendered file is reviewed (`ReviewService.run` on the file, metrics
+  only, one at a time while the next row renders) and its manifest entry gets `review { state, verdict, warnings, failed,
+  checks, run, error }`: `fail` when `requirements.json` fails, `warn` for craft warnings, else `pass`. The manifest says
+  `running` until the last review ended, `gc` keeps clip renders until then, a failed render has no review and a review
+  that cannot run (`error`) never fails the render. Rows skipped as done are reviewed when they have no finished review.
+  The CLI prints each verdict under its file and exits 1 when a verdict is `fail`. Off by default (a review decodes the
+  file). Old manifests without the field still read (`review` null). Skill `batch.md` says so.
 - Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 143): an optional `grain { amount?, size?, seed? }` on media
   and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
   hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame
