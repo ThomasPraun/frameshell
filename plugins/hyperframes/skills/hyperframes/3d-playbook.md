@@ -9,7 +9,8 @@ Read this when a shot needs a real 3D object in studio light: a product turning 
 | A product, device or prop in studio light on a camera move, with a headline | The `product-shot` template: `frameshell hyperframes new hero --template product-shot`, then props (`model`, `label`, `finish`, `spin`, `orbit`, `shadows`, `size`) |
 | A scene the template cannot say (several parts that open, a second object, a different set) | The same page edited by hand: copy `product-shot`'s studio (`studio()`, `ready()`) and keep the rules below |
 | A lit set, an animated character, a Cycles-quality final | The `blender` skill with the person's own Blender when `frameshell doctor` lists it; never three.js |
-| Extruded 3D text or a 3D logo | No template yet. Use DOM text over the canvas (the `big-word` and `kinetic-headline` templates), or a model the person supplies as a GLB |
+| A 3D logo from an SVG | The `logo-3d` template: `frameshell hyperframes new mark --template logo-3d --component assets/brand/acme-com/logo-1.svg`, then props (`depth`, `bevel`, `colors`, `color`, `finish`, `reveal`, `spin`, `title`). See [A 3D logo](#a-3d-logo) |
+| Extruded 3D text | No template yet. Use DOM text over the canvas (the `big-word` and `kinetic-headline` templates), or a model the person supplies as a GLB |
 | A product the person has no model or label for | No 3D. Show the real UI or photo |
 
 ## Studio defaults
@@ -84,6 +85,17 @@ One beat is 0.5 s. This is the shape for a product that opens or has parts; the 
 | A GLB loads in Blender but not here | It was exported with Draco, KTX2 or Meshopt compression: export again without |
 | Two verify runs differ | State between frames: `setAnimationLoop`, `THREE.Clock`, `mixer.update(dt)`, unseeded noise. `check` names them |
 | The clip is dark in the live preview only | The preview runs WebGL on the GPU: judge with `frame_capture` once the clip is `ready` |
+
+## A 3D logo
+
+The `logo-3d` template extrudes the filled paths of an SVG with `THREE.SVGLoader` and `THREE.ExtrudeGeometry` in the same studio as the product shot, on a faint wall that only catches the shadow.
+
+- **Input.** An SVG inside the composition directory (`frameshell hyperframes new mark --template logo-3d --component <svg of brand show>` copies a brand file in, or copy the file in yourself and set `logo`). Only flat fills are extruded: outline strokes and text first in a vector editor, and use solid colours, not gradients. A PNG or JPG has no outline, so the render fails naming the file. With `logo` empty the template shows a built-in hexagon mark.
+- **Colour.** `colors: single` (default) paints every path with `color`; `colors: svg` keeps each path's own fill. A black logo reads as a dark slab in studio light: pick `single` with a brand colour, or a `chrome` finish for a metal mark.
+- **Depth.** `depth` is a fraction of the logo's longer side: 0.08 to 0.15 for a badge, 0.2 to 0.4 for a chunky mark. `bevel` rounds the front edge (0.5 default); thin letterforms look best with 0.3 or less, since the rounding eats the stroke.
+- **Reveal.** `rise` grows the depth out of the flat logo while it settles from a slight turn (the default, reads best at the start of a film); `turn` swings it in from the side; `drop` falls and settles. Each lands by about 1.2 s; the glint sweeps at 0.45 s, then `spin` turns it slowly until the end. The headline rises at 0.9 s.
+- **Limits.** One extrusion depth for the whole logo, no per-path height. Holes work (an `O` or a ring), including even-odd fills. A logo of hundreds of tiny paths (a traced photo) builds slowly and shades noisily: use the simplified mark.
+- **Over footage.** Transparent like the product shot: put it on a track above, end it 0.4 s before the cut or let its exit finish, or raise `backdrop` toward 1 for a full-frame card.
 
 ## A GLB from Blender
 
