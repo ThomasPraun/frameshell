@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Speech`, `Effects` and `Sections` lines with a sentence and a section table; `--no-speech` (`speech: false`) skips the
   recognition, the slow part. New files in `packages/core/src/analyze/` (`audio.ts`, `speech.ts`, `pitch.ts`); the
   skill (`reference-video.md`), `docs/mcp.md` and SPEC say how to read them.
+- Beats and markers for generated clips, ADR 0029 decision 8 (#458, epic #451): a generated clip can sync its motion to the
+  music. An adapter says per clip which timing it reads (`ClipAdapter.timing`, `beats` and/or `markers`; plugin API
+  stays "1") and gets `RenderContext.timing` (and `LiveContext.timing` for the live page): the beats of the timeline's
+  grid with their `beat:N`/`bar:N` numbers and tempo, and the markers, that fall inside the clip, in composition seconds.
+  No usable grid (no tempo, no beats file, a broken or LOW confidence one) gives no beats and a `beatsProblem`, never a
+  failed render. Only clips that ask count it in their render key, so moving the music or a marker re-renders them and
+  nothing else; existing keys are unchanged. HyperFrames compositions ask with
+  `<meta name="frameshell-timing" content="beats markers">` and read `window.frameshellTiming`. No wire change.
 - Clip grain, slice 3 of #500 (ADR 0043, epic #451; protocol 143): an optional `grain { amount?, size?, seed? }` on media
   and generated clips adds film grain to the clip's own picture (`{}` = amount 0.35, grains 1.5 project px wide, seed a
   hash of the clip id), after its grade and vignette and before scale, keys and transition shapes. A timeline frame
