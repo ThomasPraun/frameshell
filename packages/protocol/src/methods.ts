@@ -33,6 +33,7 @@ import {
   FormatInfoSchema,
   BatchEntrySchema,
   BatchManifestSchema,
+  BatchReviewSchema,
   LostWordSchema,
   UncertainWordSchema,
 } from "./methods/shared.js";
@@ -56,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 144;
+export const PROTOCOL_VERSION = 145;
 
 export {
   type MethodSpec,
@@ -396,6 +397,8 @@ export type RenderResult = MethodResult<"render">;
 export type BatchRenderResult = MethodResult<"batch.render">;
 /** One row × format of a batch; see {@link BatchEntrySchema}. */
 export type BatchEntry = z.output<typeof BatchEntrySchema>;
+/** What `review` found on one rendered row; see {@link BatchReviewSchema}. */
+export type BatchReview = z.output<typeof BatchReviewSchema>;
 /** `<out>/manifest.json` of a batch; see {@link BatchManifestSchema}. */
 export type BatchManifest = z.output<typeof BatchManifestSchema>;
 /** `frame` params. */
