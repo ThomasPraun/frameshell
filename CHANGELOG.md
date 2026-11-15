@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused with the argument named (`sound.place: cues[1].at: ...`). The history records seconds. CLI `captions set`,
   `direct`, `multicam reframe --time` and `sound place|music` pass the text through. `track.duck` and `music.shape` curve
   times are computed by the daemon in seconds, not typed, and `multicam.paint` is on the group clock, so they stay numbers.
+- Brand pictures in motion templates, the last slice of #467 (ADR 0044, epic #451; no protocol change):
+  `frameshell hyperframes new <name> --template <t> --component [<prop>=]<path>` copies a picture `brand.json` lists
+  (a captured logo, icon, screenshot or `section-*.png` crop, or a Figma frame) into the composition as
+  `brand/<id>/<file>` and makes it the default of the template's image prop (`logo`, `screenshot`, `picture`,
+  `before`/`after`, `label`). Fonts and files `brand.json` does not list are refused before anything is written. For a
+  Figma frame the output also gives its place at the folder's one scale on this canvas; while `credits.json` has no
+  licence for the source, it says so, since `frameshell credits` does not check files inside a composition. The
+  Frameshell skill gains a brand page (`reference/brand.md`: capture, findings listed before use, credits, fonts,
+  Figma, `--component`).
+
 - Letterbox per format, slice 4 of #500 (ADR 0043 and ADR 0027 decision 14, epic #451; protocol 148): `letterbox set <aspect>
   --format 9x16` (and `letterbox clear --format`; daemon and MCP `letterbox.set` `format`) gives one format its own black
   bars, stored in the timeline's `formats`; a format without an entry still draws none, and export, `frame` and the
@@ -67,9 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   music. An adapter says per clip which timing it reads (`ClipAdapter.timing`, `beats` and/or `markers`; plugin API
   stays "1") and gets `RenderContext.timing` (and `LiveContext.timing` for the live page): the beats of the timeline's
   grid with their `beat:N`/`bar:N` numbers and tempo, and the markers, that fall inside the clip, in composition seconds.
-  No usable grid (no tempo, no beats file, a broken or LOW confidence one) gives no beats and a `beatsProblem`, never a
-  failed render. Only clips that ask count it in their render key, so moving the music or a marker re-renders them and
-  nothing else; existing keys are unchanged. HyperFrames compositions ask with
+  No usable grid gives no beats and a `beatsProblem` code (`no-tempo`, `no-music-clip`, `no-beats`, `broken-beats`,
+  `low-confidence`; worded by `RENDER_BEATS_PROBLEMS`), never a failed render; the key counts the code, not an error's
+  words, so it holds while the reason does. Only clips that ask count it in their render key, so moving the music or a
+  marker re-renders them and nothing else; existing keys are unchanged. A clip that asks inside a nested timeline is
+  keyed through the timeline that shows it, in the background as in preview and export, so it renders once. An adapter
+  whose `timing()` throws leaves the clip unavailable. HyperFrames compositions ask with
   `<meta name="frameshell-timing" content="beats markers">` and read `window.frameshellTiming`. No wire change.
 - Batch slot defaults and a review column, slice 5 of #477 (ADR 0040, epic #451; protocol 145): a batch slot written
   `<clipId>.props` (no path) sets the prop named like the slot, so `"title": "c_8f2a1b.props"` is
@@ -1043,6 +1056,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `brand import-figma` sanitises the folder in a worker thread (#467): a synthetic 13 MB frame took 4.7 s on a loaded
+  host, long enough to stall every other daemon call.
 - Internal: the daemon method registry is split into one module per area under `packages/protocol/src/methods/`
   and merged into `methods` with a declared `MethodRegistry` type (#517), so its emitted declaration no longer grows
   with every schema (TypeScript TS7056 limit). Wire, `PROTOCOL_VERSION`, method names, params, results, MCP tools and
@@ -1119,6 +1134,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
+  "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
+  switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.
 - Motion compositions paint each time the same whatever was painted before (#501, epic #451): motion runtime 0.3.0
   writes `x` and `y` on a 1/32 px grid and `rotate` on a 0.02° grid, because Chrome does not repaint a transform change
   under about 1/80 px and kept the older pose, so slow motion (a spring settling) rendered by frame differed from the

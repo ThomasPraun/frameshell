@@ -18,6 +18,8 @@ export interface TemplateInput {
   /** Seconds. */
   duration: number;
   tokens: BrandTokens;
+  /** Image props filled with a brand component (`--component`): prop id → path inside the composition directory. */
+  components?: Readonly<Record<string, string>>;
 }
 
 /** A scaffoldable motion composition (ADR 0033, #466). */
@@ -90,11 +92,19 @@ export function fontSetup(tokens: BrandTokens): FontSetup {
   };
 }
 
+/** `variables` with the image props named in `components` defaulting to that file instead of their placeholder. */
+export function withComponents(variables: readonly TemplateVariable[], components: TemplateInput["components"]): TemplateVariable[] {
+  return variables.map((variable) => {
+    const file = components?.[variable.id];
+    return variable.type === "image" && file !== undefined ? { ...variable, default: file } : variable;
+  });
+}
+
 /** Everything up to `<body>`: document head with the variables, the runtime script and the shared reset. */
 export function pageHead(input: TemplateInput, variables: readonly TemplateVariable[], css: string): string {
   const fonts = fontSetup(input.tokens);
   return `<!doctype html>
-<html lang="en" data-composition-variables='${variablesAttribute(variables)}'>
+<html lang="en" data-composition-variables='${variablesAttribute(withComponents(variables, input.components))}'>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=${input.width}, height=${input.height}" />

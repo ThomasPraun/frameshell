@@ -14,6 +14,7 @@ import {
   type BrandManifest,
   MAX_SOURCE_URL,
   createBrandManifest,
+  fitFrames,
   type FontCategory,
   type FontWidth,
   fontClassFromName,
@@ -23,7 +24,7 @@ import {
 import { readJsonIfExists, writeJsonAtomic, writeTextAtomic } from "../fs-util.js";
 import { Chrome, ChromePage } from "../inspect/chrome.js";
 import { pickAccent, rankColors, suggestStyle } from "./findings.js";
-import { fitFrames, readFigmaFolder } from "./figma.js";
+import { readFigmaFolderInWorker } from "./figma.js";
 import { type DeclaredFace, bestSource, faceFor, firstFamily, fontExtension, isGenericFamily, isIconCoverage, isIconFamily, parseFontFaces, readFontFacts } from "./fonts.js";
 import { PAGE_SCRIPT, type PageFindings, type PageSection } from "./page-script.js";
 import { CAPTURE_PORTS } from "./policy.js";
@@ -640,7 +641,7 @@ export class BrandService {
     if (!(await stat(dir).catch(() => null))?.isDirectory()) {
       throw new RpcError(ErrorCode.AssetNotFound, `brand.importFigma: ${dir} is not a folder. Export the Figma frames as SVG into one folder first.`, { path: dir });
     }
-    const { frames, warnings } = await readFigmaFolder(dir);
+    const { frames, warnings } = await readFigmaFolderInWorker(dir);
     if (frames.length === 0) {
       const why = warnings.length > 0 ? `: ${warnings.slice(0, 5).join(" ")}` : ": it holds no .svg file.";
       throw new RpcError(ErrorCode.InvalidOperation, `brand.importFigma: no frame of ${dir} could be imported${why}`, { op: "brand.importFigma", reason: "no-frames", field: "dir" });

@@ -1,3 +1,4 @@
+import type { RenderBeatsProblem } from "@frameshell/plugin-api";
 import { ErrorCode, type OperationName, RpcError, SECONDS_TEXT, TIME_REF_FIELDS } from "@frameshell/protocol";
 import { type Timeline, describeMarkers, findMarker, isGridRefLabel } from "@frameshell/schema";
 import type { OperationRequest } from "./engine.js";
@@ -189,17 +190,19 @@ const GRID_REF = /^\s*(\d+(?:\.\d*)?|\.\d+)\s*(?:([+-])\s*(\d+(?:\.\d*)?|\.\d+))
 
 /**
  * Why a beat grid cannot be used, in the words `--snap-to` and `beat:`/`bar:` both refuse with: there is none (no
- * tempo, or its beats are missing) or it is LOW confidence. Null when `found` holds a usable grid.
+ * tempo, or its beats are missing) or it is LOW confidence. `code` is the stable reason a generated clip's render key
+ * counts (ADR 0029 decision 8). Null when `found` holds a usable grid.
  */
-export function unusableGrid(found: TempoResult): { message: string; hint?: string } | null {
-  const { grid, problem } = found;
-  if (!grid) {
-    return problem
-      ? { message: problem }
-      : { message: "the timeline has no tempo.", hint: "Set one with `tempo.set` { clip } (a measured music clip) or { bpm } (a nominal grid)." };
+export function unusableGrid(found: TempoResult): { code: RenderBeatsProblem; message: string; hint?: string } | null {
+  if (!found.grid) {
+    return found.problem !== null
+      ? { code: found.reason, message: found.problem }
+      : { code: "no-tempo", message: "the timeline has no tempo.", hint: "Set one with `tempo.set` { clip } (a measured music clip) or { bpm } (a nominal grid)." };
   }
+  const { grid } = found;
   if (grid.low) {
     return {
+      code: "low-confidence",
       message: `the grid of ${grid.asset} is LOW confidence (${grid.confidence}): it may be double time or a bar off.`,
       hint: "Check it with `beats.show`, then correct it with `edits.tempo` or `edits.downbeat` in its beats file, or measure again with a `bpm` hint.",
     };

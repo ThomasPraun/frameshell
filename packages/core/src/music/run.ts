@@ -1,10 +1,10 @@
 import { ErrorCode, MUSIC_FIT_MIN_CONFIDENCE, type MusicFitResult, RpcError } from "@frameshell/protocol";
-import { type AnyClip, type AudioEffect, type ClipTrack, type DuckSettings, type MediaClip, type ShapeSettings, type Timeline, clipLength } from "@frameshell/schema";
+import { type AnyClip, type AudioEffect, type ClipTrack, type DuckSettings, type MediaClip, type ShapeSettings, type Timeline, clipLength, isBuild } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
-import { isBuild, planBuildEffects } from "./builds.js";
+import { planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
 import { finalHit } from "./hit.js";

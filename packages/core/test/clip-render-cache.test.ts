@@ -668,15 +668,21 @@ describe("timing in generated clips", () => {
   let dir = "";
   let beatTrack = "";
 
-  beforeAll(async () => {
-    dir = tempDir();
-    await conn.request("project.init", { dir });
-    const configPath = join(dir, "frameshell.json");
+  /** A trusted 64x36 project at 30 fps with the card plugin and an empty `compositions/cards/`. */
+  const cardProject = async () => {
+    const at = tempDir();
+    await conn.request("project.init", { dir: at });
+    const configPath = join(at, "frameshell.json");
     const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
     writeFileSync(configPath, JSON.stringify({ ...config, fps: 30, resolution: { width: 64, height: 36 } }));
-    installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
-    await conn.request("project.trust", { cwd: dir, decision: "trust" });
-    mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
+    installLocalPlugin(at, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: at, decision: "trust" });
+    mkdirSync(join(at, "compositions", "cards"), { recursive: true });
+    return at;
+  };
+
+  beforeAll(async () => {
+    dir = await cardProject();
     writeFileSync(join(dir, "compositions", "cards", "plain.json"), JSON.stringify({ color: "blue", seconds: 1 }));
     writeFileSync(join(dir, "compositions", "cards", "live.html"), "<!doctype html><title>card</title>");
     beatTrack = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
@@ -721,6 +727,70 @@ describe("timing in generated clips", () => {
       expect(retimed.get(plain)!.key).toBe(before.get(plain)!.key);
       // The render got the timing it was keyed with: the card refuses any other, so the new timing fails it.
       expect(await settled(timed)).toMatchObject({ state: "failed", error: expect.stringContaining('"bpm":100') });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "renders a nested clip that asks once, keyed through its host in the background, and export uses that render",
+    async () => {
+      const at = await cardProject();
+      await conn.request("tempo.set", { cwd: at, bpm: 120 });
+      const tempo = { bpm: 120, meter: 4 };
+      // 120 BPM from 0 s: the top card (timeline 0.5..1.5 s) hears beats 2 and 3; the nested card (its timeline's
+      // 0.5..1.5 s, shown from timeline 2.5 s) beats 6 and 7. Its own file has no tempo, so keyed there it would get
+      // `no-tempo`, which the card refuses: a render against the nested file fails a job.
+      const card = (beats: number[]) => ({ color: "blue", seconds: 1, timing: ["beats"], requireTiming: { beats: [{ at: 0, beat: beats[0] }, { at: 0.5, beat: beats[1] }], tempo } });
+      writeFileSync(join(at, "compositions", "cards", "top.json"), JSON.stringify(card([2, 3])));
+      writeFileSync(join(at, "compositions", "cards", "inner.json"), JSON.stringify(card([6, 7])));
+      // The host first, so no refresh ever sees the nested file without it.
+      const hostTrack = (await conn.request("track.add", { cwd: at, kind: "video" })).changes.added[0]!;
+      const main = JSON.parse(readFileSync(join(at, "timelines", "main.json"), "utf8")) as { tracks: { id: string; clips: unknown[] }[] };
+      main.tracks.find((t) => t.id === hostTrack)!.clips.push(
+        { id: "c_top", type: "beat-card", source: "compositions/cards/top.json", start: 0.5, duration: 1 },
+        { id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 2, duration: 2 },
+      );
+      await conn.request("file.write", { path: join(at, "timelines", "main.json"), content: JSON.stringify(main) });
+      const inner = { schemaVersion: 1, id: "inner", revision: 0, tracks: [{ id: "t_in", kind: "video", clips: [] as unknown[] }] };
+      inner.tracks[0]!.clips.push({ id: "c_beat", type: "beat-card", source: "compositions/cards/inner.json", start: 0.5, duration: 1 });
+      await conn.request("file.write", { path: join(at, "timelines", "inner.json"), content: JSON.stringify(inner) });
+
+      // Background renders only: `clip.renders` is not asked until they settle, so it queues nothing itself.
+      const jobs = async () => (await conn.request("job.list", { cwd: at })).jobs.filter((job) => job.kind === "clip");
+      for (const deadline = Date.now() + 60_000; ; ) {
+        const now = await jobs();
+        if (now.length >= 2 && now.every((job) => job.state === "done" || job.state === "failed")) break;
+        if (Date.now() > deadline) throw new Error(`background clip renders never settled: ${JSON.stringify(now)}`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const background = await jobs();
+      expect(background.map((job) => [job.asset, job.state]).sort()).toEqual([
+        ["compositions/cards/inner.json", "done"],
+        ["compositions/cards/top.json", "done"],
+      ]);
+
+      const shown = new Map((await conn.request("clip.renders", { cwd: at, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
+      expect(shown.get("c_top")).toMatchObject({ state: "ready" });
+      expect(shown.get("c_nest/c_beat")).toMatchObject({ state: "ready" });
+      const cache = join(at, ".frameshell", "cache", "clips");
+      const entries = () => new Set(readdirSync(cache).filter((name) => /^[0-9a-f]{32}\.json$/.test(name)).map((name) => name.slice(0, 32)));
+      expect(entries()).toEqual(new Set([shown.get("c_top")!.key, shown.get("c_nest/c_beat")!.key]));
+
+      // Export keys each clip as the preview does: no new render, and the cards accept the timing they get.
+      const out = join(tempDir(), "timed.mp4");
+      const { job } = await conn.request("render", { cwd: at, timeline: "main", out });
+      let final: JobInfo | undefined;
+      for (const deadline = Date.now() + 120_000; Date.now() < deadline && !final; ) {
+        const found = (await conn.request("job.list", { cwd: at })).jobs.find((one) => one.id === job.id);
+        if (found && (found.state === "done" || found.state === "failed")) final = found;
+        else await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(final).toMatchObject({ state: "done" });
+      expect(await jobs()).toHaveLength(2);
+      expect(entries()).toEqual(new Set([shown.get("c_top")!.key, shown.get("c_nest/c_beat")!.key]));
+      // gc keeps the host's key of the nested clip.
+      const { removed } = await conn.request("gc", { cwd: at, dryRun: true });
+      expect(removed.filter((entry) => entry.kind === "clip")).toEqual([]);
     },
     TIMEOUT,
   );

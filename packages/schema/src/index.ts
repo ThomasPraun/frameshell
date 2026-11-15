@@ -271,6 +271,7 @@ export {
   BrandManifestSchema,
   FIGMA_FRAME_WIDTH,
   createBrandManifest,
+  fitFrames,
   parseBrandManifest,
 } from "./brand.js";
 export { type PaintChange, paintStretches } from "./painted.js";
@@ -293,6 +294,7 @@ export {
   backdropMatrix,
   backdropOf,
   bakeRef,
+  isBuild,
   normalizeAudioEffects,
   sweepCutoffAt,
 } from "./effects.js";

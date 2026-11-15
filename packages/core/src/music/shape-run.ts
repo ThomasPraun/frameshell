@@ -1,8 +1,8 @@
 import { ErrorCode, type MusicShapeResult, RpcError } from "@frameshell/protocol";
-import { AUDIO_EFFECT_LIMITS, type AudioEffect, type ShapeSettings, type Timeline } from "@frameshell/schema";
+import { AUDIO_EFFECT_LIMITS, type AudioEffect, type ShapeSettings, type Timeline, isBuild } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
 import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
-import { type MusicBuild, isBuild, planBuildEffects } from "./builds.js";
+import { type MusicBuild, planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { clipEnd } from "./fit.js";
 import { type MusicFitPlan, findMusicClip, planDuckAgain } from "./run.js";
