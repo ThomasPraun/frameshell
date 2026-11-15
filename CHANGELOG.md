@@ -1150,6 +1150,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Test runs no longer fill the system temp dir: vitest gives each test file its own `TMPDIR` (`fsv-*`, removed after the
+  file and swept again at the end of the run, stale ones after a day) and warns about temp dirs that still escaped it;
+  Playwright e2e runs under one temp root removed at teardown. Before, every run left hundreds of `frameshell-*` and
+  `fs-*` dirs behind (94 GB over many parallel runs).
 - The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
   "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
   switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.
