@@ -762,7 +762,8 @@ class Engine implements LayerHost {
         } else {
           const cover = coverPixels(span, decoded);
           const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
-          const grade = span.kind === "media" && span.grade ? { grade: span.grade } : {};
+          // A render is graded like footage: its colour before its alpha plane masks it (ADR 0031).
+          const grade = span.grade ? { grade: span.grade } : {};
           const vignette = span.vignette ? { vignette: span.vignette } : {};
           const grain = span.grain ? { grain: span.grain } : {};
           parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette, ...grain });
@@ -897,7 +898,7 @@ class Engine implements LayerHost {
     const tables = new Map<string, GradeTable>();
     for (const layer of next.layers) {
       for (const span of layer) {
-        if ((span.kind !== "media" && span.kind !== "still") || !span.grade) continue;
+        if ((span.kind !== "media" && span.kind !== "still" && span.kind !== "generated") || !span.grade) continue;
         const table = next.grades?.[span.grade] ?? this.#gradeTables.get(span.grade);
         if (table) tables.set(span.grade, table);
       }

@@ -9,7 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Per-row voiceover and CSV rows for batch, a slice of #477 (ADR 0040 and 0034 slice 4, epic #451; protocol 152): a batch
+- Colour grade on generated clips and nested timeline clips, slice 8 of #384 (ADR 0031, epic #451; protocol 153):
+  `clip set --grade-*` (`clip.set` `grade`, MCP `clip_set`) now takes adapter clips and nested timeline clips on video
+  tracks too. A render is graded first in its part, before its alpha, as footage is (export `lut3d` right after it is
+  read; the preview grades the decoded colour before the alpha plane masks it). A nested timeline clip's grade follows
+  the own grade of every picture inside it, at any depth: flattening records the hosts' grades on each picture
+  (`hostGrades`) and export and the preview fold the chain into one table (`gradeChainOf`, `gradeChainTable`), so it
+  comes before that picture's vignette and grain; sound and shots are untouched. Plans of timelines without nested
+  grades are unchanged. Tests: chain tables, flattening two levels deep, two goldens, the managed ffmpeg on a nested
+  still and a VP9 alpha render, and the preview's tables against the ones export writes.
+- Motion film playbook refreshed, slice of #453 (epic #451; no protocol change): `reference/motion-films.md` and its router
+  row in `SKILL.md` now cover what landed since the first version: the brief written as `requirements.json` at the
+  storyboard gate and `review` exiting 1 on it at the critique gate, `analyze` audio fields (`pace`, `pitch`,
+  `voiceOverMusic`, `effects`, `sections`, `--no-speech`) as measured targets, a `grade analyze` / `grade compare` pass on
+  supplied footage, `beat:N` / `bar:N` in every time argument, `voiceover place --tempo`, `music shape --drop --build`,
+  the `beatsProblem` codes of generated clips that read beats and markers, and `batch` typed slots with `--review`. Links
+  go to the reference pages instead of repeating them.
+- Music fit follow-ups of #485 (ADR 0037 "Follow-ups as built", epic #451; protocol 152): `music shape --ending <time>
+  --end-on-bar` (MCP `music_shape` `endOnBar`; result `endsAt`) stretches or shrinks the closing fade so it ends on the
+  bar start of the grid nearest to `--ending + --fade`. `music grid` carries the hits stored by `music shape` with the
+  shots that moved (result `shape`: the shaping, keys and builds, runs again in the same transaction before the duck;
+  `--skip shape` leaves them). `music grid --trim head` (`trim: "head"`) moves a cut as a roll edit (tail before it and
+  head after it trimmed to the beat, nothing ripples), and `--tracks all` (default; `video` keeps the old behaviour)
+  also reads program-track shot changes (`kind: "program"`, always rolled, since the group clock keeps running) and
+  entries of clips alone on upper video tracks (`kind: "entry"`, moved whole). Each cut of the result gains `kind`, and
+  `out` is null for an entry.
+- Per-row voiceover and CSV rows for batch, a slice of #477 (ADR 0040 and 0034 slice 4, epic #451; protocol 154): a batch
   slot written `voiceover` takes a voiceover script path per row (or `{ script, lines, at, tempo, start, gap, track,
   replace }`) and places the script's existing takes as phrase clips on the row's variant, in memory, with the planner
   and writer of `voiceover.place` (same spacing, anchors, tempo, fades, overlap rules), so a row per language gets its

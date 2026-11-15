@@ -1,12 +1,12 @@
-// Grade tables of an export (ADR 0031): each distinct grade a timeline draws with, its LUT read and the table written
+// Grade tables of an export (ADR 0031): each distinct grade chain a timeline draws with, its LUTs read and the table written
 // as a `.cube` for ffmpeg `lut3d` in the work directory. The compiler only names the files (`RenderInput.grades`).
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import { type CubeLut, type Timeline, cubeText, gradeKey, gradeOf, gradeTable, parseCube } from "@frameshell/schema";
+import { type CubeLut, type GradeStage, type Timeline, cubeText, gradeChainKey, gradeChainOf, gradeChainTable, gradeOf, parseCube } from "@frameshell/schema";
 
-/** The grade tables of one export: `files` by `gradeKey` for the compiler, `contents` by file name for the work directory. */
+/** The grade tables of one export: `files` by `gradeChainKey` for the compiler, `contents` by file name for the work directory. */
 export interface GradeFiles {
   files: ReadonlyMap<string, string>;
   contents: Record<string, string>;
@@ -18,8 +18,9 @@ export function gradeFile(key: string): string {
 }
 
 /**
- * The table of every grade the media clips on the video tracks of `timeline` (flattened) draw with. A LUT is read once
- * per file. `ExportUnsupported` naming the clip when a LUT is outside the project, missing or not a 3D `.cube`.
+ * The table of every grade chain (`gradeChainOf`) the media and generated clips on the video tracks of `timeline`
+ * (flattened) draw with. A LUT is read once per file. `ExportUnsupported` naming the clip when a LUT is outside the
+ * project, missing or not a 3D `.cube`.
  */
 export async function gradeFiles(root: string, timeline: Timeline): Promise<GradeFiles> {
   const files = new Map<string, string>();
@@ -28,28 +29,36 @@ export async function gradeFiles(root: string, timeline: Timeline): Promise<Grad
   for (const track of timeline.tracks) {
     if (track.kind !== "video") continue;
     for (const clip of track.clips) {
-      const grade = gradeOf(clip);
-      if (!grade) continue;
-      const key = gradeKey(grade);
+      const chain = gradeChainOf(clip);
+      if (!chain) continue;
+      const key = gradeChainKey(chain);
       if (files.has(key)) continue;
-      let lut: CubeLut | null = null;
-      if (grade.lut !== null && grade.lutMix > 0) {
-        const path = grade.lut;
+      const stages: GradeStage[] = [];
+      for (const grade of chain) {
+        const path = grade.lut !== null && grade.lutMix > 0 ? grade.lut : null;
+        if (path === null) {
+          stages.push({ grade, lut: null });
+          continue;
+        }
         if (!luts.has(path)) luts.set(path, readLut(root, path));
         try {
-          lut = await luts.get(path)!;
+          stages.push({ grade, lut: await luts.get(path)! });
         } catch (error) {
+          const own = gradeOf(clip)?.lut === path;
           throw new RpcError(
             ErrorCode.ExportUnsupported,
-            `Clip ${clip.id} grades with LUT ${path}, which cannot be used: ${(error as Error).message} Fix the file, or clear the LUT: ` +
-              `\`frameshell clip set ${clip.id} --grade-lut none\`.`,
+            own
+              ? `Clip ${clip.id} grades with LUT ${path}, which cannot be used: ${(error as Error).message} Fix the file, or clear the LUT: ` +
+                  `\`frameshell clip set ${clip.id} --grade-lut none\`.`
+              : `Clip ${clip.id} plays inside a nested timeline clip that grades with LUT ${path}, which cannot be used: ` +
+                  `${(error as Error).message} Fix the file, or clear that clip's LUT with \`frameshell clip set <clip> --grade-lut none\`.`,
             { timeline: timeline.id, track: track.id, clip: clip.id },
           );
         }
       }
       const name = gradeFile(key);
       files.set(key, name);
-      contents[name] = cubeText(gradeTable(grade, lut));
+      contents[name] = cubeText(gradeChainTable(stages));
     }
   }
   return { files, contents };

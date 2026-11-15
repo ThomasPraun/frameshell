@@ -2376,12 +2376,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
     },
-    "music.shape": async ({ cwd, timeline, clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun }, caller) => {
+    "music.shape": async ({ cwd, timeline, clip, drop, ending, endOnBar, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const { operation, effects, duckAgain, entryFade, noop, ...report } = await planMusicShape(
         loaded,
-        { clip, drop, ending, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
+        { clip, drop, ending, endOnBar, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
         (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
       );
       const result = { timeline, ...report };
@@ -2442,14 +2442,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, candidates: placed, warnings: [...warnings] };
     },
-    "music.grid": async ({ cwd, timeline, to, maxShift, dryRun, skip }, caller) => {
+    "music.grid": async ({ cwd, timeline, to, maxShift, trim, tracks, dryRun, skip }, caller) => {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const grid = new FrameGrid(fps);
       const nested = timelines.nestedDuration(dir, timeline, fps);
       // Read on the first trimmed clip with sound only: hashing every asset is the slow part.
       let transcripts: ReturnType<typeof sourceTranscripts> | undefined;
-      const { requests, duckAgain, ...plan } = await planGridMoves(loaded, fps, { to, maxShift, skip, dryRun }, {
+      const { requests, duckAgain, shapeAgain, ...plan } = await planGridMoves(loaded, fps, { to, maxShift, trim, tracks, skip, dryRun }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
         apply: (state, request) => timelines.applyInMemory(dir, timeline, { timeline: state, fps }, request),
         end: (clip) => clipEnd(clip, grid, nested),
@@ -2469,6 +2469,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(plan.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicGridLabel(plan), revision: loaded.revision, warnings }, async (write) => {
         for (const request of requests) await write(request);
+        // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
+        if (shapeAgain?.effects !== undefined) await write({ op: "clip.set", args: { clip: shapeAgain.clip, audioEffects: shapeAgain.effects } } as OperationRequest);
+        if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
         if (duckAgain) await duckAgainStep({ dir, cwd, timeline }, duckAgain, write, warnings);
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, warnings: [...warnings] };

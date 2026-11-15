@@ -32,7 +32,7 @@ import {
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
 import { type FormatLayout, formatCrop } from "@frameshell/schema/formats";
 import { type ResolvedGrain, type ResolvedVignette, grainOf, letterboxBars, vignetteOf } from "@frameshell/schema/finish";
-import { type GradeTable, gradeKey, gradeOf } from "@frameshell/schema/grade";
+import { type GradeTable, gradeChainKey, gradeChainOf } from "@frameshell/schema/grade";
 import {
   type ClipEdges,
   type FrameRect,
@@ -149,6 +149,8 @@ export type VideoSpan =
       hold?: true;
       /** The clip's backdrop on an upper track (ADR 0031): what is below is blurred where it shows, as export draws it. */
       glass?: Backdrop;
+      /** Key of the render's colour grade table (ADR 0031, {@link tableKey}), graded before its alpha; absent: drawn as decoded. */
+      grade?: string;
       /** The clip's vignette (ADR 0043, `vignetteOf`): after the grade, on the pixels that show; absent: none. */
       vignette?: ResolvedVignette;
       /** The clip's grain (ADR 0043, `grainOf`): after the vignette, on the pixels that show; absent: none. */
@@ -513,8 +515,8 @@ export interface ProgramOptions {
    */
   format?: FormatLayout & Size;
   /**
-   * Tables of the colour grades of media clips by `gradeKey` (`useGradeTables`, ADR 0031), the ones export applies. A
-   * graded clip whose table is absent (its LUT not read yet, or unreadable) is drawn ungraded.
+   * Tables of the colour grade chains of the pictures by `gradeChainKey` (`useGradeTables`, ADR 0031), the ones export
+   * applies. A graded clip whose table is absent (its LUT not read yet, or unreadable) is drawn ungraded.
    */
   grades?: ReadonlyMap<string, GradeTable>;
 }
@@ -1227,8 +1229,9 @@ function subjectPicture(
 }
 
 /**
- * `picture` with the key of `clip`'s colour grade when `tables` holds its table, which is added to `used`; as given
- * for other pictures, clips without a grade, and a table not ready (drawn ungraded meanwhile).
+ * `picture` with the key of the table of `clip`'s grade chain (its own grade, then its nested hosts', `gradeChainOf`)
+ * when `tables` holds it, which is added to `used`; as given for other pictures, clips without a grade, and a table
+ * not ready (drawn ungraded meanwhile). Media, stills and generated renders, as export grades them.
  */
 function gradedPicture(
   picture: PlacedSpan | PlaceholderSpan | null,
@@ -1236,11 +1239,11 @@ function gradedPicture(
   tables: ReadonlyMap<string, GradeTable> | undefined,
   used: Record<string, GradeTable>,
 ): PlacedSpan | PlaceholderSpan | null {
-  if (picture?.kind !== "media" && picture?.kind !== "still") return picture;
-  const grade = gradeOf(clip);
-  const table = grade ? tables?.get(gradeKey(grade)) : undefined;
-  if (!grade || !table) return picture;
-  const key = tableKey(gradeKey(grade), table);
+  if (picture?.kind !== "media" && picture?.kind !== "still" && picture?.kind !== "generated") return picture;
+  const chain = gradeChainOf(clip);
+  const table = chain ? tables?.get(gradeChainKey(chain)) : undefined;
+  if (!chain || !table) return picture;
+  const key = tableKey(gradeChainKey(chain), table);
   used[key] = table;
   return { ...picture, grade: key };
 }

@@ -16,6 +16,7 @@ import {
   audioFades,
   bakeRef,
   flattenTimeline,
+  gradeChainKey,
   gradeKey,
   gradeOf,
   grainSeed,
@@ -463,6 +464,38 @@ describe("export compiler", () => {
       it("leaves the colour step out when it changes nothing, and a zero blur out", () => {
         const graph = filters(compileRender({ ...input, timeline: withGlass("c_title", { blur: 0 }) }));
         expect(graph).toContain("[bb0]format=gbrp,format=rgba[bg0]");
+      });
+    });
+
+    describe("colour grade (ADR 0031, #384)", () => {
+      const warm = { temperature: 0.4, saturation: 1.2 };
+      const graded: Timeline = {
+        ...layered,
+        tracks: layered.tracks.map((track) =>
+          track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (clip.type === "hyperframes" ? ({ ...clip, grade: warm } as Clip) : clip)) } : track,
+        ),
+      };
+      const grades = new Map([[gradeChainKey([gradeOf({ type: "hyperframes", grade: warm })!]), "grade-warm.cube"]]);
+      const gradedPlan = compileRender({ ...input, timeline: graded, grades });
+      const graphs = Object.values(gradedPlan.files).join("\n");
+
+      it("grades a render before its scale, opacity and alpha, as footage (golden)", () => {
+        golden("grade-generated-plan", {
+          segments: gradedPlan.segments,
+          files: gradedPlan.files,
+          frame: compileFrame({ ...input, timeline: graded, grades, width: 1280, height: 720, at: 2, output: "/out/frame.png" }),
+        });
+        // Both renders: the VP9 alpha title on v2 and the opaque end card on v1, each graded right after it is read.
+        expect(graphs.match(/format=rgba,lut3d=file=grade-warm\.cube:interp=trilinear/g)?.length).toBeGreaterThanOrEqual(2);
+        expect(graphs).toMatch(/lut3d=file=grade-warm\.cube:interp=trilinear,[^\n;]*scale=[^\n;]*colorchannelmixer=aa=0\.8/);
+        expect(gradedPlan.warnings).toEqual(layeredPlan.warnings);
+      });
+
+      it("leaves the plan as it was without a grade, and draws a render without a table ungraded, with a warning", () => {
+        expect(compileRender({ ...input, grades })).toEqual(layeredPlan);
+        const missing = compileRender({ ...input, timeline: graded });
+        expect(missing.files).toEqual(layeredPlan.files);
+        expect(missing.warnings).toContain("Clip c_title has a colour grade with no table; it was exported ungraded.");
       });
     });
   });
@@ -1038,6 +1071,34 @@ describe("export compiler", () => {
         const loose = compileRender({ ...nestedInput, timeline: flattenTimeline(hosted(plain), both) });
         expect(playback).toEqual(loose);
         expect(JSON.stringify(playback)).not.toMatch(/qsin|eval=frame|alpha=1/);
+      });
+
+      it("grades every picture of a graded nested clip through one table after its own grade, its sound untouched (ADR 0031, golden)", () => {
+        const own = { saturation: 0.6 };
+        const look = { temperature: -0.3, contrast: 1.1 };
+        const scened: Timeline = {
+          ...scene,
+          tracks: scene.tracks.map((track) =>
+            track.id === "v1" && track.kind === "video" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, grade: own }) as Clip) } : track,
+          ),
+        };
+        const both = (source: string) => (source === "timelines/scene.json" ? scened : null);
+        const timeline = flattenTimeline(hosted({ ...host, grade: look } as Clip), both, 30);
+        const chain = (...grades: object[]) => gradeChainKey(grades.map((grade) => gradeOf({ type: "media", grade })!));
+        const grades = new Map([
+          [chain(own, look), "grade-cam.cube"],
+          [chain(look), "grade-badge.cube"],
+        ]);
+        const plan = compileRender({ ...nestedInput, timeline, grades });
+        golden("grade-nested-plan", { segments: plan.segments, files: plan.files, frame: compileFrame({ ...nestedInput, timeline, grades, width: 1280, height: 720, at: 2.1, output: "/out/frame.png" }) });
+        const graphs = Object.values(plan.files).join("\n");
+        expect(graphs).toContain("lut3d=file=grade-cam.cube:interp=trilinear");
+        expect(graphs).toContain("lut3d=file=grade-badge.cube:interp=trilinear");
+        // Nothing but the tables changes: the same plan with the grade lines taken out.
+        const strip = (text: string) => text.replaceAll(/,format=rgba,lut3d=file=grade-\w+\.cube:interp=trilinear/g, "");
+        expect(Object.values(plan.files).map(strip)).toEqual(Object.values(nestedPlan.files));
+        expect(plan.audio).toEqual(nestedPlan.audio);
+        expect(plan.warnings).toEqual(nestedPlan.warnings);
       });
     });
   });

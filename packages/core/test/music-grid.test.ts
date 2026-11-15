@@ -129,7 +129,7 @@ describe("planGridMoves", () => {
     expect(plan.moved).toBe(0);
     await expect(planGridMoves(state, 30, request({ skip: ["g9"] }), deps(state))).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
-      data: { reason: "skip", valid: ["g1", "g2", "duck"] },
+      data: { reason: "skip", valid: ["g1", "g2", "duck", "shape"] },
     });
   });
 
