@@ -661,3 +661,67 @@ describe("motion blur in generated clips", () => {
     TIMEOUT,
   );
 });
+
+// Timing (ADR 0029 decision 8): a `beat-card` whose card asks for beats and markers gets them inside its range, in
+// composition seconds; its key moves with them, while a clip that does not ask keeps its key.
+describe("timing in generated clips", () => {
+  let dir = "";
+  let beatTrack = "";
+
+  beforeAll(async () => {
+    dir = tempDir();
+    await conn.request("project.init", { dir });
+    const configPath = join(dir, "frameshell.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, fps: 30, resolution: { width: 64, height: 36 } }));
+    installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: dir, decision: "trust" });
+    mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
+    writeFileSync(join(dir, "compositions", "cards", "plain.json"), JSON.stringify({ color: "blue", seconds: 1 }));
+    writeFileSync(join(dir, "compositions", "cards", "live.html"), "<!doctype html><title>card</title>");
+    beatTrack = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
+  }, TIMEOUT);
+
+  const states = async () => new Map((await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
+  const settled = async (id: string) => {
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+      const info = (await states()).get(id)!;
+      if (info.state === "ready" || info.state === "failed") return info;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`clip ${id} never settled`);
+  };
+
+  it(
+    "renders a clip that asks with the beats and markers inside it, re-keying only that clip when they move",
+    async () => {
+      await conn.request("tempo.set", { cwd: dir, bpm: 120 });
+      const hook = (await conn.request("marker.add", { cwd: dir, at: 1.2, label: "hook" })).changes.added[0]!;
+      // At 120 BPM from 0 s the clip (timeline 1..2 s, composition 0..1 s) hears beats 3 and 4; no bar starts in it.
+      const expected = { beats: [{ at: 0, beat: 3 }, { at: 0.5, beat: 4 }], tempo: { bpm: 120, meter: 4 }, markers: [{ at: 0.2, id: hook, label: "hook" }] };
+      const card = { color: "blue", seconds: 1, timing: ["beats", "markers"], requireTiming: expected };
+      writeFileSync(join(dir, "compositions", "cards", "beats.json"), JSON.stringify(card));
+      const add = async (type: string, name: string, start: number) =>
+        (await conn.request("clip.add", { cwd: dir, track: beatTrack, type, source: `compositions/cards/${name}.json`, start, duration: 1 })).changes.added[0]!;
+      const timed = await add("beat-card", "beats", 1);
+      const plain = await add("card", "plain", 3);
+      expect(await settled(timed)).toMatchObject({ state: "ready", error: null });
+      const page = await conn.request("clip.live", { cwd: dir, timeline: "main", clip: timed });
+      expect(page.head).toContain(`window.cardTiming = ${JSON.stringify(expected)};`);
+      const before = await states();
+
+      await conn.request("marker.set", { cwd: dir, marker: hook, at: 1.5 });
+      const moved = await states();
+      expect(moved.get(timed)!.key).not.toBe(before.get(timed)!.key);
+      expect(moved.get(plain)!.key).toBe(before.get(plain)!.key);
+
+      await conn.request("tempo.set", { cwd: dir, bpm: 100 });
+      const retimed = await states();
+      expect(retimed.get(timed)!.key).not.toBe(moved.get(timed)!.key);
+      expect(retimed.get(plain)!.key).toBe(before.get(plain)!.key);
+      // The render got the timing it was keyed with: the card refuses any other, so the new timing fails it.
+      expect(await settled(timed)).toMatchObject({ state: "failed", error: expect.stringContaining('"bpm":100') });
+    },
+    TIMEOUT,
+  );
+});

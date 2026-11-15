@@ -1,0 +1,111 @@
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runInNewContext } from "node:vm";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { LiveContext, RenderContext, RenderTiming } from "@frameshell/plugin-api";
+import { type Producer, createHyperframesAdapter } from "../src/index.js";
+import { timingKinds } from "../src/timing.js";
+
+// Timing for generated clips (ADR 0029 decision 8): a composition asks with a meta tag and reads `window.frameshellTiming`.
+const SOURCE = "compositions/hyperframes/drop/index.html";
+const ASKING = '<!doctype html><html><head><meta name="frameshell-timing" content="beats markers"><title>drop</title></head><body></body></html>';
+const TIMING: RenderTiming = {
+  beats: [
+    { at: 0.5, beat: 3, bar: 1 },
+    { at: 1, beat: 4 },
+  ],
+  tempo: { bpm: 120, meter: 4 },
+  markers: [{ at: 0.75, id: "m_1", label: "</script><b>hook", color: "red" }],
+};
+
+let project: string;
+
+beforeEach(() => {
+  project = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-hyperframes-timing-")));
+  mkdirSync(join(project, "compositions", "hyperframes", "drop"), { recursive: true });
+  writeFileSync(join(project, SOURCE), ASKING);
+  writeFileSync(join(project, "frameshell.json"), JSON.stringify({ resolution: { width: 1920, height: 1080 } }));
+});
+
+/** Renders SOURCE with `timing` and returns the entry as the producer saw it. */
+async function renderedEntry(timing?: RenderTiming): Promise<string> {
+  let seen = "";
+  const producer: Producer = {
+    createRenderJob: (config) => ({ config }),
+    async executeRenderJob(_job, dir, output) {
+      seen = readFileSync(join(dir, "index.html"), "utf8");
+      writeFileSync(output, "webm");
+    },
+  };
+  const ctx: RenderContext = {
+    projectDir: project,
+    outDir: realpathSync(mkdtempSync(join(tmpdir(), "frameshell-hyperframes-timing-out-"))),
+    fps: 30,
+    width: 1920,
+    height: 1080,
+    signal: new AbortController().signal,
+    ensureBinary: async (name) => `/managed/${name}`,
+    progress: () => {},
+    ...(timing ? { timing } : {}),
+  };
+  await createHyperframesAdapter({ projectDir: project, producer: async () => producer }).render({ id: "c_1", source: SOURCE }, ctx);
+  return seen;
+}
+
+/** Runs every inline script of `html` (or a head script) in one fresh context and returns its window. */
+function run(scripts: string[]): Record<string, unknown> {
+  const window: Record<string, unknown> = {};
+  window["window"] = window;
+  for (const script of scripts) runInNewContext(script, { window });
+  return window;
+}
+
+describe("timing kinds a composition asks for", () => {
+  it("reads the meta tag in any quoting, case and separator, ignoring unknown words", () => {
+    expect(timingKinds(ASKING)).toEqual(["beats", "markers"]);
+    expect(timingKinds("<META content='Markers' NAME='frameshell-timing'>")).toEqual(["markers"]);
+    expect(timingKinds('<meta name=frameshell-timing content="beats,  bars">')).toEqual(["beats"]);
+  });
+
+  it("asks for nothing without the tag, or with another meta tag", () => {
+    expect(timingKinds("<html><head><title>x</title></head></html>")).toEqual([]);
+    expect(timingKinds('<meta name="description" content="beats markers"><meta data-name="frameshell-timing" content="beats">')).toEqual([]);
+  });
+
+  it("is what the adapter's timing() says for a clip, and nothing for a clip without an HTML entry", async () => {
+    const adapter = createHyperframesAdapter({ projectDir: project });
+    expect(await adapter.timing!({ id: "c_1", source: SOURCE })).toEqual(["beats", "markers"]);
+    writeFileSync(join(project, SOURCE), "<html></html>");
+    expect(await adapter.timing!({ id: "c_1", source: SOURCE })).toEqual([]);
+    expect(await adapter.timing!({ id: "c_1" })).toEqual([]);
+    expect(await adapter.timing!({ id: "c_1", source: "compositions/hyperframes/gone/index.html" })).toEqual([]);
+  });
+});
+
+describe("timing in renders and live pages", () => {
+  it("sets window.frameshellTiming first in the copied entry's head, escaped so a label cannot close the script", async () => {
+    const seen = await renderedEntry(TIMING);
+    expect(seen.startsWith('<!doctype html><html><head><script data-frameshell-timing>window.frameshellTiming = {"beats":')).toBe(true);
+    const scripts = [...seen.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((match) => match[1]!);
+    expect(scripts).toHaveLength(1);
+    expect(run(scripts)["frameshellTiming"]).toEqual(TIMING);
+    expect(readFileSync(join(project, SOURCE), "utf8")).toBe(ASKING);
+  });
+
+  it("leaves the copy byte-identical without timing", async () => {
+    expect(await renderedEntry()).toBe(ASKING);
+  });
+
+  it("gives the live page the same timing before the variables and the runtime", async () => {
+    const live: LiveContext = { projectDir: project, fps: 30, width: 1920, height: 1080, ensureBinary: async (name) => `/managed/${name}` };
+    const adapter = createHyperframesAdapter({ projectDir: project, runtime: async () => "window.runtime = true;" });
+    const { head } = await adapter.livePreview!({ id: "c_1", source: SOURCE, props: { title: "Drop" } }, { ...live, timing: TIMING });
+    expect(head.indexOf("window.frameshellTiming = ")).toBe(0);
+    expect(head.indexOf("window.__hfVariables")).toBeGreaterThan(0);
+    expect(head).not.toContain("</script>");
+    const timing = run([head.slice(0, head.indexOf("\n"))])["frameshellTiming"];
+    expect(timing).toEqual(TIMING);
+    expect((await adapter.livePreview!({ id: "c_1", source: SOURCE }, live)).head).not.toContain("frameshellTiming");
+  });
+});
