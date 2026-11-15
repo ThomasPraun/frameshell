@@ -322,7 +322,7 @@ describe("parsing multicam commands", () => {
     });
     expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "3", remove: true })).toMatchObject({ params: { at: 3, remove: true } });
     expect(parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { clear: true })!.params).toEqual({ group: "g_1", angle: "ana", clear: true });
-    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { x: "0.3" })).toThrow(/--time <timeline seconds> or --at/);
+    expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { x: "0.3" })).toThrow(/--time <timeline seconds, a marker or beat:N \/ bar:N> or --at/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", time: "1", x: "0.3" })).toThrow(/one of them/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1" })).toThrow(/--x and\/or --y/);
     expect(() => parseTimelineCommand(["multicam", "reframe", "g_1", "ana"], { at: "1", remove: true, x: "0.2" })).toThrow(/without --x/);

@@ -221,10 +221,10 @@ function wholeList(raw: string, flag: string): number[] {
   });
 }
 
-/** A time flag: seconds as a number, else the text (a marker id or label, optionally `+s` or `-s`) for the daemon to resolve. */
+/** A time flag: seconds as a number, else the text (a marker id or label, optionally `+s` or `-s`, or `beat:N` / `bar:N`) for the daemon to resolve. */
 function when(raw: string, flag: string): number | string {
   const text = raw.trim();
-  if (text === "") throw new UsageError(`--${flag}: expected seconds or a marker id or label, got "${raw}".`);
+  if (text === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
   return SECONDS_TEXT.test(text) ? Number(text) : text;
 }
 

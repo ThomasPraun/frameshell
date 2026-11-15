@@ -1252,7 +1252,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         const other = ["time", "at", "x", "y", "remove"].find((flag) => values[flag] !== undefined);
         if (other) throw new UsageError(`--clear removes every key: pass it without --${other}.`);
       } else if ((at === undefined) === (time === undefined)) {
-        throw new UsageError("Pass the key time: --time <timeline seconds> or --at <group seconds>, one of them (or --clear).");
+        throw new UsageError("Pass the key time: --time <timeline seconds, a marker or beat:N / bar:N> or --at <group seconds>, one of them (or --clear).");
       } else if (values["remove"] === true && (values["x"] !== undefined || values["y"] !== undefined)) {
         throw new UsageError("--remove deletes the key: pass it without --x or --y.");
       } else if (values["remove"] !== true && values["x"] === undefined && values["y"] === undefined) {
