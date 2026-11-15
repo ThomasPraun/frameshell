@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion blur of 3D compositions capped at 8 samples, and warnings for a blur that did not apply, slices of #473 and #501
+  (ADR 0041, ADR 0042 decision 13, epic #451; protocol 150): a HyperFrames composition that draws with WebGL (it holds the
+  three.js bundle `frameshell-three.js`, or a script makes a `WebGLRenderer` or `webgl` context) renders its blur with at
+  most 8 samples per frame, since each sample is a full frame on the software renderer. Adapters get `RenderContext.warn`:
+  the note is kept with the cached render and shown wherever that render is used. `frame` returns `warnings` (CLI prints
+  `warning:` lines; MCP `frame_capture` has them in its facts), `review` adds them to its own `warnings`, once each, and
+  export jobs show them as before. Where the producer refuses a blur (HDR content, shader transitions) and the sharp
+  render stands in, `frame` and `review` now say so too, where only `clip.renders` `final.error` did.
 - TimeRef in the last time arguments that took plain seconds, a slice of #458 (ADR 0029 slice 4, epic #451; protocol 149):
   `sound.place` and `sound.music` now read `beat:N` and `bar:N` too (they took seconds and markers only: the `cues[].at`,
   `typing.from`/`to`, `at`, `sections[].at` and `accents[]` times), and `captions.set` `from`/`to`, `multicam.direct`

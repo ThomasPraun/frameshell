@@ -4,7 +4,7 @@ status: accepted
 
 # three.js in generated clips: a pinned bundle copied into HyperFrames compositions, rendered on SwiftShader
 
-3D product shots, titles and logos for launch films ([#473](https://github.com/ThomasPraun/frameshell/issues/473), epic #451), the lighter 3D route beside Blender (ADR 0035). The owner chose option A of the proposal on #473 on 2026-11-11 with every recommendation, after a spike; the spike ([`docs/research/three-in-hyperframes.md`](../research/three-in-hyperframes.md), PR #531) was approved on 2026-11-13 with its five corrections, which this ADR records. Extends ADR 0033 (motion runtime); ADR 0033 is unchanged except a cross-link. **Slices 1, 2 and 4 are built; slices 3 and 5 are not.**
+3D product shots, titles and logos for launch films ([#473](https://github.com/ThomasPraun/frameshell/issues/473), epic #451), the lighter 3D route beside Blender (ADR 0035). The owner chose option A of the proposal on #473 on 2026-11-11 with every recommendation, after a spike; the spike ([`docs/research/three-in-hyperframes.md`](../research/three-in-hyperframes.md), PR #531) was approved on 2026-11-13 with its five corrections, which this ADR records. Extends ADR 0033 (motion runtime); ADR 0033 is unchanged except a cross-link. **Slices 1, 2 and 4 and the motion blur cap of slice 5 are built; slice 3 and the rest of 5 are not.**
 
 ## Context (verified)
 
@@ -27,7 +27,7 @@ status: accepted
 10. **Cost budget.** About 1 s per 1080p frame for a draft-quality product shot; above it, lower MSAA, the shadow map and PMREM size first, then reopen.
 11. **No dedicated `three` clip type.** Revisit only if a template fails `clip.verify` or the cost budget on HyperFrames.
 12. **Blender bridge.** A GLB exported from Blender is loaded by a three.js template from the composition directory (hashed like every file); no code link between the plugins. GLBs are plain glTF binary: the bundle has no Draco, KTX2 or Meshopt decoder.
-13. **Motion blur (cross rule with #501).** A 3D template with motion blur is capped at 8 fixed samples with a warning.
+13. **Motion blur (cross rule with #501).** A 3D composition with motion blur is capped at 8 fixed samples with a warning. *As built:* 3D means the composition holds `frameshell-three.js` or a script makes a WebGL renderer or context, so a hand-written scene is capped too.
 
 ### Settled in slices 1 and 2
 
@@ -46,7 +46,7 @@ status: accepted
 2. `product-shot` template with a real-render test (done).
 3. `title-3d` (Archivo Black typeface JSON at build time, converter licence to check) and `logo-3d` (SVG extrude, `SVGLoader` +29 KB).
 4. The 3D playbook reference in the plugin skill (studio defaults, materials, camera, beat sheet, failure and fix, Blender bridge), GLOSSARY, the Chrome SwiftShader flag (done).
-5. Motion blur cap for 3D once #501 lands; hardware GL and the live-vs-export parity only if needed.
+5. Motion blur cap for 3D (done with the warning, see ADR 0041 "As built (slice 7)": any composition that draws with WebGL, not only the templates); hardware GL and the live-vs-export parity only if needed.
 
 ## Consequences
 

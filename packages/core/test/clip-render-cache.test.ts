@@ -523,6 +523,7 @@ describe("motion blur in generated clips", () => {
     card("blur", { color: "blue", blurColor: "red", seconds: 1, requireBlur, delayMs: 300, blurDelayMs: 600 });
     card("refuse", { color: "blue", blurColor: "red", seconds: 1, refuseBlur: true });
     card("plain", { color: "blue", seconds: 1 });
+    card("noted", { color: "blue", blurColor: "red", seconds: 1, warn: "Clip noted caps its blur." });
     blurTrack = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
   }, TIMEOUT);
 
@@ -628,7 +629,7 @@ describe("motion blur in generated clips", () => {
 
       const { job, out } = await exported();
       expect(job.state).toBe("done");
-      expect(job.warnings).toEqual([expect.stringMatching(new RegExp(`^Clip ${refused} is exported without motion blur, from its sharp render: .*cannot be motion-blurred`))]);
+      expect(job.warnings).toEqual([expect.stringMatching(new RegExp(`^Clip ${refused} is used without motion blur, from its sharp render: .*cannot be motion-blurred`))]);
       expect(isBlue(await pixel(out, 4.5))).toBe(true);
       // The blurred clip beside it still exports blurred.
       expect((await pixel(out, 0.5)).red).toBeGreaterThan(150);
@@ -657,6 +658,32 @@ describe("motion blur in generated clips", () => {
       const unused = (await conn.request("gc", { cwd: dir, dryRun: true })).removed.map((entry) => keyOf(entry.path));
       expect(unused).toContain(final!.key);
       expect(unused).not.toContain(key);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "tells what a blurred render says (ctx.warn) and a refused blur on frames, reviews and exports, from the cache too",
+    async () => {
+      const noted = await add("blur-card", "noted", 5);
+      const refused = await add("blur-card", "refuse", 6);
+      for (const id of [noted, refused]) await conn.request("clip.set", { cwd: dir, clip: id, motionBlur: { shutter: 90 } });
+      await until(noted, (info) => info.final?.state === "ready");
+      await until(refused, (info) => info.final?.state === "failed");
+      const frame = () => conn.request("frame", { cwd: dir, timeline: "main", at: 5.5, out: join(tempDir(), "frame.png") });
+      const sharpWords = new RegExp(`^Clip ${refused} is used without motion blur, from its sharp render: .*cannot be motion-blurred`);
+
+      expect((await frame()).warnings).toEqual(expect.arrayContaining(["Clip noted caps its blur.", expect.stringMatching(sharpWords)]));
+      // The render is cached now: the note comes from its entry, not from a render.
+      expect((await frame()).warnings).toContain("Clip noted caps its blur.");
+
+      const review = await conn.request("review", { cwd: dir, timeline: "main", from: 5, to: 7, sheets: ["contact"] });
+      expect(review.warnings.filter((warning) => warning === "Clip noted caps its blur.")).toHaveLength(1);
+      expect(review.warnings).toEqual(expect.arrayContaining([expect.stringMatching(sharpWords)]));
+
+      expect((await exported("final")).job.warnings).toContain("Clip noted caps its blur.");
+      expect((await exported("draft")).job.warnings).not.toContain("Clip noted caps its blur.");
+      for (const id of [noted, refused]) await conn.request("clip.remove", { cwd: dir, clip: id });
     },
     TIMEOUT,
   );
