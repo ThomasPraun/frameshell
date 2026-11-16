@@ -15,7 +15,7 @@ export const channelMethods = {
     mutating: true,
     description:
       "Write a UTF-8 text file inside a Frameshell project (scripts, compositions, config), replacing it atomically. " +
-      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json`, `people.json`, `style.json` and `brand.json` must pass schema validation " +
+      "Missing parent directories are created. `frameshell.json`, `timelines/*.json`, `transcripts/**/*.words.json`, `beats/**/*.beats.json`, `people.json`, `style.json`, `requirements.json` and `brand.json` must pass schema validation " +
       "or the write is rejected with InvalidProjectFile and the old file kept. A timeline write is a direct edit (SPEC §6.4): it must " +
       "carry the timeline's current `revision` (else StaleRevision), is checked against timeline rules like any operation, and is " +
       "journaled as a `timeline.patch` operation by author `file` with the revision bumped. In review mode (ADR 0019) a " +
@@ -23,8 +23,8 @@ export const channelMethods = {
       "file, is kept with the proposal, not in `timelines/`, until the person accepts it. A `frameshell.json` write that " +
       "changes `formats` is journaled as a `file.write` config operation (ADR 0036) in the writer's transaction, so `history` " +
       "lists it and `revert` undoes it; in review mode its formats change waits in the proposal while its other keys are " +
-      "written at once. A `style.json` write that changes a value is a `file.write` config operation the same way, and in " +
-      "review mode it waits in the proposal whole (prefer `style.set`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
+      "written at once. A `style.json` or `requirements.json` write that changes a value is a `file.write` config operation the same way, and in " +
+      "review mode it waits in the proposal whole (prefer `style.set`, `review.require`). Fails with OutsideProject for paths in no project, under daemon-owned `.frameshell/` (any letter case), " +
       "resolving outside the project through a symlink, or naming a symlink.",
     params: z.strictObject({
       path: AbsolutePath.describe("Absolute file path inside a project, e.g. `/home/ana/videos/launch/scripts/launch.md`."),

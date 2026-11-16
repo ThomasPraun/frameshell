@@ -43,7 +43,7 @@ import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyl
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { BATCH_FLAGS, BATCH_USAGE, type BatchInvocation, batchOutcome, batchLabel, describeBatch, parseBatch, waitReviews } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
-import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
+import { REVIEW_FLAGS, REVIEW_USAGE, type RequirementsInvocation, type ReviewInvocation, executeRequirements, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import { FormatIdSchema } from "@frameshell/schema";
@@ -275,6 +275,7 @@ type Invocation =
   | StyleInvocation
   | JobInvocation
   | ReviewInvocation
+  | RequirementsInvocation
   | AnalyzeInvocation
   | AnalyzeDiffInvocation
   | PeopleInvocation
@@ -481,7 +482,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" || (command === "review" && (sub === "require" || sub === "waive")) ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -908,6 +909,9 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "review":
       return executeReview(conn, inv, cwd, flags.json, outcome);
+    case "review.require":
+    case "review.waive":
+      return executeRequirements(conn, inv, cwd, flags.json);
     case "analyze":
     case "analyze.diff":
       return executeAnalyze(conn, inv, cwd, flags.json);
@@ -1572,13 +1576,14 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
   for (const note of command.notes) lines.push(`  note: ${note}`);
   lines.push("", "Binaries:");
   for (const binary of report.binaries) {
-    // Managed package with no build for this platform (today Blender, the person's own install): found through `binaries`.
+    // Managed package with no build for this platform (today Blender, the person's own install): found at a standard path or through `binaries`.
     const notInstalled = binary.source === "managed" && !binary.pinned ? `not installed, set binaries.${binary.name}` : "not installed";
     const state = binary.installed ? (binary.version ?? "not runnable") : notInstalled;
     const pinned = binary.pinned;
     const gpu = pinned?.accelerator ? `, ${pinned.accelerator}` : "";
     const pin = pinned ? ` · pinned ${pinned.version} (${pinned.license}, ${pinned.origin}${gpu})` : "";
-    lines.push(`  ${binary.name.padEnd(8)} ${state} · ${binary.source}${binary.path ? ` · ${binary.path}` : ""}${pin}`);
+    const found = binary.found === "path" ? " (found on PATH)" : binary.found === "standard" ? " (found at its standard install path)" : "";
+    lines.push(`  ${binary.name.padEnd(8)} ${state} · ${binary.source}${found}${binary.path ? ` · ${binary.path}` : ""}${pin}`);
   }
   if (report.codecs.length > 0) {
     lines.push("", "Codecs:");

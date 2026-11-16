@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type BinaryPackage, BinaryManager, type PinnedBuild, buildCandidates, currentPlatform } from "../src/index.js";
+import { type BinaryPackage, BinaryManager, type PinnedBuild, type StandardPath, buildCandidates, currentPlatform } from "../src/index.js";
 import { tarGz, zip } from "./archives.js";
 import { tempDir } from "./helpers.js";
 
@@ -235,7 +235,7 @@ describe("BinaryManager user install (Blender, ADR 0035)", () => {
   function blenderManager(config?: unknown) {
     const dirs = { dataDir: tempDir(), configDir: tempDir() };
     if (config) writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify(config));
-    return { dirs, binaries: new BinaryManager(dirs) };
+    return { dirs, binaries: new BinaryManager({ ...dirs, standardPaths: false }) };
   }
 
   it("takes the executable from a project or global `binaries.blender` override, without downloading", async () => {
@@ -272,6 +272,96 @@ describe("BinaryManager user install (Blender, ADR 0035)", () => {
   it("still throws for a tool no package ships, override or not", async () => {
     const { binaries } = blenderManager({ binaries: { godot: "/opt/godot" } });
     await expect(binaries.locate("godot")).rejects.toThrow(/Unknown binary: godot/);
+  });
+});
+
+describe("BinaryManager user install at a standard path", () => {
+  /** Fake Windows install root: `<ProgramFiles>/Blender Foundation/<folder>/blender.exe` for each folder. */
+  function programFiles(folders: Record<string, boolean>) {
+    const root = tempDir();
+    for (const [folder, withExe] of Object.entries(folders)) {
+      const dir = join(root, "Blender Foundation", folder);
+      mkdirSync(dir, { recursive: true });
+      if (withExe) writeFileSync(join(dir, "blender.exe"), "stub");
+    }
+    return root;
+  }
+  const windows = (env: NodeJS.ProcessEnv, config?: unknown) => {
+    const dirs = { dataDir: tempDir(), configDir: tempDir() };
+    if (config) writeFileSync(join(dirs.configDir, "config.json"), JSON.stringify(config));
+    return new BinaryManager({ ...dirs, platform: "win32-x64", env });
+  };
+
+  it("takes the newest Blender of the supported range from the Windows installer's folders, without running it", async () => {
+    const root = programFiles({ "Blender 4.2": true, "Blender 4.5": true, "Blender 5.1": true, "Blender 5.10": false, "Blender 6.0": true, "Blender Launcher": true });
+    const binaries = windows({ ProgramFiles: root, PATH: tempDir() });
+    const path = join(root, "Blender Foundation", "Blender 5.1", "blender.exe");
+    expect(await binaries.locate("blender")).toEqual({ name: "blender", package: "blender", source: "system", found: "standard", path, installed: true, pinned: null });
+    expect(await binaries.ensure("blender")).toBe(path);
+  });
+
+  it("takes a Blender outside the range when it is the only one, so doctor can say so", async () => {
+    const root = programFiles({ "Blender 4.2": true });
+    expect(await windows({ ProgramFiles: root }).locate("blender")).toMatchObject({ source: "system", path: join(root, "Blender Foundation", "Blender 4.2", "blender.exe") });
+  });
+
+  it("lets a `binaries.blender` override win over an install it would find", async () => {
+    const root = programFiles({ "Blender 5.0": true });
+    const own = join(tempDir(), "blender.exe");
+    writeFileSync(own, "stub");
+    const located = await windows({ ProgramFiles: root }, { binaries: { blender: own } }).locate("blender");
+    expect(located).toMatchObject({ source: "global", path: own, installed: true });
+    expect(located.found).toBeUndefined();
+  });
+
+  it("looks on PATH after the install folders, and says where it looked when Blender is nowhere", async () => {
+    const onPath = tempDir();
+    writeFileSync(join(onPath, "blender.exe"), "stub");
+    expect(await windows({ ProgramFiles: tempDir(), PATH: `${tempDir()};${onPath}` }).locate("blender")).toMatchObject({
+      source: "system",
+      found: "path",
+      path: join(onPath, "blender.exe"),
+    });
+    // No ProgramFiles in the environment: that rule is skipped, not an error.
+    const binaries = windows({ PATH: tempDir() });
+    expect(await binaries.locate("blender")).toMatchObject({ source: "managed", path: null, installed: false });
+    const error = await binaries.ensure("blender").catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: ErrorCode.BinaryUnavailable });
+    expect((error as Error).message).toMatch(/was not told where it is \(looked in \$\{ProgramFiles\}\\Blender Foundation, for blender on PATH\)\. Frameshell uses your own Blender/);
+  });
+
+  it("follows the order of a package's rules: a fixed path before PATH, `${VAR}` from the environment", async () => {
+    const rules: StandardPath[] = [
+      { kind: "file", path: "${APPS}/Tool.app/tool" },
+      { kind: "path", name: "tool" },
+    ];
+    const tool: BinaryPackage = {
+      name: "tool",
+      tools: ["tool"],
+      builds: {},
+      onDemand: true,
+      userInstall: {
+        label: "Tool",
+        supported: "any",
+        download: "https://example.test",
+        examplePath: { darwin: "/x", linux: "/x", win32: "C:\\x" },
+        standardPaths: { darwin: rules, linux: rules, win32: rules },
+        supports: () => true,
+      },
+    };
+    const apps = tempDir();
+    const onPath = tempDir();
+    const pathTool = join(onPath, `tool${exe}`);
+    writeFileSync(pathTool, "stub", { mode: 0o755 });
+    const env = { APPS: apps, PATH: onPath };
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [tool], env });
+    expect(await binaries.locate("tool")).toMatchObject({ source: "system", found: "path", path: pathTool });
+    mkdirSync(join(apps, "Tool.app"));
+    writeFileSync(join(apps, "Tool.app", "tool"), "stub");
+    expect(await binaries.locate("tool")).toMatchObject({ source: "system", found: "standard", path: join(apps, "Tool.app", "tool") });
+    // Off for tests that must not see the machine's own installs.
+    const off = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [tool], env, standardPaths: false });
+    expect(await off.locate("tool")).toMatchObject({ source: "managed", installed: false });
   });
 });
 

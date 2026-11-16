@@ -110,8 +110,9 @@ mutations print the new revision):
   clip compare <clip> --look [name:]key=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]
                                Render one frame of a generated clip (blender, hyperframes, ...) under up to 11 variants next
                                to the clip as it is, as one labelled PNG, through the export frame path. A variant is
-                               props merged over the clip's own (key=value, JSON values; key=null drops one) and/or
-                               source=<project path>: --look dusk:scene=Dusk, --look close:camera=Close,scene=Dusk,
+                               props merged over the clip's own (key=value, JSON values but scene and camera always text;
+                               key=null drops one) and/or source=<project path>: --look dusk:scene=Dusk,
+                               --look close:camera=Close,scene=Dusk,
                                --look b:source=scenes/hero-b.blend; a whole look as JSON: --look '{"name":"x","props":{...}}'.
                                --at picks the frame (default the clip's middle); --out the image (default
                                .frameshell/looks/compare-<clip>-<frame>.png); --tile-width 160 to 960 (default 480).
@@ -241,7 +242,7 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
-  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB]
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB|style]
                                Music under a voice: writes gain keys on the clips of audio track <track> that dip
                                while someone speaks on the --under tracks (video or audio; speech = sound above
                                --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
@@ -250,10 +251,12 @@ mutations print the new revision):
                                the dip, marked as the duck's: run it again after an edit and they are replaced, keys
                                you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
                                like any gain key; a key you set is a level, not a dip. --level dB first sets the
-                               static gain of each clip so the music's loudness (EBU R128, measured once per file
-                               and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
-                               keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
-                               music fit runs the same duck again after it moves one. Revert undoes it
+                               static gain of each clip so the music's loudness (EBU R128, measured over the part of
+                               its file the clip plays, once per part and cached) sits that many dB under the voice's
+                               (about 12 is a start; --level style takes the project's sound.musicUnderVoice); a clip
+                               with gain keys of its own is left alone. The settings are kept in each ducked clip
+                               (audio.duck): music fit, shape and grid run the same duck again, and the level first,
+                               after they change one. Revert undoes it
   transition set --at s [--kind dissolve|fade|wipe|push|iris|zoom|slats|grid|dip-cut] [--direction left|right|up|down]
            [--origin x0,y0,x1,y1] [--count n] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
@@ -812,7 +815,8 @@ interface ClipLookArg {
 
 /**
  * One `clip compare --look`: `[name:]key=value[,key=value...]`, e.g. `dusk:scene=Dusk` or `close:camera=Close,scene=Dusk`.
- * Values are JSON when they parse (`3`, `true`, `null`), else text; `source` is the look's source, every other key a prop.
+ * Values are JSON when they parse (`3`, `true`, `null`), else text; `scene` and `camera` are always text (but `null`
+ * drops the key); `source` is the look's source, every other key a prop.
  * A string starting with `{` is the whole look as JSON (`{"name":"x","props":{...}}`).
  */
 export function parseClipLook(raw: string): ClipLookArg {
@@ -840,10 +844,13 @@ export function parseClipLook(raw: string): ClipLookArg {
       look.source = value;
       continue;
     }
-    look.props = { ...look.props, [key]: jsonOrText(value) };
+    look.props = { ...look.props, [key]: NAME_PROPS.has(key) && value !== "null" ? value : jsonOrText(value) };
   }
   return look;
 }
+
+/** Props that name something (a Blender scene or camera): `scene=2024` is the scene called "2024", not a number. */
+const NAME_PROPS = new Set(["scene", "camera"]);
 
 /** `text` as JSON when it parses (number, boolean, null, object), else as it is. */
 function jsonOrText(text: string): unknown {
@@ -1460,7 +1467,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         releaseMs: num("release"),
         threshold: num("threshold"),
         gap: duckGap(),
-        level: num("level"),
+        level: str("level") === "style" ? "style" : num("level"),
       });
       break;
     }
@@ -1866,7 +1873,7 @@ function formatTrackDuck(result: TrackDuckResult): string {
   const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
   const written = result.changes.updated.length;
   const level = result.level
-    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
+    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under${result.level.source === "style" ? ", the style's sound.musicUnderVoice" : ""}): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
     : "";
   return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${level}${formatOperation(result)}`;
 }
@@ -1927,7 +1934,7 @@ function formatHistory(result: HistoryResult): string {
       const target = op.op === "revert" ? ` ${String(op.args["target"])}` : "";
       const touched = op.touched.length > 0 ? `  ${op.touched.join(", ")}` : "";
       // A config operation changes no timeline (ADR 0036): it says which file instead of a revision.
-      const doc = op.doc === "style" ? "style.json" : "project config";
+      const doc = op.doc === "style" ? "style.json" : op.doc === "requirements" ? "requirements.json" : "project config";
       lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? doc : `revision ${op.revision}`})`);
     }
   }

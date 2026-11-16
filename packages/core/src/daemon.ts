@@ -44,12 +44,14 @@ import {
   type ShotClip,
   type Timeline,
   type Transcript,
+  REQUIREMENTS_FILE,
   STYLE_FILE,
   USER_STYLES_DIR,
   createTimeline,
   cueTokens,
   findPerson,
   parseProjectConfig,
+  parseRequirementsFile,
   parseStyleFile,
   parseTimeline,
   projectFormats,
@@ -60,12 +62,12 @@ import {
 } from "@frameshell/schema";
 import { parseCaptionText, readCaptionFile, resolveCaptions } from "./timeline/captions.js";
 import { runDoctor } from "./binaries/doctor.js";
-import { isBinaryError } from "./binaries/errors.js";
 import { CreditsService, readCredits } from "./credits/service.js";
 import { EncoderCache } from "./encoders/probe.js";
 import type { MatteSource } from "./export/compiler.js";
 import { ExportService, readTranscriptFile, subjectAssets } from "./export/service.js";
 import { BatchService } from "./batch/service.js";
+import { findClip } from "./batch/variant.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
@@ -81,7 +83,7 @@ import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js
 import { BeatsStore, beatsFileOf, formatBeatsFile, ownBeatsFile, resolveBeatsFile, summarizeBeats } from "./media/beats-store.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { LoudnessStore } from "./media/loudness-store.js";
-import { gainFor, roundDb, voiceLoudness, voiceParts } from "./media/loudness-plan.js";
+import { planLevels } from "./media/loudness-plan.js";
 import { MediaService } from "./media/service.js";
 import { AudioFxService } from "./media/audio-fx.js";
 import { probeMedia } from "./media/ffmpeg.js";
@@ -183,6 +185,8 @@ import { sectionStarts } from "./sound/music.js";
 import { planMusic, runMusicPlacement } from "./sound/music-place.js";
 import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
+import { RequirementsService } from "./review/requirements-change.js";
+import { requirementsConfigDocument, requirementsFromState, requirementsState } from "./review/requirements-doc.js";
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
@@ -425,12 +429,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (await configJournal.serial(dir, () => writeProjectFile(dir, content, author, tx))) await transactions.applied(key, tx);
       await settle(key, tx);
     },
-    // ADR 0036: a style.json write that changes a value is a config operation of the writer, like `style set`.
-    writeStyle: async (dir, content, author = "file") => {
+    // ADR 0036: a style.json or requirements.json write that changes a value is a config operation of the writer, like `style set`.
+    writeKeyed: async (dir, doc, content, author = "file") => {
       const key = transactionKey(author);
       const tx = transactions.next(key);
-      await transactions.touching(key, tx, { root: dir, doc: "style" });
-      if (await configJournal.serial(dir, () => writeStyleFile(dir, content, author, tx))) await transactions.applied(key, tx);
+      await transactions.touching(key, tx, { root: dir, doc });
+      if (await configJournal.serial(dir, () => writeKeyedFile(dir, doc, content, author, tx))) await transactions.applied(key, tx);
       await settle(key, tx);
     },
   });
@@ -440,6 +444,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     docs: {
       project: projectConfigDocument({ readConfig: readProjectConfig, writeFormats: (dir, list) => projects.writeFormats(dir, list) }),
       style: styleConfigDocument(),
+      requirements: requirementsConfigDocument(),
     },
   });
   const directConfigEdits = new DirectConfigEdits({ journal: configJournal, sink: { directConfigEdit: (dir, doc, edit) => timelines.directConfigEdit(dir, doc, edit) } });
@@ -453,17 +458,35 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     journal: configJournal,
     change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make),
   });
+  const requirements = new RequirementsService({ journal: configJournal, change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make) });
+  /** File and keyed state of each config document a `file.write` replaces whole: the keys of a valid file, none of an invalid one. */
+  const KEYED_FILES = {
+    style: {
+      file: STYLE_FILE,
+      state: (raw: unknown) => {
+        const parsed = parseStyleFile(raw);
+        return styleState(parsed.ok ? parsed.value : null);
+      },
+    },
+    requirements: {
+      file: REQUIREMENTS_FILE,
+      state: (raw: unknown) => {
+        const parsed = parseRequirementsFile(raw);
+        return requirementsState(parsed.ok ? parsed.value : null);
+      },
+    },
+  } as const;
   /**
-   * `file.write` of `style.json` (ADR 0036): a write that changes a value is a `file.write` config operation of
-   * `author`, journaled before the file is written as given, or held whole by review mode. A write that changes no
-   * value, or that replaces an invalid file (an edit the journal cannot key), is written at once. Caller holds the
-   * config journal of `dir`. True when it changed a value.
+   * `file.write` of `style.json` or `requirements.json` (ADR 0036): a write that changes a value is a `file.write`
+   * config operation of `author`, journaled before the file is written as given, or held whole by review mode. A write
+   * that changes no value, or that replaces an invalid file (an edit the journal cannot key), is written at once.
+   * Caller holds the config journal of `dir`. True when it changed a value.
    */
-  const writeStyleFile = async (dir: string, content: string, author: string, tx: TxRef): Promise<boolean> => {
-    const path = join(dir, STYLE_FILE);
-    const parsed = parseStyleFile(JSON.parse(content));
-    const next = styleState(parsed.ok ? parsed.value : null);
-    const current = await configJournal.read(dir, "style").catch((error: unknown) => {
+  const writeKeyedFile = async (dir: string, doc: keyof typeof KEYED_FILES, content: string, author: string, tx: TxRef): Promise<boolean> => {
+    const { file } = KEYED_FILES[doc];
+    const path = join(dir, file);
+    const next = KEYED_FILES[doc].state(JSON.parse(content));
+    const current = await configJournal.read(dir, doc).catch((error: unknown) => {
       if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return null;
       throw error;
     });
@@ -473,10 +496,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
     await timelines.changeConfig(
       dir,
-      "style",
+      doc,
       { author, tx },
       // At once `base` is the file's state; in a proposal, only what the write changed replays on its version.
-      async (base, file) => ({ op: "file.write", args: { path: STYLE_FILE }, after: base === file ? next : applyConfigPatch(base, diffConfig(file, next), "after") }),
+      async (base, onDisk) => ({ op: "file.write", args: { path: file }, after: base === onDisk ? next : applyConfigPatch(base, diffConfig(onDisk, next), "after") }),
       { write: () => writeTextAtomic(path, content) },
     );
     return true;
@@ -527,6 +550,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const loudnessStore = new LoudnessStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
     ffmpeg: projectFfmpeg,
+    duration: async (dir, rel) => (await media.probe(dir, rel)).duration,
   });
   const beats = new BeatsStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
@@ -984,7 +1008,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
    * operation applies to, so a voice edited or a proposal rebased meanwhile is heard as it is then. `heard()` gives
    * what was found, after the operation ran.
    */
-  const duckPlanner = (dir: string, { under, depth, attackMs, releaseMs, threshold, gap, level }: Omit<ValidatedParams<"track.duck">, "cwd" | "timeline" | "track">) => {
+  const duckPlanner = (dir: string, { under, depth, attackMs, releaseMs, threshold, gap, level }: Omit<ValidatedParams<"track.duck">, "cwd" | "timeline" | "track" | "level"> & { level?: number | undefined }) => {
     /** What the operation keeps in `audio.duck` of the clips it ducks, so a later run (`music.fit` moving a clip) dips the same way. */
     const settings: DuckSettings = { under, depth, attackMs, releaseMs, threshold, gap, ...(level !== undefined ? { level } : {}) };
     const attack = attackMs / 1000;
@@ -1000,9 +1024,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     };
     return { prepare, settings, heard: () => ({ stretches, warnings }) };
   };
+  /** The project's `sound.musicUnderVoice`, dB: how far music sits under the voice (the style read path, 12 with no style file). */
+  const styleMusicUnderVoice = async (dir: string): Promise<number> => resolveStyle(await readStyleFile(dir)).sound.musicUnderVoice.value;
   /**
    * Duck again over a music clip's track inside a transaction `write` belongs to: with the parameters of the duck that wrote the
-   * clip's keys (`audio.duck`), else the defaults of the method. What `music.fit` and `music.shape` do after they change a ducked clip.
+   * clip's keys (`audio.duck`), else the defaults of the method. What `music.fit`, `music.shape` and `music.grid` do after they change
+   * a ducked clip (after {@link levelAgainStep}).
    */
   const duckAgainStep = async (
     { dir, cwd, timeline }: { dir: string; cwd: string; timeline: string },
@@ -1011,10 +1038,42 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     warnings: Set<string>,
   ): Promise<void> => {
     const asked = again.settings ?? methods["track.duck"].params.parse({ cwd, timeline, track: again.track, under: again.under });
-    const ducking = duckPlanner(dir, { ...asked, under: again.under });
+    const { level, ...rest } = asked;
+    const ducking = duckPlanner(dir, { ...rest, ...(level !== undefined ? { level: level === "style" ? await styleMusicUnderVoice(dir) : level } : {}), under: again.under });
     const request = { op: "track.duck", args: { track: again.track, curve: [{ time: 0, dip: 0 }], settings: ducking.settings } } as OperationRequest;
     await write(request, (current) => ducking.prepare(current, request));
     for (const warning of ducking.heard().warnings) warnings.add(warning);
+  };
+  /**
+   * Set the static gain of the clip a fit, shaping or grid move changed from the `level` its duck was run with (`duck --level`),
+   * before the music keys and the duck keys are written again: the part of the file it plays and the voice may be other than
+   * when the gain was set. Nothing when the duck has no `level` (or the clip has gain keys of its own, which a warning
+   * names); `before`, the timeline as planned, says which. `music` marks the keys that a shaping writes again after this step.
+   */
+  const levelAgainStep = async (
+    { dir, fps, before }: { dir: string; fps: number; before: Timeline },
+    again: { track: string; clip: string; under: string[]; settings: DuckSettings | null },
+    shapeFollows: boolean,
+    write: (request: OperationRequest, prepare?: (current: Timeline) => Promise<OperationRequest>) => Promise<unknown>,
+    warnings: Set<string>,
+  ): Promise<void> => {
+    if (again.settings?.level === undefined) return;
+    const level = again.settings.level;
+    const found = findClip(before, again.clip)?.clip;
+    if (!found || !("asset" in found)) return;
+    const request = { op: "clip.set", args: { clip: again.clip, gain: found.audio?.gain ?? 0 } } as OperationRequest;
+    const ask = (current: Timeline) =>
+      planLevels(current, fps, { track: again.track, under: again.under, level, only: new Set([again.clip]), ...(shapeFollows ? { replaced: new Set(["duck", "music"]) } : {}) }, { reading: (asset, range) => loudnessStore.reading(dir, asset, range) });
+    // The levels are read from the timeline the `clip.set` applies to: the clip as the earlier steps moved it, the voice as it is then.
+    let plan: Awaited<ReturnType<typeof planLevels>> | undefined;
+    await write(request, async (current) => {
+      plan = await ask(current);
+      const gain = plan.clips.find((entry) => entry.clip === again.clip)?.gain;
+      return { ...request, args: { clip: again.clip, gain: gain ?? (findClip(current, again.clip)?.clip as { audio?: { gain?: number } } | undefined)?.audio?.gain ?? 0 } } as OperationRequest;
+    });
+    for (const warning of plan?.warnings ?? []) warnings.add(warning);
+    if (plan && plan.voice === null) warnings.add(`${again.clip}'s static gain was not set again from level ${level} dB: there is no voice to measure on ${again.under.join(", ")}.`);
+    else if (plan && plan.clips.length > 0) warnings.add(`${again.clip}'s static gain was set again from level ${level} dB (${plan.clips[0]!.gain} dB for ${plan.clips[0]!.loudness} LUFS over the part it plays).`);
   };
   /** Energy envelope and beat-grid hits of an asset: what `music.fit` and `music.candidates` find a final hit with. */
   const hitSources = (dir: string) => ({
@@ -1556,8 +1615,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
+      // A proposal's version of requirements.json is judged when the run looks at the proposal.
+      const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
       return reviews.run(dir, {
         timeline,
+        ...(shownRequirements?.proposal ? { requirements: requirementsFromState(shownRequirements.state) } : {}),
         ...(file ? { file: resolve(cwd, file) } : {}),
         from,
         to,
@@ -2145,7 +2207,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
         take: (spec) =>
           serialSound(dir, () => generateMusic({ root: dir, spec, importAssets: (files) => media.import(dir, files, "copy"), credit: (file) => creditTake(dir, file) })),
-        musicUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.musicUnderVoice.value,
+        musicUnderVoice: () => styleMusicUnderVoice(dir),
       });
       const { take, spec, placement } = plan;
       const facts = {
@@ -2274,7 +2336,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "clip.key": (params, caller) => operate("clip.key", params, caller),
     "track.duck": async ({ cwd, timeline, track, under, depth, attackMs, releaseMs, threshold, gap, level }, caller) => {
       const dir = await root(cwd);
-      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `track.duck: ${reason}`, { op: "track.duck", reason, field });
       const known = (id: string) => {
         const found = loaded.tracks.find((candidate) => candidate.id === id);
@@ -2290,9 +2352,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           throw invalid(`${id} is a ${voice.kind} track; \`under\` takes video and audio tracks (a multicam program track has no sound of its own).`, "under");
         }
       }
-      const ducking = duckPlanner(dir, { under, depth, attackMs, releaseMs, threshold, gap, level });
+      // `"style"`: the number the project's style gives; it is what is kept in `audio.duck` and reported.
+      const dB = level === "style" ? await styleMusicUnderVoice(dir) : level;
+      const ducking = duckPlanner(dir, { under, depth, attackMs, releaseMs, threshold, gap, level: dB });
       const curve = [{ time: 0, dip: 0 }];
-      if (level === undefined) {
+      if (dB === undefined) {
         const result = await operate("track.duck", { cwd, timeline, track, curve, settings: ducking.settings }, caller, undefined, ducking.prepare);
         const heard = ducking.heard();
         return {
@@ -2305,43 +2369,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           warnings: [...result.warnings, ...heard.warnings],
         };
       }
-      // `level`: the static gain of each clip first, from the loudness of the voice and of the file, then the dip from that level, in one transaction.
-      const voice = await voiceParts(loaded, under, { reading: (asset) => loudnessStore.reading(dir, asset) });
-      const voiceLufs = voiceLoudness(voice.parts);
-      if (voiceLufs === null) {
-        throw invalid(`there is no voice to measure on ${under.join(", ")}: \`level\` sets the music under the voice's loudness. ${voice.warnings.join(" ")}`.trim(), "level");
+      // `level`: the static gain of each clip first, from the loudness of the voice and of the part of each file that plays, then the dip from that level, in one transaction.
+      const plan = await planLevels(loaded, fps, { track, under, level: dB }, { reading: (asset, range) => loudnessStore.reading(dir, asset, range) });
+      if (plan.voice === null || plan.target === null) {
+        throw invalid(`there is no voice to measure on ${under.join(", ")}: \`level\` sets the music under the voice's loudness. ${plan.warnings.join(" ")}`.trim(), "level");
       }
-      const target = roundDb(voiceLufs - level);
-      const warnings = new Set(voice.warnings);
-      const levels: { clip: string; loudness: number; gain: number }[] = [];
-      for (const clip of music.clips) {
-        if (!("asset" in clip)) {
-          warnings.add(`${clip.id} is not a media clip: its level is not set.`);
-          continue;
-        }
-        if (clip.audio?.muted === true) continue;
-        if (clip.keys?.gain?.some((key) => key.auto !== "duck" || key.base !== undefined)) {
-          warnings.add(`${clip.id} has gain keys of its own: its level is left as it is (\`clip key --prop gain --clear\` first to set it by loudness).`);
-          continue;
-        }
-        const reading = await loudnessStore.reading(dir, clip.asset).catch((error: unknown) => {
-          if (isBinaryError(error)) throw error;
-          warnings.add(`${clip.asset} cannot be measured (${error instanceof Error ? error.message : String(error)}): ${clip.id}'s level is left as it is.`);
-          return null;
-        });
-        if (!reading) continue;
-        if (reading.integrated === null) {
-          warnings.add(`${clip.asset} is silent: ${clip.id}'s level is left as it is.`);
-          continue;
-        }
-        levels.push({ clip: clip.id, loudness: reading.integrated, gain: gainFor(reading.integrated, target) });
-      }
+      const { voice: voiceLufs, target, clips: levels } = plan;
+      const warnings = new Set(plan.warnings);
       if (levels.length === 0) throw invalid(`no clip of ${track} can be set to a loudness.${[...warnings].length > 0 ? ` ${[...warnings].join(" ")}` : ""}`, "level");
       await assertFresh(dir, timeline, caller, "track.duck", loaded.revision, "the levels");
       let last: Awaited<ReturnType<typeof timelines.apply>> | undefined;
       const request = { op: "track.duck", args: { track, curve, settings: ducking.settings } } as OperationRequest;
       const written = await writeSteps(
-        { dir, cwd, timeline, caller, label: `Duck music: ${track} ${level} dB under the voice`, revision: loaded.revision, warnings },
+        { dir, cwd, timeline, caller, label: `Duck music: ${track} ${dB} dB under the voice`, revision: loaded.revision, warnings },
         async (write) => {
           for (const { clip, gain } of levels) await write({ op: "clip.set", args: { clip, gain } } as OperationRequest);
           last = await write(request, (current) => ducking.prepare(current, request));
@@ -2355,7 +2395,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         under,
         stretches: heard.stretches.length,
         speechSeconds: Math.round(heard.stretches.reduce((sum, span) => sum + (span.end - span.start), 0) * 1000) / 1000,
-        level: { under: level, voice: voiceLufs, target, clips: levels },
+        level: { under: dB, source: level === "style" ? "style" : "given", voice: voiceLufs, target, clips: levels },
         warnings: [...warnings, ...heard.warnings],
       };
     },
@@ -2418,6 +2458,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(report.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicFitLabel(report), revision: loaded.revision, warnings }, async (write) => {
         for (const { clip: id, ...operation } of operations) await write({ op: operation.op, args: { clip: id, ...operation.args } } as OperationRequest);
+        // The part of the file the clip plays changed: its level comes first, the keys are taken from it.
+        if (duckAgain) await levelAgainStep({ dir, fps, before: loaded }, duckAgain, shapeAgain !== null, write, warnings);
         // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
         if (shapeAgain?.effects !== undefined) await write({ op: "clip.set", args: { clip: shapeAgain.clip, audioEffects: shapeAgain.effects } } as OperationRequest);
         if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
@@ -2438,6 +2480,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       await assertFresh(dir, timeline, caller, "music.shape", loaded.revision, "the shaping");
       const warnings = new Set(report.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicShapeLabel(report), revision: loaded.revision, warnings }, async (write) => {
+        // The keys are taken from the clip's level: set it from the duck's `level` first.
+        if (duckAgain) await levelAgainStep({ dir, fps, before: loaded }, duckAgain, true, write, warnings);
         if (entryFade) await write({ op: "clip.set", args: { clip: operation.clip, audioFadeInMs: MUSIC_ENTRY_FADE_MS } } as OperationRequest);
         if (effects !== undefined) await write({ op: "clip.set", args: { clip: operation.clip, audioEffects: effects } } as OperationRequest);
         await write({ op: "music.shape", args: { clip: operation.clip, curve: operation.curve, ...(operation.settings ? { settings: operation.settings } : {}) } } as OperationRequest);
@@ -2453,7 +2497,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const plan = await planMusicCandidates(loaded, fps, { assets: rels, end, from, loudness }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
         ...hitSources(dir),
-        reading: (asset) => loudnessStore.reading(dir, asset),
+        reading: (asset, range) => loudnessStore.reading(dir, asset, range),
         duration: async (asset) => {
           const probed = await media.probe(dir, asset);
           if (probed.duration === null) throw new Error("it has no length");
@@ -2518,6 +2562,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const warnings = new Set(plan.warnings);
       const written = await writeSteps({ dir, cwd, timeline, caller, label: musicGridLabel(plan), revision: loaded.revision, warnings }, async (write) => {
         for (const request of requests) await write(request);
+        if (duckAgain) await levelAgainStep({ dir, fps, before: loaded }, duckAgain, shapeAgain !== null, write, warnings);
         // Before the duck: the shaping replaces the clip's duck keys, which the duck then writes again.
         if (shapeAgain?.effects !== undefined) await write({ op: "clip.set", args: { clip: shapeAgain.clip, audioEffects: shapeAgain.effects } } as OperationRequest);
         if (shapeAgain) await write({ op: "music.shape", args: { clip: shapeAgain.clip, curve: shapeAgain.curve, settings: shapeAgain.settings } } as OperationRequest);
@@ -3150,6 +3195,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       if (analysis !== undefined) return changeConfig(dir, caller, "style", (author, tx) => styles.applyAnalysis(dir, analysis, paths, author, tx));
       return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name!, replace === true, author, tx));
+    },
+    "review.require": async ({ cwd, path, clip, value }, caller) => {
+      const dir = await root(cwd);
+      return changeConfig(dir, caller, "requirements", (author, tx) => requirements.require(dir, { path, clip, value }, author, tx));
+    },
+    "review.waive": async ({ cwd, check, clip, reason }, caller) => {
+      const dir = await root(cwd);
+      return changeConfig(dir, caller, "requirements", (author, tx) => requirements.waive(dir, { check, clip, reason }, author, tx));
     },
     "style.save": async ({ cwd, name, force }) => styles.save(await root(cwd), name, force === true),
     "style.list": async () => styles.list(),

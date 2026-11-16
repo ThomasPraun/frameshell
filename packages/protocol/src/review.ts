@@ -408,9 +408,14 @@ export const ReviewRequirementCheckSchema = z.object({
     .string()
     .describe(
       "What was checked: `film.maxSeconds`, `film.minSeconds`, `film.maxStatic`, `film.endCard`, `film.loudness.target`, `film.loudness.maxTruePeak`, `captions.minSize`, " +
-        "`clip.appearsBy`, `clip.before` or `clip.keepsMoving`.",
+        "`clip.appearsBy`, `clip.before`, `clip.keepsMoving` or `clip.staysInFrame`.",
     ),
   clip: z.string().optional().describe("The clip a `clip.*` check is about."),
+  format: z.string().optional().describe("`clip.staysInFrame`: the project format whose frame was checked (`format.list`), the one reviewed."),
+  spans: z
+    .array(ReviewSpanSchema)
+    .optional()
+    .describe("`clip.staysInFrame` that fails: the timeline seconds in which what the clip draws leaves the frame (or comes inside the margin)."),
   status: z.enum(["pass", "fail", "skipped"]).describe("`skipped`: it cannot be measured on this review (a file has no clips, a timeline has no loudness, the range stops short of the end...); the message says why."),
   expected: z.union([z.string(), z.number()]).describe("What the file asks for."),
   actual: z.union([z.string(), z.number()]).nullable().describe("What the review measured; null when skipped."),
@@ -522,4 +527,38 @@ export const ReviewResultSchema: z.ZodType<ReviewResultShape> = z.object({
   safeZones: z.array(ReviewSafeZoneSchema).describe("One entry per platform of the `safe` sheet: its zones in the film's pixels and the captions that cross them; empty without the sheet."),
   metrics: ReviewMetricsSchema.nullable().describe("The numbers, also written to `metrics.json` in `dir`; null when `metrics` is not among the outputs asked for."),
   warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
+});
+
+/** See {@link RequirementsChangeSchema}. */
+export interface RequirementsChange {
+  dir: string;
+  path: string;
+  changes: { key: string; before: unknown; after: unknown }[];
+  op: string;
+  tx: string;
+  proposal: string | null;
+}
+
+/**
+ * What a `review.require` or `review.waive` changed in `requirements.json` (#457, ADR 0036).
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+export const RequirementsChangeSchema: z.ZodType<RequirementsChange> = z.object({
+  dir: z.string().describe("Project root."),
+  path: z.string().describe("The requirements file, project-relative: `requirements.json`."),
+  changes: z
+    .array(
+      z.object({
+        key: z.string().describe("What changed: `film.maxSeconds`, `captions.minSize`, `fail`, `clip:<id>.staysInFrame`, `waiver:<check>` or `waiver:<check>:<clip>` (value: its reason)."),
+        before: z.unknown().describe("Value in the file before; null when it was not set."),
+        after: z.unknown().describe("Value in the file after; null when it is no longer set."),
+      }),
+    )
+    .describe("Every value that changed; empty when the file already held it."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
+  tx: z.string().describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
+  proposal: z
+    .string()
+    .nullable()
+    .describe("Review mode (ADR 0019): the proposal now holding the change, which reaches `requirements.json` only once the person accepts it (`proposal.wait`). Null: applied at once."),
 });

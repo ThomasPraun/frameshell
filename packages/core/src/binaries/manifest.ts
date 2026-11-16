@@ -119,9 +119,9 @@ export interface BinaryPackage {
   /** Fallback copy of every archive. Each archive then lists its mirror URL after the canonical one. */
   readonly mirror?: BinaryMirror;
   /**
-   * The person's own install, never downloaded or redistributed (Blender, ADR 0035): no builds, found only through
-   * a `binaries` override. Messages name `label` instead of a missing managed build, and `doctor` checks the
-   * version `versionProbe` finds against `supports`.
+   * The person's own install, never downloaded or redistributed (Blender, ADR 0035): no builds, found through a
+   * `binaries` override, else at its {@link UserInstall.standardPaths}. Messages name `label` instead of a missing
+   * managed build, and `doctor` checks the version `versionProbe` finds against `supports`.
    */
   readonly userInstall?: UserInstall;
 }
@@ -135,10 +135,39 @@ export interface UserInstall {
   /** Where to get it, shown when it is not installed. */
   readonly download: string;
   /** Typical executable path per platform family, for the `binaries` hint. */
-  readonly examplePath: Readonly<Record<"darwin" | "linux" | "win32", string>>;
+  readonly examplePath: Readonly<Record<PlatformFamily, string>>;
+  /**
+   * Where an install is looked for when no `binaries` override names one, per platform family, in order: the first
+   * that exists wins.
+   */
+  readonly standardPaths?: Readonly<Partial<Record<PlatformFamily, readonly StandardPath[]>>>;
   /** True when `version`, as `versionProbe` captured it, is in `supported`. */
   supports(version: string): boolean;
 }
+
+/** Operating system part of a {@link PlatformKey}. */
+export type PlatformFamily = "darwin" | "linux" | "win32";
+
+/** Platform family of `platform`; anything not macOS or Windows counts as Linux. */
+export function platformFamily(platform: PlatformKey): PlatformFamily {
+  return platform.startsWith("darwin") ? "darwin" : platform.startsWith("win32") ? "win32" : "linux";
+}
+
+/**
+ * One place a {@link UserInstall} may sit. `${NAME}` in `path` and `dir` expands from the environment; a rule whose
+ * variable is unset is skipped.
+ */
+export type StandardPath =
+  /** An executable at a fixed path. */
+  | { readonly kind: "file"; readonly path: string }
+  /** `name` in a folder of PATH (`name.exe` on Windows). */
+  | { readonly kind: "path"; readonly name: string }
+  /**
+   * One folder per version in `dir` (path segments), named as `folder` matches (group 1 = version, e.g. `Blender 4.5`):
+   * `file` in the newest folder whose version {@link UserInstall.supports}, else in the newest folder (so `doctor` names
+   * it as out of range).
+   */
+  | { readonly kind: "versioned"; readonly dir: readonly string[]; readonly folder: RegExp; readonly file: string };
 
 /** Data file (ML model) downloaded on first use, same for every platform. */
 export interface ManagedModel {
@@ -908,7 +937,8 @@ export const BLENDER_TOOL = "blender";
 
 /**
  * Blender, the person's own install (ADR 0035): GPL and about 300 MB, so never downloaded or shipped. It has no
- * builds: `binaries.blender` in `frameshell.json` or the global config names the executable. Supported: the
+ * builds: `binaries.blender` in `frameshell.json` or the global config names the executable, else it is looked for
+ * where Blender's installers and package managers put it (`standardPaths`). Supported: the
  * 4.5 LTS and every 5.x release (5.2 is the current LTS). `supportedBlender` in `plugins/blender/src/blender.ts` repeats the
  * rule; `plugins/blender/test/blender.test.ts` checks that they agree.
  */
@@ -927,6 +957,21 @@ export const BLENDER_PACKAGE: BinaryPackage = {
       darwin: "/Applications/Blender.app/Contents/MacOS/Blender",
       linux: "/usr/bin/blender",
       win32: "C:\\Program Files\\Blender Foundation\\Blender 4.5\\blender.exe",
+    },
+    standardPaths: {
+      darwin: [
+        { kind: "file", path: "/Applications/Blender.app/Contents/MacOS/Blender" },
+        { kind: "path", name: "blender" },
+      ],
+      // The Windows installer makes one folder per minor version (`Blender 4.5`, `Blender 5.0`) and touches no PATH.
+      win32: [
+        { kind: "versioned", dir: ["${ProgramFiles}", "Blender Foundation"], folder: /^Blender (\d+\.\d+)$/i, file: "blender.exe" },
+        { kind: "path", name: "blender" },
+      ],
+      linux: [
+        { kind: "path", name: "blender" },
+        { kind: "file", path: "/snap/bin/blender" },
+      ],
     },
     supports(version) {
       const [major = 0, minor = 0] = version.split(".").map(Number);

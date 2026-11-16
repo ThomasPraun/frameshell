@@ -1,20 +1,21 @@
 import { readFile, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ConfigDoc } from "@frameshell/protocol";
-import { STYLE_FILE } from "@frameshell/schema";
+import { REQUIREMENTS_FILE, STYLE_FILE } from "@frameshell/schema";
 import { type FSWatcher, watch } from "chokidar";
 import { exists, writeTextAtomic } from "../fs-util.js";
 import { type ConfigJournal, readConfigHead, readConfigJournal, writeConfigHead } from "./journal.js";
 import { configHash } from "./patch.js";
 
 /**
- * Hand edits of config documents (ADR 0036 slice 5): `frameshell.json` formats and `style.json` edited outside the
- * daemon while it runs, or while it did not. The watcher reports the files; {@link DirectConfigEdits} diffs the
- * file's keyed state against the head snapshot the journal last wrote and turns a difference into a config operation.
+ * Hand edits of config documents (ADR 0036 slice 5): `frameshell.json` formats, `style.json` and `requirements.json`
+ * edited outside the daemon while it runs, or while it did not. The watcher reports the files; {@link DirectConfigEdits}
+ * diffs the file's keyed state against the head snapshot the journal last wrote and turns a difference into a config
+ * operation.
  */
 
 /** The file of each watched config document, project-relative. */
-export const CONFIG_FILES: Readonly<Record<ConfigDoc, string>> = { project: "frameshell.json", style: STYLE_FILE };
+export const CONFIG_FILES: Readonly<Record<ConfigDoc, string>> = { project: "frameshell.json", style: STYLE_FILE, requirements: REQUIREMENTS_FILE };
 
 /** Config document whose file is named `name`. */
 function docOf(name: string): ConfigDoc | undefined {
@@ -104,7 +105,7 @@ export interface ConfigWatcherOptions {
   stabilityMs?: number;
 }
 
-/** Watches `frameshell.json` and `style.json` at the root of attached projects, nothing else in it. */
+/** Watches the files of {@link CONFIG_FILES} at the root of attached projects, nothing else in it. */
 export class ConfigWatcher {
   readonly #options: ConfigWatcherOptions;
   readonly #watchers = new Map<string, FSWatcher>();

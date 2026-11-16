@@ -1,5 +1,6 @@
-import { type DaemonConnection, REVIEW_OUTPUTS, type ReviewMetrics, type ReviewOutput, type ReviewResult, type ReviewSound } from "@frameshell/protocol";
-import { FormatIdSchema, PLATFORM_IDS, type PlatformId } from "@frameshell/schema";
+import { type DaemonConnection, REVIEW_OUTPUTS, type RequirementsChange, type ReviewMetrics, type ReviewOutput, type ReviewResult, type ReviewSound } from "@frameshell/protocol";
+import { CRAFT_CHECKS, type CraftCheck, FormatIdSchema, PLATFORM_IDS, type PlatformId } from "@frameshell/schema";
+import { styleValue } from "./style-commands.js";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `review` (#457), in `frameshell --help`. */
@@ -20,22 +21,34 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                0.5 s window, effect files repeated, clips cut off loud, the music on the last frame;
                                --file: the end of the sound, its loudest moment, clicks), and craft warnings; written
                                without --sheets.
-                               requirements.json (project root, written with file.write; see its JSON Schema): the
-                               film's expectations (length, longest still stretch, end card, loudness of a --file,
-                               smallest captions, per clip appearsBy/before/keepsMoving) are checked into metrics, a
-                               craft check listed in "fail" is a failure, and a waiver (check, clip, reason) moves its
-                               warnings to "waived" with the reason. Any failure makes review exit 1.
+                               requirements.json (project root, set with review require / review waive; see its JSON
+                               Schema): the film's expectations (length, longest still stretch, end card, loudness of a
+                               --file, smallest captions, per clip appearsBy/before/keepsMoving/staysInFrame) are checked
+                               into metrics, a craft check listed in "fail" is a failure, and a waiver (check, clip,
+                               reason) moves its warnings to "waived" with the reason. Any failure makes review exit 1.
                                --loop: the film repeats, so a seam that holds a frame or jumps is a warning.
                                --preset p (with --file): check the file against the export plan of --timeline (and
                                --format) with that preset: size, frame rate, length, codecs, loudness.
                                --file reviews an exported video (the file
                                people get) instead of the timeline; --range limits it to seconds a to b;
                                --format lays a timeline out as that format of the project (9x16)
+  review require <path> <value> [--clip id]
+                               Set one expectation of requirements.json; null removes it. Film: film.maxSeconds,
+                               film.minSeconds, film.maxStatic, film.endCard '{"minSeconds":2}', film.loudness
+                               '{"target":-14,"maxTruePeak":-1}', captions.minSize 0.026, fail '["static"]'. With --clip:
+                               appearsBy 2 (or a marker, hook+0.5), before <clip>, keepsMoving '{"maxStatic":2}',
+                               staysInFrame true or '{"margin":0.05}'. JSON, else text. Journaled (revert undoes it);
+                               waits in the proposal in review mode
+  review waive <check> <reason> [--clip id] | review waive <check> --remove [--clip id]
+                               Accept the craft warnings of a check (static, reading, safe-zone...), on --clip only or
+                               all of them, with the reason shown beside them; --remove takes the waiver back
 `;
 
 /** Flags `review` takes besides the global ones. */
 export const REVIEW_FLAGS: Record<string, readonly string[]> = {
   review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop"],
+  "review require": ["clip"],
+  "review waive": ["clip", "remove"],
 };
 
 /** A parsed `review` command. */
@@ -53,6 +66,11 @@ export interface ReviewInvocation {
   loop?: true;
 }
 
+/** A parsed `review require` or `review waive`. */
+export type RequirementsInvocation =
+  | { kind: "review.require"; path: string; clip?: string; value: unknown }
+  | { kind: "review.waive"; check: CraftCheck; clip?: string; reason: string | null };
+
 /** Flag values `review` reads. */
 export interface ReviewOptions {
   timeline?: string | undefined;
@@ -64,6 +82,8 @@ export interface ReviewOptions {
   format?: string | undefined;
   preset?: string | undefined;
   loop?: boolean | undefined;
+  clip?: string | undefined;
+  remove?: boolean | undefined;
 }
 
 /** Names `--platform` takes besides the platform ids themselves. */
@@ -77,7 +97,25 @@ export function parsePlatform(name: string): PlatformId {
 }
 
 /** Parse `review`; null when it has arguments. Throws `UsageError` for a bad flag value. */
-export function parseReview(rest: string[], options: ReviewOptions): ReviewInvocation | null {
+export function parseReview(rest: string[], options: ReviewOptions): ReviewInvocation | RequirementsInvocation | null {
+  const [sub, ...args] = rest;
+  const clip = options.clip ? { clip: options.clip } : {};
+  if (sub === "require") {
+    if (args.length > 2) throw new UsageError("review require takes one path and one value: quote a value with spaces, e.g. review require film.endCard '{\"minSeconds\": 2}'");
+    return args.length === 2 ? { kind: "review.require", path: args[0]!, ...clip, value: styleValue(args[1]!) } : null;
+  }
+  if (sub === "waive") {
+    const [check, reason, ...extra] = args;
+    if (check === undefined) return null;
+    if (!(CRAFT_CHECKS as readonly string[]).includes(check)) throw new UsageError(`review waive takes a craft check: ${CRAFT_CHECKS.join(", ")}; got "${check}".`);
+    if (extra.length > 0) throw new UsageError('review waive takes one reason: quote it, e.g. review waive static "the hold is the joke"');
+    if (options.remove === true) {
+      if (reason !== undefined) throw new UsageError("review waive --remove takes the waiver back: give no reason.");
+      return { kind: "review.waive", check: check as CraftCheck, ...clip, reason: null };
+    }
+    if (reason === undefined || reason.trim() === "") throw new UsageError('review waive needs the reason the warnings are accepted, e.g. review waive static "the hold is the joke"; --remove takes a waiver back.');
+    return { kind: "review.waive", check: check as CraftCheck, ...clip, reason };
+  }
   if (rest.length > 0) return null;
   let from: number | undefined;
   let to: number | undefined;
@@ -116,6 +154,29 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
     ...(options.preset ? { preset: options.preset } : {}),
     ...(options.loop ? { loop: true as const } : {}),
   };
+}
+
+/** Run a parsed `review require` or `review waive`; human output unless `json`. */
+export async function executeRequirements(conn: DaemonConnection, inv: RequirementsInvocation, cwd: string, json: boolean): Promise<string> {
+  const clip = inv.clip ? { clip: inv.clip } : {};
+  const result =
+    inv.kind === "review.require"
+      ? await conn.request("review.require", { cwd, path: inv.path, value: inv.value, ...clip })
+      : await conn.request("review.waive", { cwd, check: inv.check, reason: inv.reason, ...clip });
+  if (json) return `${JSON.stringify(result, null, 2)}\n`;
+  const what = inv.kind === "review.require" ? `Required ${inv.clip ? `${inv.clip} ` : ""}${inv.path}` : `${inv.reason === null ? "Removed the waiver of" : "Waived"} ${inv.check}${inv.clip ? ` on ${inv.clip}` : ""}`;
+  return requirementsChanged(what, result);
+}
+
+/** What changed in requirements.json, key by key, and the command that undoes it. */
+function requirementsChanged(what: string, result: RequirementsChange): string {
+  const shown = (value: unknown) => (value === null || value === undefined ? "none" : JSON.stringify(value));
+  const lines = result.changes.map((change) => `  ${change.key}: ${shown(change.before)} -> ${shown(change.after)}`);
+  const list = lines.length > 0 ? `\n${lines.join("\n")}` : " Nothing changed: the file already held it.";
+  if (result.proposal) {
+    return `${what} in proposal ${result.proposal} (${result.op}): review mode is on, so ${result.path} is unchanged until the person accepts it.${list}\n  next: frameshell proposal wait\n`;
+  }
+  return `${what} (${result.op}).${list}\n  undo: frameshell revert ${result.op}\n`;
 }
 
 /** Run a parsed `review`; human output unless `json`. */

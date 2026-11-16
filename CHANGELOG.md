@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 160): "Generate voiceover…" on a
+- The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
   voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
   already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
   heard) and the form of "Place voiceover…", which asks where to start (seconds, a marker, `beat:N`, `bar:N`, resolved by
@@ -26,6 +26,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ConfirmationRequired` refusal prints the confirming command with its token and the `--lines`, `--provider`,
   `--voice` and `--no-verify` it was made with, and a script or price that changed
   meanwhile fails with `ConfirmationStale` instead of charging more than was confirmed.
+- Requirements of `review` stay in frame and go through the config journal, sixth slice of #457 (epic #451; protocol
+  162; `review.require`, `review.waive`, `clip.staysInFrame`, config document `requirements`): a clip requirement
+  `staysInFrame` (`true` or `{ margin }`, a share of the frame kept clear on every side) fails when what the clip draws
+  leaves the frame of the format reviewed: a generated clip's alpha (the boxes the safe-zone check already reads) or a
+  footage clip's faces (a cached `people scan`), after the format's cover crop and inside letterbox bars; touching an
+  edge is leaving it. The check names the `format` and the `spans` (timeline seconds) that leave, and is skipped with
+  why for a clip with nothing placed (a render with no alpha, no face scan). `requirements.json` is a config document
+  of ADR 0036 (keys `requirements:film.<field>`, `captions.minSize`, `fail`, `clip:<id>.<field>`,
+  `waiver:<check>[:<clip>]`): `frameshell review require <path> <value> [--clip id]` and `frameshell review waive
+  <check> <reason> [--clip id]` (`--remove`) change it one value at a time in the caller's transaction, so `history`
+  lists them, `revert` and `tx abort` undo them and review mode holds them in the proposal; a `file.write` of the file
+  and a hand edit are journaled like `style.json`'s, and `review` with `view: proposal` judges the proposal's version.
+  Older files load unchanged; waivers stay in `requirements.json` keyed by clip id (no field on timeline clips). Not
+  yet: requirement lines in the app's proposal bar, `staysInFrame` for clips inside a nested timeline.
+
+- Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 161): a scene at another frame rate than the project is
+  time-remapped with seconds kept (project frame k shows scene frame `start + k × scene fps / project fps` through a
+  subframe; no ratio is refused) instead of refused. Files a `.blend` loads from outside the project (owner decision
+  2026-11-16) render, their content hashes are a key input with no path in it (`outside.json` beside `deps.json`), and
+  every render of such a clip warns, naming them. Blender is found without `binaries.blender` where its installers put it
+  (macOS `/Applications/Blender.app`, Windows `Program Files\Blender Foundation\Blender <x.y>` newest supported, Linux
+  PATH and `/snap/bin`; PATH on every platform), by generic `UserInstall.standardPaths` data read by one lookup in
+  `BinaryManager.locate`; an override still wins. `doctor` reports such an install as source `system` with `found`
+  (`standard` or `path`). Not run with a real Blender: the opt-in real test now also checks the remap at a subframe, the
+  outside-file warning and that a scripted driver of a linked library outside the project stays off under `-Y`.
+
+- Loudness over the part of a file a clip plays, `duck --level style` and the level set again, slice MU2 of #485 (ADR
+  0037, epic #451; protocol 160). `LoudnessStore` reads the seconds a clip plays (`in` to `out`, on whole frames) and
+  caches them beside the whole-file reading in `.frameshell/loudness/` (`<hash>-l1-r<start ms>-<end ms>.json`, same `gc`
+  kind; a part that spans the file or is under one 400 ms block is the whole-file reading, so nothing is measured
+  twice). `music candidates --end` reads each file over the part its fit leaves playing, and `duck --level` reads each
+  music clip, and each voice clip (a file cut into over 8 pieces is read whole), over its played part. `duck --level
+  style` (`track.duck` `level: "style"`) takes the project's `sound.musicUnderVoice`; the number is what is kept in
+  `audio.duck.level` and reported with `level.source`. `music fit`, `music shape` and `music grid` set the clip's static
+  gain again from the stored `level` before they write the keys and run the duck again (a clip with gain keys of its own
+  keeps its gain, with a warning).
+
+- Documented limit of the export's loudness loop: it adds at most +3 dB (`MAX_TRIM_DB`), and when that cap binds the file
+  ends under the target by more than 0.15 LU (a transient-heavy mix that is quiet before the limiter, at AAC 128 kbps,
+  ceiling -4.9 dBTP). Kept on purpose (owner decision 2026-11-16); see SPEC §3.5 step 4 and ADR 0038 "Not done".
 
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
   protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
@@ -64,6 +104,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   character width is measured on the rendering machine. The skill lists the three templates; the opt-in real-render test
   covers layout in the four formats, cold-versus-reseek frames, the typed text, the pauses, the diff turns and the morph
   end state.
+- Wheel, roll, tab and freeze templates, slice TP2 of #466 (ADR 0033, epic #451): `slot-roll` spins a reel of words or
+  numbers (`items`, one `|`-separated prop) past a highlighted band and lands on `target` (added to the reel when it is
+  not in it; empty lands on the last), which flashes in the accent colour and pulses. `number-wheel` is an odometer:
+  every digit is a column that rolls to its final digit (left columns first, the two lowest turn twice), ends on exactly
+  the text `counter` would print (columns and separators left of the first digit of a shorter end fade out as they land)
+  and holds; the slots are as wide as the widest digit, measured on the rendering machine
+  (`1ch` is only the 0), and one line high, so nothing shifts while it rolls; count time 1.4 s by default (0.6 to 3).
+  `tab-indicator` is a row of tabs with a pill or an underline that stretches between them: the edge it moves toward
+  leaves first and the other follows, both springs retargeted at each time of `plan` (`2@1.2|4@2.4`: tab number or
+  name). `freeze-cut` is the owner's 2026-11-16 decision: a template over a still image prop, not a freeze-frame
+  operation on the timeline; the still drifts and sways, then on the beat it stops dead with a punch-in toward a focus
+  point, a white flash and an optional label (make the still with an exported frame). Typed props with bounds and the
+  per-format layout as in the other templates; every one pulls a late beat in so it lands before the 0.3 s exit. The
+  `laps` of `slot-roll` is rounded to whole turns and its reel never has fewer than three items; the
+  freeze sway stays inside the room the punch scale gains. The number format of `counter` moved to the kit (`NUMBER_FORMAT`, `GROUPING_VARIABLE`) so `number-wheel` shares it. The
+  skill lists the four; the opt-in real-render test covers layout, cold-versus-reseek frames and alpha in the four
+  formats, the digits shown at the start, mid-roll and the end, the band after a roll, the indicator edges before, in
+  and after a move, and the flash, punch-in and hold of the freeze.
 - Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 157): `analyze`
   returns `suggestions` (also in `analysis.json`), values for `style.json` read from the film, each with `path`,
   `value`, `why`, `from` (the result fields) and its own label: `colors.bg` (the palette's largest colour, a quarter of
@@ -1310,6 +1368,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `clip compare --look a:scene=2024` (#482) keeps `scene` and `camera` values as text, so a scene named `2024` or a
+  camera named `001` is found; `null` still drops the key. The `clip.compare` description now names `ClipRenderFailed`
+  for a variant whose render fails (it said InvalidOperation) and says variant renders stay cached only until `gc`.
+- The Blender playbook quotes `doctor`'s real lines for a Blender that is missing or out of range.
 - The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
   "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
   switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.

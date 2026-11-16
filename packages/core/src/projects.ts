@@ -68,10 +68,10 @@ export interface ProjectRegistryOptions {
    */
   writeConfig?: (root: string, content: string, author: string | undefined) => Promise<unknown>;
   /**
-   * Takes over {@link ProjectRegistry.writeFile} of `style.json` once its content validated, so a changed value is
-   * journaled (ADR 0036). Default: plain write.
+   * Takes over {@link ProjectRegistry.writeFile} of `style.json` and `requirements.json` once its content validated,
+   * so a changed value is journaled (ADR 0036). Default: plain write.
    */
-  writeStyle?: (root: string, content: string, author: string | undefined) => Promise<unknown>;
+  writeKeyed?: (root: string, doc: "style" | "requirements", content: string, author: string | undefined) => Promise<unknown>;
 }
 
 /** Projects the daemon holds open, keyed by absolute root directory. */
@@ -82,13 +82,13 @@ export class ProjectRegistry {
   readonly #onOpen: (dir: string) => void;
   readonly #writeTimeline: ProjectRegistryOptions["writeTimeline"];
   readonly #writeConfig: ProjectRegistryOptions["writeConfig"];
-  readonly #writeStyle: ProjectRegistryOptions["writeStyle"];
+  readonly #writeKeyed: ProjectRegistryOptions["writeKeyed"];
 
   constructor(options: ProjectRegistryOptions = {}) {
     this.#onOpen = options.onOpen ?? (() => {});
     this.#writeTimeline = options.writeTimeline;
     this.#writeConfig = options.writeConfig;
-    this.#writeStyle = options.writeStyle;
+    this.#writeKeyed = options.writeKeyed;
   }
 
   /**
@@ -306,8 +306,9 @@ export class ProjectRegistry {
       await this.openEnclosing(root);
       return { project: root, path: rel };
     }
-    if (rel === STYLE_FILE && this.#writeStyle) {
-      await this.#writeStyle(root, content, author);
+    const keyed = rel === STYLE_FILE ? "style" : rel === REQUIREMENTS_FILE ? "requirements" : null;
+    if (keyed && this.#writeKeyed) {
+      await this.#writeKeyed(root, keyed, content, author);
       return { project: root, path: rel };
     }
     await writeTextAtomic(realTarget, content);
