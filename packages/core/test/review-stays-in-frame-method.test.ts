@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type DaemonConnection, connectToDaemon } from "@frameshell/protocol";
+import { type DaemonConnection, type MethodResult, connectToDaemon } from "@frameshell/protocol";
 import { type Daemon, startDaemon, writeFaceScan } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
@@ -54,6 +54,36 @@ describe("review: staysInFrame of footage", () => {
 
       const wide = await conn.request("review", { cwd: project, sheets: ["metrics"] });
       expect(wide.metrics!.requirements!.checks.find((candidate) => candidate.id === "clip.staysInFrame")).toMatchObject({ clip, status: "pass", format: "16x9" });
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("review: requirements of a review-mode proposal", () => {
+  it(
+    "judges the proposal's requirements.json with view: proposal and the file's with view: current",
+    async () => {
+      const ui = await connectToDaemon(daemon.socketPath, { client: "desktop/test", agent: null });
+      const agent = await connectToDaemon(daemon.socketPath, { client: "cli/test", agent: null, session: "term-1" });
+      await ui.request("review.set", { cwd: project, enabled: true });
+      try {
+        const begun = await agent.request("tx.begin", { label: "Shorter" });
+        await agent.request("review.require", { cwd: project, path: "film.maxSeconds", value: 0.5 });
+        await agent.request("tx.commit", {});
+        const maxSeconds = (result: MethodResult<"review">) => result.metrics!.requirements!.checks.find((candidate) => candidate.id === "film.maxSeconds");
+
+        const proposed = await agent.request("review", { cwd: project, sheets: ["metrics"], view: "proposal" });
+        expect(maxSeconds(proposed)).toMatchObject({ status: "fail", expected: 0.5 });
+        const current = await agent.request("review", { cwd: project, sheets: ["metrics"], view: "current" });
+        expect(maxSeconds(current)).toBeUndefined();
+        expect(current.metrics!.requirements!.checks.find((candidate) => candidate.id === "clip.staysInFrame")).toBeDefined();
+
+        await ui.request("proposal.reject", { cwd: project, tx: begun.tx });
+      } finally {
+        await ui.request("review.set", { cwd: project, enabled: false });
+        ui.close();
+        agent.close();
+      }
     },
     MEDIA_TIMEOUT,
   );

@@ -92,7 +92,9 @@ export const ClipRequirementSchema = z.strictObject({
     .optional()
     .describe(
       "What the clip draws never leaves the film's frame while it plays, in the format reviewed (after its cover crop; inside the letterbox bars when the timeline has some): " +
-        "a generated clip's alpha (a render with an alpha plane), a footage clip's faces (a cached `people scan`). `true`, or `{ margin }`.",
+        "a generated clip's alpha (a render with an alpha plane), a footage clip's faces (a cached `people scan`). `true`, or `{ margin }`. " +
+        "A generated clip's alpha is read 160 px wide at up to 12 frames (4 a second): an element within about 1/160 of the width of an edge counts as touching it, " +
+        "and an exit shorter than the gap between those frames can pass unseen.",
     ),
 });
 
@@ -105,6 +107,19 @@ export function staysInFrameMargin(value: ClipRequirement["staysInFrame"]): numb
 /** One entry of `clips` in `requirements.json`. */
 export type ClipRequirement = z.output<typeof ClipRequirementSchema>;
 
+/**
+ * `clips` with one entry per clip, in the order the clips first appear: a clip's repeated entries merged, later
+ * fields winning. How `review` judges them and how the `requirements` config document keys them.
+ */
+export function clipRequirements(clips: readonly ClipRequirement[]): ClipRequirement[] {
+  const byClip = new Map<string, ClipRequirement>();
+  for (const entry of clips) {
+    const fields = Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
+    byClip.set(entry.clip, { ...byClip.get(entry.clip), ...fields } as ClipRequirement);
+  }
+  return [...byClip.values()];
+}
+
 /** A craft warning the person accepts, with why. A waived warning is still reported (`metrics.waived`), never dropped. */
 export const WaiverSchema = z.strictObject({
   check: CraftCheckSchema.describe("The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."),
@@ -115,8 +130,8 @@ export const WaiverSchema = z.strictObject({
 /**
  * Zod model of `requirements.json` (#457): the expectations of the film that `review` checks and the craft
  * warnings that are failures here or accepted. Craft warnings are warnings unless `fail` names their check; a
- * failing one is lifted by a waiver. An assertion that does not hold is a failure. Hand- or agent-written with
- * `file.write`; `review` never changes it.
+ * failing one is lifted by a waiver. An assertion that does not hold is a failure. Written through the config journal
+ * (ADR 0036): `review.require`, `review.waive`, a journaled `file.write` or a hand edit; `review` never changes it.
  */
 export const RequirementsFileSchema = z.strictObject({
   $schema: z.string().optional(),

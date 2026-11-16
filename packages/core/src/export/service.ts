@@ -591,7 +591,8 @@ export class ExportService {
       ...resolved,
       project,
       layout: { cover: format?.cover ?? false, captionScale: format?.captionScale ?? 1 },
-      format: format?.id ?? projectFormat ?? primaryFormatId(project),
+      // An unknown `projectFormat` is laid out as the primary, so it is named as the primary.
+      format: (format ?? (await this.#formatOf(root, undefined, loaded.formats)))?.id ?? primaryFormatId(project),
     };
   }
 

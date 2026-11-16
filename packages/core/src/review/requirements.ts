@@ -1,5 +1,5 @@
 import type { ReviewMetrics, ReviewRequirementCheck, ReviewRequirements, ReviewSpan, ReviewWaivedWarning } from "@frameshell/protocol";
-import { REQUIREMENTS_FILE, type RequirementsFile, type ResolvedSubtitleTrack, type Timeline, staysInFrameMargin } from "@frameshell/schema";
+import { REQUIREMENTS_FILE, type RequirementsFile, type ResolvedSubtitleTrack, type Timeline, clipRequirements, staysInFrameMargin } from "@frameshell/schema";
 import { TimeRefError, resolveTimeRef } from "../timeline/time-ref.js";
 import { BLANK_SPREAD, STILL_ENERGY, stillSpans } from "./metrics.js";
 import type { BoxSpan } from "./placement.js";
@@ -209,7 +209,7 @@ function clipChecks({ requirements, series, filmSeconds, range, timeline, clips,
   const found: ReviewRequirementCheck[] = [];
   const byId = new Map((clips ?? []).map((clip) => [clip.id, clip]));
   const still = stillSpans(series);
-  for (const { clip: id, appearsBy, before, keepsMoving, staysInFrame } of requirements.clips) {
+  for (const { clip: id, appearsBy, before, keepsMoving, staysInFrame } of clipRequirements(requirements.clips)) {
     const asked: [string, string | number][] = [];
     if (appearsBy !== undefined) asked.push(["clip.appearsBy", appearsBy]);
     if (before !== undefined) asked.push(["clip.before", before]);

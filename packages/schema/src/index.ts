@@ -240,6 +240,7 @@ export {
   type ClipRequirement,
   type CraftCheck,
   type RequirementsFile,
+  clipRequirements,
   parseRequirementsFile,
   staysInFrameMargin,
 } from "./requirements.js";

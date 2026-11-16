@@ -40,7 +40,7 @@ export const DELIVERY_FPS = 0.01;
 
 /** Alpha above this (0 to 255) is picture, for the box of a generated clip. */
 export const GRAPHIC_ALPHA = 24;
-/** Width the alpha of a generated clip is read at, px. */
+/** Width the alpha of a generated clip is read at, px. With the two below, quoted in `staysInFrame` (schema `requirements.ts`, skill `critique.md`). */
 export const GRAPHIC_WIDTH = 160;
 /** Most frames of a generated clip measured. */
 export const GRAPHIC_SAMPLES = 12;

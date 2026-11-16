@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import { CLIP_REQUIREMENT_FIELDS, REQUIREMENTS_FILE, REQUIREMENTS_SCHEMA_URL, REQUIREMENT_PATHS, type RequirementsFile, SCHEMA_VERSION, parseRequirementsFile } from "@frameshell/schema";
+import { CLIP_REQUIREMENT_FIELDS, REQUIREMENTS_FILE, REQUIREMENTS_SCHEMA_URL, REQUIREMENT_PATHS, type RequirementsFile, SCHEMA_VERSION, clipRequirements, parseRequirementsFile } from "@frameshell/schema";
 import type { ConfigDocument } from "../config/journal.js";
 import { type ConfigState, PLAIN_RULES } from "../config/patch.js";
 import { readJsonIfExists, writeTextAtomic } from "../fs-util.js";
@@ -43,7 +43,7 @@ export function requirementsState(file: RequirementsFile | null): ConfigState {
     else if (path === "captions.minSize") put(path, file.captions?.minSize);
     else put(path, file.film[path.slice("film.".length) as keyof RequirementsFile["film"]]);
   }
-  for (const entry of file.clips) {
+  for (const entry of clipRequirements(file.clips)) {
     for (const field of CLIP_REQUIREMENT_FIELDS) put(clipRequirementKey(entry.clip, field), entry[field]);
   }
   for (const waiver of file.waivers) {
