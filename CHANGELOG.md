@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 156): `analyze`
+- Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 157): `analyze`
   returns `suggestions` (also in `analysis.json`), values for `style.json` read from the film, each with `path`,
   `value`, `why`, `from` (the result fields) and its own label: `colors.bg` (the palette's largest colour, a quarter of
   the picture or more), `colors.ink` (most contrast against it, 4.5:1 or more), `colors.accent` (most saturated colour
@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `frameshell style apply --from-analysis <analysis> [--only <path,...>]`: the picked suggestions merge value by value
   as one journaled change that `revert` undoes, held by review mode. `labels` gains `suggestions` (DECISION); `analyze`
   prints them. The analysis name pattern is one constant (`ANALYSIS_NAME_PATTERN`).
+- `clip compare` and the Blender playbook, slice 3 of #482 (ADR 0035, epic #451): `frameshell clip compare <clip> --look
+  [name:]key=value[,...] [--at s] [--out file.png] [--tile-width px] [--format id]` (daemon method `clip.compare`, MCP
+  `clip_compare`) renders one frame of a generated clip under up to 11 variants next to the clip as it is, as one
+  labelled PNG, through the export `frame` path and the sheet writer `grade.compare` and `review` share. A variant is
+  props merged over the clip's own and/or another `source`, so one `.blend` with a scene per lighting setup is compared
+  with `--look dusk:scene=Dusk`; each tile is drawn from its own render (a Blender clip: its draft, never a final) and
+  the command prints the `clip set --props` that keeps it. Changes nothing. The `blender` skill grows from a stub into a
+  playbook: which route (Blender, three.js, imported media), preparing a `.blend` (fps, length, camera, alpha,
+  files inside the project, no add-ons or scripts), a look recipe, looks compared on one frame, draft to final with the
+  confirmation, and a failure-and-fix table of the plugin's messages. Protocol 156.
 - `logo-3d` template, slice 3 of #473 (ADR 0042, epic #451): `frameshell hyperframes new mark --template logo-3d
   [--component <svg of brand show>]` extrudes an SVG logo with three.js `SVGLoader` and `ExtrudeGeometry` in the
   `product-shot` studio, revealed by a rise (depth grows out of the flat logo), a swing or a drop, with a glint, a slow

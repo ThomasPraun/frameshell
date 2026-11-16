@@ -77,7 +77,7 @@ Reference analysis (#471) feeds the style (this ADR's context) without writing i
   - `sound.musicUnderVoice` = `audio.speech.overMusic.median` rounded to the dB, when the voice sits over the music (RMS against RMS, the scale `musicUnderVoice` means).
   - Not suggested: the integrated loudness (decision 5: it stays `export.loudness`), `sound.sfxUnderVoice` (`audio.effects.overMusic` is a peak over the bed, not a level under the voice), tempo (no style value) and caption tokens from `ink` (it measures shares of an 8 x 6 grid, not the size or place of a letter).
 - **One apply path: `style.apply` with `analysis`.** `style.apply { analysis, paths? }` (CLI `style apply --from-analysis <analysis> [--only <path,...>]`) reads the suggestions from `.frameshell/analysis/<analysis>/analysis.json` and merges the picked ones value by value through the `style` config document, as one `style.apply` operation (args `analysis`, `paths`) in the caller's transaction: journaled, revertible, held by review mode like any style change. `from` is not recorded (an analysis is no user style). Chosen over `analyze --apply-style`: `analyze` is a slow job that only reads and writes its own folder, and `style apply` is already the command that merges a set of values and lists each change; the agent shows the suggestions to the person between the two steps. `name` xor `analysis` (InvalidParams otherwise; `replace` only with `name`, `paths` only with `analysis`); InvalidOperation reasons `not found` (with the analyses there are), `no suggestions` (an older run, or an `analyze.diff` folder), `not suggested`, and `value` when an edited `analysis.json` no longer fits the schema.
-- Wire: `PROTOCOL_VERSION` 156.
+- Wire: `PROTOCOL_VERSION` 157.
 
 ## Consequences
 
