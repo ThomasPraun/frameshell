@@ -57,8 +57,8 @@ describe("matte.prepare", () => {
       const progress: string[] = [];
       const result = await conn.request("matte.prepare", { cwd: project, asset: "assets/mover.mp4" }, { onProgress: (update) => progress.push(update.stage ?? "") });
       expect(methods["matte.prepare"].result.parse(result)).toEqual(result);
-      expect(result).toMatchObject({ asset: "assets/mover.mp4", model: "stand-in", size: { width: 320, height: 180 }, fps: 30, frames: 60, cached: false });
-      expect(result.matte).toMatch(/^\.frameshell\/cache\/mattes\/[0-9a-f]{20}-m1-[0-9a-f]{8}\.mp4$/);
+      expect(result).toMatchObject({ asset: "assets/mover.mp4", model: "stand-in", size: { width: 320, height: 180 }, fps: 30, frames: 60, full: null, cached: false });
+      expect(result.matte).toMatch(/^\.frameshell\/cache\/mattes\/[0-9a-f]{20}-m2-[0-9a-f]{8}\.mp4$/);
       expect(existsSync(join(project, ...result.matte.split("/")))).toBe(true);
       expect(existsSync(join(project, ...result.matte.replace(/\.mp4$/, ".json").split("/")))).toBe(true);
       expect(progress).toContain("matte");

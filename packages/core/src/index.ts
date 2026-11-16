@@ -355,7 +355,7 @@ export {
   classifyAudioFx,
   sweepCommands,
 } from "./media/audio-fx.js";
-export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, sidecarArgs } from "./media/recipe.js";
+export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, proxyFrameGrid, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
 export { type ClipKeyInput, clipCacheKey } from "./clips/cache-key.js";
@@ -474,7 +474,9 @@ export {
   CONTRAST_GAIN,
   GUIDED_EPS,
   GUIDED_RADIUS,
+  GUIDED_REFERENCE_SHORT_SIDE,
   GUIDED_SUBSAMPLE,
+  type GuidedOptions,
   type PlaneSize,
   TEMPORAL_TAU_S,
   boxMean,
@@ -482,13 +484,29 @@ export {
   emaStep,
   emaWeight,
   guidedFilter,
+  guidedFilterRgb,
+  guidedScale,
   refineFrame,
   resizeBilinear,
   smoothForwardBackward,
 } from "./matte/refine.js";
 export { MATTE_MODEL_PIN, type MatteModelSpec, SELFIE, coarseAlpha, modelInput } from "./matte/models.js";
-export { MATTES_DIR, MATTE_VERSION, type MatteInfo, classifyMatte, matteKey, mattePaths, readMatteInfo, writeMatteInfo } from "./matte/cache.js";
 export {
+  MATTES_DIR,
+  MATTE_VERSION,
+  type MatteInfo,
+  type MatteVariant,
+  classifyMatte,
+  matteKey,
+  mattePaths,
+  readMatteInfo,
+  writeMatteInfo,
+} from "./matte/cache.js";
+export {
+  FULL_MATTE_ABOVE_SHORT_SIDE,
+  FULL_MATTE_MAX_SHORT_SIDE,
+  type FullMatteRequest,
+  fullMatteSize,
   type MatteFiles,
   type MatteInfer,
   type MatteVideoRequest,
@@ -499,7 +517,7 @@ export {
   matteInWorker,
   matteVideo,
 } from "./matte/video.js";
-export { type MatteJobDeps, type MatteTarget, computeMatte, formatEta } from "./matte/job.js";
+export { type MatteJobDeps, type MatteTarget, type MattesMade, computeMatte, formatEta } from "./matte/job.js";
 export { standInMatte } from "./matte/stand-in.js";
 export { readRawFrames } from "./media/raw-frames.js";
 export { type PreparedPhoto, SEGMENT_MODEL_PIN, SegmentService, type SegmentServiceOptions, readPhotoRgb } from "./segment/service.js";

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
+  protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
+  guided filter), so an edge between two colours of the same brightness is found (error at a same-luma disc's edge 0.045
+  against 0.145 with the gray guide). A source whose short side is above 1080 px also gets `<key>.full.mp4`, refined on
+  the asset's own frames on the proxy's frame grid at its size (short side at most 2160), which `render`, `frame` and
+  `cover` draw through; the preview keeps the proxy-size matte. `matte.prepare` returns it as `full` and
+  `frameshell matte` prints it. `MATTE_VERSION` 2: older mattes are made again. Measured on an Apple M3 under heavy load:
+  refinement 47 ms per 540p frame (gray guide 21 ms), the full-size pass 355 ms per 4K frame, about 2 minutes per minute
+  of video for the matte and about 11 more for a 4K source's full-size one.
+
 - More sound checks in `review`, slice RA1 of #457 (epic #451; protocol 158; `metrics.sound.music`, `edges`, `harsh`,
   craft checks `masking`, `edge-click`, `harsh`). On a timeline, still never mixed: `music` is the voice against the music
   alone per 0.5 s window where the voice speaks, judged by the style guide's `sound.musicUnderVoice` (`style.json`, 12 dB
@@ -1182,6 +1192,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Raw frame reads (`readRawFrames`: subject mattes, face detection, people scans, `review`, `analyze`) copy each pipe
+  chunk once into its frame instead of joining chunks as they come, which copied a 4K RGB frame hundreds of times.
 - The `blender` clip's `quality` prop is gone (owner decision on #501): props are `scene` and `camera`, and a `quality`
   prop is refused with how to choose draft or final at export.
 

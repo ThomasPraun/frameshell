@@ -97,11 +97,19 @@ export function alphaProxyArgs(input: string, output: string, fps: number, decod
 /** Output colour tags of every proxy: BT.709, limited range. */
 const PROXY_COLOR_TAGS = ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"];
 
-/** CFR at `fps` from source time 0, short side capped, converted to BT.709 limited `pixFmt`. */
+/**
+ * The proxy's frame grid as a video filter: CFR at `fps` from source time 0. Anything else read through it (the
+ * full-size subject matte) gets frame N = proxy frame N.
+ */
+export function proxyFrameGrid(fps: number): string {
+  return `fps=${fpsRational(fps)}:start_time=0`;
+}
+
+/** {@link proxyFrameGrid}, short side capped, converted to BT.709 limited `pixFmt`. */
 function proxyVideoFilter(fps: number, pixFmt: "yuv420p" | "yuva420p"): string {
   const shortSide = `min(iw\\,ih)`;
   const scale = `scale=w='trunc(iw*min(1\\,${PROXY_SHORT_SIDE}/${shortSide})/2)*2':h='trunc(ih*min(1\\,${PROXY_SHORT_SIDE}/${shortSide})/2)*2'`;
-  return `fps=${fpsRational(fps)}:start_time=0,${scale}:out_color_matrix=bt709:out_range=tv,format=${pixFmt}`;
+  return `${proxyFrameGrid(fps)},${scale}:out_color_matrix=bt709:out_range=tv,format=${pixFmt}`;
 }
 
 /** Raw s16le PCM sidecar of the first audio stream, same clock as the proxy. */

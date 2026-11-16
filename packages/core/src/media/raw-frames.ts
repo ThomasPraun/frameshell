@@ -39,14 +39,24 @@ export async function* readRawFrames(
     child.once("close", resolve);
   });
   exited.catch(() => undefined);
-  let pending: Buffer = Buffer.alloc(0);
+  // Pipe chunks (64 KB) copied once into the frame being filled: joining them as they come copies a 4K frame
+  // (25 MB) hundreds of times over.
+  let frame = new Uint8Array(frameBytes);
+  let filled = 0;
   let finished = false;
   try {
     for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
-      pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
-      let at = 0;
-      for (; at + frameBytes <= pending.length; at += frameBytes) yield Uint8Array.from(pending.subarray(at, at + frameBytes));
-      pending = pending.subarray(at);
+      for (let at = 0; at < chunk.length; ) {
+        const take = Math.min(frameBytes - filled, chunk.length - at);
+        frame.set(chunk.subarray(at, at + take), filled);
+        filled += take;
+        at += take;
+        if (filled === frameBytes) {
+          yield frame;
+          frame = new Uint8Array(frameBytes);
+          filled = 0;
+        }
+      }
     }
     const code = await exited;
     finished = true;

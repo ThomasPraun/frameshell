@@ -150,7 +150,7 @@ ${REVIEW_USAGE}${ANALYZE_USAGE}  inspect --at <s> (--point <x,y> | --px <X,Y>) [
   proposal diff [--tx id]      Clips the open proposal adds, removes, moves or changes, per timeline
 ${JOB_USAGE}${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${SOUND_USAGE}${BEATS_USAGE}${STYLE_USAGE}${BRAND_USAGE}  matte <asset>                Compute the subject matte of a video (who is in front, frame by frame), locally,
                                and print its path: a grayscale video in .frameshell/cache/mattes/, white = the
-                               person. Once per file content; estimated 1.5 min per minute of video. First run
+                               person. Once per file content; estimated 2 min per minute of video. First run
                                downloads 0.5 MB (plus ONNX Runtime, 33 MB, if face detection never ran)
   skill update [--force]       Update the project's copy of the agent skill (.claude/skills/frameshell) to this
                                version; an edited copy needs --force (files you added stay)
@@ -893,7 +893,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const result = await conn.request("matte.prepare", { cwd, asset: inv.asset }, flags.json ? {} : { onProgress: progressPrinter(io) });
       if (flags.json) return json(result);
       const how = result.cached ? "cached" : `made in ${result.seconds} s`;
-      return `${result.matte}\n  ${result.asset}: ${result.frames} frames at ${result.fps} fps, ${result.size.width}x${result.size.height}, ${result.model}, ${how}\n`;
+      const full = result.full ? `  full size for export: ${result.full.matte}, ${result.full.size.width}x${result.full.size.height}\n` : "";
+      return `${result.matte}\n  ${result.asset}: ${result.frames} frames at ${result.fps} fps, ${result.size.width}x${result.size.height}, ${result.model}, ${how}\n${full}`;
     }
     case "script.outline": {
       const result = await conn.request("script.outline", { cwd, file: inv.file });
