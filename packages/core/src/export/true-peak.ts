@@ -21,8 +21,9 @@ export interface CeilingClass {
  * - opus 64-192 kbps: up to +0.7 dB; 48 kbps: up to +3.7 dB.
  * - aac 160-320 kbps: up to +1.2 dB (not monotonic in bitrate: 192 kbps +0.9, 256 kbps +0.1); 96 and 128 kbps: up to
  *   +3.8 and +3.0 dB.
- * Each ceiling is -1 dBTP minus the worst overshoot of its class minus 0.1 dB (the meter reads to 0.1). Full-scale bursts are the worst case: speech and music overshoot far less, and what the ceiling costs in
- * loudness is added back by the re-measure (see {@link settleTrim}). A burst above 5 kHz can still exceed a ceiling.
+ * Each ceiling is -1 dBTP minus the worst overshoot of its class minus 0.1 dB (the meter reads to 0.1). Full-scale
+ * bursts are the worst case: speech and music overshoot far less, and what the ceiling costs in loudness is added
+ * back by the re-measure (see {@link settleTrim}). A burst above 5 kHz can still exceed a ceiling.
  */
 export const TRUE_PEAK_CEILINGS: Record<NonNullable<ExportPreset["audio"]>["codec"], readonly CeilingClass[]> = {
   pcm: [{ minKbps: 0, ceiling: -1.2 }],
@@ -46,35 +47,45 @@ export function truePeakCeiling(codec: keyof typeof TRUE_PEAK_CEILINGS, bitrateK
 export const LOUDNESS_TOLERANCE_LU = 0.15;
 /** Measurements the loop makes at most; the best one wins. */
 export const LOUDNESS_PASSES = 3;
-/** Largest gain, dB, the loop adds before the limiter: past it the limiter eats the gain and loudness cannot follow. */
+/** Largest gain, dB, the loop adds before the limiter (or takes away): past it the limiter eats the gain. */
 export const MAX_TRIM_DB = 3;
+/** Loudness gained per dB of trim below which a measured slope is noise (a limiter that eats everything): assume 1. */
+const MIN_SLOPE = 0.1;
 
 /**
- * Whether the limiter can touch the mix: loudnorm's measured true peak plus the gain it applies (`target_offset`)
- * reaches `ceiling`. When not, the loudness is what loudnorm made it and nothing needs re-measuring.
+ * Whether the limiter can touch the mix: the true peak after `loudnorm` reaches `ceiling`. The linear pass 2 applies
+ * `target - input_i` dB (not `target_offset`, a fine-tune it ignores), so the peak lands at
+ * `input_tp + (target - input_i)`. A peak above `loudnorm`'s own -1 dBTP makes it fall back to dynamic mode and
+ * limit by itself; every ceiling is below -1, so that case engages too. When not, the loudness is what `loudnorm`
+ * made it and nothing needs re-measuring.
  */
-export function limiterEngages(measured: { input_tp: string; target_offset: string }, ceiling: number): boolean {
-  const predicted = Number(measured.input_tp) + Number(measured.target_offset);
+export function limiterEngages(measured: { input_i: string; input_tp: string }, target: number, ceiling: number): boolean {
+  const predicted = Number(measured.input_tp) + (target - Number(measured.input_i));
   return !Number.isFinite(predicted) || predicted > ceiling;
 }
 
 /**
  * Find the gain, dB, to add before the limiter so the limited mix lands within {@link LOUDNESS_TOLERANCE_LU} of
  * `target` LUFS. `measure(trim)` renders the limited mix with that trim and returns its integrated loudness (null for
- * silence). Each pass adds the remaining error to the trim, at most {@link LOUDNESS_PASSES} measurements and
- * {@link MAX_TRIM_DB}; returns the trim of the closest measurement.
+ * silence). The first pass adds the remaining error to the trim; once two measurements show how much of each dB the
+ * limiter lets through (a limiter that eats most of a gain would otherwise need more passes than there are), the next
+ * trim divides the error by that slope. At most {@link LOUDNESS_PASSES} measurements and {@link MAX_TRIM_DB} in either
+ * direction; returns the trim of the closest measurement.
  */
 export async function settleTrim(target: number, measure: (trimDb: number) => Promise<number | null>): Promise<number> {
   let trim = 0;
   let best = { trim: 0, error: Number.POSITIVE_INFINITY };
+  let previous: { trim: number; loudness: number } | null = null;
   for (let pass = 0; pass < LOUDNESS_PASSES; pass++) {
     const loudness = await measure(trim);
     if (loudness === null) return best.trim;
     const error = target - loudness;
     if (Math.abs(error) < Math.abs(best.error)) best = { trim, error };
     if (Math.abs(error) <= LOUDNESS_TOLERANCE_LU) break;
-    const next = Math.min(MAX_TRIM_DB, trim + error);
+    const slope = previous && trim !== previous.trim ? (loudness - previous.loudness) / (trim - previous.trim) : 1;
+    const next = Math.max(-MAX_TRIM_DB, Math.min(MAX_TRIM_DB, trim + error / (slope >= MIN_SLOPE ? slope : 1)));
     if (next === trim) break;
+    previous = { trim, loudness };
     trim = next;
   }
   return best.trim;

@@ -24,14 +24,33 @@ describe("truePeakCeiling", () => {
 });
 
 describe("limiterEngages", () => {
-  it("compares the predicted peak (measured true peak plus the loudnorm gain) with the ceiling", () => {
-    expect(limiterEngages({ input_tp: "-6.0", target_offset: "3.0" }, -2.3)).toBe(false);
-    expect(limiterEngages({ input_tp: "-6.0", target_offset: "4.0" }, -2.3)).toBe(true);
-    expect(limiterEngages({ input_tp: "garbage", target_offset: "1" }, -2.3)).toBe(true);
+  // loudnorm's linear pass applies target - input_i (not target_offset), so the peak lands at input_tp + that.
+  it("compares the predicted peak (measured true peak plus the gain to the target) with the ceiling", () => {
+    expect(limiterEngages({ input_i: "-23.0", input_tp: "-12.0" }, -17, -2.3)).toBe(false);
+    expect(limiterEngages({ input_i: "-23.0", input_tp: "-8.0" }, -17, -2.3)).toBe(true);
+    expect(limiterEngages({ input_i: "garbage", input_tp: "-8.0" }, -17, -2.3)).toBe(true);
+  });
+
+  it("engages on a quiet mix whose target_offset would hide the peak (measured with ffmpeg 9.0.2)", () => {
+    // input_tp -8.72, input_i -28.39, target_offset 3.10: the gain to -17 is 11.39 dB, so the peak lands at +2.67 dBTP.
+    const measured = { input_i: "-28.39", input_tp: "-8.72" };
+    expect(limiterEngages(measured, -17, -2.3)).toBe(true);
+    expect(limiterEngages(measured, -17, -1.2)).toBe(true);
+  });
+
+  it("treats a peak above loudnorm's own -1 dBTP (dynamic mode) as engaging for every ceiling", () => {
+    for (const classes of Object.values(TRUE_PEAK_CEILINGS)) {
+      for (const { ceiling } of classes) expect(limiterEngages({ input_i: "-20.0", input_tp: "-3.0" }, -17, ceiling)).toBe(true);
+    }
   });
 });
 
 describe("settleTrim", () => {
+  it("limits the trim to MAX_TRIM_DB in both directions", async () => {
+    expect(await settleTrim(-17, async (trimDb) => -30 + trimDb * 0.1)).toBeLessThanOrEqual(MAX_TRIM_DB);
+    expect(await settleTrim(-17, async (trimDb) => -5 + trimDb * 0.1)).toBeGreaterThanOrEqual(-MAX_TRIM_DB);
+  });
+
   it("measures once and adds nothing when the loudness is already within the tolerance", async () => {
     let calls = 0;
     const trim = await settleTrim(-17, async () => {
@@ -58,6 +77,17 @@ describe("settleTrim", () => {
     const trim = await settleTrim(-17, measure);
     expect(calls).toBeLessThanOrEqual(LOUDNESS_PASSES);
     expect(Math.abs(-17 - (-17.6 + 0.7 * trim))).toBeLessThanOrEqual(LOUDNESS_TOLERANCE_LU);
+  });
+
+  it("uses the measured slope once it has two measurements, so a limiter that eats most of each dB still settles", async () => {
+    let calls = 0;
+    const measure = async (trim: number) => {
+      calls++;
+      return -18 + 0.4 * trim;
+    };
+    const trim = await settleTrim(-17, measure);
+    expect(calls).toBeLessThanOrEqual(LOUDNESS_PASSES);
+    expect(Math.abs(-17 - (-18 + 0.4 * trim))).toBeLessThanOrEqual(LOUDNESS_TOLERANCE_LU);
   });
 
   it("stops at the trim cap when the loudness cannot be reached", async () => {
