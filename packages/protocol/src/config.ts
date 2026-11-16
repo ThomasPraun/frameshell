@@ -2,11 +2,11 @@ import { z } from "zod";
 
 /**
  * Project-config document a config operation changes (ADR 0036). `project`: `formats` of `frameshell.json`;
- * `style`: `style.json` (ADR 0028).
+ * `style`: `style.json` (ADR 0028); `requirements`: `requirements.json` (#457).
  */
 export const ConfigDocSchema = z
-  .enum(["project", "style"])
-  .describe("Config document changed: `project` = `formats` of `frameshell.json`, `style` = `style.json`.");
+  .enum(["project", "style", "requirements"])
+  .describe("Config document changed: `project` = `formats` of `frameshell.json`, `style` = `style.json`, `requirements` = `requirements.json`.");
 
 /** See {@link ConfigDocSchema}. */
 export type ConfigDoc = z.output<typeof ConfigDocSchema>;
@@ -14,10 +14,11 @@ export type ConfigDoc = z.output<typeof ConfigDocSchema>;
 /**
  * One key a config operation changed (ADR 0036). Keys: `format:<id>`, value `{ id, width, height, index }`
  * (`index` = position, 1 = right after the primary, which is never a key); `style:<path>` (`style:colors.accent`),
- * value the one `style.json` holds there, and `style:from`. `null`: absent.
+ * value the one `style.json` holds there, and `style:from`; `requirements:<path>` (`requirements:film.maxSeconds`,
+ * `requirements:clip:<id>.staysInFrame`, `requirements:waiver:<check>[:<clip>]` with the reason). `null`: absent.
  */
 export const ConfigPatchEntrySchema = z.object({
-  key: z.string().describe("Entity key, e.g. `format:9x16` or `style:colors.accent`."),
+  key: z.string().describe("Entity key, e.g. `format:9x16`, `style:colors.accent` or `requirements:film.maxSeconds`."),
   before: z.unknown().describe("Value before the operation; null when the key was absent."),
   after: z.unknown().describe("Value after the operation; null when it was removed."),
 });

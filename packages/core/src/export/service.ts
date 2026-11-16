@@ -27,6 +27,7 @@ import {
   type Timeline,
   type Transcript,
   formatOf,
+  primaryFormatId,
   formatTimeline,
   subjectOf,
   programGroup,
@@ -582,13 +583,16 @@ export class ExportService {
    * flattened and the format's overrides applied, with the project's resolution (the unit of clip offsets) and the format's layout. What
    * `review` measures graphics and faces on. Unknown format ids count as the primary, as in {@link ExportService.resolvedSubtitles}.
    */
-  async resolvedTimeline(root: string, loaded: LoadedTimeline, projectFormat?: string): Promise<{ timeline: Timeline; fps: number; project: Size; layout: FormatLayout }> {
+  async resolvedTimeline(root: string, loaded: LoadedTimeline, projectFormat?: string): Promise<{ timeline: Timeline; fps: number; project: Size; layout: FormatLayout; format: string }> {
     const format = (await this.#formatOf(root, projectFormat, loaded.formats)) ?? undefined;
     const resolved = await this.#resolved(root, loaded.timeline.id, loaded, format);
+    const project = (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION;
     return {
       ...resolved,
-      project: (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION,
+      project,
       layout: { cover: format?.cover ?? false, captionScale: format?.captionScale ?? 1 },
+      // An unknown `projectFormat` is laid out as the primary, so it is named as the primary.
+      format: (format ?? (await this.#formatOf(root, undefined, loaded.formats)))?.id ?? primaryFormatId(project),
     };
   }
 

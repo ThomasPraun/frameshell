@@ -20,7 +20,17 @@ import {
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type FormatEntry, type PlatformId, letterboxPicture, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type StyleSource, type Timeline } from "@frameshell/schema";
+import {
+  type FormatEntry,
+  type PlatformId,
+  letterboxPicture,
+  type RequirementsFile,
+  type ResolvedSubtitleTrack,
+  SAFE_ZONES,
+  type ExportPreset,
+  type StyleSource,
+  type Timeline,
+} from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
@@ -54,7 +64,7 @@ import { reviewMetrics, visualEvents } from "./metrics.js";
 import { fileBandEnvelope, fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
 import { fileSound, heardClips, timelineSound } from "./sound.js";
 import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
-import { type ClipSpan, judgeRequirements } from "./requirements.js";
+import { type ClipSpan, type FramePlacement, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt, withinPicture } from "./safe.js";
 import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
@@ -62,6 +72,13 @@ import { syncMetrics } from "./sync.js";
 
 /** A timeline flattened for a format, as `ExportService.resolvedTimeline` gives it. */
 type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
+
+/** What `ReviewService.#boxes` placed: graphics and faces, generated clips with no alpha, and whether the timeline was laid out at all. */
+interface Placed {
+  boxes: BoxSpan[];
+  opaque: string[];
+  laidOut: boolean;
+}
 
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
@@ -103,6 +120,8 @@ export interface ReviewRequest {
   preset?: string | undefined;
   /** The film is meant to repeat: a seam that holds a frame or jumps is a craft warning. */
   loop?: boolean | undefined;
+  /** The project's requirements as `view` shows them, when a proposal changes them (ADR 0036); absent: the file's. */
+  requirements?: RequirementsFile | null | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
@@ -151,6 +170,12 @@ export class ReviewService {
       /** The timeline flattened for the format, resolved once for the safe-zone boxes and the sync. */
       let flattened: Promise<Flat> | undefined;
       const flat = (): Promise<Flat> => (flattened ??= this.#options.exports.resolvedTimeline(root, loaded!, request.projectFormat));
+      const frame = { width: source.width, height: source.height };
+      /** The picture the timeline's letterbox bars leave in this format (ADR 0043); null without bars. */
+      const picture = async () => letterboxPicture(frame, await flat().then((resolved) => resolved.timeline.letterbox?.aspect, () => undefined));
+      let placing: Promise<Placed> | undefined;
+      /** Graphics and faces of the timeline, placed once for the safe zones and `staysInFrame`. */
+      const placed = (topic: string): Promise<Placed> => (placing ??= this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, topic, signal));
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
       const write = async (
@@ -182,13 +207,12 @@ export class ReviewService {
         signal?.throwIfAborted();
         if (kind === "contact") await write("contact", contactPicks(source.fps, range, critical, request.every), "contact");
         else if (kind === "safe") {
-          const frame = { width: source.width, height: source.height };
           const picks = contactPicks(source.fps, range, critical, request.every, MAX_SAFE_TILES);
           // Every track of a project takes the one caption face of its style.
           const metrics = subtitles[0] ? await captionFontMetrics(root, subtitles[0].style.font) : null;
           // The bars of the timeline's letterbox in this format (ADR 0043) cover graphics and faces; captions are drawn over them.
-          const picture = loaded ? letterboxPicture(frame, await flat().then((resolved) => resolved.timeline.letterbox?.aspect, () => undefined)) : null;
-          const boxes = withinPicture(loaded ? await this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, signal) : [], picture);
+          const bars = loaded ? await picture() : null;
+          const boxes = withinPicture(loaded ? (await placed("safe")).boxes : [], bars);
           for (const platform of safePlatforms) {
             const zone = SAFE_ZONES[platform];
             const insets = filmInsets(zone, frame);
@@ -199,7 +223,7 @@ export class ReviewService {
               shade: { top: insets.top / frame.height, bottom: insets.bottom / frame.height, left: insets.left / frame.width, right: insets.right / frame.width },
               flags: (pick) => subjectsAt(crossing, pick.frame),
             });
-            safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, ...(picture ? { picture } : {}), sheets: paths, flags: safeFlags(crossing, source.fps) });
+            safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, ...(bars ? { picture: bars } : {}), sheets: paths, flags: safeFlags(crossing, source.fps) });
           }
         } else if (kind === "phone") await write("phone", phonePicks(source.fps, range), "phone");
         else if (kind === "seam") {
@@ -244,8 +268,18 @@ export class ReviewService {
           sound,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
         });
-        const requirements = await readRequirementsFile(root);
+        const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
         if (requirements) {
+          const inFrame = loaded !== null && requirements.clips.some((clip) => clip.staysInFrame !== undefined);
+          let placement: FramePlacement | null = null;
+          if (inFrame) {
+            const found = await placed("staysInFrame");
+            if (found.laidOut) {
+              const unplaced = new Map(found.opaque.map((id) => [id, "its render has no alpha plane, so it fills the frame and what it draws has no box"] as const));
+              const bars = await picture();
+              placement = { format: (await flat()).format, picture: bars ?? { left: 0, top: 0, ...frame }, boxes: found.boxes, unplaced };
+            }
+          }
           const judged = judgeRequirements({
             requirements,
             metrics,
@@ -256,6 +290,7 @@ export class ReviewService {
             timeline: loaded?.timeline ?? null,
             clips,
             tracks: loaded ? subtitles : null,
+            placement,
           });
           metrics = judged.metrics;
           warnings.push(...judged.notes);
@@ -293,24 +328,26 @@ export class ReviewService {
 
   /**
    * Boxes of the film's pixels that graphics (generated clips with an alpha render) and faces (footage with a cached `people scan`)
-   * hold, for the safe-zone check. Says in `warnings` what could not be measured; never fails the run.
+   * hold, for the safe-zone check and `staysInFrame`. Says in `warnings`, under `topic`, what could not be measured; never fails
+   * the run. `opaque`: generated clips whose render has no alpha; `laidOut` false when the timeline could not be laid out.
    */
-  async #boxes(root: string, flat: () => Promise<Flat>, source: FilmSource, work: string, warnings: string[], signal?: AbortSignal): Promise<BoxSpan[]> {
+  async #boxes(root: string, flat: () => Promise<Flat>, source: FilmSource, work: string, warnings: string[], topic: string, signal?: AbortSignal): Promise<Placed> {
     const { generated, faceScans } = this.#options;
     const film = { width: source.width, height: source.height };
     let resolved: Flat;
     try {
       resolved = await flat();
     } catch (error) {
-      warnings.push(`safe: graphics and faces are not placed (${(error as Error).message.split("\n")[0]}).`);
-      return [];
+      warnings.push(`${topic}: graphics and faces are not placed (${(error as Error).message.split("\n")[0]}).`);
+      return { boxes: [], opaque: [], laidOut: false };
     }
     const found: BoxSpan[] = [];
+    let opaque: string[] = [];
     if (faceScans) {
       try {
         found.push(...faceBoxes(resolved.timeline, await faceScans(root), film, resolved.project, resolved.layout));
       } catch (error) {
-        warnings.push(`safe: faces are not placed (${(error as Error).message.split("\n")[0]}).`);
+        warnings.push(`${topic}: faces are not placed (${(error as Error).message.split("\n")[0]}).`);
       }
     }
     if (generated && generatedClips(resolved.timeline).length > 0) {
@@ -319,13 +356,14 @@ export class ReviewService {
         const renders = await generated(root, resolved.timeline, otherSize ? film : undefined);
         const graphics = await graphicBoxes({ ffmpeg: await this.#options.ffmpeg(root), timeline: resolved.timeline, renders, film, project: resolved.project, work, signal });
         found.push(...graphics.boxes);
-        if (graphics.opaque.length > 0) warnings.push(`safe: ${graphics.opaque.join(", ")} ${graphics.opaque.length === 1 ? "has a render" : "have renders"} with no alpha, so the box of what they draw is not known (it fills the frame).`);
+        opaque = graphics.opaque;
+        if (graphics.opaque.length > 0) warnings.push(`${topic}: ${graphics.opaque.join(", ")} ${graphics.opaque.length === 1 ? "has a render" : "have renders"} with no alpha, so the box of what they draw is not known (it fills the frame).`);
       } catch (error) {
         signal?.throwIfAborted();
-        warnings.push(`safe: graphics are not placed (${(error as Error).message.split("\n")[0]}).`);
+        warnings.push(`${topic}: graphics are not placed (${(error as Error).message.split("\n")[0]}).`);
       }
     }
-    return found;
+    return { boxes: found, opaque, laidOut: true };
   }
 
   /**

@@ -44,12 +44,14 @@ import {
   type ShotClip,
   type Timeline,
   type Transcript,
+  REQUIREMENTS_FILE,
   STYLE_FILE,
   USER_STYLES_DIR,
   createTimeline,
   cueTokens,
   findPerson,
   parseProjectConfig,
+  parseRequirementsFile,
   parseStyleFile,
   parseTimeline,
   projectFormats,
@@ -183,6 +185,8 @@ import { sectionStarts } from "./sound/music.js";
 import { planMusic, runMusicPlacement } from "./sound/music-place.js";
 import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
+import { RequirementsService } from "./review/requirements-change.js";
+import { requirementsConfigDocument, requirementsFromState, requirementsState } from "./review/requirements-doc.js";
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
@@ -425,12 +429,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (await configJournal.serial(dir, () => writeProjectFile(dir, content, author, tx))) await transactions.applied(key, tx);
       await settle(key, tx);
     },
-    // ADR 0036: a style.json write that changes a value is a config operation of the writer, like `style set`.
-    writeStyle: async (dir, content, author = "file") => {
+    // ADR 0036: a style.json or requirements.json write that changes a value is a config operation of the writer, like `style set`.
+    writeKeyed: async (dir, doc, content, author = "file") => {
       const key = transactionKey(author);
       const tx = transactions.next(key);
-      await transactions.touching(key, tx, { root: dir, doc: "style" });
-      if (await configJournal.serial(dir, () => writeStyleFile(dir, content, author, tx))) await transactions.applied(key, tx);
+      await transactions.touching(key, tx, { root: dir, doc });
+      if (await configJournal.serial(dir, () => writeKeyedFile(dir, doc, content, author, tx))) await transactions.applied(key, tx);
       await settle(key, tx);
     },
   });
@@ -440,6 +444,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     docs: {
       project: projectConfigDocument({ readConfig: readProjectConfig, writeFormats: (dir, list) => projects.writeFormats(dir, list) }),
       style: styleConfigDocument(),
+      requirements: requirementsConfigDocument(),
     },
   });
   const directConfigEdits = new DirectConfigEdits({ journal: configJournal, sink: { directConfigEdit: (dir, doc, edit) => timelines.directConfigEdit(dir, doc, edit) } });
@@ -453,17 +458,35 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     journal: configJournal,
     change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make),
   });
+  const requirements = new RequirementsService({ journal: configJournal, change: (dir, doc, who, make) => timelines.changeConfig(dir, doc, who, make) });
+  /** File and keyed state of each config document a `file.write` replaces whole: the keys of a valid file, none of an invalid one. */
+  const KEYED_FILES = {
+    style: {
+      file: STYLE_FILE,
+      state: (raw: unknown) => {
+        const parsed = parseStyleFile(raw);
+        return styleState(parsed.ok ? parsed.value : null);
+      },
+    },
+    requirements: {
+      file: REQUIREMENTS_FILE,
+      state: (raw: unknown) => {
+        const parsed = parseRequirementsFile(raw);
+        return requirementsState(parsed.ok ? parsed.value : null);
+      },
+    },
+  } as const;
   /**
-   * `file.write` of `style.json` (ADR 0036): a write that changes a value is a `file.write` config operation of
-   * `author`, journaled before the file is written as given, or held whole by review mode. A write that changes no
-   * value, or that replaces an invalid file (an edit the journal cannot key), is written at once. Caller holds the
-   * config journal of `dir`. True when it changed a value.
+   * `file.write` of `style.json` or `requirements.json` (ADR 0036): a write that changes a value is a `file.write`
+   * config operation of `author`, journaled before the file is written as given, or held whole by review mode. A write
+   * that changes no value, or that replaces an invalid file (an edit the journal cannot key), is written at once.
+   * Caller holds the config journal of `dir`. True when it changed a value.
    */
-  const writeStyleFile = async (dir: string, content: string, author: string, tx: TxRef): Promise<boolean> => {
-    const path = join(dir, STYLE_FILE);
-    const parsed = parseStyleFile(JSON.parse(content));
-    const next = styleState(parsed.ok ? parsed.value : null);
-    const current = await configJournal.read(dir, "style").catch((error: unknown) => {
+  const writeKeyedFile = async (dir: string, doc: keyof typeof KEYED_FILES, content: string, author: string, tx: TxRef): Promise<boolean> => {
+    const { file } = KEYED_FILES[doc];
+    const path = join(dir, file);
+    const next = KEYED_FILES[doc].state(JSON.parse(content));
+    const current = await configJournal.read(dir, doc).catch((error: unknown) => {
       if (error instanceof RpcError && error.code === ErrorCode.InvalidProjectFile) return null;
       throw error;
     });
@@ -473,10 +496,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     }
     await timelines.changeConfig(
       dir,
-      "style",
+      doc,
       { author, tx },
       // At once `base` is the file's state; in a proposal, only what the write changed replays on its version.
-      async (base, file) => ({ op: "file.write", args: { path: STYLE_FILE }, after: base === file ? next : applyConfigPatch(base, diffConfig(file, next), "after") }),
+      async (base, onDisk) => ({ op: "file.write", args: { path: file }, after: base === onDisk ? next : applyConfigPatch(base, diffConfig(onDisk, next), "after") }),
       { write: () => writeTextAtomic(path, content) },
     );
     return true;
@@ -1587,8 +1610,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
+      // A proposal's version of requirements.json is judged when the run looks at the proposal.
+      const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
       return reviews.run(dir, {
         timeline,
+        ...(shownRequirements?.proposal ? { requirements: requirementsFromState(shownRequirements.state) } : {}),
         ...(file ? { file: resolve(cwd, file) } : {}),
         from,
         to,
@@ -3146,6 +3172,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       if (analysis !== undefined) return changeConfig(dir, caller, "style", (author, tx) => styles.applyAnalysis(dir, analysis, paths, author, tx));
       return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name!, replace === true, author, tx));
+    },
+    "review.require": async ({ cwd, path, clip, value }, caller) => {
+      const dir = await root(cwd);
+      return changeConfig(dir, caller, "requirements", (author, tx) => requirements.require(dir, { path, clip, value }, author, tx));
+    },
+    "review.waive": async ({ cwd, check, clip, reason }, caller) => {
+      const dir = await root(cwd);
+      return changeConfig(dir, caller, "requirements", (author, tx) => requirements.waive(dir, { check, clip, reason }, author, tx));
     },
     "style.save": async ({ cwd, name, force }) => styles.save(await root(cwd), name, force === true),
     "style.list": async () => styles.list(),

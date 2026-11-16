@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { ViewedShape } from "../proposals.js";
 import { ANALYSIS_NAME_PATTERN, AnalyzeDiffResultSchema, AnalyzeResultSchema } from "../analyze.js";
-import { ReviewOutputSchema, ReviewResultSchema } from "../review.js";
-import { FormatIdSchema, SafeZoneSchema } from "@frameshell/schema";
+import { RequirementsChangeSchema, ReviewOutputSchema, ReviewResultSchema } from "../review.js";
+import { CLIP_REQUIREMENT_FIELDS, CRAFT_CHECKS, FormatIdSchema, REQUIREMENT_PATHS, SafeZoneSchema } from "@frameshell/schema";
 import { TimelineIdSchema } from "../timeline.js";
 import { InspectedPointSchema } from "../ui.js";
 import {
@@ -340,8 +340,9 @@ export const exportMethods = {
       "`metrics.seam` is the grey jump between the last frame and the first (a hard cut reads 40 to 80, under 10 is continuous); with `loop` a duplicate or a jump is a warning. " +
       "With `file` and `preset`, `metrics.delivery` checks the file against the export plan. The `safe` sheet and `safeZones` also flag graphics (generated clips with an alpha render: titles included) and faces (footage with a cached `people scan`) that reach into a zone, " +
       "and each is a `safe-zone` craft warning. " +
-      "A project's `requirements.json` (written with `file.write`) is judged on every run with metrics: `metrics.requirements` lists each expectation it states (film length, longest still stretch, a held end card, loudness of a `file`, " +
-      "smallest caption size, per clip `appearsBy`, `before` and `keepsMoving`) as pass, fail or skipped, with what was measured. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
+      "A project's `requirements.json` (set with `review.require` and `review.waive`) is judged on every run with metrics: `metrics.requirements` lists each expectation it states (film length, longest still stretch, a held end card, loudness of a `file`, " +
+      "smallest caption size, per clip `appearsBy`, `before`, `keepsMoving` and `staysInFrame`: what the clip draws, its alpha or the faces of a cached `people scan`, never leaves the frame of the format reviewed, with the `spans` that do) as pass, fail or skipped, with what was measured. " +
+      "With `view: \"proposal\"` the proposal's version of the file is judged. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
       "a `waivers` entry (check, optional clip, reason) lifts the warnings it covers out of `craft` into `metrics.waived` with its reason, never silently. `requirements.failed` counts what still fails. " +
       "The MCP tool returns the sheets as images. " +
       "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
@@ -390,6 +391,42 @@ export const exportMethods = {
       view: ViewParam,
     }),
     result: ReviewResultSchema,
+  },
+  "review.require": {
+    mutating: true,
+    description:
+      "Set or remove one expectation of the project's `requirements.json` (#457), which `review` judges on every run with metrics. " +
+      `Without \`clip\`, \`path\` is one of ${REQUIREMENT_PATHS.map((path) => `\`${path}\``).join(", ")}: ` +
+      "`film.maxSeconds` / `film.minSeconds` / `film.maxStatic` seconds, `film.endCard` `{ minSeconds }`, `film.loudness` `{ target?, tolerance?, maxTruePeak? }` (judged on a `file`), " +
+      "`captions.minSize` (share of the short side, 0.026 is 28 px at 1080), `fail` (craft checks that fail in this project, e.g. `[\"static\", \"reading\"]`). " +
+      `With \`clip\` (a clip id of \`timeline.show\`), \`path\` is one of ${CLIP_REQUIREMENT_FIELDS.map((field) => `\`${field}\``).join(", ")}: ` +
+      "`appearsBy` seconds or a marker (`hook+0.5`), `before` another clip's id, `keepsMoving` `{ maxStatic }`, `staysInFrame` `true` or `{ margin }` (share of the frame kept clear on every side). " +
+      "`value: null` removes it. Creates the file when missing; the rest of the file is kept. Journaled in `.frameshell/history/project.config.jsonl` in the caller's transaction (ADR 0036): " +
+      "`history` lists it, `revert` with its `op` or `tx` undoes it; a hand edit of the file is journaled too. While review mode is on (ADR 0019), a change by anyone but the person in the app waits in the " +
+      "transaction's proposal (`proposal` in the result). State what the person or the brief asks for; never loosen a requirement to make a review pass without the person's agreement. " +
+      "Fails with InvalidOperation (`reason`: `path` unknown, `value` invalid, with the schema's message), InvalidProjectFile (the file on disk is invalid), ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      path: z.string().min(1).describe("What to set: `film.maxSeconds`, `captions.minSize`, `fail`...; with `clip`: `appearsBy`, `before`, `keepsMoving` or `staysInFrame`."),
+      clip: z.string().min(1).optional().describe("Clip id the expectation is about, e.g. `c_1a2b3c`. Absent: the whole film."),
+      value: z.unknown().describe("New value as `requirements.json` holds it (number, object, list, `true`); null removes it."),
+    }),
+    result: RequirementsChangeSchema,
+  },
+  "review.waive": {
+    mutating: true,
+    description:
+      "Accept the craft warnings of one check in `requirements.json` (#457), with the reason the person accepts them: `review` then lists them in `metrics.waived` with that reason " +
+      "instead of `craft`, never drops them, and a check listed in `fail` no longer fails for them. With `clip`, only the warnings whose time overlaps that clip; without, every warning of the check. " +
+      "`reason: null` removes the waiver. Journaled, revertable and held by review mode like `review.require`. Waive only with a reason the person would accept. " +
+      "Fails with InvalidOperation, InvalidProjectFile, ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      check: z.enum(CRAFT_CHECKS).describe("The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."),
+      clip: z.string().min(1).optional().describe("Waive only the warnings that overlap this clip id. Absent: every warning of the check."),
+      reason: z.string().trim().min(1).nullable().describe("Why the warnings are accepted, shown beside them; null removes the waiver."),
+    }),
+    result: RequirementsChangeSchema,
   },
   analyze: {
     description:

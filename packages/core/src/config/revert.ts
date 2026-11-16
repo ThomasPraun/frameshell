@@ -8,10 +8,10 @@ import { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, conf
  */
 
 /** Words naming config document `doc` in messages. */
-export const CONFIG_DOC_NAMES: Record<ConfigDoc, string> = { project: "the formats of frameshell.json", style: "style.json" };
+export const CONFIG_DOC_NAMES: Record<ConfigDoc, string> = { project: "the formats of frameshell.json", style: "style.json", requirements: "requirements.json" };
 
 /** The command that changes config document `doc` forward. */
-const FORWARD: Record<ConfigDoc, string> = { project: "frameshell format add|remove", style: "frameshell style set" };
+const FORWARD: Record<ConfigDoc, string> = { project: "frameshell format add|remove", style: "frameshell style set", requirements: "frameshell review require|waive" };
 
 /**
  * `current` with the target's operations undone. `entries` are `doc`'s journal lines, oldest first; `target` is

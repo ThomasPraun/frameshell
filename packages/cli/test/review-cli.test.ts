@@ -157,6 +157,28 @@ describe("frameshell review", () => {
     120_000,
   );
 
+  it(
+    "review require and review waive change requirements.json through the journal, and revert undoes them",
+    () => {
+      const required = frameshell(["review", "require", "staysInFrame", '{"margin":0.05}', "--clip", "c_title"]);
+      expect(required.code, required.stderr).toBe(0);
+      expect(required.stdout).toContain('Required c_title staysInFrame (op_');
+      expect(required.stdout).toContain('clip:c_title.staysInFrame: none -> {"margin":0.05}');
+      const op = /undo: frameshell revert (op_\w+)/.exec(required.stdout)![1]!;
+      const waived = frameshell(["review", "waive", "static", "the end card holds", "--json"]);
+      expect(waived.code, waived.stderr).toBe(0);
+      expect(JSON.parse(waived.stdout)).toMatchObject({ path: "requirements.json", changes: [{ key: "waiver:static", before: null, after: "the end card holds" }], proposal: null });
+      expect(frameshell(["review", "waive", "static", "--remove"]).stdout).toContain("Removed the waiver of static");
+      expect(frameshell(["revert", op]).code).toBe(0);
+      expect(existsSync(join(project, "requirements.json"))).toBe(false);
+      expect(frameshell(["review", "require", "film.length", "3"]).stderr).toContain('No requirement "film.length" of the film');
+      expect(frameshell(["review", "waive", "static"]).stderr).toContain("review waive needs the reason");
+      expect(frameshell(["review", "waive", "loud", "x"]).stderr).toContain("review waive takes a craft check");
+      expect(frameshell(["review", "require", "fail", '["static"]', "--remove"]).stderr).toContain("`frameshell review require` does not take --remove");
+    },
+    120_000,
+  );
+
   it("rejects --preset without --file", () => {
     expect(frameshell(["review", "--preset", "youtube-1080p"]).stderr).toContain("--preset checks an exported file against its export plan: pass --file too");
   });

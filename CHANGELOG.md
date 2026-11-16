@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Requirements of `review` stay in frame and go through the config journal, sixth slice of #457 (epic #451; protocol
+  162; `review.require`, `review.waive`, `clip.staysInFrame`, config document `requirements`): a clip requirement
+  `staysInFrame` (`true` or `{ margin }`, a share of the frame kept clear on every side) fails when what the clip draws
+  leaves the frame of the format reviewed: a generated clip's alpha (the boxes the safe-zone check already reads) or a
+  footage clip's faces (a cached `people scan`), after the format's cover crop and inside letterbox bars; touching an
+  edge is leaving it. The check names the `format` and the `spans` (timeline seconds) that leave, and is skipped with
+  why for a clip with nothing placed (a render with no alpha, no face scan). `requirements.json` is a config document
+  of ADR 0036 (keys `requirements:film.<field>`, `captions.minSize`, `fail`, `clip:<id>.<field>`,
+  `waiver:<check>[:<clip>]`): `frameshell review require <path> <value> [--clip id]` and `frameshell review waive
+  <check> <reason> [--clip id]` (`--remove`) change it one value at a time in the caller's transaction, so `history`
+  lists them, `revert` and `tx abort` undo them and review mode holds them in the proposal; a `file.write` of the file
+  and a hand edit are journaled like `style.json`'s, and `review` with `view: proposal` judges the proposal's version.
+  Older files load unchanged; waivers stay in `requirements.json` keyed by clip id (no field on timeline clips). Not
+  yet: requirement lines in the app's proposal bar, `staysInFrame` for clips inside a nested timeline.
+
 - Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 161): a scene at another frame rate than the project is
   time-remapped with seconds kept (project frame k shows scene frame `start + k × scene fps / project fps` through a
   subframe; no ratio is refused) instead of refused. Files a `.blend` loads from outside the project (owner decision
