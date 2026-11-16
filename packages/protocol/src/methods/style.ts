@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ANALYSIS_NAME_PATTERN } from "../analyze.js";
 import { ViewedShape } from "../proposals.js";
 import { ResolvedStyleSchema, SafeZoneSchema, UserStyleIdSchema } from "@frameshell/schema";
 import { type MethodSpec, CwdParam, ViewParam, StyleChangeSchema } from "./shared.js";
@@ -68,14 +69,30 @@ export const styleMethods = {
       "it merges value by value: every value the user style sets replaces the project's, the others stay. " +
       "`replace: true` makes the file exactly the user style. A user style also records `from` (its id and SHA-256), " +
       "so `style.show` can say when it changed later; nothing is inherited afterwards. A personality sets only " +
-      "`motion.personality` (with `replace`, it is all the file keeps). `changes` reports every value that changed. " +
-      "Journaled and held by review mode like `style.set`; `revert` with its `op` undoes it. Fails with InvalidOperation " +
-      "(`reason` `not found`, with the user styles available in `data.available`), InvalidGlobalConfig (the user style " +
-      "is invalid), InvalidProjectFile, ProposalPending, ProposalState, ProjectNotFound.",
+      "`motion.personality` (with `replace`, it is all the file keeps). " +
+      "With `analysis` instead of `name`, it applies the `suggestions` of that `analyze` run (read from " +
+      "`.frameshell/analysis/<analysis>/analysis.json`), all of them or only the `paths` given: apply only what the " +
+      "person agreed to after seeing them; `from` is not recorded. `changes` reports every value that changed. " +
+      "Journaled and held by review mode like `style.set`; `revert` with its `op` undoes it. Fails with InvalidParams " +
+      "(both or neither of `name` and `analysis`; `replace` or `paths` with the wrong one), InvalidOperation " +
+      "(`reason` `not found`, with the user styles or analyses available in `data.available`; `no suggestions`: an analysis " +
+      "older than its suggestions, run `analyze` again; `not suggested`: a path of `paths` the analysis does not suggest; " +
+      "`value`: a suggestion no longer fits the schema), InvalidGlobalConfig (the user style is invalid), InvalidProjectFile, " +
+      "ProposalPending, ProposalState, ProjectNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
-      name: UserStyleIdSchema.describe("User style id (`style.list`) or a motion personality id."),
-      replace: z.boolean().optional().describe("Overwrite the project's style with it instead of merging value by value. Default false."),
+      name: UserStyleIdSchema.optional().describe("User style id (`style.list`) or a motion personality id. Give this or `analysis`."),
+      replace: z.boolean().optional().describe("Overwrite the project's style with it instead of merging value by value. Default false. Not with `analysis`."),
+      analysis: z
+        .string()
+        .regex(ANALYSIS_NAME_PATTERN, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .optional()
+        .describe("Name of an `analyze` run whose `suggestions` to apply (its folder `.frameshell/analysis/<analysis>/`). Give this or `name`."),
+      paths: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("With `analysis`: apply only these suggested paths, e.g. `[\"colors.accent\", \"motion.personality\"]`. Default: every suggestion."),
     }),
     result: StyleChangeSchema,
   },

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ViewedShape } from "../proposals.js";
-import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "../analyze.js";
+import { ANALYSIS_NAME_PATTERN, AnalyzeDiffResultSchema, AnalyzeResultSchema } from "../analyze.js";
 import { ReviewOutputSchema, ReviewResultSchema } from "../review.js";
 import { FormatIdSchema, SafeZoneSchema } from "@frameshell/schema";
 import { TimelineIdSchema } from "../timeline.js";
@@ -425,7 +425,7 @@ export const exportMethods = {
       file: z.string().min(1).describe("The video to analyse: absolute, or relative to `cwd`. It may be anywhere (a download, a reference folder); it is only read."),
       name: z
         .string()
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .regex(ANALYSIS_NAME_PATTERN, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
         .optional()
         .describe("Name of the analysis, its folder is `.frameshell/analysis/<name>/`. Default: the file name in lower case, e.g. `reel` for `Reel.mp4`. A new run with the same name replaces the folder."),
       threshold: z
@@ -459,7 +459,7 @@ export const exportMethods = {
       reference: z.string().min(1).describe("The reference video to compare it with: absolute, or relative to `cwd`; it may be anywhere, it is only read."),
       name: z
         .string()
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .regex(ANALYSIS_NAME_PATTERN, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
         .optional()
         .describe("Name of the comparison, its folder is `.frameshell/analysis/<name>/`. Default `<film>-vs-<reference>` (file names in lower case, 64 characters at most). A new run with the same name replaces the folder, so do not reuse the name of an `analyze` run you want to keep."),
       lag: z.number().min(-3600).max(3600).optional().describe("Seconds to add to a time of our film to find the same moment of the reference (positive: the reference is later), instead of finding it. Use it when you know where the two start together; the alignment is then a DECISION."),

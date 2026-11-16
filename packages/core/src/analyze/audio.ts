@@ -1,6 +1,7 @@
 import type { AnalyzeAudio, AnalyzeEffect, AnalyzeEffects, AnalyzeSection, AnalyzeSentence, AnalyzeSpeech } from "@frameshell/protocol";
 import type { Pcm16 } from "../transcripts/window.js";
 import { HIT_FLOOR_DB, soundHits } from "./events.js";
+import { median } from "./median.js";
 import { pitchOf, pitchTrack } from "./pitch.js";
 import { frameAt, frameStart } from "./shots.js";
 import { type HeardWord, type Sentence, paceOf, sentenceText, sentencesOf } from "./speech.js";
@@ -117,11 +118,6 @@ export function voiceAgainstMusic(db: ArrayLike<number>, hop: number, mask: Uint
   if (bed === null || bed < MUSIC_FLOOR_DB) return { voice: round(toDb(mix), 1), music: null, voiceOverMusic: null };
   const voice = mix > toPower(bed) * VOICE_MIN_RATIO ? toDb(mix - toPower(bed)) : null;
   return { voice: voice === null ? null : round(voice, 1), music: round(bed, 1), voiceOverMusic: voice === null ? null : round(voice - bed, 1) };
-}
-
-function median(values: readonly number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)]!;
 }
 
 /** The skipped speech: no sentences. */
