@@ -123,6 +123,62 @@ describe("template emphasis-marker", () => {
   });
 });
 
+describe("template number-wheel", () => {
+  it("prints numbers with the code counter uses (one format, never a copy), in slots as wide as the widest digit", async () => {
+    await scaffold(["wheel", "--template", "number-wheel"]);
+    await scaffold(["count", "--template", "counter"]);
+    const format = (html: string) => /\/\/ Same text for the same value everywhere[\s\S]*?\n {6}}/.exec(html)![0];
+    expect(format(read("wheel"))).toBe(format(read("count")));
+    const html = read("wheel");
+    expect(html).toContain("font-variant-numeric: tabular-nums");
+    expect(html).toContain("probe.textContent = new Array(51).join(String(d));");
+    // The strip is folded into its middle copy of 0 to 9, so a column always has a neighbour above and below.
+    expect(html).toContain("M.write(c.strip, { y: -(10 + (((at % 10) + 10) % 10)) * row });");
+  });
+
+  it("takes a count time of 1.2 to 1.6 s by default and keeps the last column inside the clip", async () => {
+    await scaffold(["wheel", "--template", "number-wheel"]);
+    const defaults = Object.fromEntries(declared(read("wheel")).map((v) => [v.id, v.default]));
+    expect(defaults["countTime"]).toBeGreaterThanOrEqual(1.2);
+    expect(defaults["countTime"]).toBeLessThanOrEqual(1.6);
+    expect(read("wheel")).toContain("var TIME = Math.min(P.countTime, Math.max(0.5, D - OUT - START - 0.6));");
+  });
+});
+
+describe("template slot-roll", () => {
+  it("lands on the target by its text, adds it when missing, and never spins a reel of fewer than two", async () => {
+    await scaffold(["spot", "--template", "slot-roll"]);
+    const html = read("spot");
+    expect(html).toContain("item.toLowerCase() === want.toLowerCase()");
+    expect(html).toContain('if (goal < 0) goal = items.push(want || "...") - 1;');
+    expect(html).toContain('if (items.length < 2) { items.unshift("..."); goal = 1; }');
+    // Whole turns plus the way to the target: the last frame is exactly the target on the band.
+    expect(html).toContain("var travel = P.laps * n + goal;");
+  });
+});
+
+describe("template tab-indicator", () => {
+  it("starts on the tab of an entry at 0 and on tab 1 otherwise, pulls a late entry in, and reads tabs by number or name", async () => {
+    await scaffold(["spot", "--template", "tab-indicator"]);
+    const html = read("spot");
+    expect(html).toContain("if (moves.length && moves[0].at <= 0.05) home = moves.shift().index;");
+    expect(html).toContain("at: Math.min(at, Math.max(0.3, D - OUT - 0.7))");
+    expect(html).toContain("/^\\d+$/.test(key) ? Number(key) - 1 : names.findIndex(");
+  });
+});
+
+describe("template freeze-cut", () => {
+  it("is a template over an image prop, with no freeze-frame operation: the flash never starts before the cut", async () => {
+    await scaffold(["spot", "--template", "freeze-cut"]);
+    const html = read("spot");
+    const image = declared(html).find((v) => v.id === "image")!;
+    expect(image).toMatchObject({ type: "image", default: "" });
+    expect(html).toContain("opacity: t < CUT ? 0 :");
+    // A white layer of plain opacity: a blend mode over the film once rendered it all white.
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
 describe("the plugin skill", () => {
   const skill = readFileSync(fileURLToPath(new URL("../skills/hyperframes/SKILL.md", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
 

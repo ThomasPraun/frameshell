@@ -186,8 +186,8 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     );
   });
 
-  // The code templates (#466): what the page leaves on screen once it has played, read from the live page.
-  describe("code templates", () => {
+  // The templates read from the live page (#466): what the page leaves on screen once it has played, and where it is on the way.
+  describe("templates in the live page", () => {
     /** Opens the scaffolded template with `props` in managed Chrome, hands the page to `check`, closes everything. */
     async function inPage(template: string, props: Record<string, unknown>, duration: number | undefined, check: (page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>) => Promise<void>) {
       const manager = binaries();
@@ -323,6 +323,148 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
           "Array.from(document.querySelectorAll('.tk')).filter(function (e) { return Number(e.style.opacity) > 0.99; }).map(function (e) { return e.textContent; }).sort()",
         )) as string[];
         expect(first).toEqual(["1", "=", "x"]);
+      });
+    }, 120_000);
+
+    // The wheel, roll, tab and freeze templates: what the page shows at the start, mid-move and once it has settled.
+    const digitsShown = String.raw`cols.map(function (c) { var m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(c.strip.style.transform); return Math.round(-Number(m[2]) / row) - 10; }).join("")`;
+
+    it.each([
+      ["up", { from: 0, to: 12840 }, "00000", "12840"],
+      ["down", { from: 1500, to: 20 }, "1500", "0020"],
+    ] as const)("number-wheel rolls %s from the start digits to exactly the end ones, and never moves the number while it rolls", async (_direction, props, start, end) => {
+      await inPage("number-wheel", { ...props, grouping: "none" }, undefined, async (page) => {
+        await seek(page, 0.2);
+        expect(await page.evaluate(digitsShown)).toBe(start.padStart(end.length, "0"));
+        const width = await page.evaluate("document.getElementById('line').offsetWidth");
+        const slots = (await page.evaluate("Array.from(document.querySelectorAll('.slot')).map(function (s) { return s.offsetWidth; })")) as number[];
+        expect(new Set(slots).size).toBe(1);
+        let moved = false;
+        for (const t of [0.8, 1.1, 1.4]) {
+          await seek(page, t);
+          moved ||= (await page.evaluate(digitsShown)) !== start.padStart(end.length, "0");
+          expect(await page.evaluate("document.getElementById('line').offsetWidth")).toBe(width);
+        }
+        expect(moved).toBe(true);
+        await seek(page, 3);
+        expect(await page.evaluate(digitsShown)).toBe(end);
+        expect(await page.evaluate("document.getElementById('line').offsetWidth")).toBe(width);
+      });
+    }, 120_000);
+
+    it("number-wheel puts a separator between the digit slots and keeps leading zeros of a short start", async () => {
+      await inPage("number-wheel", { from: 5, to: 1234567, grouping: "comma" }, undefined, async (page) => {
+        await seek(page, 0.2);
+        expect(await page.evaluate("document.getElementById('digits').textContent.replace(/\\d/g, '#').replace(/#{30}/g, '')")).toContain(",");
+        expect(await page.evaluate(digitsShown)).toBe("0000005");
+        await seek(page, 3);
+        expect(await page.evaluate(digitsShown)).toBe("1234567");
+      });
+    }, 120_000);
+
+    const onBand = "els.map(function (e, i) { return [i, Math.abs(Number(/translate\\([-\\d.]+px, ([-\\d.]+)px\\)/.exec(e.style.transform)[1]))]; }).filter(function (p) { return p[1] < 1; }).map(function (p) { return items[p[0]]; })";
+
+    it("slot-roll starts on the first item, lands on the target and holds it on the band, and adds a target the reel does not have", async () => {
+      await inPage("slot-roll", { items: "red|green|blue|gold", target: "blue" }, undefined, async (page) => {
+        await seek(page, 0.2);
+        expect(await page.evaluate(onBand)).toEqual(["red"]);
+        await seek(page, 1.2);
+        const mid = (await page.evaluate("els.map(function (e) { return Number(e.style.opacity); })")) as number[];
+        expect(mid.some((opacity) => opacity > 0 && opacity < 1)).toBe(true);
+        for (const t of [3, 3.5]) {
+          await seek(page, t);
+          expect(await page.evaluate(onBand)).toEqual(["blue"]);
+        }
+      });
+      await inPage("slot-roll", { items: "1|2|3", target: "42", lead: "" }, undefined, async (page) => {
+        expect(await page.evaluate("items.join('|')")).toBe("1|2|3|42");
+        await seek(page, 3);
+        expect(await page.evaluate(onBand)).toEqual(["42"]);
+      });
+      // A reel of one item still has something to spin past, and an empty reel and target never throw.
+      await inPage("slot-roll", { items: "only", target: "" }, undefined, async (page) => {
+        await seek(page, 3);
+        expect(await page.evaluate(onBand)).toEqual(["only"]);
+      });
+      await inPage("slot-roll", { items: "", target: "" }, undefined, async (page) => {
+        await seek(page, 3);
+        expect(await page.evaluate(onBand)).toEqual(["..."]);
+      });
+    }, 240_000);
+
+    const edges = "(function () { var i = document.getElementById('ind'); return [parseFloat(i.style.left), parseFloat(i.style.left) + parseFloat(i.style.width)]; })()";
+    const tabBox = (index: number) => `(function () { var t = tabs[${index}]; return [t.offsetLeft, t.offsetLeft + t.offsetWidth]; })()`;
+
+    it("tab-indicator sits on the first tab, stretches while it moves (the leading edge first), and ends exactly on the next tab", async () => {
+      await inPage("tab-indicator", { tabs: "One|Two|Three", plan: "1@0|3@1.5", look: "pill" }, undefined, async (page) => {
+        const near = (got: number[], want: number[]) => got.forEach((value, i) => expect(Math.abs(value - want[i]!)).toBeLessThan(0.6));
+        await seek(page, 0.3);
+        near((await page.evaluate(edges)) as number[], (await page.evaluate(tabBox(0))) as number[]);
+        const first = (await page.evaluate(tabBox(0))) as number[];
+        await seek(page, 1.58);
+        const [left, right] = (await page.evaluate(edges)) as number[];
+        expect(right! - left!).toBeGreaterThan((first[1]! - first[0]!) * 1.2);
+        expect(right!).toBeGreaterThan(first[1]! + 2);
+        expect(left!).toBeLessThan(right! - (first[1]! - first[0]!));
+        await seek(page, 3.5);
+        near((await page.evaluate(edges)) as number[], (await page.evaluate(tabBox(2))) as number[]);
+        // The tab it rests on reads active: full opacity, the others dimmed.
+        const opacities = (await page.evaluate("tabs.map(function (t) { return Number(t.style.opacity); })")) as number[];
+        expect(opacities[2]).toBeGreaterThan(0.99);
+        expect(opacities[0]).toBeLessThan(0.7);
+      });
+    }, 120_000);
+
+    it("tab-indicator takes a tab by name, starts on tab 1 when no entry is at 0, and ignores an entry that names no tab", async () => {
+      await inPage("tab-indicator", { tabs: "One|Two|Three", plan: "three@1.5|nope@2|9@2|x", look: "underline" }, undefined, async (page) => {
+        await seek(page, 0.3);
+        const start = (await page.evaluate(edges)) as number[];
+        expect(Math.abs(start[0]! - ((await page.evaluate(tabBox(0))) as number[])[0]!)).toBeLessThan(0.6);
+        await seek(page, 3.5);
+        const end = (await page.evaluate(edges)) as number[];
+        expect(Math.abs(end[1]! - ((await page.evaluate(tabBox(2))) as number[])[1]!)).toBeLessThan(0.6);
+      });
+    }, 120_000);
+
+    const scaleOf = "Number(/scale\\(([-\\d.]+)/.exec(document.getElementById('pic').style.transform)[1])";
+    const offsetOf = "Number(/translate\\(([-\\d.]+)px/.exec(document.getElementById('pic').style.transform)[1])";
+    const opacityOf = (id: string) => `Number(document.getElementById('${id}').style.opacity)`;
+
+    it("freeze-cut punches in and flashes exactly at the cut, then holds the picture still while the flash falls and the label pops", async () => {
+      await inPage("freeze-cut", { cutAt: 1, punch: 1.3, flash: 1, flashTime: 0.2, label: "Right there" }, undefined, async (page) => {
+        await seek(page, 0.95);
+        const before = (await page.evaluate(scaleOf)) as number;
+        expect(await page.evaluate(opacityOf("flash"))).toBe(0);
+        expect(await page.evaluate(opacityOf("chip"))).toBe(0);
+        // The picture was living before the cut: at two times it is at two scales.
+        await seek(page, 0.5);
+        expect((await page.evaluate(scaleOf)) as number).toBeLessThan(before);
+        await seek(page, 1);
+        expect(await page.evaluate(opacityOf("flash"))).toBeCloseTo(1, 2);
+        await seek(page, 1.5);
+        expect(await page.evaluate(opacityOf("flash"))).toBeLessThan(0.02);
+        expect((await page.evaluate(scaleOf)) as number).toBeGreaterThan(before * 1.25);
+        expect(await page.evaluate(opacityOf("chip"))).toBeGreaterThan(0.99);
+        // Frozen: the sway stops where the cut found it.
+        await seek(page, 1.2);
+        const x = (await page.evaluate(offsetOf)) as number;
+        await seek(page, 2);
+        expect((await page.evaluate(offsetOf)) as number).toBe(x);
+      });
+    }, 120_000);
+
+    it("freeze-cut with no label and no flash draws neither, and a late cut is pulled in", async () => {
+      await inPage("freeze-cut", { label: "", flash: 0, cutAt: 4 }, 2, async (page) => {
+        expect(await page.evaluate("document.getElementById('label').style.display")).toBe("none");
+        for (const t of [0.4, 0.9, 1.2]) {
+          await seek(page, t);
+          expect(await page.evaluate(opacityOf("flash"))).toBe(0);
+        }
+        // 2 s clip: the cut is at 2 - 0.3 - 0.8 = 0.9 s, so the punch-in has landed by 1.4 s.
+        await seek(page, 0.8);
+        const before = (await page.evaluate(scaleOf)) as number;
+        await seek(page, 1.4);
+        expect((await page.evaluate(scaleOf)) as number).toBeGreaterThan(before * 1.1);
       });
     }, 120_000);
   });
