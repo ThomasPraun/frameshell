@@ -6,6 +6,7 @@ import type {
   ConfigOperation,
   DaemonConnection,
   GradeAnalyzeResult,
+  ClipCompareResult,
   GradeCompareResult,
   HistoryResult,
   MarkerListResult,
@@ -106,6 +107,17 @@ mutations print the new revision):
                                the clip's middle); --out the image (default .frameshell/grade/compare-<clip>-<frame>.png);
                                --tile-width 160 to 960 (default 480). Prints the clip set command that keeps each look.
                                Changes nothing
+  clip compare <clip> --look [name:]key=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]
+                               Render one frame of a generated clip (blender, hyperframes, ...) under up to 11 variants next
+                               to the clip as it is, as one labelled PNG, through the export frame path. A variant is
+                               props merged over the clip's own (key=value, JSON values; key=null drops one) and/or
+                               source=<project path>: --look dusk:scene=Dusk, --look close:camera=Close,scene=Dusk,
+                               --look b:source=scenes/hero-b.blend; a whole look as JSON: --look '{"name":"x","props":{...}}'.
+                               --at picks the frame (default the clip's middle); --out the image (default
+                               .frameshell/looks/compare-<clip>-<frame>.png); --tile-width 160 to 960 (default 480).
+                               Each variant not rendered before renders first (a Blender clip: its draft; the whole clip
+                               up to the frame, so use a short one); a still never starts a final. Prints the clip set
+                               command that keeps each variant's props. Changes nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -599,6 +611,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip verify": ["probes", "tolerance"],
   "grade analyze": ["at", "from", "to", "samples"],
   "grade compare": ["look", "at", "out", "tile-width", "format"],
+  "clip compare": ["look", "at", "out", "tile-width", "format"],
   "clip set": [
     "speed",
     "gain",
@@ -715,6 +728,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip verify": [1, 1],
   "grade analyze": [1, 1],
   "grade compare": [1, 1],
+  "clip compare": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -787,6 +801,57 @@ export function parseLook(raw: string): Record<string, string | number> {
     look[field] = number;
   }
   return look;
+}
+
+/** One look of `clip compare` as parsed. */
+interface ClipLookArg {
+  name?: string;
+  source?: string;
+  props?: Record<string, unknown>;
+}
+
+/**
+ * One `clip compare --look`: `[name:]key=value[,key=value...]`, e.g. `dusk:scene=Dusk` or `close:camera=Close,scene=Dusk`.
+ * Values are JSON when they parse (`3`, `true`, `null`), else text; `source` is the look's source, every other key a prop.
+ * A string starting with `{` is the whole look as JSON (`{"name":"x","props":{...}}`).
+ */
+export function parseClipLook(raw: string): ClipLookArg {
+  const text = raw.trim();
+  if (text.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as ClipLookArg;
+    } catch {
+      // Falls through to the usage error below.
+    }
+    throw new UsageError(`--look: expected a JSON object such as {"name":"dusk","props":{"scene":"Dusk"}}; got "${raw}".`);
+  }
+  const colon = text.indexOf(":");
+  const named = colon >= 0 && colon < text.indexOf("=");
+  const look: ClipLookArg = named ? { name: text.slice(0, colon).trim() } : {};
+  for (const pair of (named ? text.slice(colon + 1) : text).split(",")) {
+    const at = pair.indexOf("=");
+    const key = at < 0 ? "" : pair.slice(0, at).trim();
+    const value = at < 0 ? "" : pair.slice(at + 1).trim();
+    if (key === "" || value === "") {
+      throw new UsageError(`--look: expected [name:]key=value[,key=value...] (source=<path> or a prop), e.g. dusk:scene=Dusk; got "${raw}".`);
+    }
+    if (key === "source") {
+      look.source = value;
+      continue;
+    }
+    look.props = { ...look.props, [key]: jsonOrText(value) };
+  }
+  return look;
+}
+
+/** `text` as JSON when it parses (number, boolean, null, object), else as it is. */
+function jsonOrText(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 /** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
@@ -1347,6 +1412,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
       break;
     }
+    case "clip compare": {
+      method = "clip.compare";
+      const looks = (list("look") ?? []).map(parseClipLook);
+      if (looks.length === 0) throw new UsageError("`frameshell clip compare` needs at least one --look, e.g. --look dusk:scene=Dusk.");
+      if (looks.length > 11) throw new UsageError(`--look: at most 11 looks, got ${looks.length}.`);
+      const tileWidth = num("tile-width");
+      if (tileWidth !== undefined && (!Number.isInteger(tileWidth) || tileWidth < 160 || tileWidth > 960)) throw new UsageError("--tile-width: expected a whole number of px from 160 to 960.");
+      Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -1563,6 +1638,7 @@ export async function executeTimeline(
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
   if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
+  if (inv.method === "clip.compare") return formatClipCompare(result as ClipCompareResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
@@ -1621,6 +1697,23 @@ export function formatGradeCompare(result: GradeCompareResult): string {
   ];
   for (const tile of result.tiles) {
     const keep = tile.flags === "" ? "(the clip's grade now)" : `frameshell clip set ${result.clip} ${tile.flags}`;
+    lines.push(`  ${tile.label.padEnd(18)} ${keep}`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  lines.push("Nothing changed: open the image, then keep a look with its clip set command.");
+  return `${lines.join("\n")}\n`;
+}
+
+/** `clip compare` for people: the image, then each tile's number, name and the `clip set` flags that keep it. */
+export function formatClipCompare(result: ClipCompareResult): string {
+  const lines = [
+    `Clip compare of ${result.clip} (${result.type}) on ${result.timeline} · frame ${result.frame} at ${result.at.toFixed(3)} s · ${result.tiles.length} tiles, ${result.columns}x${result.rows}`,
+    `  ${result.path} (${result.width}x${result.height})`,
+  ];
+  const own = result.tiles[0]?.source;
+  for (const tile of result.tiles) {
+    const source = tile.source !== own ? ` (source ${tile.source ?? "none"}: clip add it again to keep)` : "";
+    const keep = tile.kind === "current" ? "(the clip as it is)" : tile.flags === "" ? `(same props as the clip)${source}` : `frameshell clip set ${result.clip} ${tile.flags}${source}`;
     lines.push(`  ${tile.label.padEnd(18)} ${keep}`);
   }
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
