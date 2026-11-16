@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n.js";
+import { elementOf } from "../windows.js";
 import { type LineRow, checkNote, differenceText, lineCounts, lineRows, progressText } from "../voiceover/model.js";
 import { type DialogState, type PlaceForm, voiceoverDialog } from "../voiceover/store.js";
 
@@ -24,17 +25,45 @@ function VoiceoverDialog({ state }: { state: DialogState }) {
   const { run, place } = state;
   const running = run.kind === "running";
   useEffect(() => box.current?.focus(), []);
-  // On the window, not the dialog: a button that was disabled while working drops the focus to the page.
+  // Modal: the keys and the focus stay in the dialog. On the window in the capture phase, not on the dialog: a button
+  // that was disabled while working drops the focus to the page, and the timeline's and preview's keys must not act then.
   useEffect(() => {
-    if (running) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      voiceoverDialog.close();
+    const { view } = state;
+    const inside = (target: EventTarget | null) => {
+      const element = elementOf(target);
+      return element !== null && (box.current?.contains(element) ?? false);
     };
-    state.view.addEventListener("keydown", onKey);
-    return () => state.view.removeEventListener("keydown", onKey);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!running) voiceoverDialog.close();
+      } else if (!event.metaKey && !event.ctrlKey && !event.altKey && !inside(event.target)) event.stopPropagation();
+    };
+    const onFocus = (event: FocusEvent) => {
+      if (!inside(event.target)) box.current?.focus();
+    };
+    view.addEventListener("keydown", onKey, true);
+    view.document.addEventListener("focusin", onFocus);
+    return () => {
+      view.removeEventListener("keydown", onKey, true);
+      view.document.removeEventListener("focusin", onFocus);
+    };
   }, [running, state.view]);
+  // Inside the dialog a key does its own work (typing, a button), never a global one (playback, the timeline's keys).
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    event.nativeEvent.stopPropagation();
+    if (event.key !== "Tab" || !box.current) return;
+    const stops = [...box.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")];
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    const active = box.current.ownerDocument.activeElement;
+    const wrapTo = !first || !last ? null : event.shiftKey && (active === first || active === box.current) ? last : !event.shiftKey && active === last ? first : undefined;
+    if (wrapTo === undefined) return;
+    event.preventDefault();
+    wrapTo?.focus();
+  };
   const name = state.script.split("/").pop() ?? state.script;
   return (
     <div className="voiceover-backdrop" data-testid="voiceover-backdrop">
@@ -46,6 +75,7 @@ function VoiceoverDialog({ state }: { state: DialogState }) {
         aria-labelledby={title}
         tabIndex={-1}
         data-testid="voiceover-dialog"
+        onKeyDown={onKeyDown}
       >
         <h2 id={title} className="voiceover-title">
           {said.title(name)}
@@ -91,6 +121,11 @@ function RunSection({ state }: { state: DialogState }) {
         <section className="voiceover-section" data-testid="voiceover-progress" aria-live="polite">
           <p className="voiceover-note">{run.stopping ? said.stopping : progressText(run.progress, said)}</p>
           {run.progress?.fraction != null ? <progress max={1} value={run.progress.fraction} /> : <progress />}
+          {run.nothingStopped && (
+            <p className="voiceover-note" role="status" data-testid="voiceover-nothing-stopped">
+              {said.nothingStopped}
+            </p>
+          )}
           <div className="voiceover-actions">
             <button className="button" data-testid="voiceover-stop" disabled={run.stopping} onClick={() => void voiceoverDialog.stop()}>
               {said.stop}
@@ -195,7 +230,7 @@ function PlaceSection({ place }: { place: PlaceForm }) {
           }}
         />
         <datalist id={listId}>
-          {place.markers.map((marker) => (
+          {[...new Set(place.markers)].map((marker) => (
             <option key={marker} value={marker} />
           ))}
         </datalist>

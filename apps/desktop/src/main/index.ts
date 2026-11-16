@@ -1061,7 +1061,7 @@ function registerVoiceoverIpc(): void {
       }
     }),
   );
-  ipcMain.handle(Channel.voiceoverCancel, (event) => outcome(async () => void (await daemon.request("voiceover.cancel", { cwd: await dirOf(event.sender) }))));
+  ipcMain.handle(Channel.voiceoverCancel, (event) => outcome(async () => (await daemon.request("voiceover.cancel", { cwd: await dirOf(event.sender) })).canceled));
   ipcMain.handle(Channel.voiceoverMarkers, (event) =>
     outcome(async () => {
       const view = await daemon.request("timeline.show", { cwd: await dirOf(event.sender), timeline: "main" }).catch(() => null);

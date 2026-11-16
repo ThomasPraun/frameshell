@@ -618,8 +618,11 @@ export interface FrameshellApi {
      * Rejects with the daemon's message when it fails.
      */
     generate(path: string, verify: boolean): Promise<VoiceoverRun>;
-    /** Stop the generation running in the window's project (daemon `voiceover.cancel`); the takes finished stay. */
-    cancel(): Promise<void>;
+    /**
+     * Stop the generations the app has running in the window's project (daemon `voiceover.cancel`, never an agent's
+     * run); the takes finished stay. Resolves false when there was none to stop.
+     */
+    cancel(): Promise<boolean>;
     /** Called with the progress of the generation in this window's project. Returns an unsubscribe function. */
     onProgress(listener: (progress: VoiceoverProgress) => void): () => void;
     /** Labels of the markers of the main timeline: what "where to start" can name besides seconds. Empty when it has none. */
@@ -892,7 +895,8 @@ export type VoiceoverRun =
 
 /**
  * One step of a running generation. `confirm`: waiting for the person to confirm a cost; `speak`: saying `line`;
- * `verify`: checking `line` against the script; `download`: fetching the transcription tools. `fraction` is of the step, 0..1, null when unknown.
+ * `verify`: checking `line` against the script; `download`: fetching the transcription tools. `fraction` is of the whole
+ * stage (all the lines to say, not the current one), 0..1, null when unknown.
  */
 export interface VoiceoverProgress {
   stage: "confirm" | "speak" | "verify" | "download";

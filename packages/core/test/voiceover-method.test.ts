@@ -321,6 +321,110 @@ describe("voiceover.cancel", () => {
   }, 60_000);
 });
 
+describe("voiceover.generate progress", () => {
+  it("reports one fraction of the whole speak stage, the provider's own progress included", async () => {
+    const standIn = standInSpeechProvider();
+    const reporting: SpeechProvider = {
+      ...standIn,
+      id: "reporting",
+      synthesize: (text, voice, options, context) => (context.progress({ message: "half", fraction: 0.5 }), standIn.synthesize(text, voice, options, context)),
+    };
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [reporting],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const client = await connectToDaemon(local.socketPath, { client: "test" });
+    try {
+      const dir = join(tempDir(), "progress");
+      await client.request("project.init", { dir });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, ["provider: reporting"]));
+      const fractions: number[] = [];
+      await client.request("voiceover.generate", { cwd: dir, script: "scripts/vo.md", verify: false }, { onProgress: (update) => update.stage === "speak" && fractions.push(update.fraction ?? Number.NaN) });
+      expect(fractions).toEqual([0, 0.25, 0.5, 0.75]);
+    } finally {
+      client.close();
+      await local.close();
+    }
+  });
+});
+
+describe("voiceover.cancel with several clients", () => {
+  it("stops only the calls of its own connection: a call waiting behind another client's run ends at once and leaves that run alone", async () => {
+    // Every line waits for the cancel: a run that stays in front until its own client stops it.
+    const standIn = standInSpeechProvider();
+    const blocks: SpeechProvider = {
+      ...standIn,
+      id: "blocks",
+      synthesize: (_text, _voice, _options, context) =>
+        new Promise((_resolve, reject) => context.signal.addEventListener("abort", () => reject(context.signal.reason), { once: true })),
+    };
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [blocks, standIn],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const agent = await connectToDaemon(local.socketPath, { client: "agent" });
+    const app = await connectToDaemon(local.socketPath, { client: "app" });
+    try {
+      const dir = join(tempDir(), "queued");
+      await agent.request("project.init", { dir });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, ["provider: blocks"]));
+      const params = { cwd: dir, script: "scripts/vo.md", verify: false };
+      let agentSaying!: () => void;
+      const saying = new Promise<void>((resolve) => (agentSaying = resolve));
+      const agentRun = agent.request("voiceover.generate", params, { onProgress: () => agentSaying() });
+      let agentEnded = false;
+      agentRun.then(
+        () => (agentEnded = true),
+        () => (agentEnded = true),
+      );
+      await saying;
+
+      // The app's call waits behind the agent's. Stop from the app ends it, not the agent's run in front.
+      const appRun = app.request("voiceover.generate", { ...params, lines: ["fix-1"] });
+      const appEnded = appRun.then(
+        () => "done",
+        (error: { code: number; data: { canceled?: boolean; written?: string[] } }) => error,
+      );
+      // Let the daemon take the call: it is registered before it waits.
+      for (let tries = 0; tries < 50; tries++) {
+        if ((await app.request("voiceover.cancel", { cwd: dir })).canceled) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      await expect(appEnded).resolves.toMatchObject({ code: ErrorCode.SpeechFailed, data: { canceled: true, written: [] } });
+      expect(agentEnded).toBe(false);
+      expect(await app.request("voiceover.cancel", { cwd: dir })).toEqual({ canceled: false });
+
+      // Another call queued after the canceled one still waits for the agent's run, not for nothing.
+      const third = app.request("voiceover.generate", { ...params, provider: "stand-in", lines: ["hook-1"] });
+      let thirdEnded = false;
+      third.then(
+        () => (thirdEnded = true),
+        () => (thirdEnded = true),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(thirdEnded).toBe(false);
+      expect(agentEnded).toBe(false);
+
+      // The agent stops its own run; the call behind it then runs.
+      expect(await agent.request("voiceover.cancel", { cwd: dir })).toEqual({ canceled: true });
+      await expect(agentRun).rejects.toMatchObject({ code: ErrorCode.SpeechFailed, data: { canceled: true } });
+      await expect(third).resolves.toMatchObject({ lines: [expect.objectContaining({ id: "hook-1", state: "generated" })] });
+    } finally {
+      agent.close();
+      app.close();
+      await local.close();
+    }
+  }, 60_000);
+});
+
 describe("voiceover.generate phrases and misread check", () => {
   /** The stand-in says each word as 0.3 s of tone with 0.1 s of silence after it, so each word is a phrase. */
   const word = (text: string, start: number) => ({ text, start, end: start + 0.3 });

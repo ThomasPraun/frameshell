@@ -106,7 +106,7 @@ describe("frameshell voiceover generate", () => {
     const refused = frameshell(paid);
     expect(refused.code).toBe(1);
     expect(refused.stderr).toMatch(/costs about 0\.05\d* USD/);
-    const token = /frameshell voiceover generate scripts\/paid\.md --yes --confirmation (\w+)/.exec(refused.stderr)?.[1];
+    const token = /frameshell voiceover generate scripts\/paid\.md --no-verify --yes --confirmation (\w+)/.exec(refused.stderr)?.[1];
     expect(token).toMatch(/^[0-9a-f]{32}$/);
     const json = JSON.parse(frameshell([...paid, "--json"]).stderr) as { error: { data: { confirmation: string } } };
     expect(json.error.data.confirmation).toBe(token);
@@ -121,6 +121,21 @@ describe("frameshell voiceover generate", () => {
     expect(ok.code).toBe(0);
     expect(ok.stdout).toContain("2 generated · about 0.05 USD");
     expect(existsSync(join(project, "assets", "voiceover", "paid", "hook-1.wav"))).toBe(true);
+  });
+
+  it("prints a confirming command that keeps the lines, provider, voice and --no-verify the ask was made with", () => {
+    writeFileSync(join(project, "scripts", "flags.md"), ["---", "voiceover: true", "language: en", "---", "## Hook", "Stop scrolling.", "## Why", "Close them all."].join("\n"));
+    const flags = ["--lines", "hook-1", "--provider", "stand-in-paid", "--voice", "low", "--no-verify"];
+    const refused = frameshell(["voiceover", "generate", "scripts/flags.md", ...flags]);
+    expect(refused.code).toBe(1);
+    const printed = /Once the person confirmed this cost: (frameshell voiceover generate .*)$/m.exec(refused.stderr)?.[1];
+    expect(printed).toMatch(/^frameshell voiceover generate scripts\/flags\.md --lines hook-1 --provider stand-in-paid --voice low --no-verify --yes --confirmation [0-9a-f]{32}$/);
+    // Run exactly what was printed: it confirms the same one-line run, so only that line is said and charged.
+    const ok = frameshell(printed!.split(" ").slice(1));
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toContain("(stand-in-paid, voice low): 1 generated");
+    expect(existsSync(join(project, "assets", "voiceover", "flags", "hook-1.wav"))).toBe(true);
+    expect(existsSync(join(project, "assets", "voiceover", "flags", "why-1.wav"))).toBe(false);
   });
 
   it("takes --confirmation only with --yes, and only on generate", () => {

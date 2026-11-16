@@ -1,4 +1,4 @@
-import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult, timeRefOf } from "@frameshell/protocol";
 import { VOICEOVER_LINE_GAP_S, VOICEOVER_TEMPO_RANGE } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
@@ -110,7 +110,7 @@ function anchors(raw: string): Record<string, number | string> {
     const ref = cut < 0 ? "" : entry.slice(cut + 1).trim();
     if (key === "" || ref === "") throw new UsageError(`--at: expected line=time entries separated by commas (hook-1=hook+0.5,hook-2=beat:9), got "${entry.trim()}".`);
     if (key in found) throw new UsageError(`--at: ${key} is given twice.`);
-    found[key] = SECONDS_TEXT.test(ref) ? Number(ref) : ref;
+    found[key] = timeRefOf(ref);
   }
   return found;
 }
@@ -152,7 +152,7 @@ function parsePlace(script: string, lines: string[] | undefined, options: Parame
     ...(lines ? { lines } : {}),
     ...(options.at !== undefined ? { at: anchors(options.at) } : {}),
     ...(options.tempo !== undefined ? { tempo: tempos(options.tempo) } : {}),
-    ...(start !== undefined ? { start: SECONDS_TEXT.test(start) ? Number(start) : start } : {}),
+    ...(start !== undefined ? { start: timeRefOf(start) } : {}),
     ...(gap !== undefined ? { gap } : {}),
     ...(track !== undefined ? { track } : {}),
     replace: options.replace === true,
@@ -175,7 +175,7 @@ export async function executeVoiceover(
   }
   const { kind: _kind, ...params } = inv;
   const result = await conn.request("voiceover.generate", { cwd, ...params }, progress ? { onProgress: progress } : {}).catch((error: unknown) => {
-    throw withConfirmationHint(error, inv.script);
+    throw withConfirmationHint(error, inv);
   });
   return json ? `${JSON.stringify(result, null, 2)}\n` : formatGenerate(result);
 }
@@ -184,12 +184,31 @@ export async function executeVoiceover(
  * A `ConfirmationRequired` or `ConfirmationStale` refusal with the command that confirms it: the human output of an
  * error is its message only, so the `confirmation` token the person's `--yes` must carry is printed there (JSON keeps it in `data`).
  */
-function withConfirmationHint(error: unknown, script: string): unknown {
+function withConfirmationHint(error: unknown, inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>): unknown {
   if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return error;
   const token = (error.data as { confirmation?: unknown } | undefined)?.confirmation;
   if (typeof token !== "string") return error;
-  const quoted = /^[\w./:-]+$/.test(script) ? script : JSON.stringify(script);
-  return new RpcError(error.code, `${error.message}\nOnce the person confirmed this cost: frameshell voiceover generate ${quoted} --yes --confirmation ${token}`, error.data);
+  return new RpcError(error.code, `${error.message}\nOnce the person confirmed this cost: ${confirmCommand(inv, token)}`, error.data);
+}
+
+/**
+ * The command that confirms the ask of `inv`: the same script, lines, provider, voice and `--no-verify`, so the run it
+ * confirms is the one the person saw priced, plus `--yes --confirmation <token>`.
+ */
+export function confirmCommand(inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>, token: string): string {
+  const parts = ["frameshell", "voiceover", "generate", shellWord(inv.script)];
+  if (inv.lines) parts.push("--lines", shellWord(inv.lines.join(",")));
+  if (inv.provider !== undefined) parts.push("--provider", shellWord(inv.provider));
+  if (inv.voice !== undefined) parts.push("--voice", shellWord(inv.voice));
+  if (!inv.verify) parts.push("--no-verify");
+  parts.push("--yes", "--confirmation", token);
+  return parts.join(" ");
+}
+
+/** `text` as one shell word: bare when plain, else in double quotes (read alike by sh, PowerShell and cmd) unless it holds a character they treat differently. */
+function shellWord(text: string): string {
+  if (/^[\w./:@%+=,-]+$/.test(text)) return text;
+  return /["`$\\!]/.test(text) ? JSON.stringify(text) : `"${text}"`;
 }
 
 function formatPlace(result: VoiceoverPlaceResult): string {

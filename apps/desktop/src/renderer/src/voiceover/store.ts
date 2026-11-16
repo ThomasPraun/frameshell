@@ -9,7 +9,7 @@ export type Run =
   | { kind: "none" }
   | { kind: "getting" }
   | { kind: "choose"; bytes: number }
-  | { kind: "running"; progress: VoiceoverProgress | null; stopping: boolean }
+  | { kind: "running"; progress: VoiceoverProgress | null; stopping: boolean; /** Stop found nothing of this app to stop (the daemon had no call of ours yet). */ nothingStopped: boolean }
   | { kind: "report"; result: VoiceoverGenerateResult; asked: CheckAsked }
   | { kind: "stopped"; kept: number }
   | { kind: "failed"; message: string };
@@ -47,6 +47,15 @@ function publish(next: DialogState | null): void {
   for (const listener of listeners) listener();
 }
 
+/**
+ * Keep the dialog visible when the detached panel window it is drawn in closes (ADR 0012): it moves to the project
+ * window, with its state, so a running generation can still be seen and stopped there.
+ */
+function followWindow(id: number, view: Window): void {
+  if (view === window) return;
+  view.addEventListener("pagehide", () => update(id, (state) => (state.view === view ? { ...state, view: window } : state)), { once: true });
+}
+
 const api = () => window.frameshell.voiceover;
 const messageOf = (error: unknown) => (error as Error).message ?? String(error);
 
@@ -67,7 +76,7 @@ function loadMarkers(id: number): void {
 
 /** Run the generation. `asked` is whether the misread check was asked for. */
 async function generate(id: number, script: string, verify: boolean, asked: CheckAsked): Promise<void> {
-  update(id, (state) => ({ ...state, run: { kind: "running", progress: null, stopping: false } }));
+  update(id, (state) => ({ ...state, run: { kind: "running", progress: null, stopping: false, nothingStopped: false } }));
   const off = api().onProgress((progress) => {
     update(id, (state) => (state.run.kind === "running" ? { ...state, run: { ...state.run, progress } } : state));
   });
@@ -94,6 +103,7 @@ export const voiceoverDialog = {
     if (current?.run.kind === "running") return;
     const id = ++session;
     publish({ script, view, run: { kind: "getting" }, place: null });
+    followWindow(id, view);
     try {
       const plan = await api().verifyPlan();
       // Closed while the plan was being read: nothing runs.
@@ -116,6 +126,7 @@ export const voiceoverDialog = {
     if (current?.run.kind === "running") return;
     const id = ++session;
     publish({ script, view, run: { kind: "none" }, place: emptyForm() });
+    followWindow(id, view);
     loadMarkers(id);
   },
 
@@ -123,8 +134,10 @@ export const voiceoverDialog = {
   async stop(): Promise<void> {
     if (!current || current.run.kind !== "running" || current.run.stopping) return;
     const id = session;
-    update(id, (state) => (state.run.kind === "running" ? { ...state, run: { ...state.run, stopping: true } } : state));
-    await api().cancel().catch(() => undefined);
+    update(id, (state) => (state.run.kind === "running" ? { ...state, run: { ...state.run, stopping: true, nothingStopped: false } } : state));
+    // The stopped call itself ends the run (`canceled`); only a Stop that stopped nothing, or failed, has to give the button back.
+    const canceled = await api().cancel().catch(() => false);
+    if (!canceled) update(id, (state) => (state.run.kind === "running" ? { ...state, run: { ...state.run, stopping: false, nothingStopped: true } } : state));
   },
 
   /** Edit the form. */

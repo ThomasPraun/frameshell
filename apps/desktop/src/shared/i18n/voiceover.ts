@@ -14,8 +14,9 @@ const en = {
   working: "Working…",
   stop: "Stop",
   stopping: "Stopping…",
+  nothingStopped: "There was nothing to stop yet. Try again in a moment.",
   stopped: (kept: number) =>
-    kept === 0 ? "Stopped. Nothing was generated." : `Stopped. ${kept === 1 ? "1 take" : `${kept} takes`} finished before and ${kept === 1 ? "is" : "are"} kept.`,
+    kept === 0 ? "Stopped. Nothing was generated." : `Stopped. ${kept === 1 ? "1 take was" : `${kept} takes were`} saved and ${kept === 1 ? "is" : "are"} kept.`,
   failed: "The voiceover could not be generated",
   chooseTitle: "Check the takes against the script?",
   chooseBody: (megabytes: number) =>
@@ -50,7 +51,7 @@ const en = {
   placeHelp: "Puts the phrases of each line on the Voiceover track of the main timeline, in one step you can undo.",
   startLabel: "Start at",
   startPlaceholder: "seconds, a marker or beat:9",
-  startHint: "Empty: right after the last voice clip. Seconds, a marker name, beat:N or bar:N.",
+  startHint: "Empty: right after the last voice clip. Seconds, a marker name, beat:N or bar:N (a name made only of digits counts as seconds).",
   replaceLabel: "Replace clips already placed from these takes",
   place: "Place",
   placing: "Placing…",
@@ -72,8 +73,9 @@ const es: typeof en = {
   working: "Trabajando…",
   stop: "Detener",
   stopping: "Deteniendo…",
+  nothingStopped: "Todavía no había nada que detener. Inténtalo de nuevo en un momento.",
   stopped: (kept) =>
-    kept === 0 ? "Detenido. No se generó nada." : `Detenido. ${kept === 1 ? "1 toma terminó" : `${kept} tomas terminaron`} antes y ${kept === 1 ? "se conserva" : "se conservan"}.`,
+    kept === 0 ? "Detenido. No se generó nada." : `Detenido. ${kept === 1 ? "1 toma se guardó" : `${kept} tomas se guardaron`} y ${kept === 1 ? "se conserva" : "se conservan"}.`,
   failed: "No se pudo generar la voz en off",
   chooseTitle: "¿Comprobar las tomas contra el guion?",
   chooseBody: (megabytes) =>
@@ -108,7 +110,7 @@ const es: typeof en = {
   placeHelp: "Pone las frases de cada línea en la pista Voiceover de la línea de tiempo principal, en un paso que puedes deshacer.",
   startLabel: "Empezar en",
   startPlaceholder: "segundos, un marcador o beat:9",
-  startHint: "Vacío: justo después del último clip de voz. Segundos, el nombre de un marcador, beat:N o bar:N.",
+  startHint: "Vacío: justo después del último clip de voz. Segundos, el nombre de un marcador, beat:N o bar:N (un nombre hecho solo de dígitos cuenta como segundos).",
   replaceLabel: "Reemplazar los clips ya colocados con estas tomas",
   place: "Colocar",
   placing: "Colocando…",

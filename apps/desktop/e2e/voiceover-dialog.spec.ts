@@ -47,9 +47,14 @@ test("shows what is being said, and Stop keeps the takes finished before it", as
   await expect(progress).toContainText("Saying hook-1");
   // Close is not offered while it runs.
   await expect(page.getByTestId("voiceover-close")).toBeDisabled();
+  // Modal: Tab never leaves the dialog for the timeline or the preview behind it.
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => document.activeElement?.closest("[data-testid=voiceover-dialog]") !== null)).toBe(true);
+  }
   await expect(progress).toContainText("Saying fix-1");
   await page.getByTestId("voiceover-stop").click();
-  await expect(page.getByTestId("voiceover-stopped")).toHaveText("Stopped. 1 take finished before and is kept.");
+  await expect(page.getByTestId("voiceover-stopped")).toHaveText("Stopped. 1 take was saved and is kept.");
   expect(existsSync(take("hook-1"))).toBe(true);
   expect(existsSync(take("fix-1"))).toBe(false);
   await page.getByTestId("voiceover-close").click();

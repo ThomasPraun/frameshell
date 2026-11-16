@@ -2,7 +2,7 @@
 // and the cost it found; the app asks the person and sends `yes` with that ask's `confirmation` token only after they
 // confirm, so a run whose lines or cost changed meanwhile (`ConfirmationStale`) asks again. No dialog code here, so it is testable.
 // Also the pure parts of the rest of the app's voiceover: progress, Cancel, the misread check's plan, where placing starts.
-import { ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverGenerateResult } from "@frameshell/protocol";
+import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult, timeRefOf } from "@frameshell/protocol";
 import type { VoiceoverProgress, VoiceoverVerifyPlan } from "../shared/api.js";
 
 /** Transcription provider the app can set up and size a download for (`transcriptionDownload` in `main/index.ts`). */
@@ -41,7 +41,7 @@ export function canceledRun(error: unknown): { kept: number } | null {
 export function startOf(typed: string): number | string | undefined {
   const text = typed.trim();
   if (text === "") return undefined;
-  return SECONDS_TEXT.test(text) ? Number(text) : text;
+  return timeRefOf(text);
 }
 
 /** What the person is asked to confirm: the provider, how many lines it would say, and the estimate. */

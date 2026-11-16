@@ -16,11 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the daemon's TimeRef rules) and places the phrases on the main timeline in one transaction, with "replace" for takes
   already placed. "Place voiceover…" is also in the script's own menu. The misread check runs only when transcription is
   already on the machine, or after the person agrees to its download in the dialog; never a silent download. Stop is the
-  new internal `voiceover.cancel`: the line being said is abandoned, the takes finished before it are kept and imported,
-  and the stopped call fails with `SpeechFailed` (`data.canceled`). `FRAMESHELL_SPEECH_STAND_IN=slow` adds
+  new internal `voiceover.cancel`: it stops the generations of its own connection only (never an agent's run in
+  front of it; a call still waiting its turn ends at once), the line being said is abandoned, the takes saved before it
+  are kept and imported, and the stopped call fails with `SpeechFailed` (`data.canceled`); it answers `canceled: false`
+  when it had nothing to stop and the dialog gives the button back. The dialog keeps keys and focus inside it, moves to
+  the project window when its detached panel closes, and the progress bar is one fraction of the whole run. `FRAMESHELL_SPEECH_STAND_IN=slow` adds
   `stand-in-slow` for the e2e. The native "ready" and error boxes are gone (the dialog says it); the cost box stays.
 - `frameshell voiceover generate --yes --confirmation <token>` binds a CLI confirmation to the ask the person saw: the
-  `ConfirmationRequired` refusal prints the confirming command with its token, and a script or price that changed
+  `ConfirmationRequired` refusal prints the confirming command with its token and the `--lines`, `--provider`,
+  `--voice` and `--no-verify` it was made with, and a script or price that changed
   meanwhile fails with `ConfirmationStale` instead of charging more than was confirmed.
 
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
