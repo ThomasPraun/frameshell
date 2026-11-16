@@ -282,6 +282,17 @@ export const scriptSoundMethods = {
       warnings: z.array(z.string()).describe("Script problems (budget over a scene's timing, digits without `language`…) and provider notes."),
     }),
   },
+  "voiceover.cancel": {
+    internal: true,
+    description:
+      "Stop the `voiceover.generate` running in the project (the app's Cancel button, ADR 0034): the line being said is " +
+      "abandoned, takes finished before it stay written and imported (they may have been paid for), and the stopped call fails " +
+      "with SpeechFailed whose data has `canceled: true` and the `written` takes. A run that is only waiting its turn behind " +
+      "another is not stopped, and a run in its misread check ends with the check skipped. Safe to repeat; `canceled` is false when " +
+      "nothing was running.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({ canceled: z.boolean().describe("A running generation was told to stop; false when none ran in this project.") }),
+  },
   "voiceover.place": {
     mutating: true,
     description:

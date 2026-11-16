@@ -263,6 +263,64 @@ describe("voiceover.generate with a provider that fails outside synthesis", () =
   });
 });
 
+describe("voiceover.cancel", () => {
+  it("stops a running generation at once, keeps and imports the takes finished before it, and the next call reuses them", async () => {
+    // The first line takes 150 ms, the second waits for the cancel: a provider that never answers on its own.
+    const standIn = standInSpeechProvider();
+    let calls = 0;
+    const stalls: SpeechProvider = {
+      ...standIn,
+      id: "stalls",
+      synthesize: (text, voice, options, context) =>
+        ++calls === 1
+          ? standIn.synthesize(text, voice, options, context)
+          : new Promise((_resolve, reject) => context.signal.addEventListener("abort", () => reject(context.signal.reason), { once: true })),
+    };
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [stalls, standIn],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const client = await connectToDaemon(local.socketPath, { client: "test" });
+    try {
+      const dir = join(tempDir(), "stopped");
+      await client.request("project.init", { dir });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, ["provider: stalls"]));
+      expect(await client.request("voiceover.cancel", { cwd: dir })).toEqual({ canceled: false });
+      let stopped: Promise<unknown> | null = null;
+      const run = client.request(
+        "voiceover.generate",
+        { cwd: dir, script: "scripts/vo.md", verify: false },
+        {
+          onProgress: (update) => {
+            if (update.values?.["line"] === "fix-1" && stopped === null) stopped = client.request("voiceover.cancel", { cwd: dir });
+          },
+        },
+      );
+      await expect(run).rejects.toMatchObject({
+        code: ErrorCode.SpeechFailed,
+        data: { provider: "stalls", line: "fix-1", canceled: true, written: ["assets/voiceover/vo/hook-1.wav"] },
+      });
+      expect(await stopped).toEqual({ canceled: true });
+      expect(existsSync(join(dir, "assets", "voiceover", "vo", "hook-1.wav"))).toBe(true);
+      expect(existsSync(join(dir, "assets", "voiceover", "vo", "fix-1.wav"))).toBe(false);
+      const assets = await client.request("asset.list", { cwd: dir });
+      expect(assets.assets.map((asset) => asset.path)).toContain("assets/voiceover/vo/hook-1.wav");
+      expect(await client.request("voiceover.cancel", { cwd: dir })).toEqual({ canceled: false });
+
+      // Same text, another provider id would be another take: the cached line is the one already said.
+      const again = await client.request("voiceover.generate", { cwd: dir, script: "scripts/vo.md", provider: "stalls", lines: ["hook-1"], verify: false });
+      expect(again.lines.map((line) => line.state)).toEqual(["cached"]);
+    } finally {
+      client.close();
+      await local.close();
+    }
+  }, 60_000);
+});
+
 describe("voiceover.generate phrases and misread check", () => {
   /** The stand-in says each word as 0.3 s of tone with 0.1 s of silence after it, so each word is a phrase. */
   const word = (text: string, start: number) => ({ text, start, end: start + 0.3 });

@@ -1,14 +1,16 @@
-import { type DaemonConnection, type Progress, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult } from "@frameshell/protocol";
 import { VOICEOVER_LINE_GAP_S, VOICEOVER_TEMPO_RANGE } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `voiceover` commands (ADR 0034), in `frameshell --help`. */
-export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes] [--no-verify]
+export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes [--confirmation token]] [--no-verify]
                                Say each line of a voiceover script (\`voiceover: true\`) into
                                assets/voiceover/<script>/<line>.wav and import the takes; unchanged lines are reused.
                                Reports each take's phrases (split at silences) and, through the project's transcription
                                plugin, the misreads (--no-verify skips that).
-                               A paid provider needs --yes after the person confirmed the cost it reports
+                               A paid provider needs --yes after the person confirmed the cost it reports; the refusal
+                               prints a --confirmation token: pass it back so the run stays what the person saw (a script
+                               or price that changed meanwhile fails with ConfirmationStale and generates nothing)
   voiceover place <script> [--lines id,id] [--at line=time,line.2=time,…] [--tempo line.2=1.1,…] [--start t] [--gap s]
                            [--track id] [--replace] [--dry-run] [--timeline id]
                                Put the takes of a voiceover script on the timeline as phrase clips (one per phrase of each
@@ -25,7 +27,7 @@ export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [-
 
 /** Flags each `voiceover` command takes besides the global ones. */
 export const VOICEOVER_FLAGS: Record<string, readonly string[]> = {
-  "voiceover generate": ["lines", "provider", "voice", "yes", "no-verify"],
+  "voiceover generate": ["lines", "provider", "voice", "yes", "confirmation", "no-verify"],
   "voiceover place": ["lines", "at", "tempo", "start", "gap", "track", "replace", "dry-run", "timeline"],
 };
 
@@ -38,6 +40,8 @@ export type VoiceoverInvocation =
       provider?: string;
       voice?: string;
       yes: boolean;
+      /** Token of the ask the person confirmed (`ConfirmationRequired` data); only with `yes`. */
+      confirmation?: string;
       verify: boolean;
     }
   | {
@@ -62,6 +66,7 @@ export function parseVoiceover(
     provider?: string | undefined;
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
+    confirmation?: string | undefined;
     "no-verify"?: boolean | undefined;
     timeline?: string | undefined;
     at?: string | undefined;
@@ -81,6 +86,9 @@ export function parseVoiceover(
     if (lines.length === 0) throw new UsageError("--lines: expected line ids separated by commas, e.g. --lines hook-1,problem-2.");
   }
   if (sub === "place") return parsePlace(args[0]!, lines, options);
+  const confirmation = options.confirmation?.trim();
+  if (options.confirmation !== undefined && confirmation === "") throw new UsageError("--confirmation: expected the token the ConfirmationRequired refusal printed.");
+  if (confirmation !== undefined && options.yes !== true) throw new UsageError("--confirmation goes with --yes: it binds the confirmation to the ask the person saw.");
   return {
     kind: "voiceover.generate",
     script: args[0]!,
@@ -88,6 +96,7 @@ export function parseVoiceover(
     ...(options.provider !== undefined ? { provider: options.provider } : {}),
     ...(typeof options.voice === "string" ? { voice: options.voice } : {}),
     yes: options.yes === true,
+    ...(confirmation !== undefined ? { confirmation } : {}),
     verify: options["no-verify"] !== true,
   };
 }
@@ -165,8 +174,22 @@ export async function executeVoiceover(
     return json ? `${JSON.stringify(placed, null, 2)}\n` : formatPlace(placed);
   }
   const { kind: _kind, ...params } = inv;
-  const result = await conn.request("voiceover.generate", { cwd, ...params }, progress ? { onProgress: progress } : {});
+  const result = await conn.request("voiceover.generate", { cwd, ...params }, progress ? { onProgress: progress } : {}).catch((error: unknown) => {
+    throw withConfirmationHint(error, inv.script);
+  });
   return json ? `${JSON.stringify(result, null, 2)}\n` : formatGenerate(result);
+}
+
+/**
+ * A `ConfirmationRequired` or `ConfirmationStale` refusal with the command that confirms it: the human output of an
+ * error is its message only, so the `confirmation` token the person's `--yes` must carry is printed there (JSON keeps it in `data`).
+ */
+function withConfirmationHint(error: unknown, script: string): unknown {
+  if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return error;
+  const token = (error.data as { confirmation?: unknown } | undefined)?.confirmation;
+  if (typeof token !== "string") return error;
+  const quoted = /^[\w./:-]+$/.test(script) ? script : JSON.stringify(script);
+  return new RpcError(error.code, `${error.message}\nOnce the person confirmed this cost: frameshell voiceover generate ${quoted} --yes --confirmation ${token}`, error.data);
 }
 
 function formatPlace(result: VoiceoverPlaceResult): string {

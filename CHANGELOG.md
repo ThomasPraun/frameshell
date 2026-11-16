@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 160): "Generate voiceover…" on a
+  voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
+  already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
+  heard) and the form of "Place voiceover…", which asks where to start (seconds, a marker, `beat:N`, `bar:N`, resolved by
+  the daemon's TimeRef rules) and places the phrases on the main timeline in one transaction, with "replace" for takes
+  already placed. "Place voiceover…" is also in the script's own menu. The misread check runs only when transcription is
+  already on the machine, or after the person agrees to its download in the dialog; never a silent download. Stop is the
+  new internal `voiceover.cancel`: the line being said is abandoned, the takes finished before it are kept and imported,
+  and the stopped call fails with `SpeechFailed` (`data.canceled`). `FRAMESHELL_SPEECH_STAND_IN=slow` adds
+  `stand-in-slow` for the e2e. The native "ready" and error boxes are gone (the dialog says it); the cost box stays.
+- `frameshell voiceover generate --yes --confirmation <token>` binds a CLI confirmation to the ask the person saw: the
+  `ConfirmationRequired` refusal prints the confirming command with its token, and a script or price that changed
+  meanwhile fails with `ConfirmationStale` instead of charging more than was confirmed.
+
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
   protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
   guided filter), so an edge between two colours of the same brightness is found (error at a same-luma disc's edge 0.045

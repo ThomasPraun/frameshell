@@ -103,10 +103,6 @@ const en = {
       "This provider does not say what it costs and does not declare itself free, so it may charge you. A finished take is kept in assets/voiceover/ so it is never paid for twice.",
     voiceoverCostChanged: "The script or the price changed since you confirmed, so nothing was generated.",
     voiceoverGenerate: "Generate",
-    voiceoverDoneTitle: (script: string) => `Voiceover of ${script} is ready`,
-    voiceoverDoneDetail: (generated: number, reused: number) =>
-      `${generated === 1 ? "1 line was generated" : `${generated} lines were generated`}${reused > 0 ? ` and ${reused === 1 ? "1 was already there" : `${reused} were already there`}` : ""}. The takes are in assets/voiceover/.`,
-    voiceoverFailed: "The voiceover could not be generated",
     ok: "OK",
   },
   setup: {
@@ -266,10 +262,6 @@ const es: typeof en = {
       "Este proveedor no indica cuánto cuesta ni declara ser gratuito, así que puede cobrarte. Una toma terminada se guarda en assets/voiceover/ para no pagarla dos veces.",
     voiceoverCostChanged: "El guion o el precio cambiaron desde que confirmaste, así que no se generó nada.",
     voiceoverGenerate: "Generar",
-    voiceoverDoneTitle: (script) => `La voz en off de ${script} está lista`,
-    voiceoverDoneDetail: (generated, reused) =>
-      `${generated === 1 ? "Se generó 1 línea" : `Se generaron ${generated} líneas`}${reused > 0 ? ` y ${reused === 1 ? "1 ya estaba" : `${reused} ya estaban`}` : ""}. Las tomas están en assets/voiceover/.`,
-    voiceoverFailed: "No se pudo generar la voz en off",
     ok: "Aceptar",
   },
   setup: {

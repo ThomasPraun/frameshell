@@ -552,6 +552,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Running `voiceover.generate` calls, by canonical project root: one at a time per project. */
   const voiceoverRuns = new Map<string, Promise<void>>();
+  /** Stops the `voiceover.generate` that is saying lines now, by the same key (`voiceover.cancel`); a call waiting its turn has none yet. */
+  const voiceoverActive = new Map<string, AbortController>();
   /** Running `sound.sfx` calls, by canonical project root: one at a time per project, so two calls never write one take. */
   const soundRuns = new Map<string, Promise<void>>();
   /** Run sound work of project `dir` after the sound work already running there: takes are written one at a time. */
@@ -1944,8 +1946,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           throw new RpcError(ErrorCode.SpeechProviderNotFound, `${error.message} Built in: ${[...builtIn.keys()].join(", ")}.`, { provider: id, available });
         }
       };
-      const work = () =>
-        transcribing(dir, () => generateVoiceover({
+      const key = canonicalPathSync(dir);
+      const work = () => {
+        const stop = new AbortController();
+        voiceoverActive.set(key, stop);
+        return transcribing(dir, () => generateVoiceover({
           root: dir,
           cwd,
           script,
@@ -1970,10 +1975,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
               // Connection closed.
             }
           },
-          signal: voiceoverAbort.signal,
-        }));
+          signal: AbortSignal.any([voiceoverAbort.signal, stop.signal]),
+        })).finally(() => {
+          if (voiceoverActive.get(key) === stop) voiceoverActive.delete(key);
+        });
+      };
       // One run per project at a time: two runs over one script would write the same takes.
-      const key = canonicalPathSync(dir);
       const run = (voiceoverRuns.get(key) ?? Promise.resolve()).then(work);
       const settled = run.then(
         () => undefined,
@@ -1984,6 +1991,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
       });
       return run;
+    },
+    "voiceover.cancel": async ({ cwd }) => {
+      const active = voiceoverActive.get(canonicalPathSync(await root(cwd)));
+      active?.abort();
+      return { canceled: active !== undefined };
     },
     "voiceover.place": async (params, caller) => {
       const { cwd, timeline, dryRun } = params;

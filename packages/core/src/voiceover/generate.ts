@@ -191,13 +191,20 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   }
 
   const said = new Map<string, { take: { pcm: Pcm16 }; mark: TakeMark }>();
+  /** The run was stopped (`voiceover.cancel`, or the daemon): the takes finished so far, possibly paid for, are kept and imported. */
+  const stopped = async (line: string): Promise<never> => {
+    const imported = written.length > 0 ? await request.importAssets(written.map((file) => join(root, ...file.split("/")))) : null;
+    const kept = imported ? ` The ${written.length} take${written.length === 1 ? "" : "s"} finished before ${written.length === 1 ? "is" : "are"} kept; the next call reuses them.` : "";
+    throw new RpcError(ErrorCode.SpeechFailed, `Canceled before line ${line} was said.${kept}`, { provider: provider.id, line, details: "canceled", written, canceled: true });
+  };
   for (const [index, plan] of toSay.entries()) {
-    request.signal.throwIfAborted();
+    if (request.signal.aborted) await stopped(plan.line.id);
     request.progress({ message: `Saying ${plan.line.id} (${index + 1}/${toSay.length})`, fraction: index / toSay.length, stage: "speak", values: { line: plan.line.id } });
     let take;
     try {
       take = await say(provider, plan, voice, options, request);
     } catch (error) {
+      if (request.signal.aborted) await stopped(plan.line.id);
       const imported = written.length > 0 ? await request.importAssets(written.map((file) => join(root, ...file.split("/")))) : null;
       const details = (error as Error)?.message ?? String(error);
       throw new RpcError(
@@ -262,18 +269,24 @@ async function checkTakes(
     return { verification: { status: "skipped", provider: null, model: null, reason: "Verification was not asked for (`verify: false`).", misread: 0, doubtful: 0 }, checks: new Map(), warnings: [] };
   }
   request.progress({ message: "Checking the takes against their lines", stage: "verify" });
-  return verifyTakes({
-    root,
-    takes: plans.map((plan) => ({ id: plan.line.id, spoken: plan.line.spoken, display: plan.line.display, file: join(root, ...plan.file.split("/")), pcm: pcms.get(plan.line.id)! })),
-    language: scriptLanguage ?? verify.language,
-    providerId: verify.providerId,
-    provider: verify.provider,
-    model: verify.model,
-    tools: verify.tools,
-    extractAudio: verify.extractAudio,
-    progress: request.progress,
-    signal: request.signal,
-  });
+  try {
+    return await verifyTakes({
+      root,
+      takes: plans.map((plan) => ({ id: plan.line.id, spoken: plan.line.spoken, display: plan.line.display, file: join(root, ...plan.file.split("/")), pcm: pcms.get(plan.line.id)! })),
+      language: scriptLanguage ?? verify.language,
+      providerId: verify.providerId,
+      provider: verify.provider,
+      model: verify.model,
+      tools: verify.tools,
+      extractAudio: verify.extractAudio,
+      progress: request.progress,
+      signal: request.signal,
+    });
+  } catch (error) {
+    // Canceled while checking: the takes are written and imported, so the run ends with the check skipped.
+    if (!request.signal.aborted) throw error;
+    return { verification: { status: "skipped", provider: verify.providerId, model: null, reason: "The check was canceled.", misread: 0, doubtful: 0 }, checks: new Map(), warnings: [] };
+  }
 }
 
 /** Digest of what a paid run would do and cost: provider, voice, each line to say with its take key (text, provider version, voice, language) and the estimate. */

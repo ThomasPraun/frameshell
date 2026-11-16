@@ -21,6 +21,8 @@ import type {
   TimelineView,
   UiCommand,
   UiView,
+  VoiceoverGenerateResult,
+  VoiceoverPlaceResult,
 } from "@frameshell/protocol";
 import type { DetachablePanel, Layout } from "./layout.js";
 
@@ -359,12 +361,6 @@ export interface FrameshellApi {
      * it (daemon `file.uses`). False when the person cancelled, or when it is one of the project's own files (a message box says so).
      */
     trash(path: string): Promise<boolean>;
-    /**
-     * Generate the voiceover of a project-relative voiceover script (daemon `voiceover.generate`, ADR 0034). A paid
-     * provider asks first in a native dialog naming the cost (or that it is unknown); main sends `yes` only after the
-     * person confirms. False when the person cancelled or it failed (a message box says why), true once the takes are written.
-     */
-    generateVoiceover(path: string): Promise<boolean>;
     /** Show a project-relative file or folder in Finder / Explorer / the file manager. */
     reveal(path: string): Promise<void>;
     /** Put the absolute path of a project-relative file or folder on the clipboard. */
@@ -612,6 +608,29 @@ export interface FrameshellApi {
      */
     turns(timeline: string, group: string): Promise<MulticamTurnsResult>;
   };
+  voiceover: {
+    /** How the misread check of a generation can run in the window's project; see {@link VoiceoverVerifyPlan}. Rejects with the daemon's message. */
+    verifyPlan(): Promise<VoiceoverVerifyPlan>;
+    /**
+     * Generate the voiceover of a project-relative voiceover script (daemon `voiceover.generate`, ADR 0034), with the
+     * misread check when `verify`. A paid provider asks first in a native dialog naming the cost (or that it is unknown);
+     * main sends `yes` only after the person confirms. Progress arrives through {@link FrameshellApi.voiceover}`.onProgress`.
+     * Rejects with the daemon's message when it fails.
+     */
+    generate(path: string, verify: boolean): Promise<VoiceoverRun>;
+    /** Stop the generation running in the window's project (daemon `voiceover.cancel`); the takes finished stay. */
+    cancel(): Promise<void>;
+    /** Called with the progress of the generation in this window's project. Returns an unsubscribe function. */
+    onProgress(listener: (progress: VoiceoverProgress) => void): () => void;
+    /** Labels of the markers of the main timeline: what "where to start" can name besides seconds. Empty when it has none. */
+    markers(): Promise<string[]>;
+    /**
+     * Place the takes of a project-relative voiceover script on the main timeline (daemon `voiceover.place`, one
+     * transaction). `start` is what the person typed: seconds, a marker, `beat:N` or `bar:N`; empty = after the
+     * voice track's last clip. `replace` removes the clips already playing these takes first. Rejects with the daemon's message.
+     */
+    place(path: string, start: string, replace: boolean): Promise<VoiceoverPlaceResult>;
+  };
   models: {
     /** `model.list` for the window's project (#427): provider models, files registered on this machine, the project's choice. */
     list(): Promise<MethodResult<"model.list">>;
@@ -858,6 +877,29 @@ export interface ModelProgress {
   fraction: number | null;
 }
 
+/**
+ * Whether the misread check of a voiceover generation (ADR 0034 decision 18) can run here, so the dialog never
+ * starts a download by itself: `ready` = transcription is installed with its model, `download` = it would first
+ * download `bytes` (the person agrees in the dialog), `unavailable` = no transcription plugin the app can use.
+ */
+export type VoiceoverVerifyPlan = { kind: "ready" } | { kind: "download"; bytes: number } | { kind: "unavailable" };
+
+/** What a generation did: the result, or that the person declined the cost, or that Cancel stopped it. */
+export type VoiceoverRun =
+  | { status: "done"; result: VoiceoverGenerateResult }
+  | { status: "declined" }
+  | { status: "canceled"; kept: number };
+
+/**
+ * One step of a running generation. `confirm`: waiting for the person to confirm a cost; `speak`: saying `line`;
+ * `verify`: checking `line` against the script; `download`: fetching the transcription tools. `fraction` is of the step, 0..1, null when unknown.
+ */
+export interface VoiceoverProgress {
+  stage: "confirm" | "speak" | "verify" | "download";
+  line: string | null;
+  fraction: number | null;
+}
+
 /** A generated clip's live page as the renderer gets it: never its HTML, only where to load it. */
 export interface LiveClipPage {
   /** `frameshell-live://<token>/<entry>`, valid until the clip asks again or the project closes. */
@@ -943,7 +985,12 @@ export const Channel = {
   filesWrite: "files:write",
   filesChanged: "files:changed",
   filesTrash: "files:trash",
-  filesVoiceover: "files:voiceover",
+  voiceoverVerifyPlan: "voiceover:verify-plan",
+  voiceoverGenerate: "voiceover:generate",
+  voiceoverCancel: "voiceover:cancel",
+  voiceoverProgress: "voiceover:progress",
+  voiceoverMarkers: "voiceover:markers",
+  voiceoverPlace: "voiceover:place",
   filesReveal: "files:reveal",
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
