@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Code templates, slice TP1 of #466 (ADR 0033, epic #451): `frameshell hyperframes new <name> --template code-typing`,
+  `code-diff` or `code-morph` scaffold a code window. `code-typing` types a snippet key by key with the uneven rhythm of
+  `typing-field`, a caret that blinks at rest, an indent that arrives with its Enter, waits after the lines named in
+  `pauses` and a timing guard that types faster in a clip too short for it. `code-diff` shows two snippets as a unified
+  diff: unchanged and removed lines come in, then each change is lit in turn (a removed line on a red wash with a strike
+  through it, an added line sliding in on a green one). `code-morph` turns one snippet into another: tokens both have
+  travel to their new place, the rest fade out or rise in. Props `code` / `before` / `after`, `language` (`js`,
+  `python`, `shell`, `json`, `plain`), `highlight`, `title`, `numbers`, `card`, `accent`, `size`, `bg`, `backdrop`, plus
+  timing props per template; the type shrinks until the longest line and every row fit in each format. A small built-in
+  tokenizer colours keywords, strings, numbers, comments and calls (no highlighter dependency, no network); the face is
+  the system monospace and the window colour and accent come from `style.json` (`colors.card`, `colors.accent`). The
+  character width is measured on the rendering machine. The skill lists the three templates; the opt-in real-render test
+  covers layout in the four formats, cold-versus-reseek frames, the typed text, the pauses, the diff turns and the morph
+  end state.
 - Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 157): `analyze`
   returns `suggestions` (also in `analysis.json`), values for `style.json` read from the film, each with `path`,
   `value`, `why`, `from` (the result fields) and its own label: `colors.bg` (the palette's largest colour, a quarter of
