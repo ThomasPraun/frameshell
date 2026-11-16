@@ -286,6 +286,13 @@ describe("frameshell doctor", () => {
     expect(result.code).toBe(1);
     const report = JSON.parse(result.stdout);
     expect(report.dataDir).toBe(env.FRAMESHELL_DATA_DIR);
+    // Blender is found where its installer put it (/Applications/Blender.app on a Mac that has one), whatever PATH says.
+    const blender = report.binaries.find((b: { name: string }) => b.name === "blender");
+    const machineBlender = blender.source === "system";
+    if (machineBlender) {
+      expect(blender).toMatchObject({ installed: true, found: "standard" });
+      Object.assign(blender, { source: "managed", installed: false });
+    }
     expect(report.binaries.map((b: { name: string; source: string; installed: boolean }) => [b.name, b.source, b.installed])).toEqual([
       ["ffmpeg", "managed", false],
       ["ffprobe", "managed", false],
@@ -300,9 +307,11 @@ describe("frameshell doctor", () => {
     // whisper.cpp installs on first transcription (whisper-server when the Shoot view is told to), headless Chrome
     // on first HyperFrames render, sherpa-onnx on first speaker diarization, ONNX Runtime Web on first face
     // detection: never a problem here. Blender is the person's own install: reported, never a problem.
-    expect(report.problems.join("\n")).not.toMatch(/whisper|chrome|sherpa|onnxruntime|blender/i);
+    // A machine Blender outside 4.5 LTS and 5.x is a problem doctor names; nothing else may be.
+    const problems = (report.problems as string[]).filter((problem) => !machineBlender || !/is outside the supported range/.test(problem));
+    expect(problems.join("\n")).not.toMatch(/whisper|chrome|sherpa|onnxruntime|blender/i);
     const text = frameshell(["doctor"], tempDir(), env).stdout;
-    expect(text).toMatch(/blender {2}not installed, set binaries\.blender · managed/);
+    expect(text).toMatch(machineBlender ? /blender {2}.* · system \(found at its standard install path\) · / : /blender {2}not installed, set binaries\.blender · managed/);
     // Which frameshell PATH runs is advice, never a problem: an empty PATH adds a note and no problem.
     expect(report.command).toMatchObject({ path: null, self: { entry: realpathSync(cliBin), app: false } });
     expect(report.command.notes).toEqual([expect.stringContaining("File → Install 'frameshell' Command in PATH")]);

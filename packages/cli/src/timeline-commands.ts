@@ -110,8 +110,9 @@ mutations print the new revision):
   clip compare <clip> --look [name:]key=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]
                                Render one frame of a generated clip (blender, hyperframes, ...) under up to 11 variants next
                                to the clip as it is, as one labelled PNG, through the export frame path. A variant is
-                               props merged over the clip's own (key=value, JSON values; key=null drops one) and/or
-                               source=<project path>: --look dusk:scene=Dusk, --look close:camera=Close,scene=Dusk,
+                               props merged over the clip's own (key=value, JSON values but scene and camera always text;
+                               key=null drops one) and/or source=<project path>: --look dusk:scene=Dusk,
+                               --look close:camera=Close,scene=Dusk,
                                --look b:source=scenes/hero-b.blend; a whole look as JSON: --look '{"name":"x","props":{...}}'.
                                --at picks the frame (default the clip's middle); --out the image (default
                                .frameshell/looks/compare-<clip>-<frame>.png); --tile-width 160 to 960 (default 480).
@@ -812,7 +813,8 @@ interface ClipLookArg {
 
 /**
  * One `clip compare --look`: `[name:]key=value[,key=value...]`, e.g. `dusk:scene=Dusk` or `close:camera=Close,scene=Dusk`.
- * Values are JSON when they parse (`3`, `true`, `null`), else text; `source` is the look's source, every other key a prop.
+ * Values are JSON when they parse (`3`, `true`, `null`), else text; `scene` and `camera` are always text (but `null`
+ * drops the key); `source` is the look's source, every other key a prop.
  * A string starting with `{` is the whole look as JSON (`{"name":"x","props":{...}}`).
  */
 export function parseClipLook(raw: string): ClipLookArg {
@@ -840,10 +842,13 @@ export function parseClipLook(raw: string): ClipLookArg {
       look.source = value;
       continue;
     }
-    look.props = { ...look.props, [key]: jsonOrText(value) };
+    look.props = { ...look.props, [key]: NAME_PROPS.has(key) && value !== "null" ? value : jsonOrText(value) };
   }
   return look;
 }
+
+/** Props that name something (a Blender scene or camera): `scene=2024` is the scene called "2024", not a number. */
+const NAME_PROPS = new Set(["scene", "camera"]);
 
 /** `text` as JSON when it parses (number, boolean, null, object), else as it is. */
 function jsonOrText(text: string): unknown {

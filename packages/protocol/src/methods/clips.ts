@@ -166,12 +166,14 @@ export const clipMethods = {
       "`{ source: \"scenes/hero-b.blend\" }` a copy of the file. Tile 1 is the clip as it is (`current`), then the looks in order. Every tile is the whole composed " +
       "frame as `frame` renders it (layers above, captions), from each variant's own render: a draft (EEVEE/Workbench for a Blender clip), or the final when " +
       "it is cached; a frame never starts a final. Each variant not rendered before is rendered first (a clip render job, one at a time: seconds for a draft, " +
-      "and the whole clip up to the frame is rendered, so compare on a short clip), and stays cached for `clip.set` later. Never changes the timeline: keep a look with " +
+      "and the whole clip up to the frame is rendered, so compare on a short clip). A variant's render stays in the clip cache until the next `gc`, " +
+        "which removes it while no timeline uses it: `clip.set` with a look soon after reuses it, later it renders again. Never changes the timeline: keep a look with " +
       "`clip.set` `props` (each tile's `flags`). `at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
       "`.frameshell/looks/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. " +
       'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "dusk", props: { scene: "Dusk" } }, { name: "rim", props: { scene: "Rim light" } }] }`. ' +
       "Fails with ClipNotFound (no such adapter clip on a video track), InvalidOperation (not an adapter clip, `at` outside the clip, a look that sets nothing, " +
-      "a `source` outside the project, a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+      "a `source` outside the project), ClipRenderFailed (a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, " +
+      "or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

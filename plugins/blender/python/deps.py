@@ -4,7 +4,8 @@
 # Run by the @frameshell/blender adapter inside the user's Blender:
 #   blender -b --factory-startup -Y <file.blend> --python-exit-code 1 -P deps.py -- '{"out": "<file.json>"}'
 # Writes the absolute paths of the files the .blend references (libraries, images, caches) as {"paths": [...]}.
-# The adapter keeps the ones inside the project: editing one re-renders the clip. Never saves the .blend.
+# The adapter puts the ones inside the project into the render key by path, the ones outside by content only (their
+# absolute paths never reach the project's files). Never saves the .blend.
 
 import json
 import sys

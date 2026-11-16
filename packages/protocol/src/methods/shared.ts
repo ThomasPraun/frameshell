@@ -77,11 +77,16 @@ export const BinaryReportSchema = z.object({
   name: z.string().describe("Executable name without extension, e.g. `ffmpeg`."),
   package: z.string().describe("Managed package that ships it, e.g. `ffmpeg` (also ships `ffprobe`)."),
   source: z
-    .enum(["managed", "project", "global"])
+    .enum(["managed", "project", "global", "system"])
     .describe(
       "`managed`: pinned download under the app data dir. `project` / `global`: path from `binaries` in " +
-        "`frameshell.json` / the global `config.json`.",
+        "`frameshell.json` / the global `config.json`. `system`: the person's own install of a tool Frameshell never downloads " +
+        "(Blender), found where its installer puts it because no `binaries` override names one; `found` says how.",
     ),
+  found: z
+    .enum(["path", "standard"])
+    .optional()
+    .describe("Only with `source: \"system\"`: `path` = found on PATH, `standard` = at the product's usual install location (e.g. `/Applications/Blender.app`)."),
   path: z.string().nullable().describe("Absolute executable path; null when managed and no build is pinned for this platform."),
   installed: z.boolean().describe("True when the executable exists at `path`."),
   version: z.string().nullable().describe("Version reported by `<name> -version`; null when missing or not runnable."),

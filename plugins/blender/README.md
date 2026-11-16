@@ -4,12 +4,13 @@ Official [Frameshell](https://github.com/ThomasPraun/frameshell) clip adapter fo
 
 ```sh
 frameshell plugin install @frameshell/blender
-# Tell Frameshell where your Blender is, once (4.5 LTS or any 5.x):
-#   "binaries": { "blender": "/Applications/Blender.app/Contents/MacOS/Blender" }   in frameshell.json or the global config.json
+# Blender (4.5 LTS or any 5.x) is found where its installer puts it, or on PATH (`frameshell doctor` says where).
+# Elsewhere, tell Frameshell once:
+#   "binaries": { "blender": "/opt/blender/blender" }   in frameshell.json or the global config.json
 frameshell clip add <track> --type blender --source scenes/intro.blend --start 0 --duration 4
 ```
 
-`source` is a `.blend` inside the project. Optional `props`: `scene` and `camera` (default: the file's current scene and its active camera). Each clip has a draft render (EEVEE, or Workbench) for the preview and draft exports, and a final one (Cycles) that a final export renders and waits for, after asking when the finals are estimated over 5 minutes. The frame range is the clip's own `in` and duration, counted from the scene's first frame at the project's frame rate: a scene at another frame rate is refused with the fix, never remapped. Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Usage for agents: [`skills/blender/SKILL.md`](skills/blender/SKILL.md).
+`source` is a `.blend` inside the project. Optional `props`: `scene` and `camera` (default: the file's current scene and its active camera). Each clip has a draft render (EEVEE, or Workbench) for the preview and draft exports, and a final one (Cycles) that a final export renders and waits for, after asking when the finals are estimated over 5 minutes. The frame range is the clip's own `in` and duration, counted from the scene's first frame: a scene at another frame rate is time-remapped so seconds are kept. Files the `.blend` loads from outside the project are allowed: their content is in the render key, and the render warns that nothing watches them. Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Usage for agents: [`skills/blender/SKILL.md`](skills/blender/SKILL.md).
 
 ## Your Blender, your licence
 

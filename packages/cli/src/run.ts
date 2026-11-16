@@ -1570,13 +1570,14 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
   for (const note of command.notes) lines.push(`  note: ${note}`);
   lines.push("", "Binaries:");
   for (const binary of report.binaries) {
-    // Managed package with no build for this platform (today Blender, the person's own install): found through `binaries`.
+    // Managed package with no build for this platform (today Blender, the person's own install): found at a standard path or through `binaries`.
     const notInstalled = binary.source === "managed" && !binary.pinned ? `not installed, set binaries.${binary.name}` : "not installed";
     const state = binary.installed ? (binary.version ?? "not runnable") : notInstalled;
     const pinned = binary.pinned;
     const gpu = pinned?.accelerator ? `, ${pinned.accelerator}` : "";
     const pin = pinned ? ` · pinned ${pinned.version} (${pinned.license}, ${pinned.origin}${gpu})` : "";
-    lines.push(`  ${binary.name.padEnd(8)} ${state} · ${binary.source}${binary.path ? ` · ${binary.path}` : ""}${pin}`);
+    const found = binary.found === "path" ? " (found on PATH)" : binary.found === "standard" ? " (found at its standard install path)" : "";
+    lines.push(`  ${binary.name.padEnd(8)} ${state} · ${binary.source}${found}${binary.path ? ` · ${binary.path}` : ""}${pin}`);
   }
   if (report.codecs.length > 0) {
     lines.push("", "Codecs:");
