@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
-  protocol 156): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
+  protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
   guided filter), so an edge between two colours of the same brightness is found (error at a same-luma disc's edge 0.045
   against 0.145 with the gray guide). A source whose short side is above 1080 px also gets `<key>.full.mp4`, refined on
   the asset's own frames on the proxy's frame grid at its size (short side at most 2160), which `render`, `frame` and
@@ -19,6 +19,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refinement 47 ms per 540p frame (gray guide 21 ms), the full-size pass 355 ms per 4K frame, about 2 minutes per minute
   of video for the matte and about 11 more for a 4K source's full-size one.
 
+- More sound checks in `review`, slice RA1 of #457 (epic #451; protocol 158; `metrics.sound.music`, `edges`, `harsh`,
+  craft checks `masking`, `edge-click`, `harsh`). On a timeline, still never mixed: `music` is the voice against the music
+  alone per 0.5 s window where the voice speaks, judged by the style guide's `sound.musicUnderVoice` (`style.json`, 12 dB
+  by default) less 3 dB, never under 0; the stretches under it are `masking` (the existing `voice-bed` keeps judging the
+  voice against everything at 6 dB). `edges` lists clips starting with no fade inside sound their asset already plays
+  before the in point, at -45 dBFS or more and 19 dB or more over the rest of the film's sound in the 10 ms before
+  (`edge-click`; earshot's 9x click ratio); a clip played from its asset's start, picking up the same sound or a
+  dissolve is no cut-in. On a `--file`, `harsh` measures the 2 to 6 kHz band of the decoded mix per 400 ms against that
+  band in the loudest 400 ms (at least 20 dB under the whole mix there), and the stretches over 6 dB above it are `harsh`
+  (earshot's rule, with the mix's loudest moment standing in for the music's). Thresholds are data in
+  `review/thresholds.ts`; every finding is a warning unless `requirements.json` lists its check in `fail`. Not yet:
+  masking per 1/3-octave band (the envelopes are broadband), a click in an exported file placed on a clip edge, and the
+  ADR 0038 decision 5 lint rules over the whole timeline.
+- Code templates, slice TP1 of #466 (ADR 0033, epic #451): `frameshell hyperframes new <name> --template code-typing`,
+  `code-diff` or `code-morph` scaffold a code window. `code-typing` types a snippet key by key with the uneven rhythm of
+  `typing-field`, a caret that blinks at rest, an indent that arrives with its Enter, waits after the lines named in
+  `pauses` and a timing guard that types faster in a clip too short for it. `code-diff` shows two snippets as a unified
+  diff: unchanged and removed lines come in, then each change is lit in turn (a removed line on a red wash with a strike
+  through it, an added line sliding in on a green one). `code-morph` turns one snippet into another: tokens both have
+  travel to their new place, the rest fade out or rise in. Props `code` / `before` / `after`, `language` (`js`,
+  `python`, `shell`, `json`, `plain`), `highlight`, `title`, `numbers`, `card`, `accent`, `size`, `bg`, `backdrop`, plus
+  timing props per template; the type shrinks until the longest line and every row fit in each format. A small built-in
+  tokenizer colours keywords, strings, numbers, comments and calls (no highlighter dependency, no network); the face is
+  the system monospace and the window colour and accent come from `style.json` (`colors.card`, `colors.accent`). The
+  character width is measured on the rendering machine. The skill lists the three templates; the opt-in real-render test
+  covers layout in the four formats, cold-versus-reseek frames, the typed text, the pauses, the diff turns and the morph
+  end state.
+- Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 157): `analyze`
+  returns `suggestions` (also in `analysis.json`), values for `style.json` read from the film, each with `path`,
+  `value`, `why`, `from` (the result fields) and its own label: `colors.bg` (the palette's largest colour, a quarter of
+  the picture or more), `colors.ink` (most contrast against it, 4.5:1 or more), `colors.accent` (most saturated colour
+  that is not grey), `motion.personality` (the personality whose standard move is nearest the median eased move, else
+  energetic or calm from the pace of the cutting, a DECISION) and `sound.musicUnderVoice` (how far the voice sits over
+  the music). Never applied by `analyze`. `style.apply` takes `analysis` (and `paths`) instead of `name`, CLI
+  `frameshell style apply --from-analysis <analysis> [--only <path,...>]`: the picked suggestions merge value by value
+  as one journaled change that `revert` undoes, held by review mode. `labels` gains `suggestions` (DECISION); `analyze`
+  prints them. The analysis name pattern is one constant (`ANALYSIS_NAME_PATTERN`).
+- `clip compare` and the Blender playbook, slice 3 of #482 (ADR 0035, epic #451): `frameshell clip compare <clip> --look
+  [name:]key=value[,...] [--at s] [--out file.png] [--tile-width px] [--format id]` (daemon method `clip.compare`, MCP
+  `clip_compare`) renders one frame of a generated clip under up to 11 variants next to the clip as it is, as one
+  labelled PNG, through the export `frame` path and the sheet writer `grade.compare` and `review` share. A variant is
+  props merged over the clip's own and/or another `source`, so one `.blend` with a scene per lighting setup is compared
+  with `--look dusk:scene=Dusk`; each tile is drawn from its own render (a Blender clip: its draft, never a final) and
+  the command prints the `clip set --props` that keeps it. Changes nothing. The `blender` skill grows from a stub into a
+  playbook: which route (Blender, three.js, imported media), preparing a `.blend` (fps, length, camera, alpha,
+  files inside the project, no add-ons or scripts), a look recipe, looks compared on one frame, draft to final with the
+  confirmation, and a failure-and-fix table of the plugin's messages. Protocol 156.
 - `logo-3d` template, slice 3 of #473 (ADR 0042, epic #451): `frameshell hyperframes new mark --template logo-3d
   [--component <svg of brand show>]` extrudes an SVG logo with three.js `SVGLoader` and `ExtrudeGeometry` in the
   `product-shot` studio, revealed by a rise (depth grows out of the flat logo), a swing or a drop, with a glint, a slow
@@ -1161,6 +1208,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back, before the cut to length, the loop fades and the encode. `loudnorm` alone let sharp synthesized transients
   through at -0.8 dBTP after the AAC encode; the half dB of headroom covers what the encoder adds. Only the final mux
   step changes: golden plans differ in that filter chain, nothing on the wire.
+- Export loudness after the true-peak limiter lands within 0.15 LU of the target, and the limiter's ceiling follows the
+  codec (last slice of #463, ADR 0038, epic #451; no wire change). The limiter of #519 took up to 0.6 LU (more on
+  hostile transients) off the integrated loudness: when it can engage (the true peak plus the gain to the target, which
+  is what `loudnorm` applies in linear mode, not its `target_offset`, reaches the ceiling) the export now measures the
+  limited mix again with `loudnorm` in analysis mode, adds the missing
+  difference as `volume` before the limiter (once two measurements show how much of a dB the limiter lets through,
+  the step divides by that), and measures once more, at most three measurements and ±3 dB, keeping the
+  closest; a mix the limiter cannot touch costs nothing extra. The ceiling is no longer -1.5 dBFS for every codec but
+  `TRUE_PEAK_CEILINGS` (`export/true-peak.ts`): -1.2 dBTP for PCM, -1.8 for Opus from 64 kbps, -2.3 for AAC from
+  160 kbps, -4.9 below, each from the overshoot ffmpeg's encoders add to hot transients (the data and its source are in
+  the file). `RenderPlan.audio.truePeak` carries it, `muxStep` takes the trim, `limitedAnalysis` is the new step;
+  golden plans differ in the limiter's `limit` and the plan's `audio.truePeak`. Real-ffmpeg tests export a transient
+  fixture (and a quiet one, at -33 LUFS, but for AAC 128 kbps) as AAC 320 and 128 kbps, Opus and PCM: each ends under -1 dBTP and within
+  0.15 LU of -17. The re-measures report progress inside the mux step.
+- Docs of the sound features, last slice of #463 (ADR 0038 "as built" for the slices after the first, SPEC decision 43,
+  GLOSSARY terms music take, section and true-peak ceiling, CLAUDE.md rows): #463 is done but for the CC0 set, the
+  audition page and the energetic music preset, which the owner postponed.
 - Preview playback tests count two kinds of dropped frames (#567, ADR 0001 amendment): the engine reports, per play,
   the frames it passed over that a display tick wanted but were not decoded, or that followed a tick of its own longer
   than a frame (starved), and those no tick wanted while it was idle (cadence: the host gave it no tick in time), with

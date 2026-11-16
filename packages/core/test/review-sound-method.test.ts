@@ -75,7 +75,28 @@ describe("review sound of a file", () => {
       const { metrics } = (await conn.request("review", { cwd: project, file: film, sheets: ["metrics"] })) as { metrics: ReviewMetrics };
       expect(metrics.sound!.clicks).toEqual({ count: 0, at: [] });
       expect(metrics.sound!.ending!.level).toBeNull();
-      expect(metrics.craft.filter((warning) => ["click", "ending"].includes(warning.check))).toEqual([]);
+      expect(metrics.craft.filter((warning) => ["click", "ending", "harsh"].includes(warning.check))).toEqual([]);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "a shrill tone after a loud low one is harsh: its 2 to 6 kHz band far over the band at the loudest moment",
+    async () => {
+      const project = tempDir();
+      await conn.request("project.init", { dir: project });
+      const film = join(tempDir(), "shrill.mkv");
+      // A loud 200 Hz tone for 2 s, then a quieter 3.5 kHz one (6 dB under); both cross zero at 2 s, so the switch does not click.
+      await makeFilm(film, 4, "0.6*sin(2*PI*200*t)*lt(t,2)+0.3*sin(2*PI*3500*t)*gte(t,2)");
+      const { metrics } = (await conn.request("review", { cwd: project, file: film, sheets: ["metrics"] })) as { metrics: ReviewMetrics };
+      const harsh = metrics.sound!.harsh!;
+      expect(harsh).toMatchObject({ band: [2000, 6000], window: 0.4 });
+      expect(harsh.loudestAt).toBeLessThan(2);
+      expect(harsh.spans).toHaveLength(1);
+      expect(harsh.spans[0]!.from).toBeGreaterThan(1.5);
+      expect(harsh.spans[0]!.from).toBeLessThanOrEqual(2);
+      expect(harsh.spans[0]!.over).toBeGreaterThan(6);
+      expect(metrics.craft.filter((warning) => warning.check === "harsh")).toHaveLength(1);
     },
     MEDIA_TIMEOUT,
   );
@@ -120,6 +141,48 @@ describe("review sound of a timeline", () => {
       const checks = new Set(metrics.craft.map((warning) => warning.check));
       for (const check of ["voice-bed", "sfx-repeat", "chopped", "ending"]) expect(checks.has(check as never), check).toBe(true);
       expect(checks.has("machine-gun")).toBe(false);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "judges the music under the voice by the style guide's margin, and finds a clip cut in mid-sound",
+    async () => {
+      const dir = tempDir();
+      await conn.request("project.init", { dir });
+      await conn.request("style.set", { cwd: dir, path: "sound.musicUnderVoice", value: 20 });
+      const source = tempDir();
+      const picture = join(source, "picture.mp4");
+      await makeFilm(picture, 5, "0");
+      await makeSound(join(source, "vo.wav"), 3, "0.5*sin(2*PI*300*t)*lt(t,2.5)");
+      await makeSound(join(source, "song.wav"), 3, "0.5*sin(2*PI*220*t)");
+      await makeSound(join(source, "pad.wav"), 3, "0.5*sin(2*PI*150*t)");
+      const { imported } = await conn.request("asset.import", { cwd: dir, files: [picture, join(source, "vo.wav"), join(source, "song.wav"), join(source, "pad.wav")] });
+      const [film, vo, song, pad] = imported.map((item) => item.asset);
+      const add = async (kind: "video" | "audio", name?: string) => (await conn.request("track.add", { cwd: dir, kind, ...(name ? { name } : {}) })).changes.added[0]!;
+      const video = await add("video");
+      const voice = await add("audio", "Voiceover");
+      const music = await add("audio", "Music");
+      const room = await add("audio");
+      await conn.request("clip.add", { cwd: dir, track: video, asset: film!, start: 0, in: 0, out: 5 });
+      await conn.request("clip.add", { cwd: dir, track: voice, asset: vo!, start: 0, in: 0, out: 3, audioFadeOutMs: 200 });
+      // 12 dB under the voice: the default asks 9, this style 17.
+      await conn.request("clip.add", { cwd: dir, track: music, asset: song!, start: 0, in: 0, out: 3, gain: -12, audioFadeOutMs: 200 });
+      // Starts at 3.5 s from 1 s into a tone that is already sounding, with no fade, after silence.
+      const cut = (await conn.request("clip.add", { cwd: dir, track: room, asset: pad!, start: 3.5, in: 1, out: 2.5, audioFadeOutMs: 200 })).changes.added[0]!;
+
+      const { metrics } = (await conn.request("review", { cwd: dir, sheets: ["metrics"] })) as { metrics: ReviewMetrics };
+      const sound = metrics.sound!;
+      expect(sound.music).toMatchObject({ musicUnderVoice: 20, from: "file", required: 17 });
+      expect(sound.music!.minMargin!).toBeGreaterThan(11);
+      expect(sound.music!.minMargin!).toBeLessThan(13);
+      expect(sound.music!.low).toHaveLength(1);
+      expect(sound.edges!.map((edge) => [edge.clip, edge.track, edge.at])).toEqual([[cut, room, 3.5]]);
+      expect(sound.edges![0]!.jump).toBeGreaterThan(19);
+      const checks = metrics.craft.map((warning) => warning.check);
+      expect(checks.filter((check) => check === "masking")).toHaveLength(1);
+      expect(checks.filter((check) => check === "edge-click")).toHaveLength(1);
+      expect(checks).not.toContain("voice-bed");
     },
     MEDIA_TIMEOUT,
   );

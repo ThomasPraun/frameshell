@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ViewedShape } from "../proposals.js";
-import { TempoSchema } from "@frameshell/schema";
+import { FormatIdSchema, TempoSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   OperationResultSchema,
@@ -9,6 +9,14 @@ import {
   TrackDuckResultSchema,
   operationArgs,
 } from "../timeline.js";
+import {
+  CLIP_COMPARE_DEFAULT_TILE_WIDTH,
+  CLIP_COMPARE_MAX_LOOKS,
+  CLIP_COMPARE_MAX_TILE_WIDTH,
+  CLIP_COMPARE_MIN_TILE_WIDTH,
+  ClipCompareResultSchema,
+  ClipLookSchema,
+} from "../clip-compare.js";
 import { type MethodSpec, CwdParam, ViewParam } from "./shared.js";
 
 /** Daemon methods: clip edits, transitions, keys, ducking, markers, tempo and letterbox. */
@@ -148,6 +156,49 @@ export const clipMethods = {
       "InvalidOperation (time outside the clip, no key to remove, audio track with a picture property, shots, `gain` with `format`, the primary format) or FormatNotFound.",
     params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
+  },
+  "clip.compare": {
+    description:
+      "Pick a look of a generated clip by eye (#482, ADR 0035): render one frame of an adapter clip (`blender`, `hyperframes`, `remotion`, ...) under up to " +
+      `${CLIP_COMPARE_MAX_LOOKS} candidate \`looks\` next to the clip as it is, and write them as one labelled PNG contact image. ` +
+      "A look changes the clip's `props` (merged over its own, key by key; null drops a key) and/or its `source`: for a Blender clip " +
+      "`{ props: { scene: \"Dusk\" } }` draws another scene of the same `.blend` (one scene per lighting setup), `{ props: { camera: \"Close\" } }` another camera, " +
+      "`{ source: \"scenes/hero-b.blend\" }` a copy of the file. Tile 1 is the clip as it is (`current`), then the looks in order. Every tile is the whole composed " +
+      "frame as `frame` renders it (layers above, captions), from each variant's own render: a draft (EEVEE/Workbench for a Blender clip), or the final when " +
+      "it is cached; a frame never starts a final. Each variant not rendered before is rendered first (a clip render job, one at a time: seconds for a draft, " +
+      "and the whole clip up to the frame is rendered, so compare on a short clip), and stays cached for `clip.set` later. Never changes the timeline: keep a look with " +
+      "`clip.set` `props` (each tile's `flags`). `at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
+      "`.frameshell/looks/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. " +
+      'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "dusk", props: { scene: "Dusk" } }, { name: "rim", props: { scene: "Rim light" } }] }`. ' +
+      "Fails with ClipNotFound (no such adapter clip on a video track), InvalidOperation (not an adapter clip, `at` outside the clip, a look that sets nothing, " +
+      "a `source` outside the project, a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Adapter clip id on a video track, as `timeline.show` reports it."),
+      looks: z
+        .array(ClipLookSchema)
+        .min(1)
+        .max(CLIP_COMPARE_MAX_LOOKS)
+        .describe(`Candidate variants, 1 to ${CLIP_COMPARE_MAX_LOOKS}, drawn in this order after the clip as it is.`),
+      at: z.number().nonnegative().optional().describe("Timeline seconds of the frame, inside the clip. Default: the clip's middle frame."),
+      out: z
+        .string()
+        .regex(/\.png$/i, { message: "must be a `.png` file" })
+        .optional()
+        .describe("PNG to write, absolute or relative to `cwd`; its folder is created. Default `.frameshell/looks/compare-<clip>-<frame>.png` in the project."),
+      tileWidth: z
+        .int()
+        .min(CLIP_COMPARE_MIN_TILE_WIDTH)
+        .max(CLIP_COMPARE_MAX_TILE_WIDTH)
+        .default(CLIP_COMPARE_DEFAULT_TILE_WIDTH)
+        .describe(
+          `Width of one tile, px, ${CLIP_COMPARE_MIN_TILE_WIDTH} to ${CLIP_COMPARE_MAX_TILE_WIDTH}; its height follows the frame. Default ${CLIP_COMPARE_DEFAULT_TILE_WIDTH}.`,
+        ),
+      projectFormat: FormatIdSchema.optional().describe("Format of the project to lay the frame out in (`format.list`), e.g. `9x16`. Default: the primary format."),
+      view: ViewParam,
+    }),
+    result: z.object({ ...ViewedShape, ...ClipCompareResultSchema.shape }),
   },
   "track.duck": {
     mutating: true,

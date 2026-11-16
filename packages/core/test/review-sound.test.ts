@@ -218,3 +218,98 @@ describe("review sound: clicks", () => {
     expect(findClicks(samples, RATE)).toEqual([]);
   });
 });
+
+describe("review sound: music under the voice", () => {
+  const tl = (musicGain: number) =>
+    timeline([
+      track("t_vo", [clip("c_vo", "assets/vo.wav", 0, 3)], { name: "Voiceover" }),
+      track("t_m", [clip("c_m", "assets/song.wav", 0, 3, { audio: { gain: musicGain } } as Partial<Clip>)], { name: "Music" }),
+    ]);
+  const profiles = new Map([
+    ["assets/vo.wav", profile(3, (i) => (i < 200 ? -20 : -90), -60)],
+    ["assets/song.wav", profile(3, -32)],
+  ]);
+  const run = (gain: number, musicUnderVoice?: { value: number; source: "file" | "default" }) =>
+    timelineSound({ clips: heardClips(tl(gain), FPS, none), profiles, range: { from: 0, to: 3 }, filmEnd: 3, musicUnderVoice })!;
+
+  it("judges the music against the default 12 dB less 3: 12 dB under passes, 6 dB under is masking", () => {
+    const ok = run(0);
+    expect(ok.music).toEqual({ window: 0.5, musicUnderVoice: 12, from: "default", required: 9, windows: 4, minMargin: 12, medianMargin: 12, low: [] });
+    expect(soundListWarnings(ok).filter((warning) => warning.check === "masking")).toEqual([]);
+    const loud = run(6);
+    expect(loud.music!.low).toEqual([{ from: 0, to: 2, margin: 6 }]);
+    // 6 dB is still enough for the voice over the whole bed, so `voice-bed` stays quiet (`ending`: the music runs to the last frame).
+    expect(soundListWarnings(loud).map((warning) => warning.check)).toEqual(["masking", "ending"]);
+    expect(soundListWarnings(loud)[0]!.message).toContain("keep it 9 dB or more under");
+  });
+
+  it("reads the margin from the style guide, never asking for less than 0 dB", () => {
+    const strict = run(0, { value: 20, source: "file" });
+    expect(strict.music).toMatchObject({ musicUnderVoice: 20, from: "file", required: 17, low: [{ from: 0, to: 2, margin: 12 }] });
+    expect(soundListWarnings(strict)[0]!.message).toContain("style.json");
+    expect(run(18, { value: 2, source: "file" }).music).toMatchObject({ required: 0, minMargin: -6, low: [{ from: 0, to: 2, margin: -6 }] });
+  });
+
+  it("is null without music or without a voice", () => {
+    const solo = timeline([track("t_vo", [clip("c_vo", "assets/vo.wav", 0, 3)], { name: "Voiceover" })]);
+    expect(timelineSound({ clips: heardClips(solo, FPS, none), profiles, range: { from: 0, to: 3 }, filmEnd: 3 })!.music).toBeNull();
+    const bed = timeline([track("t_m", [clip("c_m", "assets/song.wav", 0, 3)], { name: "Music" })]);
+    expect(timelineSound({ clips: heardClips(bed, FPS, none), profiles, range: { from: 0, to: 3 }, filmEnd: 3 })!.music).toBeNull();
+  });
+});
+
+describe("review sound: clips cut in mid-sound", () => {
+  const profiles = new Map([
+    // Sounding throughout.
+    ["assets/pad.wav", profile(10, -12)],
+    // Silent for its first second, then sounding.
+    ["assets/late.wav", profile(10, (i) => (i < 100 ? -100 : -12))],
+    ["assets/bed.wav", profile(10, -10)],
+  ]);
+  const run = (tracks: Track[], range = { from: 0, to: 6 }) => timelineSound({ clips: heardClips(timeline(tracks), FPS, none), profiles, range, filmEnd: 6 })!;
+  const cutIn = (extra: Partial<Clip> = {}, asset = "assets/pad.wav") => track("t_a", [clip("c_a", asset, 1, 2, { in: 2, out: 4, ...extra } as Partial<Clip>)]);
+
+  it("a clip starting with no fade inside its asset's sound clicks, with its level and the jump", () => {
+    const sound = run([cutIn()]);
+    expect(sound.edges).toEqual([{ clip: "c_a", track: "t_a", role: "other", at: 1, level: -12, jump: 108 }]);
+    expect(soundListWarnings(sound).filter((warning) => warning.check === "edge-click")).toEqual([
+      expect.objectContaining({ from: 1, to: 1.01, message: expect.stringContaining("starts at 1 s mid-sound") }),
+    ]);
+  });
+
+  it("a fade, a 5 ms ramp, the asset's own start, a pause before the in point or the same sound going on is no cut-in", () => {
+    expect(run([cutIn({ fadeIn: 0.2 } as Partial<Clip>)]).edges).toEqual([]);
+    expect(run([cutIn({ audio: { fadeInMs: 5 } } as Partial<Clip>)]).edges).toEqual([]);
+    expect(run([cutIn({ in: 0, out: 2 })]).edges).toEqual([]);
+    expect(run([cutIn({ in: 1, out: 3 }, "assets/late.wav")]).edges).toEqual([]);
+    const goingOn = run([track("t_a", [clip("c_a", "assets/pad.wav", 0, 2), clip("c_b", "assets/pad.wav", 2, 2, { in: 2, out: 4 } as Partial<Clip>)])]);
+    expect(goingOn.edges).toEqual([]);
+  });
+
+  it("a cut-in under a louder sound, or before the range, is not listed", () => {
+    expect(run([cutIn(), track("t_b", [clip("c_b", "assets/bed.wav", 0, 6)])]).edges).toEqual([]);
+    expect(run([cutIn()], { from: 2, to: 6 }).edges).toEqual([]);
+  });
+});
+
+describe("review sound: harshness of a file", () => {
+  // 3 s of mix at -20 dBFS; its 2 to 6 kHz band at -40, but -25 from 1.2 to 2.0 s (two 400 ms windows).
+  const envelope = Float32Array.from({ length: 300 }, () => -20);
+  const band = Float32Array.from({ length: 300 }, (_, i) => (i >= 120 && i < 200 ? -25 : -40));
+
+  it("lists the windows whose band comes over 6 dB above the band at the loudest moment, merged, and warns", () => {
+    const sound = fileSound({ envelope, band, clicks: [], range: { from: 0, to: 3 }, filmEnd: 3 });
+    expect(sound.harsh).toEqual({ band: [2000, 6000], window: 0.4, reference: -40, loudestAt: 0, maxOver: 15, spans: [{ from: 1.2, to: 2, over: 15 }] });
+    expect(soundListWarnings(sound).filter((warning) => warning.check === "harsh")).toEqual([
+      expect.objectContaining({ from: 1.2, to: 2, message: expect.stringContaining("2 to 6 kHz band comes 15 dB over") }),
+    ]);
+  });
+
+  it("a steady band is not harsh; no band or a range under one window measures nothing", () => {
+    const steady = fileSound({ envelope, band: Float32Array.from({ length: 300 }, () => -30), clicks: [], range: { from: 0, to: 3 }, filmEnd: 3 });
+    expect(steady.harsh).toMatchObject({ maxOver: 0, spans: [] });
+    expect(soundListWarnings(steady).filter((warning) => warning.check === "harsh")).toEqual([]);
+    expect(fileSound({ envelope, clicks: [], range: { from: 0, to: 3 }, filmEnd: 3 }).harsh).toBeNull();
+    expect(fileSound({ envelope, band, clicks: [], range: { from: 1, to: 1.3 }, filmEnd: 3 }).harsh).toBeNull();
+  });
+});

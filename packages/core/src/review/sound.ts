@@ -1,5 +1,18 @@
 import type { ReviewFinding, ReviewSound, SoundRole } from "@frameshell/protocol";
-import { type Clip, type SfxKind, type Timeline, clipTime, edgeTransitions, fadeWeight, gainAt, isSubjectClip, soundCurve, withProgramSound } from "@frameshell/schema";
+import {
+  type Clip,
+  type SfxKind,
+  type StyleSource,
+  type Timeline,
+  clipTime,
+  edgeTransitions,
+  fadeWeight,
+  gainAt,
+  isSubjectClip,
+  resolveStyle,
+  soundCurve,
+  withProgramSound,
+} from "@frameshell/schema";
 import { ENERGY_HOP_S, type EnergyProfile, SILENCE_DB } from "../media/energy.js";
 import { MUSIC_TRACK_NAME } from "../sound/music-place.js";
 import { SFX_TRACK_NAME } from "../sound/place.js";
@@ -14,13 +27,23 @@ import {
   CLICK_LISTED,
   CLICK_RATIO,
   CLICK_SHARE,
+  EDGE_FLOOR_DBFS,
+  EDGE_JUMP_DB,
+  EDGE_LISTED,
   ENDING_DBFS,
   ENDING_TAIL_S,
+  HARSH_BAND_HZ,
+  HARSH_DB,
+  HARSH_LISTED,
+  HARSH_REFERENCE_FLOOR_DB,
+  HARSH_WINDOW_S,
   LOUDEST_BEFORE,
   LOUDEST_MARGIN_DB,
   LOUDEST_WINDOW_S,
   MACHINE_GUN_GAP_S,
   MACHINE_GUN_PLAYS,
+  MASKING_LISTED,
+  MASKING_SLACK_DB,
   SFX_REPEAT_EXEMPT,
   SFX_REPEAT_MAX,
   SOUND_LISTED,
@@ -31,7 +54,7 @@ import {
 
 // The sound review list of `review` (#457). Pure: clips and envelopes in, `metrics.sound` out. A timeline is never mixed:
 // each clip is heard from its asset's 10 ms envelope (`EnergyStore`) with its gain and fades, and the clips are summed in
-// power by role (voice, music, effects, the rest). A file is its decoded mix, so only the ending and clicks can be told there.
+// power by role (voice, music, effects, the rest). A file is its decoded mix, so only the ending, clicks and harshness can be told there.
 
 /** Music takes of `sound.music` are `<SOUND_DIR>/music-<preset>-<key>.wav` (`musicFile` in `sound/takes.ts`). */
 const MUSIC_TAKE_PREFIX = `${SOUND_DIR}/music-`;
@@ -61,6 +84,8 @@ export interface HeardClip {
   rampOut: number;
   /** The next clip of its track picks its sound up at its end: the same asset from where it stops, or a dissolve. Its end is no cut-off. */
   continued: boolean;
+  /** It picks up the sound of the previous clip of its track the same way. Its start is no cut-in. */
+  resumed: boolean;
 }
 
 /** What {@link heardClips} needs to sort clips by role. */
@@ -102,11 +127,13 @@ export function heardClips(timeline: Timeline, fps: number, hints: RoleHints): H
       else if (music) role = "music";
       else if (kind !== null || track.name === SFX_TRACK_NAME) role = "sfx";
       else role = "other";
-      const speed = clip.speed ?? 1;
-      const end = clip.start + (clip.out - clip.in) / speed;
+      const end = endOf(clip);
       const next = sorted[i + 1];
       const butted = next !== undefined && Math.abs(next.start - end) <= 0.001;
       const picksUp = butted && "asset" in next && next.asset === clip.asset && Math.abs(next.in - clip.out) <= 0.001;
+      const before = sorted[i - 1];
+      const goesOn =
+        before !== undefined && "asset" in before && before.asset === clip.asset && Math.abs(endOf(before) - clip.start) <= 0.001 && Math.abs(clip.in - before.out) <= 0.001;
       const edge = edges.get(clip.id)!;
       heard.push({
         id: clip.id,
@@ -122,10 +149,16 @@ export function heardClips(timeline: Timeline, fps: number, hints: RoleHints): H
         rampIn: (clip.audio?.fadeInMs ?? 0) / 1000,
         rampOut: (clip.audio?.fadeOutMs ?? 0) / 1000,
         continued: picksUp || (butted && (edges.get(next.id)?.dissolve ?? 0) > 0),
+        resumed: goesOn || edge.dissolve > 0,
       });
     });
   }
   return heard;
+}
+
+/** Timeline second a media clip ends. */
+function endOf(clip: Extract<Clip, { asset: string }>): number {
+  return clip.start + (clip.out - clip.in) / (clip.speed ?? 1);
 }
 
 /** Level in dBFS of `clip` at timeline second `t` as heard: its asset's envelope plus its gain, through its fades; null when it is silent there. */
@@ -155,6 +188,8 @@ export interface TimelineSoundInput {
   range: { from: number; to: number };
   /** Seconds the film lasts: the ending is measured only when the range reaches it. */
   filmEnd: number;
+  /** dB the style guide sets music under the voice and where that comes from; absent: Frameshell's default. */
+  musicUnderVoice?: { value: number; source: StyleSource } | undefined;
 }
 
 /** Sum in power of the clips of each role, one value per {@link ENERGY_HOP_S} of the range, from `from`. */
@@ -189,9 +224,19 @@ function roleSeries(input: TimelineSoundInput, hops: number): RoleSeries {
   return { power, present, speaking };
 }
 
-/** Voice against the bed window by window; null without a voice clip. */
-function voiceOverBed(series: RoleSeries, hops: number, from: number, hasVoice: boolean): ReviewSound["voice"] {
-  if (!hasVoice) return null;
+/** What is under the voice at a hop: its summed power, and whether a clip of it plays there (a quiet one too). */
+type Under = (series: RoleSeries, hop: number) => { power: number; heard: boolean };
+
+/** Everything but the voice. */
+const BED: Under = (series, h) => ({
+  power: series.power.music[h]! + series.power.sfx[h]! + series.power.other[h]!,
+  heard: series.present.music[h]! + series.present.sfx[h]! + series.present.other[h]! > 0,
+});
+/** The music alone. */
+const MUSIC: Under = (series, h) => ({ power: series.power.music[h]!, heard: series.present.music[h]! > 0 });
+
+/** Margins of the voice over `under` per {@link VOICE_WINDOW_S} window where the voice speaks, and the stretches under `least` dB, merged. */
+function marginsOver(series: RoleSeries, hops: number, from: number, under: Under, least: number, listed: number) {
   const per = Math.round(VOICE_WINDOW_S / ENERGY_HOP_S);
   const margins: { from: number; to: number; margin: number | null }[] = [];
   for (let w = 0; w * per < hops; w++) {
@@ -204,8 +249,9 @@ function voiceOverBed(series: RoleSeries, hops: number, from: number, hasVoice: 
       if (!series.speaking[h]) continue;
       spoken++;
       voice += series.power.voice[h]!;
-      bed += series.power.music[h]! + series.power.sfx[h]! + series.power.other[h]!;
-      bedHeard ||= series.present.music[h]! + series.present.sfx[h]! + series.present.other[h]! > 0;
+      const below = under(series, h);
+      bed += below.power;
+      bedHeard ||= below.heard;
     }
     if (spoken * 2 < end - w * per) continue;
     const margin = bedHeard && bed > 0 ? round(toDb(voice / spoken) - toDb(bed / spoken), 1) : null;
@@ -215,7 +261,7 @@ function voiceOverBed(series: RoleSeries, hops: number, from: number, hasVoice: 
   const sorted = [...measured].sort((a, b) => a - b);
   const low: { from: number; to: number; margin: number }[] = [];
   for (const window of margins) {
-    if (window.margin === null || window.margin >= VOICE_OVER_BED_DB) continue;
+    if (window.margin === null || window.margin >= least) continue;
     const last = low.at(-1);
     if (last && Math.abs(last.to - window.from) < 1e-6) {
       last.to = window.to;
@@ -223,13 +269,54 @@ function voiceOverBed(series: RoleSeries, hops: number, from: number, hasVoice: 
     } else low.push({ ...window, margin: window.margin });
   }
   return {
-    window: VOICE_WINDOW_S,
     windows: margins.length,
     withBed: measured.length,
     minMargin: sorted[0] ?? null,
     medianMargin: sorted.length === 0 ? null : sorted[Math.floor((sorted.length - 1) / 2)]!,
-    low: low.slice(0, VOICE_LISTED),
+    low: low.slice(0, listed),
   };
+}
+
+/** Voice against the bed window by window; null without a voice clip. */
+function voiceOverBed(series: RoleSeries, hops: number, from: number, hasVoice: boolean): ReviewSound["voice"] {
+  if (!hasVoice) return null;
+  return { window: VOICE_WINDOW_S, ...marginsOver(series, hops, from, BED, VOICE_OVER_BED_DB, VOICE_LISTED) };
+}
+
+/** Voice against the music alone, judged by the style's `musicUnderVoice` less {@link MASKING_SLACK_DB}; null without both. */
+function voiceOverMusic(series: RoleSeries, hops: number, from: number, has: boolean, style: { value: number; source: StyleSource }): ReviewSound["music"] {
+  if (!has) return null;
+  const required = Math.max(0, style.value - MASKING_SLACK_DB);
+  const { withBed, minMargin, medianMargin, low } = marginsOver(series, hops, from, MUSIC, required, MASKING_LISTED);
+  return { window: VOICE_WINDOW_S, musicUnderVoice: style.value, from: style.source, required, windows: withBed, minMargin, medianMargin, low };
+}
+
+/**
+ * Clips starting with no fade inside sound their asset plays audibly before their in point, loud, and well over what the
+ * rest of the film plays the 10 ms before: a waveform cut mid-cycle clicks. A clip played from its asset's start begins as
+ * the sound was made; a clip picking up the previous one's sound (the same asset going on, a dissolve) is no cut.
+ */
+function edgesOf(input: TimelineSoundInput): NonNullable<ReviewSound["edges"]> {
+  const edges: NonNullable<ReviewSound["edges"]> = [];
+  for (const clip of input.clips) {
+    const profile = input.profiles.get(clip.asset);
+    if (!profile || clip.resumed || clip.fadeIn > 0 || clip.rampIn > 0 || clip.start < input.range.from || clip.start >= input.range.to) continue;
+    const index = Math.floor(clipTime(clip.clip, clip.start) / ENERGY_HOP_S + 1e-9);
+    // The asset is silent just before the in point (a cut in a pause, or its very start): the clip starts as its sound does.
+    if (index < 1 || index > profile.db.length || profile.db[index - 1]! + gainAt(clip.clip, clip.start) < EDGE_FLOOR_DBFS) continue;
+    const level = levelAt(clip, profile, clip.start + ENERGY_HOP_S / 2);
+    if (level === null || level < EDGE_FLOOR_DBFS) continue;
+    let before = 0;
+    for (const other of input.clips) {
+      const heard = other === clip ? undefined : input.profiles.get(other.asset);
+      const there = heard ? levelAt(other, heard, clip.start - ENERGY_HOP_S / 2) : null;
+      if (there !== null) before += toPower(there);
+    }
+    const jump = round(level - toDb(before), 1);
+    if (jump < EDGE_JUMP_DB) continue;
+    edges.push({ clip: clip.id, track: clip.track, role: clip.role, at: round(clip.start), level: round(level, 1), jump });
+  }
+  return edges.sort((a, b) => a.at - b.at).slice(0, EDGE_LISTED);
 }
 
 /** Effect files heard more than once, and quick runs of one file in a row (each within {@link MACHINE_GUN_GAP_S} of the last). */
@@ -302,6 +389,9 @@ export function timelineSound(input: TimelineSoundInput): ReviewSound | null {
     chopped: choppedOf({ ...input, clips: inside }),
     ending,
     clicks: null,
+    music: voiceOverMusic(series, hops, range.from, count("voice") > 0 && count("music") > 0, input.musicUnderVoice ?? resolveStyle(null).sound.musicUnderVoice),
+    edges: edgesOf({ ...input, clips: inside }),
+    harsh: null,
   };
 }
 
@@ -367,12 +457,52 @@ export interface FileSoundInput {
   envelope: Float32Array;
   /** Seconds of the clicks found ({@link findClicks}). */
   clicks: readonly number[];
+  /** dBFS per {@link ENERGY_HOP_S} of the file's sound in {@link HARSH_BAND_HZ}, from 0; absent: harshness is not measured. */
+  band?: Float32Array | undefined;
   /** Seconds reviewed and the file's length: the ending is measured only when the range reaches the end. */
   range: { from: number; to: number };
   filmEnd: number;
 }
 
-/** The sound of a decoded file: its ending and its clicks. */
+/**
+ * The {@link HARSH_BAND_HZ} band of a file per {@link HARSH_WINDOW_S} window of the range, against the band in the
+ * window where the whole mix is loudest (at least {@link HARSH_REFERENCE_FLOOR_DB} under the whole there); null when the
+ * range holds no whole window or no sound.
+ */
+export function harshness(envelope: Float32Array, band: Float32Array, range: { from: number; to: number }): ReviewSound["harsh"] {
+  const per = Math.max(1, Math.round(HARSH_WINDOW_S / ENERGY_HOP_S));
+  const first = Math.max(0, Math.round(range.from / ENERGY_HOP_S));
+  const last = Math.min(envelope.length, band.length, Math.round(range.to / ENERGY_HOP_S));
+  const windows: { from: number; whole: number; band: number }[] = [];
+  for (let start = first; start + per <= last; start += per) {
+    let whole = 0;
+    let inBand = 0;
+    for (let i = start; i < start + per; i++) {
+      whole += toPower(envelope[i]!);
+      inBand += toPower(band[i]!);
+    }
+    windows.push({ from: start * ENERGY_HOP_S, whole: whole / per, band: inBand / per });
+  }
+  const loudest = windows.reduce<(typeof windows)[number] | null>((best, window) => (best === null || window.whole > best.whole ? window : best), null);
+  if (!loudest || toDb(loudest.whole) <= SILENCE_DB) return null;
+  const reference = Math.max(toDb(loudest.band), toDb(loudest.whole) - HARSH_REFERENCE_FLOOR_DB);
+  const spans: NonNullable<ReviewSound["harsh"]>["spans"] = [];
+  let maxOver = -Infinity;
+  for (const window of windows) {
+    const over = round(toDb(window.band) - reference, 1);
+    maxOver = Math.max(maxOver, over);
+    if (over <= HARSH_DB) continue;
+    const to = round(window.from + per * ENERGY_HOP_S);
+    const previous = spans.at(-1);
+    if (previous && Math.abs(previous.to - round(window.from)) < 1e-6) {
+      previous.to = to;
+      previous.over = Math.max(previous.over, over);
+    } else spans.push({ from: round(window.from), to, over });
+  }
+  return { band: [...HARSH_BAND_HZ], window: HARSH_WINDOW_S, reference: round(reference, 1), loudestAt: round(loudest.from), maxOver, spans: spans.slice(0, HARSH_LISTED) };
+}
+
+/** The sound of a decoded file: its ending, its clicks and its harshness. */
 export function fileSound(input: FileSoundInput): ReviewSound {
   const { envelope, range } = input;
   let ending: ReviewSound["ending"] = null;
@@ -413,6 +543,9 @@ export function fileSound(input: FileSoundInput): ReviewSound {
     chopped: null,
     ending,
     clicks: { count: clicks.length, at: clicks.slice(0, CLICK_LISTED).map((at) => round(at)) },
+    music: null,
+    edges: null,
+    harsh: input.band ? harshness(envelope, input.band, range) : null,
   };
 }
 
@@ -428,6 +561,15 @@ export function soundListWarnings(sound: ReviewSound): ReviewFinding[] {
       from: span.from,
       to: span.to,
       message: `the bed comes within ${span.margin} dB of the voice from ${span.from} to ${span.to} s (keep it ${VOICE_OVER_BED_DB} dB or more under): duck the music (\`duck\`) or lower the effects there.`,
+    });
+  }
+  const music = sound.music;
+  for (const span of music?.low ?? []) {
+    found.push({
+      check: "masking",
+      from: span.from,
+      to: span.to,
+      message: `the music comes within ${span.margin} dB of the voice from ${span.from} to ${span.to} s; the style sets it ${music!.musicUnderVoice} dB under (${music!.from === "file" ? "style.json" : "default"}), so keep it ${music!.required} dB or more under: lower the music clip's gain or duck it (\`duck --level\`).`,
     });
   }
   for (const repeat of sound.repeats ?? []) {
@@ -454,6 +596,15 @@ export function soundListWarnings(sound: ReviewSound): ReviewFinding[] {
       from: round(clip.at - ENERGY_HOP_S),
       to: clip.at,
       message: `${clip.clip} (${clip.role}) ends at ${clip.at} s with its sound ${clip.level} dB under its loudest, above ${CHOP_DB} dB: the tail is cut, not decayed. Fade it out (\`clip set --audio-fade-out\`) or end it after the sound dies.`,
+    });
+  }
+  for (const edge of sound.edges ?? []) {
+    found.push({
+      check: "edge-click",
+      // The first 10 ms, inside the clip, so a waiver naming it covers the warning.
+      from: edge.at,
+      to: round(edge.at + ENERGY_HOP_S),
+      message: `${edge.clip} (${edge.role}) starts at ${edge.at} s mid-sound with no fade, at ${edge.level} dBFS, ${edge.jump} dB over what played just before: the cut clicks. Fade it in (\`clip set --audio-fade-in 5\`, milliseconds) or move its in point to a pause.`,
     });
   }
   const { ending } = sound;
@@ -490,6 +641,14 @@ export function soundListWarnings(sound: ReviewSound): ReviewFinding[] {
       from: sound.clicks.at[0]!,
       to: sound.clicks.at.at(-1)!,
       message: `${sound.clicks.count} ${sound.clicks.count === 1 ? "click" : "clicks"} in the sound at ${listed.join(", ")}${sound.clicks.count > listed.length ? ", ..." : ""} s: a cut on a loud sample or a jump in a waveform. Add a short fade at the clip edge there (\`clip set --audio-fade-in\`, \`--audio-fade-out\`).`,
+    });
+  }
+  for (const span of sound.harsh?.spans ?? []) {
+    found.push({
+      check: "harsh",
+      from: span.from,
+      to: span.to,
+      message: `from ${span.from} to ${span.to} s the ${sound.harsh!.band[0] / 1000} to ${sound.harsh!.band[1] / 1000} kHz band comes ${span.over} dB over that band at the mix's loudest moment (${sound.harsh!.loudestAt} s), more than ${HARSH_DB} dB: it sounds shrill. Lower the effect or music there, or pick a softer one.`,
     });
   }
   return found;

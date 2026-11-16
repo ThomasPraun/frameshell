@@ -3,6 +3,7 @@ export * from "./brand.js";
 export * from "./timeline.js";
 export * from "./cleanup.js";
 export * from "./music.js";
+export * from "./clip-compare.js";
 export * from "./clip-verify.js";
 export * from "./grade.js";
 export * from "./history.js";

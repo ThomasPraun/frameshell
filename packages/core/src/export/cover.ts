@@ -162,7 +162,7 @@ export function firstPictureTime(timeline: Timeline, fps: number): number {
 }
 
 /** WCAG relative luminance of `#rrggbb`. */
-function luminance(hex: string): number {
+export function luminance(hex: string): number {
   const channel = (offset: number) => {
     const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
     return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;

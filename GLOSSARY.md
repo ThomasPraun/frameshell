@@ -72,6 +72,18 @@ _Avoid_: trigger, hit point
 The role says what a sound does to the picture (tap, knock, click, pop, whoosh, swell) and so how far from the cue its anchor sits; the tier (primary, secondary, texture) says how much it matters and so how far under the voice it plays.
 _Avoid_: priority, layer
 
+**Music take**:
+A track generated offline by `sound music` from a preset (`synthwave`, `lofi`, `minimal`), a tempo, chords, sections and a seed: `assets/sound/music-<preset>-<key>.wav`, 24-bit stereo at -14 LUFS with the sample peak at -1 dBFS, plus an exact beat grid beside it. Same arguments, same file.
+_Avoid_: song, loop, stem
+
+**Section**:
+One part of a music take, whole bars long: `intro`, `full`, `dark`, `build`, `gap`, `drop` or `outro`. A build climbs into the next part, a gap is one stop-time hit and silence so the next downbeat lands hard.
+_Avoid_: scene (that is the script's), segment (that is the export's)
+
+**True-peak ceiling**:
+The level, in dBTP, at which the export's oversampled limiter holds the finished sound; it depends on the audio codec and bitrate (`TRUE_PEAK_CEILINGS`), because an encode adds peaks the limiter cannot see. The loudness the limiter takes off is measured and added back, so the file lands within 0.15 LU of the target.
+_Avoid_: peak limit, headroom (that is the room under a ceiling)
+
 ## Talking to the agent (ADR 0025)
 
 **Reference**:
