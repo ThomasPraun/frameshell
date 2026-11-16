@@ -3,13 +3,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { chmod, mkdir, readdir, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { ReadableStream } from "node:stream/web";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
-import { type CommandRunner, runCommand } from "./command-runner.js";
+import { type CommandRunner, findOnPath, runCommand } from "./command-runner.js";
 import { extractZip, isZip } from "./unzip.js";
 import {
   type BinaryPackage,
@@ -19,9 +19,13 @@ import {
   type ManagedModel,
   type PinnedArchive,
   type PinnedBuild,
+  type PlatformFamily,
   type PlatformKey,
+  type StandardPath,
+  type UserInstall,
   buildCandidates,
   currentPlatform,
+  platformFamily,
 } from "./manifest.js";
 import { renameRetrying } from "../fs-util.js";
 import { GLOBAL_CONFIG_FILE, readGlobalConfig } from "../global-config.js";
@@ -40,7 +44,13 @@ export interface ProjectBinaries {
 export interface BinaryLocation {
   name: string;
   package: string;
-  source: "managed" | "project" | "global";
+  /**
+   * `managed`: the pinned download. `project` / `global`: a `binaries` override. `system`: a user install
+   * (`BinaryPackage.userInstall`) found at one of its standard paths, with no override set.
+   */
+  source: "managed" | "project" | "global" | "system";
+  /** How a `system` install was found: on PATH, or at the product's usual install location. */
+  found?: "path" | "standard";
   /** Null only when managed and nothing is pinned for this platform. */
   path: string | null;
   installed: boolean;
@@ -67,6 +77,13 @@ export interface BinaryManagerOptions {
    * their installed executables. Defaults to spawning them from PATH.
    */
   commandRunner?: CommandRunner;
+  /** Environment the standard paths of user installs read (PATH, `ProgramFiles`). Default `process.env`. */
+  env?: NodeJS.ProcessEnv;
+  /**
+   * False: a user install is found only through a `binaries` override, never at its standard paths, so a test
+   * does not see the machine's own Blender. Default true.
+   */
+  standardPaths?: boolean;
 }
 
 /** One progress report of a long install (download, extraction). */
@@ -117,6 +134,8 @@ export class BinaryManager {
   readonly #packages: readonly BinaryPackage[];
   readonly #models: readonly ManagedModel[];
   readonly #commandRunner: CommandRunner;
+  readonly #env: NodeJS.ProcessEnv;
+  readonly #standardPaths: boolean;
   /** One in-flight install per package or model (keyed `pkg:` / `model:`); concurrent callers share it. */
   readonly #installing = new Map<string, Install>();
   /** Machine probe results, keyed by command line. Hardware does not change under a running daemon. */
@@ -129,6 +148,8 @@ export class BinaryManager {
     this.#models = options.models ?? DEFAULT_MODELS;
     this.platform = options.platform ?? currentPlatform();
     this.#commandRunner = options.commandRunner ?? runCommand;
+    this.#env = options.env ?? process.env;
+    this.#standardPaths = options.standardPaths ?? true;
   }
 
   /** Package that ships `tool`. Throws for unknown tools. */
@@ -157,6 +178,10 @@ export class BinaryManager {
       if (path === undefined) continue;
       if (path === MANAGED) break;
       return { name: tool, package: pkg.name, source: level.source, path, installed: await isFile(path), pinned };
+    }
+    if (pkg.userInstall && this.#standardPaths) {
+      const system = await findUserInstall(pkg.userInstall, platformFamily(this.platform), this.#env);
+      if (system) return { name: tool, package: pkg.name, source: "system", found: system.found, path: system.path, installed: true, pinned };
     }
     const path = pinned ? join(this.#installDir(pkg, pinned), toolFile(pkg, tool, this.platform)) : null;
     return { name: tool, package: pkg.name, source: "managed", path, installed: path !== null && (await isFile(path)), pinned };
@@ -416,15 +441,85 @@ export class BinaryManager {
   }
 }
 
-/** What to do when the person's own install of `tool` is not named by any `binaries` override. */
+/** What to do when the person's own install of `tool` is neither named by a `binaries` override nor at a standard path. */
 function notInstalledMessage(pkg: BinaryPackage, tool: string, platform: PlatformKey, globalConfig: string): string {
   const install = pkg.userInstall!;
-  const family = platform.startsWith("darwin") ? "darwin" : platform.startsWith("win32") ? "win32" : "linux";
+  const family = platformFamily(platform);
+  const looked = (install.standardPaths?.[family] ?? []).map((rule) => describeStandardPath(rule, family === "win32"));
   return (
-    `${install.label} is not installed, or Frameshell was not told where it is. Frameshell uses your own ${install.label} ` +
-    `(${install.supported}; ${install.download}) and never downloads it. Set ` +
+    `${install.label} is not installed, or Frameshell was not told where it is${looked.length > 0 ? ` (looked ${looked.join(", ")})` : ""}. ` +
+    `Frameshell uses your own ${install.label} (${install.supported}; ${install.download}) and never downloads it. Set ` +
     `\`"binaries": { "${tool}": ${JSON.stringify(install.examplePath[family])} }\` in frameshell.json or ${globalConfig}.`
   );
+}
+
+/** A standard path in words, for messages: `at /snap/bin/blender`, `for blender on PATH`. */
+function describeStandardPath(rule: StandardPath, windows: boolean): string {
+  switch (rule.kind) {
+    case "file":
+      return `at ${rule.path}`;
+    case "path":
+      return `for ${rule.name} on PATH`;
+    case "versioned":
+      return `in ${rule.dir.join(windows ? "\\" : "/")}`;
+  }
+}
+
+/**
+ * First of `install`'s standard paths for `family` where an executable exists, and how it was found; null when none.
+ * Never runs it: `doctor` and the feature that needs it ask for the version.
+ */
+async function findUserInstall(install: UserInstall, family: PlatformFamily, env: NodeJS.ProcessEnv): Promise<{ path: string; found: "path" | "standard" } | null> {
+  const windows = family === "win32";
+  for (const rule of install.standardPaths?.[family] ?? []) {
+    if (rule.kind === "path") {
+      const path = findOnPath(rule.name, env, windows);
+      if (path) return { path, found: "path" };
+      continue;
+    }
+    if (rule.kind === "file") {
+      const expanded = expandEnv(rule.path, env);
+      const path = expanded === null ? null : normalize(expanded);
+      if (path !== null && (await isFile(path))) return { path, found: "standard" };
+      continue;
+    }
+    const segments = rule.dir.map((segment) => expandEnv(segment, env));
+    if (segments.some((segment) => segment === null)) continue;
+    const dir = join(...(segments as string[]));
+    const names = await readdir(dir).catch(() => [] as string[]);
+    const versions = names
+      .map((name) => ({ name, version: rule.folder.exec(name)?.[1] }))
+      .filter((entry): entry is { name: string; version: string } => entry.version !== undefined)
+      .sort((a, b) => compareVersions(b.version, a.version));
+    // Newest supported first; an install outside the range still beats none, so `doctor` can say it is out of range.
+    for (const entry of [...versions.filter((v) => install.supports(v.version)), ...versions.filter((v) => !install.supports(v.version))]) {
+      const path = join(dir, entry.name, rule.file);
+      if (await isFile(path)) return { path, found: "standard" };
+    }
+  }
+  return null;
+}
+
+/** `${NAME}` replaced from `env`; null when one is unset or empty. */
+function expandEnv(text: string, env: NodeJS.ProcessEnv): string | null {
+  let missing = false;
+  const expanded = text.replace(/\$\{(\w+)\}/g, (_, name: string) => {
+    const value = env[name];
+    if (!value) missing = true;
+    return value ?? "";
+  });
+  return missing ? null : expanded;
+}
+
+/** Dotted versions compared number by number: `5.10` is newer than `5.2`. */
+function compareVersions(a: string, b: string): number {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 function megabytes(bytes: number): number {

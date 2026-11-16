@@ -58,6 +58,14 @@ export function stubBlender(config: StubConfig = {}, launcher: StubLauncher = {}
     runs(script: "deps.py" | "render.py"): string[][] {
       return stub.calls().filter((argv) => argv.includes("-P") && argv[argv.indexOf("-P") + 1]!.endsWith(script));
     },
+    /** Scene frame each rendered frame showed, in order, over every render so far. */
+    sceneFrames(): number[] {
+      try {
+        return readFileSync(join(dir, "scene-frames.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(Number);
+      } catch {
+        return [];
+      }
+    },
     /** Pid of the last render, to check it is gone. */
     pid(): number {
       return Number(readFileSync(join(dir, "pid"), "utf8"));
