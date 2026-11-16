@@ -1206,14 +1206,15 @@ export const TrackDuckResultSchema = OperationResultSchema.extend({
   speechSeconds: z.number().describe("Total seconds of those stretches."),
   level: z
     .object({
-      under: z.number().describe("dB under the voice that was asked (`level`)."),
+      under: z.number().describe("dB under the voice that was asked (`level`; the style's number for `\"style\"`)."),
+      source: z.enum(["given", "style"]).describe("`style`: the number came from the project's `sound.musicUnderVoice` (`level: \"style\"`); `given`: it was passed."),
       voice: z.number().describe("Loudness of the voice, LUFS: the integrated loudness of each voice file plus its gain, averaged by the time it plays."),
       target: z.number().describe("Loudness the music was set to, LUFS (`voice - under`)."),
       clips: z
         .array(
           z.object({
             clip: z.string(),
-            loudness: z.number().describe("Integrated loudness of the clip's file, LUFS."),
+            loudness: z.number().describe("Integrated loudness of the part of its file the clip plays, LUFS."),
             gain: z.number().describe("Static gain written to the clip, dB (`target - loudness`, 0.1 dB steps)."),
           }),
         )

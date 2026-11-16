@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 160): a scene at another frame rate than the project is
+- Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 161): a scene at another frame rate than the project is
   time-remapped with seconds kept (project frame k shows scene frame `start + k × scene fps / project fps` through a
   subframe; no ratio is refused) instead of refused. Files a `.blend` loads from outside the project (owner decision
   2026-11-16) render, their content hashes are a key input with no path in it (`outside.json` beside `deps.json`), and
@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BinaryManager.locate`; an override still wins. `doctor` reports such an install as source `system` with `found`
   (`standard` or `path`). Not run with a real Blender: the opt-in real test now also checks the remap at a subframe, the
   outside-file warning and that a scripted driver of a linked library outside the project stays off under `-Y`.
+
+- Loudness over the part of a file a clip plays, `duck --level style` and the level set again, slice MU2 of #485 (ADR
+  0037, epic #451; protocol 160). `LoudnessStore` reads the seconds a clip plays (`in` to `out`, on whole frames) and
+  caches them beside the whole-file reading in `.frameshell/loudness/` (`<hash>-l1-r<start ms>-<end ms>.json`, same `gc`
+  kind; a part that spans the file or is under one 400 ms block is the whole-file reading, so nothing is measured
+  twice). `music candidates --end` reads each file over the part its fit leaves playing, and `duck --level` reads each
+  music clip, and each voice clip (a file cut into over 8 pieces is read whole), over its played part. `duck --level
+  style` (`track.duck` `level: "style"`) takes the project's `sound.musicUnderVoice`; the number is what is kept in
+  `audio.duck.level` and reported with `level.source`. `music fit`, `music shape` and `music grid` set the clip's static
+  gain again from the stored `level` before they write the keys and run the duck again (a clip with gain keys of its own
+  keeps its gain, with a warning).
+
+- Documented limit of the export's loudness loop: it adds at most +3 dB (`MAX_TRIM_DB`), and when that cap binds the file
+  ends under the target by more than 0.15 LU (a transient-heavy mix that is quiet before the limiter, at AAC 128 kbps,
+  ceiling -4.9 dBTP). Kept on purpose (owner decision 2026-11-16); see SPEC §3.5 step 4 and ADR 0038 "Not done".
 
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
   protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
