@@ -97,3 +97,36 @@ export const CLICK_CONTEXT_S = 0.02;
 export const CLICK_FLOOR_DBFS = -60;
 /** Most clicks listed in `sound.clicks.at`. */
 export const CLICK_LISTED = 20;
+/**
+ * dB the music may come above the style's `sound.musicUnderVoice` under the voice before it is `masking`: 3 dB doubles
+ * its power, a step any listener hears, while a 0.5 s window of music wobbles by less. Never under 0 dB: music as loud
+ * as the voice masks it (earshot: a band under 0 dB of voice over music is masked).
+ */
+export const MASKING_SLACK_DB = 3;
+/** Most stretches listed in `sound.music.low`. */
+export const MASKING_LISTED = 20;
+/** Band (Hz) the harshness of a file is measured in (earshot: 2 to 6 kHz, where the ear is most sensitive and a sound turns shrill). */
+export const HARSH_BAND_HZ = [2000, 6000] as const;
+/**
+ * dB a 400 ms window of that band may come over the band at the mix's loudest 400 ms (earshot: 2 to 6 kHz more than 6 dB
+ * over the music's loudest is harsh; a file is one mix, so its loudest moment stands in for the music's).
+ */
+export const HARSH_DB = 6;
+/**
+ * dB under the whole mix at its loudest window that the band there counts as at least. Pink noise puts 2 to 6 kHz 8 dB
+ * under the whole; a loudest moment with almost nothing there (a bass hit, a low drone) would make every bright sound harsh.
+ */
+export const HARSH_REFERENCE_FLOOR_DB = 20;
+/** Seconds per window of the harshness check: the EBU R128 momentary window, as for the loudest moment. */
+export const HARSH_WINDOW_S = LOUDEST_WINDOW_S;
+/** Most stretches listed in `sound.harsh.spans`. */
+export const HARSH_LISTED = 20;
+/**
+ * A clip edge with no fade clicks when the sound it cuts into jumps by this much (dB) over what the rest of the film played the 10 ms
+ * before: earshot's click ratio, a burst 9 times its surroundings (20 log10 9 = 19 dB).
+ */
+export const EDGE_JUMP_DB = 19;
+/** dBFS (RMS of 10 ms) a clip's sound must reach at a hard edge to click: under it the edge reads as silence (earshot's -45 dBFS end of a film). */
+export const EDGE_FLOOR_DBFS = ENDING_DBFS;
+/** Most edges listed in `sound.edges`. */
+export const EDGE_LISTED = 20;

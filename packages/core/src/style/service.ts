@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { ErrorCode, RpcError, type StyleChange, type StyleListResult, type StyleSaveResult, type StyleShowResult } from "@frameshell/protocol";
+import { ANALYSIS_DIR, ANALYSIS_MANIFEST, ErrorCode, RpcError, type StyleChange, type StyleListResult, type StyleSaveResult, type StyleShowResult } from "@frameshell/protocol";
 import {
   MOTION_PERSONALITY_IDS,
   type MotionPersonalityId,
@@ -74,6 +74,33 @@ export class StyleService {
       if (source.from) after[FROM_KEY] = source.from;
       return { op: "style.apply", args: { name, ...(replace ? { replace } : {}) }, after: checkedStyleState(after, "style.apply") };
     });
+  }
+
+  /**
+   * Apply the style suggestions of `analyze` run `analysis` (all, or only `paths`), value by value over the project's
+   * values, as one `style.apply` change. `from` is not recorded: an analysis is no user style.
+   */
+  async applyAnalysis(root: string, analysis: string, paths: readonly string[] | undefined, author: string, tx: TxRef): Promise<StyleChange> {
+    const suggested = await readSuggestions(root, analysis);
+    let picked = suggested;
+    if (paths) {
+      const missing = paths.filter((path) => !suggested.some((suggestion) => suggestion.path === path));
+      if (missing.length > 0) {
+        const available = suggested.map((suggestion) => suggestion.path);
+        throw new RpcError(
+          ErrorCode.InvalidOperation,
+          `Analysis ${analysis} does not suggest ${missing.join(", ")}. It suggests: ${available.length > 0 ? available.join(", ") : "nothing"}.`,
+          { op: "style.apply", reason: "not suggested", field: "paths", available },
+        );
+      }
+      picked = suggested.filter((suggestion) => paths.includes(suggestion.path));
+    }
+    const state = Object.fromEntries(picked.map((suggestion) => [STYLE_KEY + suggestion.path, suggestion.value]));
+    return this.#change(root, { author, tx }, (base) => ({
+      op: "style.apply",
+      args: { analysis, ...(paths ? { paths: [...paths] } : {}) },
+      after: checkedStyleState({ ...base, ...state }, "style.apply"),
+    }));
   }
 
   /** Copy the project's `style.json`, without `from`, to user style `name`. */
@@ -187,6 +214,49 @@ export class StyleService {
   #userPath(id: string): string {
     return join(this.#options.userDir, `${id}.json`);
   }
+}
+
+/**
+ * The `suggestions` of analysis `name` (its `analysis.json`), each a known style path once. InvalidOperation reason
+ * `not found` (with the analyses there are) or `no suggestions` (a run older than them, or an `analyze.diff` folder).
+ */
+async function readSuggestions(root: string, name: string): Promise<{ path: string; value: unknown }[]> {
+  const dir = join(root, ...ANALYSIS_DIR.split("/"));
+  const manifest = join(dir, name, ANALYSIS_MANIFEST);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(manifest, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new RpcError(ErrorCode.InvalidOperation, `Cannot read ${manifest}: ${(error as Error).message}. Run \`frameshell analyze\` again.`, {
+        op: "style.apply",
+        reason: "no suggestions",
+        field: "analysis",
+      });
+    }
+    const entries = await readdir(dir).catch(() => [] as string[]);
+    const available = (await Promise.all(entries.map(async (entry) => ((await exists(join(dir, entry, ANALYSIS_MANIFEST))) ? entry : null)))).filter((entry) => entry !== null).sort();
+    throw new RpcError(
+      ErrorCode.InvalidOperation,
+      `No analysis "${name}" in ${dir}. Analyses: ${available.length > 0 ? available.join(", ") : "none yet (`frameshell analyze <video>` makes one)"}.`,
+      { op: "style.apply", reason: "not found", field: "analysis", available },
+    );
+  }
+  const list = (raw as { suggestions?: unknown } | null)?.suggestions;
+  if (!Array.isArray(list)) {
+    throw new RpcError(ErrorCode.InvalidOperation, `Analysis ${name} has no style suggestions: it is older than them, or a comparison. Run \`frameshell analyze\` on the video again.`, {
+      op: "style.apply",
+      reason: "no suggestions",
+      field: "analysis",
+    });
+  }
+  const seen = new Set<string>();
+  return list.filter((entry): entry is { path: string; value: unknown } => {
+    const { path, value } = (entry ?? {}) as { path?: unknown; value?: unknown };
+    if (typeof path !== "string" || !STYLE_PATHS.includes(path) || seen.has(path) || value === undefined || value === null) return false;
+    seen.add(path);
+    return true;
+  });
 }
 
 function isPersonality(name: string): name is MotionPersonalityId {

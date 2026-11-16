@@ -30,6 +30,7 @@ import { MAX_PICTURE_S, readPicture } from "./picture.js";
 import { rhythmOf } from "./rhythm.js";
 import { sceneScores } from "./scene.js";
 import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
+import { styleSuggestions } from "./suggest.js";
 
 // `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness, tempo and audio of a reference video, on the managed ffmpeg.
 // Frame sampling and sheet tiling are `review`'s (`review/plan.ts`, `review/images.ts`); the beat detector is `media/beats.ts`.
@@ -223,6 +224,7 @@ export class AnalyzeService {
     if (unmeasured > 0) warnings.push(`look: ${unmeasured} shot${unmeasured === 1 ? "" : "s"} had no frame read (past the end of the picture pass) and carry the look of the nearest earlier shot, not their own.`);
     const lookOf = (builder: LookBuilder, shot: number) => builder.look() ?? fallbackLook(looks, shot, overallLook);
     const wholeLook = overallLook.look()!; // The picture pass read at least one frame.
+    const stats = shotStats(shots, fps);
     const result: AnalyzeResultShape = {
       file: request.file,
       name,
@@ -246,7 +248,7 @@ export class AnalyzeService {
         look: shotLook(lookOf(looks[i]!, i)),
         ink: ink.shots[i]!,
       })),
-      stats: shotStats(shots, fps),
+      stats,
       palette: palettes.overall,
       look: wholeLook,
       rhythm,
@@ -259,6 +261,7 @@ export class AnalyzeService {
       tempo: tempo ? withoutBeats(tempo) : null,
       audio,
       sheets,
+      suggestions: styleSuggestions({ palette: palettes.overall, curve, stats, rhythm, audio }),
       warnings,
       labels: { ...ANALYZE_RESULT_LABELS },
     };

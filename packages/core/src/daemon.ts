@@ -183,6 +183,7 @@ import { generateMusic } from "./sound/music-take.js";
 import { ReviewService } from "./review/service.js";
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
+import { ClipComparer } from "./clips/compare.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
@@ -754,6 +755,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const shown = await timelines.viewConfig(dir, "style", "current");
       return (await styles.show(dir, shown.state)).style?.platforms.value ?? [];
     },
+    musicUnderVoice: async (dir) => {
+      const shown = await timelines.viewConfig(dir, "style", "current");
+      return ((await styles.show(dir, shown.state)).style ?? resolveStyle(null)).sound.musicUnderVoice;
+    },
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     ffprobe: async (dir) => binaries.ensure("ffprobe", await projectBinaries(dir)),
     // `clips` and `faceScans` are declared below: they are read when a review runs, not now.
@@ -786,6 +791,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     probe: (dir, asset) => media.probe(dir, asset),
   });
   const gradeComparer = new GradeComparer({
+    exports,
+    ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+  });
+  const clipComparer = new ClipComparer({
     exports,
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
   });
@@ -1796,6 +1805,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
       const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat };
       return { view: shown, proposal, ...(await gradeComparer.compare(dir, { ...loaded, ...formats }, request)) };
+    },
+    "clip.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
+      const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat };
+      return { view: shown, proposal, ...(await clipComparer.compare(dir, { ...loaded, ...formats }, request)) };
     },
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {
       const dir = await root(cwd);
@@ -3094,9 +3110,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return changeConfig(dir, caller, "style", (author, tx) => styles.set(dir, path, value, author, tx));
     },
-    "style.apply": async ({ cwd, name, replace }, caller) => {
+    "style.apply": async ({ cwd, name, replace, analysis, paths }, caller) => {
+      const invalid = (field: string, message: string) => new RpcError(ErrorCode.InvalidParams, message, { issues: [{ path: [field], message }] });
+      if ((name === undefined) === (analysis === undefined)) throw invalid("name", "style.apply takes `name` (a user style or personality) or `analysis` (an analyze run), one of them.");
+      if (analysis !== undefined && replace) throw invalid("replace", "`replace` copies a whole user style; suggestions of an analysis only merge.");
+      if (name !== undefined && paths) throw invalid("paths", "`paths` picks suggestions of an `analysis`; a user style applies whole.");
       const dir = await root(cwd);
-      return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name, replace === true, author, tx));
+      if (analysis !== undefined) return changeConfig(dir, caller, "style", (author, tx) => styles.applyAnalysis(dir, analysis, paths, author, tx));
+      return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name!, replace === true, author, tx));
     },
     "style.save": async ({ cwd, name, force }) => styles.save(await root(cwd), name, force === true),
     "style.list": async () => styles.list(),
