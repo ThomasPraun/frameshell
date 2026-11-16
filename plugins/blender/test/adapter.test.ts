@@ -27,9 +27,51 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(inputs.slice(0, 2)).toEqual([SOURCE, ".frameshell/blender/version/4.5.3.json"]);
       expect(inputs[2]).toBe(".frameshell/blender/range/500ms.json");
       expect(inputs[3]).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}-[0-9a-f]{8}\/deps\.json$/);
-      expect(inputs.slice(4)).toEqual(["scenes/lib.blend", "tex.png"]);
-      expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: ["scenes/lib.blend", "tex.png"] });
+      expect(inputs.slice(4)).toEqual(["scenes/lib.blend", "tex.png", inputs[3]!.replace(/deps\.json$/, "outside.json")]);
+      expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: ["scenes/lib.blend", "tex.png"], outside: 1 });
       expect(JSON.parse(readFileSync(join(project, inputs[1]!), "utf8"))).toEqual({ blender: "4.5.3" });
+    });
+
+    it("put libraries outside the project into the key by content, never by path, and warn on the render", async () => {
+      const elsewhere = tempDir();
+      const lib = join(elsewhere, "a-props.blend");
+      writeFileSync(lib, "BLENDERlib-v1");
+      const missing = join(elsewhere, "z-gone.png");
+      writeBlend(project, SOURCE, { fps: 10, links: [lib, missing] });
+      const blender = adapter();
+      const before = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      const outside = before.at(-1)!;
+      expect(outside).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}-[0-9a-f]{8}\/outside\.json$/);
+      const text = readFileSync(join(project, outside), "utf8");
+      expect(JSON.parse(text)).toEqual({ outside: [{ sha256: expect.stringMatching(/^[0-9a-f]{16}$/), bytes: 13 }, { missing: true }] });
+      // No absolute path of the outside files lands in a project file.
+      for (const file of [outside, before[3]!]) expect(readFileSync(join(project, file), "utf8")).not.toContain(elsewhere.split(/[\\/]/).at(-1)!);
+
+      // Editing the library changes the input's content (so the key) on the next check; Blender lists the .blend once.
+      writeFileSync(lib, "BLENDERlib-v2-longer");
+      await blender.inputs!(clip(), inputsContext(project, stub.path));
+      expect(readFileSync(join(project, outside), "utf8")).not.toBe(text);
+      expect(stub.runs("deps.py")).toHaveLength(1);
+      // A restart does not know the outside paths (never written): it lists the .blend again, once.
+      await adapter().inputs!(clip(), inputsContext(project, stub.path));
+      expect(stub.runs("deps.py")).toHaveLength(2);
+
+      const warnings: string[] = [];
+      const { ctx } = renderContext(project, stub.path, { warn: (message) => warnings.push(message) });
+      await blender.render(clip(), ctx);
+      expect(warnings).toEqual([
+        `blender clip c1: scenes/intro.blend loads 2 files from outside the project (${lib}, ${missing}); their content is in the render key, ` +
+          "but Frameshell does not watch them: copy them into the project and relink to re-render on every change.",
+      ]);
+    });
+
+    it("re-list a .blend whose listing an older plugin wrote, which did not count outside files", async () => {
+      const blender = adapter();
+      const inputs = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeFileSync(join(project, inputs[3]!), `${JSON.stringify({ blend: SOURCE, paths: [] })}\n`);
+      await adapter().inputs!(clip(), inputsContext(project, stub.path));
+      expect(stub.runs("deps.py")).toHaveLength(2);
+      expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: [], outside: 0 });
     });
 
     it("run Blender's file listing once per .blend content, and its version once per executable, not on every key check", async () => {
@@ -193,19 +235,32 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(Math.max(...rendering)).toBeCloseTo(0.9);
     });
 
-    it("refuses a scene at another frame rate with how to fix it, and renders nothing", async () => {
-      writeBlend(project, SOURCE, { fps: 24 });
+    it("time-remaps a scene at another frame rate: each project frame shows the scene at the same second", async () => {
+      // A 24 fps scene in a 30 fps project: frame k shows scene frame 1 + k * 24/30.
+      writeBlend(project, SOURCE, { fps: 24, frameStart: 1, frameEnd: 100 });
       const { ctx } = renderContext(project, stub.path, { fps: 30 });
-      await expect(adapter().render(clip(), ctx)).rejects.toThrow(
-        /blender clip c1: scene "Scene" of scenes\/intro\.blend runs at 24 fps but the project runs at 30 fps\. Set the scene's frame rate to 30.*never remapped/,
+      const result = await adapter().render(clip({ duration: 0.2 }), ctx);
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 30, frames: 6 });
+      expect(stub.sceneFrames()).toEqual([1, 1.8, 2.6, 3.4, 4.2, 5]);
+      expect((await decodeRgba(result.file)).length / (64 * 36 * 4)).toBe(6);
+
+      // 60 fps scene in a 30 fps project: every other scene frame.
+      writeBlend(project, SOURCE, { fps: 60, frameStart: 0, frameEnd: 100 });
+      await adapter().render(clip({ duration: 0.1 }), renderContext(project, stub.path, { fps: 30 }).ctx);
+      expect(stub.sceneFrames().slice(6)).toEqual([0, 2, 4]);
+    });
+
+    it("refuses a remapped clip that runs past the scene's end, naming both rates", async () => {
+      writeBlend(project, SOURCE, { fps: 24, frameStart: 1, frameEnd: 4 });
+      await expect(adapter().render(clip({ duration: 0.2 }), renderContext(project, stub.path, { fps: 30 }).ctx)).rejects.toThrow(
+        /needs scene frames 1 to 5 \(the scene runs at 24 fps, the project at 30\) but scene "Scene" of scenes\/intro\.blend ends at frame 4 \(4 frames\)/,
       );
-      expect(existsSync(join(ctx.outDir, "render.webm"))).toBe(false);
     });
 
     it("refuses a clip longer than the scene, a missing scene and a missing camera, each with the fix", async () => {
       writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 3, scenes: ["Scene", "Alt"], cameras: ["Camera"] });
       await expect(adapter().render(clip(), renderContext(project, stub.path).ctx)).rejects.toThrow(
-        /needs 5 frames from the scene's first frame \(1\) but scene "Scene" of scenes\/intro\.blend ends at frame 3 \(3 frames\)\. Raise its End frame or shorten the clip/,
+        /needs scene frames 1 to 5 but scene "Scene" of scenes\/intro\.blend ends at frame 3 \(3 frames\)\. Raise its End frame or shorten the clip/,
       );
       writeBlend(project, SOURCE, { fps: 10, scenes: ["Scene", "Alt"] });
       await expect(adapter().render(clip({ props: { scene: "Nope" } }), renderContext(project, stub.path).ctx)).rejects.toThrow(/no scene "Nope"\. Its scenes: Scene, Alt\. Set props\.scene/);

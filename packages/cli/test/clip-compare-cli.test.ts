@@ -44,6 +44,15 @@ describe("clip compare", () => {
     expect(parseClipLook("samples=32,denoise=true,camera=null")).toEqual({ props: { samples: 32, denoise: true, camera: null } });
     expect(parseClipLook(`{"name":"x","props":{"a":[1,2]}}`)).toEqual({ name: "x", props: { a: [1, 2] } });
     expect(() => parseClipLook("dusk")).toThrow(/--look: expected \[name:\]key=value/);
+  });
+
+  it("keeps scene and camera names as text, even when they read as numbers or booleans; null still drops them", () => {
+    expect(parseClipLook("a:scene=2024")).toEqual({ name: "a", props: { scene: "2024" } });
+    expect(parseClipLook("camera=001,scene=true,samples=32")).toEqual({ props: { camera: "001", scene: "true", samples: 32 } });
+    expect(parseClipLook("scene=null")).toEqual({ props: { scene: null } });
+  });
+
+  it("refuses looks that are not key=value pairs or JSON objects", () => {
     expect(() => parseClipLook("dusk:scene=")).toThrow(/--look: expected/);
     expect(() => parseClipLook("{nope")).toThrow(/expected a JSON object/);
   });

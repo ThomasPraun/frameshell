@@ -119,6 +119,9 @@ export {
   BLENDER_PACKAGE,
   BLENDER_TOOL,
   type UserInstall,
+  type PlatformFamily,
+  type StandardPath,
+  platformFamily,
   DEFAULT_MODELS,
   DEFAULT_PACKAGES,
   CHROME_HEADLESS_SHELL_PACKAGE,
@@ -549,7 +552,7 @@ export {
 } from "./analyze/service.js";
 export { DEFAULT_CUT_THRESHOLD, type Cut, type Shot, type ShotStats, detectCuts, frameStart, shotStats, shotsOf } from "./analyze/shots.js";
 export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palette.js";
-export { type LoudnessReading, measureLoudness, parseLoudness } from "./analyze/loudness.js";
+export { type LoudnessReading, type SoundRange, measureLoudness, parseLoudness } from "./analyze/loudness.js";
 export { GradeAnalyzer, type GradeAnalyzeRequest, type GradeAnalyzerOptions } from "./grade/analyze.js";
 export { CLIP_COMPARE_DIR, ClipComparer, type ClipCompareRequest, type ClipComparerOptions, type ClipVariant, applyLook, propsFlags, withVariant } from "./clips/compare.js";
 export { GRADE_COMPARE_DIR, GradeComparer, type GradeCompareRequest, type GradeComparerOptions, columnsFor, lookFlags, withGrade } from "./grade/compare.js";

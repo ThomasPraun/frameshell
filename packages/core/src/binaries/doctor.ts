@@ -1,5 +1,5 @@
 import type { BinaryReport, DoctorResult } from "@frameshell/protocol";
-import type { BinaryManager, ProjectBinaries } from "./manager.js";
+import type { BinaryLocation, BinaryManager, ProjectBinaries } from "./manager.js";
 import { EncoderCache } from "../encoders/probe.js";
 import { machineProfile, readMachineFacts } from "../encoders/profile.js";
 import { type Exec, execProcess, probeFfmpeg, probeVersion } from "./probe.js";
@@ -27,9 +27,10 @@ export interface DoctorOptions {
  * Report-only by default: never downloads unless `install` is set. On-demand
  * packages (whisper.cpp) are reported, never flagged missing and never
  * installed here: their feature installs them on first use. A user install
- * (Blender, ADR 0035) is never downloaded: without a `binaries` override it
- * is reported as not installed, and one that runs outside its supported
- * versions is a problem.
+ * (Blender, ADR 0035) is never downloaded: one found at a standard path is
+ * reported as `system` with how it was found (`found`); with neither that nor
+ * a `binaries` override it is reported as not installed, and one that runs
+ * outside its supported versions is a problem.
  */
 export async function runDoctor(binaries: BinaryManager, options: DoctorOptions = {}): Promise<Omit<DoctorResult, "skill">> {
   const { project, install = false, reprobe = false, exec = execProcess } = options;
@@ -55,6 +56,7 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
       name: tool,
       package: location.package,
       source: location.source,
+      ...(location.found ? { found: location.found } : {}),
       path: location.path,
       installed: location.installed,
       version,
@@ -109,6 +111,6 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
 }
 
 /** A module cannot be run to ask: a managed install is its pin (the version is in its path); an override is taken as given. */
-function moduleVersion(source: "managed" | "project" | "global", pinned: { version: string } | null): string {
+function moduleVersion(source: BinaryLocation["source"], pinned: { version: string } | null): string {
   return source === "managed" && pinned ? pinned.version : "unknown";
 }

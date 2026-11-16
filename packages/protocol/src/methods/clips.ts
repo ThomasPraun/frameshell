@@ -166,12 +166,14 @@ export const clipMethods = {
       "`{ source: \"scenes/hero-b.blend\" }` a copy of the file. Tile 1 is the clip as it is (`current`), then the looks in order. Every tile is the whole composed " +
       "frame as `frame` renders it (layers above, captions), from each variant's own render: a draft (EEVEE/Workbench for a Blender clip), or the final when " +
       "it is cached; a frame never starts a final. Each variant not rendered before is rendered first (a clip render job, one at a time: seconds for a draft, " +
-      "and the whole clip up to the frame is rendered, so compare on a short clip), and stays cached for `clip.set` later. Never changes the timeline: keep a look with " +
+      "and the whole clip up to the frame is rendered, so compare on a short clip). A variant's render stays in the clip cache until the next `gc`, " +
+        "which removes it while no timeline uses it: `clip.set` with a look soon after reuses it, later it renders again. Never changes the timeline: keep a look with " +
       "`clip.set` `props` (each tile's `flags`). `at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
       "`.frameshell/looks/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. " +
       'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "dusk", props: { scene: "Dusk" } }, { name: "rim", props: { scene: "Rim light" } }] }`. ' +
       "Fails with ClipNotFound (no such adapter clip on a video track), InvalidOperation (not an adapter clip, `at` outside the clip, a look that sets nothing, " +
-      "a `source` outside the project, a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+      "a `source` outside the project), ClipRenderFailed (a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, " +
+      "or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -213,10 +215,12 @@ export const clipMethods = {
       "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
       "is not heard (a warning says so), nor are multicam angles and mics: a program track in `under` is refused. A voice file " +
       "that cannot be decoded is named in the warnings. A hand key where someone speaks is dipped too and its level comes back on the next run. " +
-      "`level` first sets each clip's static gain (`audio.gain`) so the music's integrated loudness (EBU R128, measured once per file and cached) " +
-      "sits `level` dB under the voice's: the voice is every clip of the `under` tracks, its file's loudness plus its gain, averaged by the time it plays " +
-      "(about 12 dB under is a start; the style's `sound.musicUnderVoice`); a clip with gain keys of its own is left alone and named in the warnings. " +
-      "The depth, attack, release, threshold, gap and `level` are kept in `audio.duck` of each clip that gets duck keys, so `music.fit` runs the same duck again after it moves one. " +
+      "`level` first sets each clip's static gain (`audio.gain`) so the music's integrated loudness (EBU R128, measured over the part of its file the clip plays, " +
+      "once per file and part, cached) sits `level` dB under the voice's: the voice is every clip of the `under` tracks, the loudness of the part of its file it plays plus its gain, " +
+      "averaged by the time it plays. Pass a number of dB (about 12 is a start), or `\"style\"` for the project's own `sound.musicUnderVoice` (`style.show`; 12 unless `style.json` sets it); " +
+      "the number it came to is what is kept and reported. A clip with gain keys of its own is left alone and named in the warnings. " +
+      "The depth, attack, release, threshold, gap and `level` are kept in `audio.duck` of each clip that gets duck keys, so `music.fit`, `music.shape` and `music.grid` run the same duck again after they change one, " +
+      "and set the static gain again from `level` first (a clip with music keys or hand gain keys keeps its gain, a warning says so). " +
       "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8, level: 12 }`. Fails with InvalidOperation (`track` is not an audio " +
       "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
@@ -230,11 +234,12 @@ export const clipMethods = {
       threshold: z.number().min(-90).max(0).default(-38).describe("dBFS above which sound counts as speech. Default -38."),
       gap: z.number().min(0).max(30).default(0.6).describe("Seconds: speech stretches closer than this merge, so the music does not pump between words. Default 0.6."),
       level: z
-        .number()
-        .min(0)
-        .max(40)
+        .union([z.number().min(0).max(40), z.literal("style")])
         .optional()
-        .describe("dB the music's integrated loudness sits under the voice's: sets the static gain of each clip of `track` first. Default: the gains stay as they are."),
+        .describe(
+          "dB the music's integrated loudness sits under the voice's: sets the static gain of each clip of `track` first. " +
+            '`"style"` takes the number from the project\'s style (`sound.musicUnderVoice`, 12 dB unless `style.json` sets it). Default: the gains stay as they are.',
+        ),
     }),
     result: TrackDuckResultSchema,
   },

@@ -2,6 +2,8 @@ import {
   BACKDROP_CSS,
   BACKDROP_SETUP,
   COLOR_HELPERS,
+  GROUPING_VARIABLE,
+  NUMBER_FORMAT,
   PLACEHOLDER,
   type Template,
   type TemplateInput,
@@ -30,17 +32,7 @@ export const counter: Template = {
       { id: "prefix", type: "string", label: "Text before the number, e.g. $", default: "", maxLength: 8 },
       { id: "suffix", type: "string", label: "Text after the number, e.g. % or +", default: "+", maxLength: 12 },
       { id: "label", type: "string", label: "Caption under the number; empty for none", default: "videos edited", maxLength: 60 },
-      {
-        id: "grouping",
-        type: "enum",
-        label: "Thousands separator",
-        default: "comma",
-        options: [
-          { value: "comma", label: "Comma: 12,840" },
-          { value: "space", label: "Space: 12 840" },
-          { value: "none", label: "None: 12840" },
-        ],
-      },
+      GROUPING_VARIABLE,
       { id: "countTime", type: "number", label: "Seconds the count takes", default: 1.2, min: 0.4, max: 3, step: 0.1, unit: "s" },
       { id: "glow", type: "number", label: "Soft glow while it climbs, 0 = none", default: 0.5, min: 0, max: 1, step: 0.05 },
       { id: "ink", type: "color", label: "Number colour", default: tokens.colors.ink ?? PLACEHOLDER.ink },
@@ -90,14 +82,8 @@ export const counter: Template = {
       // Layout per format (sizes are fractions of the short side). wide, square, tall.
       var L = M.pick({ num: 0.22, label: 0.045, gap: 0.02 }, { num: 0.22, label: 0.045, gap: 0.02 }, { num: 0.19, label: 0.042, gap: 0.02 });
 
-      // Same text for the same value everywhere: fixed decimals, then a separator every three digits.
-      var SEP = P.grouping === "comma" ? "," : P.grouping === "space" ? String.fromCharCode(160) : "";
-      function format(value) {
-        var fixed = Math.abs(value).toFixed(P.decimals).split(".");
-        var whole = SEP ? fixed[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g, SEP) : fixed[0];
-        var negative = value < 0 && Number(fixed.join(".")) !== 0;
-        return (negative ? "-" : "") + whole + (fixed[1] ? "." + fixed[1] : "");
-      }
+      ${NUMBER_FORMAT}
+
       var first = format(P.from);
       var last = format(P.to);
       var widest = first.length > last.length ? first : last;

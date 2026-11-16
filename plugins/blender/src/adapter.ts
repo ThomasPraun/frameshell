@@ -72,8 +72,9 @@ export interface BlenderAdapterOptions {
 /**
  * The `blender` clip adapter (ADR 0035). A clip's `source` is a `.blend` inside the project. Blender is the
  * person's own install (`binaries.blender`), run once per render as a separate process; the managed ffmpeg encodes
- * its PNG frames to VP9 WebM with alpha. The cache key covers the file, the in-project files it loads, the Blender
- * version and the length rendered. Each clip has a draft render (EEVEE or Workbench) and a final one (Cycles), which
+ * its PNG frames to VP9 WebM with alpha. The cache key covers the file, the files it loads (inside the project by path,
+ * outside it by content), the Blender version and the length rendered. A scene at another frame rate than the project
+ * is time-remapped, seconds kept. Each clip has a draft render (EEVEE or Workbench) and a final one (Cycles), which
  * the host makes only when an export waits for it.
  */
 export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapter {
@@ -94,13 +95,16 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       const version = await versions.version(blender);
       const info = await deps.hash(source);
       const linked = await deps.list(source, blender, info);
+      // Files outside the project enter the key by content only (ADR 0035 slice 4): no absolute path in the project.
+      const outside = await deps.outsideKey(source, info, linked.outside);
       return [
         source,
         // The key hashes files, so the version and the length rendered travel as files named by them.
         await marker(projectDir, `${STATE_DIR}/version/${version}.json`, `${JSON.stringify({ blender: version })}\n`),
         await marker(projectDir, `${STATE_DIR}/range/${endMs(clip as BlenderClip)}ms.json`, `${JSON.stringify({ endMs: endMs(clip as BlenderClip) })}\n`),
         listingPath(source, info),
-        ...linked,
+        ...linked.inside,
+        ...(outside ? [outside] : []),
       ];
     },
     async render(clip, ctx: RenderContext) {
@@ -110,6 +114,8 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       const blender = await ctx.ensureBinary("blender");
       const version = await versions.version(blender);
       const ffmpeg = await ctx.ensureBinary("ffmpeg");
+      const { outside } = await deps.list(source, blender, await deps.hash(source));
+      if (outside.length > 0) ctx.warn?.(outsideWarning(id, source, outside));
       const frames = frameCount(clip as BlenderClip, ctx.fps);
       // Hosts older than finals pass no tier: they get the draft, as before.
       const quality = ctx.tier === "final" ? "final" : "draft";
@@ -183,7 +189,8 @@ function endMs(clip: BlenderClip): number {
 }
 
 /**
- * Frames of the scene to render, from its first, so file time t shows composition time t: up to the clip's end at `fps`.
+ * Frames to render at the project's `fps`, from the scene's first frame, so file time t shows composition time t: up to
+ * the clip's end. `render.py` shows each at its time on the scene's own clock, so a scene at another rate keeps seconds.
  * Counted from the unrounded end; 1e-3 of a frame absorbs the float error of ends snapped to the frame grid
  * (92/30 s * 30 is 92.00000000000001), which must not ask for one frame more.
  */
@@ -199,24 +206,38 @@ export function frameRate(fps: number): string {
   return String(fps);
 }
 
+/**
+ * The warning a render of `source` carries when it loads `outside` files (absolute paths): their content is in the key,
+ * but nothing watches them, so an edit to one re-renders only when the clip's key is next checked.
+ */
+export function outsideWarning(clip: string, source: string, outside: readonly string[]): string {
+  const shown = outside.slice(0, OUTSIDE_SHOWN).join(", ") + (outside.length > OUTSIDE_SHOWN ? ` and ${outside.length - OUTSIDE_SHOWN} more` : "");
+  const one = outside.length === 1;
+  return (
+    `blender clip ${clip}: ${source} loads ${one ? "a file" : `${outside.length} files`} from outside the project (${shown}); ` +
+    `${one ? "its" : "their"} content is in the render key, but Frameshell does not watch ${one ? "it" : "them"}: ` +
+    `copy ${one ? "it" : "them"} into the project and relink to re-render on every change.`
+  );
+}
+
+/** Outside files a warning names before it says how many more. */
+const OUTSIDE_SHOWN = 5;
+
 /** The fix-it message for a refusal of the shipped script. */
 export function describeRefusal(clip: string, source: string, error: Extract<BlenderEvent, { event: "error" }>, projectFps: number): string {
   const at = `blender clip ${clip}`;
   const list = (names: unknown) => (Array.isArray(names) && names.length > 0 ? names.join(", ") : "none");
   switch (error.code) {
-    case "fps": {
-      const scene = String(error["scene"]);
-      const sceneFps = Number(error["sceneFps"]);
-      return (
-        `${at}: scene "${scene}" of ${source} runs at ${Number(sceneFps.toFixed(3))} fps but the project runs at ${projectFps} fps. ` +
-        `Set the scene's frame rate to ${projectFps} (Output properties, Frame Rate) and save; frames are never remapped to another rate.`
-      );
-    }
     case "range": {
       const start = Number(error["frameStart"]);
       const end = Number(error["frameEnd"]);
+      const sceneFps = Number(error["sceneFps"]);
+      // The scene frame the clip's last frame shows (fractional when the scene runs at another rate).
+      const last = Number(error["lastFrame"]);
+      const rate = Number.isFinite(sceneFps) && Math.abs(sceneFps - projectFps) > 0.001 ? ` (the scene runs at ${Number(sceneFps.toFixed(3))} fps, the project at ${projectFps})` : "";
+      const needs = Number.isFinite(last) ? `scene frames ${start} to ${Number(last.toFixed(3))}` : `${Number(error["frames"])} frames from the scene's first frame (${start})`;
       return (
-        `${at}: it needs ${Number(error["frames"])} frames from the scene's first frame (${start}) but scene "${String(error["scene"])}" of ${source} ends at frame ${end} ` +
+        `${at}: it needs ${needs}${rate} but scene "${String(error["scene"])}" of ${source} ends at frame ${end} ` +
         `(${end - start + 1} frames). Raise its End frame or shorten the clip.`
       );
     }

@@ -162,6 +162,30 @@ export const FLAT_HELPERS = String.raw`
         M.write(element, { x: pose.x, y: pose.y, rotate: pose.rotate, scale: flat(pose.scale), scaleX: flat(pose.scaleX), scaleY: flat(pose.scaleY), opacity: pose.opacity });
       }`;
 
+/** The `grouping` prop of a template that prints a number: where the thousands separator goes. Pairs with {@link NUMBER_FORMAT}. */
+export const GROUPING_VARIABLE: TemplateVariable = {
+  id: "grouping",
+  type: "enum",
+  label: "Thousands separator",
+  default: "comma",
+  options: [
+    { value: "comma", label: "Comma: 12,840" },
+    { value: "space", label: "Space: 12 840" },
+    { value: "none", label: "None: 12840" },
+  ],
+};
+
+/** Page-script `format(value)`: one text for one value (fixed `P.decimals`, a `P.grouping` separator every three digits). */
+export const NUMBER_FORMAT = String.raw`
+      // Same text for the same value everywhere: fixed decimals, then a separator every three digits.
+      var SEP = P.grouping === "comma" ? "," : P.grouping === "space" ? String.fromCharCode(160) : "";
+      function format(value) {
+        var fixed = Math.abs(value).toFixed(P.decimals).split(".");
+        var whole = SEP ? fixed[0].replace(/\B(?=(\d{3})+(?!\d))/g, SEP) : fixed[0];
+        var negative = value < 0 && Number(fixed.join(".")) !== 0;
+        return (negative ? "-" : "") + whole + (fixed[1] ? "." + fixed[1] : "");
+      }`;
+
 /** The two props of a template that can sit on its own background: a colour and how solid it is (0 = transparent over footage). */
 export function backdropVariables(tokens: BrandTokens): TemplateVariable[] {
   return [
