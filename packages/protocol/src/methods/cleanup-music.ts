@@ -116,7 +116,7 @@ export const cleanupMusicMethods = {
     description:
       "Place 2 to 7 candidate music tracks under the same picture at the same loudness, so the person picks by ear (ADR 0037). Each file " +
       "in `assets` goes on its own new audio track `Music 1` to `Music n`, all muted but the first, with a static clip gain that brings its " +
-      "EBU R128 integrated loudness (measured over the whole file, once per file, cached by content) to one target: `loudness` (LUFS) when " +
+      "EBU R128 integrated loudness (measured over the part of the file that plays, once per file and part, cached by content) to one target: `loudness` (LUFS) when " +
       "given, else the quietest file's own, so no candidate is made louder than it is (a warning says when a gain would push a peak over " +
       "-1 dBTP). The clip starts at `from` (default 0) and plays the whole file. With `end` (seconds, a marker id or label) each is fitted " +
       "like `music.fit` slides it: its own final hit (found on its energy) lands on `end`, the intro dropped where the file is longer than " +
