@@ -77,7 +77,33 @@ export const ClipRequirementSchema = z.strictObject({
   keepsMoving: z
     .strictObject({ maxStatic: Seconds("The picture does not hold still for longer than this while the clip plays (the whole frame, so a clip under another moving one passes).") })
     .optional(),
+  staysInFrame: z
+    .union([
+      z.literal(true),
+      z.strictObject({
+        margin: z
+          .number()
+          .min(0)
+          .max(0.25)
+          .optional()
+          .describe("Keep this share of the frame clear on every side: 0.05 is 5 % of the width left and right and of the height top and bottom. Default 0: only touching or crossing an edge fails."),
+      }),
+    ])
+    .optional()
+    .describe(
+      "What the clip draws never leaves the film's frame while it plays, in the format reviewed (after its cover crop; inside the letterbox bars when the timeline has some): " +
+        "a generated clip's alpha (a render with an alpha plane), a footage clip's faces (a cached `people scan`). `true`, or `{ margin }`.",
+    ),
 });
+
+/** `staysInFrame` of a clip requirement as the margin it keeps: 0 for `true`. */
+export function staysInFrameMargin(value: ClipRequirement["staysInFrame"]): number | null {
+  if (value === undefined) return null;
+  return value === true ? 0 : (value.margin ?? 0);
+}
+
+/** One entry of `clips` in `requirements.json`. */
+export type ClipRequirement = z.output<typeof ClipRequirementSchema>;
 
 /** A craft warning the person accepts, with why. A waived warning is still reported (`metrics.waived`), never dropped. */
 export const WaiverSchema = z.strictObject({
@@ -101,6 +127,15 @@ export const RequirementsFileSchema = z.strictObject({
   fail: z.array(CraftCheckSchema).default([]).describe("Craft checks that are failures in this project: their warnings count in `requirements.failed` and make `frameshell review` exit 1, unless waived."),
   waivers: z.array(WaiverSchema).default([]),
 });
+
+/**
+ * What `review.require` sets without a clip, one value each: the fields of `film`, the caption size and the `fail`
+ * list. Each is one key of the `requirements` config document (ADR 0036).
+ */
+export const REQUIREMENT_PATHS = ["film.maxSeconds", "film.minSeconds", "film.maxStatic", "film.endCard", "film.loudness", "captions.minSize", "fail"] as const;
+
+/** What `review.require` sets for one clip: the assertions of a `clips` entry, one key each. */
+export const CLIP_REQUIREMENT_FIELDS = ["appearsBy", "before", "keepsMoving", "staysInFrame"] as const;
 
 /** Validated `requirements.json`. */
 export type RequirementsFile = z.output<typeof RequirementsFileSchema>;

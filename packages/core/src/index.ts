@@ -21,6 +21,7 @@ export { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, conf
 export { FORMAT_RULES, type FormatKeyValue, formatState, formatsFromState } from "./config/project-doc.js";
 export { CONFIG_DOC_NAMES, planConfigRevert } from "./config/revert.js";
 export { STYLE_KEY, checkedStyleState, styleConfigDocument, stylePathOf, styleState, styleWritten } from "./style/doc.js";
+export { REQUIREMENTS_KEY, checkedRequirementsState, requirementsConfigDocument, requirementsState, requirementsWritten } from "./review/requirements-doc.js";
 export { StyleService, type StyleServiceOptions } from "./style/service.js";
 export {
   type FaceScans,

@@ -130,6 +130,27 @@
               "maxStatic"
             ],
             "additionalProperties": false
+          },
+          "staysInFrame": {
+            "description": "What the clip draws never leaves the film's frame while it plays, in the format reviewed (after its cover crop; inside the letterbox bars when the timeline has some): a generated clip's alpha (a render with an alpha plane), a footage clip's faces (a cached `people scan`). `true`, or `{ margin }`.",
+            "anyOf": [
+              {
+                "type": "boolean",
+                "const": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "margin": {
+                    "description": "Keep this share of the frame clear on every side: 0.05 is 5 % of the width left and right and of the height top and bottom. Default 0: only touching or crossing an edge fails.",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.25
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [

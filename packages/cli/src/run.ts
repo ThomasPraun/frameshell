@@ -43,7 +43,7 @@ import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyl
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { BATCH_FLAGS, BATCH_USAGE, type BatchInvocation, batchOutcome, batchLabel, describeBatch, parseBatch, waitReviews } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
-import { REVIEW_FLAGS, REVIEW_USAGE, type ReviewInvocation, executeReview, parseReview } from "./review-commands.js";
+import { REVIEW_FLAGS, REVIEW_USAGE, type RequirementsInvocation, type ReviewInvocation, executeRequirements, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import { FormatIdSchema } from "@frameshell/schema";
@@ -185,7 +185,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "yes", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "from-analysis", "only"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "yes", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "from-analysis", "only", "clip", "remove"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -275,6 +275,7 @@ type Invocation =
   | StyleInvocation
   | JobInvocation
   | ReviewInvocation
+  | RequirementsInvocation
   | AnalyzeInvocation
   | AnalyzeDiffInvocation
   | PeopleInvocation
@@ -413,6 +414,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           "no-speech": { type: "boolean", default: false },
           "from-analysis": { type: "string" },
           only: { type: "string" },
+          clip: { type: "string" },
+          remove: { type: "boolean", default: false },
           help: { type: "boolean", default: false },
           version: { type: "boolean", default: false },
         },
@@ -480,7 +483,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" || (command === "review" && (sub === "require" || sub === "waive")) ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -906,6 +909,9 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     }
     case "review":
       return executeReview(conn, inv, cwd, flags.json, outcome);
+    case "review.require":
+    case "review.waive":
+      return executeRequirements(conn, inv, cwd, flags.json);
     case "analyze":
     case "analyze.diff":
       return executeAnalyze(conn, inv, cwd, flags.json);

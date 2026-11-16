@@ -227,17 +227,21 @@ export {
   glassOf,
 } from "./style.js";
 export {
+  CLIP_REQUIREMENT_FIELDS,
   CRAFT_CHECKS,
   CaptionRequirementsSchema,
   ClipRequirementSchema,
   FilmRequirementsSchema,
   REQUIREMENTS_FILE,
   REQUIREMENTS_SCHEMA_URL,
+  REQUIREMENT_PATHS,
   RequirementsFileSchema,
   WaiverSchema,
+  type ClipRequirement,
   type CraftCheck,
   type RequirementsFile,
   parseRequirementsFile,
+  staysInFrameMargin,
 } from "./requirements.js";
 export { STYLE_TOKEN_PREFIX, type StyleTokenFace, styleTokenCss } from "./style-tokens.js";
 export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
