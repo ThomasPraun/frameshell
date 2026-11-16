@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
+import { accessSync, constants, statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 
 /**
  * Runs one machine command (a probe like `nvidia-smi -L`, or an installed
@@ -16,7 +16,7 @@ const TAIL_LINES = 30;
 /** {@link CommandRunner} spawning the command from PATH or its absolute path; no shell. */
 export const runCommand: CommandRunner = (command, args, { cwd }) =>
   new Promise((resolve, reject) => {
-    const file = isAbsolute(command) ? command : findExecutable(command);
+    const file = isAbsolute(command) ? command : findOnPath(command);
     if (!file) {
       reject(Object.assign(new Error(`${command} not found on PATH`), { code: "ENOENT" }));
       return;
@@ -37,14 +37,20 @@ export const runCommand: CommandRunner = (command, args, { cwd }) =>
     });
   });
 
-function findExecutable(command: string): string | null {
-  const dirs = (process.env["PATH"] ?? "").split(delimiter).filter(Boolean);
-  const names = process.platform === "win32" ? [`${command}.exe`, command] : [command];
+/**
+ * First executable file named `command` (`command.exe` first on Windows) in the folders of `env`'s PATH, or null.
+ * `windows` picks the PATH separator and the `.exe` name, so a test can ask as another platform would.
+ */
+export function findOnPath(command: string, env: NodeJS.ProcessEnv = process.env, windows = process.platform === "win32"): string | null {
+  // A copied Windows environment is case-sensitive and usually spells it `Path`.
+  const dirs = (env["PATH"] ?? env["Path"] ?? "").split(windows ? ";" : ":").filter(Boolean);
+  const names = windows ? [`${command}.exe`, command] : [command];
   for (const dir of dirs) {
     for (const name of names) {
       const candidate = join(dir, name);
       try {
-        accessSync(candidate, constants.X_OK);
+        if (!statSync(candidate).isFile()) continue;
+        if (!windows) accessSync(candidate, constants.X_OK);
         return candidate;
       } catch {
         // Next candidate.

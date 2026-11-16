@@ -62,6 +62,7 @@ describe("frameshell duck", () => {
       params: { track: "t_m", under: ["t_v", "t_w"], depth: 8, attackMs: 30, releaseMs: 300, threshold: -40, gap: 1 },
     });
     expect(parseTimelineCommand(["duck", "t_m"], { under: ["t_v"], level: "12" })).toMatchObject({ params: { track: "t_m", under: ["t_v"], level: 12 } });
+    expect(parseTimelineCommand(["duck", "t_m"], { under: ["t_v"], level: "style" })).toMatchObject({ params: { track: "t_m", under: ["t_v"], level: "style" } });
     expect(parseTimelineCommand(["duck", "t_m"], { under: ["t_v"] })!.params).toEqual({ track: "t_m", under: ["t_v"] });
     expect(() => parseTimelineCommand(["duck", "t_m"], { under: ["t_v"], level: "low" })).toThrow(/expected a number/);
     expect(() => parseTimelineCommand(["duck", "t_m"], {})).toThrow(/needs --under/);

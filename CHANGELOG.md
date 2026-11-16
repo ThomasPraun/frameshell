@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 161): a scene at another frame rate than the project is
+  time-remapped with seconds kept (project frame k shows scene frame `start + k × scene fps / project fps` through a
+  subframe; no ratio is refused) instead of refused. Files a `.blend` loads from outside the project (owner decision
+  2026-11-16) render, their content hashes are a key input with no path in it (`outside.json` beside `deps.json`), and
+  every render of such a clip warns, naming them. Blender is found without `binaries.blender` where its installers put it
+  (macOS `/Applications/Blender.app`, Windows `Program Files\Blender Foundation\Blender <x.y>` newest supported, Linux
+  PATH and `/snap/bin`; PATH on every platform), by generic `UserInstall.standardPaths` data read by one lookup in
+  `BinaryManager.locate`; an override still wins. `doctor` reports such an install as source `system` with `found`
+  (`standard` or `path`). Not run with a real Blender: the opt-in real test now also checks the remap at a subframe, the
+  outside-file warning and that a scripted driver of a linked library outside the project stays off under `-Y`.
+
+- Loudness over the part of a file a clip plays, `duck --level style` and the level set again, slice MU2 of #485 (ADR
+  0037, epic #451; protocol 160). `LoudnessStore` reads the seconds a clip plays (`in` to `out`, on whole frames) and
+  caches them beside the whole-file reading in `.frameshell/loudness/` (`<hash>-l1-r<start ms>-<end ms>.json`, same `gc`
+  kind; a part that spans the file or is under one 400 ms block is the whole-file reading, so nothing is measured
+  twice). `music candidates --end` reads each file over the part its fit leaves playing, and `duck --level` reads each
+  music clip, and each voice clip (a file cut into over 8 pieces is read whole), over its played part. `duck --level
+  style` (`track.duck` `level: "style"`) takes the project's `sound.musicUnderVoice`; the number is what is kept in
+  `audio.duck.level` and reported with `level.source`. `music fit`, `music shape` and `music grid` set the clip's static
+  gain again from the stored `level` before they write the keys and run the duck again (a clip with gain keys of its own
+  keeps its gain, with a warning).
+
+- Documented limit of the export's loudness loop: it adds at most +3 dB (`MAX_TRIM_DB`), and when that cap binds the file
+  ends under the target by more than 0.15 LU (a transient-heavy mix that is quiet before the limiter, at AAC 128 kbps,
+  ceiling -4.9 dBTP). Kept on purpose (owner decision 2026-11-16); see SPEC §3.5 step 4 and ADR 0038 "Not done".
+
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
   protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
   guided filter), so an edge between two colours of the same brightness is found (error at a same-luma disc's edge 0.045
@@ -1310,6 +1336,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `clip compare --look a:scene=2024` (#482) keeps `scene` and `camera` values as text, so a scene named `2024` or a
+  camera named `001` is found; `null` still drops the key. The `clip.compare` description now names `ClipRenderFailed`
+  for a variant whose render fails (it said InvalidOperation) and says variant renders stay cached only until `gc`.
+- The Blender playbook quotes `doctor`'s real lines for a Blender that is missing or out of range.
 - The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
   "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
   switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.
