@@ -52,8 +52,8 @@ export const slotRoll: Template = {
       #lead { font-family: ${fonts.ui}; font-weight: 600; white-space: nowrap; }
       #machine { position: relative; flex: none; }
       #band { position: absolute; left: 0; right: 0; top: 50%; border-radius: 0.3em; border: 0.06em solid; }
-      /* The viewport cuts the reel a little past the band, so the neighbours of the landed item show half-way. */
-      #view { position: absolute; left: 0; right: 0; top: 50%; overflow: hidden; }
+      /* The viewport cuts the reel a little past the band, so the neighbours of the landed item show half-way; it cuts rows only, so a wide item is never clipped. */
+      #view { position: absolute; left: 0; right: 0; top: 50%; clip-path: inset(0 -50%); }
       .item { position: absolute; left: 0; right: 0; top: 50%; text-align: center; white-space: nowrap; font-family: ${fonts.display}; font-weight: ${fonts.displayWeight}; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }`;
     return `${pageHead(input, this.variables(input), css)}
   <body>
@@ -84,8 +84,9 @@ export const slotRoll: Template = {
       var want = String(P.target).trim();
       var goal = want ? items.findIndex(function (item) { return item.toLowerCase() === want.toLowerCase(); }) : items.length - 1;
       if (goal < 0) goal = items.push(want || "...") - 1;
-      // A reel of one item has nothing to spin past: it gets a filler in front, and the one item is the last.
+      // A reel needs three items: with fewer, an item would wrap round while still half in view. A lone item gets a filler in front, the rest one behind.
       if (items.length < 2) { items.unshift("..."); goal = 1; }
+      if (items.length < 3) items.push("...");
       var n = items.length;
 
       // Layout per format (sizes are fractions of the short side). wide, square, tall; tall stacks the lead over the reel.
@@ -134,8 +135,8 @@ export const slotRoll: Template = {
       var ROLL = Math.min(P.rollTime, Math.max(0.6, D - OUT - 0.5 - 0.3));
       var AT = Math.min(P.rollAt, Math.max(0.2, D - OUT - 0.5 - ROLL));
       var END = AT + ROLL;
-      // Whole items travelled: laps full turns plus the way to the target. Ends exactly on it.
-      var travel = P.laps * n + goal;
+      // Whole items travelled: laps (a whole number, whatever clip set wrote) full turns plus the way to the target. Ends exactly on it.
+      var travel = Math.max(1, Math.round(P.laps)) * n + goal;
 
       M.bind("${id}", function (t) {
         var out = M.ease("exit", (t - (D - OUT)) / OUT);

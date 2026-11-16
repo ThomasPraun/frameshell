@@ -20,8 +20,10 @@ import {
  * number holds. A column is a fixed slot as wide as the widest tabular digit
  * (measured on the machine that renders: `1ch` is the width of the 0 alone) and
  * one line high, never sized by the strip that moves in it, so the number never
- * shifts while it rolls. The wheel ends on exactly the text `format(to)` would
- * print.
+ * shifts while it rolls. The wheel ends on exactly the text `counter` would
+ * print: a start with more digits than `to` lays the wheels out, and the left
+ * columns (and any separator left of the first digit) the end does not use fade
+ * out as they land. They stay as empty room, so the number never moves.
  * Transparent unless `backdrop` is raised.
  */
 export const numberWheel: Template = {
@@ -100,6 +102,8 @@ export const numberWheel: Template = {
       function padded(text) { var d = digitsOf(text); while (d.length < count) d = "0" + d; return d; }
       var fromDigits = padded(first);
       var toDigits = padded(last);
+      // Columns left of the digits of the end text (a lower end value with fewer digits) end blank, not as zeros.
+      var pad = count - digitsOf(last).length;
 
       // A slot is about 0.78 em (a digit, the overhang margin and the gap), a separator 0.4 em, a prefix or suffix letter 0.65 em:
       // the size shrinks until the whole line fits inside the frame without measuring text.
@@ -121,6 +125,7 @@ export const numberWheel: Template = {
       // One strip per digit: 0 to 9 three times, so the window always has a neighbour above and below whichever digit it shows.
       var host = document.getElementById("digits");
       var cols = [];
+      var seps = [];
       layout.split("").forEach(function (ch) {
         var cell = document.createElement("span");
         if (/\\d/.test(ch)) {
@@ -136,8 +141,12 @@ export const numberWheel: Template = {
           cell.style.height = row + "px";
           cell.style.background = alpha(P.card, P.cells);
           cell.appendChild(strip);
-          cols.push({ slot: cell, strip: strip, from: Number(fromDigits[cols.length]), to: Number(toDigits[cols.length]) });
-        } else cell.textContent = ch;
+          cols.push({ slot: cell, strip: strip, from: Number(fromDigits[cols.length]), to: Number(toDigits[cols.length]), blank: cols.length < pad });
+        } else {
+          cell.textContent = ch;
+          // A separator with only blank columns to its left goes with the last of them.
+          if (cols.length <= pad) seps.push({ cell: cell, col: cols.length - 1 });
+        }
         host.appendChild(cell);
       });
 
@@ -193,7 +202,10 @@ export const numberWheel: Template = {
         cols.forEach(function (c) {
           var at = c.from + c.travel * M.ease("enter", (t - START) / c.time);
           M.write(c.strip, { y: -(10 + (((at % 10) + 10) % 10)) * row });
+          c.gone = c.blank ? M.ease("enter", (t - (START + c.time - 0.25)) / 0.25) : 0;
+          if (c.blank) M.write(c.slot, { opacity: 1 - c.gone });
         });
+        seps.forEach(function (s) { if (s.col >= 0) M.write(s.cell, { opacity: 1 - cols[s.col].gone }); });
         // Holds never stop: a slow push over the whole clip, and a small pulse when the last column lands.
         var pulse = t < END ? 1 : M.spring("snappy", t - END, 1.04, 1);
         put(group, { y: (1 - M.spring("heavy", t)) * lift, scale: (1 + 0.03 * Math.min(1, t / D) - 0.02 * out) * pulse, opacity: M.ease("enter", t / 0.25) * (1 - out) });

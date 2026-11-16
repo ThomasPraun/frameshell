@@ -120,8 +120,12 @@ export const freezeCut: Template = {
         var after = Math.max(0, t - CUT);
         var punch = 1 + (P.punch - 1) * M.ease("snap", after / 0.18);
         var push = 1 + 0.02 * Math.min(1, after / (D - CUT));
-        var sway = Math.sin(Math.min(t, CUT) * 2.2) * unit * 0.006 * live;
-        put(pic, { x: sway, scale: base * punch * push, opacity: 1 - out });
+        var scale = base * punch * push;
+        // The scale grows from the focus point, so the edge nearest it does not move: the sway may only use the room the scale has
+        // gained on each side, else a sliver of the background shows at that edge.
+        var room = (flat(scale) - 1) * S.width;
+        var sway = Math.max(-(1 - P.focusX) * room, Math.min(P.focusX * room, Math.sin(Math.min(t, CUT) * 2.2) * unit * 0.006 * live));
+        put(pic, { x: sway, scale: scale, opacity: 1 - out });
         // The flash is white at the cut and falls away on a square (half gone after about two frames at 30 fps); it never starts before it.
         M.write(flash, { opacity: t < CUT ? 0 : P.flash * Math.pow(1 - M.ease("progress", after / P.flashTime), 2) });
         // The label pops after the flash has cleared the worst of it.

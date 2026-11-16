@@ -327,6 +327,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     }, 120_000);
 
     // The wheel, roll, tab and freeze templates: what the page shows at the start, mid-move and once it has settled.
+    const visibleShown = String.raw`cols.filter(function (c) { return Number(c.slot.style.opacity || 1) > 0.5; }).map(function (c) { var m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(c.strip.style.transform); return Math.round(-Number(m[2]) / row) - 10; }).join("")`;
     const digitsShown = String.raw`cols.map(function (c) { var m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(c.strip.style.transform); return Math.round(-Number(m[2]) / row) - 10; }).join("")`;
 
     it.each([
@@ -349,6 +350,23 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         await seek(page, 3);
         expect(await page.evaluate(digitsShown)).toBe(end);
         expect(await page.evaluate("document.getElementById('line').offsetWidth")).toBe(width);
+        // What is on show is exactly the end text: columns it has no digit for are gone, not zeros.
+        expect(await page.evaluate(visibleShown)).toBe(end.replace(/^0+(?=\d)/, ""));
+      });
+    }, 120_000);
+
+    it("number-wheel to a value with fewer digits ends on exactly the end text: blank columns and no separator left of its first digit", async () => {
+      await inPage("number-wheel", { from: 1500, to: 20, grouping: "comma" }, undefined, async (page) => {
+        await seek(page, 0.2);
+        expect(await page.evaluate(visibleShown)).toBe("1500");
+        expect(await page.evaluate("Number(seps[0].cell.style.opacity || 1)")).toBe(1);
+        await seek(page, 3);
+        expect(await page.evaluate(visibleShown)).toBe("20");
+        expect(await page.evaluate("Number(seps[0].cell.style.opacity)")).toBe(0);
+      });
+      await inPage("number-wheel", { from: 12500, to: 5, grouping: "comma" }, undefined, async (page) => {
+        await seek(page, 3);
+        expect(await page.evaluate(visibleShown)).toBe("5");
       });
     }, 120_000);
 
@@ -385,6 +403,16 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       await inPage("slot-roll", { items: "only", target: "" }, undefined, async (page) => {
         await seek(page, 3);
         expect(await page.evaluate(onBand)).toEqual(["only"]);
+      });
+      // A fractional `laps` from `clip set --props` still ends exactly on the target, and a two-item reel gets a filler.
+      await inPage("slot-roll", { items: "a|b|c|d|e", target: "d", laps: 2.5 }, undefined, async (page) => {
+        await seek(page, 3);
+        expect(await page.evaluate(onBand)).toEqual(["d"]);
+      });
+      await inPage("slot-roll", { items: "a|b", target: "b" }, undefined, async (page) => {
+        expect(await page.evaluate("items.length")).toBe(3);
+        await seek(page, 3);
+        expect(await page.evaluate(onBand)).toEqual(["b"]);
       });
       await inPage("slot-roll", { items: "", target: "" }, undefined, async (page) => {
         await seek(page, 3);

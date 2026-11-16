@@ -151,6 +151,7 @@ export const tabIndicator: Template = {
         var left = edge(0, t);
         var right = Math.max(left + 2, edge(1, t));
         var first = tabs[0];
+        // The indicator stretches, which a transform would blur: its box is written rounded to 0.01 px, as cursor-marquee does.
         ind.style.left = stamp(left) + "px";
         ind.style.width = stamp(right - left) + "px";
         ind.style.top = stamp(pill ? first.offsetTop : nav.offsetHeight - px * 0.1) + "px";

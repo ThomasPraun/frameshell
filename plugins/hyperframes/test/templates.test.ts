@@ -143,6 +143,14 @@ describe("template number-wheel", () => {
     expect(defaults["countTime"]).toBeLessThanOrEqual(1.6);
     expect(read("wheel")).toContain("var TIME = Math.min(P.countTime, Math.max(0.5, D - OUT - START - 0.6));");
   });
+
+  it("fades the columns a shorter end text does not use, and the separators left of its first digit", async () => {
+    await scaffold(["wheel", "--template", "number-wheel"]);
+    const html = read("wheel");
+    expect(html).toContain("var pad = count - digitsOf(last).length;");
+    expect(html).toContain("blank: cols.length < pad");
+    expect(html).toContain("if (cols.length <= pad) seps.push(");
+  });
 });
 
 describe("template slot-roll", () => {
@@ -152,8 +160,11 @@ describe("template slot-roll", () => {
     expect(html).toContain("item.toLowerCase() === want.toLowerCase()");
     expect(html).toContain('if (goal < 0) goal = items.push(want || "...") - 1;');
     expect(html).toContain('if (items.length < 2) { items.unshift("..."); goal = 1; }');
-    // Whole turns plus the way to the target: the last frame is exactly the target on the band.
-    expect(html).toContain("var travel = P.laps * n + goal;");
+    expect(html).toContain('if (items.length < 3) items.push("...");');
+    // Whole turns (a fractional `laps` from clip set is rounded) plus the way to the target: the last frame is exactly the target on the band.
+    expect(html).toContain("var travel = Math.max(1, Math.round(P.laps)) * n + goal;");
+    // Only rows are cut, so a wide item is never clipped at its ends.
+    expect(html).toContain("clip-path: inset(0 -50%)");
   });
 });
 

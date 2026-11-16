@@ -50,7 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   numbers (`items`, one `|`-separated prop) past a highlighted band and lands on `target` (added to the reel when it is
   not in it; empty lands on the last), which flashes in the accent colour and pulses. `number-wheel` is an odometer:
   every digit is a column that rolls to its final digit (left columns first, the two lowest turn twice), ends on exactly
-  the text `counter` would print and holds; the slots are as wide as the widest digit, measured on the rendering machine
+  the text `counter` would print (columns and separators left of the first digit of a shorter end fade out as they land)
+  and holds; the slots are as wide as the widest digit, measured on the rendering machine
   (`1ch` is only the 0), and one line high, so nothing shifts while it rolls; count time 1.4 s by default (0.6 to 3).
   `tab-indicator` is a row of tabs with a pill or an underline that stretches between them: the edge it moves toward
   leaves first and the other follows, both springs retargeted at each time of `plan` (`2@1.2|4@2.4`: tab number or
@@ -58,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operation on the timeline; the still drifts and sways, then on the beat it stops dead with a punch-in toward a focus
   point, a white flash and an optional label (make the still with an exported frame). Typed props with bounds and the
   per-format layout as in the other templates; every one pulls a late beat in so it lands before the 0.3 s exit. The
-  number format of `counter` moved to the kit (`NUMBER_FORMAT`, `GROUPING_VARIABLE`) so `number-wheel` shares it. The
+  `laps` of `slot-roll` is rounded to whole turns and its reel never has fewer than three items; the
+  freeze sway stays inside the room the punch scale gains. The number format of `counter` moved to the kit (`NUMBER_FORMAT`, `GROUPING_VARIABLE`) so `number-wheel` shares it. The
   skill lists the four; the opt-in real-render test covers layout, cold-versus-reseek frames and alpha in the four
   formats, the digits shown at the start, mid-roll and the end, the band after a roll, the indicator edges before, in
   and after a move, and the flash, punch-in and hold of the freeze.
