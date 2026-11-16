@@ -113,6 +113,13 @@ describe("requirements: captions and clips", () => {
     expect(checkOf(result, "clip.keepsMoving", "c_b")).toMatchObject({ status: "pass", actual: 2 });
   });
 
+  it("judges repeated entries of one clip as one, later fields winning, as the requirements document keys them", () => {
+    const result = judge(file({ clips: [{ clip: "c_b", appearsBy: 1, before: "c_a" }, { clip: "c_b", appearsBy: 4 }] }));
+    const checks = result.metrics.requirements!.checks.filter((check) => check.clip === "c_b");
+    expect(checks.map((check) => check.id)).toEqual(["clip.appearsBy", "clip.before"]);
+    expect(checkOf(result, "clip.appearsBy", "c_b")).toMatchObject({ status: "pass", expected: 4 });
+  });
+
   it("clip checks of a file are skipped", () => {
     const result = judge(file({ clips: [{ clip: "c_a", appearsBy: 1 }] }), { timeline: null, clips: null, tracks: null });
     expect(checkOf(result, "clip.appearsBy", "c_a").status).toBe("skipped");
