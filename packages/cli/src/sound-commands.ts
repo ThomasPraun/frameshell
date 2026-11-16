@@ -1,4 +1,4 @@
-import { type DaemonConnection, SECONDS_TEXT, type SoundMusicResult, type SoundPlaceResult, type SoundSfxResult } from "@frameshell/protocol";
+import { type DaemonConnection, type SoundMusicResult, type SoundPlaceResult, type SoundSfxResult, timeRefOf } from "@frameshell/protocol";
 import {
   MUSIC_BPM_RANGE,
   MUSIC_CHORD_PATTERN,
@@ -225,7 +225,7 @@ function wholeList(raw: string, flag: string): number[] {
 function when(raw: string, flag: string): number | string {
   const text = raw.trim();
   if (text === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
-  return SECONDS_TEXT.test(text) ? Number(text) : text;
+  return timeRefOf(text);
 }
 
 function number(raw: string | undefined, flag: string, expected: string, valid: (n: number) => boolean): number | undefined {

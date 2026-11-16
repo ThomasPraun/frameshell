@@ -28,7 +28,7 @@ import type {
   TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
-import { SECONDS_TEXT } from "@frameshell/protocol";
+import { timeRefOf } from "@frameshell/protocol";
 import { glassOf, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
@@ -920,12 +920,12 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     const raw = values[flag];
     if (raw === undefined) return undefined;
     if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
-    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+    return timeRefOf(raw);
   };
   /** One time given as text: seconds as a number, else the name for the daemon to resolve. */
   const whenOf = (raw: string, flag: string): number | string => {
     if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
-    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+    return timeRefOf(raw);
   };
   const list = (flag: string): string[] | undefined => {
     const raw = values[flag];

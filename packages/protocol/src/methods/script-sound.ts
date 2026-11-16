@@ -282,6 +282,18 @@ export const scriptSoundMethods = {
       warnings: z.array(z.string()).describe("Script problems (budget over a scene's timing, digits without `language`…) and provider notes."),
     }),
   },
+  "voiceover.cancel": {
+    internal: true,
+    description:
+      "Stop the `voiceover.generate` calls this connection made in the project (the app's Cancel button, ADR 0034), never " +
+      "another client's run: the line being said is abandoned, takes finished before it stay written and imported (they may " +
+      "have been paid for), and the stopped call fails with SpeechFailed whose data has `canceled: true` and the `written` takes. " +
+      "A call of this connection that is only waiting its turn behind another run fails at once, having written nothing, and the " +
+      "run in front of it goes on. A run in its misread check ends with the check skipped. Safe to repeat; `canceled` is false " +
+      "when this connection had no generation in the project.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({ canceled: z.boolean().describe("A generation of this connection was told to stop; false when it had none in this project (nothing was stopped).") }),
+  },
   "voiceover.place": {
     mutating: true,
     description:

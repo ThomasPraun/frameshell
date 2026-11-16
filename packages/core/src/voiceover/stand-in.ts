@@ -62,3 +62,32 @@ export function paidStandInSpeechProvider(): SpeechProvider {
     estimate: (text) => ({ cost: Math.round(wordsOf(text) * PAID_STAND_IN_PRICE_PER_WORD * 1e6) / 1e6, currency: "USD", characters: text.length }),
   };
 }
+
+/** Id of {@link slowStandInSpeechProvider}. */
+export const SLOW_STAND_IN_SPEECH_PROVIDER = "stand-in-slow";
+/** How long {@link slowStandInSpeechProvider} takes to say one line, ms. */
+export const SLOW_STAND_IN_DELAY_MS = 1500;
+
+/**
+ * {@link standInSpeechProvider} that takes {@link SLOW_STAND_IN_DELAY_MS} ms a line (`FRAMESHELL_SPEECH_STAND_IN=slow` in
+ * `frameshelld`, e2e only), and stops at once when the run is canceled: progress and Cancel can be driven in the app.
+ */
+export function slowStandInSpeechProvider(delayMs = SLOW_STAND_IN_DELAY_MS): SpeechProvider {
+  const instant = standInSpeechProvider();
+  return {
+    ...instant,
+    id: SLOW_STAND_IN_SPEECH_PROVIDER,
+    async synthesize(text, voice, options, context) {
+      await new Promise<void>((resolve, reject) => {
+        const stop = () => {
+          clearTimeout(timer);
+          reject(context.signal.reason);
+        };
+        const timer = setTimeout(resolve, delayMs);
+        if (context.signal.aborted) return stop();
+        context.signal.addEventListener("abort", stop, { once: true });
+      });
+      return instant.synthesize(text, voice, options, context);
+    },
+  };
+}

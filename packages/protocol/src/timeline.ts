@@ -62,6 +62,12 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
+/** Typed time text for a {@link TimeRef} field: plain seconds become a number, anything else (a marker, `beat:N`) stays trimmed text for the daemon to resolve. One rule for the CLI and the app, never a private parser. */
+export function timeRefOf(text: string): number | string {
+  const trimmed = text.trim();
+  return SECONDS_TEXT.test(trimmed) ? Number(trimmed) : trimmed;
+}
+
 export const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])

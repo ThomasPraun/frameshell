@@ -107,7 +107,7 @@ function Nodes({
     // Whether it is a voiceover script is in the file's frontmatter: read it, then open the menu where the pointer was.
     event.preventDefault();
     const { clientX, clientY, target } = event;
-    void voiceoverItems(node.path).then((voiceover) => contextMenu.open(clientX, clientY, [...askItems(), ...items(voiceover)], windowOf(target)));
+    void voiceoverItems(node.path, windowOf(target)).then((voiceover) => contextMenu.open(clientX, clientY, [...askItems(), ...items(voiceover)], windowOf(target)));
   };
   return (
     <>

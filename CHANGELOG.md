@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
+  voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
+  already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
+  heard) and the form of "Place voiceover…", which asks where to start (seconds, a marker, `beat:N`, `bar:N`, resolved by
+  the daemon's TimeRef rules) and places the phrases on the main timeline in one transaction, with "replace" for takes
+  already placed. "Place voiceover…" is also in the script's own menu. The misread check runs only when transcription is
+  already on the machine, or after the person agrees to its download in the dialog; never a silent download. Stop is the
+  new internal `voiceover.cancel`: it stops the generations of its own connection only (never an agent's run in
+  front of it; a call still waiting its turn ends at once), the line being said is abandoned, the takes saved before it
+  are kept and imported, and the stopped call fails with `SpeechFailed` (`data.canceled`); it answers `canceled: false`
+  when it had nothing to stop and the dialog gives the button back. The dialog keeps keys and focus inside it, moves to
+  the project window when its detached panel closes, and the progress bar is one fraction of the whole run. `FRAMESHELL_SPEECH_STAND_IN=slow` adds
+  `stand-in-slow` for the e2e. The native "ready" and error boxes are gone (the dialog says it); the cost box stays.
+- `frameshell voiceover generate --yes --confirmation <token>` binds a CLI confirmation to the ask the person saw: the
+  `ConfirmationRequired` refusal prints the confirming command with its token and the `--lines`, `--provider`,
+  `--voice` and `--no-verify` it was made with, and a script or price that changed
+  meanwhile fails with `ConfirmationStale` instead of charging more than was confirmed.
 - Requirements of `review` stay in frame and go through the config journal, sixth slice of #457 (epic #451; protocol
   162; `review.require`, `review.waive`, `clip.staysInFrame`, config document `requirements`): a clip requirement
   `staysInFrame` (`true` or `{ margin }`, a share of the frame kept clear on every side) fails when what the clip draws

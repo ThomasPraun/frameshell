@@ -177,7 +177,7 @@ import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
-import { generateVoiceover } from "./voiceover/generate.js";
+import { canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
 import { planVoiceoverPlacement, runVoiceoverPlan } from "./voiceover/place.js";
 import { type SfxRequest, generateSfx } from "./sound/generate.js";
 import { allWarnings, planSounds, runPlan } from "./sound/place.js";
@@ -576,6 +576,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Running `voiceover.generate` calls, by canonical project root: one at a time per project. */
   const voiceoverRuns = new Map<string, Promise<void>>();
+  /**
+   * Every `voiceover.generate` call in flight (running or waiting its turn), by the same key, with the connection that
+   * made it: `voiceover.cancel` stops the calls of its own connection only, never another client's run.
+   */
+  const voiceoverCalls = new Map<string, Set<{ stop: AbortController; sink: EventSink }>>();
   /** Running `sound.sfx` calls, by canonical project root: one at a time per project, so two calls never write one take. */
   const soundRuns = new Map<string, Promise<void>>();
   /** Run sound work of project `dir` after the sound work already running there: takes are written one at a time. */
@@ -2006,8 +2011,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           throw new RpcError(ErrorCode.SpeechProviderNotFound, `${error.message} Built in: ${[...builtIn.keys()].join(", ")}.`, { provider: id, available });
         }
       };
-      const work = () =>
-        transcribing(dir, () => generateVoiceover({
+      const key = canonicalPathSync(dir);
+      const stop = new AbortController();
+      const call = { stop, sink: request.sink };
+      const calls = voiceoverCalls.get(key) ?? new Set();
+      calls.add(call);
+      voiceoverCalls.set(key, calls);
+      const work = () => {
+        if (stop.signal.aborted) throw voiceoverCanceledBeforeStart(provider ?? null);
+        return transcribing(dir, () => generateVoiceover({
           root: dir,
           cwd,
           script,
@@ -2032,20 +2044,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
               // Connection closed.
             }
           },
-          signal: voiceoverAbort.signal,
+          signal: AbortSignal.any([voiceoverAbort.signal, stop.signal]),
         }));
-      // One run per project at a time: two runs over one script would write the same takes.
-      const key = canonicalPathSync(dir);
-      const run = (voiceoverRuns.get(key) ?? Promise.resolve()).then(work);
-      const settled = run.then(
-        () => undefined,
-        () => undefined,
-      );
+      };
+      // One run per project at a time: two runs over one script would write the same takes. A call canceled while it
+      // waits ends at once, but the calls behind it still wait for the run in front of it.
+      const turn = voiceoverRuns.get(key) ?? Promise.resolve();
+      const canceledWaiting = new Promise<never>((_resolve, reject) => {
+        stop.signal.addEventListener("abort", () => reject(voiceoverCanceledBeforeStart(provider ?? null)), { once: true });
+      });
+      const run = Promise.race([turn, canceledWaiting]).then(work);
+      const none = () => undefined;
+      const settled = Promise.all([turn, run.then(none, none)]).then(none);
       voiceoverRuns.set(key, settled);
       void settled.then(() => {
         if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
       });
-      return run;
+      return run.finally(() => {
+        calls.delete(call);
+        if (calls.size === 0 && voiceoverCalls.get(key) === calls) voiceoverCalls.delete(key);
+      });
+    },
+    "voiceover.cancel": async ({ cwd }, _caller, request) => {
+      const mine = [...(voiceoverCalls.get(canonicalPathSync(await root(cwd))) ?? [])].filter((call) => call.sink === request.sink);
+      for (const call of mine) call.stop.abort();
+      return { canceled: mine.length > 0 };
     },
     "voiceover.place": async (params, caller) => {
       const { cwd, timeline, dryRun } = params;
