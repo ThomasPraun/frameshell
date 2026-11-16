@@ -114,20 +114,26 @@ export class GradeComparer {
   }
 }
 
-const invalid = (reason: string, message: string, field: string, valid?: { from: number; to: number }) =>
-  new RpcError(ErrorCode.InvalidOperation, `grade.compare: ${message}`, { op: "grade.compare", reason, field, ...(valid ? { valid } : {}) });
+const invalid = (reason: string, message: string, field: string, valid?: { from: number; to: number }, op = "grade.compare") =>
+  new RpcError(ErrorCode.InvalidOperation, `${op}: ${message}`, { op, reason, field, ...(valid ? { valid } : {}) });
 
 /** Timeline frame of `clip` to render: the one holding `at` (half a frame of slack at the ends, as `timeline show` rounds), else its middle frame. */
 function frameOf(clip: MediaClip, fps: number, at: number | undefined): number {
-  const start = clip.start;
-  const end = start + (clip.out - clip.in) / (clip.speed ?? 1);
+  return compareFrame(clip.id, clip.start, clip.start + (clip.out - clip.in) / (clip.speed ?? 1), fps, at, "grade.compare");
+}
+
+/**
+ * Timeline frame of the clip `id` playing from `start` to `end` (seconds) that `at` asks for, else its middle one: the
+ * frame the compare methods (`op`) render. Throws `InvalidOperation` when `at` is outside the clip.
+ */
+export function compareFrame(id: string, start: number, end: number, fps: number, at: number | undefined, op: string): number {
   const first = Math.ceil(start * fps - 1e-6);
   const last = Math.max(first, Math.ceil(end * fps - 1e-6) - 1);
   if (at === undefined) return Math.floor((first + last + 1) / 2);
   const slack = 0.5 / fps;
   if (at < start - slack || at > end + slack) {
     const valid = { from: round(start, 3), to: round(end, 3) };
-    throw invalid("outside-clip", `\`at\` ${at} is outside clip ${clip.id}, which plays from ${valid.from} to ${valid.to} s of the timeline.`, "at", valid);
+    throw invalid("outside-clip", `\`at\` ${at} is outside clip ${id}, which plays from ${valid.from} to ${valid.to} s of the timeline.`, "at", valid, op);
   }
   return Math.max(first, Math.min(last, Math.floor(at * fps + 1e-6)));
 }
@@ -197,6 +203,6 @@ export function columnsFor(tiles: number): number {
 }
 
 /** Height of a `width` px tile of a `frameWidth` x `frameHeight` frame, even (ffmpeg's `tile` and most encoders want it). */
-function evenHeight(width: number, frameWidth: number, frameHeight: number): number {
+export function evenHeight(width: number, frameWidth: number, frameHeight: number): number {
   return Math.max(2, 2 * Math.round((width * frameHeight) / frameWidth / 2));
 }

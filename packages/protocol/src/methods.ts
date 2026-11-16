@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 156;
+export const PROTOCOL_VERSION = 158;
 
 export {
   type MethodSpec,
@@ -465,6 +465,10 @@ export type ClipRendersResult = MethodResult<"clip.renders">;
 export type ClipLiveParams = MethodParams<"clip.live">;
 /** Result of `clip.live`. */
 export type ClipLiveResult = MethodResult<"clip.live">;
+/** `clip.compare` params. */
+export type ClipCompareParams = MethodParams<"clip.compare">;
+/** Result of `clip.compare`. */
+export type ClipCompareResult = MethodResult<"clip.compare">;
 /** `clip.verify` params. */
 export type ClipVerifyParams = MethodParams<"clip.verify">;
 /** Result of `clip.verify`. */

@@ -33,7 +33,7 @@ Add every format the person named that `frameshell format list` lacks, in the fi
 
 ## 2. Three storylines
 
-Write three storylines into `scripts/storylines.md` and recommend one. Each is **one viewer doing one real task**, with one real piece of data travelling from the hook to the payoff. The three differ in the central idea, and each lives in a different world, uses a different device (a cursor in an app, a chat, a phone in a hand, a terminal) and takes a different form (a demo, a before/after, a countdown, a single unbroken move). Never default to a template's story or to the last film's look.
+Write three storylines into `scripts/storylines.md` and recommend one. Each is **one viewer doing one real task**, with one real piece of data travelling from the hook to the payoff. The three differ in the central idea, and each lives in a different world, uses a different device (a cursor in an app, a chat, a phone in a hand, a terminal, a code window: `code-typing`, `code-diff`, `code-morph`) and takes a different form (a demo, a before/after, a countdown, a single unbroken move). Never default to a template's story or to the last film's look.
 
 Per storyline: a title, the viewer and their task, the data that travels, the hook in one line, the five beats in one line each, what it costs to make. Before recommending, compare it with the project's last film (a previous `scripts/storylines.md` or the person's last export): at least 4 of 6 aspects (world, device, form, palette, motion, music) differ, or it is the last demo again.
 

@@ -1,4 +1,4 @@
-import { ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type AnalyzeDiffResult, type AnalyzeResult, type DaemonConnection, labelOf } from "@frameshell/protocol";
+import { ANALYSIS_NAME_PATTERN, ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type AnalyzeDiffResult, type AnalyzeResult, type DaemonConnection, labelOf } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `analyze` (#471), in `frameshell --help`. */
@@ -14,7 +14,8 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--
                                music under it, effects over the music, sections; the speech is recognised by the project's
                                transcription), into .frameshell/analysis/<name>/ (default: the file name; a
                                new run replaces it; project files untouched). Times are frame / fps, rounded down. Every
-                               value is labelled MEASURED, ESTIMATED or DECISION (--json: "labels").
+                               value is labelled MEASURED, ESTIMATED or DECISION (--json: "labels"). Prints style.json
+                               suggestions it never applies: style apply --from-analysis <name> takes them.
                                --threshold: scene score that opens a shot (0.05 to 0.95; lower finds softer cuts)
                                --no-speech: skip recognising the speech (the slow part; no sentences or effects)
   analyze diff <film> <reference> [--name n] [--lag s] [--max-lag s] [--every s] [--snapshots n]
@@ -63,7 +64,6 @@ export interface AnalyzeOptions {
   "no-speech"?: boolean | undefined;
 }
 
-const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** A number flag in `[min, max]`; throws `UsageError` naming `expected` otherwise. */
 function numberFlag(raw: string | undefined, flag: string, expected: string, min: number, max: number, whole = false): number | undefined {
@@ -80,7 +80,7 @@ function parseDiff(files: string[], options: AnalyzeOptions): AnalyzeDiffInvocat
   if (files.length !== 2) return null;
   if (options.threshold !== undefined) throw new UsageError("`frameshell analyze diff` does not take --threshold (it cuts no shots).");
   if (options["no-speech"]) throw new UsageError("`frameshell analyze diff` does not take --no-speech (it recognises no speech).");
-  if (options.name !== undefined && !NAME_PATTERN.test(options.name)) {
+  if (options.name !== undefined && !ANALYSIS_NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
   const lag = numberFlag(options.lag, "lag", "seconds, e.g. --lag 0.4 or --lag -1", -3600, 3600);
@@ -112,7 +112,7 @@ export function parseAnalyze(rest: string[], options: AnalyzeOptions): AnalyzeIn
       throw new UsageError(`--threshold takes a scene score from 0.05 to 0.95, e.g. --threshold 0.3; got "${options.threshold}".`);
     }
   }
-  if (options.name !== undefined && !NAME_PATTERN.test(options.name)) {
+  if (options.name !== undefined && !ANALYSIS_NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
   return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(options["no-speech"] ? { speech: false as const } : {}) };
@@ -171,6 +171,10 @@ function formatAnalyze(result: AnalyzeResult): string {
   if (curve.moves.length > 0) lines.push("Moves (start s, duration s, ease, fit):");
   for (const move of curve.moves.slice(0, 40)) lines.push(`  ${move.start}  ${move.duration}  ${move.ease ?? "-"}  ${move.fit ?? "-"}`);
   if (curve.moves.length > 40) lines.push(`  … ${curve.moves.length - 40} more (--json)`);
+  if (result.suggestions.length > 0) {
+    lines.push(`${tag(result, "suggestions")} Style suggestions, never applied (show them to the person; apply what they agree to: frameshell style apply --from-analysis ${result.name} --only <path,...>):`);
+    for (const suggestion of result.suggestions) lines.push(`  ${suggestion.path}  ${typeof suggestion.value === "string" ? suggestion.value : JSON.stringify(suggestion.value)}  [${suggestion.label}] ${suggestion.why}`);
+  }
   lines.push(...result.warnings.map((warning) => `warning: ${warning}`));
   return `${lines.join("\n")}\n`;
 }

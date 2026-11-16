@@ -529,12 +529,14 @@ export { DEFAULT_CUT_THRESHOLD, type Cut, type Shot, type ShotStats, detectCuts,
 export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palette.js";
 export { type LoudnessReading, measureLoudness, parseLoudness } from "./analyze/loudness.js";
 export { GradeAnalyzer, type GradeAnalyzeRequest, type GradeAnalyzerOptions } from "./grade/analyze.js";
+export { CLIP_COMPARE_DIR, ClipComparer, type ClipCompareRequest, type ClipComparerOptions, type ClipVariant, applyLook, propsFlags, withVariant } from "./clips/compare.js";
 export { GRADE_COMPARE_DIR, GradeComparer, type GradeCompareRequest, type GradeComparerOptions, columnsFor, lookFlags, withGrade } from "./grade/compare.js";
 export { type FrameLevels, meanLevels, parseSignalstats } from "./grade/levels.js";
 export { type GradeCorrection, type GradeSuggestion, SUGGEST as GRADE_SUGGEST, correctionFlags, suggestGrade } from "./grade/suggest.js";
 export { type Look, LookBuilder, frameLook } from "./analyze/look.js";
 export { type Burst, type Rhythm, bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "./analyze/rhythm.js";
 export { type SoundHit, elementEvents, flashes, holds, hitEvents, soundHits } from "./analyze/events.js";
+export { type SuggestionInput, contrastRatio, styleSuggestions } from "./analyze/suggest.js";
 export { type SfxRender, type SfxSpec, synthesizeSfx } from "./sound/sfx.js";
 export { SFX_TRACK_NAME, type SoundItem, type SoundWish, soundWarnings } from "./sound/place.js";
 export { MUSIC_KEY_VERSION, type MusicMark, SFX_KEY_VERSION, SOUND_DIR, type SoundMark, musicFile, musicKey, musicMarkOf, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";

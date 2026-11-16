@@ -25,3 +25,9 @@ export function slidingMedians(values: ArrayLike<number>, half: number): Float64
   }
   return out;
 }
+
+/** The median of `values`, the upper middle of an even count, as {@link slidingMedians} takes it; `values` must not be empty. */
+export function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
