@@ -55,6 +55,8 @@ import {
   loudnessAnalysis,
   mixStep,
   muxStep,
+  limitedAnalysis,
+  LIMITED_STATS_FILE,
   paletteStep,
   parseLoudnessStats,
 } from "./compiler.js";
@@ -70,6 +72,7 @@ import {
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { gradeFiles } from "./grade.js";
+import { LOUDNESS_PASSES, limiterEngages, settleTrim } from "./true-peak.js";
 import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
@@ -93,6 +96,8 @@ export interface ExecuteRenderOptions {
 
 /** Share of overall progress spent encoding video segments; the rest is the mux. */
 const VIDEO_SHARE = 0.85;
+/** Share of the mux step the loudness re-measures (up to {@link LOUDNESS_PASSES} extra passes) take when they run. */
+const REMEASURE_SHARE = 0.5;
 
 /**
  * Run a compiled plan with ffmpeg: video segments in parallel with the
@@ -142,18 +147,39 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     await measuring;
     const measured = analysis ? parseLoudnessStats(await readFile(join(workDir, LOUDNESS_STATS_FILE), "utf8")) : null;
 
-    report({ step: "mux", progress: VIDEO_SHARE });
+    // Progress of a stretch (`from`..`to` of `seconds / duration`) of the mux step's `lo`..`hi` share.
+    const muxProgress = (from: number, to: number, lo: number, hi: number) => (seconds: number) =>
+      report({
+        step: "mux",
+        progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * (lo + (hi - lo) * (from + (to - from) * Math.min(1, seconds / plan.duration))),
+      });
+    // The limiter lowers the loudness a little (SPEC §3.5 step 4): measure it again and add the difference back.
+    let remeasures = 0;
+    const trim =
+      measured && plan.container !== "gif" && limiterEngages(measured, plan.loudness, plan.audio.truePeak)
+        ? await settleTrim(plan.loudness, async (trimDb) => {
+            const pass = remeasures++;
+            await run(
+              limitedAnalysis(plan, measured, trimDb)!.args,
+              muxProgress(pass / LOUDNESS_PASSES, (pass + 1) / LOUDNESS_PASSES, 0, REMEASURE_SHARE),
+            );
+            const limited = parseLoudnessStats(await readFile(join(workDir, LIMITED_STATS_FILE), "utf8"));
+            return limited ? Number(limited.input_i) : null;
+          })
+        : 0;
+
+    // The re-measures ran only when `remeasures` counted: the encode then fills the rest of the mux step.
+    const muxFrom = remeasures > 0 ? REMEASURE_SHARE : 0;
+    report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * muxFrom });
     await mkdir(dirname(output), { recursive: true });
-    const muxProgress = (from: number, to: number) => (seconds: number) =>
-      report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * (from + (to - from) * Math.min(1, seconds / plan.duration)) });
     if (plan.container === "gif") {
       // No sound to mix: the palette over every segment, then the GIF through it (ADR 0039).
-      await run(paletteStep().args, muxProgress(0, 0.4));
-      await run(gifStep(partial).args, muxProgress(0.4, 1));
+      await run(paletteStep().args, muxProgress(0, 0.4, muxFrom, 1));
+      await run(gifStep(partial).args, muxProgress(0.4, 1, muxFrom, 1));
     } else {
-      const mux = muxStep(plan, measured, partial);
+      const mux = muxStep(plan, measured, partial, trim);
       await writeFiles(workDir, mux.files);
-      await run(mux.args, muxProgress(0, 1));
+      await run(mux.args, muxProgress(0, 1, muxFrom, 1));
     }
     await renameRetrying(partial, output);
   } finally {

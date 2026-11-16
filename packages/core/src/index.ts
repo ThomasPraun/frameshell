@@ -258,12 +258,15 @@ export {
   FONTS_DIR,
   gifStep,
   loudnessAnalysis,
+  limitedAnalysis,
+  LIMITED_STATS_FILE,
   mixStep,
   muxStep,
   paletteStep,
   parseLoudnessStats,
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
+export { LOUDNESS_PASSES, LOUDNESS_TOLERANCE_LU, MAX_TRIM_DB, TRUE_PEAK_CEILINGS, limiterEngages, settleTrim, truePeakCeiling } from "./export/true-peak.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
 export { type GradeFiles, gradeFile, gradeFiles, readLut } from "./export/grade.js";
 export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";

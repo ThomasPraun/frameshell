@@ -31,13 +31,16 @@ import {
   compileRender,
   fitInside,
   gifStep,
+  LIMITED_STATS_FILE,
+  MIX_FILE,
+  limitedAnalysis,
   loudnessAnalysis,
   mixStep,
   muxStep,
   paletteStep,
   parseLoudnessStats,
 } from "../src/index.js";
-import { TRUE_PEAK_CEILING } from "../src/export/compiler.js";
+import { truePeakCeiling } from "../src/export/true-peak.js";
 
 // Golden files: reviewed ffmpeg plans. Regenerate with UPDATE_GOLDEN=1 and review the diff.
 const GOLDEN_DIR = fileURLToPath(new URL("./golden/", import.meta.url));
@@ -582,7 +585,7 @@ describe("export compiler", () => {
     it("plans lossless RGB segments, a palette pass and a GIF pass, with no audio (golden)", () => {
       const plan = gifPlan();
       expect(plan).toMatchObject({ container: "gif", loop: true, fps: "30/1", width: 1200, height: 675, frames: 240, warnings: [] });
-      expect(plan.audio).toEqual({ sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [] });
+      expect(plan.audio).toEqual({ sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [], truePeak: truePeakCeiling("pcm") });
       expect(mixStep(plan)).toBeNull();
       expect(loudnessAnalysis(plan)).toBeNull();
       golden("gif-plan", { segments: plan.segments, files: plan.files, palette: paletteStep(), gif: gifStep("/out/main.gif.partial") });
@@ -648,8 +651,29 @@ describe("export compiler", () => {
     const rate44 = compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio: { ...youtube1080.audio, sampleRate: 44_100 } }, loudness: -17, sources, resolution });
     for (const measured of [MEASURED, null]) {
       const filter = muxStep(rate44, measured, "/out.mp4").args.find((arg) => arg.startsWith("[1:a:0]"))!;
-      expect(filter).toContain(`aresample=44100,aresample=176400,alimiter=limit=${(10 ** (TRUE_PEAK_CEILING / 20)).toFixed(4)}:level=false:latency=true,aresample=44100,atrim=`);
+      expect(filter).toContain(`aresample=44100,aresample=176400,alimiter=limit=${(10 ** (rate44.audio.truePeak / 20)).toFixed(4)}:level=false:latency=true,aresample=44100,atrim=`);
     }
+  });
+
+  it("takes the limiter ceiling from the preset's codec and bitrate", () => {
+    const planOf = (audio: NonNullable<typeof youtube1080.audio>) =>
+      compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio }, loudness: -17, sources, resolution });
+    expect(planOf({ codec: "aac", bitrateKbps: 320, sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("aac", 320));
+    expect(planOf({ codec: "aac", bitrateKbps: 96, sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("aac", 96));
+    expect(planOf({ codec: "opus", bitrateKbps: 128, sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("opus", 128));
+    expect(planOf({ codec: "pcm", sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("pcm"));
+    expect(truePeakCeiling("aac", 320)).toBeLessThan(truePeakCeiling("pcm"));
+  });
+
+  it("adds the re-measure trim before the limiter, in the mux and in the loudness re-measure step", () => {
+    const plain = muxStep(plan, MEASURED, "/out.mp4").args.find((arg) => arg.startsWith("[1:a:0]"))!;
+    expect(plain).not.toContain("volume=");
+    const trimmed = muxStep(plan, MEASURED, "/out.mp4", 0.45).args.find((arg) => arg.startsWith("[1:a:0]"))!;
+    expect(trimmed).toContain("linear=true,volume=0.45dB,aresample=");
+    const check = limitedAnalysis(plan, MEASURED, 0.45)!.args;
+    const chain = trimmed.slice("[1:a:0]".length, trimmed.indexOf(",atrim="));
+    expect(check[check.indexOf("-af") + 1]).toBe(`${chain},loudnorm=I=-17:TP=-1:LRA=20:print_format=json:stats_file=${LIMITED_STATS_FILE}`);
+    expect(check).toEqual(expect.arrayContaining(["-i", MIX_FILE, "-f", "null"]));
   });
 
   it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still, subtitles burned (golden)", () => {

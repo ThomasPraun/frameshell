@@ -1196,6 +1196,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back, before the cut to length, the loop fades and the encode. `loudnorm` alone let sharp synthesized transients
   through at -0.8 dBTP after the AAC encode; the half dB of headroom covers what the encoder adds. Only the final mux
   step changes: golden plans differ in that filter chain, nothing on the wire.
+- Export loudness after the true-peak limiter lands within 0.15 LU of the target, and the limiter's ceiling follows the
+  codec (last slice of #463, ADR 0038, epic #451; no wire change). The limiter of #519 took up to 0.6 LU (more on
+  hostile transients) off the integrated loudness: when it can engage (the true peak plus the gain to the target, which
+  is what `loudnorm` applies in linear mode, not its `target_offset`, reaches the ceiling) the export now measures the
+  limited mix again with `loudnorm` in analysis mode, adds the missing
+  difference as `volume` before the limiter (once two measurements show how much of a dB the limiter lets through,
+  the step divides by that), and measures once more, at most three measurements and ±3 dB, keeping the
+  closest; a mix the limiter cannot touch costs nothing extra. The ceiling is no longer -1.5 dBFS for every codec but
+  `TRUE_PEAK_CEILINGS` (`export/true-peak.ts`): -1.2 dBTP for PCM, -1.8 for Opus from 64 kbps, -2.3 for AAC from
+  160 kbps, -4.9 below, each from the overshoot ffmpeg's encoders add to hot transients (the data and its source are in
+  the file). `RenderPlan.audio.truePeak` carries it, `muxStep` takes the trim, `limitedAnalysis` is the new step;
+  golden plans differ in the limiter's `limit` and the plan's `audio.truePeak`. Real-ffmpeg tests export a transient
+  fixture (and a quiet one, at -33 LUFS, but for AAC 128 kbps) as AAC 320 and 128 kbps, Opus and PCM: each ends under -1 dBTP and within
+  0.15 LU of -17. The re-measures report progress inside the mux step.
+- Docs of the sound features, last slice of #463 (ADR 0038 "as built" for the slices after the first, SPEC decision 43,
+  GLOSSARY terms music take, section and true-peak ceiling, CLAUDE.md rows): #463 is done but for the CC0 set, the
+  audition page and the energetic music preset, which the owner postponed.
 - Preview playback tests count two kinds of dropped frames (#567, ADR 0001 amendment): the engine reports, per play,
   the frames it passed over that a display tick wanted but were not decoded, or that followed a tick of its own longer
   than a frame (starved), and those no tick wanted while it was idle (cadence: the host gave it no tick in time), with
