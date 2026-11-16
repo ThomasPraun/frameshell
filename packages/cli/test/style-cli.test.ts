@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,5 +127,31 @@ describe("frameshell style set, save, list and apply", () => {
     expect(unknown.stderr).toMatch(/No style value at "colors\.nope"/);
     expect(frameshell(["style", "set", "colors.accent"]).code).toBe(2);
     expect(frameshell(["style", "apply", "house", "--force"]).code).toBe(2);
+  });
+});
+
+describe("frameshell style apply --from-analysis", () => {
+  it("applies the picked suggestions of an analysis and refuses a misplaced flag", () => {
+    rmSync(join(project, "style.json"), { force: true });
+    const folder = join(project, ".frameshell", "analysis", "reel");
+    mkdirSync(folder, { recursive: true });
+    const suggestions = [
+      { path: "colors.bg", value: "#101418", why: "the film's largest colour", from: ["palette"], label: "ESTIMATED" },
+      { path: "motion.personality", value: "energetic", why: "fast cutting", from: ["stats.medianLength"], label: "DECISION" },
+    ];
+    writeFileSync(join(folder, "analysis.json"), JSON.stringify({ name: "reel", suggestions }));
+    const applied = frameshell(["style", "apply", "--from-analysis", "reel", "--only", "motion.personality"]);
+    expect(applied.code, applied.stderr).toBe(0);
+    expect(applied.stdout).toMatch(/^Applied the suggestions of analysis reel \(op_[0-9a-f]+\)\.\n {2}motion\.personality: not set -> energetic\n {2}undo: frameshell revert op_[0-9a-f]+\n$/);
+    const all = frameshell(["style", "apply", "--from-analysis", "reel", "--json"]);
+    expect(JSON.parse(all.stdout).changes).toEqual([{ path: "colors.bg", before: null, after: "#101418" }]);
+
+    const unknown = frameshell(["style", "apply", "--from-analysis", "nope"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/No analysis "nope".*Analyses: reel/);
+    expect(frameshell(["style", "apply", "house", "--from-analysis", "reel"]).code).toBe(2);
+    expect(frameshell(["style", "apply", "--from-analysis", "reel", "--replace"]).code).toBe(2);
+    expect(frameshell(["style", "apply", "house", "--only", "colors.bg"]).code).toBe(2);
+    expect(frameshell(["style", "show", "--from-analysis", "reel"]).code).toBe(2);
   });
 });

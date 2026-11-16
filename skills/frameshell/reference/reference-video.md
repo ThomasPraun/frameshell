@@ -44,6 +44,22 @@ Label every value you report. The result's `labels` does it for the values of `a
 
 End with about five decisions for an original episode ("cut every 1.4 s, median 1.2, CV 0.3; a burst of 4 changes at the hook; two-colour palette of the brand; -14 LUFS for this platform"), each saying which measured number it comes from. Never copy characters, designs or script. The numbers feed the style file and the plan of the new film: write them there, with the reference's file name as their source.
 
+### Style suggestions
+
+`suggestions` lists values for the project's `style.json` read from the film, each with `path` (as `style set` takes it), `value`, `why` (with the numbers), `from` (the result fields it is read from) and its own `label`:
+
+- `colors.bg`: the palette's largest colour, when it holds a quarter of the picture or more. `colors.ink`: the palette colour with the most contrast against it (4.5:1 or more). `colors.accent`: the most saturated palette colour that is not grey. ESTIMATED: footage counts as colour, so look at the frames first; a reference's colours are its look, the person's brand may say otherwise.
+- `motion.personality`: from the median length of the eased moves (3 or more with `fit` 0.5 or under), the personality whose standard move is nearest (ESTIMATED; overshoot is not measured, so playful and energetic differ by length only); with too few moves, `energetic` for fast cutting (median shot 1 s or less, 30 cuts a minute or more) or `calm` for slow still cutting (median shot 4 s or more, half the frames still), a DECISION.
+- `sound.musicUnderVoice`: how far the voice sits over the music in the sentences (ESTIMATED, needs recognised speech).
+
+The loudness target is not a style value (it stays `export.loudness`); tempo, ink and caption sizes give no suggestion. `analyze` never applies them. Show them to the person with their labels; apply only what they agree to:
+
+```sh
+frameshell style apply --from-analysis reel --only colors.accent,motion.personality
+```
+
+MCP: `style_apply { analysis: "reel", paths: ["colors.accent", "motion.personality"] }`. Without `--only`, every suggestion. One journaled change, listed value by value (`revert` with its `op` undoes it; review mode holds it like `style set`). An analysis made before suggestions existed has none: run `analyze` again.
+
 ## 5. Compare our film with it
 
 ```sh

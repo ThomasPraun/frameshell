@@ -3106,9 +3106,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return changeConfig(dir, caller, "style", (author, tx) => styles.set(dir, path, value, author, tx));
     },
-    "style.apply": async ({ cwd, name, replace }, caller) => {
+    "style.apply": async ({ cwd, name, replace, analysis, paths }, caller) => {
+      const invalid = (field: string, message: string) => new RpcError(ErrorCode.InvalidParams, message, { issues: [{ path: [field], message }] });
+      if ((name === undefined) === (analysis === undefined)) throw invalid("name", "style.apply takes `name` (a user style or personality) or `analysis` (an analyze run), one of them.");
+      if (analysis !== undefined && replace) throw invalid("replace", "`replace` copies a whole user style; suggestions of an analysis only merge.");
+      if (name !== undefined && paths) throw invalid("paths", "`paths` picks suggestions of an `analysis`; a user style applies whole.");
       const dir = await root(cwd);
-      return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name, replace === true, author, tx));
+      if (analysis !== undefined) return changeConfig(dir, caller, "style", (author, tx) => styles.applyAnalysis(dir, analysis, paths, author, tx));
+      return changeConfig(dir, caller, "style", (author, tx) => styles.apply(dir, name!, replace === true, author, tx));
     },
     "style.save": async ({ cwd, name, force }) => styles.save(await root(cwd), name, force === true),
     "style.list": async () => styles.list(),
