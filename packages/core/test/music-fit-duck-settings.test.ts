@@ -46,7 +46,7 @@ describe("music.fit duck settings", () => {
   it("runs the duck again with the settings the clip kept, over the tracks of them that still exist", async () => {
     const plan = await fit(timeline({ duck: stored }));
     expect(plan.duck).toEqual({ under: ["t_voice"], rerun: true, parameters: "stored" });
-    expect(plan.duckAgain).toEqual({ track: "t_music", under: ["t_voice"], settings: stored });
+    expect(plan.duckAgain).toEqual({ track: "t_music", clip: expect.any(String), under: ["t_voice"], settings: stored });
     expect(plan.warnings.join(" ")).toContain("the parameters of its last run");
   });
 

@@ -241,7 +241,7 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
-  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB]
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB|style]
                                Music under a voice: writes gain keys on the clips of audio track <track> that dip
                                while someone speaks on the --under tracks (video or audio; speech = sound above
                                --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
@@ -250,10 +250,12 @@ mutations print the new revision):
                                the dip, marked as the duck's: run it again after an edit and they are replaced, keys
                                you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
                                like any gain key; a key you set is a level, not a dip. --level dB first sets the
-                               static gain of each clip so the music's loudness (EBU R128, measured once per file
-                               and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
-                               keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
-                               music fit runs the same duck again after it moves one. Revert undoes it
+                               static gain of each clip so the music's loudness (EBU R128, measured over the part of
+                               its file the clip plays, once per part and cached) sits that many dB under the voice's
+                               (about 12 is a start; --level style takes the project's sound.musicUnderVoice); a clip
+                               with gain keys of its own is left alone. The settings are kept in each ducked clip
+                               (audio.duck): music fit, shape and grid run the same duck again, and the level first,
+                               after they change one. Revert undoes it
   transition set --at s [--kind dissolve|fade|wipe|push|iris|zoom|slats|grid|dip-cut] [--direction left|right|up|down]
            [--origin x0,y0,x1,y1] [--count n] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
@@ -1460,7 +1462,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         releaseMs: num("release"),
         threshold: num("threshold"),
         gap: duckGap(),
-        level: num("level"),
+        level: str("level") === "style" ? "style" : num("level"),
       });
       break;
     }
@@ -1866,7 +1868,7 @@ function formatTrackDuck(result: TrackDuckResult): string {
   const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
   const written = result.changes.updated.length;
   const level = result.level
-    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
+    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under${result.level.source === "style" ? ", the style's sound.musicUnderVoice" : ""}): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
     : "";
   return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${level}${formatOperation(result)}`;
 }

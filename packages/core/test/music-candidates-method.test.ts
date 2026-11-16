@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Daemon, LOUDNESS_DIR, measureLoudness, startDaemon } from "../src/index.js";
 import { wavOf } from "./beat-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
+import { playedRange } from "../src/media/loudness-plan.js";
 import { makeVoiceClip } from "./media-fixtures.js";
 import { mediaTools, testBinaryManager } from "./media-tools.js";
 import { kicks, music } from "./music-fixture.js";
@@ -114,9 +115,14 @@ describe("music.candidates", () => {
         expect(candidate.gain).toBeLessThanOrEqual(0);
       }
       expect(loud.gain).toBeLessThan(-8);
-      // The reading is the one ffmpeg gives the file itself.
-      const own = await measureLoudness(ffmpeg, join(project, ...assets.loud.split("/")));
+      // The reading is the one ffmpeg gives the part of the file that plays (from the `in` point the fit cut the intro to), not the file's average.
+      const part = playedRange({ in: loud.place.in, out: 26 }, FPS);
+      const own = await measureLoudness(ffmpeg, join(project, ...assets.loud.split("/")), undefined, undefined, { start: Math.round(part.start * 1000) / 1000, end: 26 });
       expect(loud.loudness).toBe(own!.integrated);
+      const whole = await measureLoudness(ffmpeg, join(project, ...assets.loud.split("/")));
+      expect(whole!.integrated).not.toBe(loud.loudness);
+      // A file played whole (the short one) has the whole-file reading.
+      expect(short.loudness).toBe((await measureLoudness(ffmpeg, join(project, ...assets.short.split("/"))))!.integrated);
       expect(await timelineFile()).toMatchObject({ revision: before });
     },
     MEDIA_TIMEOUT,
@@ -187,13 +193,15 @@ describe("music.candidates", () => {
     async () => {
       const files = readdirSync(join(project, ...LOUDNESS_DIR.split("/")));
       const readings = files.filter((name) => name.endsWith(".json"));
-      // loud, quiet, pad, short and silent were each read once, whatever the calls above asked.
-      expect(readings).toHaveLength(5);
+      // loud, quiet, pad, short and silent were each read once whole, and the files the fit cut an intro from once over the part that plays, whatever the calls above asked.
+      expect(readings.filter((name) => !name.includes("-r"))).toHaveLength(5);
+      const parts = readings.filter((name) => name.includes("-r"));
+      expect(parts.length).toBeGreaterThanOrEqual(2);
       const planted = join(project, ...LOUDNESS_DIR.split("/"), "aaaaaaaaaaaaaaaaaaaa-l1.json");
       writeFileSync(planted, "{}");
       const swept = await conn.request("gc", { cwd: project, dryRun: false });
       expect(swept.removed.filter((entry) => entry.kind === "loudness").map((entry) => entry.path)).toEqual([`${LOUDNESS_DIR}/aaaaaaaaaaaaaaaaaaaa-l1.json`]);
-      expect(readdirSync(join(project, ...LOUDNESS_DIR.split("/"))).filter((name) => name.endsWith(".json"))).toHaveLength(5);
+      expect(readdirSync(join(project, ...LOUDNESS_DIR.split("/"))).filter((name) => name.endsWith(".json"))).toHaveLength(readings.length);
     },
     MEDIA_TIMEOUT,
   );

@@ -1,15 +1,15 @@
 import { ErrorCode, type MusicCandidate, type MusicCandidatesResult, RpcError } from "@frameshell/protocol";
 import type { AnyClip, ClipTrack, Timeline } from "@frameshell/schema";
-import type { LoudnessReading } from "../analyze/loudness.js";
+import type { LoudnessReading, SoundRange } from "../analyze/loudness.js";
 import { isBinaryError } from "../binaries/errors.js";
-import { candidateTarget, gainFor, peakWarning } from "../media/loudness-plan.js";
+import { candidateTarget, gainFor, peakWarning, playedRange } from "../media/loudness-plan.js";
 import { resolveTimeRefArg } from "../timeline/time-ref.js";
 import { type MusicFitDeps, planMusicFit } from "./run.js";
 
 /** What `music.candidates` needs from the project besides what `music.fit` does. */
 export interface MusicCandidatesDeps extends MusicFitDeps {
-  /** EBU R128 reading of a project-relative asset (the cached one); throws when it has no sound or cannot be decoded. */
-  reading(asset: string): Promise<LoudnessReading>;
+  /** EBU R128 reading of a project-relative asset (the cached one), of the part `range` of the file when given; throws when it has no sound or cannot be decoded. */
+  reading(asset: string, range?: SoundRange): Promise<LoudnessReading>;
   /** Seconds of the sound of a project-relative asset. */
   duration(asset: string): Promise<number>;
 }
@@ -70,8 +70,16 @@ export async function planMusicCandidates(timeline: Timeline, fps: number, reque
         continue;
       }
       const fit = await planMusicFit(withCandidate(timeline, asset, from, duration), fps, { clip: PLAN_CLIP, end, from, exact: false, dryRun: true, entryFade: false }, deps);
+      // The clip plays the file from `in` to its end: a cut-off intro changes the loudness the file brings to the film.
+      const played = fit.after.in > 0 ? await deps.reading(asset, playedRange({ in: fit.after.in, out: duration }, fps)) : reading;
+      if (played.integrated === null) {
+        skipped.push({ asset, reason: "it is silent over the part that plays: there is no loudness to match." });
+        continue;
+      }
       placed.push({
         ...base,
+        loudness: played.integrated,
+        truePeak: played.truePeak,
         warnings: fit.warnings,
         place: { start: fit.after.start, in: fit.after.in, speed: 1, end: fit.after.end },
         hit: fit.hit,

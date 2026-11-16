@@ -2,7 +2,7 @@ import { ErrorCode, RpcError } from "@frameshell/protocol";
 import type { Timeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
 import { classifyLoudness, loudnessCacheKey } from "../src/media/loudness-store.js";
-import { candidateTarget, gainFor, peakWarning, voiceLoudness, voiceParts } from "../src/media/loudness-plan.js";
+import { MAX_VOICE_RANGES, candidateTarget, gainFor, peakWarning, planLevels, playedRange, voiceLoudness, voiceParts } from "../src/media/loudness-plan.js";
 
 describe("gains from loudness", () => {
   it("brings a file to a target in 0.1 dB steps", () => {
@@ -63,6 +63,7 @@ describe("voice loudness", () => {
   it("reads the clips that play, at their gain and speed, and names the rest", async () => {
     const asked: string[] = [];
     const { parts, warnings } = await voiceParts(timeline, ["t_v", "t_off"], {
+      fps: 30,
       async reading(asset) {
         asked.push(asset);
         if (asset.endsWith("silent.mp4")) return { integrated: null, range: null, truePeak: null };
@@ -79,7 +80,7 @@ describe("voice loudness", () => {
 
   it("fails, rather than names, when ffmpeg cannot be fetched", async () => {
     const reading = () => Promise.reject(new RpcError(ErrorCode.BinaryUnavailable, "no ffmpeg for this platform"));
-    await expect(voiceParts(timeline, ["t_v"], { reading })).rejects.toMatchObject({ code: ErrorCode.BinaryUnavailable });
+    await expect(voiceParts(timeline, ["t_v"], { fps: 30, reading })).rejects.toMatchObject({ code: ErrorCode.BinaryUnavailable });
   });
 });
 
@@ -88,9 +89,67 @@ describe("loudness cache", () => {
     const key = loudnessCacheKey("sha256:0123456789abcdef0123456789abcdef");
     expect(key).toBe("0123456789abcdef0123-l1");
     expect(classifyLoudness(`${key}.json`, false)).toEqual({ kind: "loudness", key });
+    // A reading of a part of the file is kept or swept with the content it is of.
+    expect(classifyLoudness(`${key}-r1000-9500.json`, false)).toEqual({ kind: "loudness", key });
+    expect(classifyLoudness(`${key}-r1000-9500.json.123.ab12cd34.tmp`, false)).toEqual({ kind: "temp", key: null });
     expect(classifyLoudness(`${key}.json.123.ab12cd34.tmp`, false)).toEqual({ kind: "temp", key: null });
     expect(classifyLoudness("0123456789abcdef0123-e1.f32", false)).toBeNull();
     expect(classifyLoudness("notes.txt", false)).toBeNull();
     expect(classifyLoudness(`${key}.json`, true)).toBeNull();
+  });
+});
+
+describe("the part of a file a clip plays", () => {
+  it("is in to out, on whole frames", () => {
+    expect(playedRange({ in: 1.5, out: 9 }, 30)).toEqual({ start: 1.5, end: 9 });
+    // 20.345 s at 30 fps is frame 610.35: the nearest frame.
+    expect(playedRange({ in: 20.345, out: 26 }, 30).start).toBeCloseTo(610 / 30, 9);
+  });
+
+  const clip = (id: string, asset: string, from: number, to: number) => ({ id, type: "media", asset, start: 0, in: from, out: to });
+  const reads: [string, { start: number; end: number } | undefined][] = [];
+  const reading = async (asset: string, range?: { start: number; end: number }) => {
+    reads.push([asset, range]);
+    // 10 dB louder in the second half of the file: the reading depends on the part asked.
+    const loud = range !== undefined && range.start >= 5;
+    return { integrated: asset.endsWith("voice.wav") ? -20 : loud ? -14 : -24, range: 3, truePeak: -2 };
+  };
+  const timeline = {
+    tracks: [
+      { id: "t_v", kind: "audio", clips: [clip("c_v", "assets/voice.wav", 0, 10)] },
+      { id: "t_m", kind: "audio", clips: [clip("c_m", "assets/song.wav", 5, 20), { ...clip("c_k", "assets/song.wav", 0, 4), keys: { gain: [{ time: 1, value: -3 }] } }] },
+    ],
+  } as unknown as Timeline;
+
+  it("measures the music over the part its clip plays, the voice over its own, and leaves a clip with keys of its own", async () => {
+    reads.length = 0;
+    const plan = await planLevels(timeline, 30, { track: "t_m", under: ["t_v"], level: 12 }, { reading });
+    expect(plan.voice).toBe(-20);
+    expect(plan.target).toBe(-32);
+    // The second half of the song is -14 LUFS: -18 dB brings it to the target (the whole file's average would be -24).
+    expect(plan.clips).toEqual([{ clip: "c_m", loudness: -14, gain: -18 }]);
+    expect(plan.warnings.join(" ")).toContain("c_k has gain keys of its own");
+    expect(reads).toContainEqual(["assets/song.wav", { start: 5, end: 20 }]);
+    expect(reads).toContainEqual(["assets/voice.wav", { start: 0, end: 10 }]);
+  });
+
+  it("keeps a clip's own keys out of the way unless the caller writes those keys again", async () => {
+    const shaped = {
+      tracks: [timeline.tracks[0], { id: "t_m", kind: "audio", clips: [{ ...clip("c_m", "assets/song.wav", 5, 20), keys: { gain: [{ time: 1, value: -3, auto: "music" }] } }] }],
+    } as unknown as Timeline;
+    const ask = (replaced?: ReadonlySet<string>) => planLevels(shaped, 30, { track: "t_m", under: ["t_v"], level: 12, replaced }, { reading });
+    expect((await ask()).clips).toEqual([]);
+    expect((await ask(new Set(["duck", "music"]))).clips.map((entry) => entry.clip)).toEqual(["c_m"]);
+    // Only the clips asked for.
+    expect((await planLevels(timeline, 30, { track: "t_m", under: ["t_v"], level: 12, only: new Set(["c_k"]) }, { reading })).clips).toEqual([]);
+  });
+
+  it("reads a voice file cut into many pieces whole, not once per piece", async () => {
+    const pieces = Array.from({ length: MAX_VOICE_RANGES + 1 }, (_, i) => clip(`c_${i}`, "assets/voice.wav", i, i + 1));
+    const cut = { tracks: [{ id: "t_v", kind: "audio", clips: pieces }] } as unknown as Timeline;
+    reads.length = 0;
+    const { parts } = await voiceParts(cut, ["t_v"], { fps: 30, reading });
+    expect(parts).toHaveLength(MAX_VOICE_RANGES + 1);
+    expect(reads).toEqual([["assets/voice.wav", undefined]]);
   });
 });

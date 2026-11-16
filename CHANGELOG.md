@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Loudness over the part of a file a clip plays, `duck --level style` and the level set again, slice MU2 of #485 (ADR
+  0037, epic #451; protocol 160). `LoudnessStore` reads the seconds a clip plays (`in` to `out`, on whole frames) and
+  caches them beside the whole-file reading in `.frameshell/loudness/` (`<hash>-l1-r<start ms>-<end ms>.json`, same `gc`
+  kind; a part that spans the file or is under one 400 ms block is the whole-file reading, so nothing is measured
+  twice). `music candidates --end` reads each file over the part its fit leaves playing, and `duck --level` reads each
+  music clip, and each voice clip (a file cut into over 8 pieces is read whole), over its played part. `duck --level
+  style` (`track.duck` `level: "style"`) takes the project's `sound.musicUnderVoice`; the number is what is kept in
+  `audio.duck.level` and reported with `level.source`. `music fit`, `music shape` and `music grid` set the clip's static
+  gain again from the stored `level` before they write the keys and run the duck again (a clip with gain keys of its own
+  keeps its gain, with a warning).
+
+- Documented limit of the export's loudness loop: it adds at most +3 dB (`MAX_TRIM_DB`), and when that cap binds the file
+  ends under the target by more than 0.15 LU (a transient-heavy mix that is quiet before the limiter, at AAC 128 kbps,
+  ceiling -4.9 dBTP). Kept on purpose (owner decision 2026-11-16); see SPEC §3.5 step 4 and ADR 0038 "Not done".
+
 - Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
   protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
   guided filter), so an edge between two colours of the same brightness is found (error at a same-luma disc's edge 0.045
