@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- More sound checks in `review`, slice RA1 of #457 (epic #451; protocol 158; `metrics.sound.music`, `edges`, `harsh`,
+  craft checks `masking`, `edge-click`, `harsh`). On a timeline, still never mixed: `music` is the voice against the music
+  alone per 0.5 s window where the voice speaks, judged by the style guide's `sound.musicUnderVoice` (`style.json`, 12 dB
+  by default) less 3 dB, never under 0; the stretches under it are `masking` (the existing `voice-bed` keeps judging the
+  voice against everything at 6 dB). `edges` lists clips starting with no fade inside sound their asset already plays
+  before the in point, at -45 dBFS or more and 19 dB or more over the rest of the film's sound in the 10 ms before
+  (`edge-click`; earshot's 9x click ratio); a clip played from its asset's start, picking up the same sound or a
+  dissolve is no cut-in. On a `--file`, `harsh` measures the 2 to 6 kHz band of the decoded mix per 400 ms against that
+  band in the loudest 400 ms (at least 20 dB under the whole mix there), and the stretches over 6 dB above it are `harsh`
+  (earshot's rule, with the mix's loudest moment standing in for the music's). Thresholds are data in
+  `review/thresholds.ts`; every finding is a warning unless `requirements.json` lists its check in `fail`. Not yet:
+  masking per 1/3-octave band (the envelopes are broadband), a click in an exported file placed on a clip edge, and the
+  ADR 0038 decision 5 lint rules over the whole timeline.
 - Code templates, slice TP1 of #466 (ADR 0033, epic #451): `frameshell hyperframes new <name> --template code-typing`,
   `code-diff` or `code-morph` scaffold a code window. `code-typing` types a snippet key by key with the uneven rhythm of
   `typing-field`, a caret that blinks at rest, an indent that arrives with its Enter, waits after the lines named in

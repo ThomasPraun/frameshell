@@ -26,6 +26,9 @@ export const CRAFT_CHECKS = [
   "chopped",
   "ending",
   "click",
+  "masking",
+  "edge-click",
+  "harsh",
 ] as const;
 
 /** One of {@link CRAFT_CHECKS}. */
