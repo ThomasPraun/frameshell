@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `music.pick`, the last slice of #485 (ADR 0037; protocol 170, no schema change): `frameshell music pick <track> [--keep] [--dry-run]`
+  (MCP `music_pick`) keeps one of the candidate tracks `music candidates` placed. The chosen track (id or name, e.g.
+  `Music 2`) is unmuted and renamed `Music`, and the other candidate tracks (audio tracks named `Music <n>` that hold only
+  media clips) are removed with their clips; `--keep` mutes them and leaves them in place. A candidate with edits of its
+  own (several clips, or a clip with speed, keys, effects, fades or transitions, or a subtitle track following it) is never
+  removed: the result names it. Refused when the track is not a candidate or there is no other to pick between. One
+  transaction `Music pick: <track>` (one proposal in review mode); nothing is fitted or ducked again, the result's `next`
+  says `music fit` and `duck --level` follow. Skill updated.
+
 - Motion templates, slice TP4 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
   new <name> --template` takes four more. `orbit` has labels circle a logo or a word, from a seeded start phase, and
   slow to a stop on an evenly spaced ring that never depends on the seed. `locked-on` snaps four corner brackets onto a

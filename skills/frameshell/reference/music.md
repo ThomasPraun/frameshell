@@ -35,8 +35,23 @@ Puts 2 to 7 files under the same picture so the person can pick by ear (MCP `mus
 - A file that cannot be placed (silent, no sound, no final hit, undecodable) is in `skipped`; the rest go on. `--dry-run` changes nothing.
 - Every clip is added with a 5 ms fade in (`audio.fadeInMs`).
 - One transaction labelled `Music candidates: …`; `revert <tx>` undoes it whole.
-- **Choose:** the person listens, then `track set <track> --unmuted` on the winner and `track remove <track> --force` on the others. Run `music fit` on the clip that stays (its start is already fitted when `--end` was given), then `duck`.
+- **Choose:** the person listens, then `music pick <track>` (below). Run `music fit` on the clip that stays (its start is already fitted when `--end` was given), then `duck`.
 - Loudness is matched over the part that plays, not the file's average: a track whose first minute is dropped is matched without it. Gain and speed are not in the reading, and a doubtful hit still needs your ear: check by ear.
+
+## Pick: keep one candidate
+
+```sh
+frameshell music pick "Music 2" --dry-run
+frameshell music pick "Music 2"
+frameshell music pick t_1a2b3c --keep
+```
+
+Keeps the candidate the person chose and clears the rest (MCP `music_pick`). `<track>` is the track id or its name (`Music 2`). That track is unmuted and renamed `Music` (it keeps its name, with a warning, when a track called `Music` exists), and every other candidate track is removed with its clip; `removed` lists them. `--keep` leaves the others in place, muted, instead (`muted`). A candidate is an audio track named `Music <n>` that holds only media clips.
+
+- **Edited tracks stay.** A candidate with more than one clip, or whose clip has a speed, keys, effects, fades or transitions of its own, or that a subtitle track follows, is never removed: `left` and a warning name it, and `track remove <track> --force` takes it away when you are sure. The clip's `start`, `in` and `gain` do not count as edits (`music candidates` and `music fit` wrote them).
+- **Refused:** a track that is not a candidate, or no other candidate to pick between. `--dry-run` changes nothing.
+- **It does not fit, shape or duck again.** The winner keeps the gain, fit and fade `music candidates` wrote. The result's `next` says what follows: `music fit <clip> --end <time>` if the cut moved, `duck <track> --under <voice track> --level style` for its level under the voice (the music track is now named `Music`).
+- One transaction labelled `Music pick: <track>`; `revert <tx>` brings every track back.
 
 ## Shape: step down before a hit, fade at the ending
 

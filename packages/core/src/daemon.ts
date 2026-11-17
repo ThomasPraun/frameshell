@@ -75,6 +75,7 @@ import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { musicCandidatesLabel, planMusicCandidates } from "./music/candidates.js";
+import { musicPickLabel, planMusicPick } from "./music/pick.js";
 import { MUSIC_ENTRY_FADE_MS } from "./music/entry-fade.js";
 import { type GridWord, musicGridLabel, planGridMoves } from "./music/grid-moves.js";
 import { musicFitLabel, planMusicFit } from "./music/run.js";
@@ -2603,6 +2604,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, candidates: placed, warnings: [...warnings] };
+    },
+    "music.pick": async ({ cwd, timeline, track, keep, dryRun }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const { report, requests } = planMusicPick(loaded, { track, keep });
+      if (dryRun || requests.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...report };
+      // Nothing slow is planned, but a track removed from an older timeline could take a clip the person just edited.
+      await assertFresh(dir, timeline, caller, "music.pick", loaded.revision, "the pick");
+      const warnings = new Set(report.warnings);
+      const written = await writeSteps({ dir, cwd, timeline, caller, label: musicPickLabel(report), revision: loaded.revision, warnings }, async (write) => {
+        for (const request of requests) await write(request);
+      });
+      return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
     },
     "music.grid": async ({ cwd, timeline, to, maxShift, trim, tracks, dryRun, skip }, caller) => {
       const dir = await root(cwd);
