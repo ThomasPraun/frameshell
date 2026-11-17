@@ -1332,8 +1332,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shorter than 1/15 s and changes between two old samples are now seen; visual events are big changes (4 times the
   median within 0.5 s and at least 1 level, 15 % of the grey range, or a file's scene cut) instead of peaks over 2.5 times the
   film's median, so `events`, `largestGap` and the sync of a file change; near-blank (`blank`, `frame-0`) reads the
-  64 px picture, where thin detail on a flat frame weighs less. The MCP server's instructions list the current sheets
-  (with `beats` and `cropAt`) and the rhythm metrics.
+  64 px picture, where thin detail on a flat frame weighs less. Every motion reading (`analyze`'s picture,
+  `analyze.diff`'s activity, a reviewed file and a reviewed timeline's samples) now takes one grey, the rounded Rec. 709
+  luma of RGB frames (`greyOf`), instead of ffmpeg's Y plane for `analyze.diff` and `review`: a change of colour alone
+  (a hue turn, a grade ramp) now moves the picture there too, so their still stretches shrink and their alignment can
+  shift on coloured footage. A file over an hour is measured on its first hour, with a warning, and its gap and shots
+  stop there. The MCP server's instructions list the current sheets (with `beats` and `cropAt`) and the rhythm metrics.
 - The preview draws a person lifted in front of a word from the frame the plate track already decoded, slice MX2 of
   #461 (ADR 0032, epic #451): a subject span that shows the same source frame of the same proxy as a span of the plate
   decodes only its matte, so a word behind the head runs one decoder fewer per plate layer (2 instead of 3 for one

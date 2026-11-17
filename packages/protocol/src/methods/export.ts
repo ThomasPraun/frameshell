@@ -329,7 +329,8 @@ export const exportMethods = {
       "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
       "can measure; a file has none). A timeline is rendered frame by frame like `frame` (what `frame` puts in its `warnings`, e.g. a refused motion blur, is in this result's `warnings`; draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
-      "are covered. A file's motion is measured on every frame, the way `analyze` reads it; a timeline's is sampled at most 90 times " +
+      "are covered. A file's motion is measured on every frame, the way `analyze` reads it (its first hour only), and its shots are found on the whole file, " +
+      "a second decode even with `from`/`to`; a timeline's is sampled at most 90 times " +
       "(`metrics.picture.sampled`; thresholds then apply per sample interval), so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). `metrics` (default on, or named in `sheets`) writes `metrics.json` and " +
       "returns `metrics`: numbers a sheet cannot tell, measured on grey frames and the sound: the longest still stretch, the largest gap between " +

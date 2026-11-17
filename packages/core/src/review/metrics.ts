@@ -142,13 +142,13 @@ function shotLengths(first: number, end: number, cuts: readonly number[]): numbe
 }
 
 /**
- * The rhythm of `series` on the scale of `analyze` (`rhythmOf`): shot-length CV, still share and bursts. On a file
- * measured from frame 0 to its end these are the numbers `analyze` reports for it.
+ * The rhythm of `series` on the scale of `analyze` (`rhythmOf`) up to second `pictureTo`: shot-length CV, still share
+ * and bursts. On a file measured from frame 0 to its end these are the numbers `analyze` reports for it.
  */
-function rhythmMetrics(input: MetricsInput): { rhythm: ReviewMetrics["rhythm"]; changes: Cut[] } {
+function rhythmMetrics(input: MetricsInput, pictureTo: number): { rhythm: ReviewMetrics["rhythm"]; changes: Cut[] } {
   const { series, fps } = input;
   const cuts = input.cuts ?? [];
-  const end = Math.max(series.first + 1, Math.round(input.range.to * fps));
+  const end = Math.max(series.first + 1, Math.round(pictureTo * fps));
   // A file's cuts are seen in its picture, so they are big changes as in `analyze`; a timeline's clip cuts only split
   // shots: a cut between two clips of one take shows nothing.
   const forced = input.source === "file" ? cutSamples(series, cuts) : [];
@@ -171,7 +171,9 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   const { times, spread } = series;
   const samples = times.length;
   const spacing = samples > 1 ? (times[samples - 1]! - times[0]!) / (samples - 1) : 0;
-  const end = (last: number) => Math.min(range.to, times[last]! + (spacing || 1 / input.fps));
+  // A file read only up to `MAX_PICTURE_S`: the picture's numbers stop where the series does, as `analyze`'s do.
+  const pictureTo = series.truncated && samples > 0 ? Math.min(range.to, frameStart(series.first + samples * series.step, input.fps)) : range.to;
+  const end = (last: number) => Math.min(pictureTo, times[last]! + (spacing || 1 / input.fps));
   const craft: ReviewFinding[] = [];
 
   const still = stillSpans(series, input.fps);
@@ -179,11 +181,11 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   const longestStatic = still.reduce<ReviewSpan | null>((best, run) => (best === null || run.seconds > best.seconds ? run : best), null);
   for (const run of staticRuns) craft.push({ check: "static", from: run.from, to: run.to, message: `nothing changes in the picture for ${run.seconds} s (from ${run.from} to ${run.to} s).` });
 
-  const { rhythm, changes } = rhythmMetrics(input);
+  const { rhythm, changes } = rhythmMetrics(input, pictureTo);
   const events = changes.map((change) => changeTime(series, change.frame));
   let largestGap: ReviewSpan | null = null;
   if (samples > 1) {
-    const marks = [range.from, ...events, range.to];
+    const marks = [range.from, ...events, pictureTo];
     for (let i = 1; i < marks.length; i++) {
       if (largestGap === null || marks[i]! - marks[i - 1]! > largestGap.seconds) largestGap = span(marks[i - 1]!, marks[i]!);
     }

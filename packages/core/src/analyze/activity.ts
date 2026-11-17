@@ -1,6 +1,6 @@
 import { readRawFrames } from "../media/raw-frames.js";
 import { frameDifference } from "../multicam/motion.js";
-import { MAX_PICTURE_S, pictureSize } from "./picture.js";
+import { MAX_PICTURE_S, greyOf, pictureFilter, pictureSize } from "./picture.js";
 
 /** Standard deviation of the grey levels of `frame`: 0 for a flat picture, up to 128. */
 export function lumaSpread(frame: Uint8Array): number {
@@ -24,7 +24,8 @@ export interface ActivityRead {
 }
 
 /**
- * Mean grey change between consecutive frames of the film, on the picture `readPicture` measures (a long side of 64 px):
+ * Mean grey change between consecutive frames of the film, on the picture `readPicture` measures (a long side of 64 px,
+ * the grey of {@link greyOf}):
  * `activity[i]` is the change from frame `i - 1` (0 for the first), in the units of the `activity` of `analyze`, read
  * without its look, cells and shots: for the films `analyze.diff` compares and the files `review` measures. `frames`
  * limits it to frames `first` to `end - 1`. Stops at {@link MAX_PICTURE_S}; `truncated` says so.
@@ -46,14 +47,14 @@ export async function readActivity(
   const activity = new Float32Array(wanted);
   const spread = new Float32Array(wanted);
   const range = first > 0 || last < film.frames ? { from: first / film.fps, to: last / film.fps } : undefined;
-  let previous: Uint8Array | undefined;
+  const grey = [new Uint8Array(width * height), new Uint8Array(width * height)];
   let index = 0;
-  for await (const grey of readRawFrames(ffmpeg, file, `fps=${film.fps},scale=${width}:${height}:flags=area,format=gray`, width * height, range)) {
+  for await (const rgb of readRawFrames(ffmpeg, file, pictureFilter({ width, height }, film.fps), width * height * 3, range)) {
     signal?.throwIfAborted();
     if (index >= wanted) break;
-    activity[index] = previous ? frameDifference(previous, grey) : 0;
-    spread[index] = lumaSpread(grey);
-    previous = grey;
+    const current = greyOf(rgb, grey[index % 2]!);
+    activity[index] = index === 0 ? 0 : frameDifference(grey[(index + 1) % 2]!, current);
+    spread[index] = lumaSpread(current);
     index++;
     if (index % 60 === 0) progress?.(index / wanted);
   }

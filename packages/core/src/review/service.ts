@@ -34,6 +34,7 @@ import {
   showsPicture,
 } from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
+import { MAX_PICTURE_S } from "../analyze/picture.js";
 import { sceneScores } from "../analyze/scene.js";
 import { DEFAULT_CUT_THRESHOLD, detectCuts } from "../analyze/shots.js";
 import { generatedClips } from "../clips/renderer.js";
@@ -204,7 +205,12 @@ export class ReviewService {
       const peaks: ReviewPeak[] = [];
       let measured: MotionSeries | undefined;
       /** The motion of the range, measured once for the `motion` sheet and the metrics. */
-      const motion = async () => (measured ??= await source.motion(range, join(scratch, "motion"), signal));
+      const motion = async (): Promise<MotionSeries> => {
+        if (measured) return measured;
+        measured = await source.motion(range, join(scratch, "motion"), signal);
+        if (measured.truncated) warnings.push(`motion and rhythm: measured on the first ${MAX_PICTURE_S / 60} minutes of the file.`);
+        return measured;
+      };
       const safeZones: ReviewSafeZone[] = [];
       /** The timeline flattened for the format, resolved once for the safe-zone boxes and the sync. */
       let flattened: Promise<Flat> | undefined;

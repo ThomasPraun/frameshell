@@ -29,7 +29,7 @@ export const ReviewOutputSchema = z
   .enum(REVIEW_OUTPUTS)
   .describe(
     `${ReviewSheetKindSchema.description} ` +
-      "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, near-blank frames, " +
+      "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, `rhythm` (shot-length CV, still share, bursts on `analyze`'s scale), near-blank frames, " +
       "whether frame 0 is empty, subtitle cues shorter than they take to read, the loudness of a file (integrated LUFS, loudness range, true peak, phone band 200 Hz to 6 kHz), " +
       "sounds against the picture events they belong to (`sync`), the jump from the last frame to the first (`seam`), a file against its export plan (`delivery`), " +
       "the sound review list (`sound`: voice over bed and over music per window, repeated effect files, clips cut off or cut in mid-sound, the music on the last frame, clicks, harshness) and craft warnings.",
@@ -80,7 +80,7 @@ export type ReviewSheet = z.output<typeof ReviewSheetSchema>;
 /** A fast moment of the picture. */
 export const ReviewPeakSchema = z.object({
   at: z.number().describe("Seconds of the middle of the change."),
-  energy: z.number().describe("Mean absolute difference of two grey frames at 320 px wide, 0 to 255: how much of the picture moved."),
+  energy: z.number().describe("Mean absolute difference of two grey frames 64 px on the long side (`analyze`'s activity), 0 to 255: how much of the picture moved."),
   strip: z.string().nullable().describe("The `motion` sheet that shows it (absolute path); null for the peaks below the top two."),
 });
 
@@ -463,7 +463,7 @@ export type ReviewBurst = z.output<typeof ReviewBurstSchema>;
 export const ReviewRhythmSchema = z.object({
   label: z
     .enum(["MEASURED", "ESTIMATED"])
-    .describe("MEASURED for a `file` (every frame read like `analyze` reads it, shots found like `analyze` finds them: the same numbers); ESTIMATED for a timeline (sampled frames, shots from its clip cuts)."),
+    .describe("MEASURED for a `file` (every frame read like `analyze` reads it, shots found like `analyze` finds them: the same numbers); ESTIMATED for a timeline (sampled frames, shots from the cuts of every track, a title card on an upper track included)."),
   shotLengthCv: z.number().describe("Standard deviation of the shot lengths over their mean, 3 decimals: 0 is a metronome, above 0.6 the cutting is irregular."),
   stillShare: z.number().describe("Share of the frames (after the first; on a sampled timeline, of the sample intervals) in which the picture changes by under 0.5 grey levels, 0 to 1."),
   bursts: z.array(ReviewBurstSchema).describe("Stretches with 3 or more big changes within 1.5 s: a montage burst, a flurry of effects."),
@@ -473,8 +473,8 @@ export const ReviewRhythmSchema = z.object({
 export type ReviewRhythm = z.output<typeof ReviewRhythmSchema>;
 
 /**
- * The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames at 64 px on the long side
- * (the scale of `analyze`) and its sound.
+ * The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (Rec. 709 luma) at 64 px on
+ * the long side (the scale of `analyze`) and its sound.
  */
 export const ReviewMetricsSchema = z.object({
   picture: z.object({

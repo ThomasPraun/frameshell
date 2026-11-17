@@ -200,6 +200,13 @@ describe("review metrics: rhythm on analyze's scale", () => {
     expect(metrics.rhythm.bursts).toEqual(rhythm.bursts.map((burst) => ({ from: burst.start, to: burst.end, count: burst.count })));
   });
 
+  it("a file read only up to the hour limit: gap and shots stop where the series does", () => {
+    // 60 frames read of a range that runs to 10 s: the unread tail is no gap and no shot.
+    const metrics = reviewMetrics({ ...file, range: { from: 0, to: 10 }, series: { ...file.series, truncated: true } });
+    expect(metrics.picture.largestGap).toEqual({ from: 1, to: 2, seconds: 1 });
+    expect(metrics.rhythm).toEqual(reviewMetrics(file).rhythm);
+  });
+
   it("a timeline's rhythm is ESTIMATED on its samples, its clip cuts the shots", () => {
     // Samples 15 frames apart: a cut at frame 45 splits 3 s into 1.5 s and 1.5 s.
     const metrics = reviewMetrics(input(series([0, 0, 0, 60, 0, 0]), { cuts: [45] }));
