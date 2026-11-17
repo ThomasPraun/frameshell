@@ -13,6 +13,7 @@ import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 const TIMEOUT = 180_000;
 const STATE = ".frameshell/card-state";
 const HOUR = 3_600_000;
+const QUIET_MS = 2000;
 
 let daemon: Daemon;
 let conn: DaemonConnection;
@@ -58,9 +59,12 @@ function hookCalls(dir: string): { inputs: string[]; dryRun: boolean; floor: num
   return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { inputs: string[]; dryRun: boolean; floor: number }) : [];
 }
 
+/** No active job for `QUIET_MS` in a row: a timeline written with `file.write` queues its renders only once the watcher sees it. */
 async function idle(dir: string, on: DaemonConnection = conn): Promise<void> {
-  for (const deadline = Date.now() + 60_000; (await on.request("job.list", { cwd: dir, active: true })).jobs.length > 0; ) {
+  const deadline = Date.now() + 60_000;
+  for (let quietSince = Date.now(); Date.now() - quietSince < QUIET_MS; ) {
     if (Date.now() > deadline) throw new Error("jobs never settled");
+    if ((await on.request("job.list", { cwd: dir, active: true })).jobs.length > 0) quietSince = Date.now();
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
