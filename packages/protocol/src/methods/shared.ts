@@ -190,7 +190,8 @@ export const GcEntrySchema = z.object({
         "older recipe or fps). `energy`: cut-snapping envelope. `loudness`: EBU R128 reading of an asset in `.frameshell/loudness/` (content no asset has now). `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
         "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
-        "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
+        "generated-clip render no timeline uses, or a file a clip plugin keeps for its clips that none of them names now (the " +
+        "Blender plugin's listings, length and version markers in `.frameshell/blender/`). `context`: \"Chat about this\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
         "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +

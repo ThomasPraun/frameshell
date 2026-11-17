@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { AdapterGcContext } from "@frameshell/plugin-api";
 import { createBlenderAdapter, scriptPath } from "../src/index.js";
 import { alphaAt, decodeRgba, inputsContext, renderContext, stubBlender, tempDir, writeBlend } from "./stub.js";
 
@@ -142,7 +143,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       stub.configure({ version: "4.2.9" });
       await expect(adapter().inputs!(clip(), inputsContext(project, stub.path))).rejects.toThrow(/Blender 4\.2\.9 at .* is outside the supported range \(4\.5 LTS and 5\.x\).*binaries\.blender/);
       await expect(adapter().inputs!(clip(), inputsContext(project, join(tempDir(), "blender")))).rejects.toThrow(/Blender not found at .*Fix `binaries\.blender`/);
-      const missing = { projectDir: project, ensureBinary: async () => Promise.reject(new Error("Blender is not installed, or Frameshell was not told where it is.")) };
+      const missing = { ...inputsContext(project, stub.path), ensureBinary: async () => Promise.reject(new Error("Blender is not installed, or Frameshell was not told where it is.")) };
       await expect(adapter().inputs!(clip(), missing)).rejects.toThrow(/not installed/);
       await expect(adapter().inputs!(clip())).rejects.toThrow(/too old for the blender plugin/);
     });
@@ -336,6 +337,101 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       stub.configure({ version: "3.6.0" });
       await expect(adapter().render(clip(), renderContext(project, stub.path).ctx)).rejects.toThrow(/outside the supported range/);
       expect(stub.runs("render.py")).toEqual([]);
+    });
+  });
+
+  describe("gc and stop", () => {
+    const STATE = join(".frameshell", "blender");
+    /** Context for `gc` that counts every file as old enough to go, with `inputs` as the clips' current inputs. */
+    const gcContext = (inputs: string[], overrides: Partial<AdapterGcContext> = {}): AdapterGcContext => ({
+      projectDir: project,
+      inputs: new Set(inputs),
+      dryRun: false,
+      keepNewerThan: Date.now() + 60_000,
+      signal: new AbortController().signal,
+      ...overrides,
+    });
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it("keeps the listing, length and version of the current clip, deletes those of older saves and lengths, and keeps finals.json", async () => {
+      const blender = adapter();
+      const old = await blender.inputs!(clip({ duration: 1 }), inputsContext(project, stub.path));
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 2000 });
+      const current = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeFileSync(join(project, STATE, "finals.json"), "{}");
+      expect(current[3]).not.toBe(old[3]);
+
+      const removed = await blender.gc!(gcContext(current));
+      expect(removed.map((entry) => entry.path)).toEqual([old[3]!.replace(/deps\.json$/, ""), old[2]!]);
+      for (const kept of [...current.slice(1), `${STATE.replaceAll("\\", "/")}/finals.json`]) expect(existsSync(join(project, kept))).toBe(true);
+      expect(existsSync(join(project, old[3]!))).toBe(false);
+      expect(existsSync(join(project, old[2]!))).toBe(false);
+      // Nothing is left to delete.
+      expect(await blender.gc!(gcContext(current))).toEqual([]);
+    });
+
+    it("lists a .blend saved back to a version whose listing was deleted, instead of returning a path to a missing file", async () => {
+      const blender = adapter();
+      const first = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 2000 });
+      const second = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      await blender.gc!(gcContext(second));
+      expect(existsSync(join(project, first[3]!))).toBe(false);
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 100 });
+      const reverted = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      expect(reverted).toEqual(first);
+      expect(existsSync(join(project, reverted[3]!))).toBe(true);
+      expect(stub.runs("deps.py")).toHaveLength(3);
+    });
+
+    it("keeps the files of a clip still in use at another length or format, and honours dryRun and keepNewerThan", async () => {
+      const blender = adapter();
+      const short = await blender.inputs!(clip({ duration: 1 }), inputsContext(project, stub.path));
+      const long = await blender.inputs!(clip({ id: "c2", duration: 2 }), inputsContext(project, stub.path));
+      // Both clips are current: the union names both range files.
+      expect(await blender.gc!(gcContext([...short, ...long]))).toEqual([]);
+      const dry = await blender.gc!(gcContext(long, { dryRun: true }));
+      expect(dry.map((entry) => entry.path)).toEqual([short[2]!]);
+      expect(existsSync(join(project, short[2]!))).toBe(true);
+      expect(await blender.gc!(gcContext(long, { keepNewerThan: Date.now() - 3_600_000 }))).toEqual([]);
+      expect((await blender.gc!(gcContext(long))).map((entry) => entry.path)).toEqual([short[2]!]);
+    });
+
+    it("kills the Blender that lists a .blend's files when the host stops, rejects, and lists again on the next check", async () => {
+      stub.configure({ hangDeps: true });
+      const stopping = new AbortController();
+      const blender = adapter();
+      const settled = Promise.resolve(blender.inputs!(clip(), inputsContext(project, stub.path, stopping.signal))).then(
+        () => "resolved",
+        (error: Error) => error.name,
+      );
+      for (let waited = 0; stub.runs("deps.py").length === 0 && waited < 5000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+      for (let waited = 0; !existsSync(join(stub.dir, "pid")) && waited < 5000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+      const pid = stub.pid();
+      expect(alive(pid)).toBe(true);
+      stopping.abort();
+      expect(await settled).toBe("AbortError");
+      for (let waited = 0; alive(pid) && waited < 3000; waited += 50) await new Promise((r) => setTimeout(r, 50));
+      expect(alive(pid)).toBe(false);
+      // The aborted listing was not remembered, and left no file: the next check lists again.
+      stub.configure({});
+      const inputs = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      expect(existsSync(join(project, inputs[3]!))).toBe(true);
+      expect(stub.runs("deps.py")).toHaveLength(2);
+    });
+
+    it("starts no listing for a host that already stopped", async () => {
+      const stopped = new AbortController();
+      stopped.abort();
+      await expect(adapter().inputs!(clip(), inputsContext(project, stub.path, stopped.signal))).rejects.toThrow();
+      expect(stub.runs("deps.py")).toEqual([]);
     });
   });
 

@@ -32,6 +32,12 @@ const refuse = (code, detail) => {
 };
 
 if (script === "deps.py") {
+  if (config.hangDeps) {
+    // Never finishes, as a listing of a huge file: only a kill ends it.
+    writeFileSync(join(here, "pid"), String(process.pid));
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
   const paths = (model.links ?? []).map((link) => (link.startsWith("//") ? join(dirname(blend), link.slice(2)) : link));
   writeFileSync(request.out, JSON.stringify({ paths }));
   process.exit(0);

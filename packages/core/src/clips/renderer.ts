@@ -14,7 +14,7 @@ import {
   type JobPriority,
   RpcError,
 } from "@frameshell/protocol";
-import { type ClipAdapter, type LivePage, MOTION_BLUR_REFUSED, type RenderTier, type RenderTiming } from "@frameshell/plugin-api";
+import { type AdapterGcEntry, type ClipAdapter, type LivePage, MOTION_BLUR_REFUSED, type RenderTier, type RenderTiming } from "@frameshell/plugin-api";
 import {
   type AdapterClip,
   type BeatsFile,
@@ -183,9 +183,9 @@ interface Variant {
 
 /**
  * Keys of a clip, or why it has none: `key` its draft render's; `final` the render beside it, when it has one (blurred,
- * or the adapter's final).
+ * or the adapter's final); `paths` what the adapter's `inputs` returned, for its `gc`.
  */
-type Keyed = (Variant & { final: Variant | null }) | { key: null; error: string };
+type Keyed = (Variant & { final: Variant | null; paths: readonly string[] }) | { key: null; error: string };
 
 /** A failed render: why, and whether the adapter refused the motion blur (then never retried while the key holds). */
 interface Failure {
@@ -249,6 +249,8 @@ export class ClipRenderer {
   readonly #hashes = new Map<string, { size: number; mtimeMs: number; hash: string }>();
   /** Settles the promise of each job the renderer queued, by job id. */
   readonly #settle = new Map<string, (job: JobInfo) => void>();
+  /** Handed to adapters as `InputsContext.signal`; aborted by {@link close}, so no key check outlives the daemon. */
+  readonly #stopping = new AbortController();
   #closed = false;
 
   constructor(options: ClipRendererOptions) {
@@ -567,16 +569,21 @@ export class ClipRenderer {
    * cannot be (invalid timeline, plugin missing or untrusted, adapter error),
    * entries are kept and `skipped` says why. A key with a render pending is
    * kept. `busy`: a render or export job runs, so nothing is deleted.
+   * Then each adapter with a `gc` hook cleans its own files, given the paths its clips' inputs name now (ADR 0035
+   * slice 5); what it removes is reported as kind `clip`. It is not asked when a key is unknown.
    */
   async gc(root: string, options: { dryRun: boolean; temps: boolean; busy: boolean }): Promise<{ removed: GcEntry[]; skipped: GcSkip[] }> {
     const skipped: GcSkip[] = [];
     let keys: Set<string> | null = null;
+    let inputs: Map<RegisteredClipType, Set<string>> | null = null;
+    // A file an adapter writes after this moment is newer than the floor and kept.
+    const keepNewerThan = Date.now() - ADAPTER_GC_GRACE_MS;
     if (options.busy) {
       skipped.push({ area: "clips", reason: "a clip render or export job of this project is running; it may read any cache entry." });
     } else {
       const found = await this.#currentKeys(root);
       if (typeof found === "string") skipped.push({ area: "clips", reason: found });
-      else keys = found;
+      else ({ keys, inputs } = found);
     }
     const removed = await sweep({
       root,
@@ -587,11 +594,35 @@ export class ClipRenderer {
       dryRun: options.dryRun,
       claim: async (key) => (this.#pending.has(entryId(root, key)) ? null : () => {}),
     });
+    if (inputs) removed.push(...(await this.#adapterGc(root, inputs, { dryRun: options.dryRun, keepNewerThan }, skipped)));
     return { removed, skipped };
   }
 
-  /** Keys of every generated clip on every timeline of `root`, at every format size, or why they cannot all be known. */
-  async #currentKeys(root: string): Promise<Set<string> | string> {
+  /** Runs the `gc` hook of every adapter that has one; one that throws is skipped, with why, and the others still run. */
+  async #adapterGc(
+    root: string,
+    inputs: ReadonlyMap<RegisteredClipType, ReadonlySet<string>>,
+    options: { dryRun: boolean; keepNewerThan: number },
+    skipped: GcSkip[],
+  ): Promise<GcEntry[]> {
+    const removed: GcEntry[] = [];
+    for (const [{ adapter, plugin }, paths] of inputs) {
+      if (!adapter.gc) continue;
+      try {
+        const found: readonly AdapterGcEntry[] = await adapter.gc({ projectDir: root, inputs: paths, signal: this.#stopping.signal, ...options });
+        for (const entry of found) removed.push({ path: entry.path, kind: "clip", bytes: entry.bytes });
+      } catch (error) {
+        skipped.push({ area: "clips", reason: `${plugin.name} could not clean its own files: ${(error as Error)?.message ?? error}` });
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Keys of every generated clip on every timeline of `root`, at every format size, with the paths `inputs` named for
+   * the clips of each adapter that has a `gc` hook; or why they cannot all be known.
+   */
+  async #currentKeys(root: string): Promise<{ keys: Set<string>; inputs: Map<RegisteredClipType, Set<string>> } | string> {
     const placed: Sited[] = [];
     for (const id of await this.#options.timelines(root)) {
       try {
@@ -604,9 +635,12 @@ export class ClipRenderer {
       }
     }
     const keys = new Set<string>();
+    const inputs = new Map<RegisteredClipType, Set<string>>();
     // No generated clips: never load plugins (an untrusted project stays untouched).
-    if (placed.length === 0) return keys;
+    if (placed.length === 0) return { keys, inputs };
     const adapters = await this.#options.adapters(root);
+    // An adapter with a hook is asked even when none of its clips is left: all its files are then unused.
+    for (const registered of new Set(adapters.values())) if (registered.adapter.gc) inputs.set(registered, new Set());
     const project = await this.#options.format(root);
     const sizes = (await this.#options.formatSizes?.(root)) ?? [];
     const formats = [{ id: undefined, ...project }, ...sizes.map((size) => ({ id: size.id, fps: project.fps, width: size.width, height: size.height }))];
@@ -616,14 +650,17 @@ export class ClipRenderer {
         if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
         keys.add(keyed.key);
         if (keyed.final) keys.add(keyed.final.key);
+        const used = inputs.get(keyed.registered);
+        if (used) for (const path of keyed.paths) used.add(path);
       }
     }
-    return keys;
+    return { keys, inputs };
   }
 
   /** Stop watching. Running renders are the queue's to stop. */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#stopping.abort();
     for (const timer of this.#timers.values()) clearTimeout(timer);
     this.#timers.clear();
     const watchers = [...this.#watchers.values()];
@@ -696,7 +733,7 @@ export class ClipRenderer {
       const reason = (await this.#options.unavailable?.(root, clip.type)) ?? `No loaded plugin renders \`${clip.type}\` clips.`;
       return { key: null, error: reason };
     }
-    const context = { projectDir: root, ensureBinary: (name: string) => this.#options.ensureBinary(root, name) };
+    const context = { projectDir: root, ensureBinary: (name: string) => this.#options.ensureBinary(root, name), signal: this.#stopping.signal };
     let paths: string[];
     try {
       paths = registered.adapter.inputs ? await registered.adapter.inputs(structuredClone(clip), context) : [];
@@ -742,7 +779,7 @@ export class ClipRenderer {
             ...(finals ? { tier: "final" as const } : {}),
           }
         : null;
-    return { ...draft, final };
+    return { ...draft, final, paths };
   }
 
   /** Content hash of a project-relative input; null when missing or outside the project. */
@@ -932,6 +969,12 @@ type Refusal = Error & { refused?: boolean };
 
 /** A render's state fields before anything is known: nothing rendered, nothing running. */
 const UNRENDERED = { key: null, file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null } as const;
+
+/**
+ * Files an adapter wrote less than this long before `gc` began are kept: a key check running beside it may have
+ * written one that the inputs, gathered earlier, do not name.
+ */
+const ADAPTER_GC_GRACE_MS = 60_000;
 
 const CLIP_ENTRY = /^([0-9a-f]{32})\.(json|mp4|webm)$/;
 const CLIP_TEMP = /^\.tmp-[0-9a-f]{32}-[0-9a-f]+$/;

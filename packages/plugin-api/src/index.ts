@@ -149,6 +149,43 @@ export interface ClipAdapter {
    * other than an array, the clip has no render key: it is unavailable (preview and export say why) until it answers.
    */
   timing?(clip: unknown, context?: InputsContext): readonly RenderTimingKind[] | Promise<readonly RenderTimingKind[]>;
+  /**
+   * Optional (ADR 0035 slice 5). Clean up what the adapter keeps in the project outside the render cache, which the
+   * host's `gc` does not know: marker files that feed {@link inputs}, listings, probes. The host calls it from `gc`
+   * after keying every generated clip, with the union of the paths {@link inputs} returned for the adapter's clips,
+   * and never when a clip's key is unknown or a render or export job runs. Delete only entries the adapter itself
+   * made, recognised by name, that are not in {@link AdapterGcContext.inputs} and are older than
+   * {@link AdapterGcContext.keepNewerThan}; return what was deleted (or, with `dryRun`, what would be). Throwing
+   * leaves the rest as it is and `gc` reports why.
+   */
+  gc?(context: AdapterGcContext): Promise<readonly AdapterGcEntry[]>;
+}
+
+/** What {@link ClipAdapter.gc} receives. */
+export interface AdapterGcContext {
+  readonly projectDir: string;
+  /**
+   * Union of the project-relative, `/`-separated paths {@link ClipAdapter.inputs} returned for every current clip of
+   * this adapter's clip `type`, in every timeline and at every format size. Anything named here is in use.
+   */
+  readonly inputs: ReadonlySet<string>;
+  /** Only report what would be deleted. */
+  readonly dryRun: boolean;
+  /**
+   * Milliseconds since the epoch: entries modified at or after it are kept, so a file a key check writes while `gc`
+   * runs is never lost. Files in use are protected by {@link inputs}, not by age.
+   */
+  readonly keepNewerThan: number;
+  /** Aborted when the host stops. */
+  readonly signal: AbortSignal;
+}
+
+/** One file or folder {@link ClipAdapter.gc} deleted. */
+export interface AdapterGcEntry {
+  /** Project-relative, `/`-separated; a folder ends with `/`. */
+  readonly path: string;
+  /** Size on disk; a folder counts its files. */
+  readonly bytes: number;
 }
 
 /** How an adapter with {@link ClipAdapter.finals} sizes a final render before anyone waits for it. */
@@ -239,6 +276,12 @@ export interface InputsContext {
   readonly projectDir: string;
   /** See {@link RenderContext.ensureBinary}. Called on every key check, so ask only for tools whose answer is cheap. */
   ensureBinary(name: string): Promise<string>;
+  /**
+   * Aborted when the host stops (the daemon shuts down). A key check that starts a process of its own, as listing a
+   * `.blend`'s files does, passes it on and kills the process, so none outlives the host. A host older than this
+   * addition passes none: an adapter that reads it copes with `undefined`.
+   */
+  readonly signal: AbortSignal;
 }
 
 /** What {@link ClipAdapter.livePreview} receives: the project facts of {@link RenderContext}, without output or progress. */

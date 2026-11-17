@@ -467,10 +467,13 @@ function describeStandardPath(rule: StandardPath, windows: boolean): string {
 
 /**
  * First of `install`'s standard paths for `family` where an executable exists, and how it was found; null when none.
- * Never runs it: `doctor` and the feature that needs it ask for the version.
+ * An install a `versioned` rule finds outside the supported range is only a fallback: later rules still look, and
+ * their hit (version unknown) wins over it. Never runs anything: `doctor` and the feature that needs it ask for the
+ * version.
  */
 async function findUserInstall(install: UserInstall, family: PlatformFamily, env: NodeJS.ProcessEnv): Promise<{ path: string; found: "path" | "standard" } | null> {
   const windows = family === "win32";
+  let unsupported: { path: string; found: "standard" } | null = null;
   for (const rule of install.standardPaths?.[family] ?? []) {
     if (rule.kind === "path") {
       const path = findOnPath(rule.name, env, windows);
@@ -491,13 +494,16 @@ async function findUserInstall(install: UserInstall, family: PlatformFamily, env
       .map((name) => ({ name, version: rule.folder.exec(name)?.[1] }))
       .filter((entry): entry is { name: string; version: string } => entry.version !== undefined)
       .sort((a, b) => compareVersions(b.version, a.version));
-    // Newest supported first; an install outside the range still beats none, so `doctor` can say it is out of range.
+    // Newest supported first. The newest outside the range is kept for the end: it still beats none, so `doctor` can
+    // say it is out of range, but a hit of a later rule (PATH) is likelier to be one the person set up on purpose.
     for (const entry of [...versions.filter((v) => install.supports(v.version)), ...versions.filter((v) => !install.supports(v.version))]) {
       const path = join(dir, entry.name, rule.file);
-      if (await isFile(path)) return { path, found: "standard" };
+      if (!(await isFile(path))) continue;
+      if (install.supports(entry.version)) return { path, found: "standard" };
+      unsupported ??= { path, found: "standard" };
     }
   }
-  return null;
+  return unsupported;
 }
 
 /** `${NAME}` replaced from `env`; null when one is unset or empty. */

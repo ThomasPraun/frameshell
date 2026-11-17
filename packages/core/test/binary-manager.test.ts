@@ -305,6 +305,24 @@ describe("BinaryManager user install at a standard path", () => {
     expect(await windows({ ProgramFiles: root }).locate("blender")).toMatchObject({ source: "system", path: join(root, "Blender Foundation", "Blender 4.2", "blender.exe") });
   });
 
+  it("prefers Blender on PATH to an install folder outside the range, which is only a fallback", async () => {
+    const root = programFiles({ "Blender 3.6": true });
+    const onPath = tempDir();
+    writeFileSync(join(onPath, "blender.exe"), "stub");
+    expect(await windows({ ProgramFiles: root, PATH: onPath }).locate("blender")).toMatchObject({ source: "system", found: "path", path: join(onPath, "blender.exe") });
+    // A folder of the range still wins over PATH: its rule comes first and the version is known.
+    const supported = programFiles({ "Blender 3.6": true, "Blender 4.5": true });
+    expect(await windows({ ProgramFiles: supported, PATH: onPath }).locate("blender")).toMatchObject({
+      found: "standard",
+      path: join(supported, "Blender Foundation", "Blender 4.5", "blender.exe"),
+    });
+    // Nothing on PATH: the folder outside the range is returned, so doctor says "out of range" and not "missing".
+    expect(await windows({ ProgramFiles: root, PATH: tempDir() }).locate("blender")).toMatchObject({
+      found: "standard",
+      path: join(root, "Blender Foundation", "Blender 3.6", "blender.exe"),
+    });
+  });
+
   it("lets a `binaries.blender` override win over an install it would find", async () => {
     const root = programFiles({ "Blender 5.0": true });
     const own = join(tempDir(), "blender.exe");
