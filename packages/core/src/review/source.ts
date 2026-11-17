@@ -2,22 +2,29 @@ import { stat } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
+import { lumaSpread, readActivity } from "../analyze/activity.js";
+import { pictureSize } from "../analyze/picture.js";
 import { pool } from "../export/service.js";
 import { probeMedia, runTool } from "../media/ffmpeg.js";
 import { readRawFrames } from "../media/raw-frames.js";
 import { frameDifference } from "../multicam/motion.js";
-import { ENERGY_WIDTH, type FrameRange, fileSampleRate, frameTime, tileHeight, timelineSampleStep } from "./plan.js";
+import { type FrameRange, frameTime, timelineSampleStep } from "./plan.js";
 
 // Where the frames of a review come from: an exported file decoded by ffmpeg, or a timeline rendered frame by frame.
 
 /**
- * Motion of a range: `energy[i]` is how much the grey picture changed between sample `i - 1` and sample `i` (0 for the
- * first), `times` their seconds, `spread[i]` the standard deviation of sample `i`'s grey levels (0 flat, up to 128).
+ * Motion of a range on the scale of `analyze` (grey frames 64 px on the long side): `energy[i]` is how much the picture
+ * changed between sample `i - 1` and sample `i` (0 for the first), `times` their seconds, `spread[i]` the standard
+ * deviation of sample `i`'s grey levels (0 flat, up to 128). Sample `i` is frame `first + i * step` of the film.
  */
 export interface MotionSeries {
   times: number[];
   energy: number[];
   spread: number[];
+  /** Frame of the film that sample 0 is. */
+  first: number;
+  /** Frames between samples: 1 when every frame was measured (a file), more for a timeline over 90 frames. */
+  step: number;
 }
 
 /** A film frames can be taken from. */
@@ -40,34 +47,17 @@ export function captureParallelism(): number {
   return Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2)));
 }
 
-/** The series of consecutive frames `grey`, sampled at `times`. */
-async function series(grey: AsyncIterable<Uint8Array>, times: (index: number) => number): Promise<MotionSeries> {
-  const out: MotionSeries = { times: [], energy: [], spread: [] };
+/** The series of `grey`, the pictures of frames `first`, `first + step`... of a film at `fps`. */
+async function series(grey: AsyncIterable<Uint8Array>, fps: number, first: number, step: number): Promise<MotionSeries> {
+  const out: MotionSeries = { times: [], energy: [], spread: [], first, step };
   let previous: Uint8Array | undefined;
   for await (const frame of grey) {
-    out.times.push(times(out.times.length));
+    out.times.push((first + out.times.length * step) / fps);
     out.energy.push(previous ? frameDifference(previous, frame) : 0);
     out.spread.push(lumaSpread(frame));
     previous = frame;
   }
   return out;
-}
-
-/** Standard deviation of the grey levels of `frame`. */
-function lumaSpread(frame: Uint8Array): number {
-  let sum = 0;
-  let squares = 0;
-  for (const value of frame) {
-    sum += value;
-    squares += value * value;
-  }
-  const mean = sum / frame.length;
-  return Math.sqrt(Math.max(0, squares / frame.length - mean * mean));
-}
-
-/** Size of the grey frames the motion measure compares for pictures `width` x `height`. */
-function greySize(width: number, height: number): { width: number; height: number } {
-  return { width: ENERGY_WIDTH, height: tileHeight(ENERGY_WIDTH, width / height) };
 }
 
 /**
@@ -104,12 +94,15 @@ export async function fileSource(ffmpeg: string, ffprobe: string, path: string, 
       if (!(await exists(out))) throw new RpcError(ErrorCode.InvalidOperation, `${op}: ${path} has no picture at ${frameTime(frame, fps)} s.`, { op, field: "file" });
     },
     async motion(range, _scratch, signal) {
-      const rate = fileSampleRate((range.end - range.first) / fps, fps);
-      const grey = greySize(video.width, video.height);
-      const from = range.first / fps;
-      const stream = readRawFrames(ffmpeg, path, `fps=${rate},scale=${grey.width}:${grey.height}:flags=area,format=gray`, grey.width * grey.height, { from, to: range.end / fps });
-      signal?.throwIfAborted();
-      return series(stream, (i) => from + i / rate);
+      // Every frame, read as `analyze` reads it: a file's rhythm is the one `analyze` reports.
+      const read = await readActivity(ffmpeg, path, { width: video.width, height: video.height, fps, frames }, signal, undefined, range);
+      return {
+        times: Array.from(read.activity, (_, i) => (range.first + i) / fps),
+        energy: Array.from(read.activity),
+        spread: Array.from(read.spread),
+        first: range.first,
+        step: 1,
+      };
     },
   };
 }
@@ -144,9 +137,9 @@ export async function timelineSource(ffmpeg: string, fps: number, frames: number
         signal?.throwIfAborted();
         await render((frame + 0.5) / fps, pattern(i));
       });
-      const grey = greySize(size.width, size.height);
+      const grey = pictureSize(size.width, size.height);
       const stream = readRawFrames(ffmpeg, join(dir, "a%05d.png"), `scale=${grey.width}:${grey.height}:flags=area,format=gray`, grey.width * grey.height);
-      return series(stream, (i) => sampled[i]! / fps);
+      return series(stream, fps, range.first, step);
     },
   };
 }

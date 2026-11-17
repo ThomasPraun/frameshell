@@ -449,18 +449,46 @@ export const ReviewRequirementsSchema = z.object({
 /** See {@link ReviewRequirementsSchema}. */
 export type ReviewRequirements = z.output<typeof ReviewRequirementsSchema>;
 
-/** The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (draft size) and its sound. */
+/** Several big changes of the picture close together, as `analyze` counts them. */
+export const ReviewBurstSchema = z.object({
+  from: z.number().describe("Seconds of the first big change."),
+  to: z.number().describe("Seconds of the end of the frame of the last big change."),
+  count: z.int().describe("Big changes inside."),
+});
+
+/** See {@link ReviewBurstSchema}. */
+export type ReviewBurst = z.output<typeof ReviewBurstSchema>;
+
+/** How the film moves in time, on the scale of `analyze`'s `rhythm`. */
+export const ReviewRhythmSchema = z.object({
+  label: z
+    .enum(["MEASURED", "ESTIMATED"])
+    .describe("MEASURED for a `file` (every frame read like `analyze` reads it, shots found like `analyze` finds them: the same numbers); ESTIMATED for a timeline (sampled frames, shots from its clip cuts)."),
+  shotLengthCv: z.number().describe("Standard deviation of the shot lengths over their mean, 3 decimals: 0 is a metronome, above 0.6 the cutting is irregular."),
+  stillShare: z.number().describe("Share of the frames (after the first; on a sampled timeline, of the sample intervals) in which the picture changes by under 0.5 grey levels, 0 to 1."),
+  bursts: z.array(ReviewBurstSchema).describe("Stretches with 3 or more big changes within 1.5 s: a montage burst, a flurry of effects."),
+});
+
+/** See {@link ReviewRhythmSchema}. */
+export type ReviewRhythm = z.output<typeof ReviewRhythmSchema>;
+
+/**
+ * The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames at 64 px on the long side
+ * (the scale of `analyze`) and its sound.
+ */
 export const ReviewMetricsSchema = z.object({
   picture: z.object({
-    samples: z.int().describe("Frames the picture was measured on: a file at up to 15 a second, a timeline at most 90 over the range, so a short flash between two samples can be missed."),
+    samples: z.int().describe("Frames the picture was measured on: every frame of a file; a timeline's at most 90 over the range, so a short flash between two samples can be missed."),
     spacing: z.number().describe("Seconds between samples."),
-    longestStatic: ReviewSpanSchema.nullable().describe("The longest stretch where the picture changes by less than 0.35 grey levels between samples; null when nothing is still."),
+    sampled: z.boolean().describe("The samples are more than a frame apart (a timeline over 90 frames): every threshold then applies per sample interval."),
+    longestStatic: ReviewSpanSchema.nullable().describe("The longest stretch where the picture changes by less than 0.5 grey levels from one sample to the next, to the end of its last frame; null when nothing is still."),
     staticRuns: z.array(ReviewSpanSchema).describe("Every still stretch over 3 s."),
-    events: z.int().describe("Visual events: peaks of change above the larger of 1 grey level and 2.5 times the median change."),
+    events: z.int().describe("Visual events: `analyze`'s big changes (a change 4 times the median within 0.5 s around it and at least 1 grey level, or 15 % of the grey range, or a cut)."),
     largestGap: ReviewSpanSchema.nullable().describe("The largest gap between visual events, the start and the end of the range counted as ends; null for one sample."),
     blank: z.array(ReviewSpanSchema).describe("Stretches of near-blank pictures (luma standard deviation under 4 grey levels), from the first to the last such sample."),
     firstFrameEmpty: z.boolean().nullable().describe("Frame 0 is near-blank; null when the range does not start at 0."),
   }),
+  rhythm: ReviewRhythmSchema.describe("Shot-length CV, still share and bursts, as `analyze` measures a reference: one scale for both."),
   subtitles: z
     .object({ cues: z.int(), shortCues: z.array(ReviewShortCueSchema) })
     .nullable()
