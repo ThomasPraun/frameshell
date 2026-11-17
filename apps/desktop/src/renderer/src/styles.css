@@ -3134,6 +3134,89 @@ button.track-head:focus-visible {
   gap: 6px;
 }
 
+/* Audition dialog (ADR 0038): the voiceover dialog's frame, wider, one row per sound. */
+.audition-dialog {
+  width: min(820px, 100%);
+}
+
+.audition-match {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audition-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.audition-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.audition-play {
+  width: 28px;
+  height: 28px;
+  color: var(--text-muted);
+}
+
+.audition-play svg {
+  width: 16px;
+  height: 16px;
+}
+
+.audition-play[data-playing="true"] {
+  color: var(--accent);
+}
+
+.audition-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audition-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.audition-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.audition-take,
+.audition-level {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.audition-gain {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.audition-spectrogram {
+  display: block;
+  width: 100%;
+  height: 56px;
+  border-radius: 3px;
+  background: #080a18;
+}
+
 .context-menu {
   position: fixed;
   z-index: 100;

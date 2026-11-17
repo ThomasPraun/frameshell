@@ -1748,6 +1748,12 @@ function registerIpc(): void {
       return daemon.request("matte.status", { cwd: project.dir, timeline, ...(view ? { view } : {}) });
     }),
   );
+  ipcMain.handle(Channel.mediaInspect, (event, assets: string[]) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      return daemon.request("audio.inspect", { cwd: project.dir, assets, spectrogram: true });
+    }),
+  );
   ipcMain.handle(Channel.clipsRenders, (event, timeline: string, format?: string) =>
     outcome(async () =>
       daemon.request("clip.renders", { cwd: (await requireProject(stateOf(event.sender))).project.dir, timeline, ...(typeof format === "string" ? { format } : {}) }),

@@ -2,6 +2,8 @@
 import { parseVoiceoverScript } from "@frameshell/schema";
 import type { MenuItem } from "./components/ContextMenu.js";
 import { t } from "./i18n.js";
+import { soundFiles } from "./audition/model.js";
+import { auditionDialog } from "./audition/store.js";
 import { voiceoverDialog } from "./voiceover/store.js";
 
 const agent = navigator.userAgent;
@@ -34,6 +36,15 @@ export async function voiceoverItems(path: string, view: Window = window): Promi
     { label: t.editor.generateVoiceover, run: () => void voiceoverDialog.generate(path, view) },
     { label: t.editor.placeVoiceover, run: () => voiceoverDialog.place(path, view) },
   ];
+}
+
+/**
+ * "Audition N sounds…" when `paths` hold two or more sound files: opens the Audition dialog on them in `view`, the window
+ * the menu is in. `label` words it for where it was asked (a selection, a folder, music candidates). Empty otherwise.
+ */
+export function auditionItems(paths: readonly string[], label: (count: number) => string, view: Window = window): MenuItem[] {
+  const files = soundFiles(paths);
+  return files.length >= 2 ? [{ label: label(files.length), run: () => void auditionDialog.open(files, view) }] : [];
 }
 
 /** Reveal, Copy path, then Move to Trash (main asks first; the OS trash is the undo) for project-relative `path`. */

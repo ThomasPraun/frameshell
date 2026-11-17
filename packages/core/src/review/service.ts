@@ -34,6 +34,9 @@ import {
   showsPicture,
 } from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
+import { MAX_PICTURE_S } from "../analyze/picture.js";
+import { sceneScores } from "../analyze/scene.js";
+import { DEFAULT_CUT_THRESHOLD, detectCuts } from "../analyze/shots.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
 import { captionFontMetrics } from "../export/font-metrics.js";
@@ -56,6 +59,7 @@ import {
   beatPicks,
   contactPicks,
   cropRect,
+  frameIndex,
   frameRange,
   frameTime,
   motionPeaks,
@@ -201,7 +205,12 @@ export class ReviewService {
       const peaks: ReviewPeak[] = [];
       let measured: MotionSeries | undefined;
       /** The motion of the range, measured once for the `motion` sheet and the metrics. */
-      const motion = async () => (measured ??= await source.motion(range, join(scratch, "motion"), signal));
+      const motion = async (): Promise<MotionSeries> => {
+        if (measured) return measured;
+        measured = await source.motion(range, join(scratch, "motion"), signal);
+        if (measured.truncated) warnings.push(`motion and rhythm: measured on the first ${MAX_PICTURE_S / 60} minutes of the file.`);
+        return measured;
+      };
       const safeZones: ReviewSafeZone[] = [];
       /** The timeline flattened for the format, resolved once for the safe-zone boxes and the sync. */
       let flattened: Promise<Flat> | undefined;
@@ -300,14 +309,17 @@ export class ReviewService {
         let decoded: Promise<Float32Array> | undefined;
         /** The 10 ms envelope of a file's sound, decoded once for the sync and the sound review list. */
         const envelope = (file: string) => (decoded ??= fileEnvelope(ffmpeg, file, join(scratch, "sound")));
-        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, critical, seconds, envelope, warnings, signal);
+        const cuts = await this.#cuts(request, source, critical, ffmpeg, warnings, signal);
+        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, cuts, critical, seconds, envelope, warnings, signal);
         const sound = await this.#sound(root, request, source, loaded ? flat : null, seconds, ffmpeg, envelope, scratch, warnings, signal);
         const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
         const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
         metrics = reviewMetrics({
           fps: source.fps,
           range: seconds,
+          source: request.file ? "file" : "timeline",
           series,
+          cuts,
           tracks: subtitles,
           loudness,
           hasSound: source.audio ?? null,
@@ -502,6 +514,7 @@ export class ReviewService {
     source: FilmSource,
     flat: (() => Promise<Flat>) | null,
     series: MotionSeries,
+    cuts: readonly number[],
     critical: readonly Critical[],
     range: { from: number; to: number },
     envelope: (file: string) => Promise<Float32Array>,
@@ -520,7 +533,8 @@ export class ReviewService {
       return syncMetrics({
         source: request.file ? "file" : "takes",
         sounds,
-        events: visualEvents(series),
+        // A timeline's cuts are `exact` already; a file's scene cuts are visual events like any big change.
+        events: visualEvents(series, source.fps, request.file ? cuts : []),
         exact: critical.filter((item) => item.tag === "cut" || item.tag === "marker").map((item) => item.at),
         cuts: critical.filter((cut) => cut.tag === "cut").map((cut) => cut.at),
         range,
@@ -530,6 +544,21 @@ export class ReviewService {
       signal?.throwIfAborted();
       warnings.push(`sync: the sounds could not be placed against the picture (${(error as Error).message.split("\n")[0]}).`);
       return null;
+    }
+  }
+
+  /**
+   * Frames where a shot starts, for the shot-length CV and the big changes: a file's cuts found the way `analyze` finds
+   * them (ffmpeg scene scores at its default threshold), a timeline's clip starts and ends.
+   */
+  async #cuts(request: ReviewRequest, source: FilmSource, critical: readonly Critical[], ffmpeg: string, warnings: string[], signal?: AbortSignal): Promise<number[]> {
+    if (!request.file) return critical.filter((item) => item.tag === "cut").map((item) => frameIndex(item.at, source.fps));
+    try {
+      return detectCuts(await sceneScores(ffmpeg, request.file, source.fps, signal), DEFAULT_CUT_THRESHOLD).map((cut) => cut.frame);
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`rhythm: ffmpeg could not find the shots (${(error as Error).message.split("\n")[0]}), so the film counts as one shot.`);
+      return [];
     }
   }
 
