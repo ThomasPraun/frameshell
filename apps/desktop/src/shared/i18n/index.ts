@@ -3,6 +3,7 @@
 import { agents } from "./agents.js";
 import { angles } from "./angles.js";
 import { app } from "./app.js";
+import { audition } from "./audition.js";
 import { editor } from "./editor.js";
 import { history } from "./history.js";
 import { inspector } from "./inspector.js";
@@ -30,7 +31,7 @@ export const LANGUAGES: readonly { id: Lang; name: string }[] = [
 ];
 
 /** Every area's strings in both languages; the parity test walks it. */
-export const AREAS = { agents, angles, app, editor, history, inspector, layers, models, people, preview, review, shoot, teleprompter, terminal, timeline, transcript, voiceover, welcome, workspace };
+export const AREAS = { agents, angles, app, audition, editor, history, inspector, layers, models, people, preview, review, shoot, teleprompter, terminal, timeline, transcript, voiceover, welcome, workspace };
 
 /** All UI strings of one language, by area. */
 export type Dict = { [Area in keyof typeof AREAS]: (typeof AREAS)[Area]["en"] };

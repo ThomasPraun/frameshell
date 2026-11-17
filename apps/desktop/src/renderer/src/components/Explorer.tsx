@@ -4,7 +4,8 @@ import type { FileNode } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
 import { selection, useSelection } from "../selection.js";
-import { placeItems, voiceoverItems } from "../file-commands.js";
+import { soundFilesIn } from "../audition/model.js";
+import { auditionItems, placeItems, voiceoverItems } from "../file-commands.js";
 import { windowOf } from "../windows.js";
 import { type MenuItem, contextMenu } from "./ContextMenu.js";
 
@@ -23,8 +24,9 @@ function filePaths(nodes: readonly FileNode[]): string[] {
  * Project tree, refreshed live from the main-process watcher. Files are
  * selectable in the shared selection store for "Chat about this": a click on an
  * asset, Cmd/Ctrl-click on any file (toggles, without opening), or a
- * right-click, which opens its menu ("Chat about this", Open, Reveal, Copy path,
- * Move to Trash; a folder gets the last three). Deleted files leave the selection.
+ * right-click, which opens its menu ("Chat about this", Open, Audition for two or more
+ * selected sounds, Reveal, Copy path, Move to Trash; a folder gets Audition of its
+ * sounds and the last three). Deleted files leave the selection.
  */
 export function Explorer({ onOpenFile, activeFile }: { onOpenFile: (path: string) => void; activeFile: string | null }) {
   const [tree, setTree] = useState<FileNode[] | null>(null);
@@ -94,12 +96,16 @@ function Nodes({
     if (node.kind === "dir") {
       event.preventDefault();
       if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
-      contextMenu.open(event.clientX, event.clientY, [...askItems(), ...placeItems(node.path)], windowOf(event.target));
+      const view = windowOf(event.target);
+      contextMenu.open(event.clientX, event.clientY, [...askItems(), ...auditionItems(soundFilesIn(node), t.audition.folderItem, view), ...placeItems(node.path)], view);
       return;
     }
     if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
+    // Several sound files selected (Cmd/Ctrl-click) and this one among them: they can be heard side by side.
+    const audition = picked.has(node.path) ? auditionItems([...picked], t.audition.explorerItem, windowOf(event.target)) : [];
     const items = (voiceover: readonly MenuItem[]): MenuItem[] => [
       { label: t.editor.open, run: () => onOpenFile(node.path) },
+      ...audition,
       ...voiceover,
       ...placeItems(node.path),
     ];

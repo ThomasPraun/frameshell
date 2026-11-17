@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Audition dialog, slice AP of #463 (ADR 0038 "Audition page as built", epic #451; protocol 166): the person picks a
+  sound by ear. In the Explorer, right-click two or more selected sound files (Audition N sounds…), a folder such as
+  `assets/sound/`, or a `Music <rank>` track that `music candidates` made: each sound gets play/stop, a spectrogram,
+  its loudness and true peak, and the kind and seed of a generated take; Match loudness plays them all at the quietest
+  one's level, and Use this selects the file. Read-only: nothing on the timeline changes. English and Spanish.
+- Daemon method `audio.inspect { assets, spectrogram? }` (MCP `audio_inspect`), read-only: per file the integrated
+  loudness, true peak and loudness range from the per-asset loudness cache, the length, the `fssd` facts of a generated
+  take, and with `spectrogram: true` a 64-row log-frequency spectrogram of up to 400 columns in dB computed on the one
+  FFT in a worker thread (kept in memory, not on disk: no new `gc` kind). Files with no sound are listed in `skipped`.
+
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it

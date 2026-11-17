@@ -16,7 +16,8 @@ import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/
 import { turnsKey } from "../angles/model.js";
 import { useGroupsTurns } from "../angles/useTurns.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
-import { revealItem } from "../file-commands.js";
+import { candidateFiles } from "../audition/model.js";
+import { auditionItems, revealItem } from "../file-commands.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
@@ -1138,6 +1139,8 @@ function TimelineCanvas({
           ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => send([{ op: "track.set", args: { track: row.id, hidden: !row.hidden } }]) }]
           : []),
         ...behindItems(row),
+        // On a `Music <rank>` track of `music.candidates`: hear every candidate side by side (ADR 0038).
+        ...auditionItems(candidateFiles(latest.current.layout?.rows ?? [], row), t.audition.candidatesItem, windowOf(event.target)),
         ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
         ...(image ? [] : addTrackItems(true)),
         {

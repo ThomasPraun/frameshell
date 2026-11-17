@@ -3,11 +3,18 @@ import { useSyncExternalStore } from "react";
 import { mediaSrc } from "../preview/media-src.js";
 import { transport } from "../preview/transport.js";
 
-/** The voice playing now, one at a time: which button started it, and how to stop it. */
-let playing: { key: string; stop: () => void } | null = null;
+/** What plays now: which button started it, how to stop it and how to change its level. */
+interface Playing {
+  key: string;
+  stop: () => void;
+  gain: (db: number) => void;
+}
+
+/** The sound playing now, one at a time across the app (People voices, Audition rows). */
+let playing: Playing | null = null;
 const listeners = new Set<() => void>();
 
-function publish(next: { key: string; stop: () => void } | null): void {
+function publish(next: Playing | null): void {
   playing = next;
   for (const listener of listeners) listener();
 }
@@ -23,6 +30,11 @@ export function usePlayingVoice(): string | null {
   );
 }
 
+/** Key of the sound playing now, outside React; null when none. */
+export function playingVoice(): string | null {
+  return playing?.key ?? null;
+}
+
 /** Stop the voice playing now, if any. */
 export function stopVoice(): void {
   const current = playing;
@@ -31,18 +43,35 @@ export function stopVoice(): void {
   current.stop();
 }
 
+/** Set the level of what plays now to `db` (0 = as recorded), when `key` started it; otherwise nothing. */
+export function setVoiceGain(key: string, db: number): void {
+  if (playing?.key === key) playing.gain(db);
+}
+
 /**
  * Play source seconds `stretch` of `asset` from its PCM sidecar (the preview's own audio: s16le from source time 0,
- * read with an HTTP range, nothing written) through Web Audio of `view`, the window the button is in (ADR 0012).
- * Stops the voice playing before and pauses the timeline. Resolves once it plays; rejects with why it cannot.
+ * read with an HTTP range, nothing written) through Web Audio of `view`, the window the button is in (ADR 0012), at
+ * `gainDb` (0 = as recorded). Stops the voice playing before and pauses the timeline. Resolves once it plays; rejects
+ * with why it cannot.
  */
-export async function playVoice(key: string, asset: Pick<AssetInfo, "sidecar">, stretch: { start: number; end: number }, mediaUrl: string, view: typeof window): Promise<void> {
+export async function playVoice(
+  key: string,
+  asset: Pick<AssetInfo, "sidecar">,
+  stretch: { start: number; end: number },
+  mediaUrl: string,
+  view: typeof window,
+  gainDb = 0,
+): Promise<void> {
   const sidecar = asset.sidecar;
   if (!sidecar) throw new Error("the file has no audio");
   stopVoice();
   if (transport.get().playing) transport.pause();
   let stop = () => {};
-  const claim = { key, stop: () => stop() };
+  let level = gainDb;
+  let gain = (db: number) => {
+    level = db;
+  };
+  const claim: Playing = { key, stop: () => stop(), gain: (db) => gain(db) };
   publish(claim);
   try {
     const frame = sidecar.channels * 2;
@@ -64,7 +93,12 @@ export async function playVoice(key: string, asset: Pick<AssetInfo, "sidecar">, 
     }
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(context.destination);
+    const amp = context.createGain();
+    gain = (db) => {
+      amp.gain.value = 10 ** (db / 20);
+    };
+    gain(level);
+    source.connect(amp).connect(context.destination);
     stop = () => {
       source.onended = null;
       source.stop();
