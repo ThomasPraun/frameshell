@@ -1372,6 +1372,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
+  from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
+  so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.
+  Files under an hour are unchanged.
+
 - `review` measures motion on the scale of `analyze`, slice RR of #457 (epic #451, #471; owner decision 2026-11-17;
   protocol 166): a `--file` is read on every frame with `analyze`'s reader (grey frames 64 px on the long side) instead
   of up to 15 samples a second at 320 px, and its shots are found the way `analyze` finds them (ffmpeg scene scores at
