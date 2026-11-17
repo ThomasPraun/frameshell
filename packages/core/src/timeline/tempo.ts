@@ -2,7 +2,7 @@ import type { RenderBeatsProblem } from "@frameshell/plugin-api";
 import { ErrorCode, RpcError, type SnapToKind, TIME_REF_FIELDS } from "@frameshell/protocol";
 import { type BeatsFile, type MediaClip, type Tempo, type Timeline, effectiveBeatGrid, findMarker, findMusicClip, isLowConfidence, nominalBeatFrame } from "@frameshell/schema";
 import { FrameGrid } from "./grid.js";
-import { TimeRefError, resolveTimeRefAsync, unusableGrid } from "./time-ref.js";
+import { TimeRefError, type WordLoader, onceWords, resolveTimeRefAsync, unusableGrid } from "./time-ref.js";
 import type { OperationRequest } from "./engine.js";
 
 /**
@@ -211,6 +211,8 @@ export interface SnapContext {
   fps: number;
   snapTo: SnapToKind;
   beatsOf: TempoInput["beatsOf"];
+  /** The words the timeline plays, for a `word:` time argument; absent: such an argument is refused. */
+  wordsOf?: WordLoader | undefined;
 }
 
 /**
@@ -243,9 +245,10 @@ export async function snapRequest(request: OperationRequest, context: SnapContex
   if (given.length === 0) throw refuse(`${request.op} has no time argument to snap.`, `It snaps ${(fields ?? []).join(", ") || "nothing"}.`);
   const resolved: Record<string, number> = {};
   const loadGrid = (horizon: number) => tempoGrid({ fps: context.fps, timeline: context.timeline, horizon, beatsOf: context.beatsOf });
+  const loadWords = onceWords(context.wordsOf);
   for (const field of given) {
     try {
-      resolved[field] = await resolveTimeRefAsync(args[field] as number | string, context.timeline, loadGrid);
+      resolved[field] = await resolveTimeRefAsync(args[field] as number | string, context.timeline, loadGrid, loadWords);
     } catch (error) {
       if (!(error instanceof TimeRefError)) throw error;
       throw new RpcError(ErrorCode.InvalidOperation, `${request.op}: ${field}: ${error.message}`, { op: request.op, field, reason: "time reference", ...(error.hint ? { hint: error.hint } : {}) });

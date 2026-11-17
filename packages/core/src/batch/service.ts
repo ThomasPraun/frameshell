@@ -36,7 +36,7 @@ export interface BatchServiceOptions {
   source(root: string, asset: string): Promise<SourceInfo>;
   /** True when the project-relative asset has a transcript. */
   hasTranscript(root: string, asset: string): Promise<boolean>;
-  /** Seconds a TimeRef names on a loaded timeline of the project (markers, `beat:`, `bar:`); see `resolveTimeRefAsync`. */
+  /** Seconds a TimeRef names on a loaded timeline of the project (markers, `beat:`, `bar:`, `word:`); see `resolveTimeRefAsync`. */
   resolveTime(root: string, ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
   /** Seconds timeline `id` of the project runs when it is `timeline`; null when that cannot be told (a nested timeline fails to load). */
   duration(root: string, id: string, timeline: Timeline, fps: number): Promise<number | null>;

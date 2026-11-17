@@ -62,7 +62,7 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
-/** Typed time text for a {@link TimeRef} field: plain seconds become a number, anything else (a marker, `beat:N`) stays trimmed text for the daemon to resolve. One rule for the CLI and the app, never a private parser. */
+/** Typed time text for a {@link TimeRef} field: plain seconds become a number, anything else (a marker, `beat:N`, `word:over`) stays trimmed text for the daemon to resolve. One rule for the CLI and the app, never a private parser. */
 export function timeRefOf(text: string): number | string {
   const trimmed = text.trim();
   return SECONDS_TEXT.test(trimmed) ? Number(trimmed) : trimmed;
@@ -74,8 +74,10 @@ export const TimeRef = (what: string) =>
     .describe(
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
         "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the music counting from 1 from the music file's first measured beat or downbeat (not the clip's `in`; `beat:32`, `bar:8`, " +
-        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; with a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; needs `tempo`, refused when the grid is LOW confidence; past the measured part it extends at the tempo); the daemon turns it into " +
-        "seconds first, so the history records seconds.",
+        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; with a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; needs `tempo`, refused when the grid is LOW confidence; past the measured part it extends at the tempo), " +
+        "or the start of a word the timeline plays, `word:<text>` with `#n` for the nth time it is said (from 1) and an optional offset (`word:over`, `word:this#2`, `word:over+0.2`, " +
+        "`word:w_000012` a transcript word id; case, accents and punctuation ignored, `20` matches `twenty`; words removed by a cut do not count; needs current transcripts); the daemon turns it into " +
+        "seconds first, so the history records seconds and a later cut never moves a recorded edit.",
     );
 /** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
 export { TimeRef as TimeRefParam };
