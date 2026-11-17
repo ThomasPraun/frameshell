@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Beat helpers in the motion runtime, slice MH of #458 (ADR 0029 decision 8, ADR 0033, epic #451; plugin only, no
+  protocol change): runtime 0.5.0 adds `beats`, `beatAt` (`{ index, beat, bar, phase }`), `beatTime`, `sinceBeat`,
+  `springOnBeat`, `markers`, `hasBeats` and `frameshellTiming`. They read `window.frameshellTiming` (a composition that
+  asked with `<meta name="frameshell-timing" content="beats markers">`) and are pure functions of `t`, so seeking stays
+  exact; beats before the first and after the last of the clip continue at the nearest period. With no usable grid
+  (no tag, `beatsProblem` set) they use a nominal `{ bpm, offset, meter }` the composition passes, or the clip's own
+  seconds, so a composition looks the same without music. The `checklist` template takes an `onBeats` prop: its ticks
+  land on the first beats at or after `tickStart` (the tag is added by hand, so a plain checklist never re-keys on the
+  music). A clip keeps its frozen 0.4.0 runtime until `frameshell hyperframes update`, which now reports 0.5.0; no
+  pixel of an existing clip changes. The plugin skill lists the helpers.
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
