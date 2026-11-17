@@ -17,6 +17,24 @@ export function pictureSize(width: number, height: number): { width: number; hei
   return { width: Math.max(8, Math.round(width * scale)), height: Math.max(6, Math.round(height * scale)) };
 }
 
+/**
+ * ffmpeg filter giving the frames motion is measured on: resampled to `fps` (none for an image sequence), area-scaled to
+ * `size`, 8-bit RGB for {@link greyOf}.
+ */
+export function pictureFilter(size: { width: number; height: number }, fps?: number): string {
+  return `${fps === undefined ? "" : `fps=${fps},`}scale=${size.width}:${size.height}:flags=area,format=rgb24`;
+}
+
+/**
+ * Grey levels of interleaved 8-bit RGB frame `rgb` into `out` (one byte a pixel): rounded Rec. 709 luma. The one grey
+ * of `analyze`'s picture, `analyze.diff` and `review`: ffmpeg's `format=gray` takes the Y plane instead, which reads a
+ * change of colour alone as no change.
+ */
+export function greyOf(rgb: Uint8Array, out: Uint8Array): Uint8Array {
+  for (let i = 0; i < out.length; i++) out[i] = Math.round(luma(rgb[i * 3]!, rgb[i * 3 + 1]!, rgb[i * 3 + 2]!));
+  return out;
+}
+
 /** What {@link readPicture} reads. */
 export interface PictureRequest {
   ffmpeg: string;
@@ -59,11 +77,10 @@ export async function readPicture(request: PictureRequest): Promise<PictureRead>
   const grey = [new Uint8Array(width * height), new Uint8Array(width * height)];
   const range = wanted < film.frames ? { from: 0, to: MAX_PICTURE_S } : undefined;
   let index = 0;
-  for await (const rgb of readRawFrames(request.ffmpeg, request.file, `fps=${film.fps},scale=${width}:${height}:flags=area,format=rgb24`, width * height * 3, range)) {
+  for await (const rgb of readRawFrames(request.ffmpeg, request.file, pictureFilter({ width, height }, film.fps), width * height * 3, range)) {
     signal?.throwIfAborted();
     if (index >= wanted) break;
-    const current = grey[index % 2]!;
-    for (let i = 0; i < width * height; i++) current[i] = Math.round(luma(rgb[i * 3]!, rgb[i * 3 + 1]!, rgb[i * 3 + 2]!));
+    const current = greyOf(rgb, grey[index % 2]!);
     const figures = frameLook(rgb, width, height);
     brightness[index] = figures.brightness;
     activity[index] = index === 0 ? 0 : frameDifference(grey[(index + 1) % 2]!, current);

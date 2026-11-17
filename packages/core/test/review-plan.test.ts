@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_CONTACT_TILES,
   contactPicks,
-  fileSampleRate,
   frameRange,
   motionPeaks,
   phonePicks,
@@ -92,12 +91,9 @@ describe("review frame picks", () => {
     expect(stripPicks(30, range(10, 15), 0.4).map((pick) => pick.frame)).toEqual([10, 11, 12, 13, 14]);
   });
 
-  it("sample rates: every frame of a short timeline, spread over a long one; a file at most 15 a second", () => {
+  it("sample steps: every frame of a short timeline, spread over a long one", () => {
     expect(timelineSampleStep(60)).toBe(1);
     expect(timelineSampleStep(900)).toBe(10);
-    expect(fileSampleRate(30, 30)).toBe(15);
-    expect(fileSampleRate(30, 10)).toBe(10);
-    expect(fileSampleRate(3600, 30)).toBeCloseTo(3000 / 3600);
   });
 });
 

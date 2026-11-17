@@ -1,7 +1,8 @@
 import type { ReviewMetrics, ReviewRequirementCheck, ReviewRequirements, ReviewSpan, ReviewWaivedWarning } from "@frameshell/protocol";
 import { REQUIREMENTS_FILE, type RequirementsFile, type ResolvedSubtitleTrack, type Timeline, clipRequirements, staysInFrameMargin } from "@frameshell/schema";
+import { STILL_LEVEL } from "../analyze/rhythm.js";
 import { TimeRefError, resolveTimeRef } from "../timeline/time-ref.js";
-import { BLANK_SPREAD, STILL_ENERGY, stillSpans } from "./metrics.js";
+import { BLANK_SPREAD, stillSpans } from "./metrics.js";
 import type { BoxSpan } from "./placement.js";
 import type { MotionSeries } from "./source.js";
 
@@ -64,7 +65,7 @@ function overlap(span: ReviewSpan, from: number, to: number): number {
 function endHold(series: MotionSeries, end: number): { seconds: number; blank: boolean } {
   const { times, energy, spread } = series;
   let i = times.length - 1;
-  while (i >= 1 && energy[i]! < STILL_ENERGY) i--;
+  while (i >= 1 && energy[i]! < STILL_LEVEL) i--;
   return { seconds: Math.max(0, end - times[Math.max(0, i)]!), blank: spread[spread.length - 1]! < BLANK_SPREAD };
 }
 
@@ -205,10 +206,10 @@ function captionChecks({ requirements, tracks, range, fps, timeline }: JudgeInpu
 }
 
 /** The per-clip checks: `appearsBy`, `before`, `keepsMoving`, `staysInFrame`. */
-function clipChecks({ requirements, series, filmSeconds, range, timeline, clips, placement }: JudgeInput): ReviewRequirementCheck[] {
+function clipChecks({ requirements, series, filmSeconds, range, fps, timeline, clips, placement }: JudgeInput): ReviewRequirementCheck[] {
   const found: ReviewRequirementCheck[] = [];
   const byId = new Map((clips ?? []).map((clip) => [clip.id, clip]));
-  const still = stillSpans(series);
+  const still = stillSpans(series, fps);
   for (const { clip: id, appearsBy, before, keepsMoving, staysInFrame } of clipRequirements(requirements.clips)) {
     const asked: [string, string | number][] = [];
     if (appearsBy !== undefined) asked.push(["clip.appearsBy", appearsBy]);

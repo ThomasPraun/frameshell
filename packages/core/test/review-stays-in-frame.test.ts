@@ -12,7 +12,7 @@ import { tempDir } from "./helpers.js";
 // `staysInFrame` (#457): the boxes of what a clip draws, from `placement.ts`, against the frame of the format reviewed.
 
 const film = { width: 1080, height: 1920 };
-const MOTION: MotionSeries = { times: [0, 1, 2, 3, 4], energy: [0, 5, 5, 5, 5], spread: [50, 50, 50, 50, 50] };
+const MOTION: MotionSeries = { times: [0, 1, 2, 3, 4], energy: [0, 5, 5, 5, 5], spread: [50, 50, 50, 50, 50], first: 0, step: 30 };
 
 function file(clips: unknown[]): RequirementsFile {
   const parsed = parseRequirementsFile({ schemaVersion: 1, clips });
@@ -29,7 +29,7 @@ function placement(boxes: BoxSpan[], extra: Partial<FramePlacement> = {}): Frame
 }
 
 function judge(requirements: RequirementsFile, given: FramePlacement | null, extra: Partial<JudgeInput> = {}) {
-  const metrics = reviewMetrics({ fps: 30, range: { from: 0, to: 5 }, series: MOTION, tracks: null, loudness: null, hasSound: null });
+  const metrics = reviewMetrics({ fps: 30, range: { from: 0, to: 5 }, source: "timeline", series: MOTION, tracks: null, loudness: null, hasSound: null });
   const result = judgeRequirements({
     requirements,
     metrics,

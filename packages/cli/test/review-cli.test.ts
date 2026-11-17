@@ -104,7 +104,9 @@ describe("frameshell review", () => {
     () => {
       const result = frameshell(["review", "--file", "assets/take.mp4", "--sheets", "metrics"]);
       expect(result.code, result.stderr).toBe(0);
-      expect(result.stdout).toMatch(/Metrics \(\d+ samples, [\d.]+ s apart\): longest still /);
+      // A file is measured on every frame.
+      expect(result.stdout).toMatch(/Metrics \(30 frames, [\d.]+ s apart\): longest still /);
+      expect(result.stdout).toMatch(/ {2}\[MEASURED\] rhythm: shot-length CV [\d.]+, \d+% still frames, \d+ bursts/);
       expect(result.stdout).toMatch(/loudness: -?[\d.]+ LUFS, range [\d.]+ LU, true peak -?[\d.]+ dBTP, phone band -?[\d.]+ LUFS/);
       expect(result.stdout).toMatch(/ {2}sound \(the file's mix\)\n {4}ending: last 50 ms at -?[\d.]+ dBFS, loudest moment at [\d.]+ s \(\d+ %\)\n {4}clicks: \d+/);
       const run = /Review (\d+) of/.exec(result.stdout)![1]!;
