@@ -213,6 +213,28 @@ describe.skipIf(!BLENDER)("blender adapter with a real Blender", () => {
     expect(readFileSync(again.file).equals(readFileSync(result.file))).toBe(true);
   }, 240_000);
 
+  it("renders only the window of a clip with in > 0: transparent head, first drawn frame at the in point, one frame per project frame", async () => {
+    const { project } = remapProject();
+    const adapter = createBlenderAdapter({ projectDir: project });
+    // Scene at 24 fps, dot at x = -1.5 + 3 * (frame - 1) / 24. In project terms (30 fps) the clip shows seconds 0.5 to 1:
+    // project frames 15 to 29, scene frames 13 to 24.2 (the dot from x = 0 on).
+    const clip = { id: "c1", type: "blender", source: "scene.blend", start: 0, in: 0.5, duration: 0.5 };
+    const size = { width: 320, height: 180 };
+    const { ctx } = renderContext(project, BLENDER!, { fps: 30, ...size });
+    const result = await adapter.render(clip, ctx);
+    const rgba = await decodeRgba(result.file);
+    expect(rgba.length / (size.width * size.height * 4)).toBe(30);
+    const litAt = (frame: number) => Array.from({ length: size.width }, (_, x) => alphaAt(rgba, size, frame, x, 90)).flatMap((alpha, x) => (alpha > 128 ? [x] : []));
+    // The padded head draws nothing.
+    for (const frame of [0, 7, 14]) expect(litAt(frame), `head frame ${frame}`).toEqual([]);
+    // Project frame 15 shows scene frame 13: x = 0 (160 px); the last frame, 29, scene frame 24.2: x = 1.4 (272 px).
+    for (const [frame, expected] of [[15, 160], [29, 272]] as const) {
+      const lit = litAt(frame);
+      expect(lit.length, `frame ${frame}`).toBeGreaterThan(0);
+      expect(Math.abs((lit[0]! + lit.at(-1)!) / 2 - expected), `frame ${frame}`).toBeLessThanOrEqual(3);
+    }
+  }, 240_000);
+
   it("renders the final with Cycles: same alpha at corner, panel and dot, same bytes on a rerun (fixed seed), and records its time", async () => {
     const project = tempDir();
     writeFileSync(join(project, "make-scene.py"), SCENE);
