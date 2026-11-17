@@ -253,7 +253,7 @@ export function TimelinePanel({
     };
   }, [undoRedo]);
 
-  // A scene picked on the band follows its words when a cut or a new take moves them.
+  // A scene picked on the band follows its words or its clips when a cut, a new take or a move shifts them.
   useEffect(() => {
     const picked = selection.get().scene;
     if (!picked) return;
@@ -1672,8 +1672,8 @@ function ClipList({
       {layout.scenes.map((box) => {
         const chosen = scene?.script === box.script && scene.slug === box.slug;
         return (
-          <li key={`${box.script}#${box.slug}`} data-scene={`${box.script}#${box.slug}`} data-filled={box.clips.length > 0} data-selected={chosen || undefined}>
-            {t.timeline.sceneItem(box.title, formatTimecode(box.start, fps), formatTimecode(box.end, fps), box.clips.length, chosen)}
+          <li key={`${box.script}#${box.slug}`} data-scene={`${box.script}#${box.slug}`} data-filled={box.clips.length > 0} data-source={box.source} data-selected={chosen || undefined}>
+            {t.timeline.sceneItem(box.title, formatTimecode(box.start, fps), formatTimecode(box.end, fps), box.clips.length, chosen, box.source === "planned")}
           </li>
         );
       })}

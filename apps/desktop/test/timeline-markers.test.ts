@@ -37,7 +37,7 @@ function view(overrides: Partial<TimelineView> = {}): TimelineView {
 }
 
 const viewport = { pxPerSecond: 10, scrollLeft: 0, scrollTop: 0 };
-const scenes = [{ script: "scripts/plan.md", slug: "intro", title: "Intro", start: 1, end: 4, clips: [] }];
+const scenes = [{ script: "scripts/plan.md", slug: "intro", title: "Intro", start: 1, end: 4, clips: [], source: "words" as const }];
 
 describe("marker lane layout", () => {
   it("adds the lane under the ruler only while there are markers, then the scene band under it", () => {

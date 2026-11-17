@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The scene band shows a storyboard that has no transcript words, #662 (ADR 0015 amended, epic #451; protocol 169):
+  every `span` of `script.outline` carries a `source`. A scene whose words a timeline does not place gets a `clips`
+  span there, the first start to the last end of the clips linked to it (the box follows them when they move, and a
+  pick selects them). A scene with no clip linked anywhere gets a `planned` span on `main` from the time range in its
+  heading (`## Proof (bars 4-9, 0:06-0:18)`: clock readings win, bars and `bar:4-bar:10` go through the TimeRef
+  resolver on the main timeline's tempo; a range that cannot be read is a warning). The band draws planned boxes with
+  long dashes and the screen-reader list says "planned"; `frameshell script outline` prints where each scene is placed.
+  Dragging a scene to move its clips is a later ticket.
 - Batch closes #477 (ADR 0040 "Limits in v1" emptied, epic #451; protocol 168): a row whose data changed renders again
   without `--force`. Each manifest entry now stores a `hash` of the row's cells, the batch file's slots and the template
   timeline's content (not its revision); a `done` row whose hash differs is rendered and listed in the result's new

@@ -353,8 +353,8 @@ describe("layoutTimeline with a program track", () => {
 describe("scene band", () => {
   const tracks = [{ id: "t_v", kind: "video" as const, name: null, follows: null, clips: [media("c_a", 0, 10)] }];
   const scenes = [
-    { script: "scripts/plan.md", slug: "intro", title: "Intro", start: 1, end: 4, clips: [] },
-    { script: "scripts/plan.md", slug: "demo", title: "Demo", start: 4, end: 9, clips: ["c_a"] },
+    { script: "scripts/plan.md", slug: "intro", title: "Intro", start: 1, end: 4, clips: [], source: "words" as const },
+    { script: "scripts/plan.md", slug: "demo", title: "Demo", start: 4, end: 9, clips: ["c_a"], source: "words" as const },
   ];
   const viewport = { pxPerSecond: 10, scrollLeft: 0, scrollTop: 0 };
 
