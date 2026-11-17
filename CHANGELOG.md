@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze` finds the faces for mouth sync itself, slice AL of #471 (ADR 0020 decision 16, epic #451; protocol 165): a
+  reference file anywhere on disk no longer needs `people scan` first. When the project has no scan of the file's
+  content, the run makes it with the same scanner as `people.scan` (the one `scanFileFaces` step) and caches it in
+  `.frameshell/people/`, so `people scan` of a copy finds it again. On by default; the first run may download the face
+  models. New `faces` param (`--no-faces`) skips the scan and still uses one already cached; a scan that cannot run
+  (no model, no network, untrusted runtime) is a skipped `sync` with the reason and a warning, never a failed run.
+  `analyze.diff` has no `faces`. `gc` leaves face scans alone while an `analyze` job runs (a scan of a file outside
+  `assets/` is swept as unused afterwards; it is regenerable). The mouth is still picture motion in the face box: the
+  5-point SFace landmarks have no mouth opening.
 - `review` frames per beat and crops, slice RP2 of #457 (epic #451; protocol 164): `--sheets beats` (opt in, never a
   default) writes one frame per beat of the timeline's tempo grid, the one `tempo show` lists (`tempoGrid` through the
   daemon's grid loader), a quarter beat after each hit (the last beat takes the length of the one before), bar starts

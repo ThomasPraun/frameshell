@@ -8,6 +8,7 @@ import { JobQueue } from "../src/jobs/queue.js";
 import { energyCacheKey } from "../src/media/energy-store.js";
 import { MediaService } from "../src/media/service.js";
 import { MediaStore } from "../src/media/store.js";
+import { faceScanKey, writeFaceScan } from "../src/people/scan-cache.js";
 import { audioCacheKey } from "../src/transcripts/transcriber.js";
 import { ProjectRegistry } from "../src/projects.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -147,6 +148,23 @@ describe("MediaService.gc", () => {
     expect(existsSync(join(root, "assets", "take.wav"))).toBe(true);
     expect(existsSync(join(root, ".frameshell", "history", "main.jsonl"))).toBe(true);
     expect(await new MediaStore(root).indexedPaths()).toEqual(["assets/take.wav"]);
+  });
+
+  it("keeps the face scan of a file outside the project while an analyze run works, and sweeps it as unused afterwards", async () => {
+    const { root, media } = await setup();
+    const outside = `sha256:${"cd".repeat(32)}`;
+    await writeFaceScan(root, outside, { width: 320, height: 180, samples: 0, tracks: [] });
+    const scan = join(root, ".frameshell", "people", `${faceScanKey(outside)}.json`);
+    expect(existsSync(scan)).toBe(true);
+
+    const busy = await media.gc(root, { dryRun: false, temps: true, hashUnknown: true, analyzing: true });
+    expect(busy.removed).toEqual([]);
+    expect(busy.skipped.map((skip) => skip.reason)).toEqual([expect.stringMatching(/analyze run/)]);
+    expect(existsSync(scan)).toBe(true);
+
+    const idle = await media.gc(root, { dryRun: false, temps: true, hashUnknown: true });
+    expect(idle.removed.map((entry) => entry.kind)).toEqual(["people", "people"]);
+    expect(existsSync(scan)).toBe(false);
   });
 
   it("deletes transcription WAVs of content no file has and verify leftovers, unless a transcription runs", async () => {

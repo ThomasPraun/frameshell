@@ -530,7 +530,7 @@ const SyncSchema = z.object({
   confidence: z.number().nullable().describe("How alike mouth motion and voice level are at that offset, 0 to 1 (Pearson correlation). Under 0.2 there is no offset. Null when not measured."),
   track: z.string().nullable().describe("The face track of the people scan the mouth was read from (`t1`…); null when not measured."),
   frames: z.int().describe("Frames the two were compared on."),
-  reason: z.string().nullable().describe("Why there is no offset (no sound, no people scan of this file, a face that does not talk…); null when there is one."),
+  reason: z.string().nullable().describe("Why there is no offset (no sound, no face scan asked for or possible, no face for long enough, a face that does not talk…); null when there is one."),
 });
 
 const LabelsSchema = z.record(z.string(), z.enum(ANALYZE_LABELS));
@@ -762,7 +762,7 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
   events: z.array(EventSchema).describe("Flashes, appearing and disappearing elements, holds and sound hits, in time order. A hint to check on the sheets, not a guarantee."),
   curve: CurveSchema.describe("How much the picture changes over time (every cut is a spike) and the steady moves in it, each with the closest ease."),
   ink: InkSchema.describe("How much of the picture graphics and text cover over the whole film; each shot's own is in `shots[].ink`."),
-  sync: SyncSchema.describe("Mouth against voice for a talking face, from the face scan of `people scan` when this file has one cached; otherwise `reason` says why it is skipped."),
+  sync: SyncSchema.describe("Mouth against voice for a talking face, from the face scan of this file (found by the run, cached by content, as `people scan` does; `faces: false` only reads a cached one); otherwise `reason` says why it is skipped."),
   loudness: LoudnessSchema.nullable().describe("Null when the video has no sound."),
   tempo: TempoSchema.nullable().describe("Null when there is no sound, or no steady beat in it (see `warnings`)."),
   audio: AudioSchema.nullable().describe("What the sound does: `speech` (sentences with pace in words per second, pitch range, and the voice against the music under it), `effects` over the music and `sections` of steady level. All ESTIMATED: read from the mix by a heuristic, not from separated stems. Null when the video has no sound."),

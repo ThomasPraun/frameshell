@@ -464,7 +464,7 @@ export const exportMethods = {
       "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
       "the **curve** (the change of the picture over time, one value per 0.1 s or more, and its `moves`: steady stretches with their start, duration, peak and the closest ease: linear, in, out or inOut), " +
       "the **ink** of each shot and of the film (share of the picture covered by graphics or text, its peak, when and the box of grid cells), " +
-      "the **sync** (seconds the mouth of a talking face moves after the voice, when this exact file has a cached face scan from `people.scan`; otherwise `reason` says why it was skipped), " +
+      "the **sync** (seconds the mouth of a talking face moves after the voice; the faces of the file are found now unless `faces: false` (the scan is cached by content under `.frameshell/people/` and `people.scan` of the same file finds it again, and it may download the face models on first use); `reason` says why it was skipped: no sound, no face for 3 s, no scan with `faces: false`, or a scan that failed, which is also a warning and never fails the run), " +
       "`labels` (MEASURED, ESTIMATED or DECISION for every value, by field path), " +
       "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
@@ -498,6 +498,10 @@ export const exportMethods = {
         .boolean()
         .optional()
         .describe("Recognise the speech (sentences, pace, pitch, voice against music, effects). Default true; false skips the transcription, which is the slow part and may download a model."),
+      faces: z
+        .boolean()
+        .optional()
+        .describe("Find the faces of the video for mouth sync when it has no cached face scan. Default true; false skips the scan, which is the slow part and may download the face models (a scan already cached is still used)."),
     }),
     result: AnalyzeResultSchema,
   },

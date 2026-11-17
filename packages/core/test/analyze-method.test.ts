@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type AnalyzeResult, type DaemonConnection, ErrorCode, RpcError, connectToDaemon, methods } from "@frameshell/protocol";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { clickTrack, wavOf } from "./beat-fixture.js";
+import { noFaceScanner } from "./face-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
@@ -34,7 +35,7 @@ async function makeFilm(path: string, audio: "clicks" | "sine" | "none"): Promis
 }
 
 beforeAll(async () => {
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() }, binaries: testBinaryManager(), idleTimeoutMs: Infinity });
+  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() }, binaries: testBinaryManager(), idleTimeoutMs: Infinity, peopleScanner: noFaceScanner });
   conn = await connectToDaemon(daemon.socketPath, { client: "test" });
   project = tempDir();
   await conn.request("project.init", { dir: project });

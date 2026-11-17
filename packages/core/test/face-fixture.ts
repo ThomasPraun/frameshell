@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { FaceDetector } from "../src/index.js";
+import type { FaceDetector, PeopleScanner } from "../src/index.js";
 import { run } from "./media-tools.js";
 
 /**
@@ -93,3 +93,6 @@ export const markerDetector: FaceDetector = async ({ width, height, data }) => {
   if (count === 0) return [];
   return [{ x: sumX / count / width, y: sumY / count / height, width: (maxX - minX) / width, height: (maxY - minY) / height, score: 1 }];
 };
+
+/** A scanner that finds no face and decodes nothing: for daemons whose tests analyze films with sound but are not about faces. */
+export const noFaceScanner: PeopleScanner = async ({ width, height }) => ({ width, height, samples: 0, tracks: [] });
