@@ -190,6 +190,77 @@ describe("template freeze-cut", () => {
   });
 });
 
+describe("template logo-sting", () => {
+  it("paints its own background, falls back to a monogram with no logo, and pulls a late landing in before the exit", async () => {
+    await scaffold(["spot", "--template", "logo-sting"]);
+    const html = read("spot");
+    expect(TEMPLATES.find((t) => t.id === "logo-sting")!.overlay).toBe(false);
+    expect(declared(html).find((v) => v.id === "logo")).toMatchObject({ type: "image", default: "" });
+    expect(html).toContain('mono.textContent = (Array.from(text)[0] || "\\u2022").toUpperCase();');
+    expect(html).toContain("var POP = Math.min(P.popAt, Math.max(0.05, D - OUT - 1.2));");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template pip-card", () => {
+  it("takes a picture by path only (a live video in a corner is the multicam layout) and keeps clear of a tall frame's bottom", async () => {
+    await scaffold(["spot", "--template", "pip-card"]);
+    const html = read("spot");
+    expect(declared(html).filter((v) => v.type === "image").map((v) => v.id)).toEqual(["image"]);
+    expect(html).not.toMatch(/<video|createElement\("video"\)/);
+    expect(html).toContain('S.format === "tall" ? "top-right" : "bottom-right"');
+    expect(html).toContain("var ENTER = Math.min(P.enterAt, Math.max(0.1, D - OUT - 0.7));");
+  });
+});
+
+describe("template work-cards", () => {
+  it("reads title:status lines, draws no icon, and shares one progress between the cards", async () => {
+    await scaffold(["spot", "--template", "work-cards"]);
+    const html = read("spot");
+    const items = declared(html).find((v) => v.id === "items")!;
+    expect(items).toMatchObject({ type: "string" });
+    expect(html).toContain('var at = item.indexOf(":");');
+    expect(html).not.toMatch(/class="icon"|<svg|<img/);
+    // One curve for every card; a bar only joins it once its card has started.
+    expect(html).toContain('var shared = M.ease("progress", (t - progAt) / progTime);');
+    expect(html).toContain("scaleX: shared * on");
+    expect(html).toContain("var progTime = Math.min(P.progressTime, Math.max(0.4, D - OUT - 0.2 - progAt));");
+  });
+});
+
+describe("template light-leak", () => {
+  it("is an overlay with no blend mode, seeded, clear exactly at both ends and never a full-frame wash", async () => {
+    await scaffold(["spot", "--template", "light-leak"]);
+    const html = read("spot");
+    const leak = TEMPLATES.find((t) => t.id === "light-leak")!;
+    expect(leak.overlay).toBe(true);
+    expect(leak.defaultDuration).toBeGreaterThanOrEqual(0.8);
+    expect(leak.defaultDuration).toBeLessThanOrEqual(1.2);
+    expect(html).not.toContain("mix-blend-mode");
+    expect(html).not.toMatch(/\bfilter\s*:|backdrop-filter/);
+    expect(html).toContain("var seed = seedOf(P.seed);");
+    // The envelope is a smoothstep of the clip's progress: 0 at the first frame and from D - END on.
+    expect(html).toContain("var env = u * u * (3 - 2 * u);");
+    // The strength is capped below 1 and the colour of the core is cream, not white.
+    expect(html).toContain("var CAP = 0.55;");
+    expect(html).toContain('mix(tint, "#fff0cf", 0.6)');
+    const intensity = declared(html).find((v) => v.id === "intensity")!;
+    expect(intensity).toMatchObject({ type: "number", max: 1 });
+  });
+});
+
+describe("the seeded templates", () => {
+  it("take the seed hash and the jitter from the kit, never a private copy", async () => {
+    for (const id of ["emphasis-marker", "scene-background", "light-leak"]) {
+      await scaffold([id, "--template", id]);
+      const html = read(id);
+      expect(html, id).toContain("function seedOf(text)");
+      // The one hash line, once per page.
+      expect(html.match(/\* 31 \+ ch\.charCodeAt\(0\)/g), id).toHaveLength(1);
+    }
+  });
+});
+
 describe("the plugin skill", () => {
   const skill = readFileSync(fileURLToPath(new URL("../skills/hyperframes/SKILL.md", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
 

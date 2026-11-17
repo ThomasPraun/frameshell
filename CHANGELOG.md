@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, slice TP3 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
+  new <name> --template` takes four more. `logo-sting` is a short brand hit on its own background (the logo lands with a
+  spring and a ring, a light band sweeps across, the name rises; a monogram stands in for a missing logo). `pip-card`
+  is a still picture in a rounded corner card with an optional caption chip, over a talking head (image prop only: a
+  live video in a corner stays the multicam picture-in-picture layout, owner decision 2026-11-16). `work-cards` shows
+  task cards from a `title:status` list that come in staggered, pulse when they start and follow one shared progress,
+  with no icons. `light-leak` is a seeded warm glow, a clip about a second long on a track above a cut, clear at its
+  first frame and the last tenth of a second, `hue` and `intensity` props, no blend mode: an overlay, so the cut underneath keeps its
+  length. Each pulls late cues in before the 0.3 s exit and lays out in all four formats. The hash of `seed` that
+  `emphasis-marker` and `scene-background` each carried is one `SEED_HELPERS` in the kit, shared with `light-leak`.
+  The `hyperframes` and Frameshell skills list them.
 - `analyze` finds the faces for mouth sync itself, slice AL of #471 (ADR 0020 decision 16, epic #451; protocol 165): a
   reference file anywhere on disk no longer needs `people scan` first. When the project has no scan of the file's
   content, the run makes it with the same scanner as `people.scan` (the one `scanFileFaces` step) and caches it in

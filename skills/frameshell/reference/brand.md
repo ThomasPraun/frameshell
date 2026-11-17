@@ -36,7 +36,7 @@ Each `.svg` is sanitised (scripts, foreign content, event handlers and external 
 
 ## Brand pictures in templates
 
-A motion template with a picture prop (`logo` of `logo-lockup` and `end-card`, `screenshot` of `device-frame`, `picture` of `pull-back-reveal`, `image` of `freeze-cut`, `before` and `after` of `before-after`) takes a brand file at scaffold time:
+A motion template with a picture prop (`logo` of `logo-lockup`, `logo-sting` and `end-card`, `image` of `pip-card`, `screenshot` of `device-frame`, `picture` of `pull-back-reveal`, `image` of `freeze-cut`, `before` and `after` of `before-after`) takes a brand file at scaffold time:
 
 ```sh
 frameshell hyperframes new closer --template logo-lockup --component assets/brand/acme-com/logo-1.svg

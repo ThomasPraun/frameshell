@@ -3,6 +3,7 @@ import {
   BACKDROP_SETUP,
   COLOR_HELPERS,
   FLAT_HELPERS,
+  SEED_HELPERS,
   PLACEHOLDER,
   type Template,
   type TemplateInput,
@@ -96,6 +97,7 @@ export const emphasisMarker: Template = {
       ${COLOR_HELPERS}
       ${BACKDROP_SETUP}
       ${FLAT_HELPERS}
+      ${SEED_HELPERS}
 
       // Layout per format (size a fraction of the short side, w the text block's share of the frame width). wide, square, tall.
       var L = M.pick({ size: 0.082, w: 0.7 }, { size: 0.078, w: 0.82 }, { size: 0.07, w: 0.86 });
@@ -146,15 +148,8 @@ export const emphasisMarker: Template = {
       else { lastWord = kept[first + want.length - 1]; first = kept[first]; }
 
       // The wobble: a seeded hash of the shape's index, so the same seed always draws the same mark. -1..1.
-      var seed = 0;
-      String(P.seed).split("").forEach(function (ch) { seed = (seed * 31 + ch.charCodeAt(0)) % 9973; });
-      function jit(k) {
-        var x = Math.imul(seed * 977 + k * 7919 + 1, 2654435761) >>> 0;
-        x ^= x >>> 15;
-        x = Math.imul(x, 2246822519) >>> 0;
-        x ^= x >>> 13;
-        return ((x >>> 0) % 2001) / 1000 - 1;
-      }
+      var seed = seedOf(P.seed);
+      function jit(k) { return jitter(seed, k); }
       var wob = P.rough * px * 0.045;
       var NS = "http://www.w3.org/2000/svg";
       function node(parent, tag, attrs) {
