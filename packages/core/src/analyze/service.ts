@@ -22,7 +22,8 @@ import { curveOf } from "./curve.js";
 import { type AnalyzeDiffHooks, type AnalyzeDiffRequest, runDiff } from "./diff.js";
 import { elementEvents, flashes, hitEvents, holds, soundHits } from "./events.js";
 import { inkOf } from "./ink.js";
-import { measureSync } from "./lip-run.js";
+import type { FileFaceScan } from "../people/scan-run.js";
+import { type FaceScanFilm, measureSync } from "./lip-run.js";
 import { measureLoudness } from "./loudness.js";
 import { type Look, LookBuilder } from "./look.js";
 import { PALETTE_SIZE, PaletteBuilder } from "./palette.js";
@@ -61,6 +62,11 @@ export interface AnalyzeServiceOptions {
    * untrusted project, no model). Absent: the speech of every run is skipped.
    */
   transcribe?(root: string, wav: string, signal: AbortSignal | undefined): Promise<Recognised>;
+  /**
+   * Find the faces of a film that has no scan cached under `root` yet, and cache it there by content (the people scan of ADR 0020,
+   * which may download the face models); rejects when it cannot. Absent: only scans the project already has are used.
+   */
+  scanFaces?(root: string, film: FaceScanFilm, signal: AbortSignal | undefined, onProgress: (fraction: number) => void): Promise<FileFaceScan>;
 }
 
 /** What {@link AnalyzeServiceOptions.transcribe} heard. */
@@ -82,6 +88,8 @@ export interface AnalyzeRequest {
   threshold?: number | undefined;
   /** Recognise the speech (sentences, pace, pitch, voice against music, effects); default true. */
   speech?: boolean | undefined;
+  /** Find the faces of the film for mouth sync when it has no cached scan (the slow part; may download the face models); default true. */
+  faces?: boolean | undefined;
 }
 
 /** What a run reports while it works. */
@@ -200,7 +208,15 @@ export class AnalyzeService {
       }
     } else warnings.push("audio: the video has no sound, so there is no loudness, tempo or hits.");
     stage("Looking for a talking face", 0.6);
-    const sync = await measureSync(root, ffmpeg, request.file, { fps, frames, width, height }, voiceDb, signal);
+    const scanFaces = this.#options.scanFaces?.bind(this.#options);
+    const sync = await measureSync(root, ffmpeg, request.file, { fps, frames, width, height }, voiceDb, {
+      signal,
+      faces: request.faces,
+      ...(scanFaces ? { scanFaces: (film: FaceScanFilm, abort: AbortSignal | undefined, onProgress: (fraction: number) => void) => scanFaces(root, film, abort, onProgress) } : {}),
+      ...(hooks.stage ? { stage: hooks.stage } : {}),
+      onScanProgress: (fraction) => hooks.progress?.(0.6 + 0.05 * fraction),
+      warn: (message) => warnings.push(message),
+    });
     events.sort((a, b) => a.startFrame - b.startFrame || a.endFrame - b.endFrame);
     const listed = capEvents(events, warnings);
 
