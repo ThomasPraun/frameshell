@@ -185,7 +185,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "yes", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "from-analysis", "only"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "yes", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "from-analysis", "only"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -409,6 +409,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           sheets: { type: "string" },
           platform: { type: "string" },
           every: { type: "string" },
+          "crop-at": { type: "string" },
           lag: { type: "string" },
           "max-lag": { type: "string" },
           snapshots: { type: "string" },
@@ -611,6 +612,7 @@ function parseBuiltin(
     range?: string | undefined;
     sheets?: string | undefined;
     every?: string | undefined;
+    "crop-at"?: string | undefined;
     threshold?: string | undefined;
     lag?: string | undefined;
     "max-lag"?: string | undefined;

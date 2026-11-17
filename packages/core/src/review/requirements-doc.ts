@@ -163,11 +163,15 @@ export function checkedRequirementsState(state: ConfigState, op: string): Config
   return requirementsState(parsed.value);
 }
 
-/** The requirements file keyed `state` stands for (a proposal's version); null when it is empty or no valid file holds it. */
-export function requirementsFromState(state: ConfigState): RequirementsFile | null {
+/**
+ * The requirements file keyed `state` stands for (a proposal's version): `file` null when it is empty, or, with the
+ * schema's complaint in `error`, when no valid file holds it.
+ */
+export function requirementsFromState(state: ConfigState): { file: RequirementsFile | null; error?: string } {
   const written = requirementsWritten(null, state);
-  const parsed = written ? parseRequirementsFile(written) : null;
-  return parsed?.ok ? parsed.value : null;
+  if (!written) return { file: null };
+  const parsed = parseRequirementsFile(written);
+  return parsed.ok ? { file: parsed.value } : { file: null, error: parsed.error };
 }
 
 /** The `requirements` document for the config journal: reads `requirements.json`, writes only the keys that changed. */

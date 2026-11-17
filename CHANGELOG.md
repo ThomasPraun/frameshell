@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review` frames per beat and crops, slice RP2 of #457 (epic #451; protocol 164): `--sheets beats` (opt in, never a
+  default) writes one frame per beat of the timeline's tempo grid, the one `tempo show` lists (`tempoGrid` through the
+  daemon's grid loader), a quarter beat after each hit (the last beat takes the length of the one before), bar starts
+  labelled `bar N` and the rest `beat N` like the `bar:N`/`beat:N` time references, up to 60 tiles thinned evenly with
+  bar starts kept first; tile tag `beat`. No tempo, a LOW-confidence or unmeasured grid, or a `--file` writes no sheet
+  and says why in `warnings`. `--crop-at x,y[,size]` (`cropAt` on the wire) crops every tile of the run but the safe
+  sheet's around a point of the frame (size = share of the width, default 0.25, frame proportions kept) from the same
+  captures, inside the picture letterbox bars leave; with `--clip id` the point is in that clip's own picture and
+  follows its keyed position and scale, through the format's cover crop (ADR 0043 slice 4 as built). Each tile lists
+  its `crop` in film pixels. `cropAt.clip` with a file, or naming no video clip, is InvalidOperation.
+- Review mode: the proposal bar lists the `requirements.json` values a proposal sets, clears or waives
+  (`Requirements: film.maxSeconds 30 → 20`), in English and Spanish. A `review` of a proposal whose requirements hold no
+  valid file now says so in `warnings` and judges the film without them, instead of dropping them silently.
 - The clip inspector's Colour section now shows for generated clips and nested timeline clips on video tracks, not only
   media clips (slice 9 of #384, ADR 0031, epic #451; no wire change). Same sliders, LUT and Reset, one `ui` `clip.set`
   per release; the LOG note stays on footage, and shots have no colour section. The reset tooltip no longer says "footage".
