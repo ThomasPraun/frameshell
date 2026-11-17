@@ -1956,7 +1956,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       return { dir, events: events.unsubscribe(request.sink, await canonicalPath(dir), names) };
     },
-    "script.outline": async ({ cwd, file }) => outlineScript(await root(cwd), cwd, file),
+    "script.outline": async ({ cwd, file }, caller) => {
+      const dir = await root(cwd);
+      // Bars in a heading read the main timeline's tempo; loaded once, and only when a heading asks.
+      let main: Promise<(ref: number | string) => Promise<number>> | undefined;
+      const plannedTime = (ref: number | string) =>
+        (main ??= loadFor(dir, "main", caller).then((loaded) => {
+          const grid = gridLoaderFor(dir)(loaded);
+          return (next: number | string) => resolveTimeRefAsync(next, loaded.timeline, grid);
+        }))
+          .then((resolve) => resolve(ref));
+      return outlineScript(dir, cwd, file, plannedTime);
+    },
     "shoot.status": async ({ cwd, script }) => shoots.status(await root(cwd), cwd, script),
     "shoot.add": async ({ cwd, script, asset, scene, recordedAt }, caller) => shoots.add(await root(cwd), cwd, { script, asset, scene, recordedAt, by: journalAuthorOf(caller) }),
     "shoot.assemble": (params, caller) => assemble(params, caller),

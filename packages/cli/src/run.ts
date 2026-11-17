@@ -1356,8 +1356,13 @@ function formatOutline(outline: ScriptOutlineResult): string {
     const words = `${scene.words} word${scene.words === 1 ? "" : "s"}`;
     lines.push(`  ${`#${scene.slug}`.padEnd(slugW)}  ${scene.title.padEnd(titleW)}  line ${String(scene.line).padEnd(lineW)}  ${words}  ${clips}`);
     if (scene.wordRange) {
-      const placed = scene.span.map(({ timeline, start, end }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s`);
+      const placed = scene.span.filter(({ source }) => source === "words").map(({ timeline, start, end }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s`);
       lines.push(`    spoken ${scene.wordRange.transcript ? `${scene.wordRange.transcript} ` : ""}${scene.wordRange.from}..${scene.wordRange.to}  ${placed.length > 0 ? placed.join(", ") : "not on a timeline"}`);
+    }
+    const elsewhere = scene.span.filter(({ source }) => source !== "words");
+    if (elsewhere.length > 0) {
+      const where = elsewhere.map(({ timeline, start, end, source }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s${source === "planned" ? " (planned, no clip yet)" : " (from its clips)"}`);
+      lines.push(`    placed ${where.join(", ")}`);
     }
   }
   if (outline.unresolved.length > 0) {

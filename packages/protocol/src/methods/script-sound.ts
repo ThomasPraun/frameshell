@@ -59,7 +59,9 @@ export const scriptSoundMethods = {
       "`#anchor`), e.g. music or a full take; they cover no scene. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
       "or removed heading). A scene that names transcript words with `<!-- words: talk.words.json w_000010..w_000042 -->` under its heading (word ids repeat across transcripts: name the file; a bare range matching several transcripts is not placed) " +
       "has `wordRange`, and `span`: the timeline seconds those words occupy, per timeline, so you can place or re-place its clips; " +
-      "unknown ids, an ambiguous range or a reversed range become `warnings`. " +
+      "unknown ids, an ambiguous range or a reversed range become `warnings`. A scene whose words are not placed on a timeline gets a `span` there from its linked clips " +
+      "(`source: \"clips\"`: first start to last end), so a film with no transcript still shows its scenes. A scene with no clip linked anywhere gets a planned `span` on `main` from the " +
+      "time range in its heading (`## Proof (bars 4-9, 0:06-0:18)`: clock readings win; `bars 4-9` or `bar:4-bar:10` need the timeline's tempo), `source: \"planned\"`. " +
       "Never fails on content: bad frontmatter, duplicate headings or bad word ranges become `warnings`. Fails with " +
       "ScriptNotFound (data lists the scripts there are) or OutsideProject.",
     params: z.strictObject({
@@ -83,8 +85,8 @@ export const scriptSoundMethods = {
             span: z
               .array(SceneSpanSchema)
               .describe(
-                "Where the scene's `wordRange` sits on each timeline that places any of those words (first to last placed word, " +
-                  "through clips cut inside the range); empty when `wordRange` is null, unresolved, or no timeline places its words.",
+                "Where the scene sits on each timeline, with a `source`: its `wordRange` where that timeline places any of those words (first to last placed word, " +
+                  "through clips cut inside the range), else its linked clips there, else the heading's planned range on `main`; empty when none applies.",
               ),
           }),
         )

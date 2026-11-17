@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The scene band shows a storyboard that has no transcript words, #662 (ADR 0015 amended, epic #451; protocol 166):
+  every `span` of `script.outline` carries a `source`. A scene whose words a timeline does not place gets a `clips`
+  span there, the first start to the last end of the clips linked to it (the box follows them when they move, and a
+  pick selects them). A scene with no clip linked anywhere gets a `planned` span on `main` from the time range in its
+  heading (`## Proof (bars 4-9, 0:06-0:18)`: clock readings win, bars and `bar:4-bar:10` go through the TimeRef
+  resolver on the main timeline's tempo; a range that cannot be read is a warning). The band draws planned boxes with
+  long dashes and the screen-reader list says "planned"; `frameshell script outline` prints where each scene is placed.
+  Dragging a scene to move its clips is a later ticket.
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it

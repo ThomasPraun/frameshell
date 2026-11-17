@@ -271,9 +271,9 @@ describe("script.outline word ranges (ADR 0015)", () => {
     const bySlug = Object.fromEntries(scenes.map((scene) => [scene.slug, scene]));
     expect(bySlug["whole"]!.wordRange).toEqual({ transcript: null, ...ids(1, 10) });
     // Words 1-4 sit at 0-3.8 s; words 7-10 at 20-23.8 s.
-    expect(bySlug["whole"]!.span).toEqual([{ timeline: "talk", start: 0, end: 23.8, words: 8 }]);
-    expect(bySlug["start"]!.span).toEqual([{ timeline: "talk", start: 0, end: 2.8, words: 3 }]);
-    expect(bySlug["across-the-cut"]!.span).toEqual([{ timeline: "talk", start: 2, end: 21.8, words: 4 }]);
+    expect(bySlug["whole"]!.span).toEqual([{ timeline: "talk", start: 0, end: 23.8, words: 8, source: "words" }]);
+    expect(bySlug["start"]!.span).toEqual([{ timeline: "talk", start: 0, end: 2.8, words: 3, source: "words" }]);
+    expect(bySlug["across-the-cut"]!.span).toEqual([{ timeline: "talk", start: 2, end: 21.8, words: 4, source: "words" }]);
     expect(bySlug["removed"]!.span).toEqual([]);
     expect(bySlug["plain"]!.wordRange).toBeNull();
     expect(bySlug["plain"]!.span).toEqual([]);
@@ -289,8 +289,8 @@ describe("script.outline word ranges (ADR 0015)", () => {
     const { scenes } = await outline();
     // Source 2-6 s at 2x from 10 s: word 3 (2-2.8) at 10-10.4 s, word 5 (4-4.8) at 11-11.4 s.
     expect(scenes[0]!.span).toEqual([
-      { timeline: "fast", start: 10, end: 11.4, words: 3 },
-      { timeline: "talk", start: 2, end: 3.8, words: 2 },
+      { timeline: "fast", start: 10, end: 11.4, words: 3, source: "words" },
+      { timeline: "talk", start: 2, end: 3.8, words: 2, source: "words" },
     ]);
   });
 
@@ -354,8 +354,8 @@ describe("script.outline word ranges (ADR 0015)", () => {
     const { scenes, warnings } = await outline();
     const bySlug = Object.fromEntries(scenes.map((scene) => [scene.slug, scene]));
     expect(bySlug["bare"]!.span).toEqual([]);
-    expect(bySlug["talk"]!.span).toEqual([{ timeline: "two", start: 1, end: 3.8, words: 3 }]);
-    expect(bySlug["other"]!.span).toEqual([{ timeline: "two", start: 51, end: 53.8, words: 3 }]);
+    expect(bySlug["talk"]!.span).toEqual([{ timeline: "two", start: 1, end: 3.8, words: 3, source: "words" }]);
+    expect(bySlug["other"]!.span).toEqual([{ timeline: "two", start: 51, end: 53.8, words: 3, source: "words" }]);
     expect(bySlug["missing"]!.span).toEqual([]);
     expect(warnings).toEqual([
       expect.stringMatching(/Scene "bare": .*several transcripts .*talk\.words\.json.*other\.words\.json/),
@@ -381,7 +381,7 @@ describe("script.outline word ranges (ADR 0015)", () => {
     writeFileSync(join(root, "timelines", "over.json"), JSON.stringify(tl));
     writeFileSync(join(root, "scripts", "words.md"), scriptWith({ All: `<!-- words: ${ids(1, 10).from}..${ids(1, 10).to} -->` }));
     // Talk plays 0-5 s only: words 1-5 (word 5 starts at 4).
-    expect((await outline()).scenes[0]!.span).toEqual([{ timeline: "over", start: 0, end: 4.8, words: 5 }]);
+    expect((await outline()).scenes[0]!.span).toEqual([{ timeline: "over", start: 0, end: 4.8, words: 5, source: "words" }]);
   });
 
   it("counts each word once when the asset sits on two tracks, and skips muted clips", async () => {
@@ -397,7 +397,7 @@ describe("script.outline word ranges (ADR 0015)", () => {
     };
     writeFileSync(join(root, "timelines", "dup.json"), JSON.stringify(tl));
     writeFileSync(join(root, "scripts", "words.md"), scriptWith({ All: `<!-- words: ${ids(1, 10).from}..${ids(1, 10).to} -->` }));
-    expect((await outline()).scenes[0]!.span).toEqual([{ timeline: "dup", start: 0, end: 3.8, words: 4 }]);
+    expect((await outline()).scenes[0]!.span).toEqual([{ timeline: "dup", start: 0, end: 3.8, words: 4, source: "words" }]);
   });
 
   it("says unknown id, not a cross-transcript problem, when one end of the range is a typo", async () => {

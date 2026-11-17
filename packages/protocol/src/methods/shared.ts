@@ -572,12 +572,18 @@ export const ClipLocationSchema = z.object({
   clip: z.string().describe("Clip id."),
 });
 
-/** Where a script scene's words sit on one timeline, as `script.outline` resolves them. */
+/** Where a script scene sits on one timeline, as `script.outline` resolves it: by its words, its linked clips or its heading. */
 export const SceneSpanSchema = z.object({
   timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
-  start: z.number().describe("Timeline seconds where the first placed word of the range starts."),
-  end: z.number().describe("Timeline seconds where the last placed word of the range ends."),
-  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them)."),
+  start: z.number().describe("Timeline seconds where the scene starts: its first placed word, its earliest linked clip, or the planned start."),
+  end: z.number().describe("Timeline seconds where the scene ends: its last placed word, its latest linked clip end, or the planned end."),
+  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them); 0 for `clips` and `planned`."),
+  source: z
+    .enum(["words", "clips", "planned"])
+    .describe(
+      "`words`: the scene's `wordRange` as placed on this timeline. `clips`: the first start to the last end of this timeline's clips linked to the scene " +
+        "(a scene whose words are not placed there). `planned`: the time range written in the heading, only for a scene with no clip linked on any timeline, on `main` only.",
+    ),
 });
 
 /** One export preset as `export.presets` lists it. */

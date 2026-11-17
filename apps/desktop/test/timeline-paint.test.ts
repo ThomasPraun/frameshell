@@ -374,8 +374,8 @@ const RANGE_BAR = 3;
 
 describe("scene band", () => {
   const scenes = [
-    { script: "scripts/plan.md", slug: "intro", title: "Intro scene", start: 0, end: 5, clips: ["c_0"] },
-    { script: "scripts/plan.md", slug: "demo", title: "Demo scene", start: 5, end: 12, clips: [] },
+    { script: "scripts/plan.md", slug: "intro", title: "Intro scene", start: 0, end: 5, clips: ["c_0"], source: "words" as const },
+    { script: "scripts/plan.md", slug: "demo", title: "Demo scene", start: 5, end: 12, clips: [], source: "words" as const },
   ];
   const input = (layout: ReturnType<typeof layoutTimeline>) => ({ layout, viewport: viewport(60), fps: 30, playhead: 0, theme: DEFAULT_THEME, media: noMedia });
 
