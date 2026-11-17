@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { ErrorCode, type MediaProbe } from "@frameshell/protocol";
 import { type Timeline, type Transcript, createProjectConfig, createTimeline } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
+import type { OperationRequest } from "../src/timeline/engine.js";
 import { TimelineService } from "../src/timeline/service.js";
+import { snapRequest } from "../src/timeline/tempo.js";
 import { TimeRefError, type TimelineWord, type TimelineWords, resolveTimeRef, resolveTimeRefAsync, resolveTimeRefs } from "../src/timeline/time-ref.js";
 import { placeWords, readTimelineWords } from "../src/transcripts/timeline-words.js";
 import { tempDir } from "./helpers.js";
@@ -80,8 +82,33 @@ describe("word: in the resolver", () => {
     expect(resolveTimeRef("word:twenty three", counted)).toBe(3);
   });
 
-  it("reads a word with a hyphen and digits whole before it reads an offset", () => {
+  it("compares words token for token, so a compound never meets its parts", () => {
+    const maybe = plays([word("maybe", 1), word("it", 2), word("may", 2.3), word("be", 2.6), word("maybe", 4)]);
+    expect(resolveTimeRef("word:maybe#2", maybe)).toBe(4);
+    expect(resolveTimeRef("word:may be", maybe)).toBe(2.3);
+    expect(failure(() => resolveTimeRef("word:maybe#3", maybe)).message).toContain('"maybe" is said 2 times');
+    const twentyThree = plays([word("twenty-three", 1), word("twenty", 2), word("three", 2.3), word("23", 3), word("twenty", 4)]);
+    expect([1, 2, 3].map((n) => resolveTimeRef(`word:23#${n}`, twentyThree))).toEqual([1, 2, 3]);
+    expect(failure(() => resolveTimeRef("word:23#4", twentyThree)).hint).toBe("Use #1 to #3.");
+  });
+
+  it("reads a word with a hyphen and digits whole, and refuses text that also reads as a word and an offset", () => {
     expect(resolveTimeRef("word:covid-19", plays([word("COVID-19", 2)]))).toBe(2);
+    expect(resolveTimeRef("word:covid-19", plays([word("covid", 2), word("19", 2.3)]))).toBe(2);
+    const talk = plays([word("chapter", 3), word("chapter", 5), word("two", 5.3)]);
+    const both = failure(() => resolveTimeRef("word:chapter - 2", talk));
+    expect(both.message).toContain('"word:chapter - 2" reads two ways on timeline main: the words "chapter - 2" (at 5 s), and "chapter" (at 3 s) - 2 s.');
+    expect(both.hint).toBe("For the words write `word:chapter 2`; for the offset name the occurrence first (`word:chapter#1-2`).");
+    // An offset reading before the timeline starts gives no time, so the words win.
+    expect(resolveTimeRef("word:chapter - 2", plays([word("chapter", 1), word("chapter", 5), word("two", 5.3)]))).toBe(5);
+    expect(resolveTimeRef("word:chapter 2", talk)).toBe(5);
+    expect(resolveTimeRef("word:chapter#1-2", talk)).toBe(1);
+  });
+
+  it("names both readings of text with an offset that is not said", () => {
+    const missing = failure(() => resolveTimeRef("word:covid-19", plays([word("cove", 1)])));
+    expect(missing.message).toContain('"word:covid-19": "covid-19" nor "covid" (with -19 s) is not said on timeline main.');
+    expect(missing.hint).toContain('Closest words it plays: "cove".');
   });
 
   it("matches a phrase of consecutive words at its first word", () => {
@@ -93,6 +120,16 @@ describe("word: in the resolver", () => {
   it("counts the same speech heard on two tracks once", () => {
     const twoMics = plays([word("hello", 1, { asset: "assets/mic.wav", clip: "c_2" }), word("hello", 1.02), word("hello", 3)]);
     expect(resolveTimeRef("word:hello#2", twoMics)).toBe(3);
+    // A phrase is matched within each track before the copies fold, so the interleaved copies never break it.
+    const mic = { asset: "assets/mic.wav", clip: "c_2", track: "t_a" };
+    const phrase = plays([
+      ...[["thank", 1], ["you", 1.3], ["all", 1.6]].flatMap(([text, at]) => [word(text as string, at as number, { track: "t_v" }), word(text as string, (at as number) + 0.02, mic)]),
+      word("thank", 5, { track: "t_v" }),
+      word("you", 5.3, { track: "t_v" }),
+      word("all", 5.6, { track: "t_v" }),
+    ]);
+    expect(resolveTimeRef("word:thank you all", phrase)).toBe(1);
+    expect(resolveTimeRef("word:thank you all#2", phrase)).toBe(5);
   });
 
   it("takes a transcript word id, and refuses one two assets share", () => {
@@ -114,6 +151,10 @@ describe("word: in the resolver", () => {
     expect(resolveTimeRef("word:this", plays([word("this", 1)], [{ clip: "c_8", asset: "assets/b.mp4", reason: "no-transcript" }]))).toBe(1);
     const none = failure(() => resolveTimeRef("word:this", plays([], [{ clip: "c_8", asset: "assets/b.mp4", reason: "no-transcript" }])));
     expect(none.message).toContain("plays no transcribed words");
+    expect(failure(() => resolveTimeRef("word:this", plays([]))).hint).toContain("Words inside a nested timeline clip are not read.");
+    // `#n` past the words found names the clips it could not search.
+    const past = failure(() => resolveTimeRef("word:this#2", plays([word("this", 1)], [{ clip: "c_8", asset: "assets/b.mp4", reason: "no-transcript" }])));
+    expect(past.hint).toContain("Clips without a transcript are not searched: c_8 (assets/b.mp4)");
   });
 
   it("is never shadowed by a marker labelled like it", () => {
@@ -137,6 +178,18 @@ describe("word: in the resolver", () => {
       message: expect.stringContaining("cut: from: This reference needs the words the timeline plays"),
     });
     await expect(resolveTimeRefAsync("word:so", timeline, undefined, load)).resolves.toBe(1);
+  });
+
+  it("resolves words before --snap-to moves them to the grid, reading them once", async () => {
+    let loads = 0;
+    const wordsOf = async () => {
+      loads++;
+      return { words: [word("so", 1.1), word("idea", 2.62)], unchecked: [] };
+    };
+    const context = { timeline: { ...createTimeline("main"), tempo: { bpm: 120 } }, fps: 30, snapTo: "beat" as const, beatsOf: async () => null, wordsOf };
+    const snapped = await snapRequest({ op: "cut", args: { from: "word:so", to: "word:idea" } } as unknown as OperationRequest, context);
+    expect(snapped.args).toMatchObject({ from: 1, to: 2.5 });
+    expect(loads).toBe(1);
   });
 });
 

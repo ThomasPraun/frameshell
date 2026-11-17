@@ -61,7 +61,7 @@ async function setup() {
   );
   const video = (await conn.request("track.add", { cwd: root, kind: "video", name: "Camera" })).changes.added[0]!;
   await conn.request("clip.add", { cwd: root, track: video, asset, start: 0 });
-  return { video };
+  return { video, asset };
 }
 
 describe("word: through the daemon", () => {
@@ -77,6 +77,20 @@ describe("word: through the daemon", () => {
       const subtitles = (await conn.request("track.add", { cwd: root, kind: "subtitles", follows: video })).changes.added[0]!;
       const captions = await conn.request("captions.set", { cwd: root, track: subtitles, text: "*idea*", from: "word:idea", to: "word:20" });
       expect(captions).toMatchObject({ phrases: 1, words: 1 });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "places music.candidates from a word",
+    async () => {
+      const { asset: talk } = await setup();
+      const tune = join(tempDir(), "tune.mp4");
+      await makeBurstClip(tune, { durationS: 3, bursts: [[0.5, 1, 440]] });
+      const { imported } = await conn.request("asset.import", { cwd: root, files: [tune] });
+      const assets = [imported[0]!.asset, talk];
+      const plan = await conn.request("music.candidates", { cwd: root, assets, from: "word:idea", dryRun: true });
+      expect(plan.candidates.map((candidate) => candidate.place.start)).toEqual([4, 4]);
     },
     MEDIA_TIMEOUT,
   );

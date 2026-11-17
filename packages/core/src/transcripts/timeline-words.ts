@@ -17,6 +17,8 @@ export interface PlacedWord {
   asset: string;
   /** Id of the clip that plays it. */
   clip: string;
+  /** Id of the track the clip is on. */
+  track: string;
   speaker: string | null;
   /** The transcript's language code, null when it has none. */
   language: string | null;
@@ -112,6 +114,7 @@ export async function placeWords(
           transcript: rel,
           asset: clip.asset,
           clip: clip.id,
+          track: track.id,
           speaker: wordSpeaker(transcript, word) ?? null,
           language: transcript.language ?? null,
           at,
@@ -141,7 +144,7 @@ export async function readTimelineWords(
   const { heard, transcripts } = await heardTranscripts(projectDir, timeline, assetHash);
   const { words, left } = await placeWords(heard, fps, transcripts);
   return {
-    words: words.map(({ id, text, asset, clip, language, at, end }) => ({ id, text, asset, clip, language, at, end })),
+    words: words.map(({ id, text, asset, clip, track, language, at, end }) => ({ id, text, asset, clip, track, language, at, end })),
     unchecked: left.flatMap((entry) => (entry.transcript ? [{ clip: entry.clip, asset: entry.asset, reason: entry.transcript }] : [])),
   };
 }

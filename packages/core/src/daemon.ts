@@ -2593,6 +2593,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       for (const asset of assets) rels.push((await resolveAsset(dir, resolve(cwd, asset))).rel);
       const plan = await planMusicCandidates(loaded, fps, { assets: rels, end, from, loudness }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
+        loadWords: () => wordsOf(dir, loaded, fps),
         ...hitSources(dir),
         reading: (asset, range) => loudnessStore.reading(dir, asset, range),
         duration: async (asset) => {

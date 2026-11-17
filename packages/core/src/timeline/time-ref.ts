@@ -1,6 +1,6 @@
 import type { RenderBeatsProblem } from "@frameshell/plugin-api";
 import { ErrorCode, type OperationName, RpcError, SECONDS_TEXT, TIME_REF_FIELDS } from "@frameshell/protocol";
-import { type Timeline, describeMarkers, editDistance, findMarker, isSchemeRefLabel, numberLanguage, spokenTokens } from "@frameshell/schema";
+import { type Timeline, WordIdSchema, describeMarkers, editDistance, findMarker, isSchemeRefLabel, numberLanguage, spokenTokens } from "@frameshell/schema";
 import type { OperationRequest } from "./engine.js";
 import type { TempoResult, TimelineGrid } from "./tempo.js";
 
@@ -45,6 +45,8 @@ export interface TimelineWord {
   /** Project-relative asset of the clip that plays it. */
   asset: string;
   clip: string;
+  /** Track of the clip that plays it; a phrase is matched within one track. Absent: one track. */
+  track?: string;
   /** Language code of its transcript; spells digits for matching (`20` meets `twenty`). Null when unknown. */
   language: string | null;
   /** Timeline seconds the word starts and ends. */
@@ -316,10 +318,12 @@ function gridPoint(scheme: "beat" | "bar", rest: string, scope: TimeRefScope): n
 const WORD_OFFSET = /^(.*?)\s*([+-])\s*(\d+(?:\.\d*)?|\.\d+)$/;
 /** A trailing `#n` occurrence number after a word. */
 const WORD_ORDINAL = /^(.*?)\s*#\s*(\d+)$/;
-/** A transcript word id (`WordIdSchema`). */
-const WORD_ID = /^w_\d{6,}$/i;
 /** How to write a word reference, for refusals. */
 const WORD_FORMS = "Write `word:<text>`, `#n` for the nth time it is said (from 1) and `+s`/`-s` seconds (`word:over`, `word:this#2`, `word:over+0.2`), or a transcript word id (`word:w_000012`).";
+/** Hint for a timeline whose words cannot be read at all. */
+const NO_WORDS_HINT = "Transcribe its clips' assets first: `frameshell transcribe <asset>`. Words inside a nested timeline clip are not read.";
+
+const isWordId = (text: string) => WordIdSchema.safeParse(text.toLowerCase()).success;
 
 /** One time a word (or a run of words) is said on the timeline clock. */
 interface Said {
@@ -327,24 +331,34 @@ interface Said {
   end: number;
 }
 
-/** Comparable form of spoken text: {@link spokenTokens} joined, so `twenty-three`, `twenty three` and `23` meet. */
-function spokenKey(text: string, language: string | null): string {
-  return spokenTokens(text, numberLanguage(language)).join("");
+/**
+ * Comparable tokens of spoken text ({@link spokenTokens}) with the parts of a hyphenated word apart, so `twenty-three`,
+ * "twenty three" and `23` give the same tokens while `maybe` and "may be" stay different.
+ */
+function spokenOf(text: string, language: string | null): string[] {
+  return spokenTokens(text.replace(/\p{Pd}+/gu, " "), numberLanguage(language));
 }
 
-/** Spoken keys of `words`, computed once per loaded word list. */
-const KEYS = new WeakMap<TimelineWords, string[]>();
-function keysOf(words: TimelineWords): string[] {
-  let keys = KEYS.get(words);
-  if (!keys) KEYS.set(words, (keys = words.words.map((word) => spokenKey(word.text, word.language))));
-  return keys;
+/** Spoken tokens of each word of `words`, computed once per loaded word list. */
+const TOKENS = new WeakMap<TimelineWords, string[][]>();
+function tokensOf(words: TimelineWords): string[][] {
+  let tokens = TOKENS.get(words);
+  if (!tokens) TOKENS.set(words, (tokens = words.words.map((word) => spokenOf(word.text, word.language))));
+  return tokens;
+}
+
+/** One way to read what follows `word:`: the text (an occurrence number may still end it) and the offset split off it. */
+interface WordReading {
+  text: string;
+  offset: number;
 }
 
 /**
  * Time of `word:<text>[#n][+s|-s]`: the start of the nth time (from 1, on the timeline clock) the timeline plays the
  * word, plus the offset. Text matches when its spoken tokens equal a word's (case, accents and punctuation ignored,
- * digits spelled in the transcript's language), or a run of consecutive words' (`word:thank you`); the same words
- * heard at once on two tracks are said once. A transcript word id names that word, refused when two assets have it.
+ * digits spelled in the transcript's language), or those of a run of consecutive words of one track (`word:thank you`),
+ * token for token; the same words heard at once on two tracks are said once. A transcript word id names that word,
+ * refused when two assets have it. Text that reads both as words and as words plus an offset is refused.
  */
 function wordPoint(rest: string, scope: TimeRefScope): number {
   const shown = `word:${rest.trim()}`;
@@ -359,30 +373,46 @@ function wordPoint(rest: string, scope: TimeRefScope): number {
     );
   }
   if (loaded.words.length === 0) {
-    throw new TimeRefError(`"${shown}": timeline ${scope.timeline.id} plays no transcribed words.`, untranscribedHint(loaded) ?? "Transcribe its clips' assets first: `frameshell transcribe <asset>`.");
+    throw new TimeRefError(`"${shown}": timeline ${scope.timeline.id} plays no transcribed words.`, untranscribedHint(loaded) ?? NO_WORDS_HINT);
   }
-  // The whole text is tried first, so a word like `covid-19` is never read as `covid` minus 19 s.
-  const readings: { text: string; offset: number }[] = [{ text: rest.trim(), offset: 0 }];
-  const split = WORD_OFFSET.exec(rest.trim());
+  // Both readings are tried, so `covid-19` is never read as `covid` minus 19 s, nor the other way, unasked.
+  const whole = rest.trim();
+  const readings: WordReading[] = [{ text: whole, offset: 0 }];
+  const split = WORD_OFFSET.exec(whole);
   if (split && split[1]!.trim() !== "") readings.push({ text: split[1]!.trim(), offset: (split[2] === "-" ? -1 : 1) * Number(split[3]) });
-  for (const reading of readings) {
-    const ordinal = WORD_ORDINAL.exec(reading.text);
-    const text = (ordinal ? ordinal[1]! : reading.text).trim();
-    if (text === "") continue;
-    const said = WORD_ID.test(text) ? saidById(text.toLowerCase(), loaded, shown) : saidText(text, loaded);
-    if (said.length === 0) continue;
-    const nth = ordinal ? Number(ordinal[2]) : 1;
-    if (nth < 1) throw new TimeRefError(`"${shown}": occurrences count from 1.`, `\`#1\` is the first time "${text}" is said.`);
-    if (nth > said.length) {
-      const times = said.slice(0, 8).map((one) => `${tidy(one.at)} s`);
-      throw new TimeRefError(
-        `"${shown}": "${text}" is said ${said.length} time${said.length === 1 ? "" : "s"} on timeline ${scope.timeline.id} (at ${times.join(", ")}${said.length > times.length ? ", …" : ""}).`,
-        `Use #1 to #${said.length}.`,
-      );
-    }
-    return said[nth - 1]!.at + reading.offset;
+  const matched = readings.map((reading) => ({ reading, ...occurrences(reading, loaded, shown) })).filter((one) => one.said.length > 0);
+  // Ambiguous only when both readings give a time: `covid-19` said at 2 s is not also 19 s before "covid".
+  const valid = matched.filter(({ said, nth, reading }) => nth >= 1 && nth <= said.length && said[nth - 1]!.at + reading.offset >= 0);
+  if (valid.length > 1) {
+    const [words, offset] = valid as [(typeof valid)[number], (typeof valid)[number]];
+    const sign = offset.reading.offset < 0 ? "-" : "+";
+    const amount = Math.abs(offset.reading.offset);
+    throw new TimeRefError(
+      `"${shown}" reads two ways on timeline ${scope.timeline.id}: the words "${words.text}" (at ${tidy(words.said[words.nth - 1]!.at)} s), and "${offset.text}" (at ${tidy(offset.said[offset.nth - 1]!.at)} s) ${sign} ${amount} s.`,
+      `For the words write \`word:${split![1]!.trim()} ${split![3]}\`; for the offset name the occurrence first (\`word:${offset.text}#${offset.nth}${sign}${amount}\`).`,
+    );
   }
-  throw notSaid(shown, readings.at(-1)!.text.replace(WORD_ORDINAL, "$1").trim(), scope.timeline.id, loaded);
+  const found = valid[0] ?? matched[0];
+  if (!found) throw notSaid(shown, readings, scope.timeline.id, loaded);
+  const { said, nth, text } = found;
+  if (nth < 1) throw new TimeRefError(`"${shown}": occurrences count from 1.`, `\`#1\` is the first time "${text}" is said.`);
+  if (nth > said.length) {
+    const times = said.slice(0, 8).map((one) => `${tidy(one.at)} s`);
+    throw new TimeRefError(
+      `"${shown}": "${text}" is said ${said.length} time${said.length === 1 ? "" : "s"} on timeline ${scope.timeline.id} (at ${times.join(", ")}${said.length > times.length ? ", …" : ""}).`,
+      [`Use #1 to #${said.length}.`, untranscribedHint(loaded)].filter((hint) => hint !== null).join(" "),
+    );
+  }
+  return said[nth - 1]!.at + found.reading.offset;
+}
+
+/** The text of `reading` without its occurrence number, that number (1 when absent), and the times the text is said. */
+function occurrences(reading: WordReading, loaded: TimelineWords, shown: string): { text: string; nth: number; said: Said[] } {
+  const ordinal = WORD_ORDINAL.exec(reading.text);
+  const text = (ordinal ? ordinal[1]! : reading.text).trim();
+  const nth = ordinal ? Number(ordinal[2]) : 1;
+  if (text === "") return { text, nth, said: [] };
+  return { text, nth, said: isWordId(text) ? saidById(text.toLowerCase(), loaded, shown) : saidText(text, loaded) };
 }
 
 /** Times the words with transcript id `id` play; refused when two assets on the timeline have a word with that id. */
@@ -395,31 +425,42 @@ function saidById(id: string, loaded: TimelineWords, shown: string): Said[] {
   return words.map(({ at, end }) => ({ at, end }));
 }
 
-/** Times `text` is said: runs of consecutive words whose spoken keys join to its key, overlapping repeats folded. */
+/**
+ * Times `text` is said: runs of consecutive words of one track whose spoken tokens, in order, are exactly its tokens
+ * (a word is never split or glued, so `maybe` is not "may be"), the same speech on several tracks folded.
+ */
 function saidText(text: string, loaded: TimelineWords): Said[] {
-  const keys = keysOf(loaded);
-  const wanted = new Map<string | null, { key: string; reach: number }>();
+  const tokens = tokensOf(loaded);
+  const wanted = new Map<string | null, string[]>();
   const want = (language: string | null) => {
     let found = wanted.get(language);
-    if (!found) {
-      const tokens = spokenTokens(text, numberLanguage(language));
-      wanted.set(language, (found = { key: tokens.join(""), reach: tokens.length + 1 }));
-    }
+    if (!found) wanted.set(language, (found = spokenOf(text, language)));
     return found;
   };
   const { words } = loaded;
+  const tracks = new Map<string, number[]>();
+  words.forEach((word, index) => {
+    const list = tracks.get(word.track ?? "");
+    if (list) list.push(index);
+    else tracks.set(word.track ?? "", [index]);
+  });
   const found: Said[] = [];
-  for (let i = 0; i < words.length; i++) {
-    const { key, reach } = want(words[i]!.language);
-    if (key === "" || keys[i] === "" || !key.startsWith(keys[i]!)) continue;
-    let joined = "";
-    for (let j = i; j < words.length && j < i + reach; j++) {
-      joined += keys[j]!;
-      if (joined === key) {
-        found.push({ at: words[i]!.at, end: words[j]!.end });
-        break;
+  for (const indexes of tracks.values()) {
+    for (let first = 0; first < indexes.length; first++) {
+      const start = indexes[first]!;
+      const goal = want(words[start]!.language);
+      if (goal.length === 0 || tokens[start]!.length === 0) continue;
+      // Tokens of `goal` matched so far; a word without tokens (punctuation alone) inside the run is passed over.
+      let matched = 0;
+      for (let next = first; next < indexes.length; next++) {
+        const own = tokens[indexes[next]!]!;
+        if (matched + own.length > goal.length || own.some((token, k) => token !== goal[matched + k])) break;
+        matched += own.length;
+        if (matched === goal.length) {
+          found.push({ at: words[start]!.at, end: words[indexes[next]!]!.end });
+          break;
+        }
       }
-      if (!key.startsWith(joined)) break;
     }
   }
   // The same speech on two tracks (two mics, or a clip's sound twice) is said once: the earlier copy counts.
@@ -432,13 +473,19 @@ function saidText(text: string, loaded: TimelineWords): Said[] {
   return said;
 }
 
-/** Refusal for a word the timeline does not play: the closest words it does, and the clips it could not read. */
-function notSaid(shown: string, text: string, timeline: string, loaded: TimelineWords): TimeRefError {
-  const keys = keysOf(loaded);
-  const key = spokenKey(text, loaded.words[0]?.language ?? null);
+/** Refusal for a word the timeline does not play: each reading looked for, the closest words it plays, and the clips it could not read. */
+function notSaid(shown: string, readings: readonly WordReading[], timeline: string, loaded: TimelineWords): TimeRefError {
+  const texts = readings.map((reading) => reading.text.replace(WORD_ORDINAL, "$1").trim());
+  const looked = readings
+    .map((reading, index) => (index === 0 ? `"${texts[index]}"` : `"${texts[index]}" (with ${reading.offset < 0 ? "-" : "+"}${Math.abs(reading.offset)} s)`))
+    .join(" nor ");
+  // The text with the offset off is the likeliest single word to find neighbours of.
+  const text = texts.at(-1)!;
+  const tokens = tokensOf(loaded);
+  const key = spokenOf(text, loaded.words[0]?.language ?? null).join(" ");
   const seen = new Map<string, { text: string; count: number; distance: number }>();
   loaded.words.forEach((word, index) => {
-    const own = keys[index]!;
+    const own = tokens[index]!.join(" ");
     if (own === "") return;
     const entry = seen.get(own);
     if (entry) entry.count++;
@@ -453,9 +500,9 @@ function notSaid(shown: string, text: string, timeline: string, loaded: Timeline
   const hints = [
     nearest.length > 0 ? `Closest words it plays: ${nearest.join(", ")}.` : null,
     untranscribedHint(loaded),
-    WORD_ID.test(text) ? null : "Words removed by a cut are not played.",
+    isWordId(text) ? null : "Words removed by a cut are not played.",
   ].filter((hint) => hint !== null);
-  return new TimeRefError(`"${shown}": "${text}" is not said on timeline ${timeline}.`, hints.join(" "));
+  return new TimeRefError(`"${shown}": ${looked} is not said on timeline ${timeline}.`, hints.join(" "));
 }
 
 /** Hint naming the heard clips with no transcript, whose words no `word:` reference can reach; null when there are none. */

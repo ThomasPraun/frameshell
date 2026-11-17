@@ -12,12 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Word references as times, #458 slice 4 part 3 (ADR 0029, epic #451; protocol 170): every time argument that takes a
   TimeRef also takes `word:<text>[#n][+s|-s]`, the start of the nth time the timeline plays a word (`--from word:so
   --to word:so#2`, `--at word:over+0.2`), or a transcript word id (`word:w_000012`). Words match on their spoken tokens
-  (case, accents and punctuation ignored, `20` meets "twenty", several words in a row for a phrase); words a cut
+  (case, accents and punctuation ignored, `20` meets "twenty", several words in a row for a phrase, compared token
+  for token so `maybe` never meets "may be"; text that also reads as a word plus an offset is refused); words a cut
   removed do not count, and the same speech on two tracks counts once. The name is read on the timeline as the call
   sees it (a review-mode proposal's own timeline included) and the history records seconds, so a later cut never moves
   a recorded edit. A clip with a stale transcript refuses it naming `transcribe`; an unknown word lists the closest
   played words. A marker label starting with `word:` is now refused. `cleanup` and word references share one placement
-  of transcript words on the timeline (`placeWords`). Not yet read by `music.candidates` and `requirements.json`.
+  of transcript words on the timeline (`placeWords`). Not yet read by `requirements.json`.
 - Motion templates, slice TP4 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
   new <name> --template` takes four more. `orbit` has labels circle a logo or a word, from a seeded start phase, and
   slow to a stop on an evenly spaced ring that never depends on the seed. `locked-on` snaps four corner brackets onto a
