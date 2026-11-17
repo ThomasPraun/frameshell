@@ -7,6 +7,7 @@ import {
   applyEvent,
   barOf,
   configLines,
+  requirementLines,
   styleLines,
   dismissStale,
   readStatus,
@@ -73,6 +74,29 @@ describe("review state", () => {
       { path: "notes", from: null, to: "short, plain" },
       { path: "type.scale", from: "1.2", to: null },
     ]);
+    expect(requirementLines(open)).toEqual([]);
+  });
+
+  it("lists the requirements a proposal sets, changes, clears or waives (#457)", () => {
+    const config = [
+      { doc: "requirements" as const, key: "requirements:film.maxSeconds", before: 30, after: 20 },
+      { doc: "requirements" as const, key: "requirements:film.endCard", before: null, after: { minSeconds: 2 } },
+      { doc: "requirements" as const, key: "requirements:captions.minSize", before: 0.026, after: null },
+      { doc: "requirements" as const, key: "requirements:fail", before: null, after: ["static", "reading"] },
+      { doc: "requirements" as const, key: "requirements:clip:c_1.staysInFrame", before: null, after: true },
+      { doc: "requirements" as const, key: "requirements:waiver:static:c_1", before: null, after: "the hold is the joke" },
+      { doc: "style" as const, key: "style:notes", before: null, after: "plain" },
+    ];
+    const open = applyEvent(INITIAL_REVIEW, change("ready", { timelines: [], operations: 6, config })).proposal!;
+    expect(requirementLines(open)).toEqual([
+      { path: "film.maxSeconds", from: "30", to: "20" },
+      { path: "film.endCard", from: null, to: '{"minSeconds":2}' },
+      { path: "captions.minSize", from: "0.026", to: null },
+      { path: "fail", from: null, to: "static, reading" },
+      { path: "clip:c_1.staysInFrame", from: null, to: "true" },
+      { path: "waiver:static:c_1", from: null, to: "the hold is the joke" },
+    ]);
+    expect(styleLines(open)).toEqual([{ path: "notes", from: null, to: "plain" }]);
   });
 
   it("returns to Before and drops the bar when the proposal is accepted, rejected or aborted", () => {
