@@ -173,8 +173,8 @@ export const scriptSoundMethods = {
       "(the script was edited, a take appeared, the provider's price moved) a paid run fails with ConfirmationStale, " +
       "carrying the current ask, and generates nothing; ask the person again. The " +
       "provider `command` is the TTS program the person set up on this machine (global `config.json` only); it is free. A second charge is prevented by the takes marked on disk and one run at a time per " +
-      "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A running " +
-      "generation is not stopped by the caller disconnecting. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
+      "project (a retry finds them `cached`); `idempotencyKey` only replays a result where a client sends one. A call " +
+      "stops when its connection closes, like `voiceover.cancel`: takes finished before are kept and the call fails with SpeechFailed `canceled: true`. Progress arrives as `progress` notifications. Fails with ScriptNotFound, " +
       "SpeechProviderNotFound (data lists the providers there are; `command` is missing until set up on the machine), ProjectNotTrusted (a plugin provider in an untrusted " +
       "project), ConfirmationStale (`confirmation` no longer matches the run), InvalidParams (no provider or voice named, unknown voice or line id; the message lists the valid " +
       "ones), InvalidOperation (a take file exists that this method did not write: it is never overwritten) or " +

@@ -196,7 +196,7 @@ function withConfirmationHint(error: unknown, inv: Extract<VoiceoverInvocation, 
 /**
  * The command that confirms the ask of `inv`: the same script, lines, provider, voice and `--no-verify`, so the run it
  * confirms is the one the person saw priced, plus `--yes --confirmation <token>`. Null when a word holds a line break,
- * which no quoting carries alike across shells: the refusal then keeps its message without a command.
+ * which no quoting carries alike across shells: the refusal then keeps its message without a command. Meant for sh and PowerShell, not cmd.exe.
  */
 export function confirmCommand(
   inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>,
@@ -223,12 +223,14 @@ export function confirmCommand(
 
 /**
  * `text` as one shell word: bare when plain, else in single quotes, where only the quote itself is special (`'\''` in
- * sh, `''` in PowerShell on win32). Null for a line break.
+ * sh, `''` in PowerShell on win32, where a leading `@` is quoted too: bare it is a splat). Null for a line break, and on
+ * win32 for a `"`, which PowerShell's legacy argument passing splits out of a quoted word.
  */
 export function shellWord(text: string, platform: NodeJS.Platform = process.platform): string | null {
-  if (/^[\w./:@%+=,-]+$/.test(text)) return text;
-  if (/[\r\n\0]/.test(text)) return null;
-  if (platform === "win32") return `'${text.replace(/['‘-‛]/g, (quote) => quote + quote)}'`;
+  const windows = platform === "win32";
+  if (/^[\w./:@%+=,-]+$/.test(text) && !(windows && text.startsWith("@"))) return text;
+  if (/[\r\n\0]/.test(text) || (windows && text.includes('"'))) return null;
+  if (windows) return `'${text.replace(/['‘-‛]/g, (quote) => quote + quote)}'`;
   return `'${text.replaceAll("'", "'\\''")}'`;
 }
 

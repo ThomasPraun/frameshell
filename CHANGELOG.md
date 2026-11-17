@@ -1509,7 +1509,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer sits behind a run nobody listens to; ADR 0034 as built; the skill no longer says a dropped connection keeps
   the run going). The confirming command a paid refusal prints quotes its words for the shell (single quotes, `'\''`
   in sh and `''` in PowerShell on Windows) and is left out for a word with a line break, instead of double quotes
-  that expanded `$` and a backtick. `docs/binaries.md` says a Blender folder outside the supported range is taken on
+  that expanded `$` and a backtick (on Windows also a leading `@`, a PowerShell splat, is quoted and a `"` leaves the
+  command out). The `voiceover.generate` description now says a closed connection stops the call. `docs/binaries.md` says a Blender folder outside the supported range is taken on
   Windows only when nothing else is found, `blender.exe` on PATH included, as the code does.
   `InputsContext.signal` of the plugin API is typed optional, as its doc already said (`PLUGIN_API_VERSION` stays
   `"1"`).

@@ -27,6 +27,14 @@ describe("shellWord", () => {
     expect(shellWord("it’s", "win32")).toBe("'it’’s'");
   });
 
+  it("quotes a leading @ on win32 only, and has no word there for a double quote", () => {
+    expect(shellWord("@foo", "win32")).toBe("'@foo'");
+    expect(shellWord("@foo", "linux")).toBe("@foo");
+    expect(shellWord("a@b", "win32")).toBe("a@b");
+    expect(shellWord('a"b', "win32")).toBeNull();
+    expect(shellWord('a"b', "linux")).toBe(`'a"b'`);
+  });
+
   it("has no word for a line break", () => {
     for (const platform of ["linux", "win32"] as const) {
       expect(shellWord("a\nb", platform)).toBeNull();
