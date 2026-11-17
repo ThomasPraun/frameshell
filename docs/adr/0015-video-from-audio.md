@@ -42,7 +42,7 @@ Extends use case A (SPEC §1). A podcast, a talk or a voice note has no picture,
 
 ## Amendment: spans without words (#662, epic #451)
 
-A motion film has a storyboard but no transcript, so its scenes had no `wordRange` and the scene band stayed empty. The band now shows every scene that has a span, and a span says where it comes from (`source` on each `script.outline` `span` entry; protocol 166):
+A motion film has a storyboard but no transcript, so its scenes had no `wordRange` and the scene band stayed empty. The band now shows every scene that has a span, and a span says where it comes from (`source` on each `script.outline` `span` entry; protocol 169):
 
 - `words`: the scene's `wordRange` as placed on that timeline, as before.
 - `clips`: on a timeline that places none of the scene's words, the first start to the last end of the clips whose `scriptRef` is the scene (a union, not one span per clip). A clip whose end cannot be known without reading another file (a nested timeline with no `duration`) counts by its start. The box follows the clips when they move, because the app reads the outline again on every timeline revision; a pick on it selects those clips.
