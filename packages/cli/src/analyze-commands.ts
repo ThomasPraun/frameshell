@@ -2,14 +2,14 @@ import { ANALYSIS_NAME_PATTERN, ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type Ana
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `analyze` (#471), in `frameshell --help`. */
-export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--no-speech]
+export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--no-speech] [--no-faces]
                                Measure a reference video: shot table (cuts, cuts per minute, shot lengths), contact sheet
                                at 2 frames a second and a frame per shot, dominant colours and look (brightness, contrast,
                                saturation, warmth, colour grid) per shot and overall, rhythm (shot-length spread, still
                                share, bursts), cuts told apart (new scene, jump cut, punch-in or out with its scale: the
                                ones the scene score misses are marked), events (flashes, elements appearing or disappearing, holds, sound hits),
                                the activity curve and its moves (start, duration, closest ease), ink (how much of the
-                               picture graphics and text cover), mouth against voice (needs a people scan of the file),
+                               picture graphics and text cover), mouth against voice (the faces of the file are found for it, as "people scan" does),
                                loudness (EBU R128), tempo and the audio (sentences with pace and pitch, voice against the
                                music under it, effects over the music, sections; the speech is recognised by the project's
                                transcription), into .frameshell/analysis/<name>/ (default: the file name; a
@@ -18,6 +18,8 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--
                                suggestions it never applies: style apply --from-analysis <name> takes them.
                                --threshold: scene score that opens a shot (0.05 to 0.95; lower finds softer cuts)
                                --no-speech: skip recognising the speech (the slow part; no sentences or effects)
+                               --no-faces: skip finding the faces for the mouth sync (the slow part; may download the face
+                               models; a scan the project already has is still used)
   analyze diff <film> <reference> [--name n] [--lag s] [--max-lag s] [--every s] [--snapshots n]
                                Compare our film with a reference: the two are lined up by activity curve, then SSIM at
                                matched times, the energy of each and a side-by-side sheet (ours left), into
@@ -29,7 +31,7 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--
 
 /** Flags `analyze` takes besides the global ones. */
 export const ANALYZE_FLAGS: Record<string, readonly string[]> = {
-  analyze: ["name", "threshold", "no-speech", "lag", "max-lag", "every", "snapshots"],
+  analyze: ["name", "threshold", "no-speech", "no-faces", "lag", "max-lag", "every", "snapshots"],
 };
 
 /** A parsed `analyze` command. */
@@ -39,6 +41,7 @@ export interface AnalyzeInvocation {
   name?: string;
   threshold?: number;
   speech?: false;
+  faces?: false;
 }
 
 /** A parsed `analyze diff` command. */
@@ -62,6 +65,7 @@ export interface AnalyzeOptions {
   every?: string | undefined;
   snapshots?: string | undefined;
   "no-speech"?: boolean | undefined;
+  "no-faces"?: boolean | undefined;
 }
 
 
@@ -80,6 +84,7 @@ function parseDiff(files: string[], options: AnalyzeOptions): AnalyzeDiffInvocat
   if (files.length !== 2) return null;
   if (options.threshold !== undefined) throw new UsageError("`frameshell analyze diff` does not take --threshold (it cuts no shots).");
   if (options["no-speech"]) throw new UsageError("`frameshell analyze diff` does not take --no-speech (it recognises no speech).");
+  if (options["no-faces"]) throw new UsageError("`frameshell analyze diff` does not take --no-faces (it reads no mouth sync).");
   if (options.name !== undefined && !ANALYSIS_NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
@@ -115,7 +120,7 @@ export function parseAnalyze(rest: string[], options: AnalyzeOptions): AnalyzeIn
   if (options.name !== undefined && !ANALYSIS_NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
-  return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(options["no-speech"] ? { speech: false as const } : {}) };
+  return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(options["no-speech"] ? { speech: false as const } : {}), ...(options["no-faces"] ? { faces: false as const } : {}) };
 }
 
 /** Run a parsed `analyze` or `analyze diff`; human output unless `json`. */

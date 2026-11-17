@@ -138,7 +138,7 @@ export interface UserInstall {
   readonly examplePath: Readonly<Record<PlatformFamily, string>>;
   /**
    * Where an install is looked for when no `binaries` override names one, per platform family, in order: the first
-   * that exists wins.
+   * that exists wins, except that a `versioned` hit outside the supported range yields to a later rule's hit.
    */
   readonly standardPaths?: Readonly<Partial<Record<PlatformFamily, readonly StandardPath[]>>>;
   /** True when `version`, as `versionProbe` captured it, is in `supported`. */
@@ -164,8 +164,9 @@ export type StandardPath =
   | { readonly kind: "path"; readonly name: string }
   /**
    * One folder per version in `dir` (path segments), named as `folder` matches (group 1 = version, e.g. `Blender 4.5`):
-   * `file` in the newest folder whose version {@link UserInstall.supports}, else in the newest folder (so `doctor` names
-   * it as out of range).
+   * `file` in the newest folder whose version {@link UserInstall.supports}. Folders outside the range are a fallback:
+   * the later rules look first, and only when they find nothing the newest of them is taken (so `doctor` names it as
+   * out of range instead of saying nothing is installed).
    */
   | { readonly kind: "versioned"; readonly dir: readonly string[]; readonly folder: RegExp; readonly file: string };
 

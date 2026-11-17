@@ -4,7 +4,7 @@ import type { ReviewSheetKind, TimelineView } from "@frameshell/protocol";
 // Everything counts in frame indexes of the film (the timeline's or the file's frame rate).
 
 /** Why a frame is on a sheet; see `ReviewTileSchema`. */
-export type PickTag = "start" | "end" | "cut" | "marker" | "cue" | "zoom" | "grid" | "second" | "peak" | "head" | "tail";
+export type PickTag = "start" | "end" | "cut" | "marker" | "cue" | "zoom" | "grid" | "second" | "peak" | "head" | "tail" | "beat";
 
 /** A frame to show and why. */
 export interface FramePick {
@@ -33,6 +33,12 @@ export const MAX_PHONE_TILES = 60;
 export const TILES_PER_CONTACT = 30;
 /** Most tiles of the safe-zone sheet in all images. */
 export const MAX_SAFE_TILES = 36;
+/** Most tiles of the beats sheet in all images. */
+export const MAX_BEAT_TILES = 60;
+/** Share of a beat's length after the hit its frame is taken at: the picture the beat lands on, once it reads. */
+export const BEAT_PICK_PHASE = 0.25;
+/** Width of a `cropAt` crop as a share of the frame's width, unless the caller says. */
+export const DEFAULT_CROP_SIZE = 0.25;
 /** Tiles per image of the phone sheet. */
 export const TILES_PER_PHONE = 15;
 /** Consecutive frames of a motion strip. */
@@ -105,9 +111,13 @@ export function contactPicks(fps: number, range: FrameRange, critical: readonly 
   return sorted.length > cap ? thin(sorted, cap) : sorted;
 }
 
+/** `keep` of `items`, spread evenly over the list. */
+function evenly<T>(items: readonly T[], keep: number): T[] {
+  return items.filter((_, i) => Math.floor(((i + 1) * keep) / items.length) > Math.floor((i * keep) / items.length));
+}
+
 /** `picks` cut to `cap`: grid frames dropped evenly first, then any but the first and last. */
 function thin(picks: FramePick[], cap: number): FramePick[] {
-  const evenly = (items: FramePick[], keep: number) => items.filter((_, i) => Math.floor(((i + 1) * keep) / items.length) > Math.floor((i * keep) / items.length));
   const fixed = picks.filter((pick) => pick.tag !== "grid");
   const grid = picks.filter((pick) => pick.tag === "grid");
   if (fixed.length <= cap) return [...fixed, ...evenly(grid, cap - fixed.length)].sort((a, b) => a.frame - b.frame);
@@ -137,6 +147,85 @@ export function seamPicks(range: FrameRange): FramePick[] | null {
   const tail = Array.from({ length: count }, (_, i): FramePick => ({ frame: range.end - count + i, tag: "tail" }));
   const head = Array.from({ length: count }, (_, i): FramePick => ({ frame: range.first + i, tag: "head" }));
   return [...tail, ...head];
+}
+
+/** The beats of a timeline's tempo grid that {@link beatPicks} reads (`TimelineGrid` of `timeline/tempo.ts`). */
+export interface BeatGrid {
+  /** Timeline seconds of every beat, increasing. */
+  beats: readonly number[];
+  /** Timeline seconds of the beats that start a bar. */
+  bars: readonly number[];
+  /** Beats and bar starts before `beats[0]` and `bars[0]`: `beats[i]` is `beat:(beatBase + i + 1)`. */
+  beatBase: number;
+  barBase: number;
+  /** Beats per minute: the length of a beat when the grid has only one. */
+  bpm: number;
+}
+
+/** A frame of the beats sheet and its beat's name, `bar N` or `beat N`. */
+export interface BeatPick extends FramePick {
+  tag: "beat";
+  name: string;
+}
+
+/**
+ * One frame per beat of `grid` whose hit falls in the range, {@link BEAT_PICK_PHASE} of the beat's length after it (the
+ * length up to the next beat; the last beat takes the one before it), kept inside the range. A beat that starts a bar
+ * is named `bar N`, any other `beat N`, numbered like the `bar:N` and `beat:N` time references. Over `cap`, beats that
+ * start no bar are dropped evenly first. One pick per frame (a bar start wins).
+ */
+export function beatPicks(fps: number, range: FrameRange, grid: BeatGrid, cap = MAX_BEAT_TILES): BeatPick[] {
+  const { beats } = grid;
+  const barOf = new Map(grid.bars.map((at, i) => [frameIndex(at, fps), grid.barBase + i + 1] as const));
+  const picks: BeatPick[] = [];
+  const isBar = (pick: BeatPick) => pick.name.startsWith("bar ");
+  for (const [i, at] of beats.entries()) {
+    const hit = frameIndex(at, fps);
+    if (hit < range.first || hit >= range.end) continue;
+    const next = beats[i + 1];
+    const previous = beats[i - 1];
+    const period = next !== undefined ? next - at : previous !== undefined ? at - previous : 60 / grid.bpm;
+    const frame = Math.min(range.end - 1, frameIndex(at + BEAT_PICK_PHASE * period, fps));
+    const bar = barOf.get(hit);
+    const name = bar !== undefined ? `bar ${bar}` : `beat ${grid.beatBase + i + 1}`;
+    const last = picks.at(-1);
+    if (last?.frame === frame) {
+      if (bar !== undefined && !isBar(last)) last.name = name;
+      continue;
+    }
+    picks.push({ frame, tag: "beat", name });
+  }
+  if (picks.length <= cap) return picks;
+  const bars = picks.filter(isBar);
+  if (bars.length >= cap) return evenly(bars, cap);
+  return [...bars, ...evenly(picks.filter((pick) => !isBar(pick)), cap - bars.length)].sort((a, b) => a.frame - b.frame);
+}
+
+/** A crop of a frame, pixels of the film's frame (left, top, size). */
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The crop `size` wide (share of the frame's width; the height keeps the frame's proportions) of a `frame` centred on
+ * `centre` (pixels), shrunk to fit `within` (the picture inside letterbox bars; default the whole frame) and moved inside it.
+ */
+export function cropRect(frame: { width: number; height: number }, centre: { x: number; y: number }, size: number, within?: { left: number; top: number; width: number; height: number } | null): CropRect {
+  const area = within ?? { left: 0, top: 0, width: frame.width, height: frame.height };
+  const wide = size * frame.width;
+  const fit = Math.min(1, area.width / wide, (area.height * frame.width) / (wide * frame.height));
+  const width = Math.max(2, Math.floor(wide * fit));
+  const height = Math.max(2, Math.floor((wide * fit * frame.height) / frame.width));
+  const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
+  return {
+    x: clamp(Math.round(centre.x - width / 2), area.left, area.left + area.width - width),
+    y: clamp(Math.round(centre.y - height / 2), area.top, area.top + area.height - height),
+    width,
+    height,
+  };
 }
 
 /** A moment of fast change. */
@@ -194,6 +283,7 @@ export function sheetLayout(kind: ReviewSheetKind, aspect: number): SheetLayout 
   const tall = aspect < 1;
   switch (kind) {
     case "contact":
+    case "beats":
       return tall ? { columns: 10, perImage: TILES_PER_CONTACT, tileWidth: 160 } : { columns: 6, perImage: TILES_PER_CONTACT, tileWidth: 270 };
     case "safe":
       return tall ? { columns: 6, perImage: 18, tileWidth: 200 } : { columns: 4, perImage: 12, tileWidth: 360 };
@@ -218,9 +308,10 @@ export function splitImages<T>(picks: readonly T[], perImage: number): T[][] {
   return images;
 }
 
-/** Text drawn on a tile: the time, and why the frame is shown unless it is a plain grid or second frame. */
-export function tileLabel(at: number, tag: PickTag): string {
+/** Text drawn on a tile: the time, and why the frame is shown (`name`, else the tag) unless it is a plain grid or second frame. */
+export function tileLabel(at: number, tag: PickTag, name?: string): string {
   const time = at.toFixed(2);
+  if (name !== undefined) return `${time} ${name}`;
   return tag === "grid" || tag === "second" ? time : `${time} ${tag}`;
 }
 

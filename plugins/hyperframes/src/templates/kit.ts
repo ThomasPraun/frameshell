@@ -162,6 +162,16 @@ export const FLAT_HELPERS = String.raw`
         M.write(element, { x: pose.x, y: pose.y, rotate: pose.rotate, scale: flat(pose.scale), scaleX: flat(pose.scaleX), scaleY: flat(pose.scaleY), opacity: pose.opacity });
       }`;
 
+/**
+ * Page-script helpers of the seeded templates (`emphasis-marker`, `scene-background`, `light-leak`): `seedOf(text)`
+ * turns a `seed` prop into an integer 0..9972 (a small string hash), and `jitter(seed, k)` is a repeatable value
+ * -1..1 for the k-th choice of that seed. Same seed and k, same value, so every seek paints the same frame. Written
+ * on one line each, so a composition stays under the lint's 300-line warning.
+ */
+export const SEED_HELPERS = String.raw`
+      function seedOf(text) { var s = 0; String(text).split("").forEach(function (ch) { s = (s * 31 + ch.charCodeAt(0)) % 9973; }); return s; }
+      function jitter(seed, k) { var x = Math.imul(seed * 977 + k * 7919 + 1, 2654435761) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return ((x >>> 0) % 2001) / 1000 - 1; }`;
+
 /** The `grouping` prop of a template that prints a number: where the thousands separator goes. Pairs with {@link NUMBER_FORMAT}. */
 export const GROUPING_VARIABLE: TemplateVariable = {
   id: "grouping",

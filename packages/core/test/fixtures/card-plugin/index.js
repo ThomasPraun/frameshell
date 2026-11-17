@@ -11,8 +11,12 @@
 // unless the timing it got is that JSON, and its live page sets `window.cardTiming` to what it got.
 // `final-card` renders finals (ADR 0035): its final render (`ctx.tier` "final") paints { finalColor } and waits
 // { finalDelayMs } more; `finals.estimate` answers the card's { estimateSeconds } (default 1), or throws with { noEstimate }.
+// `gc-card` keeps a marker `.frameshell/card-state/<state>.json` per clip, `state` = the clip's props.state, else the card's
+// { state }, else "a", and has a `gc` hook (ADR 0035 slice 5): it deletes the markers no clip names that are older than
+// the host's floor, and logs every call to `.frameshell/gc-calls.jsonl`. `.frameshell/gc-fail` makes the hook throw.
+// Its `inputs` keep the signal they got in `globalThis.cardSignals`, to see the host abort it when it stops.
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Standard Schema v1 validator, hand-written: the fixture has no dependencies. */
@@ -108,6 +112,37 @@ export function activate(api) {
         if (ctx.projectDir !== project || !(ctx.width > 0 && ctx.height > 0 && ctx.fps > 0)) throw new Error("estimate got no format");
         return card.estimateSeconds ?? 1;
       },
+    },
+  });
+  const stateDir = ".frameshell/card-state";
+  api.registerClipType({
+    ...card,
+    type: "gc-card",
+    async inputs(clip, context) {
+      if (!clip.source) return [];
+      if (!(context?.signal instanceof AbortSignal)) throw new Error("inputs got no signal");
+      (globalThis.cardSignals ??= []).push(context.signal);
+      const card = await readCard(clip).catch(() => ({}));
+      return [clip.source, `${stateDir}/${clip.props?.state ?? card.state ?? "a"}.json`];
+    },
+    async gc(context) {
+      if (!(context.signal instanceof AbortSignal)) throw new Error("gc got no signal");
+      await mkdir(join(context.projectDir, ".frameshell"), { recursive: true });
+      await appendFile(
+        join(context.projectDir, ".frameshell", "gc-calls.jsonl"),
+        `${JSON.stringify({ inputs: [...context.inputs].sort(), dryRun: context.dryRun, floor: context.keepNewerThan })}\n`,
+      );
+      if (await stat(join(context.projectDir, ".frameshell", "gc-fail")).catch(() => null)) throw new Error("gc-card asked to fail");
+      const removed = [];
+      for (const name of await readdir(join(context.projectDir, ...stateDir.split("/"))).catch(() => [])) {
+        const rel = `${stateDir}/${name}`;
+        const file = join(context.projectDir, ...rel.split("/"));
+        const info = await stat(file);
+        if (!name.endsWith(".json") || context.inputs.has(rel) || info.mtimeMs >= context.keepNewerThan) continue;
+        if (!context.dryRun) await rm(file);
+        removed.push({ path: rel, bytes: info.size });
+      }
+      return removed;
     },
   });
   api.registerClipType({

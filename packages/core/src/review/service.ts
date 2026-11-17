@@ -28,8 +28,10 @@ import {
   type ResolvedSubtitleTrack,
   SAFE_ZONES,
   type ExportPreset,
+  type Size,
   type StyleSource,
   type Timeline,
+  showsPicture,
 } from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
 import { generatedClips } from "../clips/renderer.js";
@@ -42,11 +44,18 @@ import { probeMedia } from "../media/ffmpeg.js";
 import type { ScannedAsset } from "../people/face-clusters.js";
 import { soundsOn } from "../sound/place.js";
 import type { TimelineService } from "../timeline/service.js";
+import type { TempoResult } from "../timeline/tempo.js";
+import { unusableGrid } from "../timeline/time-ref.js";
 import {
+  type BeatGrid,
+  type CropRect,
   type Critical,
+  DEFAULT_CROP_SIZE,
   type FramePick,
   MAX_SAFE_TILES,
+  beatPicks,
   contactPicks,
+  cropRect,
   frameRange,
   frameTime,
   motionPeaks,
@@ -55,6 +64,7 @@ import {
   sheetLayout,
   stripPicks,
   STRIPS,
+  tileLabel,
   timelineCritical,
 } from "./plan.js";
 import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
@@ -63,7 +73,7 @@ import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
 import { fileBandEnvelope, fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
 import { fileSound, heardClips, timelineSound } from "./sound.js";
-import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
+import { type BoxSpan, type ClipPicture, clipPointInFilm, faceBoxes, graphicBoxes } from "./placement.js";
 import { type ClipSpan, type FramePlacement, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt, withinPicture } from "./safe.js";
@@ -94,9 +104,23 @@ export interface ReviewServiceOptions {
   platforms(root: string): Promise<readonly PlatformId[]>;
   /** dB the project's style guide sets music under the voice (`style.json` `sound.musicUnderVoice`, or the default); absent: the default. */
   musicUnderVoice?(root: string): Promise<{ value: number; source: StyleSource }>;
+  /** The tempo grid of a timeline up to `horizon` seconds (`tempoGrid`); absent: the `beats` sheet is not written. */
+  grid?(root: string, timeline: { timeline: Timeline; fps: number }, horizon: number): Promise<TempoResult>;
+  /** Size of the picture of a project asset, null when it has none (`MediaService.probe`); absent: taken as the film's. */
+  pictureSize?(root: string, asset: string): Promise<Size | null>;
   /** Absolute ffmpeg and ffprobe for the project rooted at `root`. */
   ffmpeg(root: string): Promise<string>;
   ffprobe(root: string): Promise<string>;
+}
+
+/** The point `cropAt` crops every tile around; see the `review` method. */
+export interface CropAt {
+  /** Fractions of the film's frame, or of the picture of `clip`. */
+  x: number;
+  y: number;
+  /** Width of the crop as a share of the frame's width; default {@link DEFAULT_CROP_SIZE}. */
+  size?: number | undefined;
+  clip?: string | undefined;
 }
 
 /** What one `review` run is asked for; see the `review` method. */
@@ -122,6 +146,10 @@ export interface ReviewRequest {
   loop?: boolean | undefined;
   /** The project's requirements as `view` shows them, when a proposal changes them (ADR 0036); absent: the file's. */
   requirements?: RequirementsFile | null | undefined;
+  /** Why the proposal's requirements hold no valid file (`requirements` is then null): said in `warnings`. */
+  requirementsError?: string | undefined;
+  /** Crop every tile but the `safe` sheet's around this point. */
+  cropAt?: CropAt | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
@@ -141,6 +169,13 @@ export class ReviewService {
 
   /** Write the sheets of `request` for the project at `root`; see the `review` method. */
   async run(root: string, request: ReviewRequest, signal?: AbortSignal): Promise<ReviewResult> {
+    if (request.file && request.cropAt?.clip !== undefined) {
+      throw new RpcError(ErrorCode.InvalidOperation, "review: `cropAt.clip` follows a clip of the timeline, and a file has no clips: drop `clip` (the point is then in the frame) or review the timeline.", {
+        op: "review",
+        field: "cropAt.clip",
+        reason: "file",
+      });
+    }
     const scratch = join(root, ".frameshell", "cache", "review", randomBytes(6).toString("hex"));
     await mkdir(scratch, { recursive: true });
     try {
@@ -157,8 +192,9 @@ export class ReviewService {
         });
       }
       const safePlatforms = await this.#safePlatforms(root, request, source, warnings);
-      const kinds = REVIEW_SHEETS.filter((kind) => (kind === "safe" ? safePlatforms.length > 0 : request.sheets === undefined || request.sheets.includes(kind)));
-      const { run, dir } = await this.#nextRun(root);
+      // `beats` is written only when named: it needs a tempo, which most films do not set.
+      const asked = (kind: ReviewSheetKind) => (kind === "beats" ? request.sheets?.includes(kind) === true : request.sheets === undefined || request.sheets.includes(kind));
+      const kinds = REVIEW_SHEETS.filter((kind) => (kind === "safe" ? safePlatforms.length > 0 : asked(kind)));
       const frames = new Frames(source, join(scratch, "frames"));
       const aspect = source.width / source.height;
       const sheets: ReviewSheet[] = [];
@@ -176,6 +212,10 @@ export class ReviewService {
       let placing: Promise<Placed> | undefined;
       /** Graphics and faces of the timeline, placed once for the safe zones and `staysInFrame`. */
       const placed = (topic: string): Promise<Placed> => (placing ??= this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, topic, signal));
+      const crop = request.cropAt ? await this.#cropper(root, request, request.cropAt, frame, loaded ? flat : null, loaded ? picture : null) : undefined;
+      if (crop && kinds.includes("safe")) warnings.push("safe: the safe-zone sheet shows whole frames, not the `cropAt` crop: its zones lie on the frame's edges.");
+      // After `cropAt` is checked, so a refused clip leaves no empty run folder.
+      const { run, dir } = await this.#nextRun(root);
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
       const write = async (
@@ -183,7 +223,7 @@ export class ReviewService {
         picks: readonly FramePick[],
         stem: string,
         numbered = false,
-        extra: Pick<SheetImagesOptions, "shade" | "flags"> = {},
+        extra: Pick<SheetImagesOptions, "shade" | "flags" | "label"> = {},
       ): Promise<string[]> => {
         const images = await writeSheetImages({
           ffmpeg,
@@ -197,6 +237,7 @@ export class ReviewService {
           numbered,
           scratch,
           signal,
+          ...(crop && kind !== "safe" ? { crop } : {}),
           ...extra,
         });
         sheets.push(...images.map((image) => ({ kind, ...image })));
@@ -230,6 +271,15 @@ export class ReviewService {
           const picks = seamPicks(range);
           if (picks) await write("seam", picks, "seam");
           else warnings.push("seam: the range is a single frame, so there is no seam to look at.");
+        } else if (kind === "beats") {
+          const grid = loaded ? await this.#beatGrid(root, loaded, source, warnings) : null;
+          if (!loaded) warnings.push("beats: a file has no tempo grid: review the timeline for the beats sheet.");
+          const picks = grid ? beatPicks(source.fps, range, grid) : [];
+          if (grid && picks.length === 0) warnings.push("beats: no beat of the tempo grid falls in the range reviewed.");
+          if (picks.length > 0) {
+            const names = new Map(picks.map((pick) => [pick.frame, pick.name] as const));
+            await write("beats", picks, "beats", false, { label: (pick, at) => tileLabel(at, pick.tag, names.get(pick.frame)) });
+          }
         } else {
           const series = await motion();
           const found = motionPeaks(series.times, series.energy);
@@ -268,6 +318,7 @@ export class ReviewService {
           sound,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
         });
+        if (request.requirementsError !== undefined) warnings.push(`requirements: the proposal's requirements are invalid (${request.requirementsError.split("\n")[0]}), so the film is judged without them.`);
         const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
         if (requirements) {
           const inFrame = loaded !== null && requirements.clips.some((clip) => clip.staysInFrame !== undefined);
@@ -325,6 +376,81 @@ export class ReviewService {
     }
   }
 
+
+  /**
+   * The tempo grid of the timeline reviewed, the one `tempo.show` lists, for the `beats` sheet; null, with a `warnings`
+   * line saying why, when there is none to use (no tempo, beats not measured or broken, a LOW-confidence grid).
+   */
+  async #beatGrid(root: string, loaded: LoadedTimeline, source: FilmSource, warnings: string[]): Promise<BeatGrid | null> {
+    if (!this.#options.grid) {
+      warnings.push("beats: this daemon has no tempo grid to read.");
+      return null;
+    }
+    let found: TempoResult;
+    try {
+      found = await this.#options.grid(root, loaded, source.frames / source.fps + 1);
+    } catch (error) {
+      warnings.push(`beats: the tempo grid cannot be read (${(error as Error).message.split("\n")[0]}).`);
+      return null;
+    }
+    const refusal = unusableGrid(found);
+    if (refusal || !found.grid) {
+      warnings.push(`beats: no beats sheet: ${refusal?.message ?? "the timeline has no tempo."}${refusal?.hint ? ` ${refusal.hint}` : ""}`);
+      return null;
+    }
+    return found.grid;
+  }
+
+  /**
+   * The crop of each tile for `cropAt`: one rectangle for a point of the frame, or, with `clip`, the point of the clip's
+   * picture where the clip's placement (keys) and the format's cover crop put it at that frame, clamped to the clip's span.
+   * The crop stays inside the picture letterbox bars leave. Throws InvalidOperation when `clip` is no picture clip.
+   */
+  async #cropper(
+    root: string,
+    request: ReviewRequest,
+    at: CropAt,
+    frame: Size,
+    flat: (() => Promise<Flat>) | null,
+    picture: (() => Promise<ReturnType<typeof letterboxPicture>>) | null,
+  ): Promise<(pick: FramePick, seconds: number) => CropRect> {
+    const size = at.size ?? DEFAULT_CROP_SIZE;
+    const bars = picture ? await picture() : null;
+    if (at.clip === undefined) {
+      const fixed = cropRect(frame, { x: at.x * frame.width, y: at.y * frame.height }, size, bars);
+      return () => fixed;
+    }
+    const resolved = await flat!();
+    const base = resolved.timeline.tracks.find(showsPicture);
+    const track = resolved.timeline.tracks.find((candidate) => candidate.kind === "video" && candidate.clips.some((clip) => clip.id === at.clip));
+    const clip = track?.kind === "video" ? track.clips.find((candidate) => candidate.id === at.clip) : undefined;
+    if (!track || !clip) {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`cropAt.clip\` ${at.clip} is not a clip of a video track of timeline ${request.timeline} (\`timeline.show\` lists the clip ids).`, {
+        op: "review",
+        field: "cropAt.clip",
+        reason: "not found",
+      });
+    }
+    const generated = !("asset" in clip);
+    let source: Size | null = frame;
+    if ("asset" in clip && this.#options.pictureSize) source = await this.#options.pictureSize(root, clip.asset);
+    if (!source) {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`cropAt.clip\` ${at.clip} plays ${"asset" in clip ? clip.asset : "a clip"}, which has no picture to follow.`, {
+        op: "review",
+        field: "cropAt.clip",
+        reason: "no picture",
+      });
+    }
+    const placed: ClipPicture = { clip, source, generated, base: base?.id === track.id };
+    const length = "asset" in clip ? (clip.out - clip.in) / (clip.speed ?? 1) : (clip.duration ?? 0);
+    const last = clip.start + Math.max(0, length - 0.5 / resolved.fps);
+    return (_pick, seconds) => {
+      // The middle of the frame, where the capture takes it.
+      const shown = Math.min(Math.max(seconds + 0.5 / resolved.fps, clip.start), last);
+      const point = clipPointInFilm(placed, shown, at, frame, resolved.project, resolved.layout);
+      return cropRect(frame, point, size, bars);
+    };
+  }
 
   /**
    * Boxes of the film's pixels that graphics (generated clips with an alpha render) and faces (footage with a cached `people scan`)

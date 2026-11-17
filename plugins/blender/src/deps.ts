@@ -40,7 +40,8 @@ export interface BlendFiles {
  * clips starts no Blender: the hash while the file's size and mtime stay, the listing for as long as the hash does
  * (`.frameshell/blender/<hash>-<path hash>/deps.json`, which survives restarts). That file holds only the inside paths
  * and how many lie outside; a .blend that loads outside files is listed again once per daemon, so their absolute paths
- * never land in the project.
+ * never land in the project. `gc` deletes the listings of .blend versions no clip uses (`sweepState`); {@link forget}
+ * then drops them from memory.
  */
 export class BlendDeps {
   readonly #projectDir: string;
@@ -66,18 +67,32 @@ export class BlendDeps {
   /**
    * Files the .blend `rel` links or loads (libraries, images, caches), from `bpy.utils.blend_paths`: the ones inside
    * the project as project-relative paths (the host hashes and watches them), the ones outside as absolute paths.
+   * `signal` ends the Blender that lists them (the host's stop); the listing then rejects and is not remembered.
    */
-  async list(rel: string, blender: string, info: BlendInfo): Promise<BlendFiles> {
+  async list(rel: string, blender: string, info: BlendInfo, signal?: AbortSignal): Promise<BlendFiles> {
     const file = join(this.#projectDir, ...listingPath(rel, info).split("/"));
     // Relative links resolve against where the .blend sits, so a copy elsewhere in the project lists again.
     const id = `${info.hash}\0${rel}`;
     let listing = this.#listings.get(id);
     if (!listing) {
-      listing = this.#read(file, rel).then((cached) => cached ?? this.#ask(rel, blender, file));
+      listing = this.#read(file, rel).then((cached) => cached ?? this.#ask(rel, blender, file, signal));
       this.#listings.set(id, listing);
       listing.catch(() => this.#listings.delete(id));
     }
     return listing;
+  }
+
+  /**
+   * Forgets the listings whose folders `gc` deleted (`removed`: their project-relative paths ending in `/`). The
+   * listing is remembered in memory, and a .blend saved back to an older version would otherwise be served a path
+   * to a file that is no longer there.
+   */
+  forget(removed: readonly string[]): void {
+    const gone = new Set(removed);
+    for (const id of [...this.#listings.keys()]) {
+      const [hash = "", rel = ""] = id.split("\0");
+      if (gone.has(`${posix.dirname(listingPath(rel, { hash }))}/`)) this.#listings.delete(id);
+    }
   }
 
   /**
@@ -116,12 +131,12 @@ export class BlendDeps {
     }
   }
 
-  async #ask(rel: string, blender: string, file: string): Promise<BlendFiles> {
+  async #ask(rel: string, blender: string, file: string, signal: AbortSignal | undefined): Promise<BlendFiles> {
     const scratch = await mkdtemp(join(tmpdir(), "frameshell-blender-deps-"));
     const raw = join(scratch, "paths.json");
     try {
       const blend = resolve(this.#projectDir, ...rel.split("/"));
-      const { error, tail } = await runBlender(blender, blend, scriptPath("deps.py"), { out: raw }, { cwd: scratch, timeoutMs: LISTING_TIMEOUT_MS });
+      const { error, tail } = await runBlender(blender, blend, scriptPath("deps.py"), { out: raw }, { cwd: scratch, timeoutMs: LISTING_TIMEOUT_MS, signal });
       if (error) throw new Error(`Blender could not list the files ${rel} loads: ${String(error["message"] ?? error.code)}`);
       let absolute: unknown;
       try {

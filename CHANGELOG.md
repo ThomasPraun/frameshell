@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
+  `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
+  version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
+  as an input and nothing wrote it in the last minute; `finals.json`, unknown names and symlinks stay. It is a new
+  optional plugin-API hook, `ClipAdapter.gc(context)` with `AdapterGcContext { projectDir, inputs, dryRun,
+  keepNewerThan, signal }`, so core never learns the plugin's layout: `ClipRenderer.gc` gathers the paths each adapter's
+  `inputs()` returned while it keys every clip (the rule that keeps the clip renders), and skips the hooks with the
+  same reasons when a clip has no key or a render or export job runs. `InputsContext` gets a `signal`, aborted when the
+  daemon stops: the Blender that lists a `.blend`'s files (up to 5 minutes) is killed with it and no longer outlives the
+  daemon.
+- The opt-in real Blender test has a positive control for the driver trap: the same library's driver does write its file
+  with auto-exec on and a frame evaluated, so "marker absent" under `-Y` means something. Not run with a real Blender
+  yet.
+- Motion templates, slice TP3 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
+  new <name> --template` takes four more. `logo-sting` is a short brand hit on its own background (the logo lands with a
+  spring and a ring, a light band sweeps across, the name rises; a monogram stands in for a missing logo). `pip-card`
+  is a still picture in a rounded corner card with an optional caption chip, over a talking head (image prop only: a
+  live video in a corner stays the multicam picture-in-picture layout, owner decision 2026-11-16). `work-cards` shows
+  task cards from a `title:status` list that come in staggered, pulse when they start and follow one shared progress,
+  with no icons. `light-leak` is a seeded warm glow, a clip about a second long on a track above a cut, clear at its
+  first frame and the last tenth of a second, `hue` and `intensity` props, no blend mode: an overlay, so the cut underneath keeps its
+  length. Each pulls late cues in before the 0.3 s exit and lays out in all four formats. The hash of `seed` that
+  `emphasis-marker` and `scene-background` each carried is one `SEED_HELPERS` in the kit, shared with `light-leak`.
+  The `hyperframes` and Frameshell skills list them.
+- `analyze` finds the faces for mouth sync itself, slice AL of #471 (ADR 0020 decision 16, epic #451; protocol 165): a
+  reference file anywhere on disk no longer needs `people scan` first. When the project has no scan of the file's
+  content, the run makes it with the same scanner as `people.scan` (the one `scanFileFaces` step) and caches it in
+  `.frameshell/people/`, so `people scan` of a copy finds it again. On by default; the first run may download the face
+  models. New `faces` param (`--no-faces`) skips the scan and still uses one already cached; a scan that cannot run
+  (no model, no network, untrusted runtime) is a skipped `sync` with the reason and a warning, never a failed run.
+  `analyze.diff` has no `faces`. `gc` leaves face scans alone while an `analyze` job runs (a scan of a file outside
+  `assets/` is swept as unused afterwards; it is regenerable). The mouth is still picture motion in the face box: the
+  5-point SFace landmarks have no mouth opening.
+- `review` frames per beat and crops, slice RP2 of #457 (epic #451; protocol 164): `--sheets beats` (opt in, never a
+  default) writes one frame per beat of the timeline's tempo grid, the one `tempo show` lists (`tempoGrid` through the
+  daemon's grid loader), a quarter beat after each hit (the last beat takes the length of the one before), bar starts
+  labelled `bar N` and the rest `beat N` like the `bar:N`/`beat:N` time references, up to 60 tiles thinned evenly with
+  bar starts kept first; tile tag `beat`. No tempo, a LOW-confidence or unmeasured grid, or a `--file` writes no sheet
+  and says why in `warnings`. `--crop-at x,y[,size]` (`cropAt` on the wire) crops every tile of the run but the safe
+  sheet's around a point of the frame (size = share of the width, default 0.25, frame proportions kept) from the same
+  captures, inside the picture letterbox bars leave; with `--clip id` the point is in that clip's own picture and
+  follows its keyed position and scale, through the format's cover crop (ADR 0043 slice 4 as built). Each tile lists
+  its `crop` in film pixels. `cropAt.clip` with a file, or naming no video clip, is InvalidOperation.
+- Review mode: the proposal bar lists the `requirements.json` values a proposal sets, clears or waives
+  (`Requirements: film.maxSeconds 30 → 20`), in English and Spanish. A `review` of a proposal whose requirements hold no
+  valid file now says so in `warnings` and judges the film without them, instead of dropping them silently.
+- The clip inspector's Colour section now shows for generated clips and nested timeline clips on video tracks, not only
+  media clips (slice 9 of #384, ADR 0031, epic #451; no wire change). Same sliders, LUT and Reset, one `ui` `clip.set`
+  per release; the LOG note stays on footage, and shots have no colour section. The reset tooltip no longer says "footage".
 - The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
   voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
   already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
@@ -1274,6 +1323,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clip, 4 instead of 6 for a dissolve or wipe of the plate under the word). Grade, shape, matte and opacity stay per
   layer, as export applies them. Any span that does not line up keeps its own decoder. A preview layer now closes a
   decoder no clip ahead of the playhead needs, instead of keeping it open and idle.
+- A tool's install folders outside its supported range are a fallback, not the answer (`findUserInstall`, Blender on
+  Windows): an old `Blender 3.6` folder in `Program Files` no longer hides a supported `blender` on PATH; the later
+  rules look first, and only when they find nothing is the newest folder outside the range taken, so `doctor` still says
+  "out of range" and never "not installed".
 - Raw frame reads (`readRawFrames`: subject mattes, face detection, people scans, `review`, `analyze`) copy each pipe
   chunk once into its frame instead of joining chunks as they come, which copied a 4K RGB frame hundreds of times.
 - The `blender` clip's `quality` prop is gone (owner decision on #501): props are `scene` and `camera`, and a `quality`

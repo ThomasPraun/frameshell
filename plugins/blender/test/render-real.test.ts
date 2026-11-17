@@ -131,16 +131,32 @@ for linked in target.objects:
 bpy.ops.wm.save_as_mainfile(filepath=out)
 `;
 
+/** A project with `scene.blend` (see {@link REMAP_SCENE}) and, outside it, its library and image; `marker` is the file the trap driver writes, removed. */
+function remapProject() {
+  const project = tempDir();
+  const elsewhere = tempDir();
+  const library = join(elsewhere, "library.blend");
+  const image = join(elsewhere, "outside.png");
+  const marker = join(elsewhere, "driver-ran.txt");
+  writeFileSync(join(project, "make-scene.py"), REMAP_SCENE);
+  execFileSync(BLENDER!, ["-b", "--factory-startup", "-P", join(project, "make-scene.py"), "--", join(project, "scene.blend"), library, image, marker], { stdio: "pipe" });
+  rmSync(marker, { force: true });
+  return { project, elsewhere, marker };
+}
+
 describe.skipIf(!BLENDER)("blender adapter with a real Blender", () => {
+  // Positive control for the next test: with auto-exec on and a frame evaluated, the same driver does write its file,
+  // so "marker absent" under -Y is not just "the driver never got evaluated". Written on a machine with no Blender:
+  // if this fails, the trap does not fire here and the next test proves nothing, so fix the trap first.
+  it("control: the trap driver of the outside library does run with auto-exec on and a frame evaluated", () => {
+    const { project, marker } = remapProject();
+    writeFileSync(join(project, "evaluate.py"), "import bpy\nbpy.context.scene.frame_set(2)\nbpy.context.view_layer.update()\n");
+    execFileSync(BLENDER!, ["-b", "--factory-startup", "--enable-autoexec", join(project, "scene.blend"), "--python-exit-code", "1", "-P", join(project, "evaluate.py")], { stdio: "pipe" });
+    expect(existsSync(marker), "the trap driver did not run even with auto-exec on").toBe(true);
+  }, 120_000);
+
   it("time-remaps a 24 fps scene into a 30 fps project, keys and warns on outside files, and runs no driver of an outside library", async () => {
-    const project = tempDir();
-    const elsewhere = tempDir();
-    const library = join(elsewhere, "library.blend");
-    const image = join(elsewhere, "outside.png");
-    const marker = join(elsewhere, "driver-ran.txt");
-    writeFileSync(join(project, "make-scene.py"), REMAP_SCENE);
-    execFileSync(BLENDER!, ["-b", "--factory-startup", "-P", join(project, "make-scene.py"), "--", join(project, "scene.blend"), library, image, marker], { stdio: "pipe" });
-    rmSync(marker, { force: true });
+    const { project, elsewhere, marker } = remapProject();
 
     const adapter = createBlenderAdapter({ projectDir: project });
     const clip = { id: "c1", type: "blender", source: "scene.blend", start: 0, duration: 1 };

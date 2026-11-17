@@ -24,6 +24,8 @@ export interface StubConfig {
   hangAfter?: number;
   /** `seconds` each `frame` event reports, by frame index; default 0.05. */
   frameSeconds?: number[];
+  /** Never finish listing a .blend's files (`-P deps.py`): only a kill ends it. */
+  hangDeps?: boolean;
 }
 
 /** Options of {@link stubBlender} that are not the stub's own behaviour. */
@@ -98,8 +100,8 @@ export function ensureWith(blender: string | (() => Promise<string>)): (name: st
   };
 }
 
-export function inputsContext(project: string, blender: string): InputsContext {
-  return { projectDir: project, ensureBinary: ensureWith(blender) };
+export function inputsContext(project: string, blender: string, signal: AbortSignal = new AbortController().signal): InputsContext {
+  return { projectDir: project, ensureBinary: ensureWith(blender), signal };
 }
 
 /** Render context at a small format; `progress` collects the reports. */

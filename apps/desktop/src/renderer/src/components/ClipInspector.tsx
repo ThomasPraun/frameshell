@@ -40,7 +40,7 @@ import { ShotInspector } from "./ShotInspector.js";
  * shot's layout and angles in {@link ShotInspector}. Each
  * change is one `clip.set` by `ui`, saved at once and undoable from the
  * timeline; values shown are the saved ones, from the shared timeline feed.
- * A media clip's voice chain (ADR 0031) is edited in {@link VoiceControl}, its colour grade in {@link ColourControl}.
+ * A media clip's voice chain (ADR 0031) is edited in {@link VoiceControl}; the colour grade of a media, generated or nested clip on a video track in {@link ColourControl}.
  * Video projects add the clip's edge transitions and keyframes (ADR 0018):
  * a keyed property shows its value at the playhead, and editing it keys it there.
  * A generated clip lists its element adjustments (ADR 0021) while it has any
@@ -193,7 +193,7 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
           ))}
         </div>
       )}
-      {clip.kind === "media" && placed && <ColourControl clip={clip.id} asset={clip.asset} grade={clip.grade} onSend={send} />}
+      {clip.kind !== "shot" && placed && <ColourControl clip={clip.id} asset={clip.asset} grade={clip.grade} onSend={send} />}
       {clip.kind === "generated" && placed && !image && <GlassControl clip={clip.id} backdrop={clip.backdrop} onSend={send} onError={setError} />}
       {clip.kind === "generated" && (mode.clip === clip.id || Object.keys(clip.elements).length > 0) && (
         <ElementAdjustments

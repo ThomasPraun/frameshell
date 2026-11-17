@@ -49,6 +49,33 @@ function inCrop(crop: LayerRect, source: Size, film: Size, box: FractionBox): Bo
   return { x0: x(box.x0), y0: y(box.y0), x1: x(box.x1), y1: y(box.y1) };
 }
 
+/** A clip of a flattened timeline as {@link clipPointInFilm} lays it out. */
+export interface ClipPicture {
+  clip: Parameters<typeof placementAt>[0];
+  /** Size of the clip's own picture: its asset's, or the film's for a generated clip (rendered at the format's size). */
+  source: Size;
+  generated: boolean;
+  /** The clip is on the timeline's lowest picture track, the one a format's cover crop fills the frame with. */
+  base: boolean;
+}
+
+/**
+ * Point `point` (fractions of the clip's own picture, 0 to 1) at timeline second `at`, in the `film`'s pixels: through
+ * the cover crop of `layout` when it fills the frame with the clip, else through the clip's placement then (its keys).
+ * Opacity is ignored: the point is where the picture is, shown or not.
+ */
+export function clipPointInFilm(picture: ClipPicture, at: number, point: { x: number; y: number }, film: Size, project: Size, layout?: FormatLayout): { x: number; y: number } {
+  const { clip, source } = picture;
+  const box = { x0: point.x, y0: point.y, x1: point.x, y1: point.y };
+  const crop = formatCrop(layout, clip, { size: source, generated: picture.generated, alpha: false, base: picture.base }, film);
+  if (crop) {
+    const found = inCrop(crop, source, film, box);
+    return { x: found.x0, y: found.y0 };
+  }
+  const rect = layerRect(source, film, project, placementAt(clip, at));
+  return { x: rect.left + point.x * rect.width, y: rect.top + point.y * rect.height };
+}
+
 /**
  * The faces of the footage clips of `timeline` (a flattened one: nested timelines are in it) that a cached face scan
  * knows, as boxes of the `film`'s pixels. A detection holds for the time between two samples of the scan. `layout`: the
