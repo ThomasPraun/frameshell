@@ -106,7 +106,7 @@ Owner decision 2026-11-17 (Q2 of wave 19): an in-app, read-only dialog, not a we
 - **Playback** is the People panel's player (`people/voice-play.ts`), generalised with a gain: the PCM sidecar fetched with an HTTP range and played through Web Audio of the window the button is in, one sound at a time across the app, pausing the timeline. A file not ingested yet has its button disabled until its sidecar exists.
 - **Shared code.** The modal keys and focus of the voiceover dialog moved into `components/modal.ts` (`useModal`), used by both dialogs; the audition dialog reuses the voiceover dialog's frame classes.
 - **Tests.** `core/test/audio-inspect.test.ts` (sines at 1, 1.234 and 5.555 kHz each in their row, silence on the floor, the column cap, the method through a real daemon: loudness, marks, skipped, the result schema); `apps/desktop/test/audition-model.test.ts` (match gains, file lists, candidate tracks, colours); e2e `audition.spec.ts` (two generated takes from the Explorer, match on and off, play/stop, Use this, the folder menu, Escape).
-- Protocol 166 (one new method).
+- Protocol 167 (one new method).
 - Not done: the CC0 set and the energetic music preset (postponed by the owner); a CLI command for `audio.inspect`; placing the chosen file from the dialog.
 
 ## Considered options

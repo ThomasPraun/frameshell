@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Audition dialog, slice AP of #463 (ADR 0038 "Audition page as built", epic #451; protocol 166): the person picks a
+- Audition dialog, slice AP of #463 (ADR 0038 "Audition page as built", epic #451; protocol 167): the person picks a
   sound by ear. In the Explorer, right-click two or more selected sound files (Audition N sounds…), a folder such as
   `assets/sound/`, or a `Music <rank>` track that `music candidates` made: each sound gets play/stop, a spectrogram,
   its loudness and true peak, and the kind and seed of a generated take; Match loudness plays them all at the quietest
