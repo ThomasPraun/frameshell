@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 167;
+export const PROTOCOL_VERSION = 168;
 
 export {
   type MethodSpec,
@@ -398,6 +398,8 @@ export type RenderParams = MethodParams<"render">;
 export type RenderResult = MethodResult<"render">;
 /** Result of `batch.render`. */
 export type BatchRenderResult = MethodResult<"batch.render">;
+/** Result of `batch.cancel`. */
+export type BatchCancelResult = MethodResult<"batch.cancel">;
 /** One row × format of a batch; see {@link BatchEntrySchema}. */
 export type BatchEntry = z.output<typeof BatchEntrySchema>;
 /** What `review` found on one rendered row; see {@link BatchReviewSchema}. */

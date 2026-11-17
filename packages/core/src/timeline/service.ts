@@ -376,6 +376,21 @@ export class TimelineService {
     return applyOperation(loaded.timeline, request, this.#context(root, id, loaded.fps, request.op));
   }
 
+  /**
+   * The top-level props the adapter of generated clip `clip` declares (`ClipAdapter.declaredProps`); null when its
+   * adapter is not loaded, declares none, or throws: then any prop goes.
+   */
+  async declaredProps(root: string, clip: { type: string }): Promise<readonly string[] | null> {
+    const adapter = (await this.#options.clipTypes(root)).get(clip.type);
+    if (!adapter?.declaredProps) return null;
+    try {
+      const names = await adapter.declaredProps(clip);
+      return names && names.length > 0 ? names : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Duration of the nested timeline files timeline `id` of `root` plays, for {@link clipEnd}. Throws {@link NestedTimelineError}. */
   nestedDuration(root: string, id: string, fps: number): (source: string) => Promise<number> {
     return this.#nestedDurations(root, [timelineRel(id)], new FrameGrid(fps));

@@ -754,6 +754,14 @@ export const BatchEntrySchema = z.object({
   finishedAt: z.string().nullable().describe("ISO time it ended; null before."),
   duration: z.number().nullable().describe("Seconds the render took; null until it ended."),
   warnings: z.array(z.string()).describe("What this render skips, and assets of the row without verified provenance (ADR 0026)."),
+  hash: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(
+      "Fingerprint of the data this render was made from: the row's cells, the batch file's slots and the template timeline's content. " +
+        "A later run renders a `done` row again, reported in `changed`, when it differs; null in a manifest of an older version, which a run treats as unchanged.",
+    ),
   review: BatchReviewSchema.nullable()
     .default(null)
     .describe("The review of the rendered file (`batch.render` with `review`); null when the batch did not ask for one, the render has not ended `done` or a manifest of an older version has none."),
@@ -764,7 +772,9 @@ export const BatchManifestSchema = z.object({
   batch: z.string().describe("Absolute path of the batch file."),
   template: z.string().describe("Template timeline id."),
   out: z.string().describe("Absolute folder of the outputs and this manifest."),
-  state: z.enum(["running", "done"]).describe("`done` once every entry ended; `running` left behind means the daemon stopped mid-batch."),
+  state: z
+    .enum(["running", "done", "canceled"])
+    .describe("`done` once every entry ended; `canceled` once `batch.cancel` stopped it and the running render ended; `running` left behind means the daemon stopped mid-batch."),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   entries: z.array(BatchEntrySchema).describe("Row order, then format order."),

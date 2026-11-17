@@ -1,16 +1,20 @@
 import { readFile } from "node:fs/promises";
-import { type BatchEntry, BatchManifestSchema, type BatchRenderResult } from "@frameshell/protocol";
+import { type BatchCancelResult, type BatchEntry, BatchManifestSchema, type BatchRenderResult } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `batch` (ADR 0040), in `frameshell --help`. */
-export const BATCH_USAGE = `  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--review] [--dry-run] [--yes]
+export const BATCH_USAGE = `  batch cancel <file.batch.json> [--out dir]
+                               Stop the batch that is rendering: no further row starts, the running render is canceled, the
+                               manifest says canceled. Ctrl-C in \`batch\` asks the same. Re-run the rest with --failed.
+  batch <file.batch.json> [--out dir] [--formats id,id] [--rows id,a..c] [--failed] [--force] [--review] [--dry-run] [--yes]
                                Render variants of a template timeline from data rows (in the file or its csv): each row sets
                                clip props, swaps assets or places a voiceover in memory (never under timelines/), every row x
                                format is validated first, then the rows render one at a time into exports/<batch name>/ with
                                manifest.json. --dry-run checks only.
                                Re-run: --rows renders only those rows (ids, or first..last in file order), --failed the rows
                                the manifest lists as not done (failed, canceled, or left running by a stopped daemon).
-                               A row whose renders are all done with the files in place is skipped unless --force.
+                               A row whose renders are all done with the files in place is skipped unless --force or its data
+                               (cells, slots, template timeline) changed since: it then renders again, listed as changed.
                                --review: review each rendered file (metrics only) and record pass/warn/fail in manifest.json
                                Blender clips (and other plugins with finals): unless the batch quality is draft, the rows
                                render their finals first. Over 5 minutes estimated for all rows: refused until --yes,
@@ -38,11 +42,19 @@ export interface BatchInvocation {
   yes: boolean;
 }
 
-/** Parse `batch <file> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
+/** A parsed `batch cancel` command. */
+export interface BatchCancelInvocation {
+  kind: "batch.cancel";
+  file: string;
+  out?: string;
+}
+
+/** Parse `batch <file> …` or `batch cancel <file>`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
 export function parseBatch(
   rest: string[],
   options: { out?: string | undefined; formats?: string | undefined; rows?: string | undefined; failed: boolean; force?: boolean | undefined; review?: boolean | undefined; "dry-run": boolean; yes?: boolean | undefined },
-): BatchInvocation | null {
+): BatchInvocation | BatchCancelInvocation | null {
+  if (rest[0] === "cancel" && rest.length === 2) return { kind: "batch.cancel", file: rest[1]!, ...(options.out ? { out: options.out } : {}) };
   if (rest.length !== 1) return null;
   const formats = list(options.formats);
   if (formats !== undefined && formats.length === 0) throw new UsageError("--formats takes format ids separated by commas, e.g. --formats 16x9,9x16.");
@@ -77,7 +89,59 @@ export function describeBatch(result: BatchRenderResult): string {
       : `Batch ${result.file}: ${rowCount(todo)} row(s) of timelines/${result.template}.json, one row at a time; manifest ${result.manifest}`;
   const lines = todo.flatMap((entry) => [`  ${batchLabel(entry)} -> ${entry.output}`, ...entry.warnings.map((warning) => `    warning: ${warning}`)]);
   const skipped = result.skipped.length > 0 ? [`  skipped (done, files in place; --force renders them again): ${result.skipped.join(", ")}`] : [];
-  return `${[head, ...lines, ...skipped].join("\n")}\n`;
+  const changed = result.changed.length > 0 ? [`  changed since their last render, rendered again: ${result.changed.join(", ")}`] : [];
+  return `${[head, ...lines, ...changed, ...skipped].join("\n")}\n`;
+}
+
+/** What `batch cancel` stopped: the rows that will not render, and where the manifest is. */
+export function describeCancel(result: BatchCancelResult): string {
+  const pending = result.state === "running" ? "; the running render has not stopped yet" : "";
+  return `${canceledLine(result.file, result.canceled)}${pending}. Manifest: ${result.manifest}\n`;
+}
+
+/** `Batch x.batch.json canceled (rows not rendered: es, fr)`. */
+export function canceledLine(file: string, rows: readonly string[]): string {
+  return `Batch ${file} canceled (${rows.length > 0 ? `rows not rendered: ${rows.join(", ")}` : "every row had rendered already"})`;
+}
+
+/** Row ids of the entries a cancel left `canceled`, in order, each once. */
+export function canceledRows(entries: readonly BatchEntry[]): string[] {
+  return [...new Set(entries.filter((entry) => entry.status === "canceled").map((entry) => entry.row))];
+}
+
+/**
+ * Watch the manifest at `path` for `"state": "canceled"`, which another `batch cancel` (or an agent's `batch.cancel`)
+ * writes: the rows it kept from starting have no job, so waiting for their files would never end. `canceled` resolves
+ * with the manifest's entries and never otherwise; `stop` ends the polling.
+ */
+export function watchCanceled(path: string, pause = 500): { canceled: Promise<BatchEntry[]>; stop: () => void } {
+  let stopped = false;
+  const canceled = (async () => {
+    while (!stopped) {
+      await new Promise((resolve) => setTimeout(resolve, pause));
+      try {
+        const parsed = BatchManifestSchema.safeParse(JSON.parse(await readFile(path, "utf8")));
+        if (parsed.success && parsed.data.state === "canceled") return parsed.data.entries;
+      } catch {
+        // Replaced atomically, so a read between two writes can only miss the file: ask again.
+      }
+    }
+    return new Promise<BatchEntry[]>(() => {});
+  })();
+  return { canceled, stop: () => void (stopped = true) };
+}
+
+/**
+ * Resolve once the person presses Ctrl-C (SIGINT), the first time only: a second one ends the CLI as usual, so a
+ * stuck cancel can still be left. `dispose` removes the handler.
+ */
+export function onInterrupt(): { interrupted: Promise<void>; dispose: () => void } {
+  let handler: () => void = () => {};
+  const interrupted = new Promise<void>((resolve) => {
+    handler = resolve;
+    process.once("SIGINT", handler);
+  });
+  return { interrupted, dispose: () => void process.off("SIGINT", handler) };
 }
 
 /** The outcome per row × format once every render ended. */
@@ -123,7 +187,7 @@ export async function waitReviews(path: string, pause = 400): Promise<BatchEntry
     }
     const parsed = BatchManifestSchema.safeParse(json);
     if (!parsed.success) return [];
-    if (parsed.data.state === "done") return parsed.data.entries;
+    if (parsed.data.state !== "running") return parsed.data.entries;
     await new Promise((resolve) => setTimeout(resolve, pause));
   }
 }

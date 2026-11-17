@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Batch closes #477 (ADR 0040 "Limits in v1" emptied, epic #451; protocol 168): a row whose data changed renders again
+  without `--force`. Each manifest entry now stores a `hash` of the row's cells, the batch file's slots and the template
+  timeline's content (not its revision); a `done` row whose hash differs is rendered and listed in the result's new
+  `changed` (the CLI prints it), a manifest from before hashes counts as unchanged, and `force` is for what the hash
+  does not see (a swapped file edited in place, `preset`, `quality`). A props slot naming a prop the clip's
+  composition does not declare fails the row with InvalidOperation data `{ row, slot, reason: "unknown prop", prop,
+  declared }`, in `--dry-run` too: the new optional plugin-API hook `ClipAdapter.declaredProps(clip)` names the
+  top-level props a composition declares, HyperFrames answers from `data-composition-variables` of the entry (an object
+  or an empty list declares nothing), and an adapter without the hook, or a composition without declarations, keeps
+  accepting any prop. New method `batch.cancel { file, out? }` (CLI `batch cancel <file> [--out dir]`, MCP
+  `batch_cancel`, replay-keyed like every mutating method): no further row is queued, the running row's render job is
+  canceled, the entries not ended become `canceled` and the manifest's `state` `canceled` (new value; `failed` re-runs
+  such rows); a Ctrl-C in `frameshell batch` asks the daemon, and the CLI also ends when another process cancels the
+  manifest. The skill (`batch.md`) and `docs/mcp.md` list the `yes` param and `batch_cancel`, and a CLI test covers
+  `batch --yes` (ConfirmationRequired, then the render with a stub final). Tests: `batch-service` (hash, cancel,
+  unknown prop), `batch-method` (daemon cancel and declared props), `batch-cli`, hyperframes `declaredProps`.
 - Audition dialog, slice AP of #463 (ADR 0038 "Audition page as built", epic #451; protocol 167): the person picks a
   sound by ear. In the Explorer, right-click two or more selected sound files (Audition N sounds…), a folder such as
   `assets/sound/`, or a `Music <rank>` track that `music candidates` made: each sound gets play/stop, a spectrogram,
