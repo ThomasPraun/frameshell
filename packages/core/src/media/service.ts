@@ -87,6 +87,11 @@ export interface MediaGcOptions {
    * and verify temps are left alone (`skipped` says so). Default false.
    */
   transcribing?: boolean;
+  /**
+   * An `analyze` run of the project is working: face scans are left alone, since it may scan a file outside the project and read
+   * the scan again (nothing in `assets/` holds its key). Swept as unused by the next run. Default false.
+   */
+  analyzing?: boolean;
 }
 
 /** What {@link MediaService.gc} found. */
@@ -386,7 +391,7 @@ export class MediaService {
       ...(await sweep({ ...common, dir: LOUDNESS_DIR, classify: classifyLoudness, keep: (key) => unknown > 0 || loudnessKeys.has(key) })),
       // Only the onset envelopes under .frameshell/: the beat grids in `beats/` are project files and never swept.
       ...(await sweep({ ...common, dir: BEATS_CACHE_DIR, classify: classifyBeatsCache, keep: (key) => unknown > 0 || beatsKeys.has(key) })),
-      ...(await sweep({ ...common, dir: PEOPLE_DIR, classify: classifyFaceScan, keep: (key) => unknown > 0 || peopleKeys.has(key) })),
+      ...(await sweep({ ...common, dir: PEOPLE_DIR, classify: classifyFaceScan, keep: (key) => unknown > 0 || options.analyzing === true || peopleKeys.has(key) })),
       ...(await sweep({ ...common, dir: MATTES_DIR, classify: classifyMatte, keep: (key) => unknown > 0 || matteKeys.has(key) })),
       // "Chat about this" captures: by age only, never by key.
       ...(await sweep({
@@ -397,6 +402,7 @@ export class MediaService {
         keepNewerThan: Math.min(Date.now() - CONTEXT_MAX_AGE_MS, options.keepNewerThan ?? Number.POSITIVE_INFINITY),
       })),
     );
+    if (options.analyzing) skipped.push({ area: "media", reason: "an analyze run of this project is running; it may use the face scan of a file outside the project." });
     if (options.transcribing) {
       skipped.push({ area: "audio", reason: "a transcription or export verify of this project is running; it may read any extracted WAV." });
     } else {

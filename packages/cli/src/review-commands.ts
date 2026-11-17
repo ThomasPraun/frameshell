@@ -4,12 +4,14 @@ import { styleValue } from "./style-commands.js";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `review` (#457), in `frameshell --help`. */
-export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop]
+export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,beats,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop] [--crop-at x,y[,size] [--clip id]]
                                Look at the film before showing it: write contact sheets and strips into
                                .frameshell/review/<n>/ (last 10 kept; project files untouched) and print their paths.
                                contact = frames at clip starts and ends, cuts, markers, subtitle cues and the deepest
                                zoom plus one every --every s (default 0.5), labelled with their time; phone = one frame
                                per second at 360 px wide; motion = the two fastest moments as 12 consecutive frames;
+                               beats (only when named) = one frame per beat of the tempo grid a quarter beat after the
+                               hit, labelled bar N / beat N (needs tempo set, not a LOW-confidence grid, not --file);
                                seam = the last 6 and first 6 frames; safe = up to 36 frames with the UI zones of
                                --platform (instagram, tiktok, shorts, youtube) shaded red and captions that cross them
                                marked !subtitle (--platform alone adds it; vertical films use the style guide's platforms).
@@ -27,6 +29,9 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                into metrics, a craft check listed in "fail" is a failure, and a waiver (check, clip,
                                reason) moves its warnings to "waived" with the reason. Any failure makes review exit 1.
                                --loop: the film repeats, so a seam that holds a frame or jumps is a warning.
+                               --crop-at x,y[,size]: crop every tile (not the safe sheet's) around a point, fractions
+                               of the frame, size = crop width as a share of it (default 0.25); with --clip id the
+                               point is in that clip's picture and the crop follows its keyed moves and scale.
                                --preset p (with --file): check the file against the export plan of --timeline (and
                                --format) with that preset: size, frame rate, length, codecs, loudness.
                                --file reviews an exported video (the file
@@ -46,7 +51,7 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
 
 /** Flags `review` takes besides the global ones. */
 export const REVIEW_FLAGS: Record<string, readonly string[]> = {
-  review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop"],
+  review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop", "crop-at", "clip"],
   "review require": ["clip"],
   "review waive": ["clip", "remove"],
 };
@@ -64,6 +69,7 @@ export interface ReviewInvocation {
   projectFormat?: string;
   preset?: string;
   loop?: true;
+  cropAt?: { x: number; y: number; size?: number; clip?: string };
 }
 
 /** A parsed `review require` or `review waive`. */
@@ -82,8 +88,24 @@ export interface ReviewOptions {
   format?: string | undefined;
   preset?: string | undefined;
   loop?: boolean | undefined;
+  "crop-at"?: string | undefined;
   clip?: string | undefined;
   remove?: boolean | undefined;
+}
+
+/** `--crop-at x,y[,size]` (with `--clip`): fractions 0 to 1, size above 0; throws `UsageError` for any other. */
+export function parseCropAt(value: string | undefined, clip: string | undefined): ReviewInvocation["cropAt"] {
+  if (value === undefined) {
+    if (clip !== undefined) throw new UsageError("--clip on review names the clip --crop-at follows: pass --crop-at x,y too.");
+    return undefined;
+  }
+  const parts = value.split(",").map((part) => (part.trim() === "" ? Number.NaN : Number(part)));
+  const [x, y, size] = parts;
+  const fraction = (n: number | undefined) => n !== undefined && Number.isFinite(n) && n >= 0 && n <= 1;
+  if (parts.length < 2 || parts.length > 3 || !fraction(x) || !fraction(y) || (size !== undefined && (!fraction(size) || size === 0))) {
+    throw new UsageError(`--crop-at takes x,y and an optional size, fractions of the frame from 0 to 1 (size above 0), e.g. --crop-at 0.5,0.8,0.25; got "${value}".`);
+  }
+  return { x: x!, y: y!, ...(size !== undefined ? { size } : {}), ...(clip !== undefined ? { clip } : {}) };
 }
 
 /** Names `--platform` takes besides the platform ids themselves. */
@@ -136,6 +158,7 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
     sheets = names as ReviewOutput[];
   }
   const platform = options.platform === undefined ? undefined : parsePlatform(options.platform);
+  const cropAt = parseCropAt(options["crop-at"], options.clip);
   const every = options.every === undefined ? undefined : Number(options.every);
   if (every !== undefined && (!Number.isFinite(every) || every <= 0)) throw new UsageError(`--every takes seconds above 0, got "${options.every}".`);
   if (options.preset !== undefined && options.file === undefined) throw new UsageError("--preset checks an exported file against its export plan: pass --file too.");
@@ -153,6 +176,7 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
     ...(options.format ? { projectFormat: options.format } : {}),
     ...(options.preset ? { preset: options.preset } : {}),
     ...(options.loop ? { loop: true as const } : {}),
+    ...(cropAt ? { cropAt } : {}),
   };
 }
 

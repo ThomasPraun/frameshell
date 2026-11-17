@@ -188,8 +188,10 @@ describe("frameshell review", () => {
     expect(frameshell(["review", "--range", "5"]).stderr).toContain("--range takes two seconds");
     expect(frameshell(["review", "--range", "5,2"]).code).toBe(2);
     expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("unknown: poster");
-    expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("seam, metrics");
+    expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("seam, beats, metrics");
     expect(frameshell(["review", "--every", "0"]).stderr).toContain("--every takes seconds above 0");
+    expect(frameshell(["review", "--crop-at", "0.5"]).stderr).toContain("--crop-at takes x,y");
+    expect(frameshell(["review", "--clip", "c_1"]).stderr).toContain("pass --crop-at x,y too");
     expect(frameshell(["review", "--at", "1"]).stderr).toContain("`frameshell review` does not take --at");
     expect(frameshell(["review", "extra"]).code).toBe(2);
   });

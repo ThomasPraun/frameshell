@@ -135,20 +135,38 @@ export function configLines(proposal: OpenProposal): ConfigLine[] {
   });
 }
 
-/** One style value a proposal changes, as the bar lists it: dotted path, and the value before and after as text (null: none). */
+/** One style or requirements value a proposal changes, as the bar lists it: dotted path, and the value before and after as text (null: none). */
 export interface StyleLine {
   path: string;
   from: string | null;
   to: string | null;
 }
 
+/** A config value as the bar shows it: arrays joined by commas, objects as JSON, null for none. */
+function valueText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return value.map((item) => (typeof item === "object" && item !== null ? JSON.stringify(item) : String(item))).join(", ");
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+/** The changes of `proposal` under config key `prefix`, as lines keyed by the rest of the key. */
+function prefixedLines(proposal: OpenProposal, prefix: string): StyleLine[] {
+  return proposal.config.flatMap((change): StyleLine[] =>
+    change.key.startsWith(prefix) ? [{ path: change.key.slice(prefix.length), from: valueText(change.before), to: valueText(change.after) }] : [],
+  );
+}
+
 /** The bar's list of what `proposal` changes in `style.json` (ADR 0036), in key order; string arrays read joined by commas. */
 export function styleLines(proposal: OpenProposal): StyleLine[] {
-  const text = (value: unknown): string | null => (value === null || value === undefined ? null : Array.isArray(value) ? value.join(", ") : String(value));
-  return proposal.config.flatMap((change): StyleLine[] => {
-    const path = /^style:(.+)$/.exec(change.key)?.[1];
-    return path === undefined ? [] : [{ path, from: text(change.before), to: text(change.after) }];
-  });
+  return prefixedLines(proposal, "style:");
+}
+
+/**
+ * The bar's list of what `proposal` changes in `requirements.json` (#457, ADR 0036), in key order: `film.maxSeconds`,
+ * `captions.minSize`, `fail`, `clip:<id>.<field>`, `waiver:<check>[:<clip>]` (its reason), with the values as text.
+ */
+export function requirementLines(proposal: OpenProposal): StyleLine[] {
+  return prefixedLines(proposal, "requirements:");
 }
 
 /** Who made a proposal, in a word: an agent's own label (`claude`), else History's name for the author. */

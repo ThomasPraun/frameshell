@@ -5,7 +5,7 @@ import { type TimelineViewName, ViewedShape } from "./proposals.js";
 // `review` (#457, epic #451): contact sheets and strips an agent looks at before it shows the person anything.
 
 /** The sheets `review` can write, in the order it writes them. */
-export const REVIEW_SHEETS = ["contact", "safe", "phone", "motion", "seam"] as const;
+export const REVIEW_SHEETS = ["contact", "safe", "phone", "motion", "seam", "beats"] as const;
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
 export const ReviewSheetKindSchema = z
@@ -14,7 +14,8 @@ export const ReviewSheetKindSchema = z
     "`contact`: frames at critical times (clip starts and ends, cuts, markers, subtitle cues, the deepest zoom) and every `every` seconds. " +
       "`safe`: the same kind of frames (up to 36) with the platform's UI zones shaded red and a `!subtitle` mark on the frames where a caption crosses one; needs a `platform` (or the style guide's). " +
       "`phone`: one frame per second, 360 px wide. `motion`: the two fastest moments as 12 consecutive frames each. " +
-      "`seam`: the last 6 and the first 6 frames, to judge a loop.",
+      "`seam`: the last 6 and the first 6 frames, to judge a loop. " +
+      "`beats` (only when named): one frame per beat of the timeline's tempo grid, a quarter beat after the hit, bar starts labelled `bar N` and the other beats `beat N` (up to 60); needs a tempo (`tempo.set`) that is not LOW confidence, and a timeline, not a `file`.",
   );
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
@@ -38,7 +39,7 @@ export const ReviewOutputSchema = z
 export type ReviewOutput = z.output<typeof ReviewOutputSchema>;
 
 /** Why a tile of a sheet shows the frame it does. */
-export const REVIEW_TAGS = ["start", "end", "cut", "marker", "cue", "zoom", "grid", "second", "peak", "head", "tail"] as const;
+export const REVIEW_TAGS = ["start", "end", "cut", "marker", "cue", "zoom", "grid", "second", "peak", "head", "tail", "beat"] as const;
 
 /** Review runs `.frameshell/review/` keeps: older numbered folders are deleted by the next run. */
 export const REVIEW_KEEP = 10;
@@ -47,7 +48,7 @@ export const REVIEW_KEEP = 10;
 export const ReviewTileSchema = z.object({
   at: z.number().describe("Seconds of the frame shown (timeline seconds, or file seconds when reviewing a file)."),
   frame: z.int().describe("Frame index (0-based) at the timeline's or the file's frame rate."),
-  tag: z.enum(REVIEW_TAGS).describe("Why this frame: a clip `start`/`end`, a `cut`, a `marker`, a subtitle `cue`, the deepest `zoom`, the `grid`, a `second` of the phone sheet, a motion `peak`, or the `head`/`tail` of a loop seam."),
+  tag: z.enum(REVIEW_TAGS).describe("Why this frame: a clip `start`/`end`, a `cut`, a `marker`, a subtitle `cue`, the deepest `zoom`, the `grid`, a `second` of the phone sheet, a motion `peak`, the `head`/`tail` of a loop seam, or a `beat` of the `beats` sheet."),
   label: z.string().describe("Text drawn on the tile: the time in seconds and, for all but the grid, the tag."),
   row: z.int().describe("0-based."),
   column: z.int().describe("0-based."),
@@ -55,6 +56,10 @@ export const ReviewTileSchema = z.object({
     .array(z.string())
     .optional()
     .describe("`safe` sheet: what crosses a platform zone in this frame (`subtitle`), also marked on the tile as `!subtitle`. Absent: nothing review can measure does."),
+  crop: z
+    .object({ x: z.int(), y: z.int(), width: z.int(), height: z.int() })
+    .optional()
+    .describe("With `cropAt`: the part of the frame this tile shows, pixels of the film's frame (left, top, size). Absent: the whole frame."),
 });
 
 /** One image `review` wrote. */

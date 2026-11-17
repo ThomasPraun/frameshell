@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { ErrorCode, type MediaProbe, type MethodResult, type Progress, RpcError } from "@frameshell/protocol";
 import { exists } from "../fs-util.js";
-import { PEOPLE_DIR, readFaceScan, writeFaceScan } from "./scan-cache.js";
+import { PEOPLE_DIR, type StoredFaceScan, readFaceScan, writeFaceScan } from "./scan-cache.js";
 import type { ScannedAsset } from "./face-clusters.js";
 import type { PeopleScanner } from "./scan.js";
 import { projectPath } from "./service.js";
@@ -21,6 +21,62 @@ export interface ScanProjectDeps {
   /** One human progress line (`stage: "people"`). */
   report(update: Progress): void;
   signal: AbortSignal;
+}
+
+/** What {@link scanFileFaces} needs: the two things a scan decodes and infers with. */
+export interface ScanFileDeps {
+  /** Called only when there is something to decode. */
+  scanner(): Promise<PeopleScanner>;
+  ffmpeg(): Promise<string>;
+  signal?: AbortSignal | undefined;
+}
+
+/** The video {@link scanFileFaces} scans. */
+export interface ScanFileInput {
+  /** Absolute path. */
+  path: string;
+  /** Content hash (`sha256:<hex>`): the cache key. */
+  hash: string;
+  /** Picture size. */
+  width: number;
+  height: number;
+  /** Seconds, for progress; unknown: no fraction. */
+  duration?: number | null | undefined;
+  /** Scan again even when the cache has it. */
+  force?: boolean | undefined;
+  /** 0..1 of this file looked at. */
+  onProgress?: ((fraction: number) => void) | undefined;
+}
+
+/** The part of a face scan its readers use; a {@link StoredFaceScan} is one. */
+export type FileFaceScan = Pick<StoredFaceScan, "samples" | "tracks">;
+
+/**
+ * The one scan step (ADR 0020 as-built): the face scan of the file with content `hash`, from the cache of
+ * `root` when it is there, else decoded and cached. The file may be anywhere (`people.scan` passes an asset,
+ * `analyze` a reference outside the project): the cache is keyed by content, never by path.
+ */
+export async function scanFileFaces(root: string, input: ScanFileInput, deps: ScanFileDeps): Promise<FileFaceScan & { cached: boolean }> {
+  const cached = input.force === true ? null : await readFaceScan(root, input.hash);
+  if (cached) return { samples: cached.samples, tracks: cached.tracks, cached: true };
+  const scan = await deps.scanner();
+  const found = await scan({
+    ffmpeg: await deps.ffmpeg(),
+    path: input.path,
+    width: input.width,
+    height: input.height,
+    duration: input.duration ?? undefined,
+    signal: deps.signal,
+    onProgress: input.onProgress,
+  });
+  await writeFaceScan(root, input.hash, found);
+  return { samples: found.samples, tracks: found.tracks, cached: false };
+}
+
+/** `fn` run once, on first call; later calls get the same answer. */
+function once<T>(fn: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | undefined;
+  return () => (pending ??= fn());
 }
 
 /**
@@ -62,35 +118,29 @@ export async function scanProjectFaces(
   }
 
   const assets: MethodResult<"people.scan">["assets"] = [];
-  let scan: PeopleScanner | undefined;
-  let ffmpeg = "";
+  const fileDeps: ScanFileDeps = { scanner: once(deps.scanner), ffmpeg: once(deps.ffmpeg), signal: deps.signal };
   for (const [index, { rel, probe }] of videos.entries()) {
     deps.signal.throwIfAborted();
-    const hash = await deps.hash(root, rel);
-    const cached = params.force === true ? null : await readFaceScan(root, hash);
-    if (cached) {
-      assets.push({ asset: rel, cached: true, samples: cached.samples, tracks: cached.tracks.length, embeddings: embeddingCount(cached.tracks) });
-      deps.onProgress((index + 1) / videos.length);
-      continue;
-    }
-    scan ??= await deps.scanner();
-    ffmpeg ||= await deps.ffmpeg();
     const message = `Finding faces in ${rel}`;
-    const found = await scan({
-      ffmpeg,
-      path: join(root, ...rel.split("/")),
-      width: probe.video.width,
-      height: probe.video.height,
-      duration: probe.duration ?? undefined,
-      signal: deps.signal,
-      onProgress: (fraction) => {
-        deps.onProgress((index + fraction) / videos.length);
-        deps.report({ message, fraction, stage: "people", values: { asset: rel } });
+    const found = await scanFileFaces(
+      root,
+      {
+        path: join(root, ...rel.split("/")),
+        hash: await deps.hash(root, rel),
+        width: probe.video.width,
+        height: probe.video.height,
+        duration: probe.duration,
+        force: params.force,
+        onProgress: (fraction) => {
+          deps.onProgress((index + fraction) / videos.length);
+          deps.report({ message, fraction, stage: "people", values: { asset: rel } });
+        },
       },
-    });
-    await writeFaceScan(root, hash, found);
-    assets.push({ asset: rel, cached: false, samples: found.samples, tracks: found.tracks.length, embeddings: embeddingCount(found.tracks) });
-    if (found.tracks.length === 0) warnings.push(`${rel}: no face found in ${found.samples} frames.`);
+      fileDeps,
+    );
+    assets.push({ asset: rel, cached: found.cached, samples: found.samples, tracks: found.tracks.length, embeddings: embeddingCount(found.tracks) });
+    if (found.cached) deps.onProgress((index + 1) / videos.length);
+    else if (found.tracks.length === 0) warnings.push(`${rel}: no face found in ${found.samples} frames.`);
   }
   return { assets, warnings };
 }
