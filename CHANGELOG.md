@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review mode: the proposal bar lists the `requirements.json` values a proposal sets, clears or waives
   (`Requirements: film.maxSeconds 30 → 20`), in English and Spanish. A `review` of a proposal whose requirements hold no
   valid file now says so in `warnings` and judges the film without them, instead of dropping them silently.
+- The clip inspector's Colour section now shows for generated clips and nested timeline clips on video tracks, not only
+  media clips (slice 9 of #384, ADR 0031, epic #451; no wire change). Same sliders, LUT and Reset, one `ui` `clip.set`
+  per release; the LOG note stays on footage, and shots have no colour section. The reset tooltip no longer says "footage".
 - The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
   voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
   already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
