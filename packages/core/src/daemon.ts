@@ -809,6 +809,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     generated: (dir, timeline, size) => clips.ensure(clipRoot(dir), timeline, { size }),
     faceScans: (dir) => faceScans(dir)(),
     soundProfile: (dir, asset) => energy.profile(dir, asset),
+    grid: (dir, loaded, horizon) => gridLoaderFor(dir)(loaded)(horizon),
+    pictureSize: async (dir, asset) => {
+      const { video } = await media.probe(dir, asset);
+      return video ? { width: video.width, height: video.height } : null;
+    },
   });
   const brands = new BrandService({
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
@@ -1626,7 +1631,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, view }, caller) => {
       if (preset !== undefined && file === undefined) {
         throw new RpcError(ErrorCode.InvalidParams, "`preset` checks an exported file against its export plan: pass `file` too.", { issues: [{ path: ["file"], message: "required with `preset`" }] });
       }
@@ -1634,9 +1639,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const reviewView = await viewOf(dir, caller, view);
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
+      const proposed = shownRequirements?.proposal ? requirementsFromState(shownRequirements.state) : null;
       return reviews.run(dir, {
         timeline,
-        ...(shownRequirements?.proposal ? { requirements: requirementsFromState(shownRequirements.state) } : {}),
+        ...(proposed ? { requirements: proposed.file, ...(proposed.error !== undefined ? { requirementsError: proposed.error } : {}) } : {}),
+        ...(cropAt ? { cropAt } : {}),
         ...(file ? { file: resolve(cwd, file) } : {}),
         from,
         to,

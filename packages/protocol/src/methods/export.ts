@@ -319,7 +319,7 @@ export const exportMethods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies and `metrics`): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies and `metrics`; `beats` only when named): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
@@ -344,8 +344,12 @@ export const exportMethods = {
       "smallest caption size, per clip `appearsBy`, `before`, `keepsMoving` and `staysInFrame`: what the clip draws, its alpha or the faces of a cached `people scan`, never leaves the frame of the format reviewed, with the `spans` that do) as pass, fail or skipped, with what was measured. " +
       "With `view: \"proposal\"` the proposal's version of the file is judged. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
       "a `waivers` entry (check, optional clip, reason) lifts the warnings it covers out of `craft` into `metrics.waived` with its reason, never silently. `requirements.failed` counts what still fails. " +
+      "`beats` (only when named in `sheets`): one frame per beat of the timeline's tempo grid (`tempo.set`; the one grid `tempo.show` lists), taken a quarter beat after the hit so the picture the beat lands on shows, " +
+      "bar starts labelled `bar N` and the others `beat N` (the numbers `beat:N`/`bar:N` time references use), up to 60 tiles; no tempo, a LOW-confidence grid or a `file` leaves it out with a `warnings` line. " +
+      "`cropAt` crops every tile of the run (but the `safe` sheet's, whose zones need the whole frame) around one point before scaling: a cursor on a button, a foot on the ground; with `clip` the point is in that clip's own picture and follows it through keyed moves and scale, " +
+      "after the format's cover crop; tiles say what they show in `crop`. " +
       "The MCP tool returns the sheets as images. " +
-      "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
+      "Fails with InvalidOperation (a range outside the film, a file with no picture, `cropAt.clip` with a `file` or naming no picture clip), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -364,7 +368,7 @@ export const exportMethods = {
         .array(ReviewOutputSchema)
         .min(1)
         .optional()
-        .describe("Outputs to write: the sheets and `metrics`. Default contact, phone, motion, seam and metrics, plus safe when a platform is given or the style guide names platforms on a vertical film."),
+        .describe("Outputs to write: the sheets and `metrics`. Default contact, phone, motion, seam and metrics, plus safe when a platform is given or the style guide names platforms on a vertical film; beats only when named."),
       platform: SafeZoneSchema.shape.platform
         .optional()
         .describe(
@@ -388,6 +392,25 @@ export const exportMethods = {
         .boolean()
         .optional()
         .describe("The film is meant to repeat (a title loop, a GIF): a last frame that repeats the first, or jumps from it, becomes a craft warning (`metrics.seam` is measured either way)."),
+      cropAt: z
+        .strictObject({
+          x: z.number().min(0).max(1).describe("Horizontal position of the point, 0 (left edge) to 1 (right edge)."),
+          y: z.number().min(0).max(1).describe("Vertical position of the point, 0 (top) to 1 (bottom)."),
+          size: z.number().gt(0).max(1).optional().describe("Width of the crop as a share of the frame's width; its height keeps the frame's proportions. Default 0.25."),
+          clip: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Clip id (`timeline.show`): `x` and `y` are then in that clip's own picture and the crop follows the point wherever the clip's position and scale keys move it, " +
+                "after the cover crop of the format reviewed; before and after the clip the crop holds where the clip starts or ends. A timeline only.",
+            ),
+        })
+        .optional()
+        .describe(
+          "Crop every tile of this run around one point (fractions of the film's frame) before it is scaled into the sheet, so a small detail reads: the crop stays inside the frame (and inside letterbox bars), each tile lists it in `crop`. " +
+            "The `safe` sheet keeps whole frames. The frames are the same captures, so `metrics` are unchanged.",
+        ),
       view: ViewParam,
     }),
     result: ReviewResultSchema,
