@@ -2,6 +2,14 @@
 
 "Make it like this video" works when you measure the reference instead of guessing. `analyze` reads a video the person gives you (a reel they like, a competitor, their own older film) and writes down its **grammar**: how it cuts, what colours and look it has, how it moves, what happens when, how much text and graphics it carries, how loud it is, what tempo it keeps, how its voice and music sit together. `analyze diff` then measures how far our film is from it. Take the grammar; never take the content (characters, designs, script, footage). Commands assume the session rule of [SKILL.md](../SKILL.md).
 
+## What kind of reference
+
+Look at what the person gave you before you run anything. Each kind needs a different first move. Label every point MEASURED, ESTIMATED or DECISION as in section 4, and never copy characters, designs, faces, copy or script.
+
+- **A frame** (one image: a screenshot, a thumbnail, a still from a reel). `analyze` is for videos; a frame has no cuts or rhythm. Open the image and say what you take: the layout (where the subject, the text and the empty space sit, as fractions of the frame), the framing (distance, angle, headroom), the text placement and weight (position, size relative to the frame, bold or light, how many words), the palette and the look (dark or bright, warm or cool, contrast). Say what you do not take: the subject, the people and characters, the faces, the words, the exact design. Everything you read by eye is ESTIMATED (name the region you looked at). For the levels of a still, put it on a timeline as a clip (a scratch timeline keeps it out of the film) and run `frameshell grade analyze <clip> --at 0.5`: luma, saturation, warmth and tint of the picture are MEASURED (checked on a PNG). It gives no palette list, so name the dominant colours by eye and say ESTIMATED, and ignore its suggested correction: that is for grading a clip, not a reading of the reference's style.
+- **A video.** Steps 1 to 5 below: a frame every 0.5 s on the contact sheet, then shot by shot (`shots`, `cuts`, `events`), then the numbers.
+- **A library** (a brand kit, a folder of references, a Figma file, a site). Style guide first, then measure. Run `frameshell brand capture <url>` for a public site, or `frameshell brand import-figma <folder>` for frames exported from Figma as SVG ([brand.md](brand.md)), then `frameshell style show`. Write the tokens the person confirms (colours with an accent, fonts, `brand.*`) into `style.json` with `frameshell style set <path> <value>`: it goes through the config journal, so it can be reverted. Only then measure one or two videos from the library with `analyze` and take their grammar (pacing, look, where graphics land) as targets next to the style file. Do not measure the whole folder: two videos show the system, ten show the noise.
+
 ## 1. Measure it
 
 ```sh

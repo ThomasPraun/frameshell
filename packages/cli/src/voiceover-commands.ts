@@ -188,27 +188,48 @@ function withConfirmationHint(error: unknown, inv: Extract<VoiceoverInvocation, 
   if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return error;
   const token = (error.data as { confirmation?: unknown } | undefined)?.confirmation;
   if (typeof token !== "string") return error;
-  return new RpcError(error.code, `${error.message}\nOnce the person confirmed this cost: ${confirmCommand(inv, token)}`, error.data);
+  const command = confirmCommand(inv, token);
+  if (command === null) return error;
+  return new RpcError(error.code, `${error.message}\nOnce the person confirmed this cost: ${command}`, error.data);
 }
 
 /**
  * The command that confirms the ask of `inv`: the same script, lines, provider, voice and `--no-verify`, so the run it
- * confirms is the one the person saw priced, plus `--yes --confirmation <token>`.
+ * confirms is the one the person saw priced, plus `--yes --confirmation <token>`. Null when a word holds a line break,
+ * which no quoting carries alike across shells: the refusal then keeps its message without a command.
  */
-export function confirmCommand(inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>, token: string): string {
-  const parts = ["frameshell", "voiceover", "generate", shellWord(inv.script)];
-  if (inv.lines) parts.push("--lines", shellWord(inv.lines.join(",")));
-  if (inv.provider !== undefined) parts.push("--provider", shellWord(inv.provider));
-  if (inv.voice !== undefined) parts.push("--voice", shellWord(inv.voice));
+export function confirmCommand(
+  inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>,
+  token: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const parts = ["frameshell", "voiceover", "generate"];
+  const flags: [string | null, string | undefined][] = [
+    [null, inv.script],
+    ["--lines", inv.lines?.join(",")],
+    ["--provider", inv.provider],
+    ["--voice", inv.voice],
+  ];
+  for (const [flag, text] of flags) {
+    if (text === undefined) continue;
+    const word = shellWord(text, platform);
+    if (word === null) return null;
+    parts.push(...(flag === null ? [word] : [flag, word]));
+  }
   if (!inv.verify) parts.push("--no-verify");
   parts.push("--yes", "--confirmation", token);
   return parts.join(" ");
 }
 
-/** `text` as one shell word: bare when plain, else in double quotes (read alike by sh, PowerShell and cmd) unless it holds a character they treat differently. */
-function shellWord(text: string): string {
+/**
+ * `text` as one shell word: bare when plain, else in single quotes, where only the quote itself is special (`'\''` in
+ * sh, `''` in PowerShell on win32). Null for a line break.
+ */
+export function shellWord(text: string, platform: NodeJS.Platform = process.platform): string | null {
   if (/^[\w./:@%+=,-]+$/.test(text)) return text;
-  return /["`$\\!]/.test(text) ? JSON.stringify(text) : `"${text}"`;
+  if (/[\r\n\0]/.test(text)) return null;
+  if (platform === "win32") return `'${text.replace(/['‘-‛]/g, (quote) => quote + quote)}'`;
+  return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
 function formatPlace(result: VoiceoverPlaceResult): string {

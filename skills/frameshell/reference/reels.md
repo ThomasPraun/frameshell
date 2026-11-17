@@ -8,7 +8,7 @@ Ask once, in at most two rounds of up to four questions, each with options and y
 
 1. **Which take:** the newest video in `assets/`, or the file they name.
 2. **Platform:** Instagram Reels, TikTok, YouTube Shorts, or all. It changes the safe zones and the length, little else.
-3. **Style:** `frameshell style show` when the project has a `style.json` (colours, fonts, type sizes, motion, sound levels, platforms, banned list; see [project-model.md](project-model.md#style)); otherwise reference images they give, or your defaults below. Ask only for values it marks `not set`.
+3. **Style:** `frameshell style show` when the project has a `style.json` (colours, fonts, type sizes, motion, sound levels, platforms, banned list; see [project-model.md](project-model.md#style)); otherwise reference images they give (a frame, a reference film or a brand library each start differently: [reference-video.md](reference-video.md#what-kind-of-reference)), or your defaults below. Ask only for values it marks `not set`.
 4. **Review:** *guided* (they watch after every pass) or *quick* (they only approve word fixes, caption keywords and the graphics plan). Both keep the three fixed stops: after the cut, after the graphics plan, before export.
 5. **Graphics:** few (captions + 2–3 cards), balanced (captions + 4–6 cards and logos, recommended), many (also one full-screen scene).
 6. **Music:** a file they give, one you make with your own tools, or none.

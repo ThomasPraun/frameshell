@@ -1503,6 +1503,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Small fixes, slice SF of #471 (epic #451, parts of #470 and #482; no wire change): a `voiceover.generate` call now
+  stops when its connection closes (Ctrl+C in the CLI, a dropped MCP connection, the app quitting), through the same
+  stop as `voiceover.cancel` (takes finished before stay written, other clients' calls untouched, a waiting client no
+  longer sits behind a run nobody listens to; ADR 0034 as built; the skill no longer says a dropped connection keeps
+  the run going). The confirming command a paid refusal prints quotes its words for the shell (single quotes, `'\''`
+  in sh and `''` in PowerShell on Windows) and is left out for a word with a line break, instead of double quotes
+  that expanded `$` and a backtick. `docs/binaries.md` says a Blender folder outside the supported range is taken on
+  Windows only when nothing else is found, `blender.exe` on PATH included, as the code does.
+  `InputsContext.signal` of the plugin API is typed optional, as its doc already said (`PLUGIN_API_VERSION` stays
+  `"1"`).
+- Skill: reference handling by type, closes #471. `reference-video.md` opens with "What kind of reference": a frame
+  (what to take and what not, ESTIMATED by eye, `grade analyze` on a still for the levels), a video (the existing
+  steps) or a library (`brand capture` / `brand import-figma`, `style show`, `style set`, then one or two videos).
+  `motion-films.md` and `reels.md` link to it.
 - `clip compare --look a:scene=2024` (#482) keeps `scene` and `camera` values as text, so a scene named `2024` or a
   camera named `001` is found; `null` still drops the key. The `clip.compare` description now names `ClipRenderFailed`
   for a variant whose render fails (it said InvalidOperation) and says variant renders stay cached only until `gc`.
