@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, slice TP3 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
+  new <name> --template` takes four more. `logo-sting` is a short brand hit on its own background (the logo lands with a
+  spring and a ring, a light band sweeps across, the name rises; a monogram stands in for a missing logo). `pip-card`
+  is a still picture in a rounded corner card with an optional caption chip, over a talking head (image prop only: a
+  live video in a corner stays the multicam picture-in-picture layout, owner decision 2026-11-16). `work-cards` shows
+  task cards from a `title:status` list that come in staggered, pulse when they start and follow one shared progress,
+  with no icons. `light-leak` is a seeded warm glow, a clip about a second long on a track above a cut, clear at its
+  first and last frame, `hue` and `intensity` props, no blend mode: an overlay, so the cut underneath keeps its
+  length. Each pulls late cues in before the 0.3 s exit and lays out in all four formats. The hash of `seed` that
+  `emphasis-marker` and `scene-background` each carried is one `SEED_HELPERS` in the kit, shared with `light-leak`.
+  The `hyperframes` and Frameshell skills list them.
 - The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
   voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
   already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was

@@ -1,6 +1,7 @@
 import {
   COLOR_HELPERS,
   PLACEHOLDER,
+  SEED_HELPERS,
   type Template,
   type TemplateInput,
   type TemplateVariable,
@@ -65,15 +66,14 @@ export const sceneBackground: Template = {
       var unit = Math.min(S.width, S.height);
       ${COLOR_HELPERS}
       ${UI_HELPERS}
+      ${SEED_HELPERS}
 
       var D = S.duration || 1;
       // Frame size per format: the short side stands for 1080 p, and orbs are a bit smaller on wide frames.
       var L = M.pick({ orb: 1.0 }, { orb: 1.1 }, { orb: 1.1 });
       var scale = unit / 1080;
-      // The seed text becomes one number in 0..1 (a small string hash) that offsets every orb's phase.
-      var hash = 0;
-      String(P.seed).split("").forEach(function (ch) { hash = (hash * 31 + ch.charCodeAt(0)) % 9973; });
-      var shift = hash / 9973;
+      // The seed text becomes one number in 0..1 that offsets every orb's phase.
+      var shift = seedOf(P.seed) / 9973;
       document.getElementById("base").style.background = P.bg;
 
       // Orbs: radial gradients (no blur), spread over the frame, each on a closed loop of the clip (1 or 2 turns), so the clip repeats without a seam.

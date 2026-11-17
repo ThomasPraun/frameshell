@@ -36,6 +36,9 @@ const clip = { id: "c_spot", source: "compositions/hyperframes/spot/index.html" 
 
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion templates (real HyperFrames)", () => {
   describe.each(TEMPLATES.map((t) => [t.id, t.overlay] as const))("%s", (template, overlay) => {
+    // A light leak is about a second long, clear at both ends and see-through at its peak: it is judged at its own times, by any visible pixel, and may leave the frame.
+    const leak = template === "light-leak";
+    const solid = leak ? 16 : 200;
     it(
       "lays out inside the frame in every format and paints the same frames cold and after a reseek (≤ 2/255)",
       async () => {
@@ -83,7 +86,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               return page;
             };
             try {
-              const times = [0.45, 0.9, 1.6, 2.4];
+              const times = leak ? [0.2, 0.45, 0.7, 0.55] : [0.45, 0.9, 1.6, 2.4];
               const cold: Buffer[] = [];
               for (const t of times) {
                 const page = await open();
@@ -107,7 +110,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               let maxY = 0;
               let drawn = 0;
               for (let p = 0; p < settled.length; p += 4) {
-                if (settled[p + 3]! < 200) continue;
+                if (settled[p + 3]! < solid) continue;
                 const x = (p / 4) % width;
                 const y = Math.floor(p / 4 / width);
                 drawn++;
@@ -119,8 +122,8 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               expect(drawn, format).toBeGreaterThan(width * height * 0.002);
               expect(cold[0]!.equals(cold[3]!), format).toBe(false);
               // An overlay leaves most of the frame unpainted (over footage) and keeps inside it with a margin.
-              if (overlay) {
-                expect(drawn, format).toBeLessThan(width * height * 0.5);
+              if (overlay) expect(drawn, format).toBeLessThan(width * height * 0.5);
+              if (overlay && !leak) {
                 expect(minX, format).toBeGreaterThan(width * 0.03);
                 expect(maxX, format).toBeLessThan(width * 0.97);
                 expect(minY, format).toBeGreaterThan(height * 0.03);
@@ -169,14 +172,22 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         expect(performance.now() - started).toBeLessThan(three ? 120_000 : 40_000);
         const { stdout } = await execFileAsync(
           ffmpeg,
-          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", three ? "0.5" : "1.5", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
+          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", three || leak ? "0.5" : "1.5", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
           { encoding: "buffer", maxBuffer: 1 << 26 },
         );
         let opaque = 0;
         let clear = 0;
+        let seen = 0;
         for (let p = 3; p < stdout.length; p += 4) {
           if (stdout[p]! > 200) opaque++;
           else if (stdout[p]! < 128) clear++;
+          if (stdout[p]! > 8) seen++;
+        }
+        // The light leak crests at its middle (0.5 s of its 1 s) and is see-through there: some of the frame is lit, most of it is clear.
+        if (leak) {
+          expect(seen).toBeGreaterThan(480 * 270 * 0.005);
+          expect(seen).toBeLessThan(480 * 270 * 0.7);
+          return;
         }
         expect(opaque).toBeGreaterThan(480 * 270 * 0.002);
         if (overlay) expect(clear).toBeGreaterThan(480 * 270 * 0.5);
@@ -493,6 +504,196 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         const before = (await page.evaluate(scaleOf)) as number;
         await seek(page, 1.4);
         expect((await page.evaluate(scaleOf)) as number).toBeGreaterThan(before * 1.1);
+      });
+    }, 120_000);
+
+    // The brand and overlay group (TP3): what each page leaves on screen at the start, at its peak and at its end.
+    type LivePage = Parameters<Parameters<typeof inPage>[3]>[0];
+    /** RGBA bytes of the page at `t`, transparent where the page paints nothing. */
+    const rgbaAt = async (page: LivePage, dir: string, t: number): Promise<Buffer> => {
+      await seek(page, t);
+      const ffmpeg = await binaries().ensure("ffmpeg");
+      const file = join(dir, `${t}.png`);
+      writeFileSync(file, await page.screenshot({ type: "png", omitBackground: true }));
+      const { stdout } = await execFileAsync(ffmpeg, ["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgba", "-"], { encoding: "buffer", maxBuffer: 1 << 26 });
+      return stdout;
+    };
+    const alphaSum = (rgba: Buffer) => {
+      let sum = 0;
+      for (let p = 3; p < rgba.length; p += 4) sum += rgba[p]!;
+      return sum;
+    };
+    const style = (id: string, property: string) => `document.getElementById('${id}').style.${property}`;
+    const translateOf = (id: string, axis: 1 | 2 = 1) => `Number(/translate\\(([-\\d.]+)px, ([-\\d.]+)px/.exec(document.getElementById('${id}').style.transform)[${axis}])`;
+    const scaleXOf = (selector: string) => `Array.from(document.querySelectorAll('${selector}')).map(function (e) { return Number(/scale\\(([-\\d.]+)/.exec(e.style.transform)[1]); })`;
+
+    it("light-leak is clear at its first and last frame, crests in the middle, and one seed paints one frame", async () => {
+      const dir = tempDir();
+      const shots: Record<string, Buffer> = {};
+      for (const [key, seed] of [["a1", "a"], ["b", "b"], ["a2", "a"]] as const) {
+        await inPage("light-leak", { seed }, undefined, async (page) => {
+          if (key === "a1") {
+            const sums: number[] = [];
+            for (const t of [0, 0.15, 0.5, 0.85, 1]) sums.push(alphaSum(await rgbaAt(page, dir, t)));
+            const [first, early, peak, late, last] = sums as [number, number, number, number, number];
+            expect(first).toBe(0);
+            expect(last).toBe(0);
+            expect(early).toBeGreaterThan(0);
+            expect(late).toBeGreaterThan(0);
+            expect(peak).toBeGreaterThan(early);
+            expect(peak).toBeGreaterThan(late);
+          }
+          shots[key] = await rgbaAt(page, dir, 0.5);
+        });
+      }
+      expect(shots["a1"]!.equals(shots["a2"]!)).toBe(true);
+      expect(shots["a1"]!.equals(shots["b"]!)).toBe(false);
+    }, 240_000);
+
+    it("light-leak at full strength and size still leaves part of the frame clear, never opaque or white, and its hue prop turns the colour", async () => {
+      const dir = tempDir();
+      const strongest = (rgba: Buffer) => {
+        let best = 0;
+        let at = 0;
+        let lit = 0;
+        for (let p = 3; p < rgba.length; p += 4) {
+          if (rgba[p]! > 8) lit++;
+          if (rgba[p]! > best) {
+            best = rgba[p]!;
+            at = p - 3;
+          }
+        }
+        return { alpha: best, red: rgba[at]!, blue: rgba[at + 2]!, lit: lit / (rgba.length / 4) };
+      };
+      const hues: ReturnType<typeof strongest>[] = [];
+      for (const hue of [0, 180]) {
+        await inPage("light-leak", { intensity: 1, size: 1.6, hue, peak: 0.5 }, undefined, async (page) => {
+          hues.push(strongest(await rgbaAt(page, dir, 0.5)));
+        });
+      }
+      for (const found of hues) {
+        expect(found.alpha).toBeLessThan(220);
+        expect(found.lit).toBeLessThan(0.8);
+      }
+      // The default tint is orange (red over blue); half a turn of hue makes it blue over red.
+      expect(hues[0]!.red).toBeGreaterThan(hues[0]!.blue);
+      expect(hues[1]!.blue).toBeGreaterThan(hues[1]!.red);
+    }, 240_000);
+
+    it("light-leak crests where `peak` says", async () => {
+      const dir = tempDir();
+      await inPage("light-leak", { peak: 0.25 }, undefined, async (page) => {
+        const early = alphaSum(await rgbaAt(page, dir, 0.25));
+        expect(early).toBeGreaterThan(alphaSum(await rgbaAt(page, dir, 0.6)));
+        expect(early).toBeGreaterThan(alphaSum(await rgbaAt(page, dir, 0.1)));
+      });
+    }, 120_000);
+
+    it("logo-sting with no logo and no name shows a bullet monogram and no name row; a late landing is pulled in before the exit", async () => {
+      await inPage("logo-sting", { name: "", logo: "", popAt: 2 }, 2, async (page) => {
+        expect(await page.evaluate(style("logo", "display"))).toBe("none");
+        expect(await page.evaluate(style("mono", "display"))).not.toBe("none");
+        expect(await page.evaluate("document.getElementById('mono').textContent")).toBe("•");
+        expect(await page.evaluate("document.getElementById('name').parentNode.style.display")).toBe("none");
+        // 2 s clip: the logo lands at 2 - 0.3 - 1.2 = 0.5 s, not at the asked 2 s.
+        await seek(page, 0.45);
+        expect(await page.evaluate(opacityOf("mark"))).toBe(0);
+        await seek(page, 1.65);
+        expect(await page.evaluate(opacityOf("mark"))).toBeGreaterThan(0.99);
+        // The ring and the band have come and gone by then.
+        expect(await page.evaluate(opacityOf("ring"))).toBe(0);
+        expect(await page.evaluate(opacityOf("sweep"))).toBe(0);
+      });
+    }, 120_000);
+
+    it("logo-sting takes its monogram from the name, shows the ring and the band on the way and the name rising through its mask", async () => {
+      await inPage("logo-sting", { name: "acme", popAt: 0.25 }, undefined, async (page) => {
+        expect(await page.evaluate("document.getElementById('mono').textContent")).toBe("A");
+        await seek(page, 0.1);
+        expect(await page.evaluate(opacityOf("mark"))).toBe(0);
+        await seek(page, 0.5);
+        expect(await page.evaluate(opacityOf("ring"))).toBeGreaterThan(0.1);
+        // The band crosses between 0.75 and 1.35 s.
+        await seek(page, 1);
+        expect(await page.evaluate(opacityOf("sweep"))).toBe(1);
+        // The name starts 0.25 s after the logo: still on its way up at 0.55 s, in place at 1.6 s.
+        await seek(page, 0.55);
+        expect((await page.evaluate(translateOf("name", 2))) as number).toBeGreaterThan(1);
+        await seek(page, 1.6);
+        expect(await page.evaluate(opacityOf("sweep"))).toBe(0);
+        expect(await page.evaluate(opacityOf("name"))).toBeGreaterThan(0.99);
+        expect(Math.abs((await page.evaluate(translateOf("name", 2))) as number)).toBeLessThan(1);
+      });
+    }, 120_000);
+
+    it.each([["top-left", false, false], ["bottom-right", true, true]] as const)("pip-card in the %s corner stays inside the frame once it has landed; an empty caption hides the chip", async (corner, right, bottom) => {
+      await inPage("pip-card", { corner, caption: "" }, undefined, async (page) => {
+        await seek(page, 3);
+        const box = (await page.evaluate("(function () { var r = document.getElementById('card').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()")) as number[];
+        const [left, top, rightEdge, bottomEdge] = box as [number, number, number, number];
+        expect(left).toBeGreaterThan(480 * 0.03);
+        expect(rightEdge).toBeLessThan(480 * 0.97);
+        expect(top).toBeGreaterThan(270 * 0.03);
+        expect(bottomEdge).toBeLessThan(270 * 0.97);
+        expect(left < 240).toBe(!right);
+        expect(top < 135).toBe(!bottom);
+        expect(await page.evaluate(style("chip", "display"))).toBe("none");
+      });
+    }, 120_000);
+
+    it("pip-card slides in from its own edge and a late card is pulled in so it has landed before the exit", async () => {
+      await inPage("pip-card", { enterAt: 3, corner: "bottom-right" }, 2, async (page) => {
+        // 2 s clip: it lands at 2 - 0.3 - 0.7 = 1 s, not at the asked 3 s.
+        await seek(page, 0.95);
+        expect(await page.evaluate(opacityOf("card"))).toBe(0);
+        await seek(page, 1.1);
+        // On the way in it is still to the right of where it ends (the card sits in the right corner).
+        const away = (await page.evaluate(translateOf("card"))) as number;
+        expect(away).toBeGreaterThan(5);
+        await seek(page, 1.65);
+        expect(await page.evaluate(opacityOf("card"))).toBeGreaterThan(0.99);
+        expect(Math.abs((await page.evaluate(translateOf("card"))) as number)).toBeLessThan(3);
+      });
+    }, 120_000);
+
+    it("work-cards reads title:status lines, shows at most five, hides the chip of a line with no status and starts cards one after another", async () => {
+      await inPage("work-cards", { items: "One:Running|Two|Three:Queued|Four|Five|Six|Seven" }, undefined, async (page) => {
+        expect(await page.evaluate("document.querySelectorAll('.card').length")).toBe(5);
+        expect(await page.evaluate("Array.from(document.querySelectorAll('.title')).map(function (e) { return e.textContent; })")).toEqual(["One", "Two", "Three", "Four", "Five"]);
+        expect(await page.evaluate("Array.from(document.querySelectorAll('.status')).map(function (e) { return e.style.display === 'none' ? '' : e.textContent; })")).toEqual(["Running", "", "Queued", "", ""]);
+        // With the defaults the first card lands at 0.3 s and the second at 0.8 s.
+        await seek(page, 0.25);
+        expect(await page.evaluate("Array.from(document.querySelectorAll('.card')).map(function (e) { return Number(e.style.opacity); })")).toEqual([0, 0, 0, 0, 0]);
+        await seek(page, 0.6);
+        const opacity = (await page.evaluate("Array.from(document.querySelectorAll('.card')).map(function (e) { return Number(e.style.opacity); })")) as number[];
+        expect(opacity[0]).toBeGreaterThan(0.9);
+        expect(opacity[1]).toBe(0);
+      });
+    }, 120_000);
+
+    it("work-cards fills every started bar to one shared amount, never a card that has not started, and ends full before the exit", async () => {
+      await inPage("work-cards", {}, undefined, async (page) => {
+        // Cards start at 0.55, 1.05 and 1.55 s (landing + 0.25); the shared progress starts at 1.2 s.
+        await seek(page, 1.4);
+        const mid = (await page.evaluate(scaleXOf(".fill"))) as number[];
+        expect(mid[0]).toBeGreaterThan(0);
+        expect(mid[0]).toBeCloseTo(mid[1]!, 3);
+        expect(mid[2]).toBe(0);
+        await seek(page, 2.4);
+        const later = (await page.evaluate(scaleXOf(".fill"))) as number[];
+        expect(later[0]).toBeGreaterThan(mid[0]!);
+        expect(later[0]).toBeCloseTo(later[1]!, 3);
+        expect(later[0]).toBeCloseTo(later[2]!, 3);
+        await seek(page, 3.9);
+        expect(((await page.evaluate(scaleXOf(".fill"))) as number[]).every((fill) => fill > 0.999)).toBe(true);
+      });
+    }, 120_000);
+
+    it("work-cards pulls its cards and its progress in on a clip too short for the asked timing", async () => {
+      await inPage("work-cards", { startAt: 2, gap: 2, progressAt: 5, progressTime: 5 }, 2.5, async (page) => {
+        await seek(page, 2.1);
+        expect(((await page.evaluate(scaleXOf(".fill"))) as number[]).every((fill) => fill > 0.999)).toBe(true);
+        expect(((await page.evaluate("Array.from(document.querySelectorAll('.card')).map(function (e) { return Number(e.style.opacity); })")) as number[]).every((value) => value > 0.99)).toBe(true);
       });
     }, 120_000);
   });
