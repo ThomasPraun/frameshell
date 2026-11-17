@@ -459,7 +459,7 @@ A generated clip (`type: "blender"`) whose `source` is a `.blend` in the project
 _Avoid_: 3D clip, Blender layer, Blender asset
 
 **User install**:
-A tool Frameshell uses but never downloads, because it belongs to the person (Blender): a package with no pinned builds, found only through a `binaries` override.
+A tool Frameshell uses but never downloads, because it belongs to the person (Blender): a package with no pinned builds, found through a `binaries` override or, without one, at the tool's standard install path or on PATH.
 _Avoid_: system binary, external binary, unmanaged tool
 
 **Draft**:

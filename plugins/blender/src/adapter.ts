@@ -6,6 +6,7 @@ import type { ClipAdapter, InputsContext, PropsSchema, PropsValidation, RenderCo
 import { type BlenderEvent, SUPPORTED_BLENDER, VersionProbe, runBlender, scriptPath } from "./blender.js";
 import { BlendDeps, STATE_DIR, listingPath, marker } from "./deps.js";
 import { FinalTimes } from "./finals.js";
+import { sweepState } from "./state-gc.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "blender";
@@ -94,7 +95,8 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       const blender = await context.ensureBinary("blender");
       const version = await versions.version(blender);
       const info = await deps.hash(source);
-      const linked = await deps.list(source, blender, info);
+      // The host's stop ends a listing's Blender (up to 5 minutes), so none outlives the daemon.
+      const linked = await deps.list(source, blender, info, context.signal);
       // Files outside the project enter the key by content only (ADR 0035 slice 4): no absolute path in the project.
       const outside = await deps.outsideKey(source, info, linked.outside);
       return [
@@ -106,6 +108,11 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
         ...linked.inside,
         ...(outside ? [outside] : []),
       ];
+    },
+    async gc(context) {
+      const removed = await sweepState(context);
+      if (!context.dryRun) deps.forget(removed.map((entry) => entry.path));
+      return removed;
     },
     async render(clip, ctx: RenderContext) {
       const { id } = clip as BlenderClip;

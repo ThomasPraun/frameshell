@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
+  `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
+  version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
+  as an input and nothing wrote it in the last minute; `finals.json`, unknown names and symlinks stay. It is a new
+  optional plugin-API hook, `ClipAdapter.gc(context)` with `AdapterGcContext { projectDir, inputs, dryRun,
+  keepNewerThan, signal }`, so core never learns the plugin's layout: `ClipRenderer.gc` gathers the paths each adapter's
+  `inputs()` returned while it keys every clip (the rule that keeps the clip renders), and skips the hooks with the
+  same reasons when a clip has no key or a render or export job runs. `InputsContext` gets a `signal`, aborted when the
+  daemon stops: the Blender that lists a `.blend`'s files (up to 5 minutes) is killed with it and no longer outlives the
+  daemon.
+- The opt-in real Blender test has a positive control for the driver trap: the same library's driver does write its file
+  with auto-exec on and a frame evaluated, so "marker absent" under `-Y` means something. Not run with a real Blender
+  yet.
 - The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
   voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
   already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
@@ -1268,6 +1281,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A tool's install folders outside its supported range are a fallback, not the answer (`findUserInstall`, Blender on
+  Windows): an old `Blender 3.6` folder in `Program Files` no longer hides a supported `blender` on PATH; the later
+  rules look first, and only when they find nothing is the newest folder outside the range taken, so `doctor` still says
+  "out of range" and never "not installed".
 - Raw frame reads (`readRawFrames`: subject mattes, face detection, people scans, `review`, `analyze`) copy each pipe
   chunk once into its frame instead of joining chunks as they come, which copied a 4K RGB frame hundreds of times.
 - The `blender` clip's `quality` prop is gone (owner decision on #501): props are `scene` and `camera`, and a `quality`

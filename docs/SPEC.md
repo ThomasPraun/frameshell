@@ -690,7 +690,7 @@ Design rules:
 
 | Point | v0.1 | Contract (sketch) |
 |---|---|---|
-| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip, ctx?)` (`ctx`: project dir, `ensureBinary`, additive: ADR 0035) → files affecting the cache key, `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview(clip, ctx)` → `{ root, entry, head }`, a page the preview drives while no render is ready (v0.2, ADR 0010) |
+| Clip adapter | ✅ | `type`, `propsSchema`, `inputs(clip, ctx?)` (`ctx`: project dir, `ensureBinary`, `signal` aborted when the daemon stops, additive: ADR 0035) → files affecting the cache key, optional `gc(ctx)` deletes the adapter's own files in the project that no clip's inputs name (ADR 0035 slice 5), `render(clip, ctx)` → `{ file, hasAlpha }`; `hasAlpha: true` ⇒ VP9 WebM with `alpha_mode=1` that plays in Chromium `<video>`; `api.refreshRenders()` re-checks keys after changes the host cannot see (code outside the project, ADR 0009); optional `livePreview(clip, ctx)` → `{ root, entry, head }`, a page the preview drives while no render is ready (v0.2, ADR 0010) |
 | Transcription provider | ✅ | `transcribe(file, opts)` → words in core format |
 | Speech provider | ✅ (ADR 0034) | `voices()`, optional `estimate(text, voice, opts)` → `{ cost, currency }` (no estimate and no `free: true` = paid, cost unknown), `synthesize(text, voice, opts, ctx)` → `{ file }` (mono 16-bit PCM WAV); the host spells numbers, caches, trims, writes and imports the take |
 | CLI commands | ✅ | `register(name, handler)` with typed args |
