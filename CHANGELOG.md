@@ -20,6 +20,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   length. Each pulls late cues in before the 0.3 s exit and lays out in all four formats. The hash of `seed` that
   `emphasis-marker` and `scene-background` each carried is one `SEED_HELPERS` in the kit, shared with `light-leak`.
   The `hyperframes` and Frameshell skills list them.
+- `analyze` finds the faces for mouth sync itself, slice AL of #471 (ADR 0020 decision 16, epic #451; protocol 165): a
+  reference file anywhere on disk no longer needs `people scan` first. When the project has no scan of the file's
+  content, the run makes it with the same scanner as `people.scan` (the one `scanFileFaces` step) and caches it in
+  `.frameshell/people/`, so `people scan` of a copy finds it again. On by default; the first run may download the face
+  models. New `faces` param (`--no-faces`) skips the scan and still uses one already cached; a scan that cannot run
+  (no model, no network, untrusted runtime) is a skipped `sync` with the reason and a warning, never a failed run.
+  `analyze.diff` has no `faces`. `gc` leaves face scans alone while an `analyze` job runs (a scan of a file outside
+  `assets/` is swept as unused afterwards; it is regenerable). The mouth is still picture motion in the face box: the
+  5-point SFace landmarks have no mouth opening.
+- `review` frames per beat and crops, slice RP2 of #457 (epic #451; protocol 164): `--sheets beats` (opt in, never a
+  default) writes one frame per beat of the timeline's tempo grid, the one `tempo show` lists (`tempoGrid` through the
+  daemon's grid loader), a quarter beat after each hit (the last beat takes the length of the one before), bar starts
+  labelled `bar N` and the rest `beat N` like the `bar:N`/`beat:N` time references, up to 60 tiles thinned evenly with
+  bar starts kept first; tile tag `beat`. No tempo, a LOW-confidence or unmeasured grid, or a `--file` writes no sheet
+  and says why in `warnings`. `--crop-at x,y[,size]` (`cropAt` on the wire) crops every tile of the run but the safe
+  sheet's around a point of the frame (size = share of the width, default 0.25, frame proportions kept) from the same
+  captures, inside the picture letterbox bars leave; with `--clip id` the point is in that clip's own picture and
+  follows its keyed position and scale, through the format's cover crop (ADR 0043 slice 4 as built). Each tile lists
+  its `crop` in film pixels. `cropAt.clip` with a file, or naming no video clip, is InvalidOperation.
+- Review mode: the proposal bar lists the `requirements.json` values a proposal sets, clears or waives
+  (`Requirements: film.maxSeconds 30 → 20`), in English and Spanish. A `review` of a proposal whose requirements hold no
+  valid file now says so in `warnings` and judges the film without them, instead of dropping them silently.
+- The clip inspector's Colour section now shows for generated clips and nested timeline clips on video tracks, not only
+  media clips (slice 9 of #384, ADR 0031, epic #451; no wire change). Same sliders, LUT and Reset, one `ui` `clip.set`
+  per release; the LOG note stays on footage, and shots have no colour section. The reset tooltip no longer says "footage".
 - The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
   voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
   already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was

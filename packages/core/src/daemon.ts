@@ -120,7 +120,7 @@ import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { ClipVerifier } from "./clips/verify.js";
 import { PluginHost } from "./plugins/host.js";
 import { type FaceScans, PeopleService, type VoicePrinter } from "./people/service.js";
-import { readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
+import { readProjectFaceScans, scanFileFaces, scanProjectFaces } from "./people/scan-run.js";
 import { type PeopleScanner, peopleScanWorker } from "./people/scan.js";
 import { type VoiceEmbedder, campplusWorkerEmbedder } from "./people/voice-embed.js";
 import { computeVoicePrints, voiceKey } from "./people/voices.js";
@@ -643,6 +643,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         (await media.list(dir)).map((asset) => asset.path),
         async (d, rel) => (await media.derivedAudio(d, rel)).hash,
       );
+  /** The face scanner of one project, built when a scan needs it: YuNet + SFace in a worker, the runtime and models fetched on first use. */
+  const faceScanner = (dir: string, progress?: (update: Progress) => void) => async (): Promise<PeopleScanner> =>
+    options.peopleScanner ??
+    peopleScanWorker({
+      runtime: await binaries.ensure(ONNX_RUNTIME_WEB, await projectBinaries(dir), { onProgress: progress }),
+      detector: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: progress }),
+      recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL, { onProgress: progress }),
+    });
   /** Voice prints of one project for one request; the speaker model is installed only when a print is not cached. */
   const voicePrinter = (dir: string, progress: (update: Progress) => void): VoicePrinter => {
     const embed: VoiceEmbedder =
@@ -801,6 +809,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     generated: (dir, timeline, size) => clips.ensure(clipRoot(dir), timeline, { size }),
     faceScans: (dir) => faceScans(dir)(),
     soundProfile: (dir, asset) => energy.profile(dir, asset),
+    grid: (dir, loaded, horizon) => gridLoaderFor(dir)(loaded)(horizon),
+    pictureSize: async (dir, asset) => {
+      const { video } = await media.probe(dir, asset);
+      return video ? { width: video.width, height: video.height } : null;
+    },
   });
   const brands = new BrandService({
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
@@ -820,6 +833,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const language = config.transcription?.language;
       const heard = await provider.transcribe(wav, { ...(model ? { model } : {}), ...(language ? { language } : {}) }, providerContext(transcriberTools({ dir, binaries: config.binaries }), () => {}).context);
       return { words: heard.words, provider: providerId, model: heard.model, language: heard.language ?? null };
+    },
+    // A reference outside the project is scanned like an asset (ADR 0020): same worker, same cache keyed by content.
+    scanFaces: async (dir, film, signal, onProgress) => {
+      const project = await projectBinaries(dir);
+      return scanFileFaces(
+        dir,
+        { path: film.file, hash: film.hash, width: film.width, height: film.height, duration: film.duration, onProgress },
+        { scanner: faceScanner(dir), ffmpeg: () => binaries.ensure("ffmpeg", project), signal },
+      );
     },
   });
   const gradeAnalyzer = new GradeAnalyzer({
@@ -1609,7 +1631,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, view }, caller) => {
       if (preset !== undefined && file === undefined) {
         throw new RpcError(ErrorCode.InvalidParams, "`preset` checks an exported file against its export plan: pass `file` too.", { issues: [{ path: ["file"], message: "required with `preset`" }] });
       }
@@ -1617,9 +1639,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const reviewView = await viewOf(dir, caller, view);
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
+      const proposed = shownRequirements?.proposal ? requirementsFromState(shownRequirements.state) : null;
       return reviews.run(dir, {
         timeline,
-        ...(shownRequirements?.proposal ? { requirements: requirementsFromState(shownRequirements.state) } : {}),
+        ...(proposed ? { requirements: proposed.file, ...(proposed.error !== undefined ? { requirementsError: proposed.error } : {}) } : {}),
+        ...(cropAt ? { cropAt } : {}),
         ...(file ? { file: resolve(cwd, file) } : {}),
         from,
         to,
@@ -1633,7 +1657,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ...(projectFormat !== undefined ? await viewFormats(dir, reviewView) : {}),
       });
     },
-    analyze: async ({ cwd, file, name, threshold, speech }, _caller, request) => {
+    analyze: async ({ cwd, file, name, threshold, speech, faces }, _caller, request) => {
       const dir = await root(cwd);
       const path = resolve(cwd, file);
       const inside = relative(dir, path);
@@ -1642,7 +1666,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         ctx.update({ step: "analyze", progress: 0 });
         return analyses.run(
           dir,
-          { file: path, name, threshold, speech },
+          { file: path, name, threshold, speech, faces },
           {
             signal: ctx.signal,
             progress: (progress) => ctx.update({ progress }),
@@ -1845,7 +1869,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const batching = batches.active(dir);
       const temps = active.length === 0 && !batching;
       const busy = batching || active.some((job) => job.kind === "clip" || job.kind === "render");
-      const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)) });
+      const derived = await media.gc(dir, { dryRun, temps, hashUnknown: true, transcribing: transcriptions.has(canonicalPathSync(dir)), analyzing: active.some((job) => job.kind === "analyze") });
       const cache = await clips.gc(clipDir, { dryRun, temps, busy });
       const proposals = await timelines.gcProposals(dir, dryRun);
       const shootCache = await shoots.gc(dir, { dryRun, temps });
@@ -3251,13 +3275,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           probe: (d, rel) => media.probe(d, rel),
           hash: async (d, rel) => (await media.derivedAudio(d, rel)).hash,
           ffmpeg: () => binaries.ensure("ffmpeg", project, { onProgress: tell }),
-          scanner: async () =>
-            options.peopleScanner ??
-            peopleScanWorker({
-              runtime: await binaries.ensure(ONNX_RUNTIME_WEB, project, { onProgress: tell }),
-              detector: await binaries.ensureModel(FACE_DETECTION_MODEL, { onProgress: tell }),
-              recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL, { onProgress: tell }),
-            }),
+          scanner: faceScanner(dir, tell),
           onProgress: (progress) => ctx.update({ progress }),
           report: tell,
           signal: ctx.signal,

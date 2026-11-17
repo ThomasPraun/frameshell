@@ -61,7 +61,7 @@ describe("frameshell analyze", () => {
   it(
     "measures a video outside the project and prints the cutting, palette, loudness and where the files are",
     () => {
-      const result = frameshell(["analyze", reference]);
+      const result = frameshell(["analyze", reference, "--no-faces"]);
       expect(result.code, result.stderr).toBe(0);
       const dir = join(project, ".frameshell", "analysis", "ref");
       expect(result.stdout).toContain(`Analysis ref of ${reference}: 2 s, 320x240 at 30 fps -> ${dir}`);
@@ -73,7 +73,7 @@ describe("frameshell analyze", () => {
       expect(result.stdout).toMatch(/Shots \(start s, length s, palette, ink peak\):\n {2}#1 {2}0 {2}2 {2}#/);
       expect(result.stdout).toMatch(/\[MEASURED\] Curve: mean change [\d.]+, peak [\d.]+ at [\d.]+ s, \d+ moves/);
       expect(result.stdout).toMatch(/\[ESTIMATED\] Ink: \d+% of the picture on average/);
-      expect(result.stdout).toMatch(/\[MEASURED\] Sync: skipped, /);
+      expect(result.stdout).toMatch(/\[MEASURED\] Sync: skipped, face scan not asked for \(faces: false\)/);
       expect(result.stdout).toMatch(/\[ESTIMATED\] Speech: skipped, the speech could not be recognised: /);
       expect(result.stdout).toMatch(/\[ESTIMATED\] Sections: 1, one steady level/);
       expect(existsSync(join(dir, "analysis.json"))).toBe(true);
@@ -85,7 +85,7 @@ describe("frameshell analyze", () => {
   it(
     "takes a name and a threshold, and prints JSON with --json",
     () => {
-      const result = frameshell(["analyze", reference, "--name", "first", "--threshold", "0.6", "--json"]);
+      const result = frameshell(["analyze", reference, "--name", "first", "--threshold", "0.6", "--no-faces", "--json"]);
       expect(result.code, result.stderr).toBe(0);
       const analysis = JSON.parse(result.stdout) as { name: string; threshold: number; shots: unknown[] };
       expect(analysis).toMatchObject({ name: "first", threshold: 0.6 });
@@ -97,10 +97,10 @@ describe("frameshell analyze", () => {
   it(
     "skips the speech with --no-speech and says so",
     () => {
-      const result = frameshell(["analyze", reference, "--name", "quiet", "--no-speech"]);
+      const result = frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--no-faces"]);
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toContain("Speech: skipped, not asked for (speech: false).");
-      const json = JSON.parse(frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--json"]).stdout) as { audio: { speech: { status: string }; effects: unknown }; labels: Record<string, string> };
+      const json = JSON.parse(frameshell(["analyze", reference, "--name", "quiet", "--no-speech", "--no-faces", "--json"]).stdout) as { audio: { speech: { status: string }; effects: unknown }; labels: Record<string, string> };
       expect(json.audio).toMatchObject({ speech: { status: "skipped" }, effects: null });
       expect(json.labels["audio"]).toBe("ESTIMATED");
     },
@@ -152,6 +152,7 @@ describe("frameshell analyze diff", () => {
     expect(frameshell(["analyze", "diff", reference, other, "extra"]).code).toBe(2);
     expect(frameshell(["analyze", "diff", reference, other, "--threshold", "0.3"]).stderr).toContain("does not take --threshold");
     expect(frameshell(["analyze", "diff", reference, other, "--no-speech"]).stderr).toContain("does not take --no-speech");
+    expect(frameshell(["analyze", "diff", reference, other, "--no-faces"]).stderr).toContain("does not take --no-faces");
     expect(frameshell(["analyze", "diff", reference, other, "--lag", "soon"]).stderr).toContain("--lag takes seconds");
     expect(frameshell(["analyze", "diff", reference, other, "--max-lag", "100"]).stderr).toContain("--max-lag takes seconds from 0.5 to 30");
     expect(frameshell(["analyze", "diff", reference, other, "--every", "0"]).stderr).toContain("--every takes seconds from 0.1 to 30");

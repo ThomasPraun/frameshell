@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ANALYZE_RESULT_LABELS, type AnalyzeResult, type DaemonConnection, connectToDaemon, labelOf, methods } from "@frameshell/protocol";
 import { type Daemon, startDaemon, writeFaceScan } from "../src/index.js";
+import { noFaceScanner } from "./face-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
@@ -29,7 +30,7 @@ function inAny(spans: [number, number][], shift = 0): string {
 }
 
 beforeAll(async () => {
-  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() }, binaries: testBinaryManager(), idleTimeoutMs: Infinity });
+  daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() }, binaries: testBinaryManager(), idleTimeoutMs: Infinity, peopleScanner: noFaceScanner });
   conn = await connectToDaemon(daemon.socketPath, { client: "test" });
   project = tempDir();
   await conn.request("project.init", { dir: project });
@@ -60,7 +61,7 @@ beforeAll(async () => {
 
   slide = await conn.request("analyze", { cwd: project, file: join(footage, "slide.mp4") });
   caption = await conn.request("analyze", { cwd: project, file: join(footage, "caption.mp4") });
-  talkWithoutScan = await conn.request("analyze", { cwd: project, file: join(footage, "talk.mp4"), name: "talk-unscanned" });
+  talkWithoutScan = await conn.request("analyze", { cwd: project, file: join(footage, "talk.mp4"), name: "talk-unscanned", faces: false });
   // A people scan of the same file, as `people scan` would have cached it: one face the whole film, boxes twice a second.
   const hash = `sha256:${createHash("sha256").update(readFileSync(join(footage, "talk.mp4"))).digest("hex")}`;
   const boxes = Array.from({ length: 17 }, (_, i) => ({ time: i / 2, x: 0.5, y: 0.45, width: 0.4, height: 0.5, score: 0.9 }));
