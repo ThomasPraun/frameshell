@@ -21,18 +21,22 @@ import { glassCard } from "./glass-card.js";
 import type { Template } from "./kit.js";
 import { kineticHeadline } from "./kinetic-headline.js";
 import { lightLeak } from "./light-leak.js";
+import { lockedOn } from "./locked-on.js";
 import { logo3d } from "./logo-3d.js";
 import { logoSting } from "./logo-sting.js";
 import { logoLockup } from "./logo-lockup.js";
 import { lowerThird } from "./lower-third.js";
 import { notificationStack } from "./notification-stack.js";
 import { numberWheel } from "./number-wheel.js";
+import { orbit } from "./orbit.js";
+import { phoneFan } from "./phone-fan.js";
 import { pipCard } from "./pip-card.js";
 import { productShot } from "./product-shot.js";
 import { promptBar } from "./prompt-bar.js";
 import { pullBackReveal } from "./pull-back-reveal.js";
 import { sceneBackground } from "./scene-background.js";
 import { slotRoll } from "./slot-roll.js";
+import { spotlight } from "./spotlight.js";
 import { tabIndicator } from "./tab-indicator.js";
 import { terminal } from "./terminal.js";
 import { typingField } from "./typing-field.js";
@@ -44,7 +48,7 @@ export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
 /** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeTyping, codeDiff, codeMorph, slotRoll, numberWheel, tabIndicator, freezeCut, logoSting, pipCard, workCards, lightLeak];
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeTyping, codeDiff, codeMorph, slotRoll, numberWheel, tabIndicator, freezeCut, logoSting, pipCard, workCards, lightLeak, orbit, lockedOn, spotlight, phoneFan];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {

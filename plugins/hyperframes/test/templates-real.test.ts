@@ -38,7 +38,9 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
   describe.each(TEMPLATES.map((t) => [t.id, t.overlay] as const))("%s", (template, overlay) => {
     // A light leak is about a second long, clear at its start and just before its end, and see-through at its peak: it is judged at its own times, by any visible pixel, and may leave the frame.
     const leak = template === "light-leak";
-    const solid = leak ? 16 : 200;
+    // A spotlight is a dim over most of the frame, 0.75 of black by default: judged by the dim it paints and by the pool it leaves clear.
+    const dimmer = template === "spotlight";
+    const solid = leak ? 16 : dimmer ? 100 : 200;
     it(
       "lays out inside the frame in every format and paints the same frames cold and after a reseek (≤ 2/255)",
       async () => {
@@ -122,8 +124,8 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               expect(drawn, format).toBeGreaterThan(width * height * 0.002);
               expect(cold[0]!.equals(cold[3]!), format).toBe(false);
               // An overlay leaves most of the frame unpainted (over footage) and keeps inside it with a margin.
-              if (overlay) expect(drawn, format).toBeLessThan(width * height * 0.5);
-              if (overlay && !leak) {
+              if (overlay && !dimmer) expect(drawn, format).toBeLessThan(width * height * 0.5);
+              if (overlay && !leak && !dimmer) {
                 expect(minX, format).toBeGreaterThan(width * 0.03);
                 expect(maxX, format).toBeLessThan(width * 0.97);
                 expect(minY, format).toBeGreaterThan(height * 0.03);
@@ -187,6 +189,12 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         if (leak) {
           expect(seen).toBeGreaterThan(480 * 270 * 0.005);
           expect(seen).toBeLessThan(480 * 270 * 0.7);
+          return;
+        }
+        // The spotlight dims most of the frame and leaves a pool of light on its first target clear.
+        if (dimmer) {
+          expect(seen).toBeGreaterThan(480 * 270 * 0.5);
+          expect(clear).toBeGreaterThan(480 * 270 * 0.01);
           return;
         }
         expect(opaque).toBeGreaterThan(480 * 270 * 0.002);
@@ -629,23 +637,27 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     it.each(Object.entries(FORMATS))("logo-sting's light band is entirely outside the %s frame when it starts and when it ends, so it never pops in", async (_format, size) => {
       await inPage("logo-sting", { sweep: 1, popAt: 0.25 }, undefined, async (page) => {
         // The band is a tilted strip: signed distance of every frame corner from its centre line, against its half width.
-        const clear = async (t: number) => {
+        // `reach` is how far into the band the nearest corner is, 0 = the whole frame is outside it, whatever its opacity.
+        const state = async (t: number) => {
           await seek(page, t);
           const opacity = (await page.evaluate(opacityOf("sweep"))) as number;
           const x = (await page.evaluate(translateOf("sweep", 1))) as number;
-          // The strongest white a frame corner takes from the band: its gradient climbs 0.2 over the half width from its edge.
           const reach = (await page.evaluate(`(function () {
             var a = 16 * Math.PI / 180, cx = S.width / 2 + ${x}, cy = S.height / 2, sides = [];
             [[0, 0], [S.width, 0], [0, S.height], [S.width, S.height]].forEach(function (c) { sides.push((c[0] - cx) * Math.cos(a) + (c[1] - cy) * Math.sin(a)); });
             var half = bandW / 2, near = sides.every(function (d) { return d > 0; }) ? Math.min.apply(null, sides) : sides.every(function (d) { return d < 0; }) ? -Math.max.apply(null, sides) : -half;
             return Math.max(0, half - near) / half;
           })()`)) as number;
-          return opacity * 0.2 * reach;
+          return { opacity, reach };
         };
-        // The band crosses from 0.75 s (popAt 0.25 + 0.5) for 0.6 s: the first and the last frame at 30 fps inside it.
-        // Less than one 8-bit level of white at the first and at the last frame it is drawn.
-        expect(await clear(23 / 30)).toBeLessThan(1 / 255);
-        expect(await clear(40 / 30)).toBeLessThan(1 / 255);
+        // The band crosses from 0.75 s (popAt 0.25 + 0.5) to 1.35 s; the live page seeks to a whole frame, so the frames just outside that span (22 and 41 at 30 fps) are its two ends. It starts and ends entirely outside the frame by geometry alone (3 % of the width of margin), not because it is faded out there.
+        expect((await state(22 / 30)).reach).toBe(0);
+        expect((await state(41 / 30)).reach).toBe(0);
+        // And the first and the last frame at 30 fps inside it show less than one 8-bit level of white: its gradient climbs 0.2 over the half width.
+        for (const frame of [23, 40]) {
+          const now = await state(frame / 30);
+          expect(now.opacity * 0.2 * now.reach).toBeLessThan(1 / 255);
+        }
       }, size);
     }, 120_000);
 
@@ -728,6 +740,196 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         await seek(page, 2.1);
         expect(((await page.evaluate(scaleXOf(".fill"))) as number[]).every((fill) => fill > 0.999)).toBe(true);
         expect(((await page.evaluate("Array.from(document.querySelectorAll('.card')).map(function (e) { return Number(e.style.opacity); })")) as number[]).every((value) => value > 0.99)).toBe(true);
+      });
+    }, 120_000);
+
+    // TP4: what each page leaves at the start, mid-move and once it has settled. `rgbaAt` (above) paints the page at a time.
+    const rotateOf = (selector: string) => `Array.from(document.querySelectorAll('${selector}')).map(function (e) { return Number(/rotate\\(([-\\d.]+)deg/.exec(e.style.transform)[1]); })`;
+    const transformsOf = (selector: string) => `Array.from(document.querySelectorAll('${selector}')).map(function (e) { return e.style.transform; })`;
+    const alphaAt = (rgba: Buffer, x: number, y: number, width = 480) => rgba[(Math.round(y) * width + Math.round(x)) * 4 + 3]!;
+
+    it("light-leak is clear at its last rendered frame on a clip of 0.2 s, at 24 and at 30 fps, and still crests", async () => {
+      const dir = tempDir();
+      await inPage("light-leak", {}, 0.2, async (page) => {
+        expect(alphaSum(await rgbaAt(page, dir, 0))).toBe(0);
+        expect(alphaSum(await rgbaAt(page, dir, 0.2 - 1 / 30))).toBe(0);
+        expect(alphaSum(await rgbaAt(page, dir, 0.2 - 1 / 24))).toBe(0);
+        expect(alphaSum(await rgbaAt(page, dir, 0.05))).toBeGreaterThan(0);
+      });
+    }, 120_000);
+
+    it("logo-sting's light band leaves with the exit on a clip too short for it", async () => {
+      await inPage("logo-sting", { sweep: 1, popAt: 0.25 }, 1.2, async (page) => {
+        // 1.2 s clip: the logo lands at 0.05 s, the band is across from 0.55 to 1.15 s and the exit starts at 0.9 s.
+        await seek(page, 27 / 30);
+        expect(await page.evaluate(opacityOf("sweep"))).toBeCloseTo(1, 2);
+        await seek(page, 31 / 30);
+        const faded = (await page.evaluate(opacityOf("sweep"))) as number;
+        expect(faded).toBeCloseTo((await page.evaluate("1 - FrameshellMotion.ease('exit', (31 / 30 - 0.9) / 0.3)")) as number, 2);
+        expect(faded).toBeLessThan(1);
+        expect(faded).toBeGreaterThan(0);
+      });
+    }, 120_000);
+
+    it("orbit ends on the same ring whatever the seed, and starts its circling from another phase for another seed", async () => {
+      const seen: Record<string, { mid: unknown; held: unknown }> = {};
+      for (const seed of ["alpha", "bravo"]) {
+        await inPage("orbit", { seed, items: "One|Two|Three|Four" }, undefined, async (page) => {
+          await seek(page, 1);
+          const mid = await page.evaluate(transformsOf(".chip"));
+          // The spin takes 2.4 s from 0.15 s: from 2.6 s on the chips do not move, so 3 s and 3.5 s are the same pose.
+          await seek(page, 3);
+          const held = await page.evaluate(transformsOf(".chip"));
+          await seek(page, 3.5);
+          expect(await page.evaluate(transformsOf(".chip"))).toEqual(held);
+          seen[seed] = { mid, held };
+        });
+      }
+      expect(seen["alpha"]!.held).toEqual(seen["bravo"]!.held);
+      expect(seen["alpha"]!.mid).not.toEqual(seen["bravo"]!.mid);
+    }, 240_000);
+
+    it("orbit shows at most 8 labels, none for an empty list, and no word row for an empty word", async () => {
+      await inPage("orbit", { items: "1|2|3|4|5|6|7|8|9|10", word: "" }, undefined, async (page) => {
+        expect(await page.evaluate("document.querySelectorAll('.chip').length")).toBe(8);
+        expect(await page.evaluate(style("word", "display"))).toBe("none");
+        expect(await page.evaluate(style("rule", "display"))).toBe("none");
+      });
+      await inPage("orbit", { items: " | " }, undefined, async (page) => {
+        expect(await page.evaluate("document.querySelectorAll('.chip').length")).toBe(0);
+        await seek(page, 3);
+      });
+    }, 240_000);
+
+    it("orbit pulls its circling in on a short clip so it has stopped before the exit", async () => {
+      await inPage("orbit", { spinTime: 6, turns: 3 }, 2, async (page) => {
+        // 2 s clip: it stops at 0.15 + (2 - 0.3 - 0.15 - 0.4) = 1.3 s.
+        await seek(page, 1.4);
+        const held = await page.evaluate(transformsOf(".chip"));
+        await seek(page, 1.65);
+        expect(await page.evaluate(transformsOf(".chip"))).toEqual(held);
+      });
+    }, 120_000);
+
+    it("locked-on snaps its brackets onto the corners of the box with an overshoot and a little creep inward", async () => {
+      await inPage("locked-on", {}, undefined, async (page) => {
+        // The first bracket starts outside the box (to the upper left) and passes its corner on the way in.
+        const xs: number[] = [];
+        for (let t = 0.6; t <= 1.6; t += 0.04) {
+          await seek(page, t);
+          xs.push((await page.evaluate(translateOf("b0", 1))) as number);
+        }
+        expect(xs[0]!).toBeLessThan(-30);
+        await seek(page, 3);
+        const final = (await page.evaluate(translateOf("b0", 1))) as number;
+        expect(Math.max(...xs)).toBeGreaterThan(final + 2);
+        // Held: each bracket's outer corner is its box corner, moved inward by the creep only.
+        const corners = (await page.evaluate("(function () { var f = function (id) { return document.getElementById(id).getBoundingClientRect(); }; return [f('b0'), f('b3')].map(function (r) { return [r.left, r.top, r.right, r.bottom]; }); })()")) as number[][];
+        const [box, , bw, bh] = (await page.evaluate("[bx, by, bw, bh]")) as number[];
+        const creep = 0.015 * Math.min(bw!, bh!);
+        expect(Math.abs(corners[0]![0]! - box!)).toBeLessThan(creep + 1);
+        expect(Math.abs(corners[1]![2]! - (box! + bw!))).toBeLessThan(creep + 1);
+      });
+    }, 120_000);
+
+    it("locked-on keeps a box that asks for the frame's edge inside it, puts its label below when there is no room above, and hides an empty one", async () => {
+      await inPage("locked-on", { x: 0.99, y: 0, w: 0.5, h: 0.5, label: "Here" }, undefined, async (page) => {
+        const [bx, by, bw, bh] = (await page.evaluate("[bx, by, bw, bh]")) as number[];
+        expect(bx! + bw!).toBeLessThanOrEqual(480 * 0.96 + 0.01);
+        expect(by!).toBeGreaterThanOrEqual(270 * 0.04 - 0.01);
+        expect(bh!).toBeGreaterThan(0);
+        expect(await page.evaluate(style("label", "bottom"))).toBe("");
+        expect(await page.evaluate(style("label", "top"))).not.toBe("");
+      });
+      await inPage("locked-on", { label: "" }, undefined, async (page) => {
+        expect(await page.evaluate(style("label", "display"))).toBe("none");
+      });
+    }, 240_000);
+
+    it("spotlight is clear at its first frame, dims the frame and leaves a pool on the first target, then on the second", async () => {
+      const dir = tempDir();
+      await inPage("spotlight", { dim: 0.75 }, undefined, async (page) => {
+        expect(alphaSum(await rgbaAt(page, dir, 0))).toBe(0);
+        // 1.2 s: pool on the first target (0.3, 0.5), the corner dimmed to 0.75 of black.
+        const first = await rgbaAt(page, dir, 1.2);
+        expect(alphaAt(first, 0.3 * 480, 0.5 * 270)).toBe(0);
+        expect(Math.abs(alphaAt(first, 3, 3) - 0.75 * 255)).toBeLessThan(3);
+        expect(alphaAt(first, 0.7 * 480, 0.5 * 270)).toBeGreaterThan(150);
+        // 3.6 s: the light has arrived at the second target (1.7 + 0.9 = 2.6 s) and left the first.
+        const second = await rgbaAt(page, dir, 3.6);
+        expect(alphaAt(second, 0.7 * 480, 0.5 * 270)).toBe(0);
+        expect(alphaAt(second, 0.3 * 480, 0.5 * 270)).toBeGreaterThan(150);
+      });
+    }, 180_000);
+
+    it("spotlight with equal targets never moves, and a late move is pulled in on a short clip", async () => {
+      const dir = tempDir();
+      await inPage("spotlight", { x2: 0.3, y2: 0.5 }, undefined, async (page) => {
+        expect(await page.evaluate("moves")).toBe(false);
+        const late = await rgbaAt(page, dir, 3.6);
+        expect(alphaAt(late, 0.3 * 480, 0.5 * 270)).toBe(0);
+        expect(alphaAt(late, 0.7 * 480, 0.5 * 270)).toBeGreaterThan(150);
+      });
+      // 2 s clip: the light travels 0.8 s from 0.5 s, so it is on the second target by 1.4 s.
+      await inPage("spotlight", { moveAt: 5, moveTime: 3 }, 2, async (page) => {
+        const arrived = await rgbaAt(page, dir, 1.45);
+        expect(alphaAt(arrived, 0.7 * 480, 0.5 * 270)).toBe(0);
+        expect(alphaAt(arrived, 0.3 * 480, 0.5 * 270)).toBeGreaterThan(150);
+      });
+    }, 240_000);
+
+    it("spotlight lights each label with its target: the first until the light leaves, the second once it has arrived", async () => {
+      await inPage("spotlight", { label: "First", label2: "Second" }, undefined, async (page) => {
+        await seek(page, 1);
+        expect(await page.evaluate(opacityOf("l0"))).toBeGreaterThan(0.99);
+        expect(await page.evaluate(opacityOf("l1"))).toBe(0);
+        await seek(page, 3.4);
+        expect(await page.evaluate(opacityOf("l0"))).toBe(0);
+        expect(await page.evaluate(opacityOf("l1"))).toBeGreaterThan(0.99);
+        expect(await page.evaluate("document.getElementById('l0').textContent + '|' + document.getElementById('l1').textContent")).toBe("First|Second");
+      });
+      await inPage("spotlight", {}, undefined, async (page) => {
+        expect(await page.evaluate(style("l0", "display"))).toBe("none");
+        expect(await page.evaluate(style("l1", "display"))).toBe("none");
+      });
+    }, 240_000);
+
+    it("phone-fan stacks its phones, then turns the outer two by `fan` degrees and leaves the middle one straight", async () => {
+      await inPage("phone-fan", { fan: 16 }, undefined, async (page) => {
+        await seek(page, 0.6);
+        expect(await page.evaluate(rotateOf(".phone"))).toEqual([0, 0, 0]);
+        await seek(page, 3.4);
+        expect(await page.evaluate(rotateOf(".phone"))).toEqual([-16, 16, 0]);
+        // Without a picture every phone shows the plain app screen.
+        expect(await page.evaluate("Array.from(document.querySelectorAll('.shot')).map(function (e) { return e.style.display; })")).toEqual(["none", "none", "none"]);
+      });
+    }, 120_000);
+
+    it.each(Object.entries(FORMATS))("phone-fan's widest fan stays inside the %s frame once it has opened", async (_format, size) => {
+      await inPage("phone-fan", { fan: 24, size: 1.2, caption: "Everything in one place" }, undefined, async (page) => {
+        await seek(page, 3.4);
+        const boxes = (await page.evaluate("Array.from(document.querySelectorAll('#caption, .phone')).map(function (e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })")) as number[][];
+        // The caption is a full-width line (its text is centred in it): only its height is judged.
+        for (const [i, [left, top, right, bottom]] of boxes.entries()) {
+          if (i > 0) {
+            expect(left!).toBeGreaterThan(size[0] * 0.03);
+            expect(right!).toBeLessThan(size[0] * 0.97);
+          }
+          expect(top!).toBeGreaterThan(size[1] * 0.03);
+          expect(bottom!).toBeLessThan(size[1] * 0.97);
+        }
+        // The caption sits under the lowest phone.
+        const phones = boxes.slice(1);
+        expect(boxes[0]![1]!).toBeGreaterThanOrEqual(Math.max(...phones.map((box) => box[3]!)) - 1);
+      }, size);
+    }, 120_000);
+
+    it("phone-fan pulls its fan in on a short clip and hides an empty caption", async () => {
+      await inPage("phone-fan", { fanAt: 4, fan: 12, caption: "" }, 2, async (page) => {
+        // 2 s clip: the fan opens at 2 - 0.3 - 1 = 0.7 s, so it is open by 1.6 s.
+        await seek(page, 1.6);
+        expect(((await page.evaluate(rotateOf(".phone"))) as number[]).map((angle) => Math.round(angle))).toEqual([-12, 12, 0]);
+        expect(await page.evaluate(style("caption", "display"))).toBe("none");
       });
     }, 120_000);
   });

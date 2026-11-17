@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, slice TP4 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
+  new <name> --template` takes four more. `orbit` has labels circle a logo or a word, from a seeded start phase, and
+  slow to a stop on an evenly spaced ring that never depends on the seed. `locked-on` snaps four corner brackets onto a
+  target box (`x`, `y`, `w`, `h` as fractions of the frame, kept inside it) with an overshoot, then a pulse and a small
+  label. `spotlight` dims the frame except a soft pool of light, one layer of plain alpha with no blend mode, which
+  moves to a second target and lights a label at each. `phone-fan` opens three phones from a stack like a hand of cards,
+  one picture each, sized so the fan fits every format. The plain app screen and the phone bezel `device-frame` drew are
+  now `paintSkeleton` and `dressPhone` in `ui-parts.ts`, shared with `phone-fan`. Fixes in `logo-sting` and
+  `light-leak`: the light band now leaves with the exit on a clip under 1.55 s instead of being cut off, its
+  geometry test checks the band outside the frame without leaning on its fade, and `light-leak` falls over at most
+  0.6 of the clip, so its last rendered frame is clear on a clip of 0.2 s too. The `hyperframes` skill lists them.
 - Beat helpers in the motion runtime, slice MH of #458 (ADR 0029 decision 8, ADR 0033, epic #451; plugin only, no
   protocol change): runtime 0.5.0 adds `beats`, `beatAt` (`{ index, beat, bar, phase }`), `beatTime`, `sinceBeat`,
   `springOnBeat`, `markers`, `hasBeats` and `frameshellTiming`. They read `window.frameshellTiming` (a composition that
