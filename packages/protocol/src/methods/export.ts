@@ -278,7 +278,7 @@ export const exportMethods = {
   "batch.cancel": {
     mutating: true,
     description:
-      "Stop a batch that `batch.render` is running (ADR 0040): no further row is queued, the render job of the row that is running is " +
+      "Stop a running batch, one `batch.render` started (ADR 0040): no further row is queued, the render job of the row that is running is " +
       "canceled, and the manifest entries of that row and of the rows not started become `canceled` (a review of a file still waiting is " +
       "dropped; one running finishes first). Rows already `done` keep their files and entries. The manifest's `state` becomes " +
       "`canceled` once the running render ended; the call waits for that (up to 10 s, then returns the entries as they are). " +
