@@ -115,6 +115,59 @@ describe("batch.render", () => {
     await expect(conn.request("batch.render", { cwd: project, file: "none.batch.json", dryRun: true })).rejects.toMatchObject({ code: ErrorCode.AssetNotFound });
   });
 
+  it("refuses a props slot naming a prop the composition does not declare, in a dry run too, and accepts the declared ones", async () => {
+    const composition = join(project, "compositions", "cards", "red.json");
+    const original = readFileSync(composition, "utf8");
+    await conn.request("file.write", { path: composition, content: JSON.stringify({ color: "red", seconds: 1, declares: ["label"] }) });
+    try {
+      writeBatch("typo-prop", { slots: { title: `${card}.props.titel` }, rows: [{ id: "a", title: "x" }] });
+      for (const dryRun of [true, false]) {
+        await expect(conn.request("batch.render", { cwd: project, file: "typo-prop.batch.json", dryRun })).rejects.toMatchObject({
+          code: ErrorCode.InvalidOperation,
+          message: expect.stringContaining("declares the props label, not titel"),
+          data: { op: "batch.render", row: "a", slot: "title", reason: "unknown prop", prop: "titel", declared: ["label"] },
+        });
+      }
+      writeBatch("typo-prop", { slots: { title: `${card}.props.label` }, rows: [{ id: "a", title: "x" }] });
+      expect((await conn.request("batch.render", { cwd: project, file: "typo-prop.batch.json", dryRun: true })).entries).toHaveLength(1);
+      expect(existsSync(join(project, "exports", "typo-prop"))).toBe(false);
+    } finally {
+      await conn.request("file.write", { path: composition, content: original });
+    }
+  });
+
+  it(
+    "cancels a running batch: later rows never queue, the render stops, the manifest says canceled, and `failed` re-runs the rest",
+    async () => {
+      writeBatch("stoppable", { quality: "draft", rows: [{ id: "a" }, { id: "b", title: "Dos" }, { id: "c", title: "Tres" }] });
+      const out = join(project, "exports", "stoppable");
+      const manifestPath = join(out, "manifest.json");
+      await expect(conn.request("batch.cancel", { cwd: project, file: "stoppable.batch.json" })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        data: { op: "batch.cancel", reason: "no batch running" },
+      });
+      const started = await conn.request("batch.render", { cwd: project, file: "stoppable.batch.json" });
+      const result = await conn.request("batch.cancel", { cwd: project, file: "stoppable.batch.json" });
+      expect(result).toMatchObject({ dir: project, out, manifest: manifestPath, state: "canceled" });
+      expect(result.canceled).toContain("c");
+      expect(result.entries.find((entry) => entry.row === "c")).toMatchObject({ status: "canceled", job: null });
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as BatchManifest;
+      expect(manifest.state).toBe("canceled");
+      expect(manifest.entries.find((entry) => entry.row === "c")!.status).toBe("canceled");
+      expect(existsSync(join(out, "c.mp4"))).toBe(false);
+      const renders = (await conn.request("job.list", { cwd: project })).jobs.filter((job) => job.kind === "render" && job.output?.startsWith(out));
+      expect(renders.some((job) => job.output === join(out, "c.mp4"))).toBe(false);
+      expect(renders.every((job) => job.state !== "running" && job.state !== "queued")).toBe(true);
+      expect(started.jobs).toHaveLength(1);
+
+      const rerun = await conn.request("batch.render", { cwd: project, file: "stoppable.batch.json", failed: true });
+      expect(rerun.entries.find((entry) => entry.row === "c")!.status).toBe("queued");
+      const finished = await ended(manifestPath);
+      expect(finished.entries.map((entry) => entry.status)).toEqual(["done", "done", "done"]);
+    },
+    TIMEOUT,
+  );
+
   it(
     "renders the rows one at a time as render jobs, keeps manifest.json current, and never touches timelines/",
     async () => {

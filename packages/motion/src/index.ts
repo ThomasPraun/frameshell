@@ -16,9 +16,25 @@ export {
   stagger,
   track,
 } from "@frameshell/schema/motion";
+export {
+  beatAt,
+  beatTime,
+  frameshellTiming,
+  hasBeats,
+  markers,
+  sinceBeat,
+  springOnBeat,
+  type BeatPosition,
+  type FrameshellTiming,
+  type ListedBeat,
+  type NominalBeats,
+  type TimingBeat,
+  type TimingMarker,
+} from "./beats.js";
+import { type ListedBeat, type NominalBeats, hasBeats, listBeats } from "./beats.js";
 
 /** Version of this runtime; a composition's copy names it in its first line. */
-export const version = "0.4.0";
+export const version = "0.5.0";
 
 /** Paints the whole composition at `t` seconds; must depend on nothing but `t`. */
 export type Paint = (t: number) => void;
@@ -213,6 +229,15 @@ export function write(element: Writable, pose: Pose): void {
   const rotate = onGrid(pose.rotate ?? 0, ROTATE_STEPS_PER_DEGREE);
   element.style.transform = `translate(${x}px, ${y}px) rotate(${rotate}deg) scale(${fixed(scaleX)}, ${fixed(scaleY)})`;
   element.style.opacity = fixed(Math.min(1, Math.max(0, pose.opacity ?? 1)));
+}
+
+/**
+ * The beats of the clip (see `listBeats` in beats.ts): the timeline's grid when the composition asked for it with
+ * `<meta name="frameshell-timing" content="beats">` and the host found one, else the `nominal` grid over the
+ * composition's `data-duration`, else one beat a second.
+ */
+export function beats(nominal?: NominalBeats): readonly ListedBeat[] {
+  return listBeats(nominal, hasBeats() || nominal?.duration !== undefined ? 0 : stage().duration);
 }
 
 /** Frame shape a layout is written for: `wide` is 16:9 and wider, `tall` is 4:5 and narrower, `square` is between. */

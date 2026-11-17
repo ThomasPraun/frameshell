@@ -9,6 +9,8 @@ import {
   ErrorCode,
   type FrameFormat,
   type GcResult,
+  type BatchCancelResult,
+  type BatchEntry,
   type JobInfo,
   type MethodResult,
   PROPOSAL_WAIT_MAX_S,
@@ -41,7 +43,7 @@ import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSoun
 import { JOB_FLAGS, JOB_USAGE, type JobInvocation, executeJob, formatJob, parseJob } from "./job-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
-import { BATCH_FLAGS, BATCH_USAGE, type BatchInvocation, batchOutcome, batchLabel, describeBatch, parseBatch, waitReviews } from "./batch-commands.js";
+import { BATCH_FLAGS, BATCH_USAGE, type BatchCancelInvocation, type BatchInvocation, batchOutcome, batchLabel, canceledLine, canceledRows, describeBatch, describeCancel, onInterrupt, parseBatch, waitReviews, watchCanceled } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type RequirementsInvocation, type ReviewInvocation, executeRequirements, executeReview, parseReview } from "./review-commands.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
@@ -289,6 +291,7 @@ type Invocation =
   | { kind: "matte"; asset: string }
   | FormatInvocation
   | BatchInvocation
+  | BatchCancelInvocation
   | { kind: "skill.update"; force: boolean }
   | TimelineInvocation;
 
@@ -1053,6 +1056,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
         .map((render) => (render.job.state === "done" ? `Rendered ${render.output}\n${render.job.warnings.map((warning) => `  warning: ${warning}\n`).join("")}` : `Render failed: ${render.output}: ${render.job.error ?? render.job.state}\n`))
         .join("");
     }
+    case "batch.cancel": {
+      const result = await conn.request("batch.cancel", { cwd, file: resolve(cwd, inv.file), ...(inv.out ? { out: resolve(cwd, inv.out) } : {}) });
+      return flags.json ? json(result) : describeCancel(result);
+    }
     case "batch": {
       // Plugin presets and adapter props schemas load only for trusted projects.
       await settleTrust(conn, flags, io);
@@ -1078,13 +1085,38 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const queued = result.entries.filter((entry) => entry.status === "queued" || entry.status === "running");
       const rows = new Map(queued.map((entry) => [entry.output, entry]));
       const last = new Map<string, string>();
-      const finished = await follower.waitOutputs([...rows.keys()], (job) => {
-        if (flags.json) return;
-        const line = `${batchLabel(rows.get(job.output!)!)}: ${formatJob(job)}`;
-        if (last.get(job.id) !== line) io.stderr(`${line}\n`);
-        last.set(job.id, line);
+      // Ctrl-C asks the daemon to cancel the batch, and another `batch cancel` marks its manifest: either way the rows
+      // kept from starting have no job, so waiting for their files would never end.
+      const interrupt = onInterrupt();
+      const watch = result.manifest ? watchCanceled(result.manifest) : null;
+      const stop: { entries?: BatchEntry[]; result?: BatchCancelResult } = {};
+      const stopped = Promise.race([
+        interrupt.interrupted
+          .then(() => conn.request("batch.cancel", { cwd, file: params.file, out: result.out }))
+          // A batch that ended already has nothing to cancel: keep waiting for the jobs' last news.
+          .then((answer) => void ((stop.result = answer), (stop.entries = answer.entries)), () => new Promise<never>(() => {})),
+        (watch?.canceled ?? new Promise<BatchEntry[]>(() => {})).then((entries) => void (stop.entries = entries)),
+      ]);
+      const finished = await Promise.race([
+        follower.waitOutputs([...rows.keys()], (job) => {
+          if (flags.json) return;
+          const line = `${batchLabel(rows.get(job.output!)!)}: ${formatJob(job)}`;
+          if (last.get(job.id) !== line) io.stderr(`${line}\n`);
+          last.set(job.id, line);
+        }),
+        stopped.then(() => new Map<string, JobInfo>()),
+      ]).finally(() => {
+        interrupt.dispose();
+        watch?.stop();
       });
       const rendered = new Set(rows.keys());
+      if (stop.entries) {
+        // The manifest as the cancel left it: rows never queued are canceled there, and the CLI saw no job of theirs.
+        outcome.code = 1;
+        const ran = stop.entries.filter((entry) => rendered.has(entry.output));
+        const summary = stop.result ? describeCancel(stop.result) : `${canceledLine(params.file, canceledRows(stop.entries))}. Manifest: ${result.manifest}\n`;
+        return flags.json ? json({ ...result, entries: stop.entries, state: "canceled", canceled: canceledRows(stop.entries) }) : `${batchOutcome(ran)}${summary}`;
+      }
       const entries = result.entries.map((entry) => {
         const job = finished.get(entry.output);
         return job ? { ...entry, job: job.id, status: job.state, error: job.error, startedAt: job.startedAt, finishedAt: job.finishedAt, duration: seconds(job) } : entry;
@@ -1356,8 +1388,13 @@ function formatOutline(outline: ScriptOutlineResult): string {
     const words = `${scene.words} word${scene.words === 1 ? "" : "s"}`;
     lines.push(`  ${`#${scene.slug}`.padEnd(slugW)}  ${scene.title.padEnd(titleW)}  line ${String(scene.line).padEnd(lineW)}  ${words}  ${clips}`);
     if (scene.wordRange) {
-      const placed = scene.span.map(({ timeline, start, end }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s`);
+      const placed = scene.span.filter(({ source }) => source === "words").map(({ timeline, start, end }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s`);
       lines.push(`    spoken ${scene.wordRange.transcript ? `${scene.wordRange.transcript} ` : ""}${scene.wordRange.from}..${scene.wordRange.to}  ${placed.length > 0 ? placed.join(", ") : "not on a timeline"}`);
+    }
+    const elsewhere = scene.span.filter(({ source }) => source !== "words");
+    if (elsewhere.length > 0) {
+      const where = elsewhere.map(({ timeline, start, end, source }) => `${timeline} ${start.toFixed(2)}-${end.toFixed(2)} s${source === "planned" ? " (planned, no clip yet)" : " (from its clips)"}`);
+      lines.push(`    placed ${where.join(", ")}`);
     }
   }
   if (outline.unresolved.length > 0) {

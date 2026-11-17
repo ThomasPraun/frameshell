@@ -5,10 +5,10 @@ import { type MetricsInput, reviewMetrics } from "../src/review/metrics.js";
 import { type ClipSpan, type JudgeInput, judgeRequirements } from "../src/review/requirements.js";
 import type { MotionSeries } from "../src/review/source.js";
 
-// `requirements.json` judged against hand-made motion series: one sample every half second.
+// `requirements.json` judged against hand-made motion series of a 30 fps film: one sample every half second unless said.
 
 function series(energy: number[], spread: number[] = energy.map(() => 50), step = 0.5): MotionSeries {
-  return { times: energy.map((_, i) => i * step), energy, spread };
+  return { times: energy.map((_, i) => i * step), energy, spread, first: 0, step: Math.round(step * 30) };
 }
 
 function file(extra: Record<string, unknown>): RequirementsFile {
@@ -22,8 +22,8 @@ const MOTION = series([0, 8, 8, ...Array(6).fill(0.1), 8, ...Array(4).fill(0.1)]
 
 function judge(requirements: RequirementsFile, extra: Partial<JudgeInput> = {}, metricsExtra: Partial<MetricsInput> = {}) {
   const motion = extra.series ?? MOTION;
-  const end = motion.times.at(-1)! + 0.5;
-  const metrics = reviewMetrics({ fps: 30, range: { from: 0, to: end }, series: motion, tracks: null, loudness: null, hasSound: null, ...metricsExtra });
+  const end = motion.times.at(-1)! + motion.step / 30;
+  const metrics = reviewMetrics({ fps: 30, range: { from: 0, to: end }, source: "timeline", series: motion, tracks: null, loudness: null, hasSound: null, ...metricsExtra });
   return judgeRequirements({
     requirements,
     metrics,
@@ -52,10 +52,21 @@ describe("requirements: film", () => {
   });
 
   it("fails a still stretch longer than declared, though the craft threshold (3 s) is not reached", () => {
+    // Still from the sample at 1 s to the end of the frame at 4 s.
     const result = judge(file({ film: { maxStatic: 2 } }));
-    expect(checkOf(result, "film.maxStatic")).toMatchObject({ status: "fail", expected: 2, actual: 3 });
+    expect(checkOf(result, "film.maxStatic")).toMatchObject({ status: "fail", expected: 2, actual: 3.033 });
     expect(result.metrics.requirements!.failed).toBe(1);
     expect(checkOf(judge(file({ film: { maxStatic: 4 } })), "film.maxStatic").status).toBe("pass");
+  });
+
+  it("maxStatic on analyze's scale: every frame of a file, a hold of n frames lasts n / fps, under 0.5 grey levels is still", () => {
+    // Frame 1 is held through frame 60 (60 frames, 2 s) by changes of 0.4 levels, then the picture moves.
+    const held = (frames: number) => {
+      const motion = series([0, 9, ...Array(frames - 1).fill(0.4), 9, 9], undefined, 1 / 30);
+      return checkOf(judge(file({ film: { maxStatic: 2 } }), { series: motion, timeline: null, clips: null, tracks: null }, { source: "file" }), "film.maxStatic");
+    };
+    expect(held(60)).toMatchObject({ status: "pass", expected: 2, actual: 2 });
+    expect(held(61)).toMatchObject({ status: "fail", expected: 2, actual: 2.033 });
   });
 
   it("an end card is the held, not blank picture at the end of the range", () => {
@@ -107,10 +118,10 @@ describe("requirements: captions and clips", () => {
   });
 
   it("keepsMoving measures the still stretch inside the clip's own span", () => {
-    // Still from 1 to 4 s and from 4.5 to 6.5 s: clip c_a (0 to 3 s) holds 2 s of the first, c_b (from 3 s) 2 s of the second.
-    const result = judge(file({ clips: [{ clip: "c_a", keepsMoving: { maxStatic: 1 } }, { clip: "c_b", keepsMoving: { maxStatic: 2 } }] }));
+    // Still from 1 to 4.033 s and from 4.5 to 6.533 s: clip c_a (0 to 3 s) holds 2 s of the first, c_b (from 3 s) 2.033 s of the second.
+    const result = judge(file({ clips: [{ clip: "c_a", keepsMoving: { maxStatic: 1 } }, { clip: "c_b", keepsMoving: { maxStatic: 2.5 } }] }));
     expect(checkOf(result, "clip.keepsMoving", "c_a")).toMatchObject({ status: "fail", actual: 2 });
-    expect(checkOf(result, "clip.keepsMoving", "c_b")).toMatchObject({ status: "pass", actual: 2 });
+    expect(checkOf(result, "clip.keepsMoving", "c_b")).toMatchObject({ status: "pass", actual: 2.033 });
   });
 
   it("judges repeated entries of one clip as one, later fields winning, as the requirements document keys them", () => {
@@ -142,7 +153,7 @@ describe("requirements: craft warnings and waivers", () => {
   it("a waiver moves the warning into waived with its reason and lifts the failure", () => {
     const result = judge(file({ fail: ["static"], waivers: [{ check: "static", clip: "c_a", reason: "the hold is the point" }] }), { series: still });
     expect(result.metrics.craft.map((warning) => warning.check)).toEqual(["frame-0"]);
-    expect(result.metrics.waived).toEqual([expect.objectContaining({ check: "static", clip: "c_a", reason: "the hold is the point", from: 0.5, to: 4.5 })]);
+    expect(result.metrics.waived).toEqual([expect.objectContaining({ check: "static", clip: "c_a", reason: "the hold is the point", from: 0.5, to: 4.533 })]);
     expect(result.metrics.waived[0]).not.toHaveProperty("severity");
     expect(result.metrics.requirements!.failed).toBe(0);
     expect(result.metrics.requirements!.waivers).toEqual([{ check: "static", clip: "c_a", reason: "the hold is the point", matched: 1 }]);

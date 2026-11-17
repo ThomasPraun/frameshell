@@ -48,6 +48,9 @@ import {
   SoundTypingSchema,
 } from "./shared.js";
 
+/** Files `audio.inspect` takes at most in one call. */
+export const AUDIO_INSPECT_MAX = 32;
+
 /** Daemon methods: scripts, voiceover and sound. */
 export const scriptSoundMethods = {
   "script.outline": {
@@ -59,7 +62,9 @@ export const scriptSoundMethods = {
       "`#anchor`), e.g. music or a full take; they cover no scene. `unresolved` lists clips pointing into this file at an anchor no scene has (renamed " +
       "or removed heading). A scene that names transcript words with `<!-- words: talk.words.json w_000010..w_000042 -->` under its heading (word ids repeat across transcripts: name the file; a bare range matching several transcripts is not placed) " +
       "has `wordRange`, and `span`: the timeline seconds those words occupy, per timeline, so you can place or re-place its clips; " +
-      "unknown ids, an ambiguous range or a reversed range become `warnings`. " +
+      "unknown ids, an ambiguous range or a reversed range become `warnings`. A scene whose words are not placed on a timeline gets a `span` there from its linked clips " +
+      "(`source: \"clips\"`: first start to last end), so a film with no transcript still shows its scenes. A scene with no clip linked anywhere gets a planned `span` on `main` from the " +
+      "time range in its heading (`## Proof (bars 4-9, 0:06-0:18)`: clock readings win; `bars 4-9` or `bar:4-bar:10` need the timeline's tempo), `source: \"planned\"`. " +
       "Never fails on content: bad frontmatter, duplicate headings or bad word ranges become `warnings`. Fails with " +
       "ScriptNotFound (data lists the scripts there are) or OutsideProject.",
     params: z.strictObject({
@@ -83,8 +88,8 @@ export const scriptSoundMethods = {
             span: z
               .array(SceneSpanSchema)
               .describe(
-                "Where the scene's `wordRange` sits on each timeline that places any of those words (first to last placed word, " +
-                  "through clips cut inside the range); empty when `wordRange` is null, unresolved, or no timeline places its words.",
+                "Where the scene sits on each timeline, with a `source`: its `wordRange` where that timeline places any of those words (first to last placed word, " +
+                  "through clips cut inside the range), else its linked clips there, else the heading's planned range on `main`; empty when none applies.",
               ),
           }),
         )
@@ -649,6 +654,66 @@ export const scriptSoundMethods = {
         .nullable()
         .describe("`set`: the timeline's tempo now follows the new clip. `kept`: the timeline already had a tempo, left as it was. Null with `place: false`."),
       warnings: z.array(z.string()),
+    }),
+  },
+  "audio.inspect": {
+    description:
+      "Read the facts of sound files for an audition (ADR 0038), changing nothing: per file its EBU R128 integrated loudness (LUFS), true peak " +
+      "(dBTP) and loudness range (the cached reading `music.candidates` and `duck --level` use, measured once per content), its length, and for a take made " +
+      "by `sound sfx` or `sound music` what made it (kind, seed, variant or preset and tempo, from the mark inside the WAV). With `spectrogram: true` each file " +
+      "also gets a spectrogram as data: 64 rows on a log-frequency scale from 40 Hz to 16 kHz, up to 400 columns over the first 10 minutes, in whole dB " +
+      "relative to a full-scale sine (floor -96). You cannot listen: these numbers say how loud a sound is and where its energy sits, not whether it suits " +
+      "the picture. To choose by ear, ask the person to open the app's Audition dialog (Explorer: select two or more sound files, or right-click " +
+      "`assets/sound/`, then Audition…). A file with no sound or that cannot be decoded is listed in `skipped` and the rest go on. " +
+      "Fails with AssetNotFound, OutsideProject, or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      assets: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(AUDIO_INSPECT_MAX)
+        .describe(`Sound files inside the project, absolute or relative to \`cwd\`, e.g. \`assets/sound/whoosh-1a2b3c4d.wav\`; 1 to ${AUDIO_INSPECT_MAX}.`),
+      spectrogram: z.boolean().default(false).describe("Also return each file's spectrogram (about 25 000 numbers a file: for drawing, not for reading)."),
+    }),
+    result: z.object({
+      items: z
+        .array(
+          z.object({
+            asset: z.string().describe("Project-relative file."),
+            duration: z.number().nullable().describe("Seconds; null when the file does not say."),
+            lufs: z.number().nullable().describe("Integrated loudness, LUFS; null for silence."),
+            shortSound: z
+              .boolean()
+              .describe(
+                "The file is shorter than one 400 ms gating block, which EBU R128 reads as silence: `lufs` is then the loudness of that one block (the sound padded with silence), so a click and a whoosh compare.",
+              ),
+            truePeak: z.number().nullable().describe("True peak of the loudest channel, dBTP; null for digital silence."),
+            range: z.number().nullable().describe("Loudness range, LU; null for silence."),
+            take: z
+              .object({
+                kind: z.string().describe("Sound effect kind, or `music`."),
+                seed: z.int(),
+                variant: z.int().nullable().describe("Sound effects: the recipe; null for music."),
+                preset: z.string().nullable().describe("Music: the preset; null for sound effects."),
+                bpm: z.number().nullable().describe("Music: the tempo; null for sound effects."),
+              })
+              .nullable()
+              .describe("What made a generated take (its `fssd` mark); null for any other file."),
+            spectrogram: z
+              .object({
+                lowHz: z.number().describe("Lower edge of row 0, Hz."),
+                highHz: z.number().describe("Upper edge of the last row, Hz; the rows split the range into equal ratios."),
+                rows: z.int(),
+                columnSeconds: z.number().describe("Seconds each column spans; column c starts at c × columnSeconds."),
+                floorDb: z.number().describe("The value of silence, dB."),
+                columns: z.array(z.array(z.number())).describe("columns[c][r]: whole dB of row r (lowest frequency first) in column c (in time order)."),
+              })
+              .nullable()
+              .describe("Null unless `spectrogram: true`."),
+          }),
+        )
+        .describe("The files that could be read, in the order given."),
+      skipped: z.array(z.object({ asset: z.string(), reason: z.string() })).describe("Files left out (no sound, undecodable), with why."),
     }),
   },
 } as const satisfies Record<string, MethodSpec>;

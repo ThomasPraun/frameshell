@@ -6,6 +6,7 @@ export type TemplateVariable =
   | { id: string; type: "string"; label: string; default: string; maxLength?: number }
   | { id: string; type: "number"; label: string; default: number; min: number; max: number; step?: number; unit?: string }
   | { id: string; type: "color"; label: string; default: string }
+  | { id: string; type: "boolean"; label: string; default: boolean }
   | { id: string; type: "image"; label: string; default: string; description?: string }
   | { id: string; type: "enum"; label: string; default: string; options: { value: string; label: string }[] };
 

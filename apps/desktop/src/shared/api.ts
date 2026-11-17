@@ -541,6 +541,11 @@ export interface FrameshellApi {
      * play; queues the missing ones. `view` as for `timeline.show`. Rejects with the daemon's message.
      */
     mattes(timeline: string, view?: TimelineViewName): Promise<MatteStatusResult>;
+    /**
+     * `audio.inspect` of project-relative sound files with their spectrograms (ADR 0038): loudness, take mark and a
+     * spectrogram per file, for the Audition dialog; files with no sound come back in `skipped`. Rejects with the daemon's message.
+     */
+    inspect(assets: string[]): Promise<MethodResult<"audio.inspect">>;
     /** Bytes of a derived waveform or thumbnail (project-relative path from `assets()`). */
     read(path: string): Promise<Uint8Array>;
     /** Called on every asset change of the project; see {@link AssetChange}. Returns an unsubscribe function. */
@@ -1037,6 +1042,7 @@ export const Channel = {
   mediaAssets: "media:assets",
   mediaBakes: "media:bakes",
   mediaMattes: "media:mattes",
+  mediaInspect: "media:inspect",
   mediaRead: "media:read",
   mediaChanged: "media:changed",
   contextCaptureFrame: "context:capture-frame",

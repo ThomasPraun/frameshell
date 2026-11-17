@@ -1,5 +1,7 @@
 import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSound, ReviewSpan, ReviewSync } from "@frameshell/protocol";
 import type { ResolvedSubtitleTrack } from "@frameshell/schema";
+import { bigChanges, rhythmOf, stillRuns } from "../analyze/rhythm.js";
+import { type Cut, frameStart } from "../analyze/shots.js";
 import { deliveryWarnings } from "./delivery.js";
 import { seamWarnings } from "./loop.js";
 import { safeWarnings } from "./safe.js";
@@ -9,16 +11,12 @@ import { syncWarnings } from "./sync.js";
 
 // The numbers of `review` (#457): what a picture sheet cannot tell. Pure: a motion series and cues in, metrics out.
 // Thresholds are the owner's launch-film checklist in #457's comments (the HyperFrames `check` and earshot ranges it
-// cites); they are judgments with a number, so every one is a warning, never a failure.
+// cites); they are judgments with a number, so every one is a warning, never a failure. Still pictures, big changes
+// and bursts are `analyze`'s (`analyze/rhythm.ts`): one scale for a reference and our film (#471). On a sampled
+// series every threshold applies per sample interval, as if each sample were a frame.
 
-/** Mean grey change between samples under which the picture counts as still. */
-export const STILL_ENERGY = 0.35;
 /** Still stretches longer than this (seconds) are craft warnings. */
 export const STILL_WARN_S = 3;
-/** A visual event is a peak of change above the larger of this (grey levels) and {@link EVENT_MEDIAN_FACTOR} times the median change. */
-export const EVENT_FLOOR = 1;
-/** See {@link EVENT_FLOOR}. */
-export const EVENT_MEDIAN_FACTOR = 2.5;
 /** Grey-level standard deviation under which a picture is near-blank. */
 export const BLANK_SPREAD = 4;
 /** Films longer than this (seconds) with no sound are a craft warning. */
@@ -47,7 +45,11 @@ export interface MetricsInput {
   fps: number;
   /** Seconds reviewed. */
   range: { from: number; to: number };
+  /** What was reviewed: a file's rhythm is measured on every frame, a timeline's estimated on samples. */
+  source: "file" | "timeline";
   series: MotionSeries;
+  /** Frames of the film where a shot starts: a file's scene cuts, a timeline's clip cuts; absent: none. */
+  cuts?: readonly number[];
   /** The timeline's subtitle tracks; null for a file. */
   tracks: readonly ResolvedSubtitleTrack[] | null;
   /** The file's loudness; null for a timeline or a file with no sound. */
@@ -83,24 +85,27 @@ function runs(length: number, from: number, test: (i: number) => boolean): { fir
   return found;
 }
 
-/** The median of `values` (0 for none). */
-function median(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+/** Indexes of the samples of `series` that first show the shot each of `cuts` (film frames) opens; inside the series only. */
+function cutSamples(series: MotionSeries, cuts: readonly number[]): number[] {
+  const found = new Set<number>();
+  for (const frame of cuts) {
+    const i = Math.ceil((frame - series.first) / series.step);
+    if (i >= 1 && i < series.energy.length) found.add(i);
+  }
+  return [...found].sort((a, b) => a - b);
 }
 
-/** Seconds of the visual events of `series`: peaks of change, each at the middle of the two samples it lies between. */
-export function visualEvents(series: MotionSeries): number[] {
-  const { times, energy } = series;
-  const floor = Math.max(EVENT_FLOOR, EVENT_MEDIAN_FACTOR * median(energy.slice(1)));
-  const found: number[] = [];
-  for (let i = 1; i < energy.length; i++) {
-    // Strictly above the sample before and not below the one after: a plateau is one event.
-    if (energy[i]! > floor && energy[i]! > energy[i - 1]! && energy[i]! >= (energy[i + 1] ?? -Infinity)) found.push((times[i - 1]! + times[i]!) / 2);
-  }
-  return found;
+/** Seconds of the change at sample `i`: the frame it shows (every frame measured), else the middle of the two samples. */
+function changeTime(series: MotionSeries, i: number): number {
+  return series.step === 1 ? series.times[i]! : (series.times[i - 1]! + series.times[i]!) / 2;
+}
+
+/**
+ * Seconds of the visual events of `series` of a film at `fps`: the big changes of `analyze` (`bigChanges`) on its
+ * samples, every one of `cuts` (film frames) included.
+ */
+export function visualEvents(series: MotionSeries, fps: number, cuts: readonly number[] = []): number[] {
+  return bigChanges(series.energy, cutSamples(series, cuts), fps / series.step).map((change) => changeTime(series, change.frame));
 }
 
 /** Subtitle cues of `tracks` inside the range that are on screen for less than their words take to read. */
@@ -122,12 +127,42 @@ export function shortCues(tracks: readonly ResolvedSubtitleTrack[], range: { fro
 }
 
 /**
- * The stretches where the picture holds still: a run of samples `i..j` whose change since the sample before is under
- * {@link STILL_ENERGY} is a still picture from sample `i - 1` to `j`.
+ * The stretches where the picture of a film at `fps` holds still (`stillRuns` of `analyze`): from the sample before
+ * the first still change to the end of the frame of the last still sample, so a hold of `n` frames lasts `n / fps`.
  */
-export function stillSpans(series: MotionSeries): ReviewSpan[] {
-  const { times, energy } = series;
-  return runs(times.length, 1, (i) => energy[i]! < STILL_ENERGY).map(({ first, last }) => span(times[first - 1]!, times[last]!));
+export function stillSpans(series: MotionSeries, fps: number): ReviewSpan[] {
+  const { times } = series;
+  return stillRuns(series.energy, 1).map(({ startFrame, endFrame }) => span(times[startFrame]!, times[endFrame - 1]! + 1 / fps));
+}
+
+/** Lengths in frames of the shots of frames `first` to `end - 1` cut at `cuts` (film frames; those outside ignored). */
+function shotLengths(first: number, end: number, cuts: readonly number[]): number[] {
+  const marks = [first, ...[...new Set(cuts)].filter((frame) => frame > first && frame < end).sort((a, b) => a - b), end];
+  return marks.slice(1).map((mark, i) => mark - marks[i]!);
+}
+
+/**
+ * The rhythm of `series` on the scale of `analyze` (`rhythmOf`) up to second `pictureTo`: shot-length CV, still share
+ * and bursts. On a file measured from frame 0 to its end these are the numbers `analyze` reports for it.
+ */
+function rhythmMetrics(input: MetricsInput, pictureTo: number): { rhythm: ReviewMetrics["rhythm"]; changes: Cut[] } {
+  const { series, fps } = input;
+  const cuts = input.cuts ?? [];
+  const end = Math.max(series.first + 1, Math.round(pictureTo * fps));
+  // A file's cuts are seen in its picture, so they are big changes as in `analyze`; a timeline's clip cuts only split
+  // shots: a cut between two clips of one take shows nothing.
+  const forced = input.source === "file" ? cutSamples(series, cuts) : [];
+  const { rhythm, changes } = rhythmOf(series.energy, fps / series.step, shotLengths(series.first, end, cuts), forced);
+  const frameOf = (sample: number) => series.first + sample * series.step;
+  return {
+    rhythm: {
+      label: input.source === "file" ? "MEASURED" : "ESTIMATED",
+      shotLengthCv: rhythm.shotLengthCv,
+      stillShare: rhythm.stillShare,
+      bursts: rhythm.bursts.map((burst) => ({ from: frameStart(frameOf(burst.startFrame), fps), to: frameStart(frameOf(burst.endFrame - 1) + 1, fps), count: burst.count })),
+    },
+    changes,
+  };
 }
 
 /** The metrics of one run; see `ReviewMetricsSchema`. */
@@ -136,18 +171,21 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   const { times, spread } = series;
   const samples = times.length;
   const spacing = samples > 1 ? (times[samples - 1]! - times[0]!) / (samples - 1) : 0;
-  const end = (last: number) => Math.min(range.to, times[last]! + (spacing || 1 / input.fps));
+  // A file read only up to `MAX_PICTURE_S`: the picture's numbers stop where the series does, as `analyze`'s do.
+  const pictureTo = series.truncated && samples > 0 ? Math.min(range.to, frameStart(series.first + samples * series.step, input.fps)) : range.to;
+  const end = (last: number) => Math.min(pictureTo, times[last]! + (spacing || 1 / input.fps));
   const craft: ReviewFinding[] = [];
 
-  const still = stillSpans(series);
+  const still = stillSpans(series, input.fps);
   const staticRuns = still.filter((run) => run.seconds > STILL_WARN_S);
   const longestStatic = still.reduce<ReviewSpan | null>((best, run) => (best === null || run.seconds > best.seconds ? run : best), null);
   for (const run of staticRuns) craft.push({ check: "static", from: run.from, to: run.to, message: `nothing changes in the picture for ${run.seconds} s (from ${run.from} to ${run.to} s).` });
 
-  const events = visualEvents(series);
+  const { rhythm, changes } = rhythmMetrics(input, pictureTo);
+  const events = changes.map((change) => changeTime(series, change.frame));
   let largestGap: ReviewSpan | null = null;
   if (samples > 1) {
-    const marks = [range.from, ...events, range.to];
+    const marks = [range.from, ...events, pictureTo];
     for (let i = 1; i < marks.length; i++) {
       if (largestGap === null || marks[i]! - marks[i - 1]! > largestGap.seconds) largestGap = span(marks[i - 1]!, marks[i]!);
     }
@@ -203,7 +241,8 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   craft.sort((a, b) => (a.from ?? -1) - (b.from ?? -1));
   // Every finding is a warning until `requirements.json` is applied (`judgeRequirements`).
   return {
-    picture: { samples, spacing: round(spacing), longestStatic, staticRuns, events: events.length, largestGap, blank, firstFrameEmpty },
+    picture: { samples, spacing: round(spacing), sampled: series.step > 1, longestStatic, staticRuns, events: events.length, largestGap, blank, firstFrameEmpty },
+    rhythm,
     subtitles,
     loudness,
     sync,

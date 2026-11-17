@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 165;
+export const PROTOCOL_VERSION = 169;
 
 export {
   type MethodSpec,
@@ -68,6 +68,7 @@ export {
   COVER_MAX_CHARS,
   BatchManifestSchema,
 } from "./methods/shared.js";
+export { AUDIO_INSPECT_MAX } from "./methods/script-sound.js";
 
 const merged = {
   ...connectionMethods,
@@ -354,6 +355,8 @@ export type SoundSfxResult = MethodResult<"sound.sfx">;
 export type SoundPlaceResult = MethodResult<"sound.place">;
 /** Result of `sound.music`. */
 export type SoundMusicResult = MethodResult<"sound.music">;
+/** Result of `audio.inspect`. */
+export type AudioInspectResult = MethodResult<"audio.inspect">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -395,6 +398,8 @@ export type RenderParams = MethodParams<"render">;
 export type RenderResult = MethodResult<"render">;
 /** Result of `batch.render`. */
 export type BatchRenderResult = MethodResult<"batch.render">;
+/** Result of `batch.cancel`. */
+export type BatchCancelResult = MethodResult<"batch.cancel">;
 /** One row × format of a batch; see {@link BatchEntrySchema}. */
 export type BatchEntry = z.output<typeof BatchEntrySchema>;
 /** What `review` found on one rendered row; see {@link BatchReviewSchema}. */

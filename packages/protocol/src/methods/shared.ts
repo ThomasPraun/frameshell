@@ -572,12 +572,18 @@ export const ClipLocationSchema = z.object({
   clip: z.string().describe("Clip id."),
 });
 
-/** Where a script scene's words sit on one timeline, as `script.outline` resolves them. */
+/** Where a script scene sits on one timeline, as `script.outline` resolves it: by its words, its linked clips or its heading. */
 export const SceneSpanSchema = z.object({
   timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
-  start: z.number().describe("Timeline seconds where the first placed word of the range starts."),
-  end: z.number().describe("Timeline seconds where the last placed word of the range ends."),
-  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them)."),
+  start: z.number().describe("Timeline seconds where the scene starts: its first placed word, its earliest linked clip, or the planned start."),
+  end: z.number().describe("Timeline seconds where the scene ends: its last placed word, its latest linked clip end, or the planned end."),
+  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them); 0 for `clips` and `planned`."),
+  source: z
+    .enum(["words", "clips", "planned"])
+    .describe(
+      "`words`: the scene's `wordRange` as placed on this timeline. `clips`: the first start to the last end of this timeline's clips linked to the scene " +
+        "(a scene whose words are not placed there). `planned`: the time range written in the heading, only for a scene with no clip linked on any timeline, on `main` only.",
+    ),
 });
 
 /** One export preset as `export.presets` lists it. */
@@ -754,6 +760,14 @@ export const BatchEntrySchema = z.object({
   finishedAt: z.string().nullable().describe("ISO time it ended; null before."),
   duration: z.number().nullable().describe("Seconds the render took; null until it ended."),
   warnings: z.array(z.string()).describe("What this render skips, and assets of the row without verified provenance (ADR 0026)."),
+  hash: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(
+      "Fingerprint of the data this render was made from: the row's cells, the batch file's slots and the template timeline's content. " +
+        "A later run renders a `done` row again, reported in `changed`, when it differs; null in a manifest of an older version, which a run treats as unchanged.",
+    ),
   review: BatchReviewSchema.nullable()
     .default(null)
     .describe("The review of the rendered file (`batch.render` with `review`); null when the batch did not ask for one, the render has not ended `done` or a manifest of an older version has none."),
@@ -764,7 +778,9 @@ export const BatchManifestSchema = z.object({
   batch: z.string().describe("Absolute path of the batch file."),
   template: z.string().describe("Template timeline id."),
   out: z.string().describe("Absolute folder of the outputs and this manifest."),
-  state: z.enum(["running", "done"]).describe("`done` once every entry ended; `running` left behind means the daemon stopped mid-batch."),
+  state: z
+    .enum(["running", "done", "canceled"])
+    .describe("`done` once every entry ended; `canceled` once `batch.cancel` stopped it and the running render ended; `running` left behind means the daemon stopped mid-batch."),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   entries: z.array(BatchEntrySchema).describe("Row order, then format order."),
