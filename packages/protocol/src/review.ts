@@ -483,7 +483,7 @@ export const ReviewMetricsSchema = z.object({
     sampled: z.boolean().describe("The samples are more than a frame apart (a timeline over 90 frames): every threshold then applies per sample interval."),
     longestStatic: ReviewSpanSchema.nullable().describe("The longest stretch where the picture changes by less than 0.5 grey levels from one sample to the next, to the end of its last frame; null when nothing is still."),
     staticRuns: z.array(ReviewSpanSchema).describe("Every still stretch over 3 s."),
-    events: z.int().describe("Visual events: `analyze`'s big changes (a change 4 times the median within 0.5 s around it and at least 1 grey level, or 15 % of the grey range, or a cut)."),
+    events: z.int().describe("Visual events: `analyze`'s big changes (a change 4 times the median within 0.5 s around it and at least 1 grey level, or 15 % of the grey range, or a `file`'s scene cut)."),
     largestGap: ReviewSpanSchema.nullable().describe("The largest gap between visual events, the start and the end of the range counted as ends; null for one sample."),
     blank: z.array(ReviewSpanSchema).describe("Stretches of near-blank pictures (luma standard deviation under 4 grey levels), from the first to the last such sample."),
     firstFrameEmpty: z.boolean().nullable().describe("Frame 0 is near-blank; null when the range does not start at 0."),

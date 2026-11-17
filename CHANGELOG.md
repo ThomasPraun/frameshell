@@ -1330,7 +1330,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frames = `n / fps`, one frame longer than before), so `static` warnings, `film.maxStatic`, `clip.keepsMoving` and a
   waiver's `to` read up to a frame longer, and a hold of exactly 3 s at 30 fps is now 3 s, not 2.967; a file's holds
   shorter than 1/15 s and changes between two old samples are now seen; visual events are big changes (4 times the
-  median within 0.5 s and at least 1 level, 15 % of the grey range, or a cut) instead of peaks over 2.5 times the
+  median within 0.5 s and at least 1 level, 15 % of the grey range, or a file's scene cut) instead of peaks over 2.5 times the
   film's median, so `events`, `largestGap` and the sync of a file change; near-blank (`blank`, `frame-0`) reads the
   64 px picture, where thin detail on a flat frame weighs less. The MCP server's instructions list the current sheets
   (with `beats` and `cropAt`) and the rhythm metrics.

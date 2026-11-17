@@ -149,7 +149,10 @@ function rhythmMetrics(input: MetricsInput): { rhythm: ReviewMetrics["rhythm"]; 
   const { series, fps } = input;
   const cuts = input.cuts ?? [];
   const end = Math.max(series.first + 1, Math.round(input.range.to * fps));
-  const { rhythm, changes } = rhythmOf(series.energy, fps / series.step, shotLengths(series.first, end, cuts), cutSamples(series, cuts));
+  // A file's cuts are seen in its picture, so they are big changes as in `analyze`; a timeline's clip cuts only split
+  // shots: a cut between two clips of one take shows nothing.
+  const forced = input.source === "file" ? cutSamples(series, cuts) : [];
+  const { rhythm, changes } = rhythmOf(series.energy, fps / series.step, shotLengths(series.first, end, cuts), forced);
   const frameOf = (sample: number) => series.first + sample * series.step;
   return {
     rhythm: {
