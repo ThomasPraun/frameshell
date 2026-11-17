@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
+  `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
+  selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags
+  the bottom-right handle to a target size (`fromW`, `fromH`, `toW`, `toH` as fractions of the frame, kept inside it
+  with the handles, the cursor and the badge), lets go, and a badge shows the final `W x H`. The card is written as
+  layout on a 0.01 px grid, never a scale, and the cursor, its timing guard and the optional follow camera are the
+  existing cursor kit. `lean-in` slides a headline or quote card in from a side with a heavy spring, tilts it away and
+  back toward the viewer, then holds a slow lean (scale 1 to 1.06, rotation 1 to 2 degrees; 2D only, no matte). The
+  ticking to-do and the word behind the person of the same ticket were already built (`checklist`, `big-word`). The
+  `hyperframes` skill lists both.
 - Motion templates, slice TP4 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
   new <name> --template` takes four more. `orbit` has labels circle a logo or a word, from a seeded start phase, and
   slow to a stop on an evenly spaced ring that never depends on the seed. `locked-on` snaps four corner brackets onto a

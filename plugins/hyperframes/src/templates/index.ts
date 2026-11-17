@@ -20,6 +20,7 @@ import { freezeCut } from "./freeze-cut.js";
 import { glassCard } from "./glass-card.js";
 import type { Template } from "./kit.js";
 import { kineticHeadline } from "./kinetic-headline.js";
+import { leanIn } from "./lean-in.js";
 import { lightLeak } from "./light-leak.js";
 import { lockedOn } from "./locked-on.js";
 import { logo3d } from "./logo-3d.js";
@@ -35,6 +36,7 @@ import { productShot } from "./product-shot.js";
 import { promptBar } from "./prompt-bar.js";
 import { pullBackReveal } from "./pull-back-reveal.js";
 import { sceneBackground } from "./scene-background.js";
+import { selectResize } from "./select-resize.js";
 import { slotRoll } from "./slot-roll.js";
 import { spotlight } from "./spotlight.js";
 import { tabIndicator } from "./tab-indicator.js";
@@ -48,7 +50,7 @@ export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
 /** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
-export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeTyping, codeDiff, codeMorph, slotRoll, numberWheel, tabIndicator, freezeCut, logoSting, pipCard, workCards, lightLeak, orbit, lockedOn, spotlight, phoneFan];
+export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, codeTyping, codeDiff, codeMorph, slotRoll, numberWheel, tabIndicator, freezeCut, logoSting, pipCard, workCards, lightLeak, orbit, lockedOn, spotlight, phoneFan, leanIn, selectResize];
 
 /** The template with id `id`, if any. */
 export function findTemplate(id: string): Template | undefined {

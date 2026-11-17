@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { CommandResult } from "@frameshell/plugin-api";
 import { type CheckReport, type UpdateReport, checkCompositions, newComposition, updateRuntime } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "../src/motion-runtime.js";
+import { CURSOR_MATH, CURSOR_SCRIPT } from "../src/templates/cursor-kit.js";
 import { TEMPLATES, type TemplateVariable, usesThree } from "../src/templates/index.js";
 import { THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "../src/three-runtime.js";
 
@@ -311,6 +312,77 @@ describe("template spotlight", () => {
     expect(html).not.toMatch(/backdrop-filter|\bmask(-image)?\s*:/);
     // Equal targets are no move.
     expect(html).toContain("var moves = a.x !== b.x || a.y !== b.y;");
+  });
+});
+
+describe("template lean-in", () => {
+  it("is a transparent overlay with a side, a late-start pull-in, 2D scale and rotation only, and no matte or 3D", async () => {
+    await scaffold(["spot", "--template", "lean-in"]);
+    const html = read("spot");
+    const variables = declared(html);
+    expect(TEMPLATES.find((t) => t.id === "lean-in")!.overlay).toBe(true);
+    expect(variables.find((v) => v.id === "side")).toMatchObject({ type: "enum", default: "left" });
+    expect(variables.find((v) => v.id === "backdrop")).toMatchObject({ type: "number", default: 0 });
+    expect(variables.find((v) => v.id === "at")).toMatchObject({ type: "number", min: 0 });
+    // A late start is pulled in so the slide and the tilt (about a second) are done before the 0.3 s exit.
+    expect(html).toContain("var AT = Math.min(P.at, Math.max(0, D - OUT - 1));");
+    // The slow lean: scale 1 to 1.06 and 1 to 2 degrees over the hold.
+    expect(html).toContain("rotate: dir * (-(1 - q) * BACK + 1 + hold),");
+    expect(html).toContain("scale: (0.88 + 0.12 * q) * (1 + 0.06 * hold),");
+    expect(html).not.toMatch(/mix-blend-mode|perspective|rotate[XYZ]|matrix3d|mask/);
+  });
+
+  it("falls back to a default line for an empty text and hides an empty kicker", async () => {
+    await scaffold(["spot", "--template", "lean-in"]);
+    const html = read("spot");
+    expect(html).toContain('var text = String(P.text).trim() || "Lean in";');
+    expect(html).toContain("if (!kicker) kickerEl.style.display = \"none\";");
+  });
+});
+
+describe("template select-resize", () => {
+  it("declares the card's four sizes as fractions of the frame that fit inside it, and the two handle looks", async () => {
+    await scaffold(["spot", "--template", "select-resize"]);
+    const html = read("spot");
+    const variables = declared(html);
+    const numbers = Object.fromEntries(variables.filter((v) => v.type === "number").map((v) => [v.id, v.default as number]));
+    for (const key of ["x", "y", "fromW", "fromH", "toW", "toH"]) expect(variables.find((v) => v.id === key), key).toMatchObject({ type: "number" });
+    expect(numbers["x"]! + Math.max(numbers["fromW"]!, numbers["toW"]!)).toBeLessThanOrEqual(0.96);
+    expect(numbers["y"]! + Math.max(numbers["fromH"]!, numbers["toH"]!)).toBeLessThanOrEqual(0.96);
+    expect(numbers["toW"]!).toBeGreaterThan(numbers["fromW"]!);
+    const handles = variables.find((v) => v.id === "handles");
+    expect(handles?.type === "enum" && handles.options.map((o) => o.value)).toEqual(["corners", "all"]);
+    expect(variables.map((v) => v.id)).toEqual(expect.arrayContaining(["camera", "zoom", "hesitate", "pointer", "cursorSize", "backdrop"]));
+    expect(TEMPLATES.find((t) => t.id === "select-resize")!.overlay).toBe(true);
+  });
+
+  it("keeps whatever sizes and position a prop asks for inside the frame, with room for the handles, the cursor and the badge", async () => {
+    await scaffold(["spot", "--template", "select-resize"]);
+    const html = read("spot");
+    expect(html).toContain("var w1 = Math.min(maxR - edge, Math.max(minW, P.toW * S.width));");
+    expect(html).toContain("var h1 = Math.min(maxB - topEdge, Math.max(minH, P.toH * S.height));");
+    expect(html).toContain("var bx = Math.min(Math.max(P.x * S.width, edge), maxR - Math.max(w0, w1));");
+    expect(html).toContain("var by = Math.min(Math.max(P.y * S.height, topEdge), maxB - Math.max(h0, h1));");
+    // The cursor's overshoot past the drop point never takes the card beyond the same limits.
+    expect(html).toContain("return { w: Math.min(maxR - bx, Math.max(minW, c.x - bx)), h: Math.min(maxB - by, Math.max(minH, c.y - by)) };");
+  });
+
+  it("writes the card as layout on a 0.01 px grid, never a scale of its size, and takes the cursor from the kit (one copy)", async () => {
+    await scaffold(["spot", "--template", "select-resize"]);
+    const html = read("spot");
+    expect(html).toContain('box.style.width = stamp(size.w) + "px";');
+    expect(html).toContain('box.style.height = stamp(size.h) + "px";');
+    // The card's own transform is only the entry pop (a uniform scale); its size never goes through a scale.
+    expect(html).not.toMatch(/put\(box, \{[^}]*scale[XY]/);
+    expect(html).not.toMatch(/mix-blend-mode|backdrop-filter/);
+    // The cursor, its timing guard and its click are the kit's own text, the same in every cursor template.
+    expect(html).toContain(CURSOR_MATH);
+    expect(html).toContain(CURSOR_SCRIPT);
+    expect(html.match(/function journey/g)).toHaveLength(1);
+    // The press, the ring and the handles share one time.
+    expect(html).toContain("var clickAt = trip.legs[0].arrive + 0.04;");
+    expect(html).toContain('drawRipple(t, clickAt, press1.x, press1.y);');
+    expect(html).toContain('opacity: M.ease("enter", (t - clickAt) / 0.1)');
   });
 });
 
