@@ -9,7 +9,7 @@ import { waitForIngest } from "./preview-probe.js";
 
 // The Colour section of the clip inspector (#384, ADR 0031): sliders for the correction, a project LUT with its mix and a
 // reset, each change one `ui` clip.set that merges its number into the clip's grade (a drag is one step); footage tagged
-// HLG shows the LOG note, plain footage does not.
+// HLG shows the LOG note, plain footage does not. A nested timeline clip gets the same section without the note (slice 9).
 const box = sandbox("colour-inspector");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const journal = join(box.projectDir, ".frameshell", "history", "main.jsonl");
@@ -77,9 +77,12 @@ test.beforeAll(async () => {
   mkdirSync(box.configDir, { recursive: true });
   writeFileSync(join(box.configDir, "config.json"), JSON.stringify({ binaries: { ffmpeg } }));
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
+  const inner = { ...timeline, tracks: [{ ...timeline.tracks[0], clips: [{ id: "c_inner", type: "media", asset: HLG, start: 0, in: 0, out: 3 }] }] };
+  writeFileSync(join(box.projectDir, "timelines", "inner.json"), JSON.stringify(inner, null, 2));
   timeline.tracks[0].clips = [
     { id: "c_plain", type: "media", asset: PLAIN, start: 0, in: 0, out: 3 },
     { id: "c_hlg", type: "media", asset: HLG, start: 3, in: 0, out: 3 },
+    { id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 6, in: 0, duration: 3 },
   ];
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
   ({ app, page } = await launch(box));
@@ -119,7 +122,7 @@ test("a slider release changes that number only: one ui clip.set, a drag is one 
   const before = journaled().length;
   await slider("Exposure (stops)").fill("0.5");
   await expect.poll(() => saved(0)).toEqual({ exposure: 0.5 });
-  expect(journaled().slice(before)).toEqual([{ op: "clip.set", author: "ui" }]);
+  await expect.poll(() => journaled().slice(before)).toEqual([{ op: "clip.set", author: "ui" }]);
   await expect(colour().getByRole("button", { name: "Reset" })).toBeEnabled();
 
   // A drag across the track moves the thumb many times and saves once, on release; the other numbers stay.
@@ -134,7 +137,7 @@ test("a slider release changes that number only: one ui clip.set, a drag is one 
   await page.mouse.up();
   await expect.poll(() => (saved(0) as { saturation?: number }).saturation).toBeGreaterThan(1);
   expect(saved(0)).toMatchObject({ exposure: 0.5 });
-  expect(journaled().slice(edits)).toEqual([{ op: "clip.set", author: "ui" }]);
+  await expect.poll(() => journaled().slice(edits)).toEqual([{ op: "clip.set", author: "ui" }]);
 });
 
 test("a project LUT is picked, mixed in and removed; a file added later is listed", async () => {
@@ -173,4 +176,21 @@ test("footage tagged HLG shows the LOG note, and is graded all the same", async 
   await select(1.5, "c_plain");
   await expect(page.getByTestId("grade-log-warning")).toHaveCount(0);
   expect(new Set(journaled().map((entry) => `${entry.op}:${entry.author}`))).toEqual(new Set(["clip.set:ui", "revert:ui"]));
+});
+
+test("a nested timeline clip has the Colour section too: one ui clip.set per release, reset clears it, no LOG note", async () => {
+  // Its host picture is graded as one; the HLG footage inside would warn only on its own clip.
+  await select(7.5, "c_nest");
+  await expect(colour()).toBeVisible();
+  await expect(slider("Contrast")).toHaveValue("1");
+  await expect(colour().getByRole("button", { name: "Reset" })).toBeDisabled();
+  const before = journaled().length;
+  await slider("Contrast").fill("1.4");
+  await expect.poll(() => saved(2)).toEqual({ contrast: 1.4 });
+  await expect.poll(() => journaled().slice(before)).toEqual([{ op: "clip.set", author: "ui" }]);
+  await expect(page.getByTestId("grade-log-warning")).toHaveCount(0);
+
+  await colour().getByRole("button", { name: "Reset" }).click();
+  await expect.poll(() => saved(2)).toBeUndefined();
+  await expect(slider("Contrast")).toHaveValue("1");
 });
