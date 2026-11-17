@@ -788,6 +788,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         throw error;
       }
     },
+    declaredProps: (dir, clip) => timelines.declaredProps(dir, clip),
     planRender: (dir, params, loaded) => exports.planRender(dir, params, loaded),
     // `reviews` is declared below: it is read when a batch asks for a review, not now.
     review: (dir, request) => reviews.run(dir, request),
@@ -1623,6 +1624,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     render: async ({ cwd, timeline, preset, quality, out, cover, formats: ids, loop, yes }) =>
       exports.render(await root(cwd), { timeline, preset, quality, out, cover, formats: ids, loop, yes }),
+    "batch.cancel": async ({ cwd, file, out }) => batches.cancel(await root(cwd), cwd, { file, out }),
     "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, review, dryRun, yes }) =>
       batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, review, dryRun, yes }),
     frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {

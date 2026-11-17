@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+  type BatchCancelResult,
   type BatchEntry,
   type BatchManifest,
   BatchManifestSchema,
@@ -11,7 +13,8 @@ import {
   type ReviewResult,
   RpcError,
 } from "@frameshell/protocol";
-import { type BatchFile, type ResolvedBatchFile, type Timeline, parseBatchFile, withRows } from "@frameshell/schema";
+import { type AnyClip, type BatchFile, type ResolvedBatchFile, type Timeline, parseBatchFile, withRows } from "@frameshell/schema";
+import { canonicalJson } from "../clips/cache-key.js";
 import { type PlannedRender, type RenderRequest, confirmFinals } from "../export/service.js";
 import { canonicalPathSync, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { JobChange, JobQueue } from "../jobs/queue.js";
@@ -37,6 +40,8 @@ export interface BatchServiceOptions {
   resolveTime(root: string, ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
   /** Seconds timeline `id` of the project runs when it is `timeline`; null when that cannot be told (a nested timeline fails to load). */
   duration(root: string, id: string, timeline: Timeline, fps: number): Promise<number | null>;
+  /** See `TimelineService.declaredProps`. Absent: no clip declares props, so a props slot may name any. */
+  declaredProps?(root: string, clip: AnyClip): Promise<readonly string[] | null>;
   /** See `ExportService.planRender`. */
   planRender(root: string, params: RenderRequest, loaded: { timeline: Timeline; fps: number }): Promise<PlannedRender>;
   /** See `ReviewService.run`. Absent: `review` is refused. */
@@ -63,6 +68,17 @@ export interface BatchRequest {
   /** The person agreed to wait for the final renders of generated clips the rows make (ADR 0035 decision 4). */
   yes?: boolean | undefined;
 }
+
+/** Params of {@link BatchService.cancel}; see the daemon method `batch.cancel`. */
+export interface BatchCancelRequest {
+  /** Batch file, absolute or relative to `cwd`. */
+  file: string;
+  /** Absolute output folder; default `<root>/exports/<batch name>/`. */
+  out?: string | undefined;
+}
+
+/** How long `batch.cancel` waits for the running render to stop before it answers with the manifest as it is. */
+const CANCEL_WAIT_MS = 10_000;
 
 /** One row ready to queue. `entries` are the manifest's, updated in place. */
 interface PlannedRow {
@@ -120,9 +136,13 @@ export class BatchService {
       hasTranscript: (asset: string) => this.#options.hasTranscript(root, asset),
       resolve: (ref: number | string, at: { timeline: Timeline; fps: number }) => this.#options.resolveTime(root, ref, at),
       duration: (timeline: Timeline) => this.#options.duration(root, file.template, timeline, loaded.fps),
+      ...(this.#options.declaredProps ? { declaredProps: (clip: AnyClip) => this.#options.declaredProps!(root, clip) } : {}),
     };
+    // The template's content without its revision, which moves on any save: equal content, equal hash.
+    const templateContent = canonicalJson({ ...loaded.timeline, revision: undefined });
     const rows: PlannedRow[] = [];
     const skipped: string[] = [];
+    const changed: string[] = [];
     let first: PlannedRender["result"] | undefined;
     // Entries of rows this call does not render stay as the earlier run left them.
     const rendering = new Set<string>();
@@ -144,6 +164,7 @@ export class BatchService {
         throw new RpcError(error.code, `Row ${row.id}: ${error.message}`, { ...(error.data as Record<string, unknown> | undefined), row: row.id });
       }
       first ??= planned.result;
+      const hash = rowHash(row, file.slots, templateContent);
       const entries = planned.result.renders.map((render) => ({
         row: row.id,
         format: render.format,
@@ -155,6 +176,7 @@ export class BatchService {
         finishedAt: null,
         duration: null,
         warnings: [...variantWarnings, ...render.warnings, ...planned.provenance],
+        hash,
         review: null,
       }));
       for (const entry of entries) {
@@ -168,14 +190,16 @@ export class BatchService {
         }
         outputs.set(entry.output, row.id);
       }
-      if (!request.force && (await rendered(earlier, row.id, entries))) {
+      const state = request.force ? "render" : await renderedState(earlier, row.id, entries);
+      if (state === "skip") {
         skipped.push(row.id);
         continue;
       }
+      if (state === "changed") changed.push(row.id);
       rendering.add(row.id);
       rows.push({ id: row.id, planned, entries });
     }
-    const base = { dir: root, file: path, template: file.template, out, preset: first?.preset ?? null, quality: first?.quality ?? null, skipped };
+    const base = { dir: root, file: path, template: file.template, out, preset: first?.preset ?? null, quality: first?.quality ?? null, skipped, changed };
     const merged = (): BatchEntry[] => orderEntries(ids, [...kept(), ...rows.flatMap((row) => row.entries)]);
     if (request.dryRun) return { ...base, manifest: null, dryRun: true, entries: merged(), jobs: [] };
     // Every row's finals in one sum, before any row queues: a later row must not start hours of renders unasked.
@@ -216,6 +240,27 @@ export class BatchService {
     });
     const jobs = run.start();
     return { ...base, manifest, dryRun: false, entries: run.snapshot().entries, jobs };
+  }
+
+  /**
+   * Stop the batch of `request.file` rendering into `out`: no further row is queued, the running row's jobs are
+   * canceled and every entry not ended becomes `canceled`. Waits (up to {@link CANCEL_WAIT_MS}) until the running
+   * render stopped and the manifest says `canceled`. Throws InvalidOperation when no such batch is rendering.
+   */
+  async cancel(root: string, cwd: string, request: BatchCancelRequest): Promise<BatchCancelResult> {
+    const path = resolve(cwd, request.file);
+    const out = request.out ?? join(root, "exports", batchName(path));
+    const run = this.#runs.get(canonicalPathSync(out));
+    const refuse = (reason: string, message: string) => new RpcError(ErrorCode.InvalidOperation, message, { op: "batch.cancel", reason, field: "out" });
+    if (!run || run.finished) throw refuse("no batch running", `No batch is rendering into ${out}. \`job.list\` shows what is running.`);
+    if (canonicalPathSync(run.batch) !== canonicalPathSync(path)) {
+      throw refuse("other batch", `The batch rendering into ${out} is ${run.batch}, not ${path}.`);
+    }
+    const canceled = run.cancel();
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([run.ended, new Promise<void>((done) => (timer = setTimeout(done, CANCEL_WAIT_MS)))]);
+    clearTimeout(timer);
+    return { dir: root, file: path, out, manifest: join(out, "manifest.json"), state: run.finished ? "canceled" : "running", canceled, entries: run.snapshot().entries };
   }
 
   /** `review` of the file `entry` wrote: metrics only, as the batch's `view` of the project (`current`). Never throws. */
@@ -262,6 +307,10 @@ class BatchRun {
   get finished(): boolean {
     return this.#finishedAt !== null;
   }
+  /** Absolute path of the batch file. */
+  get batch(): string {
+    return this.#where.batch;
+  }
 
   readonly #where: { batch: string; template: string; out: string; manifest: string };
   readonly #rows: PlannedRow[];
@@ -273,6 +322,10 @@ class BatchRun {
   readonly #byJob = new Map<string, BatchEntry>();
   readonly #startedAt = new Date().toISOString();
   #finishedAt: string | null = null;
+  /** Set by {@link cancel}: no row is queued and no review starts any more. */
+  #canceled = false;
+  /** Rows whose render {@link cancel} stopped or kept from starting. */
+  readonly #canceledRows = new Set<string>();
   #next = 0;
   #unwatch: () => void = () => {};
   #dirty = false;
@@ -325,10 +378,41 @@ class BatchRun {
     });
   }
 
+  /**
+   * Stop the batch: rows not queued yet become `canceled` and are never queued, reviews still waiting are dropped,
+   * and the render jobs of the row in progress are canceled (a running one ends `canceled` when it stops, and then
+   * the manifest says so). Returns the ids of the rows it stopped or kept from starting, in file order; a second
+   * call changes nothing.
+   */
+  cancel(): string[] {
+    if (!this.#canceled && !this.finished) {
+      this.#canceled = true;
+      const at = new Date().toISOString();
+      for (const row of this.#rows.slice(this.#next)) {
+        this.#canceledRows.add(row.id);
+        for (const entry of row.entries) {
+          entry.status = "canceled";
+          entry.error = "The batch was canceled before this render started.";
+          entry.finishedAt = at;
+        }
+      }
+      for (const entry of this.#reviewQueue.splice(0)) entry.review = null;
+      for (const entry of this.#rows[this.#next - 1]?.entries ?? []) {
+        if (ended(entry) || !entry.job) continue;
+        this.#canceledRows.add(entry.row);
+        // A queued job ends at once and reaches `#changed` before this returns; a running one stops later.
+        this.#jobs.cancel(entry.job);
+      }
+      this.#persist();
+      this.#finish();
+    }
+    return this.#rows.filter((row) => this.#canceledRows.has(row.id)).map((row) => row.id);
+  }
+
   snapshot(): BatchManifest {
     return {
       ...this.#where,
-      state: this.#finishedAt ? "done" : "running",
+      state: this.#finishedAt ? (this.#canceled ? "canceled" : "done") : "running",
       startedAt: this.#startedAt,
       finishedAt: this.#finishedAt,
       entries: orderEntries(this.#order, [...this.#kept, ...this.#rows.flatMap((row) => row.entries)]).map((entry) => ({ ...entry, warnings: [...entry.warnings] })),
@@ -353,6 +437,10 @@ class BatchRun {
   }
 
   #queueReview(entry: BatchEntry): void {
+    if (this.#canceled) {
+      entry.review = null;
+      return;
+    }
     if (this.#reviewQueue.includes(entry)) return;
     entry.review = pendingReview();
     this.#reviewQueue.push(entry);
@@ -373,7 +461,7 @@ class BatchRun {
 
   /** Ends the batch once every row ended and no review is left. */
   #finish(): void {
-    if (this.#finishedAt || this.#next < this.#rows.length || !this.#rows.every((row) => row.entries.every(ended)) || this.#reviewing || this.#reviewQueue.length > 0) return;
+    if (this.#finishedAt || (!this.#canceled && this.#next < this.#rows.length) || !this.#rows.every((row) => row.entries.every(ended)) || this.#reviewing || this.#reviewQueue.length > 0) return;
     this.#finishedAt = new Date().toISOString();
     this.#unwatch();
     this.#persist();
@@ -384,7 +472,7 @@ class BatchRun {
    * the jobs until their ids are known, so each job's snapshot after `start` is taken as its state.
    */
   #advance(): void {
-    while (this.#next < this.#rows.length) {
+    while (!this.#canceled && this.#next < this.#rows.length) {
       const row = this.#rows[this.#next++]!;
       const queued = row.planned.start();
       queued.renders.forEach((render, index) => {
@@ -472,13 +560,24 @@ async function readManifest(path: string, batch: string, failed: boolean): Promi
   return parsed.data.entries;
 }
 
-/** True when every planned entry has a `done` entry for the same output in `earlier` and the file is still there. */
-async function rendered(earlier: readonly BatchEntry[], row: string, planned: readonly BatchEntry[]): Promise<boolean> {
+/**
+ * What a chosen row needs: `skip` when every planned entry has a `done` entry for the same output in `earlier`, the
+ * file is still there and the data it was made from is the same; `changed` when only that data differs (an earlier
+ * entry with no hash, from before hashes, counts as the same); else `render`.
+ */
+async function renderedState(earlier: readonly BatchEntry[], row: string, planned: readonly BatchEntry[]): Promise<"skip" | "changed" | "render"> {
+  let changed = false;
   for (const entry of planned) {
     const was = earlier.find((other) => other.row === row && other.output === entry.output);
-    if (was?.status !== "done" || !(await exists(entry.output))) return false;
+    if (was?.status !== "done" || !(await exists(entry.output))) return "render";
+    if (was.hash !== null && was.hash !== entry.hash) changed = true;
   }
-  return true;
+  return changed ? "changed" : "skip";
+}
+
+/** Fingerprint of what a row's render is made from: its cells, the batch file's slots and the template's content. */
+function rowHash(row: object, slots: Record<string, string>, template: string): string {
+  return createHash("sha256").update(canonicalJson({ row, slots, template })).digest("hex").slice(0, 32);
 }
 
 /** True for an entry whose job ended. */
