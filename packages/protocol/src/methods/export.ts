@@ -206,8 +206,11 @@ export const exportMethods = {
       "only rows with an entry in the manifest that is not `done` (failed, canceled, or left `queued`/`running` when " +
       "the daemon stopped) or no entry yet; both together = the failed ones among `rows`. Only the chosen rows are " +
       "validated, so a bad row elsewhere does not block them; the other rows keep their manifest entries. A chosen row " +
-      "whose entries are all `done` with the files still there is skipped (listed in `skipped`) unless `force`: edit " +
-      "a row, then pass `force` or its id in `rows` with `force`. `review: true` reviews each rendered file as soon as its render " +
+      "whose entries are all `done` with the files still there is skipped (listed in `skipped`) unless `force` or its data changed: " +
+      "each entry stores a `hash` of the row's cells, the slots and the template timeline's content, and a `done` row whose hash differs renders " +
+      "again without `force`, listed in `changed` (a manifest without hashes, or a swapped file edited in place, is not noticed: pass `force`). " +
+      "A props slot naming a prop the clip's composition does not declare (a HyperFrames `data-composition-variables` list) fails the row with " +
+      "reason `unknown prop`, in a dry run too; clips whose adapter declares nothing accept any prop. `batch.cancel` stops a running batch. `review: true` reviews each rendered file as soon as its render " +
       "is done (`review` on the file, metrics only, one at a time while the next row renders; it needs a ready ffmpeg): " +
       "the entry's `review` gets `verdict` (`fail` when `requirements.json` fails, `warn` for craft warnings, else " +
       "`pass`), `warnings`, `failed`, `checks` and the `run` whose `metrics.json` holds the detail, and the manifest says " +
@@ -263,7 +266,38 @@ export const exportMethods = {
         .array(BatchEntrySchema)
         .describe("Every row × format, row order then format order: the manifest as written now. Rows not rendered by this call keep their earlier entries; `queued` ones are what it renders."),
       skipped: z.array(z.string()).describe("Chosen rows left alone because every entry is `done` and its file exists (pass `force`); empty when none."),
+      changed: z
+        .array(z.string())
+        .default([])
+        .describe(
+          "Rows rendered again without `force` because the data of their last `done` render changed: a cell, the slots, or the template timeline (the manifest entry's `hash`); empty when none.",
+        ),
       jobs: z.array(JobSchema).describe("Render jobs queued by this call: the first row's. Later rows queue as the one before ends."),
+    }),
+  },
+  "batch.cancel": {
+    mutating: true,
+    description:
+      "Stop a running batch, one `batch.render` started (ADR 0040): no further row is queued, the render job of the row that is running is " +
+      "canceled, and the manifest entries of that row and of the rows not started become `canceled` (a review of a file still waiting is " +
+      "dropped; one running finishes first). Rows already `done` keep their files and entries. The manifest's `state` becomes " +
+      "`canceled` once the running render ended; the call waits for that (up to 10 s, then returns the entries as they are). " +
+      "`file` and `out` name the batch as `batch.render` did (default out `<project>/exports/<batch file name>/`). Re-run the " +
+      "rest later with `batch.render` and `failed: true`. Fails with InvalidOperation (data `{ op, reason, " +
+      "field: \"out\" }`; `reason` is `no batch running` when no batch of this project is rendering into `out`, `other batch` when it renders another batch file).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("Batch file the running batch was started with, absolute or relative to `cwd`."),
+      out: AbsolutePath.optional().describe("Absolute output folder the batch renders into. Default `<project>/exports/<batch file name without .batch.json>/`."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      file: z.string().describe("Absolute path of the batch file."),
+      out: z.string().describe("Absolute output folder."),
+      manifest: z.string().describe("Absolute path of `manifest.json`."),
+      state: z.enum(["running", "canceled"]).describe("`canceled` once the batch ended; `running` when the render job had not stopped yet after 10 s: ask `job.list`, or read the manifest."),
+      canceled: z.array(z.string()).describe("Row ids whose render was stopped or never started, in file order."),
+      entries: z.array(BatchEntrySchema).describe("The manifest as written now."),
     }),
   },
   frame: {
@@ -329,10 +363,13 @@ export const exportMethods = {
       "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
       "can measure; a file has none). A timeline is rendered frame by frame like `frame` (what `frame` puts in its `warnings`, e.g. a refused motion blur, is in this result's `warnings`; draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
-      "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
+      "are covered. A file's motion is measured on every frame, the way `analyze` reads it (its first hour only), and its shots are found on the whole file, " +
+      "a second decode even with `from`/`to`; a timeline's is sampled at most 90 times " +
+      "(`metrics.picture.sampled`; thresholds then apply per sample interval), so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). `metrics` (default on, or named in `sheets`) writes `metrics.json` and " +
       "returns `metrics`: numbers a sheet cannot tell, measured on grey frames and the sound: the longest still stretch, the largest gap between " +
-      "visual events, near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
+      "visual events (`analyze`'s big changes), `rhythm` (shot-length CV, still share, bursts: on a `file` the numbers `analyze` reports, MEASURED; on a timeline ESTIMATED), " +
+      "near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
       "`file` (integrated LUFS, range, true peak, the phone band 200 Hz to 6 kHz; measured after the encode, so export first: a timeline has none) and `craft` warnings " +
       "(still over 3 s, empty frame 0, a blank picture, a cue too short, a true peak above -1 dBTP, a phone band 6 LU under the mix, over 15 s of silence). " +
       "`metrics.sync` sets the sounds against the picture events they belong to (the generated sounds `sound.place` put on the timeline, or the hits found in a `file`'s sound; whooshes, risers and ticks are left out): " +

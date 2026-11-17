@@ -11,12 +11,16 @@ import {
 } from "@frameshell/schema";
 import { visibleClips } from "../transcripts/verify.js";
 
-/** A scene's words placed on one timeline: first to last placed word, in timeline seconds. */
+/**
+ * A scene placed on one timeline, in timeline seconds. {@link resolveWordRanges} returns `source: "words"`
+ * (first to last placed word); `outlineScript` adds the `clips` and `planned` ones.
+ */
 export interface SceneSpan {
   timeline: string;
   start: number;
   end: number;
   words: number;
+  source: "words" | "clips" | "planned";
 }
 
 /** Result of {@link resolveWordRanges}: one entry per input range, plus problems to show the agent. */
@@ -148,7 +152,7 @@ function spanOn(id: string, timeline: Timeline, transcript: Transcript, wanted: 
       }
     }
   }
-  return placedIds.size === 0 ? null : { timeline: id, start: round(start), end: round(end), words: placedIds.size };
+  return placedIds.size === 0 ? null : { timeline: id, start: round(start), end: round(end), words: placedIds.size, source: "words" };
 }
 
 function round(seconds: number): number {

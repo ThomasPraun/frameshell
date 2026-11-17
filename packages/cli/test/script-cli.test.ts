@@ -75,6 +75,7 @@ describe("frameshell script outline", () => {
       [
         'scripts/promo.md · "Promo" · target 60 s · 9:16 · 3 scenes',
         "  #hook     Hook       line 6   2 words  clips: main/c_hook",
+        "    placed main 0.00-1.00 s (from its clips)",
         "  #por-qué  ¿Por qué?  line 8   1 word  no clips",
         "  #hook-1   Hook       line 10  1 word  no clips",
         "Warnings:",

@@ -29,6 +29,11 @@ export interface VariantContext {
   resolve(ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
   /** Seconds the timeline runs, or null when it cannot be told (a nested timeline that fails to load). */
   duration(timeline: Timeline): Promise<number | null>;
+  /**
+   * Top-level props the generated `clip`'s adapter declares, or null when it declares none (any prop goes). Absent:
+   * no adapter declares anything. See `TimelineService.declaredProps`.
+   */
+  declaredProps?(clip: AnyClip): Promise<readonly string[] | null>;
 }
 
 /** A row's timeline and what it says about it. */
@@ -66,6 +71,15 @@ export async function rowVariant(template: Timeline, file: Pick<BatchFile, "slot
     if (parsed.kind === "props") {
       if (clip.type === "media" || clip.type === "timeline" || clip.type === "shot") {
         throw rowError(row.id, slot, `${clip.id} is a ${clip.type} clip; only generated (adapter) clips take props.`, { reason: "not an adapter clip" });
+      }
+      const declared = (await context.declaredProps?.(clip)) ?? null;
+      const prop = parsed.path[0]!;
+      if (declared && !declared.includes(prop)) {
+        throw rowError(row.id, slot, `${clip.id}'s composition declares the props ${declared.join(", ")}, not ${prop}. Fix the slot's path (\`${slot}\`: ${target}).`, {
+          reason: "unknown prop",
+          prop,
+          declared: [...declared],
+        });
       }
       const current = (clip as { props?: Record<string, unknown> }).props ?? {};
       let props: Record<string, unknown>;

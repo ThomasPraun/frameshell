@@ -26,7 +26,7 @@ One finished edit, many files: the same video in other languages, for other prod
 ```
 
 - `template` is a timeline of the project (default `main`); a single generated clip is a timeline holding that one clip.
-- A slot is `<clipId>.props.<dot.path>` (written over an adapter clip's props, checked by its props schema like `clip set`), `<clipId>.props` (the prop named like the slot: `"title": "c_8f2a1b.props"` is `c_8f2a1b.props.title`, so a template's declared props become slot names without repeating them) or `<clipId>.asset` (a media clip's file swapped). Read the ids with `frameshell timeline show`. Slots reach top-level clips only, not `elements`, nested timelines or per-format props.
+- A slot is `<clipId>.props.<dot.path>` (written over an adapter clip's props, checked by its props schema like `clip set`), `<clipId>.props` (the prop named like the slot: `"title": "c_8f2a1b.props"` is `c_8f2a1b.props.title`, so a template's declared props become slot names without repeating them) or `<clipId>.asset` (a media clip's file swapped). Read the ids with `frameshell timeline show`. Slots reach top-level clips only, not `elements`, nested timelines or per-format props. When the clip's composition declares its props (a HyperFrames `data-composition-variables` list), a props slot naming another prop fails the row with `reason: "unknown prop"` and the declared names, in `--dry-run` too (a typo such as `titel` never renders the default); a composition that declares none takes any prop.
 - A third slot kind, `voiceover`, places a script's takes per row (see Per-language rows below). A file has at most one.
 - A row is its `id` (lowercase letters, digits and `-`, unique: it names the file) plus one value per slot. A slot a row leaves out keeps the template's value. Rows are written in the file (`rows`) or read from a CSV file next to it (`"csv": "launch.csv"`, relative to the batch file; give one, not both).
 - Every row x format is checked before anything renders; a bad row fails the call naming its `row` and `slot`. Check with `--dry-run`.
@@ -55,7 +55,7 @@ es,Día de lanzamiento,9.5,scripts/launch-es.md
 - The header is `id` and slot names, in any order; a slot with no column keeps the template's value for every row, and an empty cell leaves that slot to the template for that row (so a text prop cannot be set to an empty string). The delimiter is the comma, `;` or tab the header uses (Spanish spreadsheets export `;`); quoted cells may hold the delimiter, quotes doubled and line breaks.
 - A cell is read by the slot's type: a props slot takes the type of the value the template clip already has at that path (a number stays a number, `true`/`false`/`yes`/`no`/`1`/`0` for a boolean, a list or object as JSON); asset and voiceover cells are paths. A prop the template does not have is text unless the header says `price:number`, `:boolean`, `:json` or `:text`, which also overrides the template.
 - Every wrong cell is reported at once with its line and column (`line 4, column price: expected a number, got "x"`), the first 20 and a count of the rest; fix them and run `--dry-run` again.
-- Edit the CSV, then re-run with `--force` (or `--rows <id> --force`): the manifest does not know the data changed.
+- Edit the CSV and re-run: a row whose cells changed renders again by itself (see Re-run a row).
 
 ## Re-run a row
 
@@ -68,11 +68,19 @@ frameshell batch launch.batch.json --rows en..fr       # from en to fr, in the f
 frameshell batch launch.batch.json --rows es --force   # again although it is done
 ```
 
-- Without `--force`, a chosen row whose renders are all `done` with the files still in place is skipped and listed as skipped. After editing a row or the template, pass `--force` (or `--rows <id> --force`): the manifest does not know the data changed.
+- Without `--force`, a chosen row whose renders are all `done` with the files still in place is skipped and listed as skipped, unless its data changed: each manifest entry keeps a `hash` of the row's cells, the slots and the template timeline's content, and a `done` row whose hash differs renders again by itself, listed as `changed` (so an edited row, CSV cell, slot or template needs no `--force`). A manifest from before hashes counts as unchanged, and so does a swapped file edited in place under the same name or an edit to `preset`/`quality`: pass `--force` (or `--rows <id> --force`) for those.
 - Only the chosen rows are checked and rendered, so a bad row elsewhere does not block the re-run. The other rows keep their manifest entries.
 - `--failed` needs the manifest of this batch file; `--failed --rows ...` re-runs the failed ones among those rows.
 
-MCP: `batch_render` takes `file`, `out`, `formats`, `rows` (an array of ids or `first..last`), `failed`, `force`, `review`, `dryRun`.
+## Stop a batch
+
+```sh
+frameshell batch cancel launch.batch.json     # from another terminal; Ctrl-C in the running `batch` asks the same
+```
+
+No further row is queued, the render of the row in progress is canceled, and the manifest says `"state": "canceled"` with those rows `canceled` (rows already `done` keep their files). Re-run what is left with `--failed`. It fails when no batch is rendering into that `out`.
+
+MCP: `batch_render` takes `file`, `out`, `formats`, `rows` (an array of ids or `first..last`), `failed`, `force`, `review`, `dryRun`, `yes` (only after the person agreed to wait for Blender finals estimated over 5 minutes in all: without it the call fails with ConfirmationRequired; the CLI flag is `--yes`). `batch_cancel` takes `file` and `out`.
 
 ## Review each row
 

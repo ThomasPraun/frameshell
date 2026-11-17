@@ -94,3 +94,36 @@ test("editing the script moves the spans without a reload", async () => {
   writeFileSync(path, readFileSync(path, "utf8").replace("w_000001..w_000003", "w_000001..w_000002"));
   await expect(scene(INTRO)).toContainText("00:00:00:06 to 00:00:01:21");
 });
+
+// A storyboard with no transcript words (a motion film): its scenes show from the heading's time range, then from the clips.
+const REVEAL = "scripts/film.md#reveal-010-016";
+const PAYOFF = "scripts/film.md#payoff-020-026";
+
+test("a storyboard without words shows planned spans from its headings", async () => {
+  writeFileSync(join(box.projectDir, "scripts", "film.md"), "## Reveal (0:10-0:16)\nThe row lands.\n\n## Payoff (0:20-0:26)\nThe logo.\n");
+  await expect(scene(REVEAL)).toHaveAttribute("data-source", "planned");
+  await expect(scene(REVEAL)).toContainText("Reveal (0:10-0:16), 00:00:10:00 to 00:00:16:00, planned, no clips yet");
+  await expect(scene(PAYOFF)).toHaveAttribute("data-source", "planned");
+  await expect(scene(PAYOFF)).toHaveAttribute("data-filled", "false");
+});
+
+test("a clip linked to a planned scene takes the span over, and a pick follows the clip when it moves", async () => {
+  const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
+  const picture = timeline.tracks.find((track: { id: string }) => track.id === "v1");
+  picture.clips.push({ id: "c_pay", type: "titles", start: 21, duration: 3, scriptRef: PAYOFF });
+  writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
+  await expect(scene(PAYOFF)).toHaveAttribute("data-source", "clips");
+  await expect(scene(PAYOFF)).toContainText("00:00:21:00 to 00:00:24:00, 1 clip");
+  await expect(scene(REVEAL)).toHaveAttribute("data-source", "planned");
+
+  await clickBand(22);
+  await expect(scene(PAYOFF)).toHaveAttribute("data-selected", "true");
+  await expect(lanes()).toHaveAttribute("data-selected", "c_pay");
+  await expect(lanes()).toHaveAttribute("data-range", "21-24");
+
+  const moved = JSON.parse(readFileSync(mainFile, "utf8"));
+  moved.tracks.find((track: { id: string }) => track.id === "v1").clips.find((clip: { id: string }) => clip.id === "c_pay").start = 30;
+  writeFileSync(mainFile, JSON.stringify(moved, null, 2));
+  await expect(lanes()).toHaveAttribute("data-range", "30-33");
+  await expect(lanes()).toHaveAttribute("data-selected", "c_pay");
+});

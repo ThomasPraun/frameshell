@@ -1,4 +1,5 @@
 import type { ReviewSheetKind, TimelineView } from "@frameshell/protocol";
+import { STILL_LEVEL } from "../analyze/rhythm.js";
 
 // Which frames `review` shows and how sheets are laid out. Pure: the frame sampling that #471 `analyze` reuses.
 // Everything counts in frame indexes of the film (the timeline's or the file's frame rate).
@@ -53,18 +54,12 @@ const GRID_CLEARANCE_S = 0.2;
 export const PEAKS = 5;
 /** Least seconds between two reported peaks. */
 export const PEAK_GAP_S = 0.5;
-/** Weakest motion that counts as a peak (grey levels, 0 to 255). */
-export const MIN_PEAK_ENERGY = 0.5;
+/** Weakest motion that counts as a peak (grey levels, 0 to 255): any change that is not still. */
+export const MIN_PEAK_ENERGY = STILL_LEVEL;
 /** Strips written: the fastest moments. */
 export const STRIPS = 2;
-/** Width the grey frames of the motion measure are scaled to. */
-export const ENERGY_WIDTH = 320;
-/** Most samples the motion of a timeline is measured on (each is a frame render). */
+/** Most samples the motion of a timeline is measured on (each is a frame render); a file is measured on every frame. */
 export const MAX_TIMELINE_SAMPLES = 90;
-/** Most samples the motion of a file is measured on. */
-export const MAX_FILE_SAMPLES = 3000;
-/** Samples per second of the motion measure of a file, at most. */
-export const FILE_SAMPLE_HZ = 15;
 
 /** Frame index showing at `seconds`, as the `frame` method picks it. */
 export function frameIndex(seconds: number, fps: number): number {
@@ -262,11 +257,6 @@ export function stripPicks(fps: number, range: FrameRange, at: number): FramePic
 /** Frames between samples of the motion measure of a timeline of `frames` frames: every frame up to {@link MAX_TIMELINE_SAMPLES}, else spread. */
 export function timelineSampleStep(frames: number): number {
   return Math.max(1, Math.ceil(frames / MAX_TIMELINE_SAMPLES));
-}
-
-/** Samples per second of the motion measure of a file of `seconds`. */
-export function fileSampleRate(seconds: number, fps: number): number {
-  return Math.min(FILE_SAMPLE_HZ, fps, MAX_FILE_SAMPLES / Math.max(seconds, 1));
 }
 
 /** How one kind of sheet is tiled. */

@@ -150,6 +150,13 @@ export interface ClipAdapter {
    */
   timing?(clip: unknown, context?: InputsContext): readonly RenderTimingKind[] | Promise<readonly RenderTimingKind[]>;
   /**
+   * Optional. The names of the top-level props the clip's composition declares (typed template variables), when it
+   * declares any. A batch (ADR 0040) refuses a props slot naming another one, so a misspelt `titel` fails the row
+   * instead of rendering the default. Return `null` (or an empty list) when the composition declares none: any prop
+   * goes then. A throw counts as `null`.
+   */
+  declaredProps?(clip: unknown): readonly string[] | null | Promise<readonly string[] | null>;
+  /**
    * Optional (ADR 0035 slice 5). Clean up what the adapter keeps in the project outside the render cache, which the
    * host's `gc` does not know: marker files that feed {@link inputs}, listings, probes. The host calls it from `gc`
    * after keying every generated clip, with the union of the paths {@link inputs} returned for the adapter's clips,

@@ -55,7 +55,7 @@ export function clipCacheKey(input: ClipKeyInput): string {
 }
 
 /** JSON with object keys sorted at every level; `undefined` members dropped like `JSON.stringify` does. */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item === undefined ? null : item)).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>)

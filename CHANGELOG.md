@@ -19,6 +19,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   land on the first beats at or after `tickStart` (the tag is added by hand, so a plain checklist never re-keys on the
   music). A clip keeps its frozen 0.4.0 runtime until `frameshell hyperframes update`, which now reports 0.5.0; no
   pixel of an existing clip changes. The plugin skill lists the helpers.
+- The scene band shows a storyboard that has no transcript words, #662 (ADR 0015 amended, epic #451; protocol 169):
+  every `span` of `script.outline` carries a `source`. A scene whose words a timeline does not place gets a `clips`
+  span there, the first start to the last end of the clips linked to it (the box follows them when they move, and a
+  pick selects them). A scene with no clip linked anywhere gets a `planned` span on `main` from the time range in its
+  heading (`## Proof (bars 4-9, 0:06-0:18)`: clock readings win, bars and `bar:4-bar:10` go through the TimeRef
+  resolver on the main timeline's tempo; a range that cannot be read is a warning). The band draws planned boxes with
+  long dashes and the screen-reader list says "planned"; `frameshell script outline` prints where each scene is placed.
+  Dragging a scene to move its clips is a later ticket.
+- Batch closes #477 (ADR 0040 "Limits in v1" emptied, epic #451; protocol 168): a row whose data changed renders again
+  without `--force`. Each manifest entry now stores a `hash` of the row's cells, the batch file's slots and the template
+  timeline's content (not its revision); a `done` row whose hash differs is rendered and listed in the result's new
+  `changed` (the CLI prints it), a manifest from before hashes counts as unchanged, and `force` is for what the hash
+  does not see (a swapped file edited in place, `preset`, `quality`). A props slot naming a prop the clip's
+  composition does not declare fails the row with InvalidOperation data `{ row, slot, reason: "unknown prop", prop,
+  declared }`, in `--dry-run` too: the new optional plugin-API hook `ClipAdapter.declaredProps(clip)` names the
+  top-level props a composition declares, HyperFrames answers from `data-composition-variables` of the entry (an object
+  or an empty list declares nothing), and an adapter without the hook, or a composition without declarations, keeps
+  accepting any prop. New method `batch.cancel { file, out? }` (CLI `batch cancel <file> [--out dir]`, MCP
+  `batch_cancel`, replay-keyed like every mutating method): no further row is queued, the running row's render job is
+  canceled, the entries not ended become `canceled` and the manifest's `state` `canceled` (new value; `failed` re-runs
+  such rows); a Ctrl-C in `frameshell batch` asks the daemon, and the CLI also ends when another process cancels the
+  manifest. The skill (`batch.md`) and `docs/mcp.md` list the `yes` param and `batch_cancel`, and a CLI test covers
+  `batch --yes` (ConfirmationRequired, then the render with a stub final). Tests: `batch-service` (hash, cancel,
+  unknown prop), `batch-method` (daemon cancel and declared props), `batch-cli`, hyperframes `declaredProps`.
+- Audition dialog, slice AP of #463 (ADR 0038 "Audition page as built", epic #451; protocol 167): the person picks a
+  sound by ear. In the Explorer, right-click two or more selected sound files (Audition N sounds…), a folder such as
+  `assets/sound/`, or a `Music <rank>` track that `music candidates` made: each sound gets play/stop, a spectrogram,
+  its loudness and true peak, and the kind and seed of a generated take; Match loudness plays them all at the quietest
+  one's level, and Use this selects the file. Read-only: nothing on the timeline changes. English and Spanish.
+- Daemon method `audio.inspect { assets, spectrogram? }` (MCP `audio_inspect`), read-only: per file the integrated
+  loudness, true peak and loudness range from the per-asset loudness cache, the length, the `fssd` facts of a generated
+  take (a sound shorter than one 400 ms gating block, which EBU R128 reads as silence, gets the loudness of that one
+  block, flagged `shortSound`), and with `spectrogram: true` a 64-row log-frequency spectrogram of up to 400 columns in dB computed on the one
+  FFT in a worker thread (kept in memory, not on disk: no new `gc` kind). Files with no sound are listed in `skipped`.
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
@@ -1327,6 +1361,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `review` measures motion on the scale of `analyze`, slice RR of #457 (epic #451, #471; owner decision 2026-11-17;
+  protocol 166): a `--file` is read on every frame with `analyze`'s reader (grey frames 64 px on the long side) instead
+  of up to 15 samples a second at 320 px, and its shots are found the way `analyze` finds them (ffmpeg scene scores at
+  0.3). A timeline stays sampled through `frame` (at most 90 samples, now 64 px too) and every threshold applies per
+  sample interval; `metrics.picture.sampled` says so. Still pictures, visual events and bursts use `analyze/rhythm.ts`
+  only (`STILL_LEVEL`, `bigChanges`, `stillRuns`, `bursts`); review's own `STILL_ENERGY`, `EVENT_FLOOR` and
+  `EVENT_MEDIAN_FACTOR` are gone. New `metrics.rhythm` (`label`, `shotLengthCv`, `stillShare`, `bursts`): on a file
+  MEASURED and the numbers `analyze` reports for it, on a timeline ESTIMATED from its samples and clip cuts; the CLI
+  prints it on one line. **Verdicts shift:** a picture is still under 0.5 grey levels of change (was 0.35, on a different
+  picture size), so slow drifts and noisy holds now count as still; a hold lasts to the end of its last frame (`n`
+  frames = `n / fps`, one frame longer than before), so `static` warnings, `film.maxStatic`, `clip.keepsMoving` and a
+  waiver's `to` read up to a frame longer, and a hold of exactly 3 s at 30 fps is now 3 s, not 2.967; a file's holds
+  shorter than 1/15 s and changes between two old samples are now seen; visual events are big changes (4 times the
+  median within 0.5 s and at least 1 level, 15 % of the grey range, or a file's scene cut) instead of peaks over 2.5 times the
+  film's median, so `events`, `largestGap` and the sync of a file change; near-blank (`blank`, `frame-0`) reads the
+  64 px picture, where thin detail on a flat frame weighs less. Every motion reading (`analyze`'s picture,
+  `analyze.diff`'s activity, a reviewed file and a reviewed timeline's samples) now takes one grey, the rounded Rec. 709
+  luma of RGB frames (`greyOf`), instead of ffmpeg's Y plane for `analyze.diff` and `review`: a change of colour alone
+  (a hue turn, a grade ramp) now moves the picture there too, so their still stretches shrink and their alignment can
+  shift on coloured footage. A file over an hour is measured on its first hour, with a warning, and its gap and shots
+  stop there. The MCP server's instructions list the current sheets (with `beats` and `cropAt`) and the rhythm metrics.
 - The preview draws a person lifted in front of a word from the frame the plate track already decoded, slice MX2 of
   #461 (ADR 0032, epic #451): a subject span that shows the same source frame of the same proxy as a span of the plate
   decodes only its matte, so a word behind the head runs one decoder fewer per plate layer (2 instead of 3 for one

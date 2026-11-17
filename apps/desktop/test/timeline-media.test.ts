@@ -29,6 +29,7 @@ function fakeMedia(files: Record<string, unknown> = {}) {
     assets: () => new Promise((resolve) => replies.push(resolve)),
     bakes: async (timeline) => ({ timeline, revision: 0, bakes: [] }),
     mattes: async (timeline) => ({ timeline, revision: 0, mattes: [] }),
+    inspect: async () => ({ items: [], skipped: [] }),
     read: async (path) => new TextEncoder().encode(JSON.stringify(files[path] ?? PEAKS)),
     onChanged: () => () => undefined,
     import: async () => ({ imported: [], refused: [] }),

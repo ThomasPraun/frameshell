@@ -145,6 +145,16 @@ export function parseScript(text: string): ScriptOutline {
   return scanScript(text).outline;
 }
 
+/**
+ * {@link parseScript} plus, per scene in the same order, the time range its heading plans on the main timeline
+ * (see {@link readPlannedRange}); null when it names none. A range that ends before it starts is left out with
+ * a warning. Shoot and voiceover scripts read it from the heading as written, before the timing is cut from the title.
+ */
+export function parseScriptPlan(text: string): { outline: ScriptOutline; planned: (ScriptPlannedRange | null)[] } {
+  const scan = scanScript(text);
+  return { outline: scan.outline, planned: scan.planned };
+}
+
 /** Everything {@link parseScript} and {@link parseShootScript} share. */
 interface ScriptScan {
   outline: ScriptOutline;
@@ -154,6 +164,8 @@ interface ScriptScan {
   bodyStart: number;
   /** Per scene: seconds from a closing heading timing (shoot and voiceover scripts only), or null. */
   expected: (number | null)[];
+  /** Per scene: the range its heading plans ({@link readPlannedRange}), or null. */
+  planned: (ScriptPlannedRange | null)[];
   /** Per file line (0-based): inside a fenced block, fence lines included. */
   fenced: boolean[];
 }
@@ -164,7 +176,7 @@ function scanScript(text: string): ScriptScan {
   const { meta, bodyStart, fields } = readFrontmatter(lines, warnings);
   const timed = fields?.["shoot"] === true || fields?.["voiceover"] === true;
 
-  const headings: { title: string; base: string; line: number; expected: number | null }[] = [];
+  const headings: { title: string; base: string; line: number; expected: number | null; planned: ScriptPlannedRange | null }[] = [];
   const fenced = lines.map(() => false);
   let fence: { char: string; length: number } | null = null;
   for (let index = bodyStart; index < lines.length; index++) {
@@ -185,13 +197,15 @@ function scanScript(text: string): ScriptScan {
     if (!heading) continue;
     let title = (heading[1] ?? "").trim();
     let expected: number | null = null;
+    const { range: planned, reversed } = readPlannedRange(title);
+    if (reversed && !timed) warnings.push(`Line ${index + 1}: heading range ends before it starts; planned range ignored.`);
     const timing = timed ? readTiming(title) : null;
     if (timing) {
       title = timing.title;
       expected = timing.seconds;
       if (expected === null) warnings.push(`Line ${index + 1}: heading timing ends before it starts; expected length ignored.`);
     }
-    headings.push({ title, base: scriptSlug(title) || UNNAMED, line: index + 1, expected });
+    headings.push({ title, base: scriptSlug(title) || UNNAMED, line: index + 1, expected, planned });
   }
 
   const slugger = new Slugger();
@@ -217,7 +231,7 @@ function scanScript(text: string): ScriptScan {
         "Give scenes distinct headings so scriptRefs do not shift when one is removed.",
     );
   }
-  return { outline: { meta, scenes, warnings }, lines, fields, bodyStart, expected: headings.map((heading) => heading.expected), fenced };
+  return { outline: { meta, scenes, warnings }, lines, fields, bodyStart, expected: headings.map((heading) => heading.expected), planned: headings.map((heading) => heading.planned), fenced };
 }
 
 /**
@@ -511,16 +525,67 @@ function readLine(raw: string): { speaker: string | null; text: string; words: s
   return { speaker, text: spoken.join(" "), words, cues, placeholders };
 }
 
+/** One `m:ss` or `h:mm:ss` clock reading, the way a heading writes a time. */
+const CLOCK = String.raw`(?:\d+:)?\d{1,2}:\d{2}(?:\.\d+)?`;
+
 /** Heading timing like `(0:05–0:40)`: `m:ss` or `h:mm:ss`, joined by `–`, `—` or `-`. */
-const TIMING = /^(.*?)\s*\(\s*((?:\d+:)?\d{1,2}:\d{2}(?:\.\d+)?)\s*[–—-]\s*((?:\d+:)?\d{1,2}:\d{2}(?:\.\d+)?)\s*\)$/;
+const TIMING = new RegExp(String.raw`^(.*?)\s*\(\s*(${CLOCK})\s*[–—-]\s*(${CLOCK})\s*\)$`);
+
+/** Seconds of a clock reading (`1:05.5`), rounded to a millisecond. */
+function clockSeconds(value: string): number {
+  return Math.round(value.split(":").reduce((total, part) => total * 60 + Number(part), 0) * 1000) / 1000;
+}
 
 /** A heading's closing timing: the title without it, and its length (null when it ends before it starts). */
 function readTiming(heading: string): { title: string; seconds: number | null } | null {
   const match = TIMING.exec(heading);
   if (!match) return null;
-  const clock = (value: string) => value.split(":").reduce((total, part) => total * 60 + Number(part), 0);
-  const seconds = clock(match[3]!) - clock(match[2]!);
+  const seconds = clockSeconds(match[3]!) - clockSeconds(match[2]!);
   return { title: match[1]!, seconds: seconds > 0 ? Math.round(seconds * 1000) / 1000 : null };
+}
+
+/**
+ * Where a heading plans its scene on the main timeline (`## Proof (bars 4-9, 0:06-0:18)`): `start` and `end` are
+ * seconds, or a TimeRef (`bar:4`) the daemon resolves on the timeline's beat grid.
+ */
+export interface ScriptPlannedRange {
+  start: number | string;
+  end: number | string;
+}
+
+const DASH = String.raw`\s*[–—-]\s*`;
+const GRID_REF = String.raw`(?:bar|beat):\d+(?:\.\d+)?`;
+
+/**
+ * The time range a heading's closing parentheses plan: clock readings (`(0:06-0:18)`, in seconds), else bars
+ * (`(bars 4-9)`, 1-based and inclusive, so `bar:4` to `bar:10`; `(bar 4)`) or explicit grid refs (`(bar:4-bar:10)`).
+ * Parts are separated by `,` or `;`; clock readings win over bars, which need a beat grid. `reversed` is true
+ * when the only range written ends before it starts (it is then not returned). `range` is null when the heading
+ * names none.
+ */
+export function readPlannedRange(heading: string): { range: ScriptPlannedRange | null; reversed: boolean } {
+  const group = /\(([^()]*)\)$/.exec(heading.trim());
+  if (!group) return { range: null, reversed: false };
+  let reversed = false;
+  let bars: ScriptPlannedRange | null = null;
+  for (const part of group[1]!.split(/[,;]/).map((text) => text.trim())) {
+    const clock = new RegExp(`^(${CLOCK})${DASH}(${CLOCK})$`).exec(part);
+    if (clock) {
+      const range = { start: clockSeconds(clock[1]!), end: clockSeconds(clock[2]!) };
+      if (range.end > range.start) return { range, reversed: false };
+      reversed = true;
+      continue;
+    }
+    const refs = new RegExp(`^(${GRID_REF})${DASH}(${GRID_REF})$`, "i").exec(part);
+    if (refs) bars ??= { start: refs[1]!.toLowerCase(), end: refs[2]!.toLowerCase() };
+    const counted = /^bars?\s+(\d+)(?:\s*[–—-]\s*(\d+))?$/i.exec(part);
+    if (counted) {
+      const [first, last] = [Number(counted[1]), Number(counted[2] ?? counted[1])];
+      if (last < first) reversed = true;
+      else bars ??= { start: `bar:${first}`, end: `bar:${last + 1}` };
+    }
+  }
+  return { range: bars, reversed: reversed && bars === null };
 }
 
 /**

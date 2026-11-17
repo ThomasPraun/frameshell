@@ -38,6 +38,11 @@ export function activate(api) {
   const still = {
     type: "still",
     propsSchema,
+    // A card with `declares` names the props its composition declares, as a typed HyperFrames composition does (ADR 0040).
+    async declaredProps(clip) {
+      const card = await readCard(clip).catch(() => ({}));
+      return Array.isArray(card.declares) ? card.declares : null;
+    },
     // A card with `needsContext` proves the host gives `inputs` the project and `ensureBinary` (ADR 0035).
     async inputs(clip, context) {
       if (!clip.source) return [];

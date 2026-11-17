@@ -16,7 +16,8 @@ import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/
 import { turnsKey } from "../angles/model.js";
 import { useGroupsTurns } from "../angles/useTurns.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
-import { revealItem } from "../file-commands.js";
+import { candidateFiles } from "../audition/model.js";
+import { auditionItems, revealItem } from "../file-commands.js";
 import { diffCounts } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
@@ -252,7 +253,7 @@ export function TimelinePanel({
     };
   }, [undoRedo]);
 
-  // A scene picked on the band follows its words when a cut or a new take moves them.
+  // A scene picked on the band follows its words or its clips when a cut, a new take or a move shifts them.
   useEffect(() => {
     const picked = selection.get().scene;
     if (!picked) return;
@@ -1138,6 +1139,8 @@ function TimelineCanvas({
           ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => send([{ op: "track.set", args: { track: row.id, hidden: !row.hidden } }]) }]
           : []),
         ...behindItems(row),
+        // On a `Music <rank>` track of `music.candidates`: hear every candidate side by side (ADR 0038).
+        ...auditionItems(candidateFiles(latest.current.layout?.rows ?? [], row), t.audition.candidatesItem, windowOf(event.target)),
         ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
         ...(image ? [] : addTrackItems(true)),
         {
@@ -1669,8 +1672,8 @@ function ClipList({
       {layout.scenes.map((box) => {
         const chosen = scene?.script === box.script && scene.slug === box.slug;
         return (
-          <li key={`${box.script}#${box.slug}`} data-scene={`${box.script}#${box.slug}`} data-filled={box.clips.length > 0} data-selected={chosen || undefined}>
-            {t.timeline.sceneItem(box.title, formatTimecode(box.start, fps), formatTimecode(box.end, fps), box.clips.length, chosen)}
+          <li key={`${box.script}#${box.slug}`} data-scene={`${box.script}#${box.slug}`} data-filled={box.clips.length > 0} data-source={box.source} data-selected={chosen || undefined}>
+            {t.timeline.sceneItem(box.title, formatTimecode(box.start, fps), formatTimecode(box.end, fps), box.clips.length, chosen, box.source === "planned")}
           </li>
         );
       })}
