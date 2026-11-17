@@ -1328,6 +1328,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `review` measures motion on the scale of `analyze`, slice RR of #457 (epic #451, #471; owner decision 2026-11-17;
+  protocol 166): a `--file` is read on every frame with `analyze`'s reader (grey frames 64 px on the long side) instead
+  of up to 15 samples a second at 320 px, and its shots are found the way `analyze` finds them (ffmpeg scene scores at
+  0.3). A timeline stays sampled through `frame` (at most 90 samples, now 64 px too) and every threshold applies per
+  sample interval; `metrics.picture.sampled` says so. Still pictures, visual events and bursts use `analyze/rhythm.ts`
+  only (`STILL_LEVEL`, `bigChanges`, `stillRuns`, `bursts`); review's own `STILL_ENERGY`, `EVENT_FLOOR` and
+  `EVENT_MEDIAN_FACTOR` are gone. New `metrics.rhythm` (`label`, `shotLengthCv`, `stillShare`, `bursts`): on a file
+  MEASURED and the numbers `analyze` reports for it, on a timeline ESTIMATED from its samples and clip cuts; the CLI
+  prints it on one line. **Verdicts shift:** a picture is still under 0.5 grey levels of change (was 0.35, on a different
+  picture size), so slow drifts and noisy holds now count as still; a hold lasts to the end of its last frame (`n`
+  frames = `n / fps`, one frame longer than before), so `static` warnings, `film.maxStatic`, `clip.keepsMoving` and a
+  waiver's `to` read up to a frame longer, and a hold of exactly 3 s at 30 fps is now 3 s, not 2.967; a file's holds
+  shorter than 1/15 s and changes between two old samples are now seen; visual events are big changes (4 times the
+  median within 0.5 s and at least 1 level, 15 % of the grey range, or a file's scene cut) instead of peaks over 2.5 times the
+  film's median, so `events`, `largestGap` and the sync of a file change; near-blank (`blank`, `frame-0`) reads the
+  64 px picture, where thin detail on a flat frame weighs less. Every motion reading (`analyze`'s picture,
+  `analyze.diff`'s activity, a reviewed file and a reviewed timeline's samples) now takes one grey, the rounded Rec. 709
+  luma of RGB frames (`greyOf`), instead of ffmpeg's Y plane for `analyze.diff` and `review`: a change of colour alone
+  (a hue turn, a grade ramp) now moves the picture there too, so their still stretches shrink and their alignment can
+  shift on coloured footage. A file over an hour is measured on its first hour, with a warning, and its gap and shots
+  stop there. The MCP server's instructions list the current sheets (with `beats` and `cropAt`) and the rhythm metrics.
 - The preview draws a person lifted in front of a word from the frame the plate track already decoded, slice MX2 of
   #461 (ADR 0032, epic #451): a subject span that shows the same source frame of the same proxy as a span of the plate
   decodes only its matte, so a word behind the head runs one decoder fewer per plate layer (2 instead of 3 for one

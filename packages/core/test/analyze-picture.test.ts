@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CELLS, cellStats, elementEvents, flashes, hitEvents, holds, soundHits } from "../src/analyze/events.js";
 import { LOOK_COLUMNS, LOOK_ROWS, LookBuilder, cellOf, frameLook } from "../src/analyze/look.js";
 import { slidingMedians } from "../src/analyze/median.js";
-import { pictureSize } from "../src/analyze/picture.js";
+import { greyOf, pictureSize } from "../src/analyze/picture.js";
 import { bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "../src/analyze/rhythm.js";
 import { shotLocator } from "../src/analyze/shots.js";
 
@@ -16,6 +16,15 @@ function frame(width: number, height: number, color: [number, number, number], p
   }
   return rgb;
 }
+
+describe("grey", () => {
+  it("is rounded Rec. 709 luma, so a change of colour alone changes the grey", () => {
+    const grey = (color: [number, number, number]) => Array.from(greyOf(frame(2, 1, color), new Uint8Array(2)));
+    expect(grey([255, 0, 0])).toEqual([54, 54]);
+    expect(grey([0, 0, 255])).toEqual([18, 18]);
+    expect(grey([255, 255, 255])).toEqual([255, 255]);
+  });
+});
 
 describe("look", () => {
   it("reads black, white and a saturated warm frame", () => {

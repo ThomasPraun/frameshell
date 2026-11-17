@@ -16,7 +16,9 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                --platform (instagram, tiktok, shorts, youtube) shaded red and captions that cross them
                                marked !subtitle (--platform alone adds it; vertical films use the style guide's platforms).
                                metrics = metrics.json and a summary: longest still stretch, largest gap between visual
-                               events, near-blank frames, empty frame 0, subtitle cues too short to read, loudness of a
+                               events, rhythm (shot-length CV, still share, bursts: a --file every frame, the numbers
+                               of analyze; a timeline sampled, estimated), near-blank frames, empty frame 0, subtitle
+                               cues too short to read, loudness of a
                                --file (LUFS, LRA, true peak, phone band), sounds against the picture events they belong
                                to (early over 45 ms, late over 75 ms, next to what random placement scores), the jump
                                from the last frame to the first, the sound review list (timeline: voice over the bed per
@@ -264,9 +266,14 @@ function formatMetrics(metrics: ReviewMetrics): string[] {
   const { picture, subtitles, loudness } = metrics;
   const span = (found: { from: number; to: number; seconds: number } | null) => (found ? `${found.seconds} s (${found.from} to ${found.to})` : "none");
   const lines = [
-    `Metrics (${picture.samples} samples, ${picture.spacing} s apart): longest still ${span(picture.longestStatic)}, largest gap between visual events ${span(picture.largestGap)} (${picture.events} events), ` +
+    `Metrics (${picture.samples} ${picture.sampled ? "samples" : "frames"}, ${picture.spacing} s apart): longest still ${span(picture.longestStatic)}, largest gap between visual events ${span(picture.largestGap)} (${picture.events} events), ` +
       `${picture.blank.length} near-blank stretches, frame 0 ${picture.firstFrameEmpty === null ? "not measured" : picture.firstFrameEmpty ? "empty" : "not empty"}`,
   ];
+  const { rhythm } = metrics;
+  lines.push(
+    `  [${rhythm.label}] rhythm: shot-length CV ${rhythm.shotLengthCv}, ${Math.round(rhythm.stillShare * 100)}% still frames, ${rhythm.bursts.length} bursts` +
+      `${rhythm.bursts.length > 0 ? ` at ${rhythm.bursts.map((burst) => `${burst.from} s (${burst.count})`).join(", ")}` : ""}`,
+  );
   if (subtitles) lines.push(`  subtitles: ${subtitles.cues} cues, ${subtitles.shortCues.length} on screen for less than they take to read`);
   if (loudness) {
     lines.push(`  loudness: ${loudness.integrated ?? "silent"} LUFS, range ${loudness.range ?? "-"} LU, true peak ${loudness.truePeak ?? "-"} dBTP, phone band ${loudness.phoneBand ?? "-"} LUFS`);
