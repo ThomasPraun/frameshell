@@ -135,7 +135,7 @@ export const logoSting: Template = {
       sweep.style.marginTop = -bandH / 2 + "px";
       sweep.style.background = "linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, " + 0.2 * P.sweep + ") 50%, rgba(255, 255, 255, 0) 100%)";
 
-      // Centre travel from clear of the frame to clear on the other side: half the width, half the tilted band, the corner the tilt swings in, and a margin for the slow start of the ease.
+      // Centre travel from clear of the frame to clear on the other side: half the width, half the tilted band, the corner the tilt swings in, and 3 % of the width of margin.
       var travel = S.width / 2 + bandW / 2 / Math.cos(Math.PI * 16 / 180) + (S.height / 2) * Math.tan(Math.PI * 16 / 180) + 0.03 * S.width;
       var D = S.duration;
       var OUT = 0.3;
@@ -158,7 +158,8 @@ export const logoSting: Template = {
         var g = (t - POP - 0.5) / 0.6;
         // It also fades in and out over the first and last 15 % of its way, so no frame shows an edge of it appearing.
         var fade = Math.max(0, Math.min(1, g / 0.15, (1 - g) / 0.15));
-        put(sweep, { x: (2 * M.ease("progress", Math.min(1, Math.max(0, g))) - 1) * travel, rotate: 16, opacity: fade * fade });
+        // On a clip shorter than the sting needs the exit starts before the band is across: it leaves with everything else.
+        put(sweep, { x: (2 * M.ease("progress", Math.min(1, Math.max(0, g))) - 1) * travel, rotate: 16, opacity: fade * fade * (1 - out) });
       });
     </script>
   </body>

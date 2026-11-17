@@ -249,9 +249,91 @@ describe("template light-leak", () => {
   });
 });
 
+describe("template logo-sting band", () => {
+  it("leaves with the exit on a clip too short for it, so the band is never cut off", async () => {
+    await scaffold(["spot", "--template", "logo-sting"]);
+    expect(read("spot")).toContain("opacity: fade * fade * (1 - out) });");
+  });
+});
+
+describe("template light-leak fall", () => {
+  it("falls over at most 0.6 of the clip, so a very short clip still ends clear", async () => {
+    await scaffold(["spot", "--template", "light-leak", "--duration", "0.2"]);
+    expect(read("spot")).toContain("var END = Math.min(0.1, 0.6 * D);");
+  });
+});
+
+describe("template orbit", () => {
+  it("takes a logo or a word and up to 8 labels, starts from a seeded phase and ends on a ring that never depends on the seed", async () => {
+    await scaffold(["spot", "--template", "orbit"]);
+    const html = read("spot");
+    const variables = declared(html);
+    expect(variables.find((v) => v.id === "logo")).toMatchObject({ type: "image", default: "" });
+    expect(variables.find((v) => v.id === "items")).toMatchObject({ type: "string" });
+    expect(variables.find((v) => v.id === "turns")).toMatchObject({ type: "number", min: 0.25, max: 4 });
+    expect(variables.find((v) => v.id === "backdrop")).toMatchObject({ type: "number", default: 0 });
+    expect(TEMPLATES.find((t) => t.id === "orbit")!.overlay).toBe(true);
+    expect(html).toContain("var labels = parts(P.items, 8);");
+    // The seed only moves where the circling starts and which way it turns: the turns left are 0 once the ease has run out.
+    expect(html).toContain("var phase = (jitter(seed, 1) + 1) * Math.PI;");
+    expect(html).toContain('var left = 1 - M.ease("enter", (t - FIRST) / spinTime);');
+    expect(html).toContain("var a = rest[i] + dir * (P.turns * 2 * Math.PI + phase) * left;");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template locked-on", () => {
+  it("declares its target box as fractions of the frame that fit inside it, and keeps the box inside the frame with a margin", async () => {
+    await scaffold(["spot", "--template", "locked-on"]);
+    const html = read("spot");
+    const variables = declared(html);
+    const numbers = Object.fromEntries(variables.filter((v) => v.type === "number").map((v) => [v.id, v.default as number]));
+    for (const key of ["x", "y", "w", "h"]) expect(variables.find((v) => v.id === key), key).toMatchObject({ type: "number" });
+    expect(numbers["x"]! + numbers["w"]!).toBeLessThanOrEqual(0.96);
+    expect(numbers["y"]! + numbers["h"]!).toBeLessThanOrEqual(0.96);
+    expect(html).toContain("var bx = Math.min(Math.max(P.x * S.width, 0.04 * S.width), 0.96 * S.width - bw);");
+    // The brackets overshoot the corner: an under-damped spring, not a preset that stops dead.
+    expect(html).toContain("var SNAP = { response: 0.34, damping: 0.55 };");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template spotlight", () => {
+  it("dims with one layer of plain alpha, two targets as fractions of the frame, no blend mode and a dim that stays under black", async () => {
+    await scaffold(["spot", "--template", "spotlight"]);
+    const html = read("spot");
+    const variables = declared(html);
+    for (const key of ["x", "y", "x2", "y2"]) expect(variables.find((v) => v.id === key), key).toMatchObject({ type: "number", min: 0, max: 1 });
+    expect(variables.find((v) => v.id === "dim")).toMatchObject({ type: "number", max: 0.95 });
+    expect(variables.find((v) => v.id === "shade")).toMatchObject({ type: "color" });
+    expect(html).toContain('dim.style.background = "radial-gradient(circle at "');
+    expect(html).not.toContain("mix-blend-mode");
+    expect(html).not.toMatch(/backdrop-filter|\bmask(-image)?\s*:/);
+    // Equal targets are no move.
+    expect(html).toContain("var moves = a.x !== b.x || a.y !== b.y;");
+  });
+});
+
+describe("template phone-fan", () => {
+  it("takes one picture per phone, and paints a missing one with the code device-frame uses (one copy, never a second)", async () => {
+    await scaffold(["fan", "--template", "phone-fan"]);
+    await scaffold(["frame", "--template", "device-frame"]);
+    const html = read("fan");
+    expect(declared(html).filter((v) => v.type === "image").map((v) => v.id)).toEqual(["shotLeft", "shotMiddle", "shotRight"]);
+    expect(declared(html).find((v) => v.id === "fan")).toMatchObject({ type: "number", min: 4, max: 24 });
+    // The helpers are the same text in both compositions.
+    const helper = (source: string, name: string) => new RegExp(`function ${name}\\([\\s\\S]*?\\n {6}}`).exec(source)![0];
+    for (const name of ["paintSkeleton", "dressPhone"]) expect(helper(html, name)).toBe(helper(read("frame"), name));
+    expect(html.match(/function paintSkeleton/g)).toHaveLength(1);
+    // The middle phone is the last child, so it is in front.
+    expect(html).toContain("var shots = [P.shotLeft, P.shotRight, P.shotMiddle];");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
 describe("the seeded templates", () => {
   it("take the seed hash and the jitter from the kit, never a private copy", async () => {
-    for (const id of ["emphasis-marker", "scene-background", "light-leak"]) {
+    for (const id of ["emphasis-marker", "scene-background", "light-leak", "orbit"]) {
       await scaffold([id, "--template", id]);
       const html = read(id);
       expect(html, id).toContain("function seedOf(text)");

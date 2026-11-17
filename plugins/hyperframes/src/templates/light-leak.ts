@@ -16,8 +16,9 @@ import {
  * film white), the corner and the offsets chosen by a seeded hash, so one `seed`
  * always paints the same frame. Transparent outside the glow, and every pixel
  * clear at the first frame and for the last tenth of a second (a render's last
- * frame is a frame short of the clip's length): the clip's length is the leak's
- * length and the peak sits at `peak` of it.
+ * frame is a frame short of the clip's length; on a clip under a sixth of a
+ * second the fall is 0.6 of the clip, so the last frame is still clear): the
+ * clip's length is the leak's length and the peak sits at `peak` of it.
  */
 export const lightLeak: Template = {
   id: "light-leak",
@@ -61,7 +62,8 @@ export const lightLeak: Template = {
       var L = M.pick({ d: 1.5 }, { d: 1.25 }, { d: 1.4 });
       var D = S.duration || 1;
       // The glow is gone this long before the clip ends: the last rendered frame is a frame before D, and the leak must not pop off at the cut-out.
-      var END = Math.min(0.1, 0.12 * D);
+      // 0.6 D leaves at least a frame of 24 fps or faster clear on a clip of two frames or more.
+      var END = Math.min(0.1, 0.6 * D);
       // The most any pixel is covered at the peak: a leak shows the picture through it, it never whites it out.
       var CAP = 0.55;
 
