@@ -42,6 +42,20 @@ export interface SpanTiming {
   speed: number;
 }
 
+/** Source frame `span` shows at program `frame`, before clamping to the file: the one {@link decodeSteps} decodes. */
+export function sourceFrameAt(span: SpanTiming, frame: number): number {
+  // Round half down: a held frame changes on the later program frame, as export's `fps` filter does. `in` is
+  // fractional only for a piece of a sped-up clip (a dissolve's split, ADR 0018); the fraction joins the rounding.
+  const whole = Math.floor(span.in);
+  return whole + Math.ceil(span.in - whole + (frame - span.start) * span.speed - 0.5);
+}
+
+/** True when `a` and `b` show the same source frame at every program frame of `[from, to)`. */
+export function sameSourceFrames(a: SpanTiming, b: SpanTiming, from: number, to: number): boolean {
+  for (let frame = from; frame < to; frame++) if (sourceFrameAt(a, frame) !== sourceFrameAt(b, frame)) return false;
+  return true;
+}
+
 /**
  * Chunks that show program frames `[max(from, span.start), span.end)` of
  * `span`, in decode order. Starts at the keyframe before the first shown
@@ -53,11 +67,7 @@ export interface SpanTiming {
 export function* decodeSteps(span: SpanTiming, from: number, table: SyncTable): Generator<DecodeStep> {
   const last = table.count - 1;
   if (last < 0) return;
-  // Round half down: a held frame changes on the later program frame, as export's `fps` filter does. `in` is
-  // fractional only for a piece of a sped-up clip (a dissolve's split, ADR 0018); the fraction joins the rounding.
-  const whole = Math.floor(span.in);
-  const fraction = span.in - whole;
-  const source = (frame: number) => Math.min(last, Math.max(0, whole + Math.ceil(fraction + (frame - span.start) * span.speed - 0.5)));
+  const source = (frame: number) => Math.min(last, Math.max(0, sourceFrameAt(span, frame)));
   let frame = Math.max(from, span.start);
   let next = -1;
   while (frame < span.end) {

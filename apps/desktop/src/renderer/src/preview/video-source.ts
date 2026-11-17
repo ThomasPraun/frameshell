@@ -1,13 +1,14 @@
 // What the engine worker decodes a layer's pictures from: a media proxy (H.264 MP4, or VP9 WebM with alpha for sources
 // with alpha (#90), both read by byte ranges, ADR 0001) or a cached clip render (WebM, alpha as a second stream,
-// ADR 0002, read whole), or a proxy whose alpha is its subject matte (ADR 0032). One shape, so a layer decodes all of
-// them the same way.
+// ADR 0002, read whole), or a proxy whose alpha is its subject matte, or that matte alone (ADR 0032). One shape, so a
+// layer decodes all of them the same way.
 import { type SyncTable, syncTable } from "./decode-plan.js";
 import { type ByteReader, openProxy, readSamples } from "./demux.js";
 import { openWebm, openWebmProxy, readWebmProxy } from "./webm.js";
 
 /** One encoded picture; index = source frame. */
 export interface EncodedPicture {
+  /** The colour frame; empty in a {@link VideoSource.alphaOnly} source. */
   data: Uint8Array;
   key: boolean;
   /** Frame of the alpha plane (its luma is the alpha), decoded by a second decoder; null when opaque. */
@@ -21,6 +22,8 @@ export interface VideoSource {
   /** The alpha decoder's, when its frames come from another file (a subject matte). */
   alphaConfig?: DecoderConfig;
   hasAlpha: boolean;
+  /** True: only alpha frames, for a picture another layer decodes ({@link matteOnlySource}); no colour decoder runs. */
+  alphaOnly?: true;
   /** Decode starts: every stream the source has is at a keyframe. */
   table: SyncTable;
   /** Pictures `[from, to)`, clamped to the source. */
@@ -38,10 +41,31 @@ export function mattedPath(picture: string, matte: string): string {
   return `${picture}${MATTED}${matte}`;
 }
 
-/** The picture and matte of a {@link mattedPath}; null for any other path. */
-export function splitMattedPath(path: string): { picture: string; matte: string } | null {
+/** Decode path of `matte` alone, the alpha of a subject drawn from its plate layer's frame: opened as {@link matteOnlySource}. */
+export function matteOnlyPath(matte: string): string {
+  return `${MATTED}${matte}`;
+}
+
+/** The picture (null for a {@link matteOnlyPath}) and matte of a {@link mattedPath}; null for any other path. */
+export function splitMattedPath(path: string): { picture: string | null; matte: string } | null {
   const at = path.indexOf(MATTED);
-  return at < 0 ? null : { picture: path.slice(0, at), matte: path.slice(at + MATTED.length) };
+  return at < 0 ? null : { picture: at === 0 ? null : path.slice(0, at), matte: path.slice(at + MATTED.length) };
+}
+
+const NO_PICTURE = new Uint8Array(0);
+
+/**
+ * `matte` as the alpha of a picture another layer decodes (ADR 0032 slice MX2): every frame is an alpha frame, decoded
+ * by the alpha decoder as in {@link mattedSource}, and the matte's frame N still goes with the proxy's frame N.
+ */
+export function matteOnlySource(matte: VideoSource): VideoSource {
+  return {
+    config: matte.config,
+    hasAlpha: true,
+    alphaOnly: true,
+    table: matte.table,
+    read: async (from, to) => (await matte.read(from, to)).map((one) => ({ data: NO_PICTURE, key: one.key, alpha: { data: one.data, key: one.key } })),
+  };
 }
 
 /**

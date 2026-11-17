@@ -3,12 +3,13 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
+import type { EngineStats } from "../src/renderer/src/preview/engine-protocol.js";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { laidOutBox, launch, sandbox } from "./harness.js";
 import { blockDiff, blockMean, exportedPixels, previewPixels } from "./frames.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
-import { describeDrops, drawnFrames, dropsIn, startDrawLog } from "./draw-log.js";
-import { addBarcodeAsset, engineStats, installFrameReader, statsDelta, waitForIngest } from "./preview-probe.js";
+import { type Drops, describeDrops, drawnFrames, dropsIn, startDrawLog } from "./draw-log.js";
+import { addBarcodeAsset, engineStats, installFrameReader, readShownFrame, statsDelta, waitForIngest } from "./preview-probe.js";
 
 // A track behind a plate (ADR 0032) in the preview: the subject layer draws the plate's proxy through its matte (the
 // stand-in matte, FRAMESHELL_MATTE_STAND_IN: brighter than mid-gray is the subject) over the word, as export does.
@@ -99,16 +100,19 @@ test("the subject layer draws the person over the word behind them: the preview 
   }
 });
 
-test("plays through the word with the subject layer: frames drawn in order, one colour and one matte decoder more", async () => {
-  test.setTimeout(120_000);
+/**
+ * Play from the first frame to the end. Returns the source frames read off the canvas at each page display frame (the
+ * barcode; -1 where none reads), the program frames the engine drew, the drops inside the word (1 s to 5 s) by kind
+ * (#567, `draw-log.ts`) and the engine's counters, annotated under `label`.
+ */
+async function playThroughWord(label: string): Promise<{ read: number[]; drawn: number[]; drops: Drops; after: EngineStats | null }> {
   await page.keyboard.press("Home");
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
   const before = await engineStats(page);
   await startDrawLog(page);
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
-  // Until playback stops: the source frame read off the canvas at each page display frame. Drops are counted from the
-  // engine's draws, not from these reads (#567; draw-log.ts).
+  // Until playback stops. Drops are counted from the engine's draws, not from these reads (#567; draw-log.ts).
   const read = await page.evaluate(async (limit) => {
     const readShown = (window as unknown as { readShownFrame: () => number }).readShownFrame;
     const box = document.querySelector('[data-testid="preview-frame"]')!;
@@ -121,24 +125,54 @@ test("plays through the word with the subject layer: frames drawn in order, one 
     }
     return frames;
   }, 15_000);
-  // The engine reports a draw after it: let the report of the last frame read arrive.
+  // The engine reports a draw after it, and its counters once a second: let the last ones arrive.
   await page.waitForTimeout(1_200);
   const drawn = await drawnFrames(page);
   const after = await engineStats(page);
+  const drops = dropsIn(drawn, after?.dropped, 30, 150);
+  const { dropped: _played, ...delta } = statsDelta(before, after);
+  test.info().annotations.push({ type: `${label}: drops under the word`, description: describeDrops(drops, after?.dropped) });
+  test.info().annotations.push({ type: `${label}: engine`, description: JSON.stringify({ ...delta, decodersPlayed: after?.decodersPlayed }) });
+  expect(drawn.every((frame, i) => i === 0 || frame >= drawn[i - 1]!), "frames drawn in order").toBe(true);
+  return { read, drawn, drops, after };
+}
 
+test("plays through the word with the subject layer: frames drawn in order, one matte decoder more", async () => {
+  test.setTimeout(120_000);
+  const { read, drawn, drops, after } = await playThroughWord("one plate clip");
   const shown = [...new Set(read.filter((frame) => frame >= 0))];
   expect(shown.every((frame, i) => i === 0 || frame > shown[i - 1]!), "frames in order").toBe(true);
-  expect(drawn.every((frame, i) => i === 0 || frame >= drawn[i - 1]!), "frames drawn in order").toBe(true);
   const announced = new Set(drawn);
   expect(shown.filter((frame) => !announced.has(frame)), "canvas frames the engine never reported").toEqual([]);
-  // Inside the word (1 s to 5 s): source frames never drawn are dropped frames.
-  const drops = dropsIn(drawn, after?.dropped, 30, 150);
-  const unread = 120 - shown.filter((frame) => frame >= 30 && frame < 150).length;
-  const { dropped: _played, ...delta } = statsDelta(before, after);
-  test.info().annotations.push({ type: "subject playback drops", description: describeDrops(drops, after?.dropped) });
-  test.info().annotations.push({ type: "subject playback", description: JSON.stringify({ unread, ...delta }) });
   // ADR 0001 threshold 3 allows 0.1 % of program frames: none of 120 starved. Cadence drops are host scheduling.
   expect(drops.starved, describeDrops(drops, after?.dropped)).toEqual([]);
-  // The plate and the subject's colour and matte decoders (the word is a still).
-  expect(after?.["decoders"]).toBe(3);
+  // The plate's decoder and the subject's matte decoder: the subject draws the plate's decoded frame (the word is a still).
+  expect(after?.decodersPlayed).toBe(2);
 });
+
+test("plays a dissolve and a wipe of the plate inside the word: each subject draws its plate layer's frame", async () => {
+  test.setTimeout(120_000);
+  // Three cuts of the take, the second in by a dissolve at 2 s, the third by a wipe at 4 s, both under the word. Each
+  // `in` after the first is 0.5 s past its start, so at 3 s the barcode reads source frame 105 once this cut plays.
+  const take = (id: string, start: number, inS: number, out: number, extra: object = {}) => ({ id, type: "media", asset: TAKE, start, in: inS, out, ...extra });
+  const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
+  timeline.tracks[0].clips = [
+    take("c_a", 0, 0, 2),
+    take("c_b", 2, 2.5, 4.5, { dissolve: 0.4 }),
+    take("c_c", 4, 4.5, 6, { dissolve: 0.4, shape: { kind: "wipe", direction: "left" } }),
+  ];
+  writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
+  await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "4");
+  await page.keyboard.press("Home");
+  await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-shown", "0");
+  for (let i = 0; i < 3; i++) await page.keyboard.press("Shift+ArrowRight");
+  await expect(page.getByTestId("playhead")).toHaveText("00:00:03:00");
+  await expect.poll(() => readShownFrame(page), { timeout: 30_000 }).toBe(105);
+  await expect(page.getByTestId("preview-layer-placeholder")).toHaveCount(0);
+
+  const { drops, after } = await playThroughWord("dissolve and wipe");
+  expect(drops.starved, describeDrops(drops, after?.dropped)).toEqual([]);
+  // The colour decoders of the plate's main and dissolve layers, and the matte decoder of each of their subjects.
+  expect(after?.decodersPlayed).toBe(4);
+});
+

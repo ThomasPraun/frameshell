@@ -1268,6 +1268,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The preview draws a person lifted in front of a word from the frame the plate track already decoded, slice MX2 of
+  #461 (ADR 0032, epic #451): a subject span that shows the same source frame of the same proxy as a span of the plate
+  decodes only its matte, so a word behind the head runs one decoder fewer per plate layer (2 instead of 3 for one
+  clip, 4 instead of 6 for a dissolve or wipe of the plate under the word). Grade, shape, matte and opacity stay per
+  layer, as export applies them. Any span that does not line up keeps its own decoder. A preview layer now closes a
+  decoder no clip ahead of the playhead needs, instead of keeping it open and idle.
 - Raw frame reads (`readRawFrames`: subject mattes, face detection, people scans, `review`, `analyze`) copy each pipe
   chunk once into its frame instead of joining chunks as they come, which copied a 4K RGB frame hundreds of times.
 - The `blender` clip's `quality` prop is gone (owner decision on #501): props are `scene` and `camera`, and a `quality`

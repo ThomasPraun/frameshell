@@ -48,6 +48,7 @@ import {
   shapeAt,
   slatRects,
 } from "@frameshell/schema/transitions";
+import { sameSourceFrames } from "./decode-plan.js";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -94,6 +95,12 @@ export type VideoSpan =
        * picture's alpha. The span draws only the person, over the tracks behind the plate.
        */
       matte?: string;
+      /**
+       * On a subject span: the lower layer whose span shows this same source frame of `proxy` on every frame of this one
+       * ({@link sharesPlateFrame}). The engine draws that layer's decoded frame and decodes only the matte; absent, the
+       * subject decodes the proxy itself.
+       */
+      sharesLayer?: number;
       /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
       cover?: LayerRect;
       /** Key of the clip's colour grade table (ADR 0031, {@link tableKey}), a key of {@link Program.grades}; absent: drawn as decoded. */
@@ -664,7 +671,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     sampleRate: rate,
     resolution,
     frames,
-    layers,
+    layers: withSharedFrames(layers),
     audio,
     ...(Object.keys(grades).length > 0 ? { grades } : {}),
     ...(view.letterbox ? { letterbox: view.letterbox } : {}),
@@ -784,7 +791,15 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
   if (!x || !y) return x === y;
   if ((x.kind === "media" || x.kind === "angle") && x.kind === y.kind) {
     const matte = (span: VideoSpan) => (span.kind === "media" ? span.matte : undefined);
-    return x.proxy === y.proxy && matte(x) === matte(y) && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
+    // A subject that draws another layer's frame decodes only its matte: changing that is a new decode.
+    const shared = (span: VideoSpan) => span.kind === "media" && span.sharesLayer !== undefined;
+    return (
+      x.proxy === y.proxy &&
+      matte(x) === matte(y) &&
+      shared(x) === shared(y) &&
+      x.speed === y.speed &&
+      x.in - x.start * x.speed === y.in - y.start * y.speed
+    );
   }
   if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
   if (x.kind === "generated" && y.kind === "generated") {
@@ -1226,6 +1241,41 @@ function subjectPicture(
   if (matte === undefined) return { kind: "placeholder", clip: clip.id, start, end, reason: "matte", type: clip.type };
   const picture = pictureOf(clip, info, start, end, fps, undefined);
   return picture?.kind === "media" ? { ...picture, matte } : null;
+}
+
+/**
+ * True when the subject span `subject` (ADR 0032) can draw the frame `plate`'s layer decodes instead of decoding the
+ * proxy itself: `plate` is the same clip's picture without a matte, from the same proxy at the same speed, and shows the
+ * same source frame on every frame of `subject`. Grade, placement, shape and opacity stay per layer, so they never
+ * matter; anything else (another clip, `in` or speed, a span that starts later or ends sooner) does not share.
+ */
+export function sharesPlateFrame(subject: VideoSpan, plate: VideoSpan): boolean {
+  return (
+    subject.kind === "media" &&
+    subject.matte !== undefined &&
+    plate.kind === "media" &&
+    plate.matte === undefined &&
+    plate.clip === subject.clip &&
+    plate.proxy === subject.proxy &&
+    plate.speed === subject.speed &&
+    plate.start <= subject.start &&
+    subject.end <= plate.end &&
+    sameSourceFrames(subject, plate, subject.start, subject.end)
+  );
+}
+
+/** `layers` with each subject span that {@link sharesPlateFrame} with a span of a lower layer pointed at that layer. */
+function withSharedFrames(layers: VideoSpan[][]): VideoSpan[][] {
+  return layers.map((spans, index) =>
+    spans.map((span) => {
+      if (span.kind !== "media" || span.matte === undefined) return span;
+      for (let lower = 0; lower < index; lower++) {
+        const plate = spanAt(layers[lower]!, span.start);
+        if (plate && sharesPlateFrame(span, plate)) return { ...span, sharesLayer: lower };
+      }
+      return span;
+    }),
+  );
 }
 
 /**

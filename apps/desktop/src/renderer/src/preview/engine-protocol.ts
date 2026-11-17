@@ -45,6 +45,8 @@ export interface EngineStats {
   audioChunks: number;
   /** `VideoDecoder`s open now: one per layer that decoded something, plus one per alpha stream (a multicam shot: one per angle slot). */
   decoders: number;
+  /** Most `VideoDecoder`s open at once during the current (or last) play: a layer closes its decoders once no span is ahead. */
+  decodersPlayed: number;
   /** Pictures put through the colour grade pass (ADR 0031): stays 0 while no drawn clip has a grade. */
   graded: number;
   /** Frames the current (or last) play passed over by kind, and its tick times (ADR 0001: CI fails on starved only). */
