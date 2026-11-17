@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { LiveContext, RenderContext, RenderTiming } from "@frameshell/plugin-api";
 import { type Producer, createHyperframesAdapter } from "../src/index.js";
+import { MOTION_RUNTIME } from "../src/motion-runtime.js";
 import { timingKinds } from "../src/timing.js";
 
 // Timing for generated clips (ADR 0029 decision 8): a composition asks with a meta tag and reads `window.frameshellTiming`.
@@ -107,5 +108,40 @@ describe("timing in renders and live pages", () => {
     const timing = run([head.slice(0, head.indexOf("\n"))])["frameshellTiming"];
     expect(timing).toEqual(TIMING);
     expect((await adapter.livePreview!({ id: "c_1", source: SOURCE }, live)).head).not.toContain("frameshellTiming");
+  });
+});
+
+describe("the motion runtime reads window.frameshellTiming (runtime 0.5.0)", () => {
+  /** The shipped runtime in one page, after the given scripts (a render copy's head script, or none). */
+  function motion(...before: string[]): Record<string, (...args: unknown[]) => unknown> {
+    const page: Record<string, unknown> = {};
+    page["window"] = page;
+    for (const script of [...before, `${MOTION_RUNTIME}\nwindow.M = FrameshellMotion;`]) runInNewContext(script, page);
+    return page["M"] as Record<string, (...args: unknown[]) => unknown>;
+  }
+  const nominal = { bpm: 120, offset: 0.25 };
+
+  it("follows the beats and markers the host wrote into the render copy", async () => {
+    const copy = await renderedEntry(TIMING);
+    const M = motion(...[...copy.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((match) => match[1]!));
+    expect(M["hasBeats"]!()).toBe(true);
+    expect(M["beats"]!()).toEqual([
+      { at: 0.5, index: 0, beat: 3, bar: 1 },
+      { at: 1, index: 1, beat: 4 },
+    ]);
+    expect(M["sinceBeat"]!(1.25, 1, nominal)).toBeCloseTo(0.25, 9);
+    expect(M["beatAt"]!(0.75)).toMatchObject({ index: 0, beat: 3, bar: 1 });
+    expect(M["markers"]!("</script><b>hook")).toHaveLength(1);
+  });
+
+  it("uses the nominal grid, or the clip's own seconds, when the page has no timing or the grid has a problem", () => {
+    for (const before of [[], ['window.frameshellTiming = { beats: [], beatsProblem: "no-music-clip" };']]) {
+      const M = motion(...before);
+      expect(M["hasBeats"]!()).toBe(false);
+      expect(M["beatTime"]!(2, nominal)).toBeCloseTo(1.25, 9);
+      expect(M["sinceBeat"]!(2.5, 1)).toBe(1.5);
+      expect(M["beats"]!({ ...nominal, duration: 1.5 })).toHaveLength(3);
+      expect(M["markers"]!()).toEqual([]);
+    }
   });
 });

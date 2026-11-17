@@ -253,7 +253,7 @@ describe("motion runtime bundle", () => {
 
   it("never reads a clock, frame callbacks, timers or a random source, in its sources or the bundle", () => {
     const forbidden = /\bDate\b|requestAnimationFrame|performance\.now|Math\.random|setTimeout|setInterval|crypto\./;
-    for (const text of [read("../src/index.ts"), read("../../schema/src/motion.ts"), MOTION_RUNTIME]) expect(text).not.toMatch(forbidden);
+    for (const text of [read("../src/index.ts"), read("../src/beats.ts"), read("../../schema/src/motion.ts"), MOTION_RUNTIME]) expect(text).not.toMatch(forbidden);
   });
 
   it("never writes element-adjustment properties, 3D transforms or will-change", () => {
@@ -265,7 +265,7 @@ describe("motion runtime bundle", () => {
     const scope: Record<string, unknown> = {};
     new Function("self", `${MOTION_RUNTIME}\nself.FrameshellMotion = FrameshellMotion;`)(scope);
     const motion = scope["FrameshellMotion"] as Record<string, unknown>;
-    for (const name of ["bind", "cuts", "write", "spring", "springStep", "settle", "track", "ease", "stagger", "durationFromDistance", "SPRING_PRESETS", "version", "pick", "stage", "props", "formatClass", "resolveProps"]) {
+    for (const name of ["bind", "cuts", "write", "spring", "springStep", "settle", "track", "ease", "stagger", "durationFromDistance", "SPRING_PRESETS", "version", "pick", "stage", "props", "formatClass", "resolveProps", "beats", "beatAt", "beatTime", "sinceBeat", "springOnBeat", "markers", "hasBeats", "frameshellTiming"]) {
       expect(motion[name], name).toBeDefined();
     }
     expect((motion["spring"] as (p: string, t: number) => number)("heavy", 10)).toBeCloseTo(1, 9);

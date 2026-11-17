@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import puppeteer from "puppeteer-core";
 import { describe, expect, it } from "vitest";
 import { BinaryManager, ClipVerifier } from "@frameshell/core";
+import type { RenderTiming } from "@frameshell/plugin-api";
 import { createHyperframesAdapter } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE } from "../src/motion-runtime.js";
 
@@ -95,6 +96,25 @@ const cutComposition = (guarded: boolean) => `<!doctype html>
 </html>
 `;
 
+/**
+ * The red box springs 80 px right on the clip's first beat (playful, overshoots) and dims over each beat; asks for the timeline's
+ * beats with the meta tag. Beats at 0.1, 0.5 and 0.9 s of the composition, as `BEAT_TIMING` says.
+ */
+const BEAT_COMPOSITION = COMPOSITION.replace("<style>", '<meta name="frameshell-timing" content="beats">\n    <style>').replace(
+  /M\.bind\("motion"[\s\S]*?\n {6}\}\);/,
+  `M.bind("motion", function (t) {
+        M.write(box, { x: M.springOnBeat("playful", t, 0, 0, 80), opacity: 1 - 0.4 * M.beatAt(t).phase });
+      });`,
+);
+const BEAT_TIMING: RenderTiming = {
+  beats: [
+    { at: 0.1, beat: 1, bar: 1 },
+    { at: 0.5, beat: 2 },
+    { at: 0.9, beat: 3 },
+  ],
+  tempo: { bpm: 150, meter: 4 },
+};
+
 function project(html = COMPOSITION): string {
   const dir = tempDir();
   const composition = join(dir, "compositions", "hyperframes", "motion");
@@ -128,9 +148,10 @@ function redExtent(frame: Buffer): { left: number; right: number } {
 }
 
 /** The adapter's render of `dir`'s composition, sharp or with the default blur (fixed 8, 180 degrees, linear). */
-async function renderClip(dir: string, manager: BinaryManager, blurred: boolean) {
+async function renderClip(dir: string, manager: BinaryManager, blurred: boolean, timing?: RenderTiming) {
   const adapter = createHyperframesAdapter({ projectDir: dir });
   return adapter.render(clip, {
+    ...(timing ? { timing } : {}),
     projectDir: dir,
     outDir: tempDir(),
     fps: 30,
@@ -279,6 +300,39 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       expect(result.distinct).toBeGreaterThan(8);
     },
     600_000,
+  );
+
+  it(
+    "a spring started on a beat (runtime 0.5.0) reseeks within 2/255 (clip verify), and the render waits for the beat",
+    async () => {
+      const dir = project(BEAT_COMPOSITION);
+      const manager = binaries();
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      const timeline = { id: "main", revision: 1, tracks: [{ id: "v1", kind: "video", clips: [{ ...clip, type: "hyperframes", start: 0, in: 0, duration: DURATION }] }] };
+      const verifier = new ClipVerifier({
+        timeline: async () => ({ timeline: timeline as never, fps: 30 }),
+        live: async (_root, _timeline, id) => ({
+          ...(await adapter.livePreview!(clip, { projectDir: dir, fps: 30, width: 160, height: 90, ensureBinary: (name) => manager.ensure(name), timing: BEAT_TIMING })),
+          clip: id,
+          key: "k",
+        }),
+        resolution: async () => ({ width: 160, height: 90 }),
+        chrome: () => manager.ensure("chrome-headless-shell"),
+        ffmpeg: () => manager.ensure("ffmpeg"),
+      });
+      const result = await verifier.verify(dir, { timeline: "main", clip: "c_motion" });
+      expect(result).toMatchObject({ ok: true, worst: null, warnings: [] });
+      expect(result.distinct).toBeGreaterThan(8);
+
+      // Frames 0 to 2 (before the beat at 0.1 s) show the box at rest; the same page without timing starts its spring at once.
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const [timed, untimed] = [BEAT_TIMING, undefined].map(async (timing) => frames(ffmpeg, (await renderClip(dir, manager, false, timing)).file));
+      const [withBeats, without] = [await timed, await untimed];
+      expect(redExtent(withBeats![2]!).right).toBe(redExtent(withBeats![0]!).right);
+      expect(redExtent(without![2]!).right).toBeGreaterThan(redExtent(without![0]!).right + 3);
+      expect(redExtent(withBeats![8]!).right).toBeGreaterThan(redExtent(withBeats![0]!).right + 20);
+    },
+    900_000,
   );
 
   it(
