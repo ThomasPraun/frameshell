@@ -5,7 +5,7 @@ import { STILL_LEVEL } from "../analyze/rhythm.js";
 // Everything counts in frame indexes of the film (the timeline's or the file's frame rate).
 
 /** Why a frame is on a sheet; see `ReviewTileSchema`. */
-export type PickTag = "start" | "end" | "cut" | "marker" | "cue" | "zoom" | "grid" | "second" | "peak" | "head" | "tail" | "beat";
+export type PickTag = "start" | "end" | "cut" | "marker" | "cue" | "zoom" | "grid" | "second" | "peak" | "head" | "tail" | "beat" | "pop" | "onion" | "speed";
 
 /** A frame to show and why. */
 export interface FramePick {
@@ -38,6 +38,14 @@ export const MAX_SAFE_TILES = 36;
 export const MAX_BEAT_TILES = 60;
 /** Share of a beat's length after the hit its frame is taken at: the picture the beat lands on, once it reads. */
 export const BEAT_PICK_PHASE = 0.25;
+/** Seconds from a cut of the tiles of the `cuts` sheet: one row per cut. */
+export const CUT_OFFSETS_S = [-0.2, -0.1, 0, 0.1, 0.2] as const;
+/** Most tiles of the cuts sheet in all images: 24 cuts of {@link CUT_OFFSETS_S}. */
+export const MAX_CUT_TILES = 120;
+/** Tiles per image of the cuts sheet: 6 cuts. */
+export const TILES_PER_CUTS = 30;
+/** Most frames the onion image blends. */
+export const MAX_ONION_FRAMES = 24;
 /** Width of a `cropAt` crop as a share of the frame's width, unless the caller says. */
 export const DEFAULT_CROP_SIZE = 0.25;
 /** Tiles per image of the phone sheet. */
@@ -196,6 +204,57 @@ export function beatPicks(fps: number, range: FrameRange, grid: BeatGrid, cap = 
   return [...bars, ...evenly(picks.filter((pick) => !isBar(pick)), cap - bars.length)].sort((a, b) => a.frame - b.frame);
 }
 
+/** A frame of the cuts sheet and its name, `cut N ±s`. */
+export interface CutPick extends FramePick {
+  tag: "cut";
+  name: string;
+}
+
+/**
+ * The tiles of the `cuts` sheet: for every cut (film frames where a new shot starts) inside the range, the whole frames
+ * {@link CUT_OFFSETS_S} from it, clamped to the range and one per frame within the cut (a cut near the range's edge has
+ * fewer), named `cut N -0.1` with `N` counting the cuts of the range from 1. A cut on the range's first frame has no
+ * picture before it and is left out. Over `cap` tiles, cuts are dropped evenly, numbers kept; `dropped` counts them.
+ */
+export function cutPicks(fps: number, range: FrameRange, cuts: readonly number[], cap = MAX_CUT_TILES): { picks: CutPick[]; cuts: number; dropped: number } {
+  const inside = [...new Set(cuts)].filter((frame) => frame > range.first && frame < range.end).sort((a, b) => a - b);
+  const keep = Math.max(1, Math.floor(cap / CUT_OFFSETS_S.length));
+  const shown = inside.length > keep ? evenly(inside.map((frame, i) => ({ frame, n: i + 1 })), keep) : inside.map((frame, i) => ({ frame, n: i + 1 }));
+  const picks: CutPick[] = [];
+  for (const { frame: cut, n } of shown) {
+    const seen = new Set<number>();
+    for (const offset of CUT_OFFSETS_S) {
+      const frame = Math.min(range.end - 1, Math.max(range.first, cut + Math.round(offset * fps)));
+      if (seen.has(frame)) continue;
+      seen.add(frame);
+      picks.push({ frame, tag: "cut", name: `cut ${n} ${offset === 0 ? "0" : `${offset > 0 ? "+" : ""}${offset}`}` });
+    }
+  }
+  return { picks, cuts: inside.length, dropped: inside.length - shown.length };
+}
+
+/** The two frames of the `pop` sheet: the one before frame `frame` and `frame` itself; null when `frame` is the film's first or past its end. */
+export function popPicks(frames: number, frame: number): [FramePick, FramePick] | null {
+  if (frame < 1 || frame >= frames) return null;
+  return [
+    { frame: frame - 1, tag: "pop" },
+    { frame, tag: "pop" },
+  ];
+}
+
+/** Up to `cap` frames spread evenly over the range, its first and last included: the frames the `onion` image blends. */
+export function onionPicks(range: FrameRange, cap = MAX_ONION_FRAMES): FramePick[] {
+  const frames = range.end - range.first;
+  const count = Math.min(cap, frames);
+  if (count <= 1) return frames > 0 ? [{ frame: range.first, tag: "onion" }] : [];
+  const picks: FramePick[] = [];
+  for (let i = 0; i < count; i++) {
+    const frame = range.first + Math.round((i * (frames - 1)) / (count - 1));
+    if (picks.at(-1)?.frame !== frame) picks.push({ frame, tag: "onion" });
+  }
+  return picks;
+}
+
 /** A crop of a frame, pixels of the film's frame (left, top, size). */
 export interface CropRect {
   x: number;
@@ -275,6 +334,13 @@ export function sheetLayout(kind: ReviewSheetKind, aspect: number): SheetLayout 
     case "contact":
     case "beats":
       return tall ? { columns: 10, perImage: TILES_PER_CONTACT, tileWidth: 160 } : { columns: 6, perImage: TILES_PER_CONTACT, tileWidth: 270 };
+    case "cuts":
+      return { columns: CUT_OFFSETS_S.length, perImage: TILES_PER_CUTS, tileWidth: tall ? 200 : 320 };
+    case "pop":
+      return { columns: 3, perImage: 3, tileWidth: tall ? 400 : 640 };
+    case "onion":
+    case "speed":
+      return { columns: 1, perImage: 1, tileWidth: tall ? 720 : 1280 };
     case "safe":
       return tall ? { columns: 6, perImage: 18, tileWidth: 200 } : { columns: 4, perImage: 12, tileWidth: 360 };
     case "phone":

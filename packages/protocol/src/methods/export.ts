@@ -3,7 +3,7 @@ import { ViewedShape } from "../proposals.js";
 import { ANALYSIS_NAME_PATTERN, AnalyzeDiffResultSchema, AnalyzeResultSchema } from "../analyze.js";
 import { RequirementsChangeSchema, ReviewOutputSchema, ReviewResultSchema } from "../review.js";
 import { CLIP_REQUIREMENT_FIELDS, CRAFT_CHECKS, FormatIdSchema, REQUIREMENT_PATHS, SafeZoneSchema } from "@frameshell/schema";
-import { TimelineIdSchema } from "../timeline.js";
+import { TimeRefParam, TimelineIdSchema } from "../timeline.js";
 import { InspectedPointSchema } from "../ui.js";
 import {
   type MethodSpec,
@@ -385,8 +385,13 @@ export const exportMethods = {
       "bar starts labelled `bar N` and the others `beat N` (the numbers `beat:N`/`bar:N` time references use), up to 60 tiles; no tempo, a LOW-confidence grid or a `file` leaves it out with a `warnings` line. " +
       "`cropAt` crops every tile of the run (but the `safe` sheet's, whose zones need the whole frame) around one point before scaling: a cursor on a button, a foot on the ground; with `clip` the point is in that clip's own picture and follows it through keyed moves and scale, " +
       "after the format's cover crop; tiles say what they show in `crop`. " +
+      "`cuts` (only when named in `sheets`): a seam strip of every cut, one row each: the whole frames 0.2 and 0.1 s before, on, and 0.1 and 0.2 s after it, labelled `cut 3 -0.1` (a timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds; up to 24 cuts spread evenly, the rest named in `warnings`). " +
+      "The per-clip kit: `pop` (a time) writes the frame before and the frame at it side by side with their difference amplified 4 times, to see what jumps; " +
+      "`onion` (a clip id) blends up to 24 frames of the clip's span (or of `from`/`to` inside it) into one image, each moving part at 25 %, so the spacing between positions shows whether the motion tightens into its keys; " +
+      "`speed` (a clip id) charts the speed of the clip's hero point per frame (a media clip: its picture as its keys place it, exact; a generated clip: the centre and size of its render's alpha, a render without alpha is skipped with the reason) and lists in `metrics.speed` " +
+      "the `linear` stretches (no ease) and the dead `stop`s mid-move, both warnings. With any of the three and no `sheets`, the run writes only their sheets (and `metrics` with `speed`); `cropAt` crops the `pop` and `onion` tiles too. " +
       "The MCP tool returns the sheets as images. " +
-      "Fails with InvalidOperation (a range outside the film, a file with no picture, `cropAt.clip` with a `file` or naming no picture clip), AssetNotFound (`file` missing), " +
+      "Fails with InvalidOperation (a range outside the film, a file with no picture, `cropAt.clip`, `onion` or `speed` with a `file` or naming no picture clip, `pop` outside the film or on its first frame), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -447,6 +452,21 @@ export const exportMethods = {
         .describe(
           "Crop every tile of this run around one point (fractions of the film's frame) before it is scaled into the sheet, so a small detail reads: the crop stays inside the frame (and inside letterbox bars), each tile lists it in `crop`. " +
             "The `safe` sheet keeps whole frames. The frames are the same captures, so `metrics` are unchanged.",
+        ),
+      pop: TimeRefParam(
+        "Debug a pop: the frame showing at this time and the one before it, side by side, with a third tile of their difference amplified 4 times (`pop` sheet). Not the first frame.",
+      ).optional(),
+      onion: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Clip id (`timeline.show`) of a video track: blend up to 24 frames of its span (`from`/`to` narrow it) into one `onion` image, each moving part at 25 %. A timeline only."),
+      speed: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Clip id (`timeline.show`) of a video track: chart its hero point's speed per frame (`speed` sheet) and report linear moves and dead stops in `metrics.speed`. A media clip's placement is exact; a generated clip needs a render with alpha. A timeline only.",
         ),
       view: ViewParam,
     }),

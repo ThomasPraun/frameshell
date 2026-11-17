@@ -130,3 +130,22 @@ export const EDGE_JUMP_DB = 19;
 export const EDGE_FLOOR_DBFS = ENDING_DBFS;
 /** Most edges listed in `sound.edges`. */
 export const EDGE_LISTED = 20;
+
+// The speed graph of a hero point (`review --speed`, #457): when a move reads mechanical. Judgments with a number, so
+// warnings only. A constant speed is the tell of a key with no ease; a dead stop mid-move reads as a hitch.
+
+/**
+ * Fastest minus slowest over the mean speed of a stretch under which its speed counts as constant: no ease. Not 5 %: the
+ * middle 20 % of the `in-out` key ease (smoothstep) varies by 4 %, and a sine ease's by 5 %, so 5 % flags eased moves.
+ */
+export const SPEED_LINEAR_SPREAD = 0.025;
+/** Fewest frames a constant-speed stretch needs to be `linear`: over fewer, any curve looks constant at its top. */
+export const SPEED_LINEAR_FRAMES = 6;
+/** Least share of the whole move (first to last moving frame) a constant-speed stretch covers to be `linear`. */
+export const SPEED_LINEAR_SHARE = 0.2;
+/** Film px per frame under which the hero point stands still: a quarter pixel. */
+export const SPEED_STOP_PX = 0.25;
+/** Fewest still frames between two moving stretches that read as a dead `stop` (4 frames at 30 fps: a visible hitch). */
+export const SPEED_STOP_FRAMES = 4;
+/** Width a generated clip's alpha is read at for its hero point, px; the centre is an alpha-weighted mean, finer than a pixel. */
+export const SPEED_ALPHA_WIDTH = 480;

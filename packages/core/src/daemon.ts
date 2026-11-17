@@ -1640,12 +1640,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, pop: popRef, onion, speed, view }, caller) => {
       if (preset !== undefined && file === undefined) {
         throw new RpcError(ErrorCode.InvalidParams, "`preset` checks an exported file against its export plan: pass `file` too.", { issues: [{ path: ["file"], message: "required with `preset`" }] });
       }
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
+      // A marker or beat names a time of the timeline, also when its exported file is reviewed.
+      let pop: number | undefined;
+      if (popRef !== undefined) {
+        const loaded = await timelines.viewTimeline(dir, timeline, reviewView);
+        pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded));
+      }
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
       const proposed = shownRequirements?.proposal ? requirementsFromState(shownRequirements.state) : null;
@@ -1653,6 +1659,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         timeline,
         ...(proposed ? { requirements: proposed.file, ...(proposed.error !== undefined ? { requirementsError: proposed.error } : {}) } : {}),
         ...(cropAt ? { cropAt } : {}),
+        ...(pop !== undefined ? { pop } : {}),
+        ...(onion !== undefined ? { onion } : {}),
+        ...(speed !== undefined ? { speed } : {}),
         ...(file ? { file: resolve(cwd, file) } : {}),
         from,
         to,

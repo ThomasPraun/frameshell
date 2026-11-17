@@ -1,10 +1,10 @@
-import { type DaemonConnection, REVIEW_OUTPUTS, type RequirementsChange, type ReviewMetrics, type ReviewOutput, type ReviewResult, type ReviewSound } from "@frameshell/protocol";
+import { type DaemonConnection, REVIEW_OUTPUTS, type RequirementsChange, type ReviewMetrics, type ReviewOutput, type ReviewResult, type ReviewSound, timeRefOf } from "@frameshell/protocol";
 import { CRAFT_CHECKS, type CraftCheck, FormatIdSchema, PLATFORM_IDS, type PlatformId } from "@frameshell/schema";
 import { styleValue } from "./style-commands.js";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `review` (#457), in `frameshell --help`. */
-export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,beats,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop] [--crop-at x,y[,size] [--clip id]]
+export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,beats,cuts,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop] [--crop-at x,y[,size] [--clip id]] [--pop t] [--onion clip] [--speed clip]
                                Look at the film before showing it: write contact sheets and strips into
                                .frameshell/review/<n>/ (last 10 kept; project files untouched) and print their paths.
                                contact = frames at clip starts and ends, cuts, markers, subtitle cues and the deepest
@@ -12,6 +12,8 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                per second at 360 px wide; motion = the two fastest moments as 12 consecutive frames;
                                beats (only when named) = one frame per beat of the tempo grid a quarter beat after the
                                hit, labelled bar N / beat N (needs tempo set, not a LOW-confidence grid, not --file);
+                               cuts (only when named) = one row per cut: the frames 0.2 and 0.1 s before it, on it,
+                               and 0.1 and 0.2 s after, labelled cut N -0.1 (up to 24 cuts; a --file's scene cuts);
                                seam = the last 6 and first 6 frames; safe = up to 36 frames with the UI zones of
                                --platform (instagram, tiktok, shorts, youtube) shaded red and captions that cross them
                                marked !subtitle (--platform alone adds it; vertical films use the style guide's platforms).
@@ -34,6 +36,13 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                --crop-at x,y[,size]: crop every tile (not the safe sheet's) around a point, fractions
                                of the frame, size = crop width as a share of it (default 0.25); with --clip id the
                                point is in that clip's picture and the crop follows its keyed moves and scale.
+                               Per-clip kit (alone, without --sheets, the run writes only these): --pop t (seconds or
+                               a marker, hook+0.5, beat:8) = the frame before t and the frame at t side by side with
+                               their difference x4; --onion clip = up to 24 frames of the clip (or of --range inside
+                               it) blended into one image, each moving part at 25 %: the spacing shows whether motion
+                               eases into its keys; --speed clip = chart of the clip's hero point speed per frame (a
+                               media clip's keyed placement, a generated clip's alpha) and its linear stretches and
+                               dead stops in metrics.speed (warnings only). --crop-at crops --pop and --onion too.
                                --preset p (with --file): check the file against the export plan of --timeline (and
                                --format) with that preset: size, frame rate, length, codecs, loudness.
                                --file reviews an exported video (the file
@@ -53,7 +62,7 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
 
 /** Flags `review` takes besides the global ones. */
 export const REVIEW_FLAGS: Record<string, readonly string[]> = {
-  review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop", "crop-at", "clip"],
+  review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop", "crop-at", "clip", "pop", "onion", "speed"],
   "review require": ["clip"],
   "review waive": ["clip", "remove"],
 };
@@ -72,6 +81,10 @@ export interface ReviewInvocation {
   preset?: string;
   loop?: true;
   cropAt?: { x: number; y: number; size?: number; clip?: string };
+  /** Seconds, or a name the daemon resolves (a marker, `beat:8`). */
+  pop?: number | string;
+  onion?: string;
+  speed?: string;
 }
 
 /** A parsed `review require` or `review waive`. */
@@ -93,6 +106,9 @@ export interface ReviewOptions {
   "crop-at"?: string | undefined;
   clip?: string | undefined;
   remove?: boolean | undefined;
+  pop?: string | undefined;
+  onion?: string | undefined;
+  speed?: string | undefined;
 }
 
 /** `--crop-at x,y[,size]` (with `--clip`): fractions 0 to 1, size above 0; throws `UsageError` for any other. */
@@ -167,6 +183,11 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
   if (options.format !== undefined && !FormatIdSchema.safeParse(options.format).success) {
     throw new UsageError(`--format: expected a format id of the project (e.g. 9x16), got "${options.format}".`);
   }
+  for (const flag of ["pop", "onion", "speed"] as const) {
+    if (options[flag] !== undefined && options[flag].trim() === "") throw new UsageError(`--${flag} takes ${flag === "pop" ? "a time (seconds or a marker)" : "a clip id"}, got nothing.`);
+  }
+  const pop = options.pop === undefined ? undefined : timeRefOf(options.pop);
+  if (typeof pop === "number" && pop < 0) throw new UsageError(`--pop takes seconds from 0 or a marker, got "${options.pop}".`);
   return {
     kind: "review",
     ...(options.timeline ? { timeline: options.timeline } : {}),
@@ -179,6 +200,9 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
     ...(options.preset ? { preset: options.preset } : {}),
     ...(options.loop ? { loop: true as const } : {}),
     ...(cropAt ? { cropAt } : {}),
+    ...(pop !== undefined ? { pop } : {}),
+    ...(options.onion ? { onion: options.onion.trim() } : {}),
+    ...(options.speed ? { speed: options.speed.trim() } : {}),
   };
 }
 
@@ -291,6 +315,14 @@ function formatMetrics(metrics: ReviewMetrics): string[] {
     }
   }
   if (metrics.sound) lines.push(...formatSound(metrics.sound));
+  for (const graph of metrics.speed ?? []) {
+    if (graph.skipped !== undefined) {
+      lines.push(`  speed of ${graph.clip}: not measured (${graph.skipped})`);
+      continue;
+    }
+    lines.push(`  [${graph.label}] speed of ${graph.clip} (${graph.hero}, ${graph.samples} of ${graph.frames} frames): peak ${graph.peak} px/frame, ${graph.spans.length === 0 ? "no linear move or dead stop" : `${graph.spans.length} to look at`}`);
+    for (const span of graph.spans) lines.push(`    ${span.kind === "linear" ? "linear move" : "dead stop"} ${span.from} to ${span.to} s at ${span.speed} px/frame`);
+  }
   if (seam) lines.push(`  loop seam: the last frame (${seam.last} s) differs from the first by ${seam.jump} of 255 (${seam.verdict})`);
   if (delivery) {
     lines.push(`  delivery against ${delivery.timeline} with ${delivery.preset} (${delivery.format}): ${delivery.checks.every((check) => check.ok) ? "as planned" : "differs"}`);

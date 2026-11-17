@@ -4,8 +4,14 @@ import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
 // `review` (#457, epic #451): contact sheets and strips an agent looks at before it shows the person anything.
 
+/** The sheets `sheets` can ask for, in the order they are written. */
+export const REVIEW_PICKED_SHEETS = ["contact", "safe", "phone", "motion", "seam", "beats", "cuts"] as const;
+
+/** The sheets of the per-clip kit, each written only when its param (`pop`, `onion`, `speed`) is given. */
+export const REVIEW_KIT_SHEETS = ["pop", "onion", "speed"] as const;
+
 /** The sheets `review` can write, in the order it writes them. */
-export const REVIEW_SHEETS = ["contact", "safe", "phone", "motion", "seam", "beats"] as const;
+export const REVIEW_SHEETS = [...REVIEW_PICKED_SHEETS, ...REVIEW_KIT_SHEETS] as const;
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
 export const ReviewSheetKindSchema = z
@@ -15,14 +21,16 @@ export const ReviewSheetKindSchema = z
       "`safe`: the same kind of frames (up to 36) with the platform's UI zones shaded red and a `!subtitle` mark on the frames where a caption crosses one; needs a `platform` (or the style guide's). " +
       "`phone`: one frame per second, 360 px wide. `motion`: the two fastest moments as 12 consecutive frames each. " +
       "`seam`: the last 6 and the first 6 frames, to judge a loop. " +
-      "`beats` (only when named): one frame per beat of the timeline's tempo grid, a quarter beat after the hit, bar starts labelled `bar N` and the other beats `beat N` (up to 60); needs a tempo (`tempo.set`) that is not LOW confidence, and a timeline, not a `file`.",
+      "`beats` (only when named): one frame per beat of the timeline's tempo grid, a quarter beat after the hit, bar starts labelled `bar N` and the other beats `beat N` (up to 60); needs a tempo (`tempo.set`) that is not LOW confidence, and a timeline, not a `file`. " +
+      "`cuts` (only when named): one row per cut, the frames 0.2 and 0.1 s before it, on it, and 0.1 and 0.2 s after (labelled `cut 3 -0.1`), up to 24 cuts spread evenly; a timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds. " +
+      "`pop`, `onion`, `speed`: written only when the param of that name is given.",
   );
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
 export type ReviewSheetKind = z.output<typeof ReviewSheetKindSchema>;
 
-/** What a run can be asked for: the sheets, and `metrics.json`. */
-export const REVIEW_OUTPUTS = [...REVIEW_SHEETS, "metrics"] as const;
+/** What `sheets` can ask for: every sheet but the per-clip kit's, and `metrics`. */
+export const REVIEW_OUTPUTS = [...REVIEW_PICKED_SHEETS, "metrics"] as const;
 
 /** Name in {@link REVIEW_OUTPUTS}. */
 export const ReviewOutputSchema = z
@@ -39,7 +47,7 @@ export const ReviewOutputSchema = z
 export type ReviewOutput = z.output<typeof ReviewOutputSchema>;
 
 /** Why a tile of a sheet shows the frame it does. */
-export const REVIEW_TAGS = ["start", "end", "cut", "marker", "cue", "zoom", "grid", "second", "peak", "head", "tail", "beat"] as const;
+export const REVIEW_TAGS = ["start", "end", "cut", "marker", "cue", "zoom", "grid", "second", "peak", "head", "tail", "beat", "pop", "onion", "speed"] as const;
 
 /** Review runs `.frameshell/review/` keeps: older numbered folders are deleted by the next run. */
 export const REVIEW_KEEP = 10;
@@ -48,7 +56,12 @@ export const REVIEW_KEEP = 10;
 export const ReviewTileSchema = z.object({
   at: z.number().describe("Seconds of the frame shown (timeline seconds, or file seconds when reviewing a file)."),
   frame: z.int().describe("Frame index (0-based) at the timeline's or the file's frame rate."),
-  tag: z.enum(REVIEW_TAGS).describe("Why this frame: a clip `start`/`end`, a `cut`, a `marker`, a subtitle `cue`, the deepest `zoom`, the `grid`, a `second` of the phone sheet, a motion `peak`, the `head`/`tail` of a loop seam, or a `beat` of the `beats` sheet."),
+  tag: z
+    .enum(REVIEW_TAGS)
+    .describe(
+      "Why this frame: a clip `start`/`end`, a `cut` (also every tile of the `cuts` sheet), a `marker`, a subtitle `cue`, the deepest `zoom`, the `grid`, a `second` of the phone sheet, a motion `peak`, the `head`/`tail` of a loop seam, a `beat` of the `beats` sheet, " +
+        "a tile of the `pop` sheet (the two frames and their difference), the `onion` image (at its first frame) or the `speed` chart (at the clip's first frame).",
+    ),
   label: z.string().describe("Text drawn on the tile: the time in seconds and, for all but the grid, the tag."),
   row: z.int().describe("0-based."),
   column: z.int().describe("0-based."),
@@ -472,6 +485,48 @@ export const ReviewRhythmSchema = z.object({
 /** See {@link ReviewRhythmSchema}. */
 export type ReviewRhythm = z.output<typeof ReviewRhythmSchema>;
 
+/** Kinds of stretch the speed graph finds in a move. */
+export const SPEED_SPAN_KINDS = ["linear", "stop"] as const;
+
+/** A stretch of a hero point's move that reads mechanical. */
+export const ReviewSpeedSpanSchema = z.object({
+  from: z.number().describe("Timeline seconds the stretch starts."),
+  to: z.number().describe("Timeline seconds it ends (the end of its last frame)."),
+  kind: z
+    .enum(SPEED_SPAN_KINDS)
+    .describe(
+      "`linear`: the speed holds within 2.5 % (fastest minus slowest over the mean) for 6 frames or more and at least 20 % of the move: a move with no ease. " +
+        "`stop`: under 0.25 px per frame for 4 frames or more between two moving stretches: a dead stop mid-move. Both are warnings, never failures.",
+    ),
+  speed: z.number().describe("Mean speed of the stretch, film px per frame."),
+});
+
+/** See {@link ReviewSpeedSpanSchema}. */
+export type ReviewSpeedSpan = z.output<typeof ReviewSpeedSpanSchema>;
+
+/** The speed graph of one clip's hero point. */
+export const ReviewSpeedSchema = z.object({
+  clip: z.string(),
+  label: z.literal("ESTIMATED").describe("A judgment from the clip's placement or its render's alpha, not a measure of the finished picture."),
+  hero: z
+    .enum(["placement", "alpha"])
+    .describe(
+      "`placement`: a media clip's picture as its keys place it (position and scale, through the format's cover crop), every frame, no render; " +
+        "`alpha`: what a generated clip draws, the centre and the square root of the area of its render's alpha, read at up to 90 frames and spread between them.",
+    ),
+  from: z.number().describe("Timeline seconds of the first frame measured."),
+  to: z.number().describe("Timeline seconds of the end of the last."),
+  frames: z.int().describe("Timeline frames the speed covers."),
+  samples: z.int().describe("Frames actually measured: every frame for `placement`, at most 90 for `alpha`."),
+  peak: z.number().describe("Fastest speed, film px per frame: the centre's travel plus half the change of the size."),
+  spans: z.array(ReviewSpeedSpanSchema).describe("Linear moves and dead stops, in time order; empty when the move eases (or nothing moves)."),
+  sheet: z.string().nullable().describe("The chart (`speed` sheet), absolute path; null when skipped."),
+  skipped: z.string().optional().describe("Why the clip was not measured (a generated clip whose render has no alpha, or no render); absent when it was."),
+});
+
+/** See {@link ReviewSpeedSchema}. */
+export type ReviewSpeed = z.output<typeof ReviewSpeedSchema>;
+
 /**
  * The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (Rec. 709 luma) at 64 px on
  * the long side (the scale of `analyze`) and its sound.
@@ -501,6 +556,7 @@ export const ReviewMetricsSchema = z.object({
   craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order, waived ones left out; empty when none."),
   waived: z.array(ReviewWaivedWarningSchema).describe("Craft warnings a waiver of `requirements.json` covers, with its reason: accepted, not gone; empty when none."),
   requirements: ReviewRequirementsSchema.nullable().describe("`requirements.json` judged: its checks, its waivers and what failed; null when the project has none."),
+  speed: z.array(ReviewSpeedSchema).optional().describe("With `speed`: the speed graph of the clip's hero point, with its linear moves and dead stops. Absent without `speed`."),
 });
 
 /** See {@link ReviewMetricsSchema}. */
