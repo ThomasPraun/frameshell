@@ -83,6 +83,7 @@ import { type Span, dipCurve, speechStretches, voiceRuns } from "./media/duck.js
 import { BeatsStore, beatsFileOf, formatBeatsFile, ownBeatsFile, resolveBeatsFile, summarizeBeats } from "./media/beats-store.js";
 import { EnergyStore } from "./media/energy-store.js";
 import { LoudnessStore } from "./media/loudness-store.js";
+import { AUDIO_INSPECT_LANES, type AudioFacts, AudioInspector } from "./media/audio-inspect.js";
 import { planLevels } from "./media/loudness-plan.js";
 import { MediaService } from "./media/service.js";
 import { AudioFxService } from "./media/audio-fx.js";
@@ -551,6 +552,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
     ffmpeg: projectFfmpeg,
     duration: async (dir, rel) => (await media.probe(dir, rel)).duration,
+  });
+  const audition = new AudioInspector({
+    loudness: (dir, rel) => loudnessStore.reading(dir, rel),
+    hash: async (dir, rel) => (await media.derivedAudio(dir, rel)).hash,
+    duration: async (dir, rel) => (await media.probe(dir, rel)).duration,
+    ffmpeg: projectFfmpeg,
   });
   const beats = new BeatsStore({
     derivedAudio: (dir, rel) => media.derivedAudio(dir, rel),
@@ -2154,6 +2161,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       } finally {
         await settle(key, tx);
       }
+    },
+    "audio.inspect": async ({ cwd, assets, spectrogram }) => {
+      const dir = await root(cwd);
+      // Resolved first: a path outside the project or missing fails the call; a file that has no sound only skips itself.
+      const rels: string[] = [];
+      for (const asset of assets) rels.push((await resolveAsset(dir, resolve(cwd, asset))).rel);
+      const files = [...new Set(rels)];
+      type Read = { item: AudioFacts; skip: null } | { item: null; skip: { asset: string; reason: string } };
+      const read: Read[] = new Array(files.length);
+      let next = 0;
+      // A few files at a time: each one is an ffmpeg decode and, with spectrograms, a worker thread.
+      const lane = async () => {
+        for (let index = next++; index < files.length; index = next++) {
+          const rel = files[index]!;
+          read[index] = await audition.inspect(dir, rel, spectrogram).then(
+            (item): Read => ({ item, skip: null }),
+            (error: unknown): Read => {
+              if (error instanceof RpcError && error.code !== ErrorCode.InvalidOperation) throw error;
+              return { item: null, skip: { asset: rel, reason: error instanceof Error ? error.message : String(error) } };
+            },
+          );
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(AUDIO_INSPECT_LANES, files.length) }, lane));
+      return { items: read.flatMap(({ item }) => (item ? [item] : [])), skipped: read.flatMap(({ skip }) => (skip ? [skip] : [])) };
     },
     "sound.sfx": async ({ cwd, kind, variant, seed, pitch, length }) => {
       const dir = await root(cwd);
