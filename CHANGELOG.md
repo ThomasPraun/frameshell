@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one's level, and Use this selects the file. Read-only: nothing on the timeline changes. English and Spanish.
 - Daemon method `audio.inspect { assets, spectrogram? }` (MCP `audio_inspect`), read-only: per file the integrated
   loudness, true peak and loudness range from the per-asset loudness cache, the length, the `fssd` facts of a generated
-  take, and with `spectrogram: true` a 64-row log-frequency spectrogram of up to 400 columns in dB computed on the one
+  take (a sound shorter than one 400 ms gating block, which EBU R128 reads as silence, gets the loudness of that one
+  block, flagged `shortSound`), and with `spectrogram: true` a 64-row log-frequency spectrogram of up to 400 columns in dB computed on the one
   FFT in a worker thread (kept in memory, not on disk: no new `gc` kind). Files with no sound are listed in `skipped`.
 
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
