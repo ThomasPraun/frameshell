@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live video in a corner stays the multicam picture-in-picture layout, owner decision 2026-11-16). `work-cards` shows
   task cards from a `title:status` list that come in staggered, pulse when they start and follow one shared progress,
   with no icons. `light-leak` is a seeded warm glow, a clip about a second long on a track above a cut, clear at its
-  first and last frame, `hue` and `intensity` props, no blend mode: an overlay, so the cut underneath keeps its
+  first frame and the last tenth of a second, `hue` and `intensity` props, no blend mode: an overlay, so the cut underneath keeps its
   length. Each pulls late cues in before the 0.3 s exit and lays out in all four formats. The hash of `seed` that
   `emphasis-marker` and `scene-background` each carried is one `SEED_HELPERS` in the kit, shared with `light-leak`.
   The `hyperframes` and Frameshell skills list them.

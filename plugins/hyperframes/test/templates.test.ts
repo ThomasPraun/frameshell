@@ -239,7 +239,7 @@ describe("template light-leak", () => {
     expect(html).not.toContain("mix-blend-mode");
     expect(html).not.toMatch(/\bfilter\s*:|backdrop-filter/);
     expect(html).toContain("var seed = seedOf(P.seed);");
-    // The envelope is a smoothstep of the clip's progress: 0 at the first and the last frame.
+    // The envelope is a smoothstep of the clip's progress: 0 at the first frame and from D - END on.
     expect(html).toContain("var env = u * u * (3 - 2 * u);");
     // The strength is capped below 1 and the colour of the core is cream, not white.
     expect(html).toContain("var CAP = 0.55;");

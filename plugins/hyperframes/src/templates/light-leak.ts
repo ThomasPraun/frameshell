@@ -15,12 +15,13 @@ import {
  * length. Three soft radial gradients (no blend mode: one once rendered a whole
  * film white), the corner and the offsets chosen by a seeded hash, so one `seed`
  * always paints the same frame. Transparent outside the glow, and every pixel
- * clear at the first and the last frame: the clip's length is the leak's length
- * and the peak sits at `peak` of it.
+ * clear at the first frame and for the last tenth of a second (a render's last
+ * frame is a frame short of the clip's length): the clip's length is the leak's
+ * length and the peak sits at `peak` of it.
  */
 export const lightLeak: Template = {
   id: "light-leak",
-  description: "Light leak over a cut: a warm glow swells in from a corner and falls away, seeded, hue-shiftable, clear at both ends; an overlay for a track above, never shortens the timeline",
+  description: "Light leak over a cut: a warm glow swells in from a corner and falls away, seeded, hue-shiftable, clear at the start and just before the end; an overlay for a track above, never shortens the timeline",
   defaultDuration: 1,
   overlay: true,
   variables(_input: TemplateInput): TemplateVariable[] {
@@ -59,6 +60,8 @@ export const lightLeak: Template = {
       // Layout per format: diameter of the main glow as a multiple of the short side. wide, square, tall.
       var L = M.pick({ d: 1.5 }, { d: 1.25 }, { d: 1.4 });
       var D = S.duration || 1;
+      // The glow is gone this long before the clip ends: the last rendered frame is a frame before D, and the leak must not pop off at the cut-out.
+      var END = Math.min(0.1, 0.12 * D);
       // The most any pixel is covered at the peak: a leak shows the picture through it, it never whites it out.
       var CAP = 0.55;
 
@@ -101,8 +104,8 @@ export const lightLeak: Template = {
       var drift = 0.07 + 0.03 * jitter(seed, 7);
 
       M.bind("${id}", function (t) {
-        // Rise to the peak and fall away: a smoothstep on each side, exactly 0 at the first and the last frame.
-        var f = t / D;
+        // Rise to the peak and fall away: a smoothstep on each side, exactly 0 at the first frame and from D - END on.
+        var f = t / (D - END);
         var u = Math.min(1, Math.max(0, f < P.peak ? f / P.peak : (1 - f) / (1 - P.peak)));
         var env = u * u * (3 - 2 * u);
         for (var i = 0; i < els.length; i++) {

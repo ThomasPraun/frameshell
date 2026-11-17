@@ -135,6 +135,8 @@ export const logoSting: Template = {
       sweep.style.marginTop = -bandH / 2 + "px";
       sweep.style.background = "linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, " + 0.2 * P.sweep + ") 50%, rgba(255, 255, 255, 0) 100%)";
 
+      // Centre travel from clear of the frame to clear on the other side: half the width, half the tilted band, the corner the tilt swings in, and a margin for the slow start of the ease.
+      var travel = S.width / 2 + bandW / 2 / Math.cos(Math.PI * 16 / 180) + (S.height / 2) * Math.tan(Math.PI * 16 / 180) + 0.03 * S.width;
       var D = S.duration;
       var OUT = 0.3;
       // After the logo lands the ring, the name and the sweep need about 1.2 s: a late landing is pulled in so they all finish before the exit.
@@ -152,9 +154,11 @@ export const logoSting: Template = {
         put(ring, { scale: 0.8 + 1.4 * M.ease("progress", f), opacity: P.ring * 0.7 * (1 - f) * (f > 0 ? 1 : 0) });
         s = M.spring("heavy", t - POP - 0.25);
         M.write(nameEl, { y: (1 - s) * rise, opacity: M.ease("enter", (t - POP - 0.25) / 0.2) });
-        // The band crosses the frame once, tilted 16 degrees, and is clear before and after.
+        // The band crosses the frame once, tilted 16 degrees: it starts and ends fully outside the frame in every format, and fades over its first and last stretch.
         var g = (t - POP - 0.5) / 0.6;
-        put(sweep, { x: (M.ease("progress", Math.min(1, Math.max(0, g))) - 0.5) * 1.5 * S.width, rotate: 16, opacity: g > 0 && g < 1 ? 1 : 0 });
+        // It also fades in and out over the first and last 15 % of its way, so no frame shows an edge of it appearing.
+        var fade = Math.max(0, Math.min(1, g / 0.15, (1 - g) / 0.15));
+        put(sweep, { x: (2 * M.ease("progress", Math.min(1, Math.max(0, g))) - 1) * travel, rotate: 16, opacity: fade * fade });
       });
     </script>
   </body>

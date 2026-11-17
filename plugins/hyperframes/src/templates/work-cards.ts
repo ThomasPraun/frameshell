@@ -70,7 +70,7 @@ export const workCards: Template = {
       .ring { position: absolute; inset: 0; border-radius: 0.9em; border: 0.16em solid; opacity: 0; }
       .row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 0.8em; }
       .title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; font-size: 1em; }
-      .status { flex: none; padding: 0.15em 0.7em 0.2em; border-radius: 999px; font-weight: 700; font-size: 0.72em; }
+      .status { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.15em 0.7em 0.2em; border-radius: 999px; font-weight: 700; font-size: 0.72em; }
       .track { position: absolute; left: 1.1em; right: 1.1em; bottom: 0.8em; height: 0.4em; border-radius: 999px; overflow: hidden; }
       .fill { position: absolute; inset: 0; border-radius: 999px; transform-origin: 0% 50%; }`;
     return `${pageHead(input, this.variables(input), css)}
@@ -99,6 +99,8 @@ export const workCards: Template = {
         var at = item.indexOf(":");
         return at > 0 ? { title: item.slice(0, at).trim(), status: item.slice(at + 1).trim() } : { title: item, status: "" };
       });
+      // Nothing to show is never an empty picture: one placeholder card stands in.
+      if (!entries.length) entries = [{ title: "Task", status: "" }];
       var n = entries.length;
 
       // Cards are 3.8 em tall with 0.7 em between: the type shrinks if the column would use more than 80 % of the frame's height.
@@ -170,7 +172,7 @@ export const workCards: Template = {
           var on = M.ease("enter", (t - began) / 0.25);
           var c = cards[i];
           put(c.el, { y: (1 - s) * fs * 2.2, scale: 1 + 0.04 * P.pulse * bump, opacity: M.ease("enter", (t - at) / 0.2) });
-          M.write(c.ring, { scale: 1 + 0.06 * P.pulse * bump, opacity: 0.85 * P.pulse * bump });
+          put(c.ring, { scale: 1 + 0.06 * P.pulse * bump, opacity: 0.85 * P.pulse * bump });
           M.write(c.status, { opacity: 0.4 + 0.6 * on });
           // A bar fills only once its card has started, to the one shared amount.
           M.write(c.fill, { scaleX: shared * on });
