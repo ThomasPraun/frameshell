@@ -99,7 +99,7 @@ export {
   type Tempo,
   type Letterbox,
   type TimelineFormatOverride,
-  isGridRefLabel,
+  isSchemeRefLabel,
   markerLabelKey,
   findMarker,
   findMusicClip,

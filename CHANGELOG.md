@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Word references as times, #458 slice 4 part 3 (ADR 0029, epic #451; protocol 172): every time argument that takes a
+  TimeRef also takes `word:<text>[#n][+s|-s]`, the start of the nth time the timeline plays a word (`--from word:so
+  --to word:so#2`, `--at word:over+0.2`), or a transcript word id (`word:w_000012`). Words match on their spoken tokens
+  (case, accents and punctuation ignored, `20` meets "twenty", several words in a row for a phrase, compared token
+  for token so `maybe` never meets "may be"; text that also reads as a word plus an offset is refused); words a cut
+  removed do not count, and the same speech on two tracks counts once. The name is read on the timeline as the call
+  sees it (a review-mode proposal's own timeline included) and the history records seconds, so a later cut never moves
+  a recorded edit. A clip with a stale transcript refuses it naming `transcribe`; an unknown word lists the closest
+  played words. A marker label starting with `word:` is now refused. `cleanup` and word references share one placement
+  of transcript words on the timeline (`placeWords`). Not yet read by `requirements.json`.
+
+- `music.pick`, the last slice of #485 (ADR 0037; protocol 171, no schema change): `frameshell music pick <track> [--keep] [--dry-run]`
+  (MCP `music_pick`) keeps one of the candidate tracks `music candidates` placed. The chosen track (id or name, e.g.
+  `Music 2`) is unmuted and renamed `Music`, and the other candidate tracks (audio tracks named `Music <n>` that hold only
+  media clips) are removed with their clips; `--keep` mutes them and leaves them in place. A candidate with edits of its
+  own (several clips, or a clip with speed, keys, effects, fades or transitions, or a subtitle track following it) is never
+  removed: the result names it. Refused when the track is not a candidate or there is no other to pick between. One
+  transaction `Music pick: <track>` (one proposal in review mode); nothing is fitted or ducked again, the result's `next`
+  says `music fit` and `duck --level` follow. Skill updated.
+
+- Cut seam strips and the per-clip kit of `review`, slice RP3 of #457, the last (epic #451; protocol 170):
+  `--sheets cuts` (opt in, never a default) writes one row per cut, the whole frames 0.2 and 0.1 s before it, on it,
+  and 0.1 and 0.2 s after (`cut 3 -0.1`; a cut within 0.2 s of the range's edge repeats the edge frame, so every cut
+  keeps its row), up to 24 cuts thinned evenly with a warning naming how many were left out; a
+  timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds (found once per run, shared with the
+  metrics). `--pop <time>` (seconds, a marker, `beat:N`; resolved in the daemon by the shared TimeRef resolver) writes
+  the frame before and the frame at it side by side with their difference amplified 4 times. `--onion <clip>` blends
+  up to 24 frames of the clip's span (of `--range` inside it) into one image: the median background, each moving part
+  laid over at 25 %. `--speed <clip>` charts the clip's hero point speed per frame (a media clip: its keyed placement
+  through `placementAt` and the cover crop, sub-pixel, no render; a generated clip: the centre and area of its render's
+  alpha (alpha-weighted centroid and area, not its bounding box) at up to 90 frames; no render, a render that fails, no
+  alpha or alpha on fewer than two frames skipped with the reason, never a failed run) and lists in `metrics.speed` the `linear`
+  stretches (speed within 2.5 % over 6 frames and 20 % of the move) and dead `stop`s (under 0.25 px per frame for 4
+  frames between two moving stretches), ESTIMATED, warnings only, thresholds as data in `review/thresholds.ts` (2.5 %,
+  not 5 %: the middle of the `in-out` key ease varies by 4 %). With only the kit and no `--sheets`, a run writes the
+  kit's sheets (and the metrics with `--speed`, the safe sheet with `--platform`). `--crop-at` crops `pop` and `onion`
+  too; both `pop` frames take the crop of the frame at the pop. New sheet kinds and tile
+  tags `pop`, `onion`, `speed`; `encodeRgbPng` joins `encodeGrayPng`. `onion`, `speed` with a file, a clip that is not
+  on a video track or plays outside the range, and `pop` on the first frame or past the film are InvalidOperation.
+
 - Motion templates, slice TP4 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
   new <name> --template` takes four more. `orbit` has labels circle a logo or a word, from a seeded start phase, and
   slow to a stop on an evenly spaced ring that never depends on the seed. `locked-on` snaps four corner brackets onto a
@@ -1371,6 +1411,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hyperframes update` command.
 
 ### Changed
+
+- `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
+  from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
+  so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.
+  Files under an hour are unchanged.
 
 - `review` measures motion on the scale of `analyze`, slice RR of #457 (epic #451, #471; owner decision 2026-11-17;
   protocol 166): a `--file` is read on every frame with `analyze`'s reader (grey frames 64 px on the long side) instead

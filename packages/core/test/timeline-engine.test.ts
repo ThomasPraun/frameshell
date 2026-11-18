@@ -1128,9 +1128,9 @@ describe("markers (ADR 0029)", () => {
     expect((await apply(t, "marker.add", { at: 3, label: "m_1 drop" })).timeline.markers).toHaveLength(4);
   });
 
-  it("a label shaped like beat:<number> or bar:<number> is refused on add and set, in any case", async () => {
+  it("a label shaped like beat:<number>, bar:<number> or word:<text> is refused on add and set, in any case", async () => {
     const t = await marked();
-    for (const label of ["beat:8", "BAR:2", "Beat: 3", "bar:2.5", "bar:8-0.2"]) {
+    for (const label of ["beat:8", "BAR:2", "Beat: 3", "bar:2.5", "bar:8-0.2", "word:over", "WORD:this#2"]) {
       expect((await rejection(apply(t, "marker.add", { at: 3, label }))).message, label).toMatch(/must not look like a beat or bar reference/);
       expect((await rejection(apply(t, "marker.set", { marker: "m_b", label }))).message, label).toMatch(/must not look like a beat or bar reference/);
     }
