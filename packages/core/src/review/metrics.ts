@@ -1,7 +1,7 @@
-import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSound, ReviewSpan, ReviewSync } from "@frameshell/protocol";
+import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSound, ReviewSpan, ReviewSpeed, ReviewSync } from "@frameshell/protocol";
 import type { ResolvedSubtitleTrack } from "@frameshell/schema";
 import { bigChanges, rhythmOf, stillRuns } from "../analyze/rhythm.js";
-import { type Cut, frameStart } from "../analyze/shots.js";
+import { type Cut, frameStart, shotLengthsRead, shotsOf } from "../analyze/shots.js";
 import { deliveryWarnings } from "./delivery.js";
 import { seamWarnings } from "./loop.js";
 import { safeWarnings } from "./safe.js";
@@ -68,6 +68,8 @@ export interface MetricsInput {
   sound?: ReviewSound | null;
   /** Graphics and faces that cross each platform's zones. */
   safe?: readonly { platform: string; flags: readonly ReviewSafeFlag[] }[];
+  /** The speed graphs `speed` asked for; absent: none. */
+  speed?: readonly ReviewSpeed[];
 }
 
 /** Runs of consecutive samples (first and last index) where `test` holds, starting at index `from`. */
@@ -137,8 +139,8 @@ export function stillSpans(series: MotionSeries, fps: number): ReviewSpan[] {
 
 /** Lengths in frames of the shots of frames `first` to `end - 1` cut at `cuts` (film frames; those outside ignored). */
 function shotLengths(first: number, end: number, cuts: readonly number[]): number[] {
-  const marks = [first, ...[...new Set(cuts)].filter((frame) => frame > first && frame < end).sort((a, b) => a - b), end];
-  return marks.slice(1).map((mark, i) => mark - marks[i]!);
+  const sorted = [...new Set(cuts)].sort((a, b) => a - b).map((frame) => ({ frame, score: 0 }));
+  return shotLengthsRead(shotsOf(sorted, end), end, first);
 }
 
 /**
@@ -252,5 +254,6 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
     craft: craft.map((finding) => ({ ...finding, severity: "warn" as const })),
     waived: [],
     requirements: null,
+    ...(input.speed ? { speed: [...input.speed] } : {}),
   };
 }
