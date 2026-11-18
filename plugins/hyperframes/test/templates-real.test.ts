@@ -932,6 +932,201 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         expect(await page.evaluate(style("caption", "display"))).toBe("none");
       });
     }, 120_000);
+
+    // TP5: lean-in and select-resize, judged by what they paint and by the layout they leave.
+    const rectOf = (selector: string) => `(function () { var r = document.querySelector('${selector}').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()`;
+    const poseOf = (id: string) => `(function () { var m = /translate\\(([-\\d.]+)px, ([-\\d.]+)px\\) rotate\\(([-\\d.]+)deg\\) scale\\(([-\\d.]+)/.exec(document.getElementById('${id}').style.transform); return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]; })()`;
+    /** Bounding box [left, top, right, bottom] of the pixels of `rgba` that pass `test`, or null. */
+    const boundsOf = (rgba: Buffer, width: number, test: (r: number, g: number, b: number, a: number) => boolean): number[] | null => {
+      let box: number[] | null = null;
+      for (let p = 0; p < rgba.length; p += 4) {
+        if (!test(rgba[p]!, rgba[p + 1]!, rgba[p + 2]!, rgba[p + 3]!)) continue;
+        const x = (p / 4) % width;
+        const y = Math.floor(p / 4 / width);
+        box = box ? [Math.min(box[0]!, x), Math.min(box[1]!, y), Math.max(box[2]!, x + 1), Math.max(box[3]!, y + 1)] : [x, y, x + 1, y + 1];
+      }
+      return box;
+    };
+    const pxOf = (value: unknown) => Number(String(value).replace("px", ""));
+    const countOf = (rgba: Buffer, test: (r: number, g: number, b: number, a: number) => boolean) => {
+      let n = 0;
+      for (let p = 0; p < rgba.length; p += 4) if (test(rgba[p]!, rgba[p + 1]!, rgba[p + 2]!, rgba[p + 3]!)) n++;
+      return n;
+    };
+
+    it("lean-in is clear at its first frame and starts wholly outside the frame on its own side", async () => {
+      const dir = tempDir();
+      for (const side of ["left", "right"]) {
+        await inPage("lean-in", { side }, undefined, async (page) => {
+          expect(alphaSum(await rgbaAt(page, dir, 0))).toBe(0);
+          await seek(page, 0.15);
+          const [left, , right] = (await page.evaluate(rectOf("#card"))) as number[];
+          if (side === "left") expect(right!).toBeLessThanOrEqual(0);
+          else expect(left!).toBeGreaterThanOrEqual(480);
+          // Once it has landed it sits in its half of the frame.
+          await seek(page, 2.5);
+          const [l2, , r2] = (await page.evaluate(rectOf("#card"))) as number[];
+          expect((l2! + r2!) / 2 < 240).toBe(side === "left");
+        });
+      }
+    }, 240_000);
+
+    it("lean-in tilts away as it comes, leans past its resting tilt toward the viewer, and holds a slow lean (scale 1 to 1.06, 1 to 2 degrees)", async () => {
+      await inPage("lean-in", {}, undefined, async (page) => {
+        const rotations: number[] = [];
+        for (let t = 0.2; t <= 1.7; t += 1 / 30) {
+          await seek(page, t);
+          rotations.push(((await page.evaluate(poseOf("card"))) as number[])[2]!);
+        }
+        // It starts tilted back (about -8 degrees), passes its resting tilt and settles.
+        expect(rotations[0]!).toBeLessThan(-4);
+        await seek(page, 1.7);
+        const [, , settled] = (await page.evaluate(poseOf("card"))) as number[];
+        expect(Math.max(...rotations)).toBeGreaterThan(settled! + 0.3);
+        // The hold never stops: the lean grows from about 1 to 2 degrees, the scale from 1 to 1.06 and never past it.
+        await seek(page, 2);
+        const early = (await page.evaluate(poseOf("card"))) as number[];
+        await seek(page, 3.6);
+        const late = (await page.evaluate(poseOf("card"))) as number[];
+        expect(late[2]!).toBeGreaterThan(early[2]!);
+        expect(late[2]!).toBeGreaterThan(1.8);
+        expect(late[2]!).toBeLessThanOrEqual(2);
+        expect(early[3]!).toBeGreaterThanOrEqual(1);
+        expect(late[3]!).toBeGreaterThan(early[3]!);
+        expect(late[3]!).toBeGreaterThan(1.05);
+        expect(late[3]!).toBeLessThanOrEqual(1.0601);
+        expect(Math.abs(late[0]!)).toBeLessThan(0.5);
+      });
+      // A card from the right leans the other way.
+      await inPage("lean-in", { side: "right" }, undefined, async (page) => {
+        await seek(page, 3.6);
+        const [, , rotate] = (await page.evaluate(poseOf("card"))) as number[];
+        expect(rotate!).toBeLessThan(-1.8);
+        expect(rotate!).toBeGreaterThanOrEqual(-2);
+      });
+    }, 240_000);
+
+    it("lean-in pulls a late start in so the card has landed before the exit on a short clip", async () => {
+      await inPage("lean-in", { at: 3 }, 2, async (page) => {
+        // 2 s clip: it starts at 2 - 0.3 - 1 = 0.7 s and has landed by 1.6 s.
+        await seek(page, 1.6);
+        const [x] = (await page.evaluate(poseOf("card"))) as number[];
+        expect(Math.abs(x!)).toBeLessThan(0.5);
+        const [left, , right] = (await page.evaluate(rectOf("#card"))) as number[];
+        expect(left!).toBeGreaterThan(0);
+        expect(right!).toBeLessThan(480);
+      });
+    }, 120_000);
+
+    it("lean-in shrinks a long text to fit, falls back to a default line for an empty one and hides an empty kicker, in every format", async () => {
+      for (const [format, size] of Object.entries(FORMATS)) {
+        await inPage("lean-in", { text: "word ".repeat(30).trim(), size: 1.6, side: "right" }, undefined, async (page) => {
+          await seek(page, 3.6);
+          const [left, top, right, bottom] = (await page.evaluate(rectOf("#card"))) as number[];
+          expect(left!, format).toBeGreaterThan(size[0] * 0.02);
+          expect(right!, format).toBeLessThan(size[0] * 0.98);
+          expect(top!, format).toBeGreaterThan(size[1] * 0.02);
+          expect(bottom!, format).toBeLessThan(size[1] * 0.98);
+        }, size);
+      }
+      await inPage("lean-in", { text: "  ", kicker: "" }, undefined, async (page) => {
+        expect(await page.evaluate("document.getElementById('text').textContent")).toBe("Lean in");
+        expect(await page.evaluate(style("kicker", "display"))).toBe("none");
+        await seek(page, 3);
+      });
+    }, 360_000);
+
+    // The card is a pure green and the handles are pure magenta with a cyan edge, so each is found by its colour in the painted frame.
+    const GREEN = (r: number, g: number, b: number, a: number) => a > 200 && g > 200 && r < 80 && b < 80;
+    const MAGENTA = (r: number, g: number, b: number, a: number) => a > 120 && r > 150 && b > 150 && g < 110;
+    const COLOURS = { card: "#00ff00", ink: "#ff00ff", accent: "#00ffff", label: "" };
+
+    it("select-resize is clear at its first frame; its handles are not painted before the press and are by the next frames", async () => {
+      const dir = tempDir();
+      await inPage("select-resize", COLOURS, undefined, async (page) => {
+        expect(alphaSum(await rgbaAt(page, dir, 0))).toBe(0);
+        const opacity = (selector: string) => `Number(document.querySelector('${selector}').style.opacity)`;
+        let press = -1;
+        for (let f = 0; f < 150 && press < 0; f++) {
+          await seek(page, f / 30);
+          if (((await page.evaluate(opacity(".handle"))) as number) > 0) press = f;
+        }
+        expect(press).toBeGreaterThan(0);
+        // The ring and the ripple start on that same frame.
+        expect(await page.evaluate(opacity("#sel"))).toBeGreaterThan(0);
+        expect(await page.evaluate(opacity("#ripple"))).toBeGreaterThan(0);
+        await seek(page, (press - 1) / 30);
+        expect(await page.evaluate(opacity(".handle"))).toBe(0);
+        expect(await page.evaluate(opacity("#sel"))).toBe(0);
+        expect(await page.evaluate(opacity("#ripple"))).toBe(0);
+        expect(countOf(await rgbaAt(page, dir, (press - 1) / 30), MAGENTA)).toBe(0);
+        expect(countOf(await rgbaAt(page, dir, (press + 3) / 30), MAGENTA)).toBeGreaterThan(0);
+      });
+    }, 240_000);
+
+    it("select-resize paints 4 corner squares or 8 dots, on the card's edges, and the dragged corner is the bottom right one", async () => {
+      for (const [handles, count] of [["corners", 4], ["all", 8]] as const) {
+        await inPage("select-resize", { handles }, undefined, async (page) => {
+          expect(await page.evaluate("document.querySelectorAll('.handle').length")).toBe(count);
+          await seek(page, 4);
+          const box = (await page.evaluate(rectOf("#box"))) as number[];
+          const centres = (await page.evaluate("Array.from(document.querySelectorAll('.handle')).map(function (e) { var r = e.getBoundingClientRect(); return [(r.left + r.right) / 2, (r.top + r.bottom) / 2]; })")) as number[][];
+          for (const [x, y] of centres) {
+            // Every handle's centre is on the card's outline, within a pixel (the card has a hairline border inside its box).
+            const onX = Math.abs(x! - box[0]!) < 1.5 || Math.abs(x! - box[2]!) < 1.5 || Math.abs(x! - (box[0]! + box[2]!) / 2) < 1.5;
+            const onY = Math.abs(y! - box[1]!) < 1.5 || Math.abs(y! - box[3]!) < 1.5 || Math.abs(y! - (box[1]! + box[3]!) / 2) < 1.5;
+            expect(onX && onY).toBe(true);
+          }
+          expect(centres.some(([x, y]) => Math.abs(x! - box[2]!) < 1.5 && Math.abs(y! - box[3]!) < 1.5)).toBe(true);
+          // Dots are round, squares are not.
+          expect((await page.evaluate("document.querySelectorAll('.handle')[0].style.borderRadius")) === "50%").toBe(handles === "all");
+        });
+      }
+    }, 240_000);
+
+    it("select-resize ends on the target size: the layout box and the painted card both equal it, and the badge says so", async () => {
+      const dir = tempDir();
+      await inPage("select-resize", { ...COLOURS, x: 0.3, y: 0.2, fromW: 0.2, fromH: 0.22, toW: 0.36, toH: 0.4 }, undefined, async (page) => {
+        // Before the drag the card has its first size.
+        await seek(page, 1.2);
+        expect(pxOf(await page.evaluate(style("box", "width")))).toBeCloseTo(0.2 * 480, 1);
+        expect(pxOf(await page.evaluate(style("box", "height")))).toBeCloseTo(0.22 * 270, 1);
+        // Well after the release (it lets go by about 2.5 s; the exit starts at 4.7 s).
+        const painted = await rgbaAt(page, dir, 4);
+        expect(pxOf(await page.evaluate(style("box", "width")))).toBeCloseTo(0.36 * 480, 1);
+        expect(pxOf(await page.evaluate(style("box", "height")))).toBeCloseTo(0.4 * 270, 1);
+        // The badge reads it in pixels of a frame whose short side is 1080 (this one is 270: x4).
+        expect(await page.evaluate("document.getElementById('badge').textContent")).toBe(`${Math.round(0.36 * 480 * 4)} x ${Math.round(0.4 * 270 * 4)}`);
+        // The painted pure green is the card (handles magenta, ring cyan; its hairline border and the ring cost a few pixels): its extent is the box's, seen through the slow push, far from the 77 px the first size differs by.
+        const push = ((await page.evaluate(poseOf("world"))) as number[])[3]!;
+        const green = boundsOf(painted, 480, GREEN)!;
+        expect(green).not.toBeNull();
+        expect(Math.abs(green[2]! - green[0]! - 0.36 * 480 * push)).toBeLessThanOrEqual(6);
+        expect(Math.abs(green[3]! - green[1]! - 0.4 * 270 * push)).toBeLessThanOrEqual(6);
+      });
+    }, 240_000);
+
+    it("select-resize can drag inward, and keeps a card that asks for the frame's edge, its handles and its badge inside the frame", async () => {
+      await inPage("select-resize", { fromW: 0.4, fromH: 0.4, toW: 0.2, toH: 0.2 }, undefined, async (page) => {
+        await seek(page, 1.2);
+        expect(pxOf(await page.evaluate(style("box", "width")))).toBeCloseTo(0.4 * 480, 1);
+        await seek(page, 4);
+        expect(pxOf(await page.evaluate(style("box", "width")))).toBeCloseTo(0.2 * 480, 1);
+        expect(pxOf(await page.evaluate(style("box", "height")))).toBeCloseTo(0.2 * 270, 1);
+      });
+      for (const [format, size] of Object.entries(FORMATS)) {
+        await inPage("select-resize", { x: 0.9, y: 0.9, fromW: 0.2, toW: 0.9, toH: 0.9, handles: "all" }, undefined, async (page) => {
+          await seek(page, 4);
+          const rects = (await page.evaluate("Array.from(document.querySelectorAll('#box, .handle, #badge')).map(function (e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })")) as number[][];
+          for (const [left, top, right, bottom] of rects) {
+            expect(left!, format).toBeGreaterThan(size[0] * 0.03);
+            expect(right!, format).toBeLessThan(size[0] * 0.97);
+            expect(top!, format).toBeGreaterThan(size[1] * 0.03);
+            expect(bottom!, format).toBeLessThan(size[1] * 0.97);
+          }
+        }, size);
+      }
+    }, 360_000);
   });
 
   // A wrong `clip set --props` never breaks the picture (ADR 0033): a paragraph with no word left falls back to the default one.
