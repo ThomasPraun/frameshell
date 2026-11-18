@@ -1629,9 +1629,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TSDoc named only markers, beats and bars; they now point to the `TimeRef` forms, `word:` included. `review --pop`
   with a number is taken as seconds straight, with no stub timeline; a marker, beat or word still resolves against the
   timeline. The plugin API TSDoc of `ClipAdapter.gc` states the real contract of the host's `gc`: one call per clip
-  type, which inputs it gets, and when it is not called. Not changed: the stale temp-root sweep for e2e (PR #640 is not
-  on main yet) and `grade.analyze`/`grade.compare` for generated clips (they need a clip render and a nullable `asset`
-  in the result, a wire change).
+  type, which inputs it gets, and when it is not called. Not changed: the stale temp-root sweep for e2e (the unit-test
+  side, PR #640, is on main; the e2e side is done in slice SF3) and `grade.analyze`/`grade.compare` for generated clips
+  (they need a clip render and a nullable `asset` in the result, a wire change).
+
+- Small fixes, slice SF3 of #451 (no wire change): the e2e run root `fse-*` that a killed run left in the system temp
+  dir is swept at the next start when it is older than a day, by the same helper as the unit tests' `fsv-*` dirs
+  (`scripts/stale-temp-dirs.mjs`, one sweep with a unit test), before `TMPDIR` moves so a parallel run's young root
+  stays. `review` of words behind the person now measures only inside the range reviewed (a word that plays outside it
+  is not listed, one that straddles an end is sampled in its part inside), and one word whose alpha or matte cannot be
+  read (an ffmpeg exit) is an `unplaced` entry and a `behind:` warning instead of failing the whole review. When the
+  samples of a word fall on both sides of the 15 to 65 % bands, the entry keeps the verdict of the farthest sample and
+  its message says part of the word floats and part is eaten. `readyMatte` (review) and `matte.status` read one
+  `matteLookup`, so both judge the ingest the same way (texts and states unchanged). `sound.place` and `sound.music`
+  write through the `inOneTransaction` helper that `voiceover.place` uses, so a stale-revision refusal now carries the
+  helper's generic text.
 
 - Small fixes, slice SF of #471 (epic #451, parts of #470 and #482; no wire change): a `voiceover.generate` call now
   stops when its connection closes (Ctrl+C in the CLI, a dropped MCP connection, the app quitting), through the same

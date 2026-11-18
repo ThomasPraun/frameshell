@@ -165,7 +165,8 @@ export function behindEntry(word: { clip: string; track: string; plate: string }
         : verdict === "floats"
           ? `${read}: under ${percent(BEHIND_FLOATS)} the word floats beside the person instead of sitting behind them. Aim for ${target}: move it toward the person or make it larger (the template's \`place\` and \`size\`, or the clip's \`transform\`).`
           : `${read}: over ${percent(BEHIND_EATEN)} the person eats the word and it no longer reads. Aim for ${target}: move it out from behind them or make it larger.`;
-  return { ...base, verdict, message };
+  const straddles = shown.some((sample) => sample.covered! < BEHIND_FLOATS) && shown.some((sample) => sample.covered! > BEHIND_EATEN);
+  return { ...base, verdict, message: straddles ? `${message} The samples fall on both sides of the band: part of the word floats, part is eaten.` : message };
 }
 
 /** Craft warnings of `entries`: a word covered out of the bands, and a word that meets a face. */
