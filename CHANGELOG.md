@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `grade.analyze` and `grade.compare` on generated and nested clips, slice 11 of #384 (ADR 0031, epic #451;
+  protocol 177): `grade compare` (MCP `grade_compare`) draws one frame of a generated clip or a nested timeline clip
+  under candidate grades through the export frame path, as it did footage (a multicam shot is refused with reason
+  `not-gradable`); `grade analyze` (MCP `grade_analyze`) measures a generated clip from its cached draft render, made
+  when missing, and refuses one whose render has transparency (`has-alpha`) and a nested timeline (`nested`, pointing at
+  the clips inside and at `grade compare`). Both results gain `kind` and a nullable `asset`. Owner decision
+  2026-11-18.
 - Still finals for look-dev, slice 7 of #482 (ADR 0035, epic #451; protocol 176): `frameshell frame --final [--yes]`
   and `frameshell clip compare --final [--yes]` (MCP `frame_capture` / `clip_compare` with `final`) draw a Blender clip
   shown at that frame from a Cycles final of that one frame instead of its EEVEE draft, unless its whole final is

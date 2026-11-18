@@ -1,5 +1,5 @@
 // Test fixture: a clip adapter that renders a flat colour card with ffmpeg, like a HyperFrames clip but in
-// milliseconds. The composition is a JSON file: { color, alpha, seconds, delayMs, fail }. Props: { label? }. With
+// milliseconds. The composition is a JSON file: { color, alpha, seconds, delayMs, fail, opaque } (opaque: an opaque WebM, `hasAlpha` false). Props: { label? }. With
 // { box: [x, y, width, height] } (fractions of the frame) only that rectangle is painted, the rest transparent: a word.
 // Live preview (ADR 0010): the page is `live.html` next to the card; the card's { liveRoot, liveEntry, liveFail }
 // override or break it. `still` renders the same cards but has no live preview. `token-card` takes the style's token
@@ -83,6 +83,7 @@ export function activate(api) {
       }
       const ffmpeg = await ctx.ensureBinary("ffmpeg");
       const file = join(ctx.outDir, "card.webm");
+      const opaque = card.opaque === true;
       const size = `${ctx.width}x${ctx.height}`;
       const alpha = card.alpha ?? 1;
       const color = (final ? card.finalColor : undefined) ?? (blurred ? card.blurColor : undefined) ?? card.color ?? "white";
@@ -92,12 +93,12 @@ export function activate(api) {
           [
             ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"],
             ...(card.box ? boxed(card.box, color, alpha, ctx, card.seconds ?? 2) : ["-i", `color=c=${color}@${alpha}:s=${size}:r=${ctx.fps}:d=${card.seconds ?? 2},format=rgba`]),
-            ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-crf", "30", "-b:v", "0", "-deadline", "realtime", file],
+            ...["-c:v", "libvpx-vp9", "-pix_fmt", opaque ? "yuv420p" : "yuva420p", "-auto-alt-ref", "0", "-crf", "30", "-b:v", "0", "-deadline", "realtime", file],
           ],
           (error, _stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve()),
         ),
       );
-      return { file, hasAlpha: true };
+      return { file, hasAlpha: !opaque };
     },
   };
   api.registerClipType(still);

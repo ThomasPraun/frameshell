@@ -95,7 +95,8 @@ mutations print the new revision):
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
   grade analyze <clip> [--at s | --from s --to s] [--samples n]
                                Measure the clip's source picture (before its own grade) with ffmpeg signalstats and
-                               suggest a bounded correction: exposure, white balance, contrast, saturation, in the
+                               suggest a bounded correction (a generated clip is measured from its draft render, made
+                               when missing; one with transparency and a nested timeline are refused, see grade compare): exposure, white balance, contrast, saturation, in the
                                fields of clip set --grade-*. --at (timeline seconds) measures one frame; --from and
                                --to a range, --samples frames spread over it (default 8, 1 to 32); none: the whole
                                clip. Prints the levels, why each number, and the clip set command to apply it.
@@ -104,7 +105,7 @@ mutations print the new revision):
                                numbers: plain grade numbers in one table, no LUT files. Keep one with clip set --grade-look
   grade compare <clip> --look [name:]field=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px]
                 [--format id]
-                               Render one frame of a media clip under up to 16 looks next to a neutral baseline (and
+                               Render one frame of a media, generated or nested timeline clip under up to 16 looks next to a neutral baseline (and
                                its current grade) as one labelled PNG, through the export frame path. A look is a whole
                                grade: exposure, temperature, tint, contrast, saturation, lut, lut-mix (left out =
                                neutral), e.g. --look warm:temperature=0.25,saturation=1.1; a bare built-in look name is
@@ -1744,6 +1745,11 @@ export function formatClipVerify(result: ClipVerifyResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** What a grade report names after the clip: its source file, else the kind of clip (a generated clip has no file, a nested one is a timeline). */
+function clipSubject(result: { asset: string | null; kind: "media" | "generated" | "timeline" }): string {
+  return result.asset ?? (result.kind === "timeline" ? "nested timeline" : "generated clip");
+}
+
 /** `grade analyze` for people: what was measured, the levels, then the suggestion with its reasons and the command that applies it. */
 export function formatGradeAnalyze(result: GradeAnalyzeResult): string {
   const { levels } = result;
@@ -1751,7 +1757,7 @@ export function formatGradeAnalyze(result: GradeAnalyzeResult): string {
   const sign = (value: number) => (value > 0 ? `+${value}` : String(value));
   const where = result.mode === "frame" ? `at ${result.from.toFixed(3)} s` : `${result.frames} frame${result.frames === 1 ? "" : "s"} from ${result.from.toFixed(3)} to ${result.to.toFixed(3)} s`;
   const lines = [
-    `Grade analysis of ${result.clip} (${result.asset}) on ${result.timeline} · ${where}`,
+    `Grade analysis of ${result.clip} (${clipSubject(result)}) on ${result.timeline} · ${where}`,
     `  luma  min ${luma.min}  shadows ${luma.low}  mean ${luma.mean}  highlights ${luma.high}  max ${luma.max}`,
     `  saturation ${levels.saturation}  warmth ${sign(levels.warmth)} (red - blue)  tint ${sign(levels.tint)} (green - red/blue)`,
   ];
@@ -1778,7 +1784,7 @@ export function formatGradeLooks(result: GradeLooksResult): string {
 /** `grade compare` for people: the image, then each tile's number, name and the `clip set` flags that keep it. */
 export function formatGradeCompare(result: GradeCompareResult): string {
   const lines = [
-    `Grade compare of ${result.clip} (${result.asset}) on ${result.timeline} · frame ${result.frame} at ${result.at.toFixed(3)} s · ${result.tiles.length} tiles, ${result.columns}x${result.rows}`,
+    `Grade compare of ${result.clip} (${clipSubject(result)}) on ${result.timeline} · frame ${result.frame} at ${result.at.toFixed(3)} s · ${result.tiles.length} tiles, ${result.columns}x${result.rows}`,
     `  ${result.path} (${result.width}x${result.height})`,
   ];
   for (const tile of result.tiles) {

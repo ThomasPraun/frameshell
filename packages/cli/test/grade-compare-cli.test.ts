@@ -10,6 +10,7 @@ const result: GradeCompareResult = {
   timeline: "main",
   clip: "c_talk",
   asset: "assets/talk.mp4",
+  kind: "media",
   frame: 30,
   at: 1,
   path: "/p/.frameshell/grade/compare-c_talk-30.png",
@@ -83,6 +84,14 @@ describe("grade compare", () => {
     expect(text).toContain("2 current          (the clip's grade now)");
     expect(text).toContain("3 warm             frameshell clip set c_talk --grade-exposure 0 --grade-temperature 0.25");
     expect(text).toContain("warning: Track v1 is hidden.");
+  });
+
+  it("names a generated or nested clip by its kind, as it has no source file", async () => {
+    const inv = parseTimelineCommand(["grade", "compare", "c_talk"], { look: ["warm"] })!;
+    const generated = await executeTimeline(stub({ ...result, asset: null, kind: "generated" }).conn, inv, "/p", false);
+    expect(generated).toContain("Grade compare of c_talk (generated clip) on main");
+    const nested = await executeTimeline(stub({ ...result, asset: null, kind: "timeline" }).conn, inv, "/p", false);
+    expect(nested).toContain("Grade compare of c_talk (nested timeline) on main");
   });
 
   it("gives --json the daemon's result as it is", async () => {

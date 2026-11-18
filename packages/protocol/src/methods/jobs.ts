@@ -154,7 +154,7 @@ export const jobMethods = {
   },
   "grade.analyze": {
     description:
-      "Measure the picture of a media clip and suggest a colour correction (ADR 0031), without changing anything: the clip's SOURCE frames " +
+      "Measure the picture of a media or generated clip and suggest a colour correction (ADR 0031), without changing anything: the clip's SOURCE frames " +
       "(before its own grade, crop and placement) are read through ffmpeg `signalstats` at video levels, and the answer is the " +
       "measured `levels` (luma min, 10th percentile, mean, 90th percentile, max; saturation; warmth; tint), the clip's `current` grade, and a " +
       "`suggestion` in the fields of `clip.set` `grade` (`exposure`, `temperature`, `tint`, `contrast`, `saturation`, absolute numbers for the source: a correction the clip already sets and the source does not need comes back neutral, so applying it replaces the clip's own), " +
@@ -164,13 +164,16 @@ export const jobMethods = {
       "when the picture is within the targets or has no range) and never pushes the highlights into clipping: judge it by eye, a sunset is meant " +
       "to be warm. Scope: `at` (timeline seconds) measures one frame; `from` and `to` (timeline seconds inside the clip) measure `samples` frames " +
       "spread evenly over that part; with none of them the whole clip, `samples` frames (a still is one frame). Footage tagged or named as LOG or HDR " +
-      "gets a warning: its levels are flat by design. Reads only: writes no file, takes about a second for a few frames. " +
-      "Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound (no such clip on a video track), InvalidOperation (not a media clip, a frame " +
-      "or range outside the clip, `at` with `from`/`to`, a source with no picture), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+      "gets a warning: its levels are flat by design. A generated clip (hyperframes, blender, ...) is measured from its cached DRAFT render, " +
+      "the picture before its own grade (`asset` is null, `kind` `generated`); a missing render is queued and waited for, as `frame` does, " +
+      "so the first call can take as long as that render; a render with transparency is refused (`has-alpha`: its levels would count the empty parts as black), " +
+      "and so is a nested timeline (`nested`): analyze a clip inside it. Writes no project file, takes about a second for a few frames. " +
+      "Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound (no such clip on a video track), InvalidOperation (reason `nested`: a nested timeline; `not-gradable`: a multicam shot; `has-alpha`: a generated clip whose render has transparency; " +
+      "a frame or range outside the clip, `at` with `from`/`to`, a source with no picture), ClipRenderFailed (a generated clip that cannot be rendered), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
-      clip: z.string().min(1).describe("Media clip id on a video track, as `timeline.show` reports it."),
+      clip: z.string().min(1).describe("Media or generated clip id on a video track, as `timeline.show` reports it."),
       at: z.number().nonnegative().optional().describe("Timeline seconds of the one frame to measure, inside the clip. Not with `from` or `to`."),
       from: z.number().nonnegative().optional().describe("Timeline seconds where the measured part starts. Default: the clip's start."),
       to: z.number().nonnegative().optional().describe("Timeline seconds where the measured part ends. Default: the clip's end."),
@@ -196,23 +199,23 @@ export const jobMethods = {
   },
   "grade.compare": {
     description:
-      "Pick a colour look by eye (ADR 0031): render one frame of a media clip under up to " +
+      "Pick a colour look by eye (ADR 0031): render one frame of a media, generated or nested timeline clip under up to " +
       `${GRADE_COMPARE_MAX_LOOKS} candidate \`looks\` next to a neutral baseline and write them as one labelled PNG contact image. ` +
       "Each look is a whole grade in the fields of `clip.set` `grade` (`exposure`, `temperature`, `tint`, `contrast`, `saturation`, `lut`, `lutMix`) plus an optional `name`, " +
       "drawn in place of the clip's own grade (fields left out are neutral, not the clip's); `look` names a built-in look (`grade.looks`) whose numbers it starts " +
       "from, the fields given win (`{ look: \"warm\", saturation: 1.1 }`).Tile 1 is the clip with no grade (`neutral`); tile 2 its " +
       "stored grade (`current`) when it has one; then the looks in order. Every tile is the whole composed frame as `frame` renders it " +
-      "(export compiler, layers above, captions), so what you pick is what exports. Never changes the timeline: keep a look with `clip.set` `grade` " +
+      "(export compiler, layers above, captions), so what you pick is what exports (a generated clip is drawn from its cached render, the draft when its final is not made yet, with that said in `warnings`; the sheet may wait for a missing render, as `frame` does; a nested timeline is drawn flattened, its grade over its own clips'). Never changes the timeline: keep a look with `clip.set` `grade` " +
       "(each tile's `flags` are the `clip set` flags). Correct first (`grade.analyze` suggests a correction: compare it as a look), then style with LUTs. " +
       "`at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
       "`.frameshell/grade/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. Takes about a second per tile. " +
       'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "warm", temperature: 0.25, saturation: 1.1 }, { name: "teal", lut: "luts/teal.cube", lutMix: 0.6 }] }`. ' +
-      "Fails with ClipNotFound (no such clip on a video track), InvalidOperation (not a media clip, `at` outside the clip), InvalidParams (a look's LUT " +
+      "Fails with ClipNotFound (no such clip on a video track), InvalidOperation (reason `not-gradable`: a multicam shot; `at` outside the clip), InvalidParams (a look's LUT " +
       "outside the project, missing or not a 3D `.cube`; a `look` that is not a built-in one, naming the valid ones), FormatNotFound, TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
-      clip: z.string().min(1).describe("Media clip id on a video track, as `timeline.show` reports it."),
+      clip: z.string().min(1).describe("Media, generated or nested timeline clip id on a video track, as `timeline.show` reports it."),
       looks: z
         .array(GradeLookSchema)
         .min(1)

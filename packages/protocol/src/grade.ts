@@ -3,12 +3,15 @@ import { GRADE_LOOKS, GradeSchema, lookNames } from "@frameshell/schema";
 
 // `grade.analyze` (#384, ADR 0031): measured levels of a clip's picture and a bounded correction suggestion, never applied.
 
+/** What kind of clip `grade.analyze` and `grade.compare` were asked about: footage or a photo, a generated clip (a plugin's render), a nested timeline (compare only). */
+export const GradeClipKindSchema = z.enum(["media", "generated", "timeline"]);
+
 /** Most frames one `grade.analyze` over a range measures. */
 export const GRADE_ANALYZE_MAX_SAMPLES = 32;
 /** Frames `grade.analyze` measures over a range when `samples` is not given. */
 export const GRADE_ANALYZE_DEFAULT_SAMPLES = 8;
 
-/** Levels of a picture, measured by ffmpeg `signalstats` on the clip's source before its grade. Every figure is the mean over the frames measured, except `min` and `max`. */
+/** Levels of a picture, measured by ffmpeg `signalstats` on the clip's source before its grade (a generated clip's draft render). Every figure is the mean over the frames measured, except `min` and `max`. */
 export const GradeLevelsSchema = z.object({
   luma: z
     .object({
@@ -41,14 +44,15 @@ export const GradeSuggestionSchema = GradeSchema.omit({ lut: true, lutMix: true 
 export const GradeAnalyzeResultSchema = z.object({
   timeline: z.string().describe("Timeline id."),
   clip: z.string().describe("The analyzed clip, as asked."),
-  asset: z.string().describe("Project-relative source file measured."),
+  asset: z.string().nullable().describe("Project-relative source file measured; null for a generated clip, which has none: its render is measured."),
+  kind: GradeClipKindSchema.describe("`media` or `generated`: what the clip is. A generated clip's levels are of its draft render, the picture before its own grade."),
   mode: z.enum(["frame", "range"]).describe("`frame`: one frame (`at`, or a still). `range`: `frames` frames spread over `from` to `to`."),
   from: z.number().describe("Timeline seconds the measure starts (`at` in frame mode), 3 decimals."),
   to: z.number().describe("Timeline seconds the measure ends (`at` in frame mode), 3 decimals."),
   frames: z.int().min(1).describe("Frames measured."),
   samples: z.array(GradeSampleSchema).describe("One per frame measured, in time order: spots a clip whose exposure changes."),
   levels: GradeLevelsSchema,
-  current: GradeSchema.nullable().describe("The clip's stored `grade`, as `timeline.show` reports it; null for none. The measure ignores it: it is of the source."),
+  current: GradeSchema.nullable().describe("The clip's stored `grade`, as `timeline.show` reports it; null for none. The measure ignores it: it is of the source (the render, for a generated clip)."),
   suggestion: GradeSuggestionSchema.describe(
     "Correction that moves the measured picture towards the targets, in the fields of `clip.set` `grade`; empty when the picture is within them and the clip has no correction of its own. " +
       "Absolute numbers for the source, so they replace the clip's own correction (a field it sets that the source does not need is given back as neutral: exposure 0, temperature 0, tint 0, contrast 1, saturation 1; its LUT stays). Bounded: at most 1 stop of exposure, 0.4 of white balance, contrast 0.8 to 1.25, saturation 0.85 to 1.2.",
@@ -127,7 +131,8 @@ export const GradeCompareTileSchema = z.object({
 export const GradeCompareResultSchema = z.object({
   timeline: z.string().describe("Timeline id."),
   clip: z.string().describe("The compared clip."),
-  asset: z.string().describe("Project-relative source file of the clip."),
+  asset: z.string().nullable().describe("Project-relative source file of a media clip; null for a generated or nested clip."),
+  kind: GradeClipKindSchema.describe("`media`, `generated` (a plugin's render) or `timeline` (a nested timeline)."),
   frame: z.int().describe("Timeline frame rendered."),
   at: z.number().describe("Start of that frame, timeline seconds, 3 decimals."),
   path: z.string().describe("Absolute path of the PNG written."),

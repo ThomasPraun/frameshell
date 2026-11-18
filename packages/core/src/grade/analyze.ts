@@ -1,12 +1,14 @@
 import { join } from "node:path";
 import { ErrorCode, type GradeAnalyzeResultShape, type MediaProbe, RpcError } from "@frameshell/protocol";
-import { type MediaClip, type Timeline, logFootageHint, logFootageWarning } from "@frameshell/schema";
+import { type AdapterClip, type MediaClip, type Timeline, logFootageHint, logFootageWarning } from "@frameshell/schema";
+import type { ClipRenderer } from "../clips/renderer.js";
 import { pool } from "../export/service.js";
 import { runTool } from "../media/ffmpeg.js";
 import { type FrameLevels, meanLevels, parseSignalstats, round } from "./levels.js";
 import { correctionFlags, suggestGrade } from "./suggest.js";
 
 // `grade.analyze` (#384, ADR 0031): levels of a clip's source frames by ffmpeg `signalstats` and a suggestion from them. Reads only.
+// A generated clip's source is its cached draft render (ADR 0031 slice 11): the picture before its own grade, as a media file is.
 
 /** Width the frames are measured at, px: area-averaged, so the figures do not depend on the source's size. */
 const MEASURE_WIDTH = 480;
@@ -23,6 +25,8 @@ export interface GradeAnalyzerOptions {
   ffmpeg(root: string): Promise<string>;
   /** Probe of a project file. */
   probe(root: string, asset: string): Promise<MediaProbe>;
+  /** The clip render cache: a generated clip is measured from its draft render, made (queued, cached) when missing. */
+  clips: Pick<ClipRenderer, "ensure">;
 }
 
 /** What to measure of one clip. */
@@ -68,14 +72,22 @@ export class GradeAnalyzer {
     if (!clip) {
       throw new RpcError(ErrorCode.ClipNotFound, `grade.analyze: no clip "${request.clip}" on a video track of timeline ${timeline.id}. List clip ids with "frameshell timeline show".`, { clip: request.clip });
     }
-    if (clip.type !== "media") throw invalid("not-media", `clip ${clip.id} is not a media clip: only footage and photos have a source picture to measure.`, "clip");
-    const media = clip as MediaClip;
-    const probe = await this.#options.probe(root, media.asset);
-    if (!probe.video) throw invalid("no-picture", `${media.asset} has no picture.`, "clip");
-    const still = probe.video.still;
-    const speed = media.speed ?? 1;
-    const start = media.start;
-    const end = start + (media.out - media.in) / speed;
+    if (clip.type === "timeline") {
+      throw invalid(
+        "nested",
+        `clip ${clip.id} is a nested timeline: it has no single picture to measure. Analyze a clip inside it (${clip.source}), or see its colour with \`grade.compare\`.`,
+        "clip",
+      );
+    }
+    if (clip.type === "shot") throw invalid("not-gradable", `clip ${clip.id} is a multicam shot: it takes no grade, so there is nothing to measure for one.`, "clip");
+    const generated = clip.type === "media" ? undefined : (clip as AdapterClip);
+    const media = generated ? undefined : (clip as MediaClip);
+    const probe = media ? await this.#options.probe(root, media.asset) : undefined;
+    if (media && !probe?.video) throw invalid("no-picture", `${media.asset} has no picture.`, "clip");
+    const still = probe?.video?.still ?? false;
+    const speed = media?.speed ?? 1;
+    const start = clip.start;
+    const end = media ? start + (media.out - media.in) / speed : start + generated!.duration;
     const valid = { from: round(start, 3), to: round(end, 3) };
     if (request.at !== undefined && (request.from !== undefined || request.to !== undefined)) {
       throw invalid("at-and-range", "`at` measures one frame, `from` and `to` a range: give one.", "at");
@@ -106,12 +118,38 @@ export class GradeAnalyzer {
       times = Array.from({ length: frames }, (_, i) => from + ((i + 0.5) * (to - from)) / frames);
       mode = "range";
     }
-    // A seek lands on the first frame at or after it: the last seek is the start of the clip's last source frame, since one into its tail finds none.
-    const lastSeek = media.out - 1 / (probe.video.fps || FALLBACK_FPS) - END_GUARD_S;
-    const sourceAt = (time: number): number => Math.max(media.in, Math.min(lastSeek, media.in + (time - start) * speed));
+    const warnings: string[] = [];
+    let file: string;
+    let label: string;
+    let first: number;
+    let lastSeek: number;
+    if (media) {
+      first = media.in;
+      // A seek lands on the first frame at or after it: the last seek is the start of the clip's last source frame, since one into its tail finds none.
+      lastSeek = media.out - 1 / (probe!.video!.fps || FALLBACK_FPS) - END_GUARD_S;
+      file = join(root, ...media.asset.split("/"));
+      label = media.asset;
+    } else {
+      // The draft render of this clip alone: the other generated clips are not this call's business, and the key does not depend on them.
+      const rendered = await this.#options.clips.ensure(root, onlyGenerated(timeline, clip.id), { tier: "draft", onWarning: (note) => void warnings.push(note) });
+      const render = rendered.get(clip.id);
+      if (!render) throw invalid("no-render", `clip ${clip.id} has no render to measure.`, "clip");
+      for (const note of render.warnings ?? []) if (!warnings.includes(note)) warnings.push(note);
+      if (render.hasAlpha) {
+        throw invalid(
+          "has-alpha",
+          `the render of ${clip.type} clip ${clip.id} has transparency, so its levels would count the empty parts as black. Judge its colour with \`grade.compare\` (or \`frame\`) instead.`,
+          "clip",
+        );
+      }
+      first = generated!.in ?? 0;
+      lastSeek = Math.min(first + generated!.duration, render.duration ?? Number.POSITIVE_INFINITY) - 1 / request.fps - END_GUARD_S;
+      file = render.path;
+      label = render.file;
+    }
+    const sourceAt = (time: number): number => Math.max(first, Math.min(lastSeek, first + (time - start) * speed));
 
     const ffmpeg = await this.#options.ffmpeg(root);
-    const file = join(root, ...media.asset.split("/"));
     const measured: (FrameLevels | null)[] = new Array<FrameLevels | null>(times.length).fill(null);
     let firstFailure = "";
     await pool(times, PARALLEL, async (time, index) => {
@@ -124,22 +162,22 @@ export class GradeAnalyzer {
         firstFailure ||= error instanceof Error ? error.message.split("\n")[0]! : String(error);
       }
     });
-    const warnings: string[] = [];
     const taken = times.flatMap((time, index) => (measured[index] ? [{ time, levels: measured[index]! }] : []));
-    if (taken.length === 0) throw invalid("no-frame", `ffmpeg read no picture from ${media.asset} for the frames asked${firstFailure ? `: ${firstFailure}` : ""}.`, "clip");
+    if (taken.length === 0) throw invalid("no-frame", `ffmpeg read no picture from ${label} for the frames asked${firstFailure ? `: ${firstFailure}` : ""}.`, "clip");
     if (taken.length < times.length) warnings.push(`${times.length - taken.length} of ${times.length} frames could not be read and are left out.`);
 
     const levels = meanLevels(taken.map((entry) => entry.levels));
-    const { correction, reasons } = suggestGrade(levels, media.grade);
-    const hint = logFootageHint(media.asset, probe.video);
-    if (hint) warnings.push(logFootageWarning(media.asset, hint));
-    if (media.grade && Object.keys(media.grade).length > 0) {
-      warnings.push(`${clip.id} already has a grade. The levels are of its source, and the suggestion replaces the clip's correction numbers (a correction field it does not need is set back to neutral; a LUT stays); read it against \`current\`.`);
+    const { correction, reasons } = suggestGrade(levels, clip.grade);
+    const hint = media ? logFootageHint(media.asset, probe!.video!) : null;
+    if (media && hint) warnings.push(logFootageWarning(media.asset, hint));
+    if (clip.grade && Object.keys(clip.grade).length > 0) {
+      warnings.push(`${clip.id} already has a grade. The levels are of its ${media ? "source" : "render"}, and the suggestion replaces the clip's correction numbers (a correction field it does not need is set back to neutral; a LUT stays); read it against \`current\`.`);
     }
     return {
       timeline: request.timeline,
       clip: clip.id,
-      asset: media.asset,
+      asset: media?.asset ?? null,
+      kind: media ? "media" : "generated",
       mode,
       from: round(from, 3),
       to: round(to, 3),
@@ -151,11 +189,21 @@ export class GradeAnalyzer {
         warmth: round(levels.warmth, 3),
         tint: round(levels.tint, 3),
       },
-      current: media.grade ?? null,
+      current: clip.grade ?? null,
       suggestion: correction,
       reasons,
       flags: correctionFlags(correction),
       warnings,
     };
   }
+}
+
+/** `timeline` with every generated clip but `id` taken off its video tracks: a render of one clip asks the cache for that clip only. Tempo, markers and the other tracks (what a clip's timing reads) stay. */
+function onlyGenerated(timeline: Timeline, id: string): Timeline {
+  return {
+    ...timeline,
+    tracks: timeline.tracks.map((track) =>
+      track.kind === "video" ? { ...track, clips: track.clips.filter((clip) => clip.type === "media" || clip.type === "timeline" || clip.id === id) } : track,
+    ),
+  };
 }
