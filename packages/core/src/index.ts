@@ -548,9 +548,21 @@ export {
   slowStandInSpeechProvider,
   standInSpeechProvider,
 } from "./voiceover/stand-in.js";
-export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
+export { type LineTake, TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, readLineTakes, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
 export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";
 export { VOICE_TRACK_NAME, planVoiceoverPlacement, runVoiceoverPlan } from "./voiceover/place.js";
+export {
+  type CaptionLimits,
+  type CaptionLineInput,
+  type CaptionedLine,
+  SCRIPT_TIMING,
+  VOICE_CAPTIONS_TRACK_NAME,
+  captionLine,
+  chunkSizes,
+  displayWords,
+  planVoiceoverCaptions,
+  runCaptionsPlan,
+} from "./voiceover/captions.js";
 export { PHRASE_FADE_S, type Phrase, SPLIT_HOP_S, SPLIT_LEAD_S, SPLIT_MIN_SILENCE_S, SPLIT_RANGE_DB, SPLIT_TAIL_S, splitPhrases } from "./voiceover/split.js";
 export { type LineCheck, type TakeToCheck, type Verification, type VerifyOutcome, type VerifyRequest, checkLine, textInRanges, verifyTakes } from "./voiceover/verify.js";
 export {
@@ -566,7 +578,7 @@ export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palet
 export { type LoudnessReading, type SoundRange, measureLoudness, parseLoudness } from "./analyze/loudness.js";
 export { GradeAnalyzer, type GradeAnalyzeRequest, type GradeAnalyzerOptions } from "./grade/analyze.js";
 export { CLIP_COMPARE_DIR, ClipComparer, type ClipCompareRequest, type ClipComparerOptions, type ClipVariant, applyLook, propsFlags, withVariant } from "./clips/compare.js";
-export { GRADE_COMPARE_DIR, GradeComparer, type GradeCompareRequest, type GradeComparerOptions, columnsFor, lookFlags, withGrade } from "./grade/compare.js";
+export { GRADE_COMPARE_DIR, GradeComparer, type GradeCompareRequest, type GradeComparerOptions, columnsFor, lookFlags, resolveLooks, withGrade } from "./grade/compare.js";
 export { type FrameLevels, meanLevels, parseSignalstats } from "./grade/levels.js";
 export { type GradeCorrection, type GradeSuggestion, SUGGEST as GRADE_SUGGEST, correctionFlags, suggestGrade } from "./grade/suggest.js";
 export { type Look, LookBuilder, frameLook } from "./analyze/look.js";

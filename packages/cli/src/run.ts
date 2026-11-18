@@ -989,6 +989,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "voiceover.place":
       return executeVoiceover(conn, inv, cwd, flags.json, undefined);
     case "voiceover.generate":
+    case "voiceover.captions":
       await settleTrust(conn, flags, io);
       return executeVoiceover(conn, inv, cwd, flags.json, flags.json ? undefined : progressPrinter(io));
     case "skill.update": {

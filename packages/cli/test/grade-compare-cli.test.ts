@@ -41,7 +41,7 @@ describe("grade compare", () => {
     expect(parseLook("warm:temperature=0.25,saturation=1.1")).toEqual({ name: "warm", temperature: 0.25, saturation: 1.1 });
     expect(parseLook("exposure=-0.5")).toEqual({ exposure: -0.5 });
     expect(parseLook("teal: lut=luts/teal.cube, lut-mix=0.6")).toEqual({ name: "teal", lut: "luts/teal.cube", lutMix: 0.6 });
-    expect(() => parseLook("warm")).toThrow(/--look: expected \[name:\]field=value/);
+    expect(() => parseLook("sepia")).toThrow(/--look: expected a built-in look .* or \[name:\]field=value/);
     expect(() => parseLook("warm:hue=2")).toThrow(/--look: expected/);
     expect(() => parseLook("contrast=high")).toThrow(/contrast expects a number/);
   });

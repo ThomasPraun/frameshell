@@ -216,11 +216,15 @@ _Avoid_: frosted glass, backdrop-filter (that is the CSS inside a composition, w
 
 **Grade** (`grade`):
 A media clip's colour change: a correction (exposure, white balance, contrast, saturation), then an optional LUT. Baked into one 3D table that export and the preview both apply.
-_Avoid_: filter, colour correction (that is only the first half), look (that is what a LUT gives)
+_Avoid_: filter, colour correction (that is only the first half)
 
 **LUT**:
 A `.cube` 3D lookup table in the project (up to 65 points per side, Rec.709 input), the look a grade applies after its correction, at `lutMix` strength.
 _Avoid_: preset, filter
+
+**Look** (`grade looks`):
+A named grade of plain numbers (exposure, temperature, tint, contrast, saturation) from one built-in table: `warm`, `cool`, `filmic`, `punchy`, `faded`, `mono`. Applying one copies its numbers into the clip's own `grade`, so the clip keeps them if the table changes; no LUT file is involved. A candidate of `grade compare` is also called a look: a whole grade, built-in or written out.
+_Avoid_: preset, filter, LUT (a look has no file)
 
 ## Film finish (ADR 0043)
 
