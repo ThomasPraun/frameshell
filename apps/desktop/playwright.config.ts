@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 // Drives the built Electron app (`electron-vite build` first; `pnpm test:e2e` does both).
 export default defineConfig({
   testDir: "e2e",
+  globalSetup: "./e2e/temp-root.ts",
   timeout: 90_000,
   expect: { timeout: 20_000 },
   workers: 1,
