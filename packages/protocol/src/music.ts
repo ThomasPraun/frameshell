@@ -208,6 +208,43 @@ export type MusicCandidatesResult = z.output<typeof MusicCandidatesResultSchema>
 /** See {@link MusicCandidateSchema}. */
 export type MusicCandidate = z.output<typeof MusicCandidateSchema>;
 
+// `music.pick` (#485, ADR 0037): keep one of the candidate tracks.
+
+/** One candidate track `music.pick` removed, muted or left in place. */
+export const MusicPickTrackSchema = z.object({
+  track: z.string().describe("Track id."),
+  name: z.string().describe("Track name at the time of the call, e.g. `Music 2`."),
+  asset: z.string().describe("Project-relative music file of its clip."),
+});
+
+/** Result of `music.pick`. */
+export const MusicPickResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  revision: z.int().describe("Revision after the change; the revision it was planned from when nothing was written."),
+  dryRun: z.boolean(),
+  applied: z.boolean().describe("True when the timeline changed (a review-mode proposal counts: it waits for the person)."),
+  tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
+  chosen: z.object({
+    track: z.string().describe("Track id of the kept candidate."),
+    name: z.string().describe("Its name before the call, e.g. `Music 2`."),
+    asset: z.string().describe("Project-relative music file."),
+    clip: z.string().nullable().describe("Its clip id; null when the track holds several clips."),
+    renamedTo: z.string().nullable().describe("The name the track now has, `Music`; null when a track of that name exists and it keeps its own."),
+    unmuted: z.boolean().describe("True when the track was muted and now plays."),
+  }),
+  keep: z.boolean().describe("True when the other candidates were muted and left in place (`keep`)."),
+  removed: z.array(MusicPickTrackSchema).describe("Candidate tracks removed with their clips; empty with `keep`."),
+  muted: z.array(MusicPickTrackSchema).describe("With `keep`: the candidate tracks left in place, now muted; empty otherwise."),
+  left: z
+    .array(MusicPickTrackSchema.extend({ reason: z.string().describe("Why it was not removed: the person worked on it, or a subtitle track follows it.") }))
+    .describe("Candidate tracks that were not removed and are as they were (not muted either): remove them with `track.remove` once not needed."),
+  next: z.string().describe("What usually follows: `music.fit` and `track.duck` on the kept track."),
+  warnings: z.array(z.string()),
+});
+
+/** See {@link MusicPickResultSchema}. */
+export type MusicPickResult = z.output<typeof MusicPickResultSchema>;
+
 // `music.grid` (#485 slice 5, ADR 0037 decision 8): move picture cuts onto the timeline's beat grid.
 
 /** Default of `maxShift`: the farthest a cut moves onto a beat, seconds (half a beat at 120 BPM). */

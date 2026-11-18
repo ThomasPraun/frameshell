@@ -425,6 +425,101 @@ describe("voiceover.cancel with several clients", () => {
   }, 60_000);
 });
 
+describe("voiceover.generate when the connection closes", () => {
+  /** A provider that never answers on its own and records its abort signal, so the test sees what stopped it. */
+  const blockingProvider = (signals: AbortSignal[]): SpeechProvider => ({
+    ...standInSpeechProvider(),
+    id: "blocks",
+    synthesize: (_text, _voice, _options, context) => {
+      signals.push(context.signal);
+      return new Promise((_resolve, reject) => context.signal.addEventListener("abort", () => reject(context.signal.reason), { once: true }));
+    },
+  });
+  const until = async (done: () => boolean) => {
+    for (let tries = 0; tries < 100 && !done(); tries++) await new Promise((resolve) => setTimeout(resolve, 20));
+  };
+
+  it("stops the run of the closed connection and lets another client start at once, not behind a zombie", async () => {
+    const signals: AbortSignal[] = [];
+    const standIn = standInSpeechProvider();
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [blockingProvider(signals), standIn],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const gone = await connectToDaemon(local.socketPath, { client: "gone" });
+    const other = await connectToDaemon(local.socketPath, { client: "other" });
+    try {
+      const dir = join(tempDir(), "closed");
+      await other.request("project.init", { dir });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, ["provider: blocks"]));
+      const params = { cwd: dir, script: "scripts/vo.md", verify: false };
+      let saying!: () => void;
+      const started = new Promise<void>((resolve) => (saying = resolve));
+      void gone.request("voiceover.generate", params, { onProgress: () => saying() }).catch(() => undefined);
+      await started;
+      await until(() => signals.length === 1);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(false);
+
+      gone.close();
+      await until(() => signals[0]!.aborted);
+      expect(signals[0]!.aborted).toBe(true);
+
+      const next = await other.request("voiceover.generate", { ...params, provider: "stand-in", lines: ["hook-1"] });
+      expect(next.lines).toEqual([expect.objectContaining({ id: "hook-1", state: "generated" })]);
+    } finally {
+      gone.close();
+      other.close();
+      await local.close();
+    }
+  }, 60_000);
+
+  it("leaves the run of a second connected client alone", async () => {
+    const signals: AbortSignal[] = [];
+    const local = await startDaemon({
+      socketPath: uniqueSocketPath(),
+      idleTimeoutMs: Number.POSITIVE_INFINITY,
+      speechProviders: [blockingProvider(signals)],
+      dirs: { dataDir: tempDir(), configDir: tempDir() },
+      binaries: testBinaryManager(),
+    });
+    const agent = await connectToDaemon(local.socketPath, { client: "agent" });
+    const app = await connectToDaemon(local.socketPath, { client: "app" });
+    try {
+      const dir = join(tempDir(), "kept");
+      await agent.request("project.init", { dir });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, ["provider: blocks"]));
+      let saying!: () => void;
+      const started = new Promise<void>((resolve) => (saying = resolve));
+      const run = agent.request("voiceover.generate", { cwd: dir, script: "scripts/vo.md", verify: false }, { onProgress: () => saying() });
+      let ended = false;
+      run.then(
+        () => (ended = true),
+        () => (ended = true),
+      );
+      await started;
+      await until(() => signals.length === 1);
+
+      app.close();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(signals[0]!.aborted).toBe(false);
+      expect(ended).toBe(false);
+
+      expect(await agent.request("voiceover.cancel", { cwd: dir })).toEqual({ canceled: true });
+      await expect(run).rejects.toMatchObject({ code: ErrorCode.SpeechFailed, data: { canceled: true } });
+    } finally {
+      agent.close();
+      app.close();
+      await local.close();
+    }
+  }, 60_000);
+});
+
 describe("voiceover.generate phrases and misread check", () => {
   /** The stand-in says each word as 0.3 s of tone with 0.1 s of silence after it, so each word is a phrase. */
   const word = (text: string, start: number) => ({ text, start, end: start + 0.3 });

@@ -15,6 +15,7 @@ import {
   MusicGridResultSchema,
   MusicGridTracksSchema,
   MusicGridTrimSchema,
+  MusicPickResultSchema,
   MusicShapeResultSchema,
 } from "../music.js";
 import { TimelineIdSchema, TimeRef } from "../timeline.js";
@@ -147,6 +148,26 @@ export const cleanupMusicMethods = {
       dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
     }),
     result: MusicCandidatesResultSchema,
+  },
+  "music.pick": {
+    mutating: true,
+    description:
+      "Keep one of the candidate tracks `music.candidates` placed and clear the others (ADR 0037). `track` is the candidate's track id or its name (`Music 2`). " +
+      "It is unmuted (when it was muted) and renamed `Music` (kept as it is, with a warning, when a track of that name already exists); every other candidate track is removed " +
+      "with its clip, and listed in `removed`. With `keep: true` the others stay in place, muted, instead (`muted`). A candidate is an audio track named `Music <n>` that holds only media clips. " +
+      "A candidate the person worked on is never removed: one with more than one clip, or whose clip has a speed, keys, effects, fades or transitions of its own (the placement's `start`, `in` and `gain` do not count), " +
+      "or that a subtitle track follows, stays as it is and is named in `left` and in a warning. Refused before anything is written: a `track` that is not a candidate, or no other candidate to pick between. " +
+      "The winner keeps what `music.candidates` wrote (loudness gain, fit, 5 ms fade in); nothing is fitted, shaped or ducked again: `next` says what usually follows (`music.fit`, `track.duck` with `level`). " +
+      "`dryRun: true` changes nothing and returns the plan. One transaction labelled `Music pick: <track>` (`revert` undoes it whole, tracks and clips included; with review mode on it is one proposal). " +
+      "Example: `{ track: \"Music 2\" }`. Fails with TrackNotFound, InvalidOperation, TimelineNotFound or StaleRevision (the timeline changed while it was planned).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      track: z.string().min(1).describe("The candidate to keep: its track id from `timeline.show` (`t_1a2b3c`) or its name, e.g. `Music 2`."),
+      keep: z.boolean().default(false).describe("Leave the other candidates in place, muted, instead of removing them."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+    }),
+    result: MusicPickResultSchema,
   },
   "music.shape": {
     mutating: true,

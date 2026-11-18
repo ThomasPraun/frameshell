@@ -3,7 +3,7 @@ import type { AnyClip, ClipTrack, Timeline } from "@frameshell/schema";
 import type { LoudnessReading, SoundRange } from "../analyze/loudness.js";
 import { isBinaryError } from "../binaries/errors.js";
 import { candidateTarget, gainFor, peakWarning, playedRange } from "../media/loudness-plan.js";
-import { resolveTimeRefArg } from "../timeline/time-ref.js";
+import { onceWords, resolveTimeRefArg } from "../timeline/time-ref.js";
 import { type MusicFitDeps, planMusicFit } from "./run.js";
 
 /** What `music.candidates` needs from the project besides what `music.fit` does. */
@@ -31,6 +31,12 @@ const RANKING_FITTED =
   "Files that cover the picture before the final hit first, then by how sure the final hit is; ties keep the order of `assets`.";
 const RANKING_GIVEN = "The order of `assets` (without `end` nothing is fitted, so nothing sets them apart).";
 
+/** Name of the track of the candidate ranked `rank`: `Music 1` to `Music n`. */
+export const candidateName = (rank: number) => `Music ${rank}`;
+
+/** Matches the name {@link candidateName} gives; the rank is group 1. `music.pick` finds the candidate tracks with it. */
+export const CANDIDATE_TRACK_NAME = /^Music (\d+)$/;
+
 /** Track and id the candidate is planned on: a clip of a track no real timeline has, so `planMusicFit` can fit it. */
 const PLAN_TRACK = "t_candidate";
 const PLAN_CLIP = "c_candidate";
@@ -47,8 +53,9 @@ export async function planMusicCandidates(timeline: Timeline, fps: number, reque
     if (seen.has(asset)) throw invalid(`${asset} is given twice.`, { reason: "duplicate", field: "assets", hint: "Each candidate is a different file." });
     seen.add(asset);
   }
-  const end = request.end === undefined ? null : await resolveTimeRefArg("music.candidates", "end", request.end, timeline, deps.loadGrid);
-  const from = request.from === undefined ? 0 : await resolveTimeRefArg("music.candidates", "from", request.from, timeline, deps.loadGrid);
+  const loadWords = onceWords(deps.loadWords);
+  const end = request.end === undefined ? null : await resolveTimeRefArg("music.candidates", "end", request.end, timeline, deps.loadGrid, loadWords);
+  const from = request.from === undefined ? 0 : await resolveTimeRefArg("music.candidates", "from", request.from, timeline, deps.loadGrid, loadWords);
   if (end !== null && end <= from) {
     throw invalid(`end (${end} s) is not after from (${from} s): there is no picture to fit the music to.`, { reason: "end before from", field: "end", hint: "Give an `end` later than `from`." });
   }
@@ -114,7 +121,7 @@ export async function planMusicCandidates(timeline: Timeline, fps: number, reque
   const candidates = order.map(({ candidate }, i): MusicCandidate => {
     const gain = gainFor(candidate.loudness, target);
     const peak = peakWarning(candidate.asset, candidate.truePeak, gain);
-    return { ...candidate, rank: i + 1, name: `Music ${i + 1}`, muted: i > 0, gain, warnings: peak ? [...candidate.warnings, peak] : candidate.warnings };
+    return { ...candidate, rank: i + 1, name: candidateName(i + 1), muted: i > 0, gain, warnings: peak ? [...candidate.warnings, peak] : candidate.warnings };
   });
   return { end, loudness: { target, source }, ranking: end === null ? RANKING_GIVEN : RANKING_FITTED, candidates, skipped, warnings };
 }

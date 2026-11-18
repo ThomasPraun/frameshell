@@ -21,4 +21,17 @@ describe("review flags", () => {
     }
     expect(() => parseReview([], { clip: "c_1" })).toThrow("pass --crop-at x,y too");
   });
+
+  it("takes the cuts sheet, and the per-clip kit: --pop as seconds or a name, --onion and --speed as clip ids", () => {
+    expect(parseReview([], { sheets: "cuts" })).toEqual({ kind: "review", sheets: ["cuts"] });
+    expect(parseReview([], { pop: "1.5" })).toEqual({ kind: "review", pop: 1.5 });
+    expect(parseReview([], { pop: "hook+0.5" })).toEqual({ kind: "review", pop: "hook+0.5" });
+    expect(parseReview([], { onion: "c_1", speed: "c_2" })).toEqual({ kind: "review", onion: "c_1", speed: "c_2" });
+  });
+
+  it("refuses the kit sheets in --sheets, an empty clip and a negative pop", () => {
+    expect(() => parseReview([], { sheets: "pop" })).toThrow(UsageError);
+    expect(() => parseReview([], { onion: " " })).toThrow("--onion takes a clip id");
+    expect(() => parseReview([], { pop: "-1" })).toThrow("--pop takes seconds from 0");
+  });
 });

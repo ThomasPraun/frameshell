@@ -30,7 +30,7 @@ import { PALETTE_SIZE, PaletteBuilder } from "./palette.js";
 import { MAX_PICTURE_S, readPicture } from "./picture.js";
 import { rhythmOf } from "./rhythm.js";
 import { sceneScores } from "./scene.js";
-import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
+import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLengthsRead, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
 import { styleSuggestions } from "./suggest.js";
 
 // `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness, tempo and audio of a reference video, on the managed ffmpeg.
@@ -173,7 +173,9 @@ export class AnalyzeService {
     if (series.frames < 1) throw new RpcError(ErrorCode.InvalidOperation, `analyze: ffmpeg decoded no picture from ${request.file}.`, { op: "analyze", field: "file" });
     if (truncated) warnings.push(`look, rhythm and events: measured on the first ${MAX_PICTURE_S / 60} minutes of the film.`);
     const cutFrames = cuts.map((cut) => cut.frame);
-    const { rhythm, changes } = rhythmOf(series.activity, fps, shots.map((shot) => shot.endFrame - shot.startFrame), cutFrames);
+    // The shots table keeps the whole film; the rhythm, like every picture number, stops where the picture was read.
+    const lengths = truncated ? shotLengthsRead(shots, series.frames) : shots.map((shot) => shot.endFrame - shot.startFrame);
+    const { rhythm, changes } = rhythmOf(series.activity, fps, lengths, cutFrames);
     stage("Telling the cuts apart", 0.45);
     const cutKinds = await classifyCuts(
       { ffmpeg, file: request.file, film: { width, height, fps }, changes, shotFrames: cutFrames, signal, progress: (fraction) => hooks.progress?.(0.45 + 0.05 * fraction) },

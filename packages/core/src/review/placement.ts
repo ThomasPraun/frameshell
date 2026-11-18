@@ -8,8 +8,9 @@ import type { ScannedAsset } from "../people/face-clusters.js";
 import { tileHeight } from "./plan.js";
 import { GRAPHIC_ALPHA, GRAPHIC_HZ, GRAPHIC_SAMPLES, GRAPHIC_WIDTH } from "./thresholds.js";
 import type { Box } from "./safe.js";
+import type { HeroSample } from "./speed.js";
 
-// Where graphics and faces are in the film, for the platform safe zones (#457). Pure but for the alpha read: a box of the
+// Where graphics and faces are in the film, for the platform safe zones and the speed graph (#457). Pure but for the alpha read: a box of the
 // film's pixels over a stretch of timeline seconds, from a generated clip's alpha or a footage clip's cached face scan.
 
 /** A box a subject holds over `[from, to)` timeline seconds. */
@@ -76,6 +77,26 @@ export function clipPointInFilm(picture: ClipPicture, at: number, point: { x: nu
   return { x: rect.left + point.x * rect.width, y: rect.top + point.y * rect.height };
 }
 
+/** Times larger the film is laid out for {@link clipHero} and `alphaHero`, then scaled back: layouts round to whole pixels, and a ±1 px step would hide an ease. */
+const SUBPIXEL = 64;
+
+/** `film` laid out {@link SUBPIXEL} times larger. */
+const enlarged = (film: Size): Size => ({ width: film.width * SUBPIXEL, height: film.height * SUBPIXEL });
+
+/**
+ * Where the whole picture of a clip is at timeline second `at` ({@link clipPointInFilm}, finer than a pixel): its centre
+ * in the `film`'s pixels and the square root of its area there.
+ */
+export function clipHero(picture: ClipPicture, at: number, film: Size, project: Size, layout?: FormatLayout): HeroPoint {
+  const big = enlarged(film);
+  const a = clipPointInFilm(picture, at, { x: 0, y: 0 }, big, project, layout);
+  const b = clipPointInFilm(picture, at, { x: 1, y: 1 }, big, project, layout);
+  return { x: (a.x + b.x) / 2 / SUBPIXEL, y: (a.y + b.y) / 2 / SUBPIXEL, size: Math.sqrt(Math.abs((b.x - a.x) * (b.y - a.y))) / SUBPIXEL };
+}
+
+/** A hero point without its frame; see `HeroSample`. */
+type HeroPoint = Omit<HeroSample, "frame">;
+
 /**
  * The faces of the footage clips of `timeline` (a flattened one: nested timelines are in it) that a cached face scan
  * knows, as boxes of the `film`'s pixels. A detection holds for the time between two samples of the scan. `layout`: the
@@ -129,10 +150,35 @@ export function alphaBox(grey: Uint8Array, width: number, height: number): Fract
   return x1 < 0 ? null : { x0: x0 / width, y0: y0 / height, x1: (x1 + 1) / width, y1: (y1 + 1) / height };
 }
 
-/** The alpha of `render` over `span` seconds of it from `from`, at up to {@link GRAPHIC_SAMPLES} evenly spaced frames: their boxes (null for an empty frame) and the seconds between them. */
-async function alphaSamples(ffmpeg: string, render: GeneratedSource, from: number, span: number, work: string, signal?: AbortSignal): Promise<{ boxes: (FractionBox | null)[]; step: number }> {
-  const hz = Math.min(GRAPHIC_HZ, GRAPHIC_SAMPLES / span);
-  const width = GRAPHIC_WIDTH;
+/** The centre of the alpha of a grey picture `width` x `height` (pixels at or above {@link GRAPHIC_ALPHA}, weighted by their alpha) and the share of the picture it covers, as fractions; null when it is empty. */
+export function alphaMass(grey: Uint8Array, width: number, height: number): { x: number; y: number; area: number } | null {
+  let mass = 0;
+  let sumX = 0;
+  let sumY = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = grey[y * width + x]!;
+      if (alpha < GRAPHIC_ALPHA) continue;
+      mass += alpha;
+      sumX += alpha * (x + 0.5);
+      sumY += alpha * (y + 0.5);
+    }
+  }
+  return mass === 0 ? null : { x: sumX / mass / width, y: sumY / mass / height, area: mass / 255 / (width * height) };
+}
+
+/** How {@link readAlpha} samples a render. */
+interface AlphaRead {
+  /** Frames per second read, and most frames. */
+  hz: number;
+  samples: number;
+  /** Width each is scaled to, px. */
+  width: number;
+}
+
+/** The alpha of `render` over `span` seconds of it from `from`, read as grey pictures `read.width` wide at `read.hz`, up to `read.samples`; each picture in turn. */
+async function readAlpha(ffmpeg: string, render: GeneratedSource, from: number, span: number, work: string, read: AlphaRead, signal?: AbortSignal): Promise<{ pictures: Uint8Array[]; width: number; height: number }> {
+  const { width, hz, samples } = read;
   const height = tileHeight(width, render.width / render.height);
   const raw = join(work, "alpha.gray");
   await mkdir(work, { recursive: true });
@@ -144,17 +190,57 @@ async function alphaSamples(ffmpeg: string, render: GeneratedSource, from: numbe
         // VP9's alpha is a side stream only libvpx decodes (ADR 0002).
         ...(render.hasAlpha ? ["-c:v", "libvpx-vp9"] : []),
         ...["-ss", String(from), "-t", String(span), "-i", render.path],
-        ...["-vf", `fps=${hz},alphaextract,scale=${width}:${height}:flags=area,format=gray`, "-frames:v", String(GRAPHIC_SAMPLES), "-an", "-f", "rawvideo", raw],
+        ...["-vf", `fps=${hz},alphaextract,scale=${width}:${height}:flags=area,format=gray`, "-frames:v", String(samples), "-an", "-f", "rawvideo", raw],
       ],
       signal ? { signal } : {},
     );
     const bytes = await readFile(raw);
-    const boxes: (FractionBox | null)[] = [];
-    for (let at = 0; at + width * height <= bytes.length; at += width * height) boxes.push(alphaBox(bytes.subarray(at, at + width * height), width, height));
-    return { boxes, step: 1 / hz };
+    const pictures: Uint8Array[] = [];
+    for (let at = 0; at + width * height <= bytes.length; at += width * height) pictures.push(bytes.subarray(at, at + width * height));
+    return { pictures, width, height };
   } finally {
     await rm(work, { recursive: true, force: true });
   }
+}
+
+/** The alpha of `render` over `span` seconds of it from `from`, at up to {@link GRAPHIC_SAMPLES} evenly spaced frames: their boxes (null for an empty frame) and the seconds between them. */
+async function alphaSamples(ffmpeg: string, render: GeneratedSource, from: number, span: number, work: string, signal?: AbortSignal): Promise<{ boxes: (FractionBox | null)[]; step: number }> {
+  const hz = Math.min(GRAPHIC_HZ, GRAPHIC_SAMPLES / span);
+  const { pictures, width, height } = await readAlpha(ffmpeg, render, from, span, work, { hz, samples: GRAPHIC_SAMPLES, width: GRAPHIC_WIDTH }, signal);
+  return { boxes: pictures.map((picture) => alphaBox(picture, width, height)), step: 1 / hz };
+}
+
+/**
+ * Where a generated clip's drawing is (`clip`, of a flattened timeline, with its `render`), at timeline frames `frames`
+ * (at `fps`; evenly spaced from the first by `step`): the centre and area of the render's alpha ({@link alphaMass}), read
+ * `width` wide, placed in the `film` through the clip's keys. Frames whose alpha is empty or that the render does not
+ * reach are left out. The render must have alpha.
+ */
+export async function alphaHero(
+  input: { ffmpeg: string; clip: AdapterClip; render: GeneratedSource; film: Size; project: Size; work: string; signal?: AbortSignal | undefined },
+  frames: { first: number; count: number; step: number },
+  fps: number,
+  width: number,
+): Promise<HeroSample[]> {
+  const { clip, render } = input;
+  const hz = fps / frames.step;
+  // The render's own second of the first frame, a quarter frame early so the seek keeps that frame.
+  const from = Math.max(0, (clip.in ?? 0) + (frames.first - 0.25) / fps - clip.start);
+  const read = await readAlpha(input.ffmpeg, render, from, frames.count / hz, input.work, { hz, samples: frames.count, width }, input.signal);
+  const found: HeroSample[] = [];
+  for (const [k, picture] of read.pictures.entries()) {
+    const mass = alphaMass(picture, read.width, read.height);
+    if (!mass) continue;
+    const frame = frames.first + k * frames.step;
+    const rect = layerRect(render, enlarged(input.film), input.project, placementAt(clip, (frame + 0.5) / fps));
+    found.push({
+      frame,
+      x: (rect.left + mass.x * rect.width) / SUBPIXEL,
+      y: (rect.top + mass.y * rect.height) / SUBPIXEL,
+      size: Math.sqrt(mass.area * rect.width * rect.height) / SUBPIXEL,
+    });
+  }
+  return found;
 }
 
 /** What {@link graphicBoxes} reads and where it works. */

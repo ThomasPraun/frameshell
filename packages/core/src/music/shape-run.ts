@@ -2,7 +2,7 @@ import { ErrorCode, type MusicShapeResult, RpcError } from "@frameshell/protocol
 import { AUDIO_EFFECT_LIMITS, type AudioEffect, type ShapeSettings, type Timeline, isBuild } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
 import type { TimelineGrid } from "../timeline/tempo.js";
-import { type GridLoader, resolveTimeRefArg, unusableGrid } from "../timeline/time-ref.js";
+import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, unusableGrid } from "../timeline/time-ref.js";
 import { type MusicBuild, planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { clipEnd } from "./fit.js";
@@ -61,9 +61,11 @@ const MAX_FADE_S = 15;
 /**
  * The shaping of music clip `request.clip` of `timeline` (ADR 0037 slice 4): hits and ending resolved by the shared
  * TimeRef resolver, the dip curve ({@link shapeCurve}) over the clip, and the duck that goes again after it when the clip
- * carries duck keys. Reads only. Throws ClipNotFound or InvalidOperation.
+ * carries duck keys. `loadWords` reads the words the timeline plays for `word:` references. Reads only. Throws
+ * ClipNotFound or InvalidOperation.
  */
-export async function planMusicShape(timeline: Timeline, request: MusicShapeRequest, loadGrid: GridLoader): Promise<MusicShapePlan> {
+export async function planMusicShape(timeline: Timeline, request: MusicShapeRequest, loadGrid: GridLoader, loadWords?: WordLoader): Promise<MusicShapePlan> {
+  const words = onceWords(loadWords);
   const { track, clip } = findMusicClip(timeline, request.clip, "music.shape");
   const warnings: string[] = [];
   const keyed = clip.keys?.gain?.some((key) => key.auto === "music" || key.baseAuto === "music") === true;
@@ -101,7 +103,7 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
   let ending: number | null = null;
   if (settings) {
     const resolved: number[] = [];
-    for (const value of request.drop ?? []) resolved.push(round3(await resolveTimeRefArg("music.shape", "drop", value, timeline, loadGrid)));
+    for (const value of request.drop ?? []) resolved.push(round3(await resolveTimeRefArg("music.shape", "drop", value, timeline, loadGrid, words)));
     for (const at of [...new Set(resolved)].sort((a, b) => a - b)) {
       // A hit whose dip never reaches the clip writes nothing.
       if (at + settings.hold + settings.release <= playsFrom || at - settings.lead - SHAPE_STEP_S >= playsTo) {
@@ -109,7 +111,7 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
       } else drops.push(at);
     }
     if (request.ending !== undefined) {
-      const at = round3(await resolveTimeRefArg("music.shape", "ending", request.ending, timeline, loadGrid));
+      const at = round3(await resolveTimeRefArg("music.shape", "ending", request.ending, timeline, loadGrid, words));
       if (at >= playsTo) warnings.push(`The ending at ${at} s is after ${clip.id} ends (${round3(playsTo)} s): no fade written.`);
       else {
         ending = at;

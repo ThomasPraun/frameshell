@@ -288,7 +288,7 @@ export interface InputsContext {
    * `.blend`'s files does, passes it on and kills the process, so none outlives the host. A host older than this
    * addition passes none: an adapter that reads it copes with `undefined`.
    */
-  readonly signal: AbortSignal;
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** What {@link ClipAdapter.livePreview} receives: the project facts of {@link RenderContext}, without output or progress. */
