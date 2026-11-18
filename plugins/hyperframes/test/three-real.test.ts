@@ -93,15 +93,39 @@ function glb(): Buffer {
   return Buffer.concat([head, chunkHead(text.length, "JSON"), text, chunkHead(bin.length, "BIN\0"), bin]);
 }
 
-/** A project with the product-shot template scaffolded as `shot`, `--duration` {@link DURATION}. */
-async function project(): Promise<string> {
+/** A project with `template` scaffolded as `shot`, `--duration` {@link DURATION}; returns the project and composition directories. */
+async function scaffold(template: string): Promise<{ dir: string; composition: string }> {
   const dir = tempDir();
   writeFileSync(join(dir, "frameshell.json"), JSON.stringify({ resolution: { width: WIDTH, height: HEIGHT } }));
-  await newComposition.run({ args: ["shot", "--template", "product-shot", "--duration", String(DURATION)], cwd: dir, project: { dir } });
-  const composition = join(dir, "compositions", "hyperframes", "shot");
+  await newComposition.run({ args: ["shot", "--template", template, "--duration", String(DURATION)], cwd: dir, project: { dir } });
+  return { dir, composition: join(dir, "compositions", "hyperframes", "shot") };
+}
+
+/** A project with the product-shot template scaffolded as `shot`, with a GLB and a texture beside it. */
+async function project(): Promise<string> {
+  const { dir, composition } = await scaffold("product-shot");
   writeFileSync(join(composition, "product.glb"), glb());
   writeFileSync(join(composition, "label.png"), png(64, (x, y) => (((x >> 3) + (y >> 3)) % 2 === 0 ? [20, 200, 60, 255] : [240, 240, 240, 255])));
   return dir;
+}
+
+/** `clip.verify` of the clip `c_shot` carrying `props` over 12 probes, cold vs reseek. */
+async function verify(dir: string, props: Record<string, unknown>, tolerance: number) {
+  const manager = binaries();
+  const adapter = createHyperframesAdapter({ projectDir: dir });
+  const timeline = { id: "main", revision: 1, tracks: [{ id: "v1", kind: "video", clips: [{ ...clip, props, type: "hyperframes", start: 0, in: 0, duration: DURATION }] }] };
+  const verifier = new ClipVerifier({
+    timeline: async () => ({ timeline: timeline as never, fps: 30 }),
+    live: async (_root, _timeline, id) => ({
+      ...(await adapter.livePreview!({ ...clip, props }, { projectDir: dir, fps: 30, width: WIDTH, height: HEIGHT, ensureBinary: (name) => manager.ensure(name) })),
+      clip: id,
+      key: "k",
+    }),
+    resolution: async () => ({ width: WIDTH, height: HEIGHT }),
+    chrome: () => manager.ensure("chrome-headless-shell"),
+    ffmpeg: () => manager.ensure("ffmpeg"),
+  });
+  return verifier.verify(dir, { timeline: "main", clip: "c_shot", tolerance });
 }
 
 describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D product shot (real HyperFrames, SwiftShader)", () => {
@@ -142,19 +166,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D prod
         expect(clear, `transparent pixels at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.5);
       }
 
-      const timeline = { id: "main", revision: 1, tracks: [{ id: "v1", kind: "video", clips: [{ ...clip, props, type: "hyperframes", start: 0, in: 0, duration: DURATION }] }] };
-      const verifier = new ClipVerifier({
-        timeline: async () => ({ timeline: timeline as never, fps: 30 }),
-        live: async (_root, _timeline, id) => ({
-          ...(await adapter.livePreview!({ ...clip, props }, { projectDir: dir, fps: 30, width: WIDTH, height: HEIGHT, ensureBinary: (name) => manager.ensure(name) })),
-          clip: id,
-          key: "k",
-        }),
-        resolution: async () => ({ width: WIDTH, height: HEIGHT }),
-        chrome: () => manager.ensure("chrome-headless-shell"),
-        ffmpeg: () => manager.ensure("ffmpeg"),
-      });
-      const result = await verifier.verify(dir, { timeline: "main", clip: "c_shot", tolerance: 0 });
+      const result = await verify(dir, props, 0);
       expect(result).toMatchObject({ ok: true, worst: null, warnings: [] });
       expect(result.probes).toHaveLength(12);
       expect(result.distinct).toBeGreaterThan(8);
@@ -190,6 +202,96 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D prod
       expect(green, "green label pixels on the first frame").toBeGreaterThan(WIDTH * HEIGHT * 0.002);
 
       await expect(adapter.render({ ...clip, props: { model: "missing.glb" } }, ctx())).rejects.toThrow(/missing\.glb/);
+    },
+    600_000,
+  );
+});
+
+// The 3D logo template (ADR 0042): a generated SVG of a red disc and a blue frame (a hole in it), extruded on SwiftShader.
+const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">
+  <circle cx="50" cy="50" r="40" fill="#e11d48"/>
+  <path fill="#0ea5e9" fill-rule="evenodd" d="M110 10h80v80h-80z M130 30v40h40v-40z"/>
+</svg>`;
+
+describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D logo (real HyperFrames, SwiftShader)", () => {
+  const ctx = (dir: string, manager: BinaryManager) => ({
+    projectDir: dir,
+    outDir: tempDir(),
+    fps: 30,
+    width: WIDTH,
+    height: HEIGHT,
+    signal: new AbortController().signal,
+    ensureBinary: (name: string) => manager.ensure(name),
+    progress: () => {},
+  });
+
+  it(
+    "extrudes the SVG's own fills before frame 0, keeps alpha, and passes clip verify (cold vs reseek identical)",
+    async () => {
+      const { dir, composition } = await scaffold("logo-3d");
+      writeFileSync(join(composition, "mark.svg"), LOGO_SVG);
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const props = { logo: "mark.svg", colors: "svg", title: "", backdrop: 0 };
+      const rendered = await createHyperframesAdapter({ projectDir: dir }).render({ ...clip, props }, ctx(dir, manager));
+      // The first frame already shows the flat logo (the render waited for __hf.buildReady); at 1 s both fills are there.
+      for (const at of [0.05, 1]) {
+        const { stdout } = await execFileAsync(
+          ffmpeg,
+          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", String(at), "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
+          { encoding: "buffer", maxBuffer: 1 << 26 },
+        );
+        let [red, blue, clear] = [0, 0, 0];
+        for (let p = 0; p < stdout.length; p += 4) {
+          const [r, g, b, a] = [stdout[p]!, stdout[p + 1]!, stdout[p + 2]!, stdout[p + 3]!];
+          if (a < 16) clear++;
+          else if (a > 200 && r > 90 && r > 2 * g && r > 1.4 * b) red++;
+          else if (a > 200 && b > 90 && b > 1.3 * r && b > 1.15 * g) blue++;
+        }
+        expect(red, `red logo pixels at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.004);
+        expect(blue, `blue logo pixels at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.004);
+        expect(clear, `transparent pixels at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.5);
+      }
+      const result = await verify(dir, props, 0);
+      expect(result).toMatchObject({ ok: true, worst: null, warnings: [] });
+      expect(result.probes).toHaveLength(12);
+      expect(result.distinct).toBeGreaterThan(8);
+    },
+    600_000,
+  );
+
+  it(
+    "extrudes the built-in mark with no logo set, in every reveal",
+    async () => {
+      const { dir } = await scaffold("logo-3d");
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      for (const reveal of ["rise", "turn", "drop"]) {
+        const rendered = await createHyperframesAdapter({ projectDir: dir }).render({ ...clip, props: { reveal, title: "", backdrop: 0 } }, ctx(dir, manager));
+        const { stdout } = await execFileAsync(
+          ffmpeg,
+          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", "1.2", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
+          { encoding: "buffer", maxBuffer: 1 << 26 },
+        );
+        let opaque = 0;
+        for (let p = 3; p < stdout.length; p += 4) if (stdout[p]! > 200) opaque++;
+        expect(opaque, `${reveal}: logo pixels at 1.2 s`).toBeGreaterThan(WIDTH * HEIGHT * 0.02);
+      }
+    },
+    600_000,
+  );
+
+  it(
+    "fails the render naming the file for a missing SVG, a raster and an SVG with nothing filled",
+    async () => {
+      const { dir, composition } = await scaffold("logo-3d");
+      writeFileSync(join(composition, "lines.svg"), `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M10 10L90 90" stroke="#000" stroke-width="8" fill="none"/></svg>`);
+      writeFileSync(join(composition, "logo.png"), png(8, () => [0, 0, 0, 255]));
+      const manager = binaries();
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      await expect(adapter.render({ ...clip, props: { logo: "missing.svg" } }, ctx(dir, manager))).rejects.toThrow(/missing\.svg/);
+      await expect(adapter.render({ ...clip, props: { logo: "logo.png" } }, ctx(dir, manager))).rejects.toThrow(/logo\.png/);
+      await expect(adapter.render({ ...clip, props: { logo: "lines.svg" } }, ctx(dir, manager))).rejects.toThrow(/lines\.svg has no filled paths/);
     },
     600_000,
   );

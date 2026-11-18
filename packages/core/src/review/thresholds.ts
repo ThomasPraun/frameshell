@@ -40,7 +40,7 @@ export const DELIVERY_FPS = 0.01;
 
 /** Alpha above this (0 to 255) is picture, for the box of a generated clip. */
 export const GRAPHIC_ALPHA = 24;
-/** Width the alpha of a generated clip is read at, px. */
+/** Width the alpha of a generated clip is read at, px. With the two below, quoted in `staysInFrame` (schema `requirements.ts`, skill `critique.md`). */
 export const GRAPHIC_WIDTH = 160;
 /** Most frames of a generated clip measured. */
 export const GRAPHIC_SAMPLES = 12;
@@ -97,3 +97,55 @@ export const CLICK_CONTEXT_S = 0.02;
 export const CLICK_FLOOR_DBFS = -60;
 /** Most clicks listed in `sound.clicks.at`. */
 export const CLICK_LISTED = 20;
+/**
+ * dB the music may come above the style's `sound.musicUnderVoice` under the voice before it is `masking`: 3 dB doubles
+ * its power, a step any listener hears, while a 0.5 s window of music wobbles by less. Never under 0 dB: music as loud
+ * as the voice masks it (earshot: a band under 0 dB of voice over music is masked).
+ */
+export const MASKING_SLACK_DB = 3;
+/** Most stretches listed in `sound.music.low`. */
+export const MASKING_LISTED = 20;
+/** Band (Hz) the harshness of a file is measured in (earshot: 2 to 6 kHz, where the ear is most sensitive and a sound turns shrill). */
+export const HARSH_BAND_HZ = [2000, 6000] as const;
+/**
+ * dB a 400 ms window of that band may come over the band at the mix's loudest 400 ms (earshot: 2 to 6 kHz more than 6 dB
+ * over the music's loudest is harsh; a file is one mix, so its loudest moment stands in for the music's).
+ */
+export const HARSH_DB = 6;
+/**
+ * dB under the whole mix at its loudest window that the band there counts as at least. Pink noise puts 2 to 6 kHz 8 dB
+ * under the whole; a loudest moment with almost nothing there (a bass hit, a low drone) would make every bright sound harsh.
+ */
+export const HARSH_REFERENCE_FLOOR_DB = 20;
+/** Seconds per window of the harshness check: the EBU R128 momentary window, as for the loudest moment. */
+export const HARSH_WINDOW_S = LOUDEST_WINDOW_S;
+/** Most stretches listed in `sound.harsh.spans`. */
+export const HARSH_LISTED = 20;
+/**
+ * A clip edge with no fade clicks when the sound it cuts into jumps by this much (dB) over what the rest of the film played the 10 ms
+ * before: earshot's click ratio, a burst 9 times its surroundings (20 log10 9 = 19 dB).
+ */
+export const EDGE_JUMP_DB = 19;
+/** dBFS (RMS of 10 ms) a clip's sound must reach at a hard edge to click: under it the edge reads as silence (earshot's -45 dBFS end of a film). */
+export const EDGE_FLOOR_DBFS = ENDING_DBFS;
+/** Most edges listed in `sound.edges`. */
+export const EDGE_LISTED = 20;
+
+// The speed graph of a hero point (`review --speed`, #457): when a move reads mechanical. Judgments with a number, so
+// warnings only. A constant speed is the tell of a key with no ease; a dead stop mid-move reads as a hitch.
+
+/**
+ * Fastest minus slowest over the mean speed of a stretch under which its speed counts as constant: no ease. Not 5 %: the
+ * middle 20 % of the `in-out` key ease (smoothstep) varies by 4 %, and a sine ease's by 5 %, so 5 % flags eased moves.
+ */
+export const SPEED_LINEAR_SPREAD = 0.025;
+/** Fewest frames a constant-speed stretch needs to be `linear`: over fewer, any curve looks constant at its top. */
+export const SPEED_LINEAR_FRAMES = 6;
+/** Least share of the whole move (first to last moving frame) a constant-speed stretch covers to be `linear`. */
+export const SPEED_LINEAR_SHARE = 0.2;
+/** Film px per frame under which the hero point stands still: a quarter pixel. */
+export const SPEED_STOP_PX = 0.25;
+/** Fewest still frames between two moving stretches that read as a dead `stop` (4 frames at 30 fps: a visible hitch). */
+export const SPEED_STOP_FRAMES = 4;
+/** Width a generated clip's alpha is read at for its hero point, px; the centre is an alpha-weighted mean, finer than a pixel. */
+export const SPEED_ALPHA_WIDTH = 480;

@@ -6,6 +6,7 @@ import type {
   ConfigOperation,
   DaemonConnection,
   GradeAnalyzeResult,
+  ClipCompareResult,
   GradeCompareResult,
   HistoryResult,
   MarkerListResult,
@@ -16,6 +17,7 @@ import type {
   MulticamTurnsResult,
   MusicCandidatesResult,
   MusicGridResult,
+  MusicPickResult,
   MusicShapeResult,
   MusicFitResult,
   MethodName,
@@ -27,7 +29,7 @@ import type {
   TrackDuckResult,
   TrackSummary,
 } from "@frameshell/protocol";
-import { SECONDS_TEXT } from "@frameshell/protocol";
+import { timeRefOf } from "@frameshell/protocol";
 import { glassOf, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
@@ -106,6 +108,18 @@ mutations print the new revision):
                                the clip's middle); --out the image (default .frameshell/grade/compare-<clip>-<frame>.png);
                                --tile-width 160 to 960 (default 480). Prints the clip set command that keeps each look.
                                Changes nothing
+  clip compare <clip> --look [name:]key=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]
+                               Render one frame of a generated clip (blender, hyperframes, ...) under up to 11 variants next
+                               to the clip as it is, as one labelled PNG, through the export frame path. A variant is
+                               props merged over the clip's own (key=value, JSON values but scene and camera always text;
+                               key=null drops one) and/or source=<project path>: --look dusk:scene=Dusk,
+                               --look close:camera=Close,scene=Dusk,
+                               --look b:source=scenes/hero-b.blend; a whole look as JSON: --look '{"name":"x","props":{...}}'.
+                               --at picks the frame (default the clip's middle); --out the image (default
+                               .frameshell/looks/compare-<clip>-<frame>.png); --tile-width 160 to 960 (default 480).
+                               Each variant not rendered before renders first (a Blender clip: its draft; the whole clip
+                               up to the frame, so use a short one); a still never starts a final. Prints the clip set
+                               command that keeps each variant's props. Changes nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -131,11 +145,12 @@ mutations print the new revision):
                                glass; by default blur 46 px, saturate 1.45, dim 0.55): what is below the clip is
                                blurred, saturated and dimmed where the clip shows. Glass is a style choice, never a
                                default. --backdrop-* set one number each, over --glass (blur = Gaussian sigma in project px)
-                               --grade-* colour-grade a media clip on a video track, one number each, merged into its
-                               grade: exposure in stops, white balance (temperature -1 cool to 1 warm, tint -1 green to
-                               1 magenta), contrast and saturation factors (1 = unchanged), then a 3D .cube LUT (project
-                               file, up to 65 points, Rec.709 input; none removes it) at --grade-lut-mix (default 1).
-                               Export and the preview apply the same table; --clear-grade removes the grade
+                               --grade-* colour-grade a media, generated or nested timeline clip on a video track, one
+                               number each, merged into its grade: exposure in stops, white balance (temperature -1 cool
+                               to 1 warm, tint -1 green to 1 magenta), contrast and saturation factors (1 = unchanged),
+                               then a 3D .cube LUT (project file, up to 65 points, Rec.709 input; none removes it) at
+                               --grade-lut-mix (default 1). A nested timeline clip's grade follows the grades of the
+                               clips inside it. Export and the preview apply the same table; --clear-grade removes it
                                --motion-blur blurs a generated clip's moves like a camera (ADR 0041): each frame is the
                                average of --motion-blur-samples pictures (default 8, 1 to 64) across a shutter of
                                --motion-blur-shutter degrees (default 180, centred on the frame), averaged in linear light
@@ -228,7 +243,7 @@ mutations print the new revision):
                                template, or --rules): written on the program track in one operation, each with a
                                confidence and reason. Same input, same shots. Keeps shots a person chose in the app
                                unless --replace-human. Lists the doubtful ones (--json: low)
-  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB]
+  duck <track> --under <track>… [--depth dB] [--attack ms] [--release ms] [--threshold dBFS] [--gap s] [--level dB|style]
                                Music under a voice: writes gain keys on the clips of audio track <track> that dip
                                while someone speaks on the --under tracks (video or audio; speech = sound above
                                --threshold=-40 style, default -38 dBFS; stretches closer than --gap, default 0.6 s, merge).
@@ -237,10 +252,12 @@ mutations print the new revision):
                                the dip, marked as the duck's: run it again after an edit and they are replaced, keys
                                you set with clip key stay (and are dipped too where a voice speaks). Edit the curve
                                like any gain key; a key you set is a level, not a dip. --level dB first sets the
-                               static gain of each clip so the music's loudness (EBU R128, measured once per file
-                               and cached) sits that many dB under the voice's (about 12 is a start); a clip with gain
-                               keys of its own is left alone. The settings are kept in each ducked clip (audio.duck):
-                               music fit runs the same duck again after it moves one. Revert undoes it
+                               static gain of each clip so the music's loudness (EBU R128, measured over the part of
+                               its file the clip plays, once per part and cached) sits that many dB under the voice's
+                               (about 12 is a start; --level style takes the project's sound.musicUnderVoice); a clip
+                               with gain keys of its own is left alone. The settings are kept in each ducked clip
+                               (audio.duck): music fit, shape and grid run the same duck again, and the level first,
+                               after they change one. Revert undoes it
   transition set --at s [--kind dissolve|fade|wipe|push|iris|zoom|slats|grid|dip-cut] [--direction left|right|up|down]
            [--origin x0,y0,x1,y1] [--count n] [--duration s] [--track <track>…]
                                At the clip edge at --at on every video and audio track (--track limits): dissolve
@@ -318,15 +335,22 @@ mutations print the new revision):
                                with --end each is fitted like music fit slides a clip (its own final hit lands on
                                --end) and they are ranked: files that cover the picture first, then by how sure the
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
-                               Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
-                               gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
-  music shape <clip> [--drop <time>]… [--ending <time>] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
+                               Choose with music pick <track>. Each clip gets a 5 ms fade in (audio.fadeInMs).
+                               One transaction (revert it)
+  music pick <track> [--keep] [--dry-run]
+                               Keep one candidate (its track id or name, e.g. "Music 2"): unmute it, rename it Music and
+                               remove the other candidate tracks with their clips (--keep leaves them in place, muted).
+                               A candidate you worked on (more than one clip, or a clip with speed, keys, effects, fades)
+                               is never removed: it is named and left. Nothing is fitted, shaped or ducked again; music
+                               fit and duck --level follow. --dry-run changes nothing. One transaction (revert it)
+  music shape <clip> [--drop <time>]… [--ending <time> [--end-on-bar]] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
                      [--build s [--build-from Hz] [--build-to Hz]] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
                                (a hit: seconds, marker, beat:N / bar:N) instead of ducking after it, --depth dB (9) down,
                                complete --lead s (0.4) before it, held --hold s (0.3) after, back over --release s (0.6);
-                               from --ending it fades out over --fade s (2.5; a short one with --ending bar:N stops on a
-                               bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
+                               from --ending it fades out over --fade s (2.5; --end-on-bar stretches or shrinks it so it
+                               ends on the bar start of the grid nearest to --ending + --fade, which stops the music on
+                               a bar line). Gain keys marked auto "music" on the clip: running it again replaces those and
                                keeps keys set by hand; --clear removes them. Duck keys are written again after it. music
                                fit re-runs it when it moves the clip. --build s (e.g. 2) adds a rising high-pass before
                                each --drop: a highpassSweep audio effect (marked auto "music") whose cutoff climbs from
@@ -334,16 +358,21 @@ mutations print the new revision):
                                of the signal again at it, so the low end returns with the hit; it sits on the file's own
                                clock, is baked like any audio effect, and a rerun replaces it. --dry-run prints the dip
                                curve. One transaction
-  music grid [--to beat|bar] [--max-shift s] [--skip g1,…] [--dry-run]
+  music grid [--to beat|bar] [--max-shift s] [--trim tail|head] [--tracks all|video] [--skip g1,…] [--dry-run]
                                Move picture cuts (two clips of a video track that meet) onto the timeline's beat grid
                                (tempo set; a LOW grid is refused): each cut off its nearest beat (--to bar: bar start) by
                                at most --max-shift s (0.25) gets an id g1, g2… and lands exactly on it. A move trims the
                                tail of the clip before the cut with ripple: later clips move on every track with no clip
                                across a cut (the music, a voice line, a background keep their timing); the next cut that
-                               does not move is put back, so only the shots between change length. Blocked: no more of
-                               the file, a clip would be empty or overlap, or a transcribed word would be cut or added.
-                               --dry-run lists every cut; --skip leaves moves (and duck) out. Duck keys on the music are
-                               written again. One transaction (revert it)
+                               does not move is put back, so only the shots between change length. --trim head makes
+                               it a roll edit instead (tail before the cut and head after it trimmed to the beat,
+                               nothing ripples). --tracks all (default) also reads the shot changes of program tracks
+                               (always a roll edit) and the entries of clips alone on upper video tracks (a title
+                               appearing: the clip moves whole); --tracks video reads video cuts only. Blocked: no more
+                               of the file, a clip would be empty or overlap, or a transcribed word would be cut or
+                               added. Stored music shape hits follow the shots that moved (music shape runs again).
+                               --dry-run lists every cut; --skip leaves moves, duck and shape out. Duck keys on the
+                               music are written again. One transaction (revert it)
   cut and clip trim move edges on media with audio into the nearest pause (±0.5 s, or frameshell.json
   editing.snapWindow; --snap-window 0.5-10 overrides); the output lists requested vs applied times.
   --no-snap uses the exact times. clip add snaps media in/out only with --snap.
@@ -371,7 +400,12 @@ mutations print the new revision):
   offset: --at bar:8, --from bar:2 --to bar:6, --start beat:17-0.1, --at beat:2.5 (halfway between beats 2 and 3).
   Past the measured part they continue at the tempo. With a pickup, bar:N is not beat:(meter*(N-1)+1). They need
   a tempo (tempo set) and are refused on a LOW confidence grid or with no beats file, like --snap-to beat|bar.
-  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit). word: names are still refused.
+  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit).
+  word:<text> is the start of a word the timeline plays, #n for the nth time it is said (from 1), with the same
+  optional offset: --at word:over, --from word:this#2 --to word:idea+0.3, --at word:w_000012 (a transcript word id).
+  Case, accents and punctuation are ignored and digits meet spelled numbers (word:20 finds "twenty"); words a cut
+  removed do not count, so the same name means a later word after a cut. It needs current transcripts
+  (transcribe); a clip with a stale one refuses it. The quotes-only form ("this#2") is not accepted: write word:.
   --group-clock times (multicam reframe --at, multicam paint) stay seconds.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -534,9 +568,11 @@ export const TIMELINE_OPTIONS = {
   "min-confidence": { type: "string" },
   skip: { type: "string", multiple: true },
   "dry-run": { type: "boolean" },
+  keep: { type: "boolean" },
   hit: { type: "string" },
   drop: { type: "string", multiple: true },
   ending: { type: "string" },
+  "end-on-bar": { type: "boolean" },
   lead: { type: "string" },
   hold: { type: "string" },
   fade: { type: "string" },
@@ -549,6 +585,8 @@ export const TIMELINE_OPTIONS = {
   probes: { type: "string" },
   tolerance: { type: "string" },
   "max-shift": { type: "string" },
+  trim: { type: "string" },
+  tracks: { type: "string" },
 } as const;
 
 type Values = Record<string, string | boolean | string[] | undefined>;
@@ -589,6 +627,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip verify": ["probes", "tolerance"],
   "grade analyze": ["at", "from", "to", "samples"],
   "grade compare": ["look", "at", "out", "tile-width", "format"],
+  "clip compare": ["look", "at", "out", "tile-width", "format"],
   "clip set": [
     "speed",
     "gain",
@@ -667,8 +706,9 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
-  "music shape": ["drop", "ending", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
-  "music grid": ["to", "max-shift", "skip", "dry-run"],
+  "music pick": ["keep", "dry-run"],
+  "music shape": ["drop", "ending", "end-on-bar", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
+  "music grid": ["to", "max-shift", "trim", "tracks", "skip", "dry-run"],
   "tx begin": [],
   "tx commit": [],
   "tx abort": [],
@@ -705,6 +745,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip verify": [1, 1],
   "grade analyze": [1, 1],
   "grade compare": [1, 1],
+  "clip compare": [1, 1],
   "clip set": [1, 1],
   "multicam create": [2, Number.POSITIVE_INFINITY],
   "multicam gallery": [1, 1],
@@ -723,6 +764,7 @@ const ARITY: Record<string, [number, number]> = {
   cleanup: [0, 0],
   "music fit": [1, 1],
   "music candidates": [2, 7],
+  "music pick": [1, 1],
   "music shape": [1, 1],
   "music grid": [0, 0],
   "tx begin": [1, 1],
@@ -779,6 +821,61 @@ export function parseLook(raw: string): Record<string, string | number> {
   return look;
 }
 
+/** One look of `clip compare` as parsed. */
+interface ClipLookArg {
+  name?: string;
+  source?: string;
+  props?: Record<string, unknown>;
+}
+
+/**
+ * One `clip compare --look`: `[name:]key=value[,key=value...]`, e.g. `dusk:scene=Dusk` or `close:camera=Close,scene=Dusk`.
+ * Values are JSON when they parse (`3`, `true`, `null`), else text; `scene` and `camera` are always text (but `null`
+ * drops the key); `source` is the look's source, every other key a prop.
+ * A string starting with `{` is the whole look as JSON (`{"name":"x","props":{...}}`).
+ */
+export function parseClipLook(raw: string): ClipLookArg {
+  const text = raw.trim();
+  if (text.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as ClipLookArg;
+    } catch {
+      // Falls through to the usage error below.
+    }
+    throw new UsageError(`--look: expected a JSON object such as {"name":"dusk","props":{"scene":"Dusk"}}; got "${raw}".`);
+  }
+  const colon = text.indexOf(":");
+  const named = colon >= 0 && colon < text.indexOf("=");
+  const look: ClipLookArg = named ? { name: text.slice(0, colon).trim() } : {};
+  for (const pair of (named ? text.slice(colon + 1) : text).split(",")) {
+    const at = pair.indexOf("=");
+    const key = at < 0 ? "" : pair.slice(0, at).trim();
+    const value = at < 0 ? "" : pair.slice(at + 1).trim();
+    if (key === "" || value === "") {
+      throw new UsageError(`--look: expected [name:]key=value[,key=value...] (source=<path> or a prop), e.g. dusk:scene=Dusk; got "${raw}".`);
+    }
+    if (key === "source") {
+      look.source = value;
+      continue;
+    }
+    look.props = { ...look.props, [key]: NAME_PROPS.has(key) && value !== "null" ? value : jsonOrText(value) };
+  }
+  return look;
+}
+
+/** Props that name something (a Blender scene or camera): `scene=2024` is the scene called "2024", not a number. */
+const NAME_PROPS = new Set(["scene", "camera"]);
+
+/** `text` as JSON when it parses (number, boolean, null, object), else as it is. */
+function jsonOrText(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 /** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
 function aspectOf(raw: string): number {
   const match = /^\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:[:/]\s*(\d+(?:\.\d+)?|\.\d+)\s*)?$/.exec(raw);
@@ -833,17 +930,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     }
     return parts;
   };
-  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N` or `bar:N`, optionally `+s` or `-s`) for the daemon to resolve. */
+  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N`, `bar:N` or `word:<text>`, optionally `+s` or `-s`) for the daemon to resolve. */
   const when = (flag: string): number | string | undefined => {
     const raw = values[flag];
     if (raw === undefined) return undefined;
-    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
-    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, beat:N / bar:N or word:<text>, got "${String(raw)}".`);
+    return timeRefOf(raw);
   };
   /** One time given as text: seconds as a number, else the name for the daemon to resolve. */
   const whenOf = (raw: string, flag: string): number | string => {
-    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
-    return SECONDS_TEXT.test(raw.trim()) ? Number(raw) : raw.trim();
+    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, beat:N / bar:N or word:<text>, got "${raw}".`);
+    return timeRefOf(raw);
   };
   const list = (flag: string): string[] | undefined => {
     const raw = values[flag];
@@ -1337,6 +1434,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
       break;
     }
+    case "clip compare": {
+      method = "clip.compare";
+      const looks = (list("look") ?? []).map(parseClipLook);
+      if (looks.length === 0) throw new UsageError("`frameshell clip compare` needs at least one --look, e.g. --look dusk:scene=Dusk.");
+      if (looks.length > 11) throw new UsageError(`--look: at most 11 looks, got ${looks.length}.`);
+      const tileWidth = num("tile-width");
+      if (tileWidth !== undefined && (!Number.isInteger(tileWidth) || tileWidth < 160 || tileWidth > 960)) throw new UsageError("--tile-width: expected a whole number of px from 160 to 960.");
+      Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
+      break;
+    }
     case "image cutout":
       method = "image.cutout";
       if (str("mask") === undefined) throw new UsageError("`frameshell image cutout` needs --mask <png>: a grayscale PNG at the photo's size, white = keep.");
@@ -1375,7 +1482,7 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         releaseMs: num("release"),
         threshold: num("threshold"),
         gap: duckGap(),
-        level: num("level"),
+        level: str("level") === "style" ? "style" : num("level"),
       });
       break;
     }
@@ -1415,12 +1522,21 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music pick":
+      method = "music.pick";
+      Object.assign(params, {
+        track: args[0],
+        keep: values["keep"] === true ? true : undefined,
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "music shape":
       method = "music.shape";
       Object.assign(params, {
         clip: args[0],
         drop: list("drop")?.map((raw) => whenOf(raw, "drop")),
         ending: when("ending"),
+        endOnBar: values["end-on-bar"] === true ? true : undefined,
         lead: num("lead"),
         depth: num("depth"),
         hold: num("hold"),
@@ -1437,9 +1553,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       method = "music.grid";
       const to = str("to");
       if (to !== undefined && to !== "beat" && to !== "bar") throw new UsageError(`--to: expected beat or bar, got "${to}".`);
+      const trim = str("trim");
+      if (trim !== undefined && trim !== "tail" && trim !== "head") throw new UsageError(`--trim: expected tail or head, got "${trim}".`);
+      const tracks = str("tracks");
+      if (tracks !== undefined && tracks !== "all" && tracks !== "video") throw new UsageError(`--tracks: expected all or video, got "${tracks}".`);
       Object.assign(params, {
         to,
         maxShift: num("max-shift"),
+        trim,
+        tracks,
         skip: list("skip")?.flatMap((ids) => ids.split(",")).map((id) => id.trim()).filter((id) => id !== ""),
         dryRun: values["dry-run"] === true ? true : undefined,
       });
@@ -1534,6 +1656,7 @@ export async function executeTimeline(
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
+  if (inv.method === "music.pick") return formatMusicPick(result as MusicPickResult);
   if (inv.method === "music.shape") return formatMusicShape(result as MusicShapeResult);
   if (inv.method === "music.grid") return formatMusicGrid(result as MusicGridResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
@@ -1546,6 +1669,7 @@ export async function executeTimeline(
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
   if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
+  if (inv.method === "clip.compare") return formatClipCompare(result as ClipCompareResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
   if (inv.method === "image.cutout") {
     const { asset, track, clip } = result as MethodResult<"image.cutout">;
@@ -1611,6 +1735,23 @@ export function formatGradeCompare(result: GradeCompareResult): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** `clip compare` for people: the image, then each tile's number, name and the `clip set` flags that keep it. */
+export function formatClipCompare(result: ClipCompareResult): string {
+  const lines = [
+    `Clip compare of ${result.clip} (${result.type}) on ${result.timeline} · frame ${result.frame} at ${result.at.toFixed(3)} s · ${result.tiles.length} tiles, ${result.columns}x${result.rows}`,
+    `  ${result.path} (${result.width}x${result.height})`,
+  ];
+  const own = result.tiles[0]?.source;
+  for (const tile of result.tiles) {
+    const source = tile.source !== own ? ` (source ${tile.source ?? "none"}: clip add it again to keep)` : "";
+    const keep = tile.kind === "current" ? "(the clip as it is)" : tile.flags === "" ? `(same props as the clip)${source}` : `frameshell clip set ${result.clip} ${tile.flags}${source}`;
+    lines.push(`  ${tile.label.padEnd(18)} ${keep}`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  lines.push("Nothing changed: open the image, then keep a look with its clip set command.");
+  return `${lines.join("\n")}\n`;
+}
+
 function formatCaptions(result: CaptionsSetResult): string {
   const lines = [`Captions on ${result.track}: ${result.phrases} phrase${result.phrases === 1 ? "" : "s"}, ${result.words} word${result.words === 1 ? "" : "s"}`];
   for (const cue of result.cues) lines.push(`  ${cue.start}–${cue.end} s  ${cue.text}${cue.entry === "none" ? "" : `  [${cue.entry}]`}`);
@@ -1647,10 +1788,16 @@ function formatMusicGrid(result: MusicGridResult): string {
   ];
   for (const cut of result.cuts) {
     const off = cut.shiftMs === null ? "" : ` ${cut.shiftMs >= 0 ? "+" : ""}${cut.shiftMs} ms to ${cut.ref} (${cut.beat} s)`;
-    lines.push(`  ${(cut.id ?? "").padEnd(4)}${cut.at.toFixed(3).padStart(9)} s  ${cut.out} | ${cut.in}  ${cut.status}${off}${cut.reason ? `: ${cut.reason}` : ""}`);
+    const clips = cut.out === null ? `${cut.in} (entry)` : `${cut.out} | ${cut.in}${cut.kind === "program" ? " (shots)" : ""}`;
+    lines.push(`  ${(cut.id ?? "").padEnd(4)}${cut.at.toFixed(3).padStart(9)} s  ${clips}  ${cut.status}${off}${cut.reason ? `: ${cut.reason}` : ""}`);
     for (const warning of cut.warnings) lines.push(`        warning: ${warning}`);
   }
-  if (result.moved > 0) lines.push(`Ripple on ${result.ripple.join(", ") || "the cut's own track"}; the picture gets ${result.durationChange >= 0 ? "+" : ""}${result.durationChange} s`);
+  if (result.shape) {
+    const list = result.shape.drops.map((drop) => `${drop.from} to ${drop.to} s`).join(", ");
+    lines.push(`Music shape hits of ${result.shape.clip} follow their shots: ${list}${result.shape.rerun ? "" : " (not run again: see the warnings)"}`);
+  }
+  if (result.moved > 0 && result.trim === "head") lines.push(`Roll edits: nothing ripples; the picture keeps its length`);
+  else if (result.moved > 0) lines.push(`Ripple on ${result.ripple.join(", ") || "the cut's own track"}; the picture gets ${result.durationChange >= 0 ? "+" : ""}${result.durationChange} s`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
@@ -1689,6 +1836,19 @@ function formatMusicCandidates(result: MusicCandidatesResult): string {
   for (const skip of result.skipped) lines.push(`Left out ${skip.asset}: ${skip.reason}`);
   lines.push(`Ranking: ${result.ranking}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicPick(result: MusicPickResult): string {
+  const { chosen } = result;
+  const lines = [`Music pick · ${chosen.name} (${chosen.track}, ${chosen.asset}) kept${chosen.renamedTo ? `, renamed ${chosen.renamedTo}` : ""}${chosen.unmuted ? ", unmuted" : ""}${result.dryRun ? " · dry run" : ""}`];
+  for (const track of result.removed) lines.push(`  removed ${track.name} (${track.track}, ${track.asset})`);
+  for (const track of result.muted) lines.push(`  muted ${track.name} (${track.track}, ${track.asset}), left in place`);
+  for (const track of result.left) lines.push(`  left ${track.name} (${track.track}, ${track.asset}): ${track.reason}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`Next: ${result.next}`);
+  else if (result.dryRun) lines.push("Dry run: nothing changed; run again without --dry-run.");
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }
@@ -1750,7 +1910,7 @@ function formatTrackDuck(result: TrackDuckResult): string {
   const heard = `${result.stretches} stretch${result.stretches === 1 ? "" : "es"} of speech (${result.speechSeconds} s) on ${result.under.join(", ")}`;
   const written = result.changes.updated.length;
   const level = result.level
-    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
+    ? `Level: voice ${result.level.voice} LUFS, music set to ${result.level.target} LUFS (${result.level.under} dB under${result.level.source === "style" ? ", the style's sound.musicUnderVoice" : ""}): ${result.level.clips.map((c) => `${c.clip} ${c.gain > 0 ? "+" : ""}${c.gain} dB`).join(", ")}\n`
     : "";
   return `Ducked ${result.track} under ${heard}: ${written} clip${written === 1 ? "" : "s"} changed\n${level}${formatOperation(result)}`;
 }
@@ -1811,7 +1971,7 @@ function formatHistory(result: HistoryResult): string {
       const target = op.op === "revert" ? ` ${String(op.args["target"])}` : "";
       const touched = op.touched.length > 0 ? `  ${op.touched.join(", ")}` : "";
       // A config operation changes no timeline (ADR 0036): it says which file instead of a revision.
-      const doc = op.doc === "style" ? "style.json" : "project config";
+      const doc = op.doc === "style" ? "style.json" : op.doc === "requirements" ? "requirements.json" : "project config";
       lines.push(`  ${op.id}  ${op.op}${target}${touched}  (${op.doc ? doc : `revision ${op.revision}`})`);
     }
   }

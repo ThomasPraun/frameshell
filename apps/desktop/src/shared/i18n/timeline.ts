@@ -100,10 +100,10 @@ const en = {
   markerName: "Marker name",
   /** Label of the scene band's head, under the zoom buttons. */
   scenes: "Scenes",
-  scenesTitle: "Script scenes placed on their words. Click one to select its time range; dashed ones have no clip yet.",
-  /** Screen-reader line of a scene span; `clips` is how many are linked to it, none meaning it is still empty. */
-  sceneItem: (title: string, from: string, to: string, clips: number, selected: boolean) =>
-    `Scene ${title}, ${from} to ${to}, ${clips === 0 ? "no clips yet" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", selected" : ""}`,
+  scenesTitle: "Script scenes placed on their words, their clips or the time range in their heading. Click one to select its time range; dashed ones have no clip yet, long dashes are only planned.",
+  /** Screen-reader line of a scene span; `clips` is how many are linked to it, none meaning it is still empty; `planned`: only the heading's time range places it. */
+  sceneItem: (title: string, from: string, to: string, clips: number, selected: boolean, planned: boolean) =>
+    `Scene ${title}, ${from} to ${to}, ${planned ? "planned, " : ""}${clips === 0 ? "no clips yet" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", selected" : ""}`,
   /** Canvas label of a clip whose end cannot be derived. */
   lengthUnknownShort: "length unknown",
   lengthUnknown: "Length unknown",
@@ -254,9 +254,9 @@ const es: typeof en = {
   deleteMarker: (label) => `Eliminar el marcador ${label}`,
   markerName: "Nombre del marcador",
   scenes: "Escenas",
-  scenesTitle: "Escenas del guion colocadas sobre sus palabras. Haz clic en una para seleccionar su rango de tiempo; las de línea discontinua aún no tienen clip.",
-  sceneItem: (title, from, to, clips, selected) =>
-    `Escena ${title}, de ${from} a ${to}, ${clips === 0 ? "sin clips todavía" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", seleccionada" : ""}`,
+  scenesTitle: "Escenas del guion colocadas sobre sus palabras, sus clips o el rango de tiempo de su encabezado. Haz clic en una para seleccionar su rango de tiempo; las de línea discontinua aún no tienen clip, las de guiones largos solo están planificadas.",
+  sceneItem: (title, from, to, clips, selected, planned) =>
+    `Escena ${title}, de ${from} a ${to}, ${planned ? "planificada, " : ""}${clips === 0 ? "sin clips todavía" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", seleccionada" : ""}`,
   lengthUnknownShort: "duración desconocida",
   lengthUnknown: "Duración desconocida",
   muted: "silenciado",

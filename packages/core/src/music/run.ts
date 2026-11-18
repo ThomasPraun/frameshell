@@ -3,7 +3,7 @@ import { type AnyClip, type AudioEffect, type ClipTrack, type DuckSettings, type
 import type { DipPoint } from "../media/duck.js";
 import type { EnergyProfile } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
-import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
+import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg } from "../timeline/time-ref.js";
 import { planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { type FitOperation, type FitPlan, clipEnd, planFit } from "./fit.js";
@@ -14,6 +14,8 @@ import { shapeCurve } from "./shape.js";
 export interface MusicFitDeps {
   /** The timeline's beat grid (`tempoGrid`), for `beat:` and `bar:` in `end` and `from`. */
   loadGrid: GridLoader;
+  /** The words the timeline plays, for `word:` in `end` and `from`; absent: such a reference is refused. */
+  loadWords?: WordLoader | undefined;
   /** Energy envelope of a project-relative asset; throws when it cannot be decoded. */
   profile(asset: string): Promise<EnergyProfile>;
   /** Hits (source seconds) measured in the asset's beat grid, when there is a grid for this content; else null. */
@@ -39,11 +41,11 @@ export interface MusicFitPlan extends Omit<MusicFitResult, "timeline" | "revisio
   /** Clip operations to apply in order (each names the clip); empty when nothing changes. */
   operations: ({ clip: string } & FitOperation)[];
   /**
-   * Duck to run again in the same transaction: the music track, the tracks to listen to and the parameters of the duck
+   * Duck to run again in the same transaction: the music track and clip, the tracks to listen to and the parameters of the duck
    * that wrote the clip's keys (`audio.duck`); `settings` is null when the clip has none stored (the method's defaults
-   * apply). Null when no duck runs.
+   * apply). The clip's static gain is set again first when the settings carry a `level`. Null when no duck runs.
    */
-  duckAgain: { track: string; under: string[]; settings: DuckSettings | null } | null;
+  duckAgain: { track: string; clip: string; under: string[]; settings: DuckSettings | null } | null;
   /**
    * Music shape to run again in the same transaction, before the duck: the clip's `music` keys sit on its own clock and the
    * hits they stepped down for are on the picture. `curve` is the stored shaping at the clip's new length. Null when none runs.
@@ -63,8 +65,9 @@ const invalid = (message: string, data: Record<string, unknown>) => new RpcError
  */
 export async function planMusicFit(timeline: Timeline, fps: number, request: MusicFitRequest, deps: MusicFitDeps): Promise<MusicFitPlan> {
   const { track, clip } = findMusicClip(timeline, request.clip);
-  const end = await resolveTimeRefArg("music.fit", "end", request.end, timeline, deps.loadGrid);
-  const from = request.from === undefined ? undefined : await resolveTimeRefArg("music.fit", "from", request.from, timeline, deps.loadGrid);
+  const loadWords = onceWords(deps.loadWords);
+  const end = await resolveTimeRefArg("music.fit", "end", request.end, timeline, deps.loadGrid, loadWords);
+  const from = request.from === undefined ? undefined : await resolveTimeRefArg("music.fit", "from", request.from, timeline, deps.loadGrid, loadWords);
 
   const warnings: string[] = [];
   let hit: MusicFitResult["hit"];
@@ -241,7 +244,7 @@ export function planDuckAgain(
   }
   return {
     duck: { under, rerun: true, parameters },
-    duckAgain: { track: trackId, under, settings: stored },
+    duckAgain: { track: trackId, clip: clip.id, under, settings: stored },
     warning: `${clip.id} carries duck keys: duck ${options.dryRun ? "would run" : "ran"} again on ${trackId} over ${under.join(", ")} with ${stored ? "the parameters of its last run" : "its defaults (the clip has none stored)"}, replacing the old duck keys of every clip of that track.`,
   };
 }

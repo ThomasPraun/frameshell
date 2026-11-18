@@ -1,11 +1,17 @@
-import { CRAFT_CHECKS, SafeZoneSchema } from "@frameshell/schema";
+import { CRAFT_CHECKS, STYLE_SOURCES, SafeZoneSchema } from "@frameshell/schema";
 import { z } from "zod";
 import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
 // `review` (#457, epic #451): contact sheets and strips an agent looks at before it shows the person anything.
 
+/** The sheets `sheets` can ask for, in the order they are written. */
+export const REVIEW_PICKED_SHEETS = ["contact", "safe", "phone", "motion", "seam", "beats", "cuts"] as const;
+
+/** The sheets of the per-clip kit, each written only when its param (`pop`, `onion`, `speed`) is given. */
+export const REVIEW_KIT_SHEETS = ["pop", "onion", "speed"] as const;
+
 /** The sheets `review` can write, in the order it writes them. */
-export const REVIEW_SHEETS = ["contact", "safe", "phone", "motion", "seam"] as const;
+export const REVIEW_SHEETS = [...REVIEW_PICKED_SHEETS, ...REVIEW_KIT_SHEETS] as const;
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
 export const ReviewSheetKindSchema = z
@@ -14,31 +20,34 @@ export const ReviewSheetKindSchema = z
     "`contact`: frames at critical times (clip starts and ends, cuts, markers, subtitle cues, the deepest zoom) and every `every` seconds. " +
       "`safe`: the same kind of frames (up to 36) with the platform's UI zones shaded red and a `!subtitle` mark on the frames where a caption crosses one; needs a `platform` (or the style guide's). " +
       "`phone`: one frame per second, 360 px wide. `motion`: the two fastest moments as 12 consecutive frames each. " +
-      "`seam`: the last 6 and the first 6 frames, to judge a loop.",
+      "`seam`: the last 6 and the first 6 frames, to judge a loop. " +
+      "`beats` (only when named): one frame per beat of the timeline's tempo grid, a quarter beat after the hit, bar starts labelled `bar N` and the other beats `beat N` (up to 60); needs a tempo (`tempo.set`) that is not LOW confidence, and a timeline, not a `file`. " +
+      "`cuts` (only when named): one row per cut, the frames 0.2 and 0.1 s before it, on it, and 0.1 and 0.2 s after (labelled `cut 3 -0.1`), up to 24 cuts spread evenly; a timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds. " +
+      "`pop`, `onion`, `speed`: written only when the param of that name is given.",
   );
 
 /** Name of a sheet in {@link REVIEW_SHEETS}. */
 export type ReviewSheetKind = z.output<typeof ReviewSheetKindSchema>;
 
-/** What a run can be asked for: the sheets, and `metrics.json`. */
-export const REVIEW_OUTPUTS = [...REVIEW_SHEETS, "metrics"] as const;
+/** What `sheets` can ask for: every sheet but the per-clip kit's, and `metrics`. */
+export const REVIEW_OUTPUTS = [...REVIEW_PICKED_SHEETS, "metrics"] as const;
 
 /** Name in {@link REVIEW_OUTPUTS}. */
 export const ReviewOutputSchema = z
   .enum(REVIEW_OUTPUTS)
   .describe(
     `${ReviewSheetKindSchema.description} ` +
-      "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, near-blank frames, " +
+      "`metrics`: numbers instead of pictures, written to `metrics.json` and returned as `metrics`: the longest still stretch, the largest gap between visual events, `rhythm` (shot-length CV, still share, bursts on `analyze`'s scale), near-blank frames, " +
       "whether frame 0 is empty, subtitle cues shorter than they take to read, the loudness of a file (integrated LUFS, loudness range, true peak, phone band 200 Hz to 6 kHz), " +
       "sounds against the picture events they belong to (`sync`), the jump from the last frame to the first (`seam`), a file against its export plan (`delivery`), " +
-      "the sound review list (`sound`: voice over bed per window, repeated effect files, clips cut off, the music on the last frame, clicks) and craft warnings.",
+      "the sound review list (`sound`: voice over bed and over music per window, repeated effect files, clips cut off or cut in mid-sound, the music on the last frame, clicks, harshness) and craft warnings.",
   );
 
 /** Name in {@link REVIEW_OUTPUTS}. */
 export type ReviewOutput = z.output<typeof ReviewOutputSchema>;
 
 /** Why a tile of a sheet shows the frame it does. */
-export const REVIEW_TAGS = ["start", "end", "cut", "marker", "cue", "zoom", "grid", "second", "peak", "head", "tail"] as const;
+export const REVIEW_TAGS = ["start", "end", "cut", "marker", "cue", "zoom", "grid", "second", "peak", "head", "tail", "beat", "pop", "onion", "speed"] as const;
 
 /** Review runs `.frameshell/review/` keeps: older numbered folders are deleted by the next run. */
 export const REVIEW_KEEP = 10;
@@ -47,7 +56,12 @@ export const REVIEW_KEEP = 10;
 export const ReviewTileSchema = z.object({
   at: z.number().describe("Seconds of the frame shown (timeline seconds, or file seconds when reviewing a file)."),
   frame: z.int().describe("Frame index (0-based) at the timeline's or the file's frame rate."),
-  tag: z.enum(REVIEW_TAGS).describe("Why this frame: a clip `start`/`end`, a `cut`, a `marker`, a subtitle `cue`, the deepest `zoom`, the `grid`, a `second` of the phone sheet, a motion `peak`, or the `head`/`tail` of a loop seam."),
+  tag: z
+    .enum(REVIEW_TAGS)
+    .describe(
+      "Why this frame: a clip `start`/`end`, a `cut` (also every tile of the `cuts` sheet), a `marker`, a subtitle `cue`, the deepest `zoom`, the `grid`, a `second` of the phone sheet, a motion `peak`, the `head`/`tail` of a loop seam, a `beat` of the `beats` sheet, " +
+        "a tile of the `pop` sheet (the two frames and their difference), the `onion` image (at its first frame) or the `speed` chart (at the clip's first frame).",
+    ),
   label: z.string().describe("Text drawn on the tile: the time in seconds and, for all but the grid, the tag."),
   row: z.int().describe("0-based."),
   column: z.int().describe("0-based."),
@@ -55,6 +69,10 @@ export const ReviewTileSchema = z.object({
     .array(z.string())
     .optional()
     .describe("`safe` sheet: what crosses a platform zone in this frame (`subtitle`), also marked on the tile as `!subtitle`. Absent: nothing review can measure does."),
+  crop: z
+    .object({ x: z.int(), y: z.int(), width: z.int(), height: z.int() })
+    .optional()
+    .describe("With `cropAt`: the part of the frame this tile shows, pixels of the film's frame (left, top, size). Absent: the whole frame."),
 });
 
 /** One image `review` wrote. */
@@ -75,7 +93,7 @@ export type ReviewSheet = z.output<typeof ReviewSheetSchema>;
 /** A fast moment of the picture. */
 export const ReviewPeakSchema = z.object({
   at: z.number().describe("Seconds of the middle of the change."),
-  energy: z.number().describe("Mean absolute difference of two grey frames at 320 px wide, 0 to 255: how much of the picture moved."),
+  energy: z.number().describe("Mean absolute difference of two grey frames 64 px on the long side (`analyze`'s activity), 0 to 255: how much of the picture moved."),
   strip: z.string().nullable().describe("The `motion` sheet that shows it (absolute path); null for the peaks below the top two."),
 });
 
@@ -154,7 +172,8 @@ export const ReviewCraftWarningSchema = z.object({
         "`delivery`: the file differs from the export plan. `safe-zone`: a graphic or a face reaches into a platform zone. " +
         "`voice-bed`: the bed comes within 6 dB of the voice. `sfx-repeat`: one effect file plays more than twice. `machine-gun`: one effect file 4 times or more in a row, each within 1 s of the last. " +
         "`chopped`: a clip ends with its sound above -35 dB of its loudest. `ending`: the music is cut on the last frame, or a file's sound is not down at its end or peaks in its last 15 %. " +
-        "`click`: a click in a file's sound.",
+        "`click`: a click in a file's sound. `masking`: under the voice the music comes within the style's `musicUnderVoice` minus 3 dB of it. " +
+        "`edge-click`: a clip starts with no fade mid-sound, 19 dB or more over what played just before. `harsh`: a file's 2 to 6 kHz band comes over 6 dB above that band at its loudest moment.",
     ),
   from: z.number().nullable().describe("Seconds the thing starts; null when it is about the whole film."),
   to: z.number().nullable(),
@@ -309,6 +328,45 @@ export const ReviewEndingSchema = z.object({
   loudestShare: z.number().nullable().describe("The middle of the loudest 400 ms as a share of the film (0 to 1); over 0.85 the film peaks at its end instead of resolving. Null for a timeline."),
 });
 
+/** Voice against the music alone, window by window, judged by the margin the style guide asks for. */
+export const ReviewMusicSchema = z.object({
+  window: z.number().describe("Seconds per window (the `voice` windows)."),
+  musicUnderVoice: z.number().describe("dB the style guide sets music under the voice (`sound.musicUnderVoice` in `style.json`, 12 by default)."),
+  from: z.enum(STYLE_SOURCES).describe("`file`: written in `style.json`; `default`: Frameshell's."),
+  required: z.number().describe("Least margin before a window is `masking`, dB: `musicUnderVoice` minus 3 (a step anyone hears), never under 0."),
+  windows: z.int().describe("Windows where the voice speaks and music plays under it."),
+  minMargin: z.number().nullable().describe("Smallest margin, dB: voice minus music, each the power mean over the window's speaking steps. Null with no such window."),
+  medianMargin: z.number().nullable().describe("Median margin of those windows, dB; null with none."),
+  low: z.array(ReviewVoiceSpanSchema).describe("Stretches of windows whose margin is under `required` (at most 20): the music sits louder under the voice than the style asks."),
+});
+
+/** A clip edge with no fade that cuts into sound already going. */
+export const ReviewEdgeSchema = z.object({
+  clip: z.string(),
+  track: z.string(),
+  role: z.enum(SOUND_ROLES),
+  at: z.number().describe("Seconds the clip starts."),
+  level: z.number().describe("Level of its first 10 ms as heard (gain applied), dBFS."),
+  jump: z.number().describe("That level over the sound of the rest of the film in the 10 ms before, dB."),
+});
+
+/** A stretch of a file's sound with too much energy where a sound turns shrill. */
+export const ReviewHarshSpanSchema = z.object({
+  from: z.number(),
+  to: z.number(),
+  over: z.number().describe("Most the band comes over `reference` in the stretch, dB."),
+});
+
+/** A file's 2 to 6 kHz band window by window against that band at the mix's loudest moment. */
+export const ReviewHarshSchema = z.object({
+  band: z.tuple([z.number(), z.number()]).describe("Band measured, Hz."),
+  window: z.number().describe("Seconds per window (the EBU R128 momentary 400 ms)."),
+  reference: z.number().describe("Level of the band in the mix's loudest window, dBFS, at least 20 dB under the whole mix there: what the rest is judged against."),
+  loudestAt: z.number().describe("Seconds that loudest window starts."),
+  maxOver: z.number().describe("Most any window's band comes over `reference`, dB (negative: never over it)."),
+  spans: z.array(ReviewHarshSpanSchema).describe("Stretches whose band is over 6 dB above `reference` (at most 20)."),
+});
+
 /** Clicks found in a file's sound. */
 export const ReviewClicksSchema = z.object({
   count: z.int(),
@@ -336,6 +394,15 @@ export const ReviewSoundSchema = z.object({
   clicks: ReviewClicksSchema.nullable().describe(
     "Clicks in a file's sound: a burst above 14 kHz peaking over 9 times the RMS of its 20 ms, with 80 % of that energy in 1 ms (none in the first 20 ms). Null for a timeline (render it and review the file).",
   ),
+  music: ReviewMusicSchema.nullable().describe("Null for a file, or a timeline with no voice or no music clip in the range."),
+  edges: z
+    .array(ReviewEdgeSchema)
+    .nullable()
+    .describe(
+      "Clips starting with no fade into sound their asset already plays before their in point (a cut mid-sound), heard at or above -45 dBFS and 19 dB or more over the rest of the film's sound just before (at most 20). " +
+        "A clip played from its asset's start, or picking up the previous clip's sound, is no cut-in. Null for a file.",
+    ),
+  harsh: ReviewHarshSchema.nullable().describe("Null for a timeline (render it and review the file), a file with no sound, or a range shorter than one window."),
 });
 
 /** See {@link ReviewSoundSchema}. */
@@ -359,9 +426,14 @@ export const ReviewRequirementCheckSchema = z.object({
     .string()
     .describe(
       "What was checked: `film.maxSeconds`, `film.minSeconds`, `film.maxStatic`, `film.endCard`, `film.loudness.target`, `film.loudness.maxTruePeak`, `captions.minSize`, " +
-        "`clip.appearsBy`, `clip.before` or `clip.keepsMoving`.",
+        "`clip.appearsBy`, `clip.before`, `clip.keepsMoving` or `clip.staysInFrame`.",
     ),
   clip: z.string().optional().describe("The clip a `clip.*` check is about."),
+  format: z.string().optional().describe("`clip.staysInFrame`: the project format whose frame was checked (`format.list`), the one reviewed."),
+  spans: z
+    .array(ReviewSpanSchema)
+    .optional()
+    .describe("`clip.staysInFrame` that fails: the timeline seconds in which what the clip draws leaves the frame (or comes inside the margin)."),
   status: z.enum(["pass", "fail", "skipped"]).describe("`skipped`: it cannot be measured on this review (a file has no clips, a timeline has no loudness, the range stops short of the end...); the message says why."),
   expected: z.union([z.string(), z.number()]).describe("What the file asks for."),
   actual: z.union([z.string(), z.number()]).nullable().describe("What the review measured; null when skipped."),
@@ -390,18 +462,88 @@ export const ReviewRequirementsSchema = z.object({
 /** See {@link ReviewRequirementsSchema}. */
 export type ReviewRequirements = z.output<typeof ReviewRequirementsSchema>;
 
-/** The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (draft size) and its sound. */
+/** Several big changes of the picture close together, as `analyze` counts them. */
+export const ReviewBurstSchema = z.object({
+  from: z.number().describe("Seconds of the first big change."),
+  to: z.number().describe("Seconds of the end of the frame of the last big change."),
+  count: z.int().describe("Big changes inside."),
+});
+
+/** See {@link ReviewBurstSchema}. */
+export type ReviewBurst = z.output<typeof ReviewBurstSchema>;
+
+/** How the film moves in time, on the scale of `analyze`'s `rhythm`. */
+export const ReviewRhythmSchema = z.object({
+  label: z
+    .enum(["MEASURED", "ESTIMATED"])
+    .describe("MEASURED for a `file` (every frame read like `analyze` reads it, shots found like `analyze` finds them: the same numbers); ESTIMATED for a timeline (sampled frames, shots from the cuts of every track, a title card on an upper track included)."),
+  shotLengthCv: z.number().describe("Standard deviation of the shot lengths over their mean, 3 decimals: 0 is a metronome, above 0.6 the cutting is irregular."),
+  stillShare: z.number().describe("Share of the frames (after the first; on a sampled timeline, of the sample intervals) in which the picture changes by under 0.5 grey levels, 0 to 1."),
+  bursts: z.array(ReviewBurstSchema).describe("Stretches with 3 or more big changes within 1.5 s: a montage burst, a flurry of effects."),
+});
+
+/** See {@link ReviewRhythmSchema}. */
+export type ReviewRhythm = z.output<typeof ReviewRhythmSchema>;
+
+/** Kinds of stretch the speed graph finds in a move. */
+export const SPEED_SPAN_KINDS = ["linear", "stop"] as const;
+
+/** A stretch of a hero point's move that reads mechanical. */
+export const ReviewSpeedSpanSchema = z.object({
+  from: z.number().describe("Timeline seconds the stretch starts."),
+  to: z.number().describe("Timeline seconds it ends (the end of its last frame)."),
+  kind: z
+    .enum(SPEED_SPAN_KINDS)
+    .describe(
+      "`linear`: the speed holds within 2.5 % (fastest minus slowest over the mean) for 6 frames or more and at least 20 % of the move: a move with no ease. " +
+        "`stop`: under 0.25 px per frame for 4 frames or more between two moving stretches: a dead stop mid-move. Both are warnings, never failures.",
+    ),
+  speed: z.number().describe("Mean speed of the stretch, film px per frame."),
+});
+
+/** See {@link ReviewSpeedSpanSchema}. */
+export type ReviewSpeedSpan = z.output<typeof ReviewSpeedSpanSchema>;
+
+/** The speed graph of one clip's hero point. */
+export const ReviewSpeedSchema = z.object({
+  clip: z.string(),
+  label: z.literal("ESTIMATED").describe("A judgment from the clip's placement or its render's alpha, not a measure of the finished picture."),
+  hero: z
+    .enum(["placement", "alpha"])
+    .describe(
+      "`placement`: a media clip's picture as its keys place it (position and scale, through the format's cover crop), every frame, no render; " +
+        "`alpha`: what a generated clip draws, the centre and the square root of the area of its render's alpha, read at up to 90 frames and spread between them.",
+    ),
+  from: z.number().describe("Timeline seconds of the first frame measured."),
+  to: z.number().describe("Timeline seconds of the end of the last."),
+  frames: z.int().describe("Timeline frames the speed covers."),
+  samples: z.int().describe("Frames actually measured: every frame for `placement`, at most 90 for `alpha`."),
+  peak: z.number().describe("Fastest speed, film px per frame: the centre's travel plus half the change of the size."),
+  spans: z.array(ReviewSpeedSpanSchema).describe("Linear moves and dead stops, in time order; empty when the move eases (or nothing moves)."),
+  sheet: z.string().nullable().describe("The chart (`speed` sheet), absolute path; null when skipped."),
+  skipped: z.string().optional().describe("Why the clip was not measured (a generated clip with no render, a render that cannot be read or has no alpha, or alpha on fewer than two frames); absent when it was."),
+});
+
+/** See {@link ReviewSpeedSchema}. */
+export type ReviewSpeed = z.output<typeof ReviewSpeedSchema>;
+
+/**
+ * The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (Rec. 709 luma) at 64 px on
+ * the long side (the scale of `analyze`) and its sound.
+ */
 export const ReviewMetricsSchema = z.object({
   picture: z.object({
-    samples: z.int().describe("Frames the picture was measured on: a file at up to 15 a second, a timeline at most 90 over the range, so a short flash between two samples can be missed."),
+    samples: z.int().describe("Frames the picture was measured on: every frame of a file; a timeline's at most 90 over the range, so a short flash between two samples can be missed."),
     spacing: z.number().describe("Seconds between samples."),
-    longestStatic: ReviewSpanSchema.nullable().describe("The longest stretch where the picture changes by less than 0.35 grey levels between samples; null when nothing is still."),
+    sampled: z.boolean().describe("The samples are more than a frame apart (a timeline over 90 frames): every threshold then applies per sample interval."),
+    longestStatic: ReviewSpanSchema.nullable().describe("The longest stretch where the picture changes by less than 0.5 grey levels from one sample to the next, to the end of its last frame; null when nothing is still."),
     staticRuns: z.array(ReviewSpanSchema).describe("Every still stretch over 3 s."),
-    events: z.int().describe("Visual events: peaks of change above the larger of 1 grey level and 2.5 times the median change."),
+    events: z.int().describe("Visual events: `analyze`'s big changes (a change 4 times the median within 0.5 s around it and at least 1 grey level, or 15 % of the grey range, or a `file`'s scene cut)."),
     largestGap: ReviewSpanSchema.nullable().describe("The largest gap between visual events, the start and the end of the range counted as ends; null for one sample."),
     blank: z.array(ReviewSpanSchema).describe("Stretches of near-blank pictures (luma standard deviation under 4 grey levels), from the first to the last such sample."),
     firstFrameEmpty: z.boolean().nullable().describe("Frame 0 is near-blank; null when the range does not start at 0."),
   }),
+  rhythm: ReviewRhythmSchema.describe("Shot-length CV, still share and bursts, as `analyze` measures a reference: one scale for both."),
   subtitles: z
     .object({ cues: z.int(), shortCues: z.array(ReviewShortCueSchema) })
     .nullable()
@@ -410,10 +552,11 @@ export const ReviewMetricsSchema = z.object({
   sync: ReviewSyncSchema.nullable().describe("Sounds against the picture events they belong to, with what random placement would score; null when there are no sounds to compare."),
   seam: ReviewSeamSchema.nullable().describe("Last frame against the first; null for a film of one frame."),
   delivery: ReviewDeliverySchema.nullable().describe("The file against the export plan; null unless a `file` is reviewed with a `preset`."),
-  sound: ReviewSoundSchema.nullable().describe("The sound review list: voice over bed per window, repeated effects, cut-off clips, the ending and clicks; null when there is no sound to review."),
+  sound: ReviewSoundSchema.nullable().describe("The sound review list: voice over bed and over music per window, repeated effects, cut-off and cut-in clips, the ending, clicks and harshness; null when there is no sound to review."),
   craft: z.array(ReviewCraftWarningSchema).describe("Things to fix or defend, in film order, waived ones left out; empty when none."),
   waived: z.array(ReviewWaivedWarningSchema).describe("Craft warnings a waiver of `requirements.json` covers, with its reason: accepted, not gone; empty when none."),
   requirements: ReviewRequirementsSchema.nullable().describe("`requirements.json` judged: its checks, its waivers and what failed; null when the project has none."),
+  speed: z.array(ReviewSpeedSchema).optional().describe("With `speed`: the speed graph of the clip's hero point, with its linear moves and dead stops. Absent without `speed`."),
 });
 
 /** See {@link ReviewMetricsSchema}. */
@@ -473,4 +616,38 @@ export const ReviewResultSchema: z.ZodType<ReviewResultShape> = z.object({
   safeZones: z.array(ReviewSafeZoneSchema).describe("One entry per platform of the `safe` sheet: its zones in the film's pixels and the captions that cross them; empty without the sheet."),
   metrics: ReviewMetricsSchema.nullable().describe("The numbers, also written to `metrics.json` in `dir`; null when `metrics` is not among the outputs asked for."),
   warnings: z.array(z.string()).describe("What could not be shown (a seam on a one-frame film, nothing moving…); empty when none."),
+});
+
+/** See {@link RequirementsChangeSchema}. */
+export interface RequirementsChange {
+  dir: string;
+  path: string;
+  changes: { key: string; before: unknown; after: unknown }[];
+  op: string;
+  tx: string;
+  proposal: string | null;
+}
+
+/**
+ * What a `review.require` or `review.waive` changed in `requirements.json` (#457, ADR 0036).
+ * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
+ */
+export const RequirementsChangeSchema: z.ZodType<RequirementsChange> = z.object({
+  dir: z.string().describe("Project root."),
+  path: z.string().describe("The requirements file, project-relative: `requirements.json`."),
+  changes: z
+    .array(
+      z.object({
+        key: z.string().describe("What changed: `film.maxSeconds`, `captions.minSize`, `fail`, `clip:<id>.staysInFrame`, `waiver:<check>` or `waiver:<check>:<clip>` (value: its reason)."),
+        before: z.unknown().describe("Value in the file before; null when it was not set."),
+        after: z.unknown().describe("Value in the file after; null when it is no longer set."),
+      }),
+    )
+    .describe("Every value that changed; empty when the file already held it."),
+  op: z.string().describe("Journal id of the change in `.frameshell/history/project.config.jsonl`, `op_…`; `revert` takes it."),
+  tx: z.string().describe("Transaction the change joined (ADR 0036); `revert` with it undoes the whole transaction."),
+  proposal: z
+    .string()
+    .nullable()
+    .describe("Review mode (ADR 0019): the proposal now holding the change, which reaches `requirements.json` only once the person accepts it (`proposal.wait`). Null: applied at once."),
 });

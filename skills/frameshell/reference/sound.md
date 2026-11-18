@@ -60,3 +60,9 @@ A track synthesized from a seed: drums, bass, chords, a melody from the minor pe
 - Keep the accents rare: one `braaam` or `sting` per film (on the title or the logo), a `swell` into a chapter cut instead of a noise whoosh, a `bell` or `notify` only on a visible badge or message.
 - Leave at least two real silences before the peak of a film. Never put a noise whoosh on every transition.
 - You cannot listen: check the result's `peakDb` and `rmsDb`, and look at the export with `frameshell review` ([critique.md](critique.md)).
+
+## Let the person choose by ear
+
+You cannot hear whether a take suits the picture; the person can. When there are several takes to choose from (two or three whooshes or seeds, music presets, `music candidates`), ask the person to audition them in the app: select the files in the Explorer (Cmd/Ctrl-click) and pick **Audition N sounds…** from the right-click menu, or right-click the folder `assets/sound/`, or a `Music 1` track that `music candidates` made. The dialog plays each one, draws its spectrogram, shows its loudness and the kind and seed of a generated take, and **Match loudness** plays them all at the quietest one's level, so the louder one does not win by being louder. It edits nothing: ask which file they chose, then place or keep it.
+
+`audio_inspect` (MCP) reads the same facts without the app: `lufs` (for a sound shorter than 0.4 s, `shortSound: true`, the loudness of one 400 ms block holding it), `truePeak`, `duration`, and `take` (kind, seed, variant or preset and tempo) of every file; `spectrogram: true` adds the picture as numbers, for drawing, not for you to read.

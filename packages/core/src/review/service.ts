@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   ErrorCode,
   REVIEW_KEEP,
-  REVIEW_SHEETS,
+  REVIEW_PICKED_SHEETS,
   type ReviewDelivery,
   type ReviewLoudness,
   type ReviewMetrics,
@@ -16,12 +16,29 @@ import {
   type ReviewSheet,
   type ReviewSheetKind,
   type ReviewSound,
+  type ReviewSpeed,
   type ReviewSync,
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
-import { type FormatEntry, type PlatformId, letterboxPicture, type ResolvedSubtitleTrack, SAFE_ZONES, type ExportPreset, type Timeline } from "@frameshell/schema";
+import {
+  type AdapterClip,
+  type FormatEntry,
+  type PlatformId,
+  letterboxPicture,
+  type RequirementsFile,
+  type ResolvedSubtitleTrack,
+  SAFE_ZONES,
+  type ExportPreset,
+  type Size,
+  type StyleSource,
+  type Timeline,
+  showsPicture,
+} from "@frameshell/schema";
 import { PHONE_BAND_FILTER, measureLoudness } from "../analyze/loudness.js";
+import { MAX_PICTURE_S } from "../analyze/picture.js";
+import { sceneScores } from "../analyze/scene.js";
+import { DEFAULT_CUT_THRESHOLD, detectCuts } from "../analyze/shots.js";
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
 import { captionFontMetrics } from "../export/font-metrics.js";
@@ -32,29 +49,49 @@ import { probeMedia } from "../media/ffmpeg.js";
 import type { ScannedAsset } from "../people/face-clusters.js";
 import { soundsOn } from "../sound/place.js";
 import type { TimelineService } from "../timeline/service.js";
+import type { TempoResult } from "../timeline/tempo.js";
+import { unusableGrid } from "../timeline/time-ref.js";
+import { encodeRgbPng } from "../segment/png.js";
 import {
+  type BeatGrid,
+  type CropRect,
   type Critical,
+  type CutPick,
+  DEFAULT_CROP_SIZE,
   type FramePick,
+  type FrameRange,
   MAX_SAFE_TILES,
+  beatPicks,
   contactPicks,
+  cropRect,
+  cutPicks,
+  frameIndex,
   frameRange,
   frameTime,
   motionPeaks,
+  onionPicks,
   phonePicks,
+  popPicks,
   seamPicks,
   sheetLayout,
   stripPicks,
   STRIPS,
+  tileLabel,
   timelineCritical,
+  timelineSampleStep,
 } from "./plan.js";
-import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
+import { speedChart } from "./chart.js";
+import { Frames, type KitSheetOptions, type SheetImagesOptions, writeOnionSheet, writePopSheet, writeSheetImages } from "./images.js";
+import { writeSheet } from "./sheet.js";
+import { type HeroSample, peakSpeed, spansOf, speedOf } from "./speed.js";
+import { SPEED_ALPHA_WIDTH } from "./thresholds.js";
 import { deliveryChecks } from "./delivery.js";
 import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
-import { fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
+import { fileBandEnvelope, fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
 import { fileSound, heardClips, timelineSound } from "./sound.js";
-import { type BoxSpan, faceBoxes, graphicBoxes } from "./placement.js";
-import { type ClipSpan, judgeRequirements } from "./requirements.js";
+import { type BoxSpan, type ClipPicture, alphaHero, clipHero, clipPointInFilm, faceBoxes, graphicBoxes } from "./placement.js";
+import { type ClipSpan, type FramePlacement, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt, withinPicture } from "./safe.js";
 import { type FilmSource, type MotionSeries, fileSource, timelineSource } from "./source.js";
@@ -62,6 +99,23 @@ import { syncMetrics } from "./sync.js";
 
 /** A timeline flattened for a format, as `ExportService.resolvedTimeline` gives it. */
 type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
+
+/** A clip of a video track of the flattened timeline, as `ReviewService.#videoClip` finds it. */
+interface VideoClip {
+  clip: ClipPicture["clip"];
+  placed: ClipPicture;
+  /** Timeline seconds it starts and ends. */
+  start: number;
+  end: number;
+  resolved: Flat;
+}
+
+/** What `ReviewService.#boxes` placed: graphics and faces, generated clips with no alpha, and whether the timeline was laid out at all. */
+interface Placed {
+  boxes: BoxSpan[];
+  opaque: string[];
+  laidOut: boolean;
+}
 
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
@@ -75,9 +129,25 @@ export interface ReviewServiceOptions {
   soundProfile?(root: string, asset: string): Promise<EnergyProfile>;
   /** Platforms the project's style guide names (`style.json`); empty when there is none. */
   platforms(root: string): Promise<readonly PlatformId[]>;
+  /** dB the project's style guide sets music under the voice (`style.json` `sound.musicUnderVoice`, or the default); absent: the default. */
+  musicUnderVoice?(root: string): Promise<{ value: number; source: StyleSource }>;
+  /** The tempo grid of a timeline up to `horizon` seconds (`tempoGrid`); absent: the `beats` sheet is not written. */
+  grid?(root: string, timeline: { timeline: Timeline; fps: number }, horizon: number): Promise<TempoResult>;
+  /** Size of the picture of a project asset, null when it has none (`MediaService.probe`); absent: taken as the film's. */
+  pictureSize?(root: string, asset: string): Promise<Size | null>;
   /** Absolute ffmpeg and ffprobe for the project rooted at `root`. */
   ffmpeg(root: string): Promise<string>;
   ffprobe(root: string): Promise<string>;
+}
+
+/** The point `cropAt` crops every tile around; see the `review` method. */
+export interface CropAt {
+  /** Fractions of the film's frame, or of the picture of `clip`. */
+  x: number;
+  y: number;
+  /** Width of the crop as a share of the frame's width; default {@link DEFAULT_CROP_SIZE}. */
+  size?: number | undefined;
+  clip?: string | undefined;
 }
 
 /** What one `review` run is asked for; see the `review` method. */
@@ -101,13 +171,26 @@ export interface ReviewRequest {
   preset?: string | undefined;
   /** The film is meant to repeat: a seam that holds a frame or jumps is a craft warning. */
   loop?: boolean | undefined;
+  /** The project's requirements as `view` shows them, when a proposal changes them (ADR 0036); absent: the file's. */
+  requirements?: RequirementsFile | null | undefined;
+  /** Why the proposal's requirements hold no valid file (`requirements` is then null): said in `warnings`. */
+  requirementsError?: string | undefined;
+  /** Crop every tile but the `safe` sheet's around this point. */
+  cropAt?: CropAt | undefined;
+  /** Seconds of a pop: the `pop` sheet shows the frame before and the frame at it, and their difference. */
+  pop?: number | undefined;
+  /** Clip id whose frames the `onion` sheet blends. */
+  onion?: string | undefined;
+  /** Clip id whose hero point the `speed` sheet charts. */
+  speed?: string | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
 export const REVIEW_DIR = [".frameshell", "review"] as const;
 
 /**
- * `review` (#457): contact sheet, phone sheet, fast-motion strips, loop seam and `metrics.json` of a timeline or an
+ * `review` (#457): contact sheet, phone sheet, fast-motion strips, loop seam, cut strips, the per-clip kit (pop pair,
+ * onion skin, speed graph) and `metrics.json` of a timeline or an
  * exported file, written to `.frameshell/review/<n>/`. Frames come from the `frame` method (timeline) or ffmpeg (file); sampling
  * is in `plan.ts` and tiling in `sheet.ts`, which #471 `analyze` shares.
  */
@@ -120,6 +203,18 @@ export class ReviewService {
 
   /** Write the sheets of `request` for the project at `root`; see the `review` method. */
   async run(root: string, request: ReviewRequest, signal?: AbortSignal): Promise<ReviewResult> {
+    if (request.file && request.cropAt?.clip !== undefined) {
+      throw new RpcError(ErrorCode.InvalidOperation, "review: `cropAt.clip` follows a clip of the timeline, and a file has no clips: drop `clip` (the point is then in the frame) or review the timeline.", {
+        op: "review",
+        field: "cropAt.clip",
+        reason: "file",
+      });
+    }
+    for (const field of ["onion", "speed"] as const) {
+      if (request.file && request[field] !== undefined) {
+        throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` names a clip of the timeline, and a file has no clips: review the timeline.`, { op: "review", field, reason: "file" });
+      }
+    }
     const scratch = join(root, ".frameshell", "cache", "review", randomBytes(6).toString("hex"));
     await mkdir(scratch, { recursive: true });
     try {
@@ -135,20 +230,54 @@ export class ReviewService {
           valid: { min: 0, max: last },
         });
       }
-      const safePlatforms = await this.#safePlatforms(root, request, source, warnings);
-      const kinds = REVIEW_SHEETS.filter((kind) => (kind === "safe" ? safePlatforms.length > 0 : request.sheets === undefined || request.sheets.includes(kind)));
-      const { run, dir } = await this.#nextRun(root);
+      const pop = request.pop === undefined ? null : popPicks(source.frames, frameIndex(request.pop, source.fps));
+      if (request.pop !== undefined && !pop) {
+        const last = frameTime(source.frames - 1, source.fps);
+        throw new RpcError(ErrorCode.InvalidOperation, `review: \`pop\` ${request.pop} s is ${request.pop < 1 / source.fps ? "the first frame, which has no frame before it" : "past the film's last frame"} (a pop is looked at from ${frameTime(1, source.fps)} to ${last} s).`, {
+          op: "review",
+          field: "pop",
+          reason: "out of range",
+          valid: { min: frameTime(1, source.fps), max: last },
+        });
+      }
+      // With only the per-clip kit asked for, the run is a debugging look: no default sheets.
+      const kitOnly = request.sheets === undefined && (request.pop !== undefined || request.onion !== undefined || request.speed !== undefined);
+      const safePlatforms = kitOnly && !request.platform ? [] : await this.#safePlatforms(root, request, source, warnings);
+      // `beats` and `cuts` are written only when named: a tempo most films do not set, a strip per cut that floods a long film.
+      const asked = (kind: (typeof REVIEW_PICKED_SHEETS)[number]) =>
+        kind === "beats" || kind === "cuts" ? request.sheets?.includes(kind) === true : !kitOnly && (request.sheets === undefined || request.sheets.includes(kind));
+      const kinds = REVIEW_PICKED_SHEETS.filter((kind) => (kind === "safe" ? safePlatforms.length > 0 : asked(kind)));
       const frames = new Frames(source, join(scratch, "frames"));
       const aspect = source.width / source.height;
       const sheets: ReviewSheet[] = [];
       const peaks: ReviewPeak[] = [];
       let measured: MotionSeries | undefined;
       /** The motion of the range, measured once for the `motion` sheet and the metrics. */
-      const motion = async () => (measured ??= await source.motion(range, join(scratch, "motion"), signal));
+      const motion = async (): Promise<MotionSeries> => {
+        if (measured) return measured;
+        measured = await source.motion(range, join(scratch, "motion"), signal);
+        if (measured.truncated) warnings.push(`motion and rhythm: measured on the first ${MAX_PICTURE_S / 60} minutes of the file.`);
+        return measured;
+      };
       const safeZones: ReviewSafeZone[] = [];
       /** The timeline flattened for the format, resolved once for the safe-zone boxes and the sync. */
       let flattened: Promise<Flat> | undefined;
       const flat = (): Promise<Flat> => (flattened ??= this.#options.exports.resolvedTimeline(root, loaded!, request.projectFormat));
+      const frame = { width: source.width, height: source.height };
+      /** The picture the timeline's letterbox bars leave in this format (ADR 0043); null without bars. */
+      const picture = async () => letterboxPicture(frame, await flat().then((resolved) => resolved.timeline.letterbox?.aspect, () => undefined));
+      let placing: Promise<Placed> | undefined;
+      /** Graphics and faces of the timeline, placed once for the safe zones and `staysInFrame`. */
+      const placed = (topic: string): Promise<Placed> => (placing ??= this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, topic, signal));
+      const crop = request.cropAt ? await this.#cropper(root, request, request.cropAt, frame, loaded ? flat : null, loaded ? picture : null) : undefined;
+      if (crop && kinds.includes("safe")) warnings.push("safe: the safe-zone sheet shows whole frames, not the `cropAt` crop: its zones lie on the frame's edges.");
+      const onion = request.onion === undefined ? null : await this.#clipFrames(root, request, "onion", request.onion, frame, flat, range);
+      const speedClip = request.speed === undefined ? null : await this.#clipFrames(root, request, "speed", request.speed, frame, flat, range);
+      let cutting: Promise<number[]> | undefined;
+      /** Frames where a shot starts, found once for the `cuts` sheet and the metrics. */
+      const cutFrames = (): Promise<number[]> => (cutting ??= this.#cuts(request, source, critical, ffmpeg, warnings, signal));
+      // After `cropAt` is checked, so a refused clip leaves no empty run folder.
+      const { run, dir } = await this.#nextRun(root);
 
       /** Write the images of `kind` for `picks`, named `<stem>.png` or, for several, `<stem>-<i>.png`. */
       const write = async (
@@ -156,7 +285,7 @@ export class ReviewService {
         picks: readonly FramePick[],
         stem: string,
         numbered = false,
-        extra: Pick<SheetImagesOptions, "shade" | "flags"> = {},
+        extra: Pick<SheetImagesOptions, "shade" | "flags" | "label"> = {},
       ): Promise<string[]> => {
         const images = await writeSheetImages({
           ffmpeg,
@@ -170,6 +299,7 @@ export class ReviewService {
           numbered,
           scratch,
           signal,
+          ...(crop && kind !== "safe" ? { crop } : {}),
           ...extra,
         });
         sheets.push(...images.map((image) => ({ kind, ...image })));
@@ -180,13 +310,12 @@ export class ReviewService {
         signal?.throwIfAborted();
         if (kind === "contact") await write("contact", contactPicks(source.fps, range, critical, request.every), "contact");
         else if (kind === "safe") {
-          const frame = { width: source.width, height: source.height };
           const picks = contactPicks(source.fps, range, critical, request.every, MAX_SAFE_TILES);
           // Every track of a project takes the one caption face of its style.
           const metrics = subtitles[0] ? await captionFontMetrics(root, subtitles[0].style.font) : null;
           // The bars of the timeline's letterbox in this format (ADR 0043) cover graphics and faces; captions are drawn over them.
-          const picture = loaded ? letterboxPicture(frame, await flat().then((resolved) => resolved.timeline.letterbox?.aspect, () => undefined)) : null;
-          const boxes = withinPicture(loaded ? await this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, signal) : [], picture);
+          const bars = loaded ? await picture() : null;
+          const boxes = withinPicture(loaded ? (await placed("safe")).boxes : [], bars);
           for (const platform of safePlatforms) {
             const zone = SAFE_ZONES[platform];
             const insets = filmInsets(zone, frame);
@@ -197,13 +326,29 @@ export class ReviewService {
               shade: { top: insets.top / frame.height, bottom: insets.bottom / frame.height, left: insets.left / frame.width, right: insets.right / frame.width },
               flags: (pick) => subjectsAt(crossing, pick.frame),
             });
-            safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, ...(picture ? { picture } : {}), sheets: paths, flags: safeFlags(crossing, source.fps) });
+            safeZones.push({ platform, measured: zone.measured, source: zone.source, insets, ...(bars ? { picture: bars } : {}), sheets: paths, flags: safeFlags(crossing, source.fps) });
           }
         } else if (kind === "phone") await write("phone", phonePicks(source.fps, range), "phone");
         else if (kind === "seam") {
           const picks = seamPicks(range);
           if (picks) await write("seam", picks, "seam");
           else warnings.push("seam: the range is a single frame, so there is no seam to look at.");
+        } else if (kind === "cuts") {
+          const found = cutPicks(source.fps, range, await cutFrames());
+          if (found.picks.length === 0) warnings.push("cuts: no cut falls inside the range reviewed, so there is no seam strip to show.");
+          else {
+            if (found.dropped > 0) warnings.push(`cuts: ${found.cuts} cuts in the range; the sheet shows ${found.cuts - found.dropped} of them spread evenly and leaves ${found.dropped} out (narrow the range to see them).`);
+            await write("cuts", found.picks, "cuts", false, { label: (pick, at) => tileLabel(at, pick.tag, (pick as CutPick).name) });
+          }
+        } else if (kind === "beats") {
+          const grid = loaded ? await this.#beatGrid(root, loaded, source, warnings) : null;
+          if (!loaded) warnings.push("beats: a file has no tempo grid: review the timeline for the beats sheet.");
+          const picks = grid ? beatPicks(source.fps, range, grid) : [];
+          if (grid && picks.length === 0) warnings.push("beats: no beat of the tempo grid falls in the range reviewed.");
+          if (picks.length > 0) {
+            const names = new Map(picks.map((pick) => [pick.frame, pick.name] as const));
+            await write("beats", picks, "beats", false, { label: (pick, at) => tileLabel(at, pick.tag, names.get(pick.frame)) });
+          }
         } else {
           const series = await motion();
           const found = motionPeaks(series.times, series.energy);
@@ -215,8 +360,29 @@ export class ReviewService {
         }
       }
 
+      const kit: KitSheetOptions = { ffmpeg, fps: source.fps, aspect, frames, layout: sheetLayout("pop", aspect), dir, scratch, signal, ...(crop ? { crop } : {}) };
+      if (pop) {
+        signal?.throwIfAborted();
+        sheets.push({ kind: "pop", ...(await writePopSheet({ ...kit, picks: pop })) });
+      }
+      if (onion) {
+        signal?.throwIfAborted();
+        const picks = onionPicks(onion.frames);
+        const label = tileLabel(frameTime(picks[0]!.frame, source.fps), "onion", `onion ${request.onion} ${picks.length} frames to ${frameTime(picks.at(-1)!.frame, source.fps).toFixed(2)}`);
+        sheets.push({ kind: "onion", ...(await writeOnionSheet({ ...kit, layout: sheetLayout("onion", aspect), picks, label })) });
+      }
+      const speed: ReviewSpeed[] = [];
+      if (speedClip) {
+        signal?.throwIfAborted();
+        const found = await this.#speed(root, request.speed!, speedClip, source, { ffmpeg, dir, scratch, warnings, signal });
+        speed.push(found.speed);
+        if (found.sheet) sheets.push(found.sheet);
+      }
+
       let metrics: ReviewMetrics | null = null;
-      if (request.sheets === undefined || request.sheets.includes("metrics")) {
+      const wantsMetrics = request.sheets === undefined ? !kitOnly || request.speed !== undefined : request.sheets.includes("metrics");
+      if (request.speed !== undefined && !wantsMetrics) warnings.push("speed: its linear moves and dead stops are listed in `metrics.speed`: add `metrics` to the sheets to get them.");
+      if (wantsMetrics) {
         signal?.throwIfAborted();
         const series = await motion();
         const seconds = { from: frameTime(range.first, source.fps), to: frameTime(range.end, source.fps) };
@@ -224,14 +390,17 @@ export class ReviewService {
         let decoded: Promise<Float32Array> | undefined;
         /** The 10 ms envelope of a file's sound, decoded once for the sync and the sound review list. */
         const envelope = (file: string) => (decoded ??= fileEnvelope(ffmpeg, file, join(scratch, "sound")));
-        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, critical, seconds, envelope, warnings, signal);
+        const cuts = await cutFrames();
+        const sync = await this.#sync(root, request, source, loaded ? flat : null, series, cuts, critical, seconds, envelope, warnings, signal);
         const sound = await this.#sound(root, request, source, loaded ? flat : null, seconds, ffmpeg, envelope, scratch, warnings, signal);
         const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
         const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
         metrics = reviewMetrics({
           fps: source.fps,
           range: seconds,
+          source: request.file ? "file" : "timeline",
           series,
+          cuts,
           tracks: subtitles,
           loudness,
           hasSound: source.audio ?? null,
@@ -241,9 +410,21 @@ export class ReviewService {
           delivery,
           sound,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
+          ...(speedClip ? { speed } : {}),
         });
-        const requirements = await readRequirementsFile(root);
+        if (request.requirementsError !== undefined) warnings.push(`requirements: the proposal's requirements are invalid (${request.requirementsError.split("\n")[0]}), so the film is judged without them.`);
+        const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
         if (requirements) {
+          const inFrame = loaded !== null && requirements.clips.some((clip) => clip.staysInFrame !== undefined);
+          let placement: FramePlacement | null = null;
+          if (inFrame) {
+            const found = await placed("staysInFrame");
+            if (found.laidOut) {
+              const unplaced = new Map(found.opaque.map((id) => [id, "its render has no alpha plane, so it fills the frame and what it draws has no box"] as const));
+              const bars = await picture();
+              placement = { format: (await flat()).format, picture: bars ?? { left: 0, top: 0, ...frame }, boxes: found.boxes, unplaced };
+            }
+          }
           const judged = judgeRequirements({
             requirements,
             metrics,
@@ -254,6 +435,7 @@ export class ReviewService {
             timeline: loaded?.timeline ?? null,
             clips,
             tracks: loaded ? subtitles : null,
+            placement,
           });
           metrics = judged.metrics;
           warnings.push(...judged.notes);
@@ -290,25 +472,199 @@ export class ReviewService {
 
 
   /**
-   * Boxes of the film's pixels that graphics (generated clips with an alpha render) and faces (footage with a cached `people scan`)
-   * hold, for the safe-zone check. Says in `warnings` what could not be measured; never fails the run.
+   * The tempo grid of the timeline reviewed, the one `tempo.show` lists, for the `beats` sheet; null, with a `warnings`
+   * line saying why, when there is none to use (no tempo, beats not measured or broken, a LOW-confidence grid).
    */
-  async #boxes(root: string, flat: () => Promise<Flat>, source: FilmSource, work: string, warnings: string[], signal?: AbortSignal): Promise<BoxSpan[]> {
+  async #beatGrid(root: string, loaded: LoadedTimeline, source: FilmSource, warnings: string[]): Promise<BeatGrid | null> {
+    if (!this.#options.grid) {
+      warnings.push("beats: this daemon has no tempo grid to read.");
+      return null;
+    }
+    let found: TempoResult;
+    try {
+      found = await this.#options.grid(root, loaded, source.frames / source.fps + 1);
+    } catch (error) {
+      warnings.push(`beats: the tempo grid cannot be read (${(error as Error).message.split("\n")[0]}).`);
+      return null;
+    }
+    const refusal = unusableGrid(found);
+    if (refusal || !found.grid) {
+      warnings.push(`beats: no beats sheet: ${refusal?.message ?? "the timeline has no tempo."}${refusal?.hint ? ` ${refusal.hint}` : ""}`);
+      return null;
+    }
+    return found.grid;
+  }
+
+  /**
+   * The crop of each tile for `cropAt`: one rectangle for a point of the frame, or, with `clip`, the point of the clip's
+   * picture where the clip's placement (keys) and the format's cover crop put it at that frame, clamped to the clip's span.
+   * The crop stays inside the picture letterbox bars leave. Throws InvalidOperation when `clip` is no picture clip.
+   */
+  async #cropper(
+    root: string,
+    request: ReviewRequest,
+    at: CropAt,
+    frame: Size,
+    flat: (() => Promise<Flat>) | null,
+    picture: (() => Promise<ReturnType<typeof letterboxPicture>>) | null,
+  ): Promise<(pick: FramePick, seconds: number) => CropRect> {
+    const size = at.size ?? DEFAULT_CROP_SIZE;
+    const bars = picture ? await picture() : null;
+    if (at.clip === undefined) {
+      const fixed = cropRect(frame, { x: at.x * frame.width, y: at.y * frame.height }, size, bars);
+      return () => fixed;
+    }
+    const { clip, placed, start, end, resolved } = await this.#videoClip(root, request, "cropAt.clip", at.clip, frame, flat!);
+    const last = Math.max(start, end - 0.5 / resolved.fps);
+    return (_pick, seconds) => {
+      // The middle of the frame, where the capture takes it.
+      const shown = Math.min(Math.max(seconds + 0.5 / resolved.fps, clip.start), last);
+      const point = clipPointInFilm(placed, shown, at, frame, resolved.project, resolved.layout);
+      return cropRect(frame, point, size, bars);
+    };
+  }
+
+  /**
+   * The clip `id` of a video track of the flattened timeline, with the size of its own picture. Throws InvalidOperation,
+   * naming `field`, when there is no such clip or it has no picture.
+   */
+  async #videoClip(root: string, request: ReviewRequest, field: string, id: string, frame: Size, flat: () => Promise<Flat>): Promise<VideoClip> {
+    const resolved = await flat();
+    const base = resolved.timeline.tracks.find(showsPicture);
+    const track = resolved.timeline.tracks.find((candidate) => candidate.kind === "video" && candidate.clips.some((clip) => clip.id === id));
+    const clip = track?.kind === "video" ? track.clips.find((candidate) => candidate.id === id) : undefined;
+    if (!track || !clip) {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` ${id} is not a clip of a video track of timeline ${request.timeline} (\`timeline.show\` lists the clip ids).`, {
+        op: "review",
+        field,
+        reason: "not found",
+      });
+    }
+    const generated = !("asset" in clip);
+    let source: Size | null = frame;
+    if ("asset" in clip && this.#options.pictureSize) source = await this.#options.pictureSize(root, clip.asset);
+    if (!source) {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` ${id} plays ${"asset" in clip ? clip.asset : "a clip"}, which has no picture to follow.`, {
+        op: "review",
+        field,
+        reason: "no picture",
+      });
+    }
+    const length = "asset" in clip ? (clip.out - clip.in) / (clip.speed ?? 1) : (clip.duration ?? 0);
+    return { clip, placed: { clip, source, generated, base: base?.id === track.id }, start: clip.start, end: clip.start + length, resolved };
+  }
+
+  /** The clip `id` of {@link #videoClip} and the frames of the range it plays in; InvalidOperation when it plays in none. */
+  async #clipFrames(root: string, request: ReviewRequest, field: "onion" | "speed", id: string, frame: Size, flat: () => Promise<Flat>, range: FrameRange): Promise<VideoClip & { frames: FrameRange }> {
+    const found = await this.#videoClip(root, request, field, id, frame, flat);
+    const fps = found.resolved.fps;
+    const frames = { first: Math.max(range.first, frameIndex(found.start, fps)), end: Math.min(range.end, Math.ceil(found.end * fps - 1e-6)) };
+    if (frames.first >= frames.end) {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` ${id} plays from ${found.start} to ${Math.round(found.end * 1000) / 1000} s, outside the range reviewed.`, {
+        op: "review",
+        field,
+        reason: "out of range",
+      });
+    }
+    return { ...found, frames };
+  }
+
+  /**
+   * The speed graph of a clip's hero point over `found.frames`: a media clip's picture as its keys place it, every frame;
+   * a generated clip's alpha (centre and area), at up to 90 frames. Writes the chart as the `speed` sheet. A generated clip
+   * with no render, no alpha, a render that fails or alpha on fewer than two frames is skipped with the reason, in the
+   * entry and in `warnings`.
+   */
+  async #speed(
+    root: string,
+    id: string,
+    found: VideoClip & { frames: FrameRange },
+    source: FilmSource,
+    out: { ffmpeg: string; dir: string; scratch: string; warnings: string[]; signal?: AbortSignal | undefined },
+  ): Promise<{ speed: ReviewSpeed; sheet: ReviewSheet | null }> {
+    const { resolved, placed, frames } = found;
+    const fps = source.fps;
+    const film = { width: source.width, height: source.height };
+    const count = frames.end - frames.first;
+    const entry = { clip: id, label: "ESTIMATED" as const, hero: placed.generated ? ("alpha" as const) : ("placement" as const), from: frameTime(frames.first, fps), to: frameTime(frames.end, fps), frames: count };
+    const skip = (reason: string) => {
+      out.warnings.push(`speed: ${id} is not measured: ${reason}.`);
+      return { speed: { ...entry, samples: 0, peak: 0, spans: [], sheet: null, skipped: reason }, sheet: null };
+    };
+    let samples: HeroSample[];
+    if (placed.generated) {
+      const otherSize = film.width !== resolved.project.width || film.height !== resolved.project.height;
+      try {
+        const renders = this.#options.generated ? await this.#options.generated(root, resolved.timeline, otherSize ? film : undefined) : null;
+        const render = renders?.get(id);
+        if (!render) return skip("its clip has no render to read");
+        if (!render.hasAlpha) return skip("its render has no alpha plane, so what it draws has no centre to follow");
+        const step = timelineSampleStep(count);
+        samples = await alphaHero(
+          { ffmpeg: out.ffmpeg, clip: found.clip as AdapterClip, render, film, project: resolved.project, work: join(out.scratch, "speed"), signal: out.signal },
+          { first: frames.first, count: Math.ceil(count / step), step },
+          fps,
+          SPEED_ALPHA_WIDTH,
+        );
+      } catch (error) {
+        // As the safe-zone boxes do: a render or alpha read that fails is a reason in the result, never a failed run.
+        out.signal?.throwIfAborted();
+        return skip(`its render could not be read (${(error as Error).message.split("\n")[0]})`);
+      }
+      if (samples.length < 2) return skip("its alpha shows on fewer than two of the frames read, so there is no move to measure");
+    } else {
+      samples = [];
+      for (let frame = frames.first; frame < frames.end; frame++) samples.push({ frame, ...clipHero(placed, (frame + 0.5) / fps, film, resolved.project, resolved.layout) });
+    }
+    const intervals = speedOf(samples);
+    const spans = spansOf(intervals);
+    const peak = peakSpeed(intervals);
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    const layout = sheetLayout("speed", film.width / film.height);
+    const tile = { width: layout.tileWidth, height: Math.round(layout.tileWidth * 0.28) };
+    const work = join(out.scratch, "speed-chart");
+    await mkdir(work, { recursive: true });
+    const chart = speedChart(intervals, spans, { first: samples[0]?.frame ?? frames.first, end: samples.at(-1)?.frame ?? frames.end }, tile.width, tile.height);
+    await writeFile(join(work, "chart.png"), encodeRgbPng(chart.pixels, chart.width, chart.height));
+    const counted = (kind: string) => spans.filter((span) => span.kind === kind).length;
+    const label = tileLabel(entry.from, "speed", `speed ${id} peak ${round(peak)} px/frame, ${counted("linear")} linear, ${counted("stop")} stop`);
+    const path = join(out.dir, "speed.png");
+    const size = await writeSheet(out.ffmpeg, [{ path: join(work, "chart.png"), label }], { out: path, columns: 1, tile, scratch: join(work, "sheet"), ...(out.signal ? { signal: out.signal } : {}) });
+    const sheet: ReviewSheet = { kind: "speed", path, ...size, tile, tiles: [{ at: entry.from, frame: frames.first, tag: "speed", label, row: 0, column: 0 }] };
+    return {
+      speed: {
+        ...entry,
+        samples: samples.length,
+        peak: round(peak),
+        spans: spans.map((span) => ({ from: frameTime(span.from, fps), to: frameTime(Math.min(frames.end, span.to + 1), fps), kind: span.kind, speed: round(span.speed) })),
+        sheet: path,
+      },
+      sheet,
+    };
+  }
+
+  /**
+   * Boxes of the film's pixels that graphics (generated clips with an alpha render) and faces (footage with a cached `people scan`)
+   * hold, for the safe-zone check and `staysInFrame`. Says in `warnings`, under `topic`, what could not be measured; never fails
+   * the run. `opaque`: generated clips whose render has no alpha; `laidOut` false when the timeline could not be laid out.
+   */
+  async #boxes(root: string, flat: () => Promise<Flat>, source: FilmSource, work: string, warnings: string[], topic: string, signal?: AbortSignal): Promise<Placed> {
     const { generated, faceScans } = this.#options;
     const film = { width: source.width, height: source.height };
     let resolved: Flat;
     try {
       resolved = await flat();
     } catch (error) {
-      warnings.push(`safe: graphics and faces are not placed (${(error as Error).message.split("\n")[0]}).`);
-      return [];
+      warnings.push(`${topic}: graphics and faces are not placed (${(error as Error).message.split("\n")[0]}).`);
+      return { boxes: [], opaque: [], laidOut: false };
     }
     const found: BoxSpan[] = [];
+    let opaque: string[] = [];
     if (faceScans) {
       try {
         found.push(...faceBoxes(resolved.timeline, await faceScans(root), film, resolved.project, resolved.layout));
       } catch (error) {
-        warnings.push(`safe: faces are not placed (${(error as Error).message.split("\n")[0]}).`);
+        warnings.push(`${topic}: faces are not placed (${(error as Error).message.split("\n")[0]}).`);
       }
     }
     if (generated && generatedClips(resolved.timeline).length > 0) {
@@ -317,13 +673,14 @@ export class ReviewService {
         const renders = await generated(root, resolved.timeline, otherSize ? film : undefined);
         const graphics = await graphicBoxes({ ffmpeg: await this.#options.ffmpeg(root), timeline: resolved.timeline, renders, film, project: resolved.project, work, signal });
         found.push(...graphics.boxes);
-        if (graphics.opaque.length > 0) warnings.push(`safe: ${graphics.opaque.join(", ")} ${graphics.opaque.length === 1 ? "has a render" : "have renders"} with no alpha, so the box of what they draw is not known (it fills the frame).`);
+        opaque = graphics.opaque;
+        if (graphics.opaque.length > 0) warnings.push(`${topic}: ${graphics.opaque.join(", ")} ${graphics.opaque.length === 1 ? "has a render" : "have renders"} with no alpha, so the box of what they draw is not known (it fills the frame).`);
       } catch (error) {
         signal?.throwIfAborted();
-        warnings.push(`safe: graphics are not placed (${(error as Error).message.split("\n")[0]}).`);
+        warnings.push(`${topic}: graphics are not placed (${(error as Error).message.split("\n")[0]}).`);
       }
     }
-    return found;
+    return { boxes: found, opaque, laidOut: true };
   }
 
   /**
@@ -336,6 +693,7 @@ export class ReviewService {
     source: FilmSource,
     flat: (() => Promise<Flat>) | null,
     series: MotionSeries,
+    cuts: readonly number[],
     critical: readonly Critical[],
     range: { from: number; to: number },
     envelope: (file: string) => Promise<Float32Array>,
@@ -354,7 +712,8 @@ export class ReviewService {
       return syncMetrics({
         source: request.file ? "file" : "takes",
         sounds,
-        events: visualEvents(series),
+        // A timeline's cuts are `exact` already; a file's scene cuts are visual events like any big change.
+        events: visualEvents(series, source.fps, request.file ? cuts : []),
         exact: critical.filter((item) => item.tag === "cut" || item.tag === "marker").map((item) => item.at),
         cuts: critical.filter((cut) => cut.tag === "cut").map((cut) => cut.at),
         range,
@@ -368,8 +727,24 @@ export class ReviewService {
   }
 
   /**
-   * The sound review list. A file: its decoded mix (ending, clicks). A timeline: each heard clip from its asset's envelope,
-   * by role (voice over bed, repeated effects, cut-off tails, the music on the last frame). Null when there is no sound, or
+   * Frames where a shot starts, for the shot-length CV and the big changes: a file's cuts found the way `analyze` finds
+   * them (ffmpeg scene scores at its default threshold), a timeline's clip starts and ends.
+   */
+  async #cuts(request: ReviewRequest, source: FilmSource, critical: readonly Critical[], ffmpeg: string, warnings: string[], signal?: AbortSignal): Promise<number[]> {
+    if (!request.file) return critical.filter((item) => item.tag === "cut").map((item) => frameIndex(item.at, source.fps));
+    try {
+      return detectCuts(await sceneScores(ffmpeg, request.file, source.fps, signal), DEFAULT_CUT_THRESHOLD).map((cut) => cut.frame);
+    } catch (error) {
+      signal?.throwIfAborted();
+      warnings.push(`rhythm: ffmpeg could not find the shots (${(error as Error).message.split("\n")[0]}), so the film counts as one shot.`);
+      return [];
+    }
+  }
+
+  /**
+   * The sound review list. A file: its decoded mix (ending, clicks, harshness). A timeline: each heard clip from its asset's
+   * envelope, by role (voice over bed and over music, repeated effects, cut-off tails, cut-in starts, the music on the last
+   * frame). Null when there is no sound, or
    * with a warning when it cannot be read.
    */
   async #sound(
@@ -388,10 +763,14 @@ export class ReviewService {
     try {
       if (request.file) {
         if (!source.audio) return null;
-        const [decoded, clicks] = await Promise.all([envelope(request.file), fileClicks(ffmpeg, request.file, join(scratch, "clicks"), signal)]);
-        return fileSound({ envelope: decoded, clicks, range, filmEnd });
+        const [decoded, clicks, band] = await Promise.all([
+          envelope(request.file),
+          fileClicks(ffmpeg, request.file, join(scratch, "clicks"), signal),
+          fileBandEnvelope(ffmpeg, request.file, join(scratch, "band"), signal),
+        ]);
+        return fileSound({ envelope: decoded, clicks, band, range, filmEnd });
       }
-      const { soundProfile } = this.#options;
+      const { soundProfile, musicUnderVoice } = this.#options;
       if (!flat || !soundProfile) return null;
       const { timeline, fps } = await flat();
       const assets = new Set(timeline.tracks.flatMap((track) => (track.kind === "subtitles" ? [] : track.clips.flatMap((clip) => ("asset" in clip ? [clip.asset] : [])))));
@@ -415,7 +794,13 @@ export class ReviewService {
         }
       }
       if (unread.size > 0) warnings.push(`sound: ${[...unread].join(", ")} cannot be decoded, so ${unread.size === 1 ? "it is" : "they are"} not heard in the sound review.`);
-      return timelineSound({ clips, profiles, range, filmEnd });
+      const style = musicUnderVoice
+        ? await musicUnderVoice(root).catch((error: unknown) => {
+            warnings.push(`sound: the style guide cannot be read, so music under the voice is judged by the default (${(error as Error).message.split("\n")[0]}).`);
+            return undefined;
+          })
+        : undefined;
+      return timelineSound({ clips, profiles, range, filmEnd, musicUnderVoice: style });
     } catch (error) {
       signal?.throwIfAborted();
       warnings.push(`sound: the sound could not be reviewed (${(error as Error).message.split("\n")[0]}).`);

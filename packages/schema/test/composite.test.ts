@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { type ClipTrack, type Timeline, composePlacement, flattenTimeline, layerRect, placementOf, showsPicture, withProgramSound, withTrackMutes } from "../src/index.js";
+import {
+  type ClipTrack,
+  type Timeline,
+  composePlacement,
+  flattenTimeline,
+  gradeChainOf,
+  gradeKey,
+  layerRect,
+  normalizeGrade,
+  placementOf,
+  showsPicture,
+  withProgramSound,
+  withTrackMutes,
+} from "../src/index.js";
 
 describe("layer placement", () => {
   it("fills defaults: centered, fitted, opaque", () => {
@@ -83,6 +96,47 @@ describe("flattenTimeline", () => {
       { id: "c_nest/c_title", type: "media", asset: "assets/title.png", start: 5, in: 1, out: 2, transform: { x: 50, y: 0, scale: 0.25, opacity: 1 }, audio: { gain: -6 } },
     ]);
     expect(a1!.clips).toEqual([{ id: "c_nest/c_music", type: "media", asset: "assets/music.wav", start: 5, in: 2, out: 4, audio: { gain: -12 } }]);
+  });
+
+  it("records a graded nested clip's grade on every picture it plays, after deeper ones, never on its sound (ADR 0031)", () => {
+    const outer = timeline("outer", [
+      {
+        id: "v1",
+        kind: "video",
+        clips: [
+          { id: "c_card", type: "hyperframes", start: 0, duration: 4, grade: { exposure: 0.5 } },
+          { id: "c_deep", type: "timeline", source: "timelines/intro.json", start: 4, duration: 2, grade: { temperature: 0.2 } },
+          { id: "c_flat", type: "timeline", source: "timelines/intro.json", start: 6, duration: 2, grade: { contrast: 1 } },
+        ],
+      },
+    ]);
+    const main = timeline("main", [
+      { id: "v1", kind: "video", clips: [{ id: "c_nest", type: "timeline", source: "timelines/outer.json", start: 0, grade: { saturation: 0 } }] },
+      { id: "a1", kind: "audio", clips: [{ id: "c_snd", type: "timeline", source: "timelines/intro.json", start: 0, grade: { saturation: 0 } }] },
+    ]);
+    const flat = flattenTimeline(main, (source) => (source === "timelines/intro.json" ? intro : source === "timelines/outer.json" ? outer : null));
+    const chains = new Map(
+      flat.tracks.flatMap((track) =>
+        track.kind === "subtitles" || track.kind === "program" ? [] : track.clips.map((clip) => [clip.id, gradeChainOf(clip)?.map((grade) => gradeKey(grade)) ?? null] as const),
+      ),
+    );
+    const key = (grade: object) => gradeKey(normalizeGrade(grade));
+    expect(Object.fromEntries(chains)).toEqual({
+      "c_nest/c_card": [key({ exposure: 0.5 }), key({ saturation: 0 })],
+      "c_nest/c_deep/c_cam": [key({ temperature: 0.2 }), key({ saturation: 0 })],
+      "c_nest/c_deep/c_title": [key({ temperature: 0.2 }), key({ saturation: 0 })],
+      // A host grade that changes nothing is recorded as nothing.
+      "c_nest/c_flat/c_cam": [key({ saturation: 0 })],
+      "c_nest/c_flat/c_title": [key({ saturation: 0 })],
+      "c_nest/c_deep/c_music": null,
+      "c_nest/c_flat/c_music": null,
+      "c_snd/c_cam": null,
+      "c_snd/c_title": null,
+      "c_snd/c_music": null,
+    });
+    // Plain data on the clip, as written: JSON keeps it.
+    const card = (flat.tracks[0] as ClipTrack).clips[0]!;
+    expect(gradeChainOf(JSON.parse(JSON.stringify(card)))).toEqual(gradeChainOf(card));
   });
 
   it("mutes the clips of muted tracks, nested ones included, and keeps a hidden nested track hidden on its own track", () => {

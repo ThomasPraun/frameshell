@@ -12,10 +12,11 @@ import {
   programAt,
   readyMattes,
   shapedRect,
+  sharesPlateFrame,
   spanShape,
 } from "../src/renderer/src/preview/program.js";
-import { syncTable } from "../src/renderer/src/preview/decode-plan.js";
-import { type VideoSource, mattedPath, mattedSource, splitMattedPath } from "../src/renderer/src/preview/video-source.js";
+import { sourceFrameAt, syncTable } from "../src/renderer/src/preview/decode-plan.js";
+import { type VideoSource, mattedPath, mattedSource, matteOnlyPath, matteOnlySource, splitMattedPath } from "../src/renderer/src/preview/video-source.js";
 
 // Seam under test: subject layers (ADR 0032) in the preview program, against the export compiler on the same timeline.
 
@@ -95,7 +96,23 @@ const subjectsAt = (shown: Program, frame: number) =>
   });
 
 /** Source frame `span` shows at program `frame`, as `decodeSteps` picks it. */
-const sourceFrame = (span: Extract<VideoSpan, { kind: "media" }>, frame: number) => Math.round(span.in + (frame - span.start) * span.speed);
+const sourceFrame = (span: Extract<VideoSpan, { kind: "media" }>, frame: number) => sourceFrameAt(span, frame);
+
+/**
+ * At every frame, each subject that draws another layer's frame (`sharesLayer`) finds there a span of the same clip
+ * and proxy showing the same source frame: what the engine draws through the matte is what the plate decoded.
+ */
+function expectSharedFramesMatch(shown: Program): void {
+  for (let frame = 0; frame < shown.frames; frame++) {
+    for (const subject of subjectsAt(shown, frame)) {
+      expect(subject.sharesLayer, `subject ${subject.clip} at ${frame}`).toBeDefined();
+      const plate = programAt(shown, frame, subject.sharesLayer!);
+      expect(plate).toMatchObject({ kind: "media", clip: subject.clip, proxy: subject.proxy });
+      expect(plate).not.toHaveProperty("matte");
+      expect(sourceFrame(plate as Extract<VideoSpan, { kind: "media" }>, frame), `source frame at ${frame}`).toBe(sourceFrame(subject, frame));
+    }
+  }
+}
 
 const SOURCES = new Map<string, ExportSource>([
   [TALK, { path: "/abs/talk.mp4", video: { codec: "h264", still: false, width: 1920, height: 1080 }, audio: true, duration: 600 }],
@@ -209,10 +226,50 @@ describe("subject layers in the preview (ADR 0032)", () => {
     expect(pictures[1]).toEqual({ data: new Uint8Array([1, 30]), key: true, alpha: { data: new Uint8Array([2, 30]), key: true } });
   });
 
+  it("decodes only the matte of a subject drawn from its plate layer's frame, every frame an alpha frame", async () => {
+    const matte: VideoSource = {
+      config: { codec: "avc1.2", codedWidth: 960, codedHeight: 540 },
+      hasAlpha: false,
+      table: syncTable([true, false, true]),
+      read: async (from, to) => Array.from({ length: Math.min(to, 3) - from }, (_, i) => ({ data: new Uint8Array([2, from + i]), key: from + i !== 1, alpha: null })),
+    };
+    expect(splitMattedPath(matteOnlyPath(MATTE))).toEqual({ picture: null, matte: MATTE });
+    const source = matteOnlySource(matte);
+    expect(source).toMatchObject({ alphaOnly: true, hasAlpha: true, config: { codec: "avc1.2" }, table: matte.table });
+    expect(await source.read(0, 3)).toEqual([0, 1, 2].map((i) => ({ data: new Uint8Array(0), key: i !== 1, alpha: { data: new Uint8Array([2, i]), key: i !== 1 } })));
+  });
+
+  describe("shares the plate's decoded frame only where the plate shows the same source frame", () => {
+    const shown = program(stack());
+    const plate = programAt(shown, 30, 0) as Extract<VideoSpan, { kind: "media" }>;
+    const subject = subjectsAt(shown, 30)[0]!;
+    const cases: [string, VideoSpan, VideoSpan, boolean][] = [
+      ["the plate's own span", subject, plate, true],
+      ["a graded, placed and faded plate (each layer grades and places itself)", subject, { ...plate, grade: "g1", placement: { ...plate.placement, x: 0.2, opacity: 0.5 } }, true],
+      ["an `in` that rounds to the same source frames", { ...subject, in: subject.in + 0.2 }, plate, true],
+      ["another clip", subject, { ...plate, clip: "c_b" }, false],
+      ["another proxy", subject, { ...plate, proxy: ".frameshell/proxies/other.mp4" }, false],
+      ["another speed", subject, { ...plate, speed: 2 }, false],
+      ["a frame later in the source", subject, { ...plate, in: plate.in + 1 }, false],
+      ["a plate span that starts after the subject", subject, { ...plate, start: subject.start + 1, in: plate.in + (subject.start + 1 - plate.start) }, false],
+      ["a plate span that ends before the subject", subject, { ...plate, end: subject.end - 1 }, false],
+      ["another subject (a plate with a matte)", subject, subject, false],
+      ["a placeholder plate", subject, { kind: "placeholder", clip: plate.clip, start: plate.start, end: plate.end, reason: "ingest", type: "media" }, false],
+      ["a plate clip without a matte as the subject", plate, plate, false],
+    ];
+    for (const [name, one, other, shares] of cases) it(name, () => expect(sharesPlateFrame(one, other)).toBe(shares));
+
+    it("points the subject at the plate layer, and decodes it alone where the matte is not ready", () => {
+      expect(subject.sharesLayer).toBe(0);
+      expect(program(stack(), new Map()).layers.flat().some((span) => span.kind === "media" && span.sharesLayer !== undefined)).toBe(false);
+    });
+  });
+
   describe("draws a subject on the frames export does", () => {
     const cases: [string, Timeline][] = [
       ["a plate with a dissolve", stack()],
       ["a sped-up plate clip with an in point", stack({ a: { in: 2, out: 8, speed: 2 } })],
+      ["a sped-up incoming clip of a dissolve", stack({ b: { in: 10, out: 16, speed: 1.5 } })],
       ["a wiped base plate", stack({ b: { shape: { kind: "wipe", direction: "left" } } })],
       ["a cutaway between the plate and the word", stack({}, [{ id: "v_c", kind: "video", clips: [media("c_c", BROLL, 2, 0, 0.5)] }])],
       [
@@ -230,6 +287,7 @@ describe("subject layers in the preview (ADR 0032)", () => {
         const preview = frames.map((frame) => subjectsAt(shown, frame).length);
         expect(preview.some((count) => count > 0)).toBe(true);
         expect(preview).toEqual(frames.map((frame) => exportedSubjects(timeline, frame)));
+        expectSharedFramesMatch(shown);
       });
     }
   });

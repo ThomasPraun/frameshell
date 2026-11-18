@@ -1035,7 +1035,8 @@ const SCENE_GAP = 1;
 /**
  * The scene band under the ruler (ADR 0015): a span per script scene with the
  * heading as label. A scene with a clip linked to it is filled; one without is
- * hollow (dashed), still waiting for its footage or composition.
+ * hollow (dashed), still waiting for its footage or composition. A `planned`
+ * span (storyboard time range, no clip yet) has the longer dash.
  */
 function paintScenes<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
   const { layout, theme, viewport } = input;
@@ -1066,7 +1067,7 @@ function paintScenes<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>): void {
     }
     ctx.strokeStyle = selected ? theme.accent : filled ? withAlpha(theme.video, 0.7) : theme.textFaint;
     ctx.lineWidth = selected ? 2 : 1;
-    if (!filled) ctx.setLineDash([3, 2]);
+    if (!filled) ctx.setLineDash(scene.source === "planned" ? [6, 3] : [3, 2]);
     ctx.strokeRect(left + 0.5, y + 0.5, Math.max(0, w - 1), boxH - 1);
     if (!filled) ctx.setLineDash([]);
     const textX = Math.max(left, 0) + 5;

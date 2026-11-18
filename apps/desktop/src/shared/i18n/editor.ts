@@ -31,6 +31,7 @@ const en = {
   copyPath: "Copy path",
   moveToTrash: (windows: boolean): string => (windows ? "Move to Recycle Bin" : "Move to Trash"),
   generateVoiceover: "Generate voiceover…",
+  placeVoiceover: "Place voiceover…",
 };
 
 const es: typeof en = {
@@ -64,6 +65,7 @@ const es: typeof en = {
   copyPath: "Copiar ruta",
   moveToTrash: (windows) => (windows ? "Mover a la Papelera de reciclaje" : "Mover a la Papelera"),
   generateVoiceover: "Generar voz en off…",
+  placeVoiceover: "Colocar voz en off…",
 };
 
 export const editor = { en, es };

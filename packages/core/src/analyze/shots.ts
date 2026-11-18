@@ -86,6 +86,15 @@ export function shotMiddle(shot: Pick<Shot, "startFrame" | "endFrame">): number 
   return Math.floor((shot.startFrame + shot.endFrame - 1) / 2);
 }
 
+/**
+ * Lengths in frames of the parts of `shots` inside frames `first` to `readFrames - 1`: what a reader that stopped at
+ * `readFrames` saw of each (a file over an hour is read only so far). Shots wholly outside are left out. The one rule
+ * `analyze` and `review` give a truncated film's shot-length CV.
+ */
+export function shotLengthsRead(shots: readonly Pick<Shot, "startFrame" | "endFrame">[], readFrames: number, first = 0): number[] {
+  return shots.map((shot) => Math.min(shot.endFrame, readFrames) - Math.max(shot.startFrame, first)).filter((length) => length > 0);
+}
+
 /** Rhythm of a film's cutting. */
 export interface ShotStats {
   shotCount: number;

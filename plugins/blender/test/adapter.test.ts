@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { AdapterGcContext } from "@frameshell/plugin-api";
 import { createBlenderAdapter, scriptPath } from "../src/index.js";
 import { alphaAt, decodeRgba, inputsContext, renderContext, stubBlender, tempDir, writeBlend } from "./stub.js";
 
@@ -25,11 +26,53 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       writeBlend(project, SOURCE, { fps: 10, links: ["//../tex.png", "/outside/elsewhere.png", join(project, "scenes", "lib.blend")] });
       const inputs = await adapter().inputs!(clip(), inputsContext(project, stub.path));
       expect(inputs.slice(0, 2)).toEqual([SOURCE, ".frameshell/blender/version/4.5.3.json"]);
-      expect(inputs[2]).toBe(".frameshell/blender/range/500ms.json");
+      expect(inputs[2]).toBe(".frameshell/blender/range/0-500ms.json");
       expect(inputs[3]).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}-[0-9a-f]{8}\/deps\.json$/);
-      expect(inputs.slice(4)).toEqual(["scenes/lib.blend", "tex.png"]);
-      expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: ["scenes/lib.blend", "tex.png"] });
+      expect(inputs.slice(4)).toEqual(["scenes/lib.blend", "tex.png", inputs[3]!.replace(/deps\.json$/, "outside.json")]);
+      expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: ["scenes/lib.blend", "tex.png"], outside: 1 });
       expect(JSON.parse(readFileSync(join(project, inputs[1]!), "utf8"))).toEqual({ blender: "4.5.3" });
+    });
+
+    it("put libraries outside the project into the key by content, never by path, and warn on the render", async () => {
+      const elsewhere = tempDir();
+      const lib = join(elsewhere, "a-props.blend");
+      writeFileSync(lib, "BLENDERlib-v1");
+      const missing = join(elsewhere, "z-gone.png");
+      writeBlend(project, SOURCE, { fps: 10, links: [lib, missing] });
+      const blender = adapter();
+      const before = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      const outside = before.at(-1)!;
+      expect(outside).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}-[0-9a-f]{8}\/outside\.json$/);
+      const text = readFileSync(join(project, outside), "utf8");
+      expect(JSON.parse(text)).toEqual({ outside: [{ sha256: expect.stringMatching(/^[0-9a-f]{16}$/), bytes: 13 }, { missing: true }] });
+      // No absolute path of the outside files lands in a project file.
+      for (const file of [outside, before[3]!]) expect(readFileSync(join(project, file), "utf8")).not.toContain(elsewhere.split(/[\\/]/).at(-1)!);
+
+      // Editing the library changes the input's content (so the key) on the next check; Blender lists the .blend once.
+      writeFileSync(lib, "BLENDERlib-v2-longer");
+      await blender.inputs!(clip(), inputsContext(project, stub.path));
+      expect(readFileSync(join(project, outside), "utf8")).not.toBe(text);
+      expect(stub.runs("deps.py")).toHaveLength(1);
+      // A restart does not know the outside paths (never written): it lists the .blend again, once.
+      await adapter().inputs!(clip(), inputsContext(project, stub.path));
+      expect(stub.runs("deps.py")).toHaveLength(2);
+
+      const warnings: string[] = [];
+      const { ctx } = renderContext(project, stub.path, { warn: (message) => warnings.push(message) });
+      await blender.render(clip(), ctx);
+      expect(warnings).toEqual([
+        `blender clip c1: scenes/intro.blend loads 2 files from outside the project (${lib}, ${missing}); their content is in the render key, ` +
+          "but Frameshell does not watch them: copy them into the project and relink to re-render on every change.",
+      ]);
+    });
+
+    it("re-list a .blend whose listing an older plugin wrote, which did not count outside files", async () => {
+      const blender = adapter();
+      const inputs = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeFileSync(join(project, inputs[3]!), `${JSON.stringify({ blend: SOURCE, paths: [] })}\n`);
+      await adapter().inputs!(clip(), inputsContext(project, stub.path));
+      expect(stub.runs("deps.py")).toHaveLength(2);
+      expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: [], outside: 0 });
     });
 
     it("run Blender's file listing once per .blend content, and its version once per executable, not on every key check", async () => {
@@ -84,23 +127,27 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(readFileSync(join(project, after[1]!), "utf8")).not.toBe(readFileSync(join(project, before[1]!), "utf8"));
     });
 
-    it("put the length rendered in the key, and nothing of the clip's placement", async () => {
+    it("put the part rendered (its start and its end) in the key, and nothing of the clip's placement", async () => {
       const blender = adapter();
       const short = await blender.inputs!(clip({ duration: 1 }), inputsContext(project, stub.path));
       const moved = await blender.inputs!(clip({ duration: 1, start: 30 }), inputsContext(project, stub.path));
       const longer = await blender.inputs!(clip({ duration: 2 }), inputsContext(project, stub.path));
       const trimmedIn = await blender.inputs!(clip({ duration: 1, in: 1 }), inputsContext(project, stub.path));
       expect(moved).toEqual(short);
-      expect(short[2]).toBe(".frameshell/blender/range/1000ms.json");
-      expect(longer[2]).toBe(".frameshell/blender/range/2000ms.json");
-      expect(trimmedIn[2]).toBe(".frameshell/blender/range/2000ms.json");
+      expect(short[2]).toBe(".frameshell/blender/range/0-1000ms.json");
+      expect(longer[2]).toBe(".frameshell/blender/range/0-2000ms.json");
+      // A head trim changes what is rendered (the head is not), so it re-renders: owner decision on #482, 2026-11-17.
+      expect(trimmedIn[2]).toBe(".frameshell/blender/range/1000-2000ms.json");
+      const sameEndOtherStart = await blender.inputs!(clip({ duration: 0.5, in: 1.5 }), inputsContext(project, stub.path));
+      expect(sameEndOtherStart[2]).toBe(".frameshell/blender/range/1500-2000ms.json");
+      expect(JSON.parse(readFileSync(join(project, trimmedIn[2]!), "utf8"))).toEqual({ inMs: 1000, endMs: 2000 });
     });
 
     it("refuse a Blender outside 4.5 LTS and 5.x, one that is missing, and a host without the inputs context", async () => {
       stub.configure({ version: "4.2.9" });
       await expect(adapter().inputs!(clip(), inputsContext(project, stub.path))).rejects.toThrow(/Blender 4\.2\.9 at .* is outside the supported range \(4\.5 LTS and 5\.x\).*binaries\.blender/);
       await expect(adapter().inputs!(clip(), inputsContext(project, join(tempDir(), "blender")))).rejects.toThrow(/Blender not found at .*Fix `binaries\.blender`/);
-      const missing = { projectDir: project, ensureBinary: async () => Promise.reject(new Error("Blender is not installed, or Frameshell was not told where it is.")) };
+      const missing = { ...inputsContext(project, stub.path), ensureBinary: async () => Promise.reject(new Error("Blender is not installed, or Frameshell was not told where it is.")) };
       await expect(adapter().inputs!(clip(), missing)).rejects.toThrow(/not installed/);
       await expect(adapter().inputs!(clip())).rejects.toThrow(/too old for the blender plugin/);
     });
@@ -132,7 +179,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       const [run] = stub.runs("render.py");
       const blend = join(project, "scenes", "intro.blend");
       expect(run!.slice(0, 9)).toEqual(["-b", "--factory-startup", "-Y", blend, "--python-exit-code", "1", "-P", scriptPath("render.py"), "--"]);
-      expect(JSON.parse(run![9]!)).toEqual({ scene: "Scene", camera: "Camera", width: 64, height: 36, fps: 10, frames: 5, outDir: join(ctx.outDir, "frames"), quality: "draft" });
+      expect(JSON.parse(run![9]!)).toEqual({ scene: "Scene", camera: "Camera", width: 64, height: 36, fps: 10, startFrame: 0, frames: 5, outDir: join(ctx.outDir, "frames"), quality: "draft" });
       expect(stub.runs("render.py")).toHaveLength(1);
 
       const size = { width: 64, height: 36 };
@@ -153,13 +200,43 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(progress.map((update) => update.message)).toEqual(expect.arrayContaining(["Starting Blender 4.5.3", "Rendering", "Encoding", "Done"]));
     });
 
-    it("renders up to the end of the clip's part: in + duration, at the project fps, from the scene's first frame", async () => {
+    it("renders only the clip's part, frames in*fps up to (in + duration)*fps, and pads the head transparent so file time is composition time", async () => {
       writeBlend(project, SOURCE, { fps: 20 });
-      const { ctx } = renderContext(project, stub.path, { fps: 20 });
+      const { ctx, progress } = renderContext(project, stub.path, { fps: 20 });
       await adapter().render(clip({ in: 0.25, duration: 0.5 }), ctx);
-      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 20, frames: 15 });
-      const frames = (await decodeRgba(join(ctx.outDir, "render.webm"))).length / (64 * 36 * 4);
-      expect(frames).toBe(15);
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 20, startFrame: 5, frames: 10 });
+      // Scene frames 6 to 15: the head (1 to 5) is not drawn.
+      expect(stub.sceneFrames()).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+      const size = { width: 64, height: 36 };
+      const rgba = await decodeRgba(join(ctx.outDir, "render.webm"));
+      expect(rgba.length / (size.width * size.height * 4)).toBe(15);
+      for (let frame = 0; frame < 15; frame++) {
+        expect(alphaAt(rgba, size, frame, 2, 2), `corner of frame ${frame}`).toBe(0);
+        // Panel: transparent in the padded head, drawn from the first frame of the window.
+        const panel = alphaAt(rgba, size, frame, 24, 18);
+        if (frame < 5) expect(panel, `panel of frame ${frame}`).toBe(0);
+        else expect(panel, `panel of frame ${frame}`).toBeGreaterThanOrEqual(149);
+      }
+      // Progress counts the window's frames: the `Fra:` lines start at scene frame 6, and still end at the render's share.
+      const rendering = progress.filter((update) => update.message === "Rendering").map((update) => update.fraction);
+      expect(rendering[0]).toBeLessThan(0.2);
+      expect(Math.max(...rendering)).toBeCloseTo(0.9);
+    });
+
+    it("pads the head at the exact NTSC rate, and reruns are byte-identical with and without a head", async () => {
+      writeBlend(project, SOURCE, { fps: 29.97003, frameStart: 1, frameEnd: 100 });
+      const ntsc = renderContext(project, stub.path, { fps: 30000 / 1001 });
+      const result = await adapter().render(clip({ in: 0.2, duration: 0.2 }), ntsc.ctx);
+      // in 0.2 s is frame 6 (5.994 plus the 1e-3 slack, floored), end frame 12: a window of 6 after a head of 6.
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ startFrame: 5, frames: 7 });
+      expect((await decodeRgba(result.file)).length / (64 * 36 * 4)).toBe(12);
+
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 100 });
+      for (const extra of [{ duration: 0.3 }, { in: 0.2, duration: 0.3 }]) {
+        const first = await adapter().render(clip(extra), renderContext(project, stub.path).ctx);
+        const again = await adapter().render(clip(extra), renderContext(project, stub.path).ctx);
+        expect(readFileSync(again.file).equals(readFileSync(first.file))).toBe(true);
+      }
     });
 
     it("asks for exactly the frames of an end snapped to the frame grid, and a scene whose last frame is the clip's end renders", async () => {
@@ -193,25 +270,50 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(Math.max(...rendering)).toBeCloseTo(0.9);
     });
 
-    it("refuses a scene at another frame rate with how to fix it, and renders nothing", async () => {
-      writeBlend(project, SOURCE, { fps: 24 });
+    it("time-remaps a scene at another frame rate: each project frame shows the scene at the same second", async () => {
+      // A 24 fps scene in a 30 fps project: frame k shows scene frame 1 + k * 24/30.
+      writeBlend(project, SOURCE, { fps: 24, frameStart: 1, frameEnd: 100 });
       const { ctx } = renderContext(project, stub.path, { fps: 30 });
-      await expect(adapter().render(clip(), ctx)).rejects.toThrow(
-        /blender clip c1: scene "Scene" of scenes\/intro\.blend runs at 24 fps but the project runs at 30 fps\. Set the scene's frame rate to 30.*never remapped/,
+      const result = await adapter().render(clip({ duration: 0.2 }), ctx);
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 30, frames: 6 });
+      expect(stub.sceneFrames()).toEqual([1, 1.8, 2.6, 3.4, 4.2, 5]);
+      expect((await decodeRgba(result.file)).length / (64 * 36 * 4)).toBe(6);
+
+      // 60 fps scene in a 30 fps project: every other scene frame.
+      writeBlend(project, SOURCE, { fps: 60, frameStart: 0, frameEnd: 100 });
+      await adapter().render(clip({ duration: 0.1 }), renderContext(project, stub.path, { fps: 30 }).ctx);
+      expect(stub.sceneFrames().slice(6)).toEqual([0, 2, 4]);
+    });
+
+    it("refuses a remapped clip that runs past the scene's end, naming both rates", async () => {
+      writeBlend(project, SOURCE, { fps: 24, frameStart: 1, frameEnd: 4 });
+      await expect(adapter().render(clip({ duration: 0.2 }), renderContext(project, stub.path, { fps: 30 }).ctx)).rejects.toThrow(
+        /needs scene frames 1 to 5 \(the scene runs at 24 fps, the project at 30\) but scene "Scene" of scenes\/intro\.blend ends at frame 4 \(4 frames\)/,
       );
-      expect(existsSync(join(ctx.outDir, "render.webm"))).toBe(false);
     });
 
     it("refuses a clip longer than the scene, a missing scene and a missing camera, each with the fix", async () => {
       writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 3, scenes: ["Scene", "Alt"], cameras: ["Camera"] });
       await expect(adapter().render(clip(), renderContext(project, stub.path).ctx)).rejects.toThrow(
-        /needs 5 frames from the scene's first frame \(1\) but scene "Scene" of scenes\/intro\.blend ends at frame 3 \(3 frames\)\. Raise its End frame or shorten the clip/,
+        /needs scene frames 1 to 5 but scene "Scene" of scenes\/intro\.blend ends at frame 3 \(3 frames\)\. Raise its End frame or shorten the clip/,
       );
       writeBlend(project, SOURCE, { fps: 10, scenes: ["Scene", "Alt"] });
       await expect(adapter().render(clip({ props: { scene: "Nope" } }), renderContext(project, stub.path).ctx)).rejects.toThrow(/no scene "Nope"\. Its scenes: Scene, Alt\. Set props\.scene/);
       await expect(adapter().render(clip({ props: { camera: "Nope" } }), renderContext(project, stub.path).ctx)).rejects.toThrow(/no camera object "Nope"\. Its cameras: Camera\./);
       writeBlend(project, SOURCE, { fps: 10, cameras: [] });
       await expect(adapter().render(clip(), renderContext(project, stub.path).ctx)).rejects.toThrow(/has no active camera\. Set one in Blender/);
+    });
+
+    it("counts the frames written against the window, not the clip's end", async () => {
+      stub.configure({ skipLast: true });
+      await expect(adapter().render(clip({ in: 0.2, duration: 0.3 }), renderContext(project, stub.path).ctx)).rejects.toThrow(/Blender wrote 2 of 3 frames of scenes\/intro\.blend/);
+    });
+
+    it("refuses a window that runs past the scene's end even when its head is not rendered", async () => {
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 4 });
+      await expect(adapter().render(clip({ in: 0.2, duration: 0.3 }), renderContext(project, stub.path).ctx)).rejects.toThrow(
+        /needs scene frames 1 to 5 but scene "Scene" of scenes\/intro\.blend ends at frame 4 \(4 frames\)/,
+      );
     });
 
     it("fails with Blender's own output when it crashes, and when it writes fewer frames than asked", async () => {
@@ -281,6 +383,172 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       stub.configure({ version: "3.6.0" });
       await expect(adapter().render(clip(), renderContext(project, stub.path).ctx)).rejects.toThrow(/outside the supported range/);
       expect(stub.runs("render.py")).toEqual([]);
+    });
+  });
+
+  describe("gc and stop", () => {
+    const STATE = join(".frameshell", "blender");
+    /** Context for `gc` that counts every file as old enough to go, with `inputs` as the clips' current inputs. */
+    const gcContext = (inputs: string[], overrides: Partial<AdapterGcContext> = {}): AdapterGcContext => ({
+      projectDir: project,
+      inputs: new Set(inputs),
+      dryRun: false,
+      keepNewerThan: Date.now() + 60_000,
+      signal: new AbortController().signal,
+      ...overrides,
+    });
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it("keeps the listing, length and version of the current clip, deletes those of older saves and lengths, and keeps finals.json", async () => {
+      const blender = adapter();
+      const old = await blender.inputs!(clip({ duration: 1 }), inputsContext(project, stub.path));
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 2000 });
+      const current = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeFileSync(join(project, STATE, "finals.json"), "{}");
+      expect(current[3]).not.toBe(old[3]);
+
+      const removed = await blender.gc!(gcContext(current));
+      expect(removed.map((entry) => entry.path)).toEqual([old[3]!.replace(/deps\.json$/, ""), old[2]!]);
+      for (const kept of [...current.slice(1), `${STATE.replaceAll("\\", "/")}/finals.json`]) expect(existsSync(join(project, kept))).toBe(true);
+      expect(existsSync(join(project, old[3]!))).toBe(false);
+      expect(existsSync(join(project, old[2]!))).toBe(false);
+      // Nothing is left to delete.
+      expect(await blender.gc!(gcContext(current))).toEqual([]);
+    });
+
+    it("lists a .blend saved back to a version whose listing was deleted, instead of returning a path to a missing file", async () => {
+      const blender = adapter();
+      const first = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 2000 });
+      const second = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      await blender.gc!(gcContext(second));
+      expect(existsSync(join(project, first[3]!))).toBe(false);
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 100 });
+      const reverted = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      expect(reverted).toEqual(first);
+      expect(existsSync(join(project, reverted[3]!))).toBe(true);
+      expect(stub.runs("deps.py")).toHaveLength(3);
+    });
+
+    it("keeps the files of a clip still in use at another length or format, and honours dryRun and keepNewerThan", async () => {
+      const blender = adapter();
+      const short = await blender.inputs!(clip({ duration: 1 }), inputsContext(project, stub.path));
+      const long = await blender.inputs!(clip({ id: "c2", duration: 2 }), inputsContext(project, stub.path));
+      // Both clips are current: the union names both range files.
+      expect(await blender.gc!(gcContext([...short, ...long]))).toEqual([]);
+      const dry = await blender.gc!(gcContext(long, { dryRun: true }));
+      expect(dry.map((entry) => entry.path)).toEqual([short[2]!]);
+      expect(existsSync(join(project, short[2]!))).toBe(true);
+      expect(await blender.gc!(gcContext(long, { keepNewerThan: Date.now() - 3_600_000 }))).toEqual([]);
+      expect((await blender.gc!(gcContext(long))).map((entry) => entry.path)).toEqual([short[2]!]);
+    });
+
+    it("recognises the key markers an older plugin wrote (<endMs>ms.json) and deletes them when no clip names them", async () => {
+      const blender = adapter();
+      const current = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeFileSync(join(project, STATE, "range", "500ms.json"), "{}");
+      const removed = await blender.gc!(gcContext(current));
+      expect(removed.map((entry) => entry.path)).toEqual([".frameshell/blender/range/500ms.json"]);
+      expect(existsSync(join(project, current[2]!))).toBe(true);
+    });
+
+    it("kills the Blender that lists a .blend's files when the host stops, rejects, and lists again on the next check", async () => {
+      stub.configure({ hangDeps: true });
+      const stopping = new AbortController();
+      const blender = adapter();
+      const settled = Promise.resolve(blender.inputs!(clip(), inputsContext(project, stub.path, stopping.signal))).then(
+        () => "resolved",
+        (error: Error) => error.name,
+      );
+      for (let waited = 0; stub.runs("deps.py").length === 0 && waited < 5000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+      for (let waited = 0; !existsSync(join(stub.dir, "pid")) && waited < 5000; waited += 20) await new Promise((r) => setTimeout(r, 20));
+      const pid = stub.pid();
+      expect(alive(pid)).toBe(true);
+      stopping.abort();
+      expect(await settled).toBe("AbortError");
+      for (let waited = 0; alive(pid) && waited < 3000; waited += 50) await new Promise((r) => setTimeout(r, 50));
+      expect(alive(pid)).toBe(false);
+      // The aborted listing was not remembered, and left no file: the next check lists again.
+      stub.configure({});
+      const inputs = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      expect(existsSync(join(project, inputs[3]!))).toBe(true);
+      expect(stub.runs("deps.py")).toHaveLength(2);
+    });
+
+    it("starts no listing for a host that already stopped", async () => {
+      const stopped = new AbortController();
+      stopped.abort();
+      await expect(adapter().inputs!(clip(), inputsContext(project, stub.path, stopped.signal))).rejects.toThrow();
+      expect(stub.runs("deps.py")).toEqual([]);
+    });
+  });
+
+  describe("finals", () => {
+    const estimate = (blender: ReturnType<typeof adapter>, fps = 10, width = 1000, height = 1000) =>
+      blender.finals!.estimate(clip({ duration: 2 }), { projectDir: project, fps, width, height });
+
+    it("render the draft when the host asks for it or names no tier, and the final with Cycles when it asks for the final", async () => {
+      for (const tier of ["draft", undefined] as const) {
+        await adapter().render(clip(), renderContext(project, stub.path, tier ? { tier } : {}).ctx);
+        expect(JSON.parse(stub.runs("render.py").at(-1)![9]!)).toMatchObject({ quality: "draft" });
+      }
+      const { ctx, progress } = renderContext(project, stub.path, { tier: "final" });
+      const result = await adapter().render(clip(), ctx);
+      expect(JSON.parse(stub.runs("render.py").at(-1)![9]!)).toMatchObject({ quality: "final", frames: 5 });
+      expect(progress.map((update) => update.message)).toContain("Rendering the final (Cycles)");
+      expect(alphaAt(await decodeRgba(result.file), { width: 64, height: 36 }, 0, 2, 2)).toBe(0);
+    });
+
+    it("estimate the window only: a clip trimmed at the head costs the frames it draws, not the ones before it", async () => {
+      // Frames 10 to 20 at 10 fps: a window of 10 frames, against 20 untrimmed.
+      const format = { projectDir: project, fps: 10, width: 1000, height: 1000 };
+      expect(await adapter().finals!.estimate(clip({ in: 1, duration: 1 }), format)).toBe(10 + 10 * 5);
+      expect(await adapter().finals!.estimate(clip({ duration: 2 }), format)).toBe(10 + 20 * 5);
+      expect(await adapter().finals!.estimate(clip({ in: 1, duration: 2 }), format)).toBe(10 + 20 * 5);
+    });
+
+    it("estimate frames x megapixels x 5 s plus start-up before any final ran here, then the rate this .blend's last final took", async () => {
+      // 2 s at 10 fps = 20 frames of 1 megapixel.
+      expect(await estimate(adapter())).toBe(10 + 20 * 5);
+      expect(await estimate(adapter(), 10, 2000, 1000)).toBe(10 + 20 * 2 * 5);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "final" }).ctx);
+      const measured = JSON.parse(readFileSync(join(project, ".frameshell", "blender", "finals.json"), "utf8")) as { sources: Record<string, number>; last: number };
+      expect(measured.sources[SOURCE]).toBeGreaterThan(0);
+      expect(measured.last).toBe(measured.sources[SOURCE]);
+      // A new adapter (a daemon restart) reads it back.
+      expect(await estimate(adapter())).toBeCloseTo(10 + 20 * measured.sources[SOURCE]!, 3);
+      // Another .blend of the project takes the last rate measured.
+      writeBlend(project, "scenes/other.blend", { fps: 10 });
+      const other = await adapter().finals!.estimate({ ...clip({ duration: 2 }), source: "scenes/other.blend" }, { projectDir: project, fps: 10, width: 1000, height: 1000 });
+      expect(other).toBeCloseTo(10 + 20 * measured.last, 3);
+    });
+
+    it("measure the rate from the frames after the first, which also pays for start-up and kernel compiles", async () => {
+      // 5 frames at 64x36: a 600 s first frame (Metal kernels), then 2 s each.
+      stub.configure({ frameSeconds: [600, 2, 2, 2, 2] });
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "final" }).ctx);
+      const measured = JSON.parse(readFileSync(join(project, ".frameshell", "blender", "finals.json"), "utf8")) as { sources: Record<string, number> };
+      expect(measured.sources[SOURCE]).toBeCloseTo(2 / ((64 * 36) / 1e6), 2);
+    });
+
+    it("do not record a final of one frame, whose time is mostly start-up", async () => {
+      await adapter().render(clip({ duration: 0.1 }), renderContext(project, stub.path, { tier: "final" }).ctx);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+    });
+
+    it("do not measure drafts, and never estimate a clip without a .blend source", async () => {
+      await adapter().render(clip(), renderContext(project, stub.path, { tier: "draft" }).ctx);
+      expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);
+      await expect(Promise.resolve().then(() => adapter().finals!.estimate({ id: "c1", duration: 1 }, { projectDir: project, fps: 10, width: 64, height: 36 }))).rejects.toThrow(/needs `source`/);
     });
   });
 });

@@ -62,14 +62,22 @@ const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Sec
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
+/** Typed time text for a {@link TimeRef} field: plain seconds become a number, anything else (a marker, `beat:N`, `word:over`) stays trimmed text for the daemon to resolve. One rule for the CLI and the app, never a private parser. */
+export function timeRefOf(text: string): number | string {
+  const trimmed = text.trim();
+  return SECONDS_TEXT.test(trimmed) ? Number(trimmed) : trimmed;
+}
+
 export const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])
     .describe(
       `${what} Seconds (snapped to the project frame grid, 3 decimals), or a marker id or label from \`marker.list\`, optionally with an offset ` +
         "in seconds (`hook`, `m_1a2b3c`, `hook+0.5`, `outro-1`), or a beat or bar of the music counting from 1 from the music file's first measured beat or downbeat (not the clip's `in`; `beat:32`, `bar:8`, " +
-        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; with a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; needs `tempo`, refused when the grid is LOW confidence; past the measured part it extends at the tempo); the daemon turns it into " +
-        "seconds first, so the history records seconds.",
+        "`bar:8-0.2`, `beat:2.5` halfway between beats 2 and 3; with a pickup `bar:N` is not `beat:(meter*(N-1)+1)`; needs `tempo`, refused when the grid is LOW confidence; past the measured part it extends at the tempo), " +
+        "or the start of a word the timeline plays, `word:<text>` with `#n` for the nth time it is said (from 1) and an optional offset (`word:over`, `word:this#2`, `word:over+0.2`, " +
+        "`word:w_000012` a transcript word id; case, accents and punctuation ignored, `20` matches `twenty`; words removed by a cut do not count; needs current transcripts); the daemon turns it into " +
+        "seconds first, so the history records seconds and a later cut never moves a recorded edit.",
     );
 /** {@link TimeRef} for methods outside this file whose time arguments take the same forms (`sound.place`). */
 export { TimeRef as TimeRefParam };
@@ -422,9 +430,10 @@ export const operationArgs = {
       .nullable()
       .optional()
       .describe(
-        "`media` clips on video tracks only (ADR 0031): colour grade merged field by field into the clip's; `null` clears it. Correction " +
-          "`exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project `.cube`) at `lutMix`. " +
-          "Shots are skipped with a warning.",
+        "Media, generated and nested timeline clips on video tracks (ADR 0031): colour grade merged field by field into the clip's; `null` " +
+          "clears it. Correction `exposure` (stops), `temperature`, `tint` (-1 to 1), `contrast`, `saturation` (factors), then `lut` (project " +
+          "`.cube`) at `lutMix`. A generated clip's render is graded before its alpha; a nested timeline clip's grade applies to every " +
+          "picture inside it, after their own grades. Shots are skipped with a warning.",
       ),
     motionBlur: MotionBlurSchema.nullable()
       .optional()
@@ -1205,14 +1214,15 @@ export const TrackDuckResultSchema = OperationResultSchema.extend({
   speechSeconds: z.number().describe("Total seconds of those stretches."),
   level: z
     .object({
-      under: z.number().describe("dB under the voice that was asked (`level`)."),
+      under: z.number().describe("dB under the voice that was asked (`level`; the style's number for `\"style\"`)."),
+      source: z.enum(["given", "style"]).describe("`style`: the number came from the project's `sound.musicUnderVoice` (`level: \"style\"`); `given`: it was passed."),
       voice: z.number().describe("Loudness of the voice, LUFS: the integrated loudness of each voice file plus its gain, averaged by the time it plays."),
       target: z.number().describe("Loudness the music was set to, LUFS (`voice - under`)."),
       clips: z
         .array(
           z.object({
             clip: z.string(),
-            loudness: z.number().describe("Integrated loudness of the clip's file, LUFS."),
+            loudness: z.number().describe("Integrated loudness of the part of its file the clip plays, LUFS."),
             gain: z.number().describe("Static gain written to the clip, dB (`target - loudness`, 0.1 dB steps)."),
           }),
         )

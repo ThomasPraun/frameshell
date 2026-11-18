@@ -26,7 +26,8 @@ function frameshell(args: string[], cwd = project) {
       FRAMESHELL_IDLE_TIMEOUT_MS: "1500",
       FRAMESHELL_DATA_DIR: userDirs,
       FRAMESHELL_CONFIG_DIR: userDirs,
-      FRAMESHELL_SPEECH_STAND_IN: "1",
+      // `paid` is the free stand-in plus `stand-in-paid`, the same voice at 0.01 USD a word.
+      FRAMESHELL_SPEECH_STAND_IN: "paid",
     },
   });
   return { code: result.status, stdout: result.stdout, stderr: result.stderr };
@@ -39,6 +40,7 @@ beforeAll(() => {
   expect(frameshell(["init", project, "--no-skill"], parent).code).toBe(0);
   mkdirSync(join(project, "scripts"), { recursive: true });
   writeFileSync(join(project, "scripts", "vo.md"), ["---", "voiceover: true", "language: en", "---", "## Hook", "Stop scrolling.", "## Why", "Because 3 reasons."].join("\n"));
+  writeFileSync(join(project, "scripts", "paid.md"), ["---", "voiceover: true", "language: en", "provider: stand-in-paid", "---", "## Hook", "Stop scrolling.", "## Why", "Close them all."].join("\n"));
   const status = JSON.parse(frameshell(["status", "--json"]).stdout) as { daemon: { pid: number } };
   daemonPid = status.daemon.pid;
 });
@@ -97,6 +99,51 @@ describe("frameshell voiceover generate", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("(stand-in, voice tone)");
     expect(frameshell(["voiceover", "generate", "scripts/vo.md", "--provider", "stand-in", "--voice", "nobody"]).code).not.toBe(0);
+  });
+
+  it("binds --yes to the ask it showed: the refusal prints its token, a stale one generates nothing", () => {
+    const paid = ["voiceover", "generate", "scripts/paid.md", "--no-verify"];
+    const refused = frameshell(paid);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toMatch(/costs about 0\.05\d* USD/);
+    const token = /frameshell voiceover generate scripts\/paid\.md --no-verify --yes --confirmation (\w+)/.exec(refused.stderr)?.[1];
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    const json = JSON.parse(frameshell([...paid, "--json"]).stderr) as { error: { data: { confirmation: string } } };
+    expect(json.error.data.confirmation).toBe(token);
+
+    const stale = frameshell([...paid, "--yes", "--confirmation", "0".repeat(32)]);
+    expect(stale.code).toBe(1);
+    expect(stale.stderr).toContain("changed since the person confirmed");
+    expect(stale.stderr).toContain(`--confirmation ${token}`);
+    expect(existsSync(join(project, "assets", "voiceover", "paid"))).toBe(false);
+
+    const ok = frameshell([...paid, "--yes", "--confirmation", token!]);
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toContain("2 generated · about 0.05 USD");
+    expect(existsSync(join(project, "assets", "voiceover", "paid", "hook-1.wav"))).toBe(true);
+  });
+
+  it("prints a confirming command that keeps the lines, provider, voice and --no-verify the ask was made with", () => {
+    writeFileSync(join(project, "scripts", "flags.md"), ["---", "voiceover: true", "language: en", "---", "## Hook", "Stop scrolling.", "## Why", "Close them all."].join("\n"));
+    const flags = ["--lines", "hook-1", "--provider", "stand-in-paid", "--voice", "low", "--no-verify"];
+    const refused = frameshell(["voiceover", "generate", "scripts/flags.md", ...flags]);
+    expect(refused.code).toBe(1);
+    const printed = /Once the person confirmed this cost: (frameshell voiceover generate .*)$/m.exec(refused.stderr)?.[1];
+    expect(printed).toMatch(/^frameshell voiceover generate scripts\/flags\.md --lines hook-1 --provider stand-in-paid --voice low --no-verify --yes --confirmation [0-9a-f]{32}$/);
+    // Run exactly what was printed: it confirms the same one-line run, so only that line is said and charged.
+    const ok = frameshell(printed!.split(" ").slice(1));
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toContain("(stand-in-paid, voice low): 1 generated");
+    expect(existsSync(join(project, "assets", "voiceover", "flags", "hook-1.wav"))).toBe(true);
+    expect(existsSync(join(project, "assets", "voiceover", "flags", "why-1.wav"))).toBe(false);
+  });
+
+  it("takes --confirmation only with --yes, and only on generate", () => {
+    const generate = ["voiceover", "generate", "scripts/paid.md"];
+    expect(frameshell([...generate, "--confirmation", "abc"]).stderr).toContain("--confirmation goes with --yes");
+    expect(frameshell([...generate, "--yes", "--confirmation", " "]).stderr).toContain("--confirmation: expected the token");
+    expect(frameshell(["voiceover", "place", "scripts/vo.md", "--confirmation", "abc"]).code).toBe(2);
+    expect(frameshell(["render", "--confirmation", "abc"]).code).toBe(2);
   });
 });
 

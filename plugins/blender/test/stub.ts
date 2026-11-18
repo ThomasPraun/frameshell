@@ -22,6 +22,10 @@ export interface StubConfig {
   skipLast?: boolean;
   /** Stay alive after this many frames, until killed. */
   hangAfter?: number;
+  /** `seconds` each `frame` event reports, by frame index; default 0.05. */
+  frameSeconds?: number[];
+  /** Never finish listing a .blend's files (`-P deps.py`): only a kill ends it. */
+  hangDeps?: boolean;
 }
 
 /** Options of {@link stubBlender} that are not the stub's own behaviour. */
@@ -56,6 +60,14 @@ export function stubBlender(config: StubConfig = {}, launcher: StubLauncher = {}
     runs(script: "deps.py" | "render.py"): string[][] {
       return stub.calls().filter((argv) => argv.includes("-P") && argv[argv.indexOf("-P") + 1]!.endsWith(script));
     },
+    /** Scene frame each rendered frame showed, in order, over every render so far. */
+    sceneFrames(): number[] {
+      try {
+        return readFileSync(join(dir, "scene-frames.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(Number);
+      } catch {
+        return [];
+      }
+    },
     /** Pid of the last render, to check it is gone. */
     pid(): number {
       return Number(readFileSync(join(dir, "pid"), "utf8"));
@@ -88,8 +100,8 @@ export function ensureWith(blender: string | (() => Promise<string>)): (name: st
   };
 }
 
-export function inputsContext(project: string, blender: string): InputsContext {
-  return { projectDir: project, ensureBinary: ensureWith(blender) };
+export function inputsContext(project: string, blender: string, signal: AbortSignal = new AbortController().signal): InputsContext {
+  return { projectDir: project, ensureBinary: ensureWith(blender), signal };
 }
 
 /** Render context at a small format; `progress` collects the reports. */

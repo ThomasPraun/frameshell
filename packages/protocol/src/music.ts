@@ -101,8 +101,8 @@ export const MusicCandidateSchema = z.object({
   track: z.string().nullable().describe("Its audio track id; null in a dry run."),
   clip: z.string().nullable().describe("Its clip id; null in a dry run."),
   muted: z.boolean().describe("True for every rank but the first: unmute one with `track.set`, and `track.remove --force` the others."),
-  loudness: z.number().describe("Integrated loudness of the whole file, LUFS (EBU R128)."),
-  truePeak: z.number().nullable().describe("True peak of the file, dBTP; null for digital silence."),
+  loudness: z.number().describe("Integrated loudness of the part of the file that plays (the whole file unless `end` cuts its intro), LUFS (EBU R128)."),
+  truePeak: z.number().nullable().describe("True peak of the part of the file that plays, dBTP; null for digital silence."),
   gain: z.number().describe("Static clip gain, dB, that brings the file to `loudness.target` (0.1 dB steps)."),
   place: MusicFitPlaceSchema.describe("Where the clip plays: `start`, `in` and `end` on the timeline and the file."),
   hit: MusicFitHitSchema.nullable().describe("Only with `end`: the final hit that lands on it, as `music.fit` finds it."),
@@ -157,6 +157,7 @@ export const MusicShapeResultSchema = z.object({
   cleared: z.boolean().describe("True when the call removed the clip's music keys (`clear`)."),
   drops: z.array(z.number()).describe("Timeline seconds of the hits the music steps down before, resolved and sorted; hits outside the clip are left out (a warning says so)."),
   ending: z.number().nullable().describe("Timeline seconds the closing fade begins; null when none."),
+  endsAt: z.number().nullable().describe("Timeline seconds the closing fade is over (`ending + settings.fade`); a bar start of the grid with `endOnBar`; null when there is no ending."),
   settings: z
     .object({
       drops: z.array(z.number()).optional(),
@@ -207,6 +208,43 @@ export type MusicCandidatesResult = z.output<typeof MusicCandidatesResultSchema>
 /** See {@link MusicCandidateSchema}. */
 export type MusicCandidate = z.output<typeof MusicCandidateSchema>;
 
+// `music.pick` (#485, ADR 0037): keep one of the candidate tracks.
+
+/** One candidate track `music.pick` removed, muted or left in place. */
+export const MusicPickTrackSchema = z.object({
+  track: z.string().describe("Track id."),
+  name: z.string().describe("Track name at the time of the call, e.g. `Music 2`."),
+  asset: z.string().describe("Project-relative music file of its clip."),
+});
+
+/** Result of `music.pick`. */
+export const MusicPickResultSchema = z.object({
+  timeline: z.string().describe("Timeline id."),
+  revision: z.int().describe("Revision after the change; the revision it was planned from when nothing was written."),
+  dryRun: z.boolean(),
+  applied: z.boolean().describe("True when the timeline changed (a review-mode proposal counts: it waits for the person)."),
+  tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
+  chosen: z.object({
+    track: z.string().describe("Track id of the kept candidate."),
+    name: z.string().describe("Its name before the call, e.g. `Music 2`."),
+    asset: z.string().describe("Project-relative music file."),
+    clip: z.string().nullable().describe("Its clip id; null when the track holds several clips."),
+    renamedTo: z.string().nullable().describe("The name the track now has, `Music`; null when a track of that name exists and it keeps its own."),
+    unmuted: z.boolean().describe("True when the track was muted and now plays."),
+  }),
+  keep: z.boolean().describe("True when the other candidates were muted and left in place (`keep`)."),
+  removed: z.array(MusicPickTrackSchema).describe("Candidate tracks removed with their clips; empty with `keep`."),
+  muted: z.array(MusicPickTrackSchema).describe("With `keep`: the candidate tracks left in place, now muted; empty otherwise."),
+  left: z
+    .array(MusicPickTrackSchema.extend({ reason: z.string().describe("Why it was not removed: the person worked on it, or a subtitle track follows it.") }))
+    .describe("Candidate tracks that were not removed and are as they were (not muted either): remove them with `track.remove` once not needed."),
+  next: z.string().describe("What usually follows: `music.fit` and `track.duck` on the kept track."),
+  warnings: z.array(z.string()),
+});
+
+/** See {@link MusicPickResultSchema}. */
+export type MusicPickResult = z.output<typeof MusicPickResultSchema>;
+
 // `music.grid` (#485 slice 5, ADR 0037 decision 8): move picture cuts onto the timeline's beat grid.
 
 /** Default of `maxShift`: the farthest a cut moves onto a beat, seconds (half a beat at 120 BPM). */
@@ -215,13 +253,25 @@ export const MUSIC_GRID_MAX_SHIFT_DEFAULT_S = 0.25;
 /** Largest `maxShift` a call may ask for, seconds. */
 export const MUSIC_GRID_MAX_SHIFT_LIMIT_S = 2;
 
-/** One picture cut of the timeline and what grid moves do with it. */
+/** How a grid move edits the clips at a cut (`trim`). */
+export const MusicGridTrimSchema = z.enum(["tail", "head"]);
+
+/** Which tracks grid moves read: every picture track and upper-track entries (`all`), or the cuts of video tracks only. */
+export const MusicGridTracksSchema = z.enum(["all", "video"]);
+
+/** One picture cut (or upper-track entry) of the timeline and what grid moves do with it. */
 export const MusicGridCutSchema = z.object({
   id: z.string().nullable().describe("`g1`, `g2`… in time order for a cut off the grid within `maxShift` (a move `skip` can name); null otherwise."),
-  at: z.number().describe("Timeline seconds of the cut before the moves."),
-  track: z.string().describe("Video track the cut is on (the first in track order when several cut on the same frame)."),
-  out: z.string().describe("Clip before the cut: its tail is trimmed to move the cut."),
-  in: z.string().describe("Clip after the cut: it moves with the cut, unchanged."),
+  kind: z
+    .enum(["cut", "program", "entry"])
+    .describe(
+      "`cut`: two clips of a video track meet. `program`: two shots of a program track (a multicam angle change) meet; always moved as a roll edit. " +
+        "`entry`: a clip alone on an upper video track (a title or an overlay appearing) starts; it is moved whole, nothing else changes.",
+    ),
+  at: z.number().describe("Timeline seconds of the cut (an entry: of the clip's first frame) before the moves."),
+  track: z.string().describe("Track the cut is on (the first in track order when several cut on the same frame)."),
+  out: z.string().nullable().describe("Clip before the cut: its tail is trimmed to move the cut; null for an entry."),
+  in: z.string().describe("Clip after the cut: it moves with the cut (head trimmed with `trim: head`, program shots always); for an entry, the clip that moves."),
   beat: z.number().nullable().describe("Timeline seconds of the nearest beat (bar start with `to: \"bar\"`); null when the grid has none within a beat."),
   ref: z.string().nullable().describe("That beat as a time reference, e.g. `beat:17` or `bar:5`; null with `beat`."),
   shiftMs: z.number().nullable().describe("`beat - at` in milliseconds: how far the cut is off the grid (negative: it moves earlier)."),
@@ -245,6 +295,8 @@ export const MusicGridResultSchema = z.object({
   tx: z.string().nullable().describe("Transaction the change is in; null when nothing was written."),
   to: z.enum(["beat", "bar"]).describe("What cuts move onto."),
   maxShift: z.number().describe("Seconds a cut may move."),
+  trim: MusicGridTrimSchema.describe("How video cuts move: `tail` ripples, `head` rolls. Program cuts always roll."),
+  tracks: MusicGridTracksSchema.describe("`all`: program cuts and upper-track entries were read too. `video`: video cuts only."),
   grid: z.object({
     source: z.enum(["beats", "nominal"]).describe("`beats`: measured, from the music's beats file. `nominal`: from a BPM."),
     bpm: z.number(),
@@ -266,6 +318,14 @@ export const MusicGridResultSchema = z.object({
     })
     .nullable()
     .describe("Set when the music clip carries `auto: \"duck\"` keys and cuts moved; null otherwise."),
+  shape: z
+    .object({
+      clip: z.string().describe("The music clip whose `music.shape` hits moved."),
+      drops: z.array(z.object({ from: z.number(), to: z.number() })).describe("Hits (timeline seconds) that moved with their shot: where they were stored and where they are now."),
+      rerun: z.boolean().describe("True when `music.shape` ran again in the same transaction (keys and builds on the new times)."),
+    })
+    .nullable()
+    .describe("Set when the music clip's stored `music.shape` hits sit in shots that moved; null otherwise."),
   warnings: z.array(z.string()),
 });
 

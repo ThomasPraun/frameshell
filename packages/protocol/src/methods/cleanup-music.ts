@@ -13,6 +13,9 @@ import {
   MusicCandidatesResultSchema,
   MusicFitResultSchema,
   MusicGridResultSchema,
+  MusicGridTracksSchema,
+  MusicGridTrimSchema,
+  MusicPickResultSchema,
   MusicShapeResultSchema,
 } from "../music.js";
 import { TimelineIdSchema, TimeRef } from "../timeline.js";
@@ -114,7 +117,7 @@ export const cleanupMusicMethods = {
     description:
       "Place 2 to 7 candidate music tracks under the same picture at the same loudness, so the person picks by ear (ADR 0037). Each file " +
       "in `assets` goes on its own new audio track `Music 1` to `Music n`, all muted but the first, with a static clip gain that brings its " +
-      "EBU R128 integrated loudness (measured over the whole file, once per file, cached by content) to one target: `loudness` (LUFS) when " +
+      "EBU R128 integrated loudness (measured over the part of the file that plays, once per file and part, cached by content) to one target: `loudness` (LUFS) when " +
       "given, else the quietest file's own, so no candidate is made louder than it is (a warning says when a gain would push a peak over " +
       "-1 dBTP). The clip starts at `from` (default 0) and plays the whole file. With `end` (seconds, a marker id or label) each is fitted " +
       "like `music.fit` slides it: its own final hit (found on its energy) lands on `end`, the intro dropped where the file is longer than " +
@@ -146,6 +149,26 @@ export const cleanupMusicMethods = {
     }),
     result: MusicCandidatesResultSchema,
   },
+  "music.pick": {
+    mutating: true,
+    description:
+      "Keep one of the candidate tracks `music.candidates` placed and clear the others (ADR 0037). `track` is the candidate's track id or its name (`Music 2`). " +
+      "It is unmuted (when it was muted) and renamed `Music` (kept as it is, with a warning, when a track of that name already exists); every other candidate track is removed " +
+      "with its clip, and listed in `removed`. With `keep: true` the others stay in place, muted, instead (`muted`). A candidate is an audio track named `Music <n>` that holds only media clips. " +
+      "A candidate the person worked on is never removed: one with more than one clip, or whose clip has a speed, keys, effects, fades or transitions of its own (the placement's `start`, `in` and `gain` do not count), " +
+      "or that a subtitle track follows, stays as it is and is named in `left` and in a warning. Refused before anything is written: a `track` that is not a candidate, or no other candidate to pick between. " +
+      "The winner keeps what `music.candidates` wrote (loudness gain, fit, 5 ms fade in); nothing is fitted, shaped or ducked again: `next` says what usually follows (`music.fit`, `track.duck` with `level`). " +
+      "`dryRun: true` changes nothing and returns the plan. One transaction labelled `Music pick: <track>` (`revert` undoes it whole, tracks and clips included; with review mode on it is one proposal). " +
+      "Example: `{ track: \"Music 2\" }`. Fails with TrackNotFound, InvalidOperation, TimelineNotFound or StaleRevision (the timeline changed while it was planned).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      track: z.string().min(1).describe("The candidate to keep: its track id from `timeline.show` (`t_1a2b3c`) or its name, e.g. `Music 2`."),
+      keep: z.boolean().default(false).describe("Leave the other candidates in place, muted, instead of removing them."),
+      dryRun: z.boolean().default(false).describe("Only return the plan; change nothing."),
+    }),
+    result: MusicPickResultSchema,
+  },
   "music.shape": {
     mutating: true,
     description:
@@ -153,7 +176,7 @@ export const cleanupMusicMethods = {
       "`drop` lists the times of the hits (timeline seconds, a marker id or label, `beat:N`/`bar:N`; the cut into the end card, a title slam, a sound effect). For each, " +
       "the music is `depth` dB down (default 9) over a quick step that is complete `lead` seconds before the hit (default 0.4), stays down until `hold` seconds after it (0.3) " +
       "and comes back over `release` (0.6). `ending` is where the closing fade begins (e.g. the end of the last word, or `bar:17` with a short `fade` to stop on a bar line): " +
-      "the music fades straight down over `fade` seconds (default 2.5) to inaudible and stays there to the clip's end. The result is gain keys " +
+      "the music fades straight down over `fade` seconds (default 2.5) to inaudible and stays there to the clip's end; with `endOnBar` the fade ends on the bar start nearest to `ending + fade` of the timeline's beat grid (`tempo.set`) instead, so the music stops on a bar line (the result's `endsAt` and a warning say the fade it became). The result is gain keys " +
       "(`clip.key` `gain`) on the clip, marked `auto: \"music\"`: running it again replaces those and keeps the keys you set by hand (a hand key inside a dip stays as set and " +
       "a warning names it); `clear: true` removes them. The level they dip from is the clip's `audio.gain` or its own keys. The times of the hits are kept in the clip's `audio.shape`, " +
       "so `music.fit` runs the same shaping again after it moves the clip (`skip: [\"shape\"]` leaves the keys and says so). The keys replace the clip's duck keys (`track.duck`): " +
@@ -177,6 +200,10 @@ export const cleanupMusicMethods = {
         .optional()
         .describe("Hits of the picture, as timeline times. The music is complete down `lead` seconds before each."),
       ending: TimeRef("Timeline time the closing fade begins.").optional(),
+      endOnBar: z
+        .boolean()
+        .default(false)
+        .describe("Needs `ending`: stretch or shrink the closing fade so it ends on a bar start of the timeline's beat grid (the nearest one to `ending + fade`), so the music stops on a bar line."),
       lead: z.number().min(0.05).max(3).default(0.4).describe("Seconds before a hit that the step down is complete. Default 0.4."),
       depth: z.number().positive().max(40).default(9).describe("dB the music steps down by. Default 9."),
       hold: z.number().min(0).max(5).default(0.3).describe("Seconds after a hit the music stays down. Default 0.3."),
@@ -220,7 +247,11 @@ export const cleanupMusicMethods = {
       "would be empty or overlap, a multicam shot would be trimmed, or a transcribed word would be cut, dropped or added at the trimmed end " +
       "(clips with sound but no transcript are moved with a warning). `skip` leaves moves out by id; `dryRun: true` changes nothing and returns " +
       "every cut with its `status`. If the music clip carries duck keys (`track.duck`), duck runs again in the same transaction, since the voice " +
-      "moved with the picture (`skip: [\"duck\"]` leaves them). Markers stay where they are unless every track ripples (no music under the cuts). One transaction labelled `Music grid: …` (`revert` " +
+      "moved with the picture (`skip: [\"duck\"]` leaves them). The hits stored by `music.shape` follow the shots that moved (`shape`): the same shaping runs again with each hit on its shot's new time, " +
+      "so the dip and the build stay on the picture (`skip: [\"shape\"]` leaves them, with a warning). `trim: head` makes each move a roll edit instead: the clip before the cut is trimmed to the beat and the clip after it " +
+      "gets its head trimmed to it, nothing ripples, no shot changes its time and no hit moves. `tracks: all` (default) also reads the shot changes of program tracks (an angle change, always a roll edit, so the group " +
+      "clock stays in sync) and the entries of clips alone on upper video tracks (a title appearing; the whole clip moves, nothing else); `tracks: video` reads only the cuts of video tracks. " +
+      "Markers stay where they are unless every track ripples (no music under the cuts). One transaction labelled `Music grid: …` (`revert` " +
       "undoes it whole; with review mode on it is one proposal). Example: `{ dryRun: true }`, then `{ skip: [\"g3\"] }`. Fails with " +
       "InvalidOperation (no tempo, no beats file yet, a LOW confidence grid, a `skip` id that is no move) or TimelineNotFound.",
     params: z.strictObject({
@@ -233,8 +264,16 @@ export const cleanupMusicMethods = {
         .max(MUSIC_GRID_MAX_SHIFT_LIMIT_S)
         .default(MUSIC_GRID_MAX_SHIFT_DEFAULT_S)
         .describe(`Farthest a cut moves, seconds. Default ${MUSIC_GRID_MAX_SHIFT_DEFAULT_S} (half a beat at 120 BPM); cuts farther off are listed as \`far\`.`),
+      trim: MusicGridTrimSchema.default("tail").describe(
+        "How a video cut moves. `tail` (default): the clip before the cut is trimmed with ripple. `head`: a roll edit, the clip before the cut is trimmed to the beat and the clip after it " +
+          "gets its head trimmed to it, so nothing ripples and every shot keeps its own time (the picture stays in sync with its sound); needs footage on the far side of the edit.",
+      ),
+      tracks: MusicGridTracksSchema.default("all").describe("`all` (default): also read the shot changes of program tracks and the entries of clips alone on upper video tracks. `video`: cuts of video tracks only."),
       dryRun: z.boolean().default(false).describe("Only return the cuts and the planned moves; change nothing."),
-      skip: z.array(z.string().min(1)).optional().describe("Move ids (`g1`…) from a dry run to leave out, and `duck` to leave the duck keys as they are."),
+      skip: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Move ids (`g1`…) from a dry run to leave out, `duck` to leave the duck keys as they are, and `shape` to leave the stored `music.shape` hits where they were."),
     }),
     result: MusicGridResultSchema,
   },

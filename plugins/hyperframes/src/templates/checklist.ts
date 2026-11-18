@@ -15,7 +15,10 @@ import {
  * Checklist (#466): the items spring in one after another, then tick one by
  * one on a steady beat (a filled box with a check, the text settling back).
  * Up to eight items, separated by `|` in one prop so a revision is one
- * `clip set`. Transparent unless `backdrop` is raised.
+ * `clip set`. Transparent unless `backdrop` is raised. With `onBeats` the ticks
+ * land on the beats of the timeline's music (motion runtime 0.5.0, ADR 0029
+ * decision 8): the entry also needs `<meta name="frameshell-timing" content="beats">`,
+ * which is not scaffolded so a plain checklist never re-renders when the music moves.
  */
 export const checklist: Template = {
   id: "checklist",
@@ -34,6 +37,12 @@ export const checklist: Template = {
       },
       { id: "tickStart", type: "number", label: "Seconds until the first tick", default: 1, min: 0.3, max: 6, step: 0.1, unit: "s" },
       { id: "tickGap", type: "number", label: "Seconds between ticks", default: 0.7, min: 0.2, max: 3, step: 0.05, unit: "s" },
+      {
+        id: "onBeats",
+        type: "boolean",
+        label: "Tick on the music's beats from tickStart (needs the frameshell-timing meta tag with beats in the entry)",
+        default: false,
+      },
       { id: "ink", type: "color", label: "Text colour", default: tokens.colors.ink ?? PLACEHOLDER.ink },
       { id: "accent", type: "color", label: "Tick colour", default: tokens.colors.accent ?? PLACEHOLDER.accent },
       { id: "size", type: "number", label: "Type size, 1 = the format's default", default: 1, min: 0.5, max: 1.6, step: 0.05 },
@@ -111,6 +120,18 @@ export const checklist: Template = {
         rows.push({ row: row, fill: fill, tick: tick, text: row.lastChild });
       });
 
+      // Tick times: the steps above, or the clip's beats from the first one at or after tickStart. Without a usable
+      // grid the beats fall back to those same steps (nominal grid), so onBeats never changes a clip that has none.
+      var steps = { bpm: 60 / P.tickGap, offset: P.tickStart };
+      var first = 0;
+      if (P.onBeats) {
+        var from = M.beatAt(P.tickStart, steps);
+        first = from.phase > 1e-6 ? from.index + 1 : from.index;
+      }
+      var tickTimes = rows.map(function (_, i) {
+        return P.onBeats ? M.beatTime(first + i, steps) : P.tickStart + i * P.tickGap;
+      });
+
       var D = S.duration;
       var OUT = 0.3;
       var START = 0.15;  // the title is in; the first item follows
@@ -129,7 +150,7 @@ export const checklist: Template = {
           var s = M.spring("default", t - at);
           M.write(r.row, { x: (1 - s) * -px * 0.6, opacity: M.ease("enter", (t - at) / 0.2) });
           // The tick: the box fills, the check pops in, the text settles back.
-          var tickAt = P.tickStart + i * P.tickGap;
+          var tickAt = tickTimes[i];
           M.write(r.fill, { opacity: M.ease("enter", (t - tickAt) / 0.12) });
           M.write(r.tick, { scale: 0.4 + 0.6 * M.spring("snappy", t - tickAt), opacity: M.ease("enter", (t - tickAt) / 0.1) });
           M.write(r.text, { opacity: 1 - 0.35 * M.ease("enter", (t - tickAt - 0.1) / 0.3) });

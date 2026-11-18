@@ -21,6 +21,7 @@ const ADDONS = {
   TextGeometry: "three/addons/geometries/TextGeometry.js",
   "FontLoader, Font": "three/addons/loaders/FontLoader.js",
   GLTFLoader: "three/addons/loaders/GLTFLoader.js",
+  SVGLoader: "three/addons/loaders/SVGLoader.js",
 };
 const names = Object.keys(ADDONS).join(", ");
 const entry = [

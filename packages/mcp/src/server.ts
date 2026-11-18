@@ -9,6 +9,7 @@ import {
   type AnalyzeDiffResult,
   type AnalyzeResult,
   type FrameResult,
+  type ClipCompareResult,
   type GradeCompareResult,
   type Progress,
   type ReviewResult,
@@ -67,7 +68,7 @@ const INSTRUCTIONS =
   "start/end/at/from/to, source seconds for in/out), snapped to the frame grid. Read the timeline (resource " +
   "`frameshell://timelines/main` or `timeline_show`) before editing and use the ids it returns. Every mutating tool " +
   "returns the new `revision` and `operation.tx`; `revert` with that tx id undoes your change, `tx_begin`/`tx_commit` " +
-  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (contact, phone, motion and seam sheets, safe-zone sheets with `platform`, and `metrics`: still stretches, loudness of a `file`, sound sync, loop seam, a `file` against its export plan with `preset`, the sound review list (voice over bed, repeated effects, cut-off clips, the ending, clicks), craft warnings); measure a reference video with `analyze` (shots, palette, look, rhythm, events, curve, ink, sync, loudness, tempo) and compare our film with it with `analyze_diff`. `history` with `since` " +
+  "group several operations. Look at what you built with `frame_capture` and `frames_strip`, and review a whole film with `review` (sheets contact, safe, phone, motion, seam, beats and cuts; `cropAt` follows a point; the per-clip kit `pop` (frame pair and difference), `onion` (blended frames) and `speed` (hero-point speed chart, linear moves and dead stops); `metrics`: still stretches, rhythm (shot-length CV, still share, bursts, on `analyze`'s scale), loudness of a `file`, sound sync, loop seam, delivery, the sound review list, craft warnings, `requirements.json`); measure a reference video with `analyze` (shots, palette, look, rhythm, events, curve, ink, sync, loudness, tempo) and compare our film with it with `analyze_diff`. `history` with `since` " +
   "shows what the human changed after your last transaction. When the user says \"this\" or \"here\", read `ui_state` " +
   "(their playhead and selection in the app); `ui_seek`, `ui_select` and `ui_show_tx_diff` show them what you mean. " +
   "When they say they sent or pointed at something in Frameshell (\"Chat about this\"), `inbox_take` returns it as " +
@@ -208,7 +209,7 @@ export function createMcpServer(options: McpServerOptions): Server {
     if (tool.name === "frames_strip") return strip(await link.get(), args);
     const result = await (await link.get()).request(tool.method!, args as never, { onProgress });
     if (tool.method === "review" || tool.method === "analyze" || tool.method === "analyze.diff") return withSheets(result as ReviewResult | AnalyzeResult | AnalyzeDiffResult);
-    if (tool.method === "grade.compare") return withGradeSheet(result as GradeCompareResult);
+    if (tool.method === "grade.compare" || tool.method === "clip.compare") return withGradeSheet(result as GradeCompareResult | ClipCompareResult);
     if (tool.method === "transcribe" || tool.method === "transcribe.speakers") {
       const transcript = (result as { transcript: string }).transcript.replace(/^transcripts\//, "");
       // Speakers rewrite an existing transcript: its resource changed, the list did not.
@@ -356,8 +357,8 @@ async function withSheets(result: ReviewResult | AnalyzeResult | AnalyzeDiffResu
   return { content };
 }
 
-/** `grade.compare`: its sheet as an image, then the facts with each tile's label, kind and `clip set` flags. */
-async function withGradeSheet(result: GradeCompareResult): Promise<CallToolResult> {
+/** `grade.compare` and `clip.compare`: the sheet as an image, then the facts with each tile's label, kind and `clip set` flags. */
+async function withGradeSheet(result: GradeCompareResult | ClipCompareResult): Promise<CallToolResult> {
   const image = pngForModel(await readFile(result.path), REVIEW_MAX_SIDE, REVIEW_MAX_SIDE);
   return {
     content: [

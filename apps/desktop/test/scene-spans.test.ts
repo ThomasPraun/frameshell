@@ -32,8 +32,8 @@ describe("sceneBoxes", () => {
     const boxes = sceneBoxes(
       [
         outline("scripts/plan.md", [
-          scene("outro", { span: [{ timeline: "main", start: 20, end: 30, words: 4 }] }),
-          scene("intro", { span: [{ timeline: "main", start: 0, end: 12.5, words: 9 }] }),
+          scene("outro", { span: [{ timeline: "main", start: 20, end: 30, words: 4, source: "words" }] }),
+          scene("intro", { span: [{ timeline: "main", start: 0, end: 12.5, words: 9, source: "words" }] }),
         ]),
       ],
       "main",
@@ -45,15 +45,14 @@ describe("sceneBoxes", () => {
     expect(boxes[0]).toMatchObject({ script: "scripts/plan.md", title: "Intro" });
   });
 
-  it("leaves out scenes without a word range, without a span on the timeline, or with an empty one", () => {
+  it("leaves out scenes without a span on the timeline, or with an empty one", () => {
     const boxes = sceneBoxes(
       [
         outline("scripts/plan.md", [
-          scene("no-words", { wordRange: null, span: [{ timeline: "main", start: 0, end: 3, words: 1 }] }),
-          scene("elsewhere", { span: [{ timeline: "intro", start: 0, end: 3, words: 1 }] }),
+          scene("elsewhere", { span: [{ timeline: "intro", start: 0, end: 3, words: 1, source: "words" }] }),
           scene("unplaced", { span: [] }),
-          scene("empty", { span: [{ timeline: "main", start: 4, end: 4, words: 1 }] }),
-          scene("kept", { span: [{ timeline: "main", start: 5, end: 6, words: 1 }] }),
+          scene("empty", { span: [{ timeline: "main", start: 4, end: 4, words: 1, source: "words" }] }),
+          scene("kept", { span: [{ timeline: "main", start: 5, end: 6, words: 1, source: "words" }] }),
         ]),
       ],
       "main",
@@ -61,10 +60,34 @@ describe("sceneBoxes", () => {
     expect(boxes.map((box) => box.slug)).toEqual(["kept"]);
   });
 
+  it("shows a storyboard scene that has no words: from its clips, or planned from its heading, with its source", () => {
+    const boxes = sceneBoxes(
+      [
+        outline("scripts/film.md", [
+          scene("hook", {
+            wordRange: null,
+            span: [{ timeline: "main", start: 0, end: 6, words: 0, source: "planned" }],
+          }),
+          scene("proof", {
+            wordRange: null,
+            clips: [{ timeline: "main", clip: "c_a" }],
+            span: [{ timeline: "main", start: 6, end: 18, words: 0, source: "clips" }],
+          }),
+          scene("payoff", { wordRange: null, span: [{ timeline: "alt", start: 18, end: 24, words: 0, source: "clips" }] }),
+        ]),
+      ],
+      "main",
+    );
+    expect(boxes.map((box) => [box.slug, box.start, box.end, box.source, box.clips])).toEqual([
+      ["hook", 0, 6, "planned", []],
+      ["proof", 6, 18, "clips", ["c_a"]],
+    ]);
+  });
+
   it("counts only this timeline's clips: a scene realized on another timeline is still hollow here", () => {
-    const placed = [
-      { timeline: "main", start: 0, end: 5, words: 3 },
-      { timeline: "alt", start: 0, end: 5, words: 3 },
+    const placed: Scene["span"] = [
+      { timeline: "main", start: 0, end: 5, words: 3, source: "words" },
+      { timeline: "alt", start: 0, end: 5, words: 3, source: "words" },
     ];
     const [box] = sceneBoxes(
       [
@@ -89,8 +112,8 @@ describe("sceneBoxes", () => {
   it("merges scripts, keeping which one each scene is from", () => {
     const boxes = sceneBoxes(
       [
-        outline("scripts/b.md", [scene("one", { span: [{ timeline: "main", start: 10, end: 11, words: 1 }] })]),
-        outline("scripts/a.md", [scene("one", { span: [{ timeline: "main", start: 0, end: 1, words: 1 }] })]),
+        outline("scripts/b.md", [scene("one", { span: [{ timeline: "main", start: 10, end: 11, words: 1, source: "words" }] })]),
+        outline("scripts/a.md", [scene("one", { span: [{ timeline: "main", start: 0, end: 1, words: 1, source: "words" }] })]),
       ],
       "main",
     );
@@ -120,17 +143,19 @@ describe("scriptFiles and affectsScenes", () => {
   it("re-reads the spans for scripts and transcripts only", () => {
     expect(affectsScenes(["scripts/plan.md"])).toBe(true);
     expect(affectsScenes(["assets/a.mp4", "transcripts/talk.words.json"])).toBe(true);
+    expect(affectsScenes(["beats/music.beats.json"])).toBe(true);
     expect(affectsScenes(["assets/a.mp4", "README.md", "scripts/notes.txt"])).toBe(false);
   });
 });
 
 describe("sameBoxes", () => {
-  const box = { script: "scripts/plan.md", slug: "intro", title: "Intro", start: 0, end: 5, clips: ["c_a"] };
+  const box = { script: "scripts/plan.md", slug: "intro", title: "Intro", start: 0, end: 5, clips: ["c_a"], source: "words" as const };
 
   it("tells a re-read that found nothing new from one that did", () => {
     expect(sameBoxes([box], [{ ...box, clips: ["c_a"] }])).toBe(true);
     expect(sameBoxes([box], [{ ...box, clips: [] }])).toBe(false);
     expect(sameBoxes([box], [{ ...box, end: 6 }])).toBe(false);
+    expect(sameBoxes([box], [{ ...box, source: "planned" }])).toBe(false);
     expect(sameBoxes([box], [])).toBe(false);
   });
 });

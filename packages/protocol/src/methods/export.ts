@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { ViewedShape } from "../proposals.js";
-import { AnalyzeDiffResultSchema, AnalyzeResultSchema } from "../analyze.js";
-import { ReviewOutputSchema, ReviewResultSchema } from "../review.js";
-import { FormatIdSchema, SafeZoneSchema } from "@frameshell/schema";
-import { TimelineIdSchema } from "../timeline.js";
+import { ANALYSIS_NAME_PATTERN, AnalyzeDiffResultSchema, AnalyzeResultSchema } from "../analyze.js";
+import { RequirementsChangeSchema, ReviewOutputSchema, ReviewResultSchema } from "../review.js";
+import { CLIP_REQUIREMENT_FIELDS, CRAFT_CHECKS, FormatIdSchema, REQUIREMENT_PATHS, SafeZoneSchema } from "@frameshell/schema";
+import { TimeRefParam, TimelineIdSchema } from "../timeline.js";
 import { InspectedPointSchema } from "../ui.js";
 import {
   type MethodSpec,
@@ -115,7 +115,11 @@ export const exportMethods = {
       "(16:9 is 1200x675, 9:16 is 675x1200, never scaled up), at most 30 fps (24 and 25 keep their rate), one palette over the whole file with " +
       "bayer dither, ~4 centisecond frame delays. A GIF always has the loop rules (refused with `cover`, the black-end and cycle warnings, the " +
       "repeated-last-frame warning on the job) and ignores `quality` (a warning says so). More than 350 output frames fails with InvalidOperation " +
-      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`.",
+      "(`data.frames`, `data.max`) before anything is queued; a finished file over 15 MB puts a warning in the job's `warnings`. " +
+      "Finals (ADR 0035): a generated clip whose plugin renders finals (Blender: EEVEE draft, Cycles final) keeps both; `quality: \"draft\"` " +
+      "exports its draft with a warning per clip, while `final` or no quality renders its missing final first and waits for it. When the " +
+      "missing finals are estimated over 5 minutes in all (or a plugin cannot say), nothing is queued: it fails with ConfirmationRequired " +
+      "(`data.finals` lists `{ clip, type, format, seconds }`, `data.seconds` the total) until called again with `yes: true` after the person agreed.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -149,6 +153,13 @@ export const exportMethods = {
           "Export a file meant to repeat (title loops, banners): frame 0 to the last frame, 2 ms half-sine audio fades at both ends of " +
             "MP4 and MOV, warnings for a broken cycle, black ends, and a last frame that repeats frame 0. Refused with `cover`. Default false.",
         ),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "The person agreed to wait for the final renders of generated clips (Blender's Cycles finals) this export makes when they " +
+            "are estimated over 5 minutes in all. Never set it without their explicit agreement. Default false.",
+        ),
     }),
     result: z.object({
       format: z.string().describe("Format id of the first render, which the fields below describe."),
@@ -173,8 +184,10 @@ export const exportMethods = {
     description:
       "Render variants of one template timeline from data rows (ADR 0040): sizes, languages, product rows. The batch file " +
       "(`*.batch.json`, JSON Schema `batch.json`) names `template` (timeline id, default `main`), `slots` (name → " +
-      "`<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot) or `<clipId>.asset`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
-      "used as file names; a slot a row leaves out keeps the template's value), and optional `formats`, `preset`, `quality`. " +
+      "`<clipId>.props.<dot.path>`, `<clipId>.props` (the prop named like the slot), `<clipId>.asset` or `voiceover`), `rows` (`{ id, <slot>: value }`, ids lowercase `[a-z0-9-]`, unique, " +
+      "used as file names; a slot a row leaves out keeps the template's value) or `csv` (a CSV file next to the batch file with the rows: a header of `id` and slot names, " +
+      "a column typed `price:number` / `text` / `boolean` / `json` or else as the template's value is, an empty cell leaves the slot to the template; every wrong cell is " +
+      "reported with its line and column), and optional `formats`, `preset`, `quality`. " +
       "Each row patches the template in memory only, never under `timelines/` (no journal, no proposal): a props value is " +
       "written at its path over the clip's props and checked by the adapter like `clip.set`; an asset swap keeps the clip's " +
       "in, out and placement and fails when the new file lacks the stream the track plays, is shorter than `out`, or lacks a " +
@@ -182,8 +195,10 @@ export const exportMethods = {
       "time as ordinary `render` jobs, to `<out>/<row>.<container>` (`-<format>` added with formats), and the call returns at " +
       "once. `<out>/manifest.json` (default `<project>/exports/<batch file name>/`) holds every row × format with status, " +
       "output, job, error and timings, rewritten on each job change; follow the jobs with `job.list` or `job.progress`. " +
-      "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover: swap in takes " +
-      "that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
+      "Formats come from `frameshell.json` on disk, never a pending proposal. Batch never generates voiceover. A `voiceover` slot takes a " +
+      "voiceover script path (or `{ script, lines, at, tempo, start, gap, track, replace }`) and places the takes `voiceover.generate` already made as phrase clips on " +
+      "the row's variant, with the planner and rules of `voiceover.place` (a line with no take fails; a subtitle track that follows the voice track needs each take " +
+      "transcribed; the video grows when the voice runs past the template, and the entry's warnings say by how much); `asset` slots swap in files that exist. `dryRun` validates and returns the plan without rendering. Fails with InvalidOperation (data `{ row, slot }`: " +
       "unknown clip, props the adapter refuses, an asset too short or without the stream or transcript; a batch already " +
       "running into the same `out`; a name in `rows` the file lacks; `failed` without a manifest of this batch file), " +
       "InvalidProjectFile (the batch file), and what `render` fails with, its data naming the `row`. Re-run: `rows` " +
@@ -191,14 +206,21 @@ export const exportMethods = {
       "only rows with an entry in the manifest that is not `done` (failed, canceled, or left `queued`/`running` when " +
       "the daemon stopped) or no entry yet; both together = the failed ones among `rows`. Only the chosen rows are " +
       "validated, so a bad row elsewhere does not block them; the other rows keep their manifest entries. A chosen row " +
-      "whose entries are all `done` with the files still there is skipped (listed in `skipped`) unless `force`: edit " +
-      "a row, then pass `force` or its id in `rows` with `force`. `review: true` reviews each rendered file as soon as its render " +
+      "whose entries are all `done` with the files still there is skipped (listed in `skipped`) unless `force` or its data changed: " +
+      "each entry stores a `hash` of the row's cells, the slots and the template timeline's content, and a `done` row whose hash differs renders " +
+      "again without `force`, listed in `changed` (a manifest without hashes, or a swapped file edited in place, is not noticed: pass `force`). " +
+      "A props slot naming a prop the clip's composition does not declare (a HyperFrames `data-composition-variables` list) fails the row with " +
+      "reason `unknown prop`, in a dry run too; clips whose adapter declares nothing accept any prop. `batch.cancel` stops a running batch. `review: true` reviews each rendered file as soon as its render " +
       "is done (`review` on the file, metrics only, one at a time while the next row renders; it needs a ready ffmpeg): " +
       "the entry's `review` gets `verdict` (`fail` when `requirements.json` fails, `warn` for craft warnings, else " +
       "`pass`), `warnings`, `failed`, `checks` and the `run` whose `metrics.json` holds the detail, and the manifest says " +
       "`running` until the last review ended. Rows skipped as done are reviewed too when their entry has no finished " +
       "review. A review that cannot run leaves the render `done` and the entry's review `error`. In a props slot, `<clipId>.props` " +
-      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`.",
+      "without a path means the prop named like the slot: `{ \"title\": \"c_8f2a1b.props\" }` is `c_8f2a1b.props.title`. " +
+      "Finals (ADR 0035): unless the batch file's `quality` is `draft`, each row renders the missing finals of its generated clips " +
+      "(Blender's Cycles renders) first; when those of every chosen row are estimated over 5 minutes in all (or a plugin cannot say), " +
+      "nothing is queued: it fails with ConfirmationRequired as `render` does (`data.finals` entries also name their `row`) until " +
+      "called again with `yes: true` after the person agreed. `dryRun` never asks.",
     params: z.strictObject({
       cwd: CwdParam,
       file: z.string().min(1).describe("Batch file, absolute or relative to `cwd`, e.g. `batches/launch.batch.json`."),
@@ -223,6 +245,13 @@ export const exportMethods = {
         .default(false)
         .describe("Review each rendered file (`review` with `file`, metrics only) and record its verdict in the entry's `review`; slower, off by default."),
       dryRun: z.boolean().default(false).describe("Validate every chosen row × format and return the plan; nothing is rendered or written."),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "The person agreed to wait for the final renders of generated clips (Blender's Cycles finals) the chosen rows make when they " +
+            "are estimated over 5 minutes in all. Never set it without their explicit agreement. Default false.",
+        ),
     }),
     result: z.object({
       dir: z.string().describe("Project root."),
@@ -237,7 +266,38 @@ export const exportMethods = {
         .array(BatchEntrySchema)
         .describe("Every row × format, row order then format order: the manifest as written now. Rows not rendered by this call keep their earlier entries; `queued` ones are what it renders."),
       skipped: z.array(z.string()).describe("Chosen rows left alone because every entry is `done` and its file exists (pass `force`); empty when none."),
+      changed: z
+        .array(z.string())
+        .default([])
+        .describe(
+          "Rows rendered again without `force` because the data of their last `done` render changed: a cell, the slots, or the template timeline (the manifest entry's `hash`); empty when none.",
+        ),
       jobs: z.array(JobSchema).describe("Render jobs queued by this call: the first row's. Later rows queue as the one before ends."),
+    }),
+  },
+  "batch.cancel": {
+    mutating: true,
+    description:
+      "Stop a running batch, one `batch.render` started (ADR 0040): no further row is queued, the render job of the row that is running is " +
+      "canceled, and the manifest entries of that row and of the rows not started become `canceled` (a review of a file still waiting is " +
+      "dropped; one running finishes first). Rows already `done` keep their files and entries. The manifest's `state` becomes " +
+      "`canceled` once the running render ended; the call waits for that (up to 10 s, then returns the entries as they are). " +
+      "`file` and `out` name the batch as `batch.render` did (default out `<project>/exports/<batch file name>/`). Re-run the " +
+      "rest later with `batch.render` and `failed: true`. Fails with InvalidOperation (data `{ op, reason, " +
+      "field: \"out\" }`; `reason` is `no batch running` when no batch of this project is rendering into `out`, `other batch` when it renders another batch file).",
+    params: z.strictObject({
+      cwd: CwdParam,
+      file: z.string().min(1).describe("Batch file the running batch was started with, absolute or relative to `cwd`."),
+      out: AbsolutePath.optional().describe("Absolute output folder the batch renders into. Default `<project>/exports/<batch file name without .batch.json>/`."),
+    }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      file: z.string().describe("Absolute path of the batch file."),
+      out: z.string().describe("Absolute output folder."),
+      manifest: z.string().describe("Absolute path of `manifest.json`."),
+      state: z.enum(["running", "canceled"]).describe("`canceled` once the batch ended; `running` when the render job had not stopped yet after 10 s: ask `job.list`, or read the manifest."),
+      canceled: z.array(z.string()).describe("Row ids whose render was stopped or never started, in file order."),
+      entries: z.array(BatchEntrySchema).describe("The manifest as written now."),
     }),
   },
   frame: {
@@ -293,7 +353,7 @@ export const exportMethods = {
     description:
       "Look at a film before showing it (#457): write contact sheets and strips of a timeline, or of an exported video " +
       "with `file`, into `.frameshell/review/<n>/` (`<n>` counts runs; the last 10 are kept) and report them. Never " +
-      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies and `metrics`): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
+      "touches project files. Sheets (`sheets`, default the four below, plus `safe` when it applies and `metrics`; `beats` only when named): `contact` (6 tiles wide, 10 in a vertical format, 30 per " +
       "image; frames at clip starts and ends, cuts, markers, subtitle cues and the deepest zoom of a clip, plus one every " +
       "`every` seconds, each labelled with its time), `phone` (one frame per second at 360 px wide: how it reads on a " +
       "phone), `motion` (the two fastest moments, found by how much the picture changes between frames, as 12 consecutive " +
@@ -303,10 +363,13 @@ export const exportMethods = {
       "subtitle track cross a zone is marked `!subtitle`, and `safeZones` in the result lists them per track and zone (captions are the only text review " +
       "can measure; a file has none). A timeline is rendered frame by frame like `frame` (what `frame` puts in its `warnings`, e.g. a refused motion blur, is in this result's `warnings`; draft work: matches `render`, not a full " +
       "render, app closed is fine); a file is decoded with the managed ffmpeg, so footage and any generated clip type " +
-      "are covered. Motion of a long timeline is sampled at most 90 times, so its peaks are approximate. `from` and " +
+      "are covered. A file's motion is measured on every frame, the way `analyze` reads it (its first hour only), and its shots are found on the whole file, " +
+      "a second decode even with `from`/`to`; a timeline's is sampled at most 90 times " +
+      "(`metrics.picture.sampled`; thresholds then apply per sample interval), so its peaks are approximate. `from` and " +
       "`to` limit it to a range (the seam is then the range's ends). `metrics` (default on, or named in `sheets`) writes `metrics.json` and " +
       "returns `metrics`: numbers a sheet cannot tell, measured on grey frames and the sound: the longest still stretch, the largest gap between " +
-      "visual events, near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
+      "visual events (`analyze`'s big changes), `rhythm` (shot-length CV, still share, bursts: on a `file` the numbers `analyze` reports, MEASURED; on a timeline ESTIMATED), " +
+      "near-blank frames, whether frame 0 is empty, subtitle cues on screen for less than they take to read (a timeline), the loudness of a " +
       "`file` (integrated LUFS, range, true peak, the phone band 200 Hz to 6 kHz; measured after the encode, so export first: a timeline has none) and `craft` warnings " +
       "(still over 3 s, empty frame 0, a blank picture, a cue too short, a true peak above -1 dBTP, a phone band 6 LU under the mix, over 15 s of silence). " +
       "`metrics.sync` sets the sounds against the picture events they belong to (the generated sounds `sound.place` put on the timeline, or the hits found in a `file`'s sound; whooshes, risers and ticks are left out): " +
@@ -314,11 +377,21 @@ export const exportMethods = {
       "`metrics.seam` is the grey jump between the last frame and the first (a hard cut reads 40 to 80, under 10 is continuous); with `loop` a duplicate or a jump is a warning. " +
       "With `file` and `preset`, `metrics.delivery` checks the file against the export plan. The `safe` sheet and `safeZones` also flag graphics (generated clips with an alpha render: titles included) and faces (footage with a cached `people scan`) that reach into a zone, " +
       "and each is a `safe-zone` craft warning. " +
-      "A project's `requirements.json` (written with `file.write`) is judged on every run with metrics: `metrics.requirements` lists each expectation it states (film length, longest still stretch, a held end card, loudness of a `file`, " +
-      "smallest caption size, per clip `appearsBy`, `before` and `keepsMoving`) as pass, fail or skipped, with what was measured. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
+      "A project's `requirements.json` (set with `review.require` and `review.waive`) is judged on every run with metrics: `metrics.requirements` lists each expectation it states (film length, longest still stretch, a held end card, loudness of a `file`, " +
+      "smallest caption size, per clip `appearsBy`, `before`, `keepsMoving` and `staysInFrame`: what the clip draws, its alpha or the faces of a cached `people scan`, never leaves the frame of the format reviewed, with the `spans` that do) as pass, fail or skipped, with what was measured. " +
+      "With `view: \"proposal\"` the proposal's version of the file is judged. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
       "a `waivers` entry (check, optional clip, reason) lifts the warnings it covers out of `craft` into `metrics.waived` with its reason, never silently. `requirements.failed` counts what still fails. " +
+      "`beats` (only when named in `sheets`): one frame per beat of the timeline's tempo grid (`tempo.set`; the one grid `tempo.show` lists), taken a quarter beat after the hit so the picture the beat lands on shows, " +
+      "bar starts labelled `bar N` and the others `beat N` (the numbers `beat:N`/`bar:N` time references use), up to 60 tiles; no tempo, a LOW-confidence grid or a `file` leaves it out with a `warnings` line. " +
+      "`cropAt` crops every tile of the run (but the `safe` sheet's, whose zones need the whole frame) around one point before scaling: a cursor on a button, a foot on the ground; with `clip` the point is in that clip's own picture and follows it through keyed moves and scale, " +
+      "after the format's cover crop; tiles say what they show in `crop`. " +
+      "`cuts` (only when named in `sheets`): a seam strip of every cut, one row each: the whole frames 0.2 and 0.1 s before, on, and 0.1 and 0.2 s after it, labelled `cut 3 -0.1` (a timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds; up to 24 cuts spread evenly, the rest named in `warnings`). " +
+      "The per-clip kit: `pop` (a time) writes the frame before and the frame at it side by side with their difference amplified 4 times, to see what jumps; " +
+      "`onion` (a clip id) blends up to 24 frames of the clip's span (or of `from`/`to` inside it) into one image, each moving part at 25 %, so the spacing between positions shows whether the motion tightens into its keys; " +
+      "`speed` (a clip id) charts the speed of the clip's hero point per frame (a media clip: its picture as its keys place it, exact; a generated clip: the centre and size of its render's alpha, a render without alpha is skipped with the reason) and lists in `metrics.speed` " +
+      "the `linear` stretches (no ease) and the dead `stop`s mid-move, both warnings. With any of the three and no `sheets`, the run writes only their sheets (and `metrics` with `speed`, the safe sheet with `platform`); `cropAt` crops the `pop` and `onion` tiles too (both `pop` frames take the crop of the frame at `pop`). " +
       "The MCP tool returns the sheets as images. " +
-      "Fails with InvalidOperation (a range outside the film, a file with no picture), AssetNotFound (`file` missing), " +
+      "Fails with InvalidOperation (a range outside the film, a file with no picture, `cropAt.clip`, `onion` or `speed` with a `file` or naming no picture clip, `pop` outside the film or on its first frame), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -337,7 +410,7 @@ export const exportMethods = {
         .array(ReviewOutputSchema)
         .min(1)
         .optional()
-        .describe("Outputs to write: the sheets and `metrics`. Default contact, phone, motion, seam and metrics, plus safe when a platform is given or the style guide names platforms on a vertical film."),
+        .describe("Outputs to write: the sheets and `metrics`. Default contact, phone, motion, seam and metrics, plus safe when a platform is given or the style guide names platforms on a vertical film; beats only when named."),
       platform: SafeZoneSchema.shape.platform
         .optional()
         .describe(
@@ -361,9 +434,79 @@ export const exportMethods = {
         .boolean()
         .optional()
         .describe("The film is meant to repeat (a title loop, a GIF): a last frame that repeats the first, or jumps from it, becomes a craft warning (`metrics.seam` is measured either way)."),
+      cropAt: z
+        .strictObject({
+          x: z.number().min(0).max(1).describe("Horizontal position of the point, 0 (left edge) to 1 (right edge)."),
+          y: z.number().min(0).max(1).describe("Vertical position of the point, 0 (top) to 1 (bottom)."),
+          size: z.number().gt(0).max(1).optional().describe("Width of the crop as a share of the frame's width; its height keeps the frame's proportions. Default 0.25."),
+          clip: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "Clip id (`timeline.show`): `x` and `y` are then in that clip's own picture and the crop follows the point wherever the clip's position and scale keys move it, " +
+                "after the cover crop of the format reviewed; before and after the clip the crop holds where the clip starts or ends. A timeline only.",
+            ),
+        })
+        .optional()
+        .describe(
+          "Crop every tile of this run around one point (fractions of the film's frame) before it is scaled into the sheet, so a small detail reads: the crop stays inside the frame (and inside letterbox bars), each tile lists it in `crop`. " +
+            "The `safe` sheet keeps whole frames. The frames are the same captures, so `metrics` are unchanged.",
+        ),
+      pop: TimeRefParam(
+        "Debug a pop: the frame showing at this time and the one before it, side by side, with a third tile of their difference amplified 4 times (`pop` sheet). Not the first frame.",
+      ).optional(),
+      onion: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Clip id (`timeline.show`) of a video track: blend up to 24 frames of its span (`from`/`to` narrow it) into one `onion` image, each moving part at 25 %. A timeline only."),
+      speed: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Clip id (`timeline.show`) of a video track: chart its hero point's speed per frame (`speed` sheet) and report linear moves and dead stops in `metrics.speed`. A media clip's placement is exact; a generated clip needs a render with alpha. A timeline only.",
+        ),
       view: ViewParam,
     }),
     result: ReviewResultSchema,
+  },
+  "review.require": {
+    mutating: true,
+    description:
+      "Set or remove one expectation of the project's `requirements.json` (#457), which `review` judges on every run with metrics. " +
+      `Without \`clip\`, \`path\` is one of ${REQUIREMENT_PATHS.map((path) => `\`${path}\``).join(", ")}: ` +
+      "`film.maxSeconds` / `film.minSeconds` / `film.maxStatic` seconds, `film.endCard` `{ minSeconds }`, `film.loudness` `{ target?, tolerance?, maxTruePeak? }` (judged on a `file`), " +
+      "`captions.minSize` (share of the short side, 0.026 is 28 px at 1080), `fail` (craft checks that fail in this project, e.g. `[\"static\", \"reading\"]`). " +
+      `With \`clip\` (a clip id of \`timeline.show\`), \`path\` is one of ${CLIP_REQUIREMENT_FIELDS.map((field) => `\`${field}\``).join(", ")}: ` +
+      "`appearsBy` seconds or a marker (`hook+0.5`), `before` another clip's id, `keepsMoving` `{ maxStatic }`, `staysInFrame` `true` or `{ margin }` (share of the frame kept clear on every side). " +
+      "`value: null` removes it. Creates the file when missing; the rest of the file is kept. Journaled in `.frameshell/history/project.config.jsonl` in the caller's transaction (ADR 0036): " +
+      "`history` lists it, `revert` with its `op` or `tx` undoes it; a hand edit of the file is journaled too. While review mode is on (ADR 0019), a change by anyone but the person in the app waits in the " +
+      "transaction's proposal (`proposal` in the result). State what the person or the brief asks for; never loosen a requirement to make a review pass without the person's agreement. " +
+      "Fails with InvalidOperation (`reason`: `path` unknown, `value` invalid, with the schema's message), InvalidProjectFile (the file on disk is invalid), ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      path: z.string().min(1).describe("What to set: `film.maxSeconds`, `captions.minSize`, `fail`...; with `clip`: `appearsBy`, `before`, `keepsMoving` or `staysInFrame`."),
+      clip: z.string().min(1).optional().describe("Clip id the expectation is about, e.g. `c_1a2b3c`. Absent: the whole film."),
+      value: z.unknown().describe("New value as `requirements.json` holds it (number, object, list, `true`); null removes it."),
+    }),
+    result: RequirementsChangeSchema,
+  },
+  "review.waive": {
+    mutating: true,
+    description:
+      "Accept the craft warnings of one check in `requirements.json` (#457), with the reason the person accepts them: `review` then lists them in `metrics.waived` with that reason " +
+      "instead of `craft`, never drops them, and a check listed in `fail` no longer fails for them. With `clip`, only the warnings whose time overlaps that clip; without, every warning of the check. " +
+      "`reason: null` removes the waiver. Journaled, revertable and held by review mode like `review.require`. Waive only with a reason the person would accept. " +
+      "Fails with InvalidOperation, InvalidProjectFile, ProposalPending, ProposalState, ProjectNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      check: z.enum(CRAFT_CHECKS).describe("The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."),
+      clip: z.string().min(1).optional().describe("Waive only the warnings that overlap this clip id. Absent: every warning of the check."),
+      reason: z.string().trim().min(1).nullable().describe("Why the warnings are accepted, shown beside them; null removes the waiver."),
+    }),
+    result: RequirementsChangeSchema,
   },
   analyze: {
     description:
@@ -378,7 +521,7 @@ export const exportMethods = {
       "the **events** in time order (`flash`: the picture jumps brighter or darker for at most 0.25 s; `appear` / `disappear`: part of the picture gains or loses detail while the rest holds, with its `region` as fractions of the frame, which is where a caption or an element shows up; `hold`: the picture does not change for 0.5 s or more; `hit`: a sudden rise of the sound with its `offset` in seconds to a big change of the picture within 0.2 s, null when none is near), " +
       "the **curve** (the change of the picture over time, one value per 0.1 s or more, and its `moves`: steady stretches with their start, duration, peak and the closest ease: linear, in, out or inOut), " +
       "the **ink** of each shot and of the film (share of the picture covered by graphics or text, its peak, when and the box of grid cells), " +
-      "the **sync** (seconds the mouth of a talking face moves after the voice, when this exact file has a cached face scan from `people.scan`; otherwise `reason` says why it was skipped), " +
+      "the **sync** (seconds the mouth of a talking face moves after the voice; the faces of the file are found now unless `faces: false` (the scan is cached by content under `.frameshell/people/` and `people.scan` of the same file finds it again, and it may download the face models on first use); `reason` says why it was skipped: no sound, no face for 3 s, no scan with `faces: false`, or a scan that failed, which is also a warning and never fails the run), " +
       "`labels` (MEASURED, ESTIMATED or DECISION for every value, by field path), " +
       "the **loudness** by EBU R128 (integrated LUFS, range LU, true peak dBTP), the **tempo** and " +
       "beats when the sound has a steady beat (the beat detector of `beats.measure`; its beat lists are in `analysis.json`, not in this " +
@@ -399,7 +542,7 @@ export const exportMethods = {
       file: z.string().min(1).describe("The video to analyse: absolute, or relative to `cwd`. It may be anywhere (a download, a reference folder); it is only read."),
       name: z
         .string()
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .regex(ANALYSIS_NAME_PATTERN, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
         .optional()
         .describe("Name of the analysis, its folder is `.frameshell/analysis/<name>/`. Default: the file name in lower case, e.g. `reel` for `Reel.mp4`. A new run with the same name replaces the folder."),
       threshold: z
@@ -412,6 +555,10 @@ export const exportMethods = {
         .boolean()
         .optional()
         .describe("Recognise the speech (sentences, pace, pitch, voice against music, effects). Default true; false skips the transcription, which is the slow part and may download a model."),
+      faces: z
+        .boolean()
+        .optional()
+        .describe("Find the faces of the video for mouth sync when it has no cached face scan. Default true; false skips the scan, which is the slow part and may download the face models (a scan already cached is still used)."),
     }),
     result: AnalyzeResultSchema,
   },
@@ -433,7 +580,7 @@ export const exportMethods = {
       reference: z.string().min(1).describe("The reference video to compare it with: absolute, or relative to `cwd`; it may be anywhere, it is only read."),
       name: z
         .string()
-        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
+        .regex(ANALYSIS_NAME_PATTERN, "letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit")
         .optional()
         .describe("Name of the comparison, its folder is `.frameshell/analysis/<name>/`. Default `<film>-vs-<reference>` (file names in lower case, 64 characters at most). A new run with the same name replaces the folder, so do not reuse the name of an `analyze` run you want to keep."),
       lag: z.number().min(-3600).max(3600).optional().describe("Seconds to add to a time of our film to find the same moment of the reference (positive: the reference is later), instead of finding it. Use it when you know where the two start together; the alignment is then a DECISION."),

@@ -86,7 +86,7 @@ import {
 import { FrameGrid } from "./grid.js";
 import { applyPatch, diffTimelines, isEmptyPatch, sortMarkers } from "./patch.js";
 import { tempoGrid } from "./tempo.js";
-import { type GridLoader, resolveTimeRefs } from "./time-ref.js";
+import { type GridLoader, type TimelineWords, type WordLoader, resolveTimeRefs } from "./time-ref.js";
 import { listRejections, recordRejection, revisionOf } from "./rejections.js";
 import { NestedTimelineError, clipEnd, nestedClipError, timelineDuration } from "./timing.js";
 
@@ -129,6 +129,11 @@ export interface TimelineServiceOptions {
    * Read by `beat:N` and `bar:N` time references (ADR 0029 slice 4). Default: no asset has one.
    */
   beatsOf?: (root: string, asset: string) => Promise<BeatsFile | null>;
+  /**
+   * The words `timeline` (in the state an operation sees) plays, read from the project's transcripts; for `word:` time
+   * references (ADR 0029 slice 4). Default: none can be read, so a `word:` reference is refused.
+   */
+  wordsOf?: (root: string, timeline: Timeline, fps: number) => Promise<TimelineWords>;
 }
 
 /** One step of a proposal (ADR 0019), as reported to {@link TimelineServiceOptions.onProposal}. */
@@ -374,6 +379,21 @@ export class TimelineService {
    */
   async applyInMemory(root: string, id: string, loaded: { timeline: Timeline; fps: number }, request: OperationRequest): Promise<AppliedOperation> {
     return applyOperation(loaded.timeline, request, this.#context(root, id, loaded.fps, request.op));
+  }
+
+  /**
+   * The top-level props the adapter of generated clip `clip` declares (`ClipAdapter.declaredProps`); null when its
+   * adapter is not loaded, declares none, or throws: then any prop goes.
+   */
+  async declaredProps(root: string, clip: { type: string }): Promise<readonly string[] | null> {
+    const adapter = (await this.#options.clipTypes(root)).get(clip.type);
+    if (!adapter?.declaredProps) return null;
+    try {
+      const names = await adapter.declaredProps(clip);
+      return names && names.length > 0 ? names : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Duration of the nested timeline files timeline `id` of `root` plays, for {@link clipEnd}. Throws {@link NestedTimelineError}. */
@@ -1638,12 +1658,16 @@ export class TimelineService {
     };
   }
 
-  /** {@link normalizeArgs} with the beat grid of `timeline` (its tempo and the beats files of the project) as the source of `beat:`/`bar:`. */
+  /**
+   * {@link normalizeArgs} with the beat grid of `timeline` (its tempo and the beats files of the project) as the source
+   * of `beat:`/`bar:`, and the words it plays as the source of `word:`.
+   */
   #normalize(call: TimelineCall, timeline: Timeline, fps: number): Promise<OperationRequest> {
-    const beatsOf = this.#options.beatsOf;
+    const { beatsOf, wordsOf } = this.#options;
     const loadGrid: GridLoader = (horizon) =>
       tempoGrid({ fps, timeline, horizon, beatsOf: async (asset) => (beatsOf ? beatsOf(call.root, asset) : null) });
-    return normalizeArgs(call, timeline, loadGrid);
+    const loadWords: WordLoader | undefined = wordsOf ? () => wordsOf(call.root, timeline, fps) : undefined;
+    return normalizeArgs(call, timeline, loadGrid, loadWords);
   }
 
   /**
@@ -2392,12 +2416,12 @@ export async function readTimelineFile(root: string, rel: string): Promise<Timel
  * Project-relative `asset`/`source` args, so the record and the file never
  * hold caller-specific paths. A relative path is tried against `cwd` first,
  * then the project root; a bare timeline id (`intro`) means `timelines/intro.json`.
- * Time references (marker names, ADR 0037; `beat:N` and `bar:N`, ADR 0029 slice 4) become seconds against
- * `timeline`, the state the operation applies to; `loadGrid` reads its beat grid.
+ * Time references (marker names, ADR 0037; `beat:N`, `bar:N` and `word:`, ADR 0029 slice 4) become seconds against
+ * `timeline`, the state the operation applies to; `loadGrid` reads its beat grid, `loadWords` the words it plays.
  */
-async function normalizeArgs(call: TimelineCall, timeline: Timeline, loadGrid: GridLoader): Promise<OperationRequest> {
+async function normalizeArgs(call: TimelineCall, timeline: Timeline, loadGrid: GridLoader, loadWords: WordLoader | undefined): Promise<OperationRequest> {
   const { root, cwd } = call;
-  const request = await resolveTimeRefs(call.request, timeline, loadGrid);
+  const request = await resolveTimeRefs(call.request, timeline, loadGrid, loadWords);
   if (request.op !== "clip.add") return request;
   const args = { ...request.args };
   if (args.asset !== undefined) args.asset = projectPath(root, cwd, args.asset, "asset");

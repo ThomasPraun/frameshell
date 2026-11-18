@@ -136,6 +136,36 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("UI demo
     120_000,
   );
 
+  it(
+    "select-resize: the ring, the handles and the ripple start on the press's frame; the badge comes on the frame the card has its final size",
+    async () => {
+      const frames: number[] = [];
+      for (const camera of ["still", "follow"]) {
+        const page = await open("select-resize", { camera });
+        try {
+          const ripple = await firstFrame(page, opacity("#ripple"), (v) => v > 0);
+          const handle = await firstFrame(page, opacity(".handle"), (v) => v > 0);
+          const ring = await firstFrame(page, opacity("#sel"), (v) => v > 0);
+          expect(ripple, camera).toBeGreaterThan(0);
+          expect(handle, camera).toBe(ripple);
+          expect(ring, camera).toBe(ripple);
+          // The card is still at its first size on the press frame and has the final one on the badge's frame.
+          expect(Math.abs(await page.at<number>(ripple, "Number(box.style.width.replace('px', '')) - w0")), camera).toBeLessThan(0.01);
+          const badge = await firstFrame(page, opacity("#badge"), (v) => v > 0);
+          expect(badge, camera).toBeGreaterThan(ripple);
+          expect(Math.abs(await page.at<number>(badge, "Number(box.style.width.replace('px', '')) - w1")), camera).toBeLessThan(0.01);
+          expect(Math.abs(await page.at<number>(badge, "Number(box.style.height.replace('px', '')) - h1")), camera).toBeLessThan(0.01);
+          frames.push(ripple);
+          expect(page.errors).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }
+      expect(frames[1]).toBe(frames[0]);
+    },
+    120_000,
+  );
+
   it.each(["typing-field", "comment-box"])(
     "%s: the progress line, the dimmed ring and the ripple start on the press's frame, cursor on and off",
     async (template) => {
@@ -209,6 +239,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("UI demo
     ["cursor-click", { hesitate: 1 }, 2.4, "#toast"],
     ["cursor-drag-drop", { hesitate: 1 }, 3.2, "#done"],
     ["cursor-marquee", { hesitate: 1 }, 3.2, "#badge"],
+    ["select-resize", { hesitate: 1 }, 3.6, "#badge"],
     ["typing-field", { text: "x".repeat(80), speed: 6, runTime: 3 }, 4, "#done"],
     ["comment-box", { text: "word ".repeat(14), speed: 6, runTime: 3 }, 4, "#done"],
   ] as const)(
@@ -231,6 +262,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("UI demo
   it.each([
     ["cursor-click", { camera: "follow" }],
     ["app-window", { camera: "follow", then: "copy-paste" }],
+    ["select-resize", { camera: "follow" }],
   ] as const)(
     "%s paints the same frames on two plays in order (%j)",
     async (template, props) => {

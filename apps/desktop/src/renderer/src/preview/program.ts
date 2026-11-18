@@ -32,7 +32,7 @@ import {
 import { audioEffectsOf, backdropOf, bakeRef } from "@frameshell/schema/effects";
 import { type FormatLayout, formatCrop } from "@frameshell/schema/formats";
 import { type ResolvedGrain, type ResolvedVignette, grainOf, letterboxBars, vignetteOf } from "@frameshell/schema/finish";
-import { type GradeTable, gradeKey, gradeOf } from "@frameshell/schema/grade";
+import { type GradeTable, gradeChainKey, gradeChainOf } from "@frameshell/schema/grade";
 import {
   type ClipEdges,
   type FrameRect,
@@ -48,6 +48,7 @@ import {
   shapeAt,
   slatRects,
 } from "@frameshell/schema/transitions";
+import { sameSourceFrames } from "./decode-plan.js";
 import { EDGE_FADE_SAMPLES } from "./mixer.js";
 
 /** Program audio rate: the PCM sidecar rate (SPEC §6.3). */
@@ -94,6 +95,12 @@ export type VideoSpan =
        * picture's alpha. The span draws only the person, over the tracks behind the plate.
        */
       matte?: string;
+      /**
+       * On a subject span: the lower layer whose span shows this same source frame of `proxy` on every frame of this one
+       * ({@link sharesPlateFrame}). The engine draws that layer's decoded frame and decodes only the matte; absent, the
+       * subject decodes the proxy itself.
+       */
+      sharesLayer?: number;
       /** Source pixels (of `size`) that fill the whole frame of the format shown (ADR 0027, `formatCrop`); absent: placed. */
       cover?: LayerRect;
       /** Key of the clip's colour grade table (ADR 0031, {@link tableKey}), a key of {@link Program.grades}; absent: drawn as decoded. */
@@ -149,6 +156,8 @@ export type VideoSpan =
       hold?: true;
       /** The clip's backdrop on an upper track (ADR 0031): what is below is blurred where it shows, as export draws it. */
       glass?: Backdrop;
+      /** Key of the render's colour grade table (ADR 0031, {@link tableKey}), graded before its alpha; absent: drawn as decoded. */
+      grade?: string;
       /** The clip's vignette (ADR 0043, `vignetteOf`): after the grade, on the pixels that show; absent: none. */
       vignette?: ResolvedVignette;
       /** The clip's grain (ADR 0043, `grainOf`): after the vignette, on the pixels that show; absent: none. */
@@ -513,8 +522,8 @@ export interface ProgramOptions {
    */
   format?: FormatLayout & Size;
   /**
-   * Tables of the colour grades of media clips by `gradeKey` (`useGradeTables`, ADR 0031), the ones export applies. A
-   * graded clip whose table is absent (its LUT not read yet, or unreadable) is drawn ungraded.
+   * Tables of the colour grade chains of the pictures by `gradeChainKey` (`useGradeTables`, ADR 0031), the ones export
+   * applies. A graded clip whose table is absent (its LUT not read yet, or unreadable) is drawn ungraded.
    */
   grades?: ReadonlyMap<string, GradeTable>;
 }
@@ -662,7 +671,7 @@ export function compileProgram(view: TimelineView, assets: ReadonlyMap<string, A
     sampleRate: rate,
     resolution,
     frames,
-    layers,
+    layers: withSharedFrames(layers),
     audio,
     ...(Object.keys(grades).length > 0 ? { grades } : {}),
     ...(view.letterbox ? { letterbox: view.letterbox } : {}),
@@ -782,7 +791,15 @@ function samePicture(x: VideoSpan | null, y: VideoSpan | null): boolean {
   if (!x || !y) return x === y;
   if ((x.kind === "media" || x.kind === "angle") && x.kind === y.kind) {
     const matte = (span: VideoSpan) => (span.kind === "media" ? span.matte : undefined);
-    return x.proxy === y.proxy && matte(x) === matte(y) && x.speed === y.speed && x.in - x.start * x.speed === y.in - y.start * y.speed;
+    // A subject that draws another layer's frame decodes only its matte: changing that is a new decode.
+    const shared = (span: VideoSpan) => span.kind === "media" && span.sharesLayer !== undefined;
+    return (
+      x.proxy === y.proxy &&
+      matte(x) === matte(y) &&
+      shared(x) === shared(y) &&
+      x.speed === y.speed &&
+      x.in - x.start * x.speed === y.in - y.start * y.speed
+    );
   }
   if (x.kind === "still" && y.kind === "still") return x.image === y.image && x.version === y.version;
   if (x.kind === "generated" && y.kind === "generated") {
@@ -1227,8 +1244,44 @@ function subjectPicture(
 }
 
 /**
- * `picture` with the key of `clip`'s colour grade when `tables` holds its table, which is added to `used`; as given
- * for other pictures, clips without a grade, and a table not ready (drawn ungraded meanwhile).
+ * True when the subject span `subject` (ADR 0032) can draw the frame `plate`'s layer decodes instead of decoding the
+ * proxy itself: `plate` is the same clip's picture without a matte, from the same proxy at the same speed, and shows the
+ * same source frame on every frame of `subject`. Grade, placement, shape and opacity stay per layer, so they never
+ * matter; anything else (another clip, `in` or speed, a span that starts later or ends sooner) does not share.
+ */
+export function sharesPlateFrame(subject: VideoSpan, plate: VideoSpan): boolean {
+  return (
+    subject.kind === "media" &&
+    subject.matte !== undefined &&
+    plate.kind === "media" &&
+    plate.matte === undefined &&
+    plate.clip === subject.clip &&
+    plate.proxy === subject.proxy &&
+    plate.speed === subject.speed &&
+    plate.start <= subject.start &&
+    subject.end <= plate.end &&
+    sameSourceFrames(subject, plate, subject.start, subject.end)
+  );
+}
+
+/** `layers` with each subject span that {@link sharesPlateFrame} with a span of a lower layer pointed at that layer. */
+function withSharedFrames(layers: VideoSpan[][]): VideoSpan[][] {
+  return layers.map((spans, index) =>
+    spans.map((span) => {
+      if (span.kind !== "media" || span.matte === undefined) return span;
+      for (let lower = 0; lower < index; lower++) {
+        const plate = spanAt(layers[lower]!, span.start);
+        if (plate && sharesPlateFrame(span, plate)) return { ...span, sharesLayer: lower };
+      }
+      return span;
+    }),
+  );
+}
+
+/**
+ * `picture` with the key of the table of `clip`'s grade chain (its own grade, then its nested hosts', `gradeChainOf`)
+ * when `tables` holds it, which is added to `used`; as given for other pictures, clips without a grade, and a table
+ * not ready (drawn ungraded meanwhile). Media, stills and generated renders, as export grades them.
  */
 function gradedPicture(
   picture: PlacedSpan | PlaceholderSpan | null,
@@ -1236,11 +1289,11 @@ function gradedPicture(
   tables: ReadonlyMap<string, GradeTable> | undefined,
   used: Record<string, GradeTable>,
 ): PlacedSpan | PlaceholderSpan | null {
-  if (picture?.kind !== "media" && picture?.kind !== "still") return picture;
-  const grade = gradeOf(clip);
-  const table = grade ? tables?.get(gradeKey(grade)) : undefined;
-  if (!grade || !table) return picture;
-  const key = tableKey(gradeKey(grade), table);
+  if (picture?.kind !== "media" && picture?.kind !== "still" && picture?.kind !== "generated") return picture;
+  const chain = gradeChainOf(clip);
+  const table = chain ? tables?.get(gradeChainKey(chain)) : undefined;
+  if (!chain || !table) return picture;
+  const key = tableKey(gradeChainKey(chain), table);
   used[key] = table;
   return { ...picture, grade: key };
 }

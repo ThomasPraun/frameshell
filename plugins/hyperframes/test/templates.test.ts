@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { CommandResult } from "@frameshell/plugin-api";
 import { type CheckReport, type UpdateReport, checkCompositions, newComposition, updateRuntime } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "../src/motion-runtime.js";
+import { CURSOR_MATH, CURSOR_SCRIPT } from "../src/templates/cursor-kit.js";
 import { TEMPLATES, type TemplateVariable, usesThree } from "../src/templates/index.js";
 import { THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "../src/three-runtime.js";
 
@@ -123,6 +124,297 @@ describe("template emphasis-marker", () => {
   });
 });
 
+describe("template number-wheel", () => {
+  it("prints numbers with the code counter uses (one format, never a copy), in slots as wide as the widest digit", async () => {
+    await scaffold(["wheel", "--template", "number-wheel"]);
+    await scaffold(["count", "--template", "counter"]);
+    const format = (html: string) => /\/\/ Same text for the same value everywhere[\s\S]*?\n {6}}/.exec(html)![0];
+    expect(format(read("wheel"))).toBe(format(read("count")));
+    const html = read("wheel");
+    expect(html).toContain("font-variant-numeric: tabular-nums");
+    expect(html).toContain("probe.textContent = new Array(51).join(String(d));");
+    // The strip is folded into its middle copy of 0 to 9, so a column always has a neighbour above and below.
+    expect(html).toContain("M.write(c.strip, { y: -(10 + (((at % 10) + 10) % 10)) * row });");
+  });
+
+  it("takes a count time of 1.2 to 1.6 s by default and keeps the last column inside the clip", async () => {
+    await scaffold(["wheel", "--template", "number-wheel"]);
+    const defaults = Object.fromEntries(declared(read("wheel")).map((v) => [v.id, v.default]));
+    expect(defaults["countTime"]).toBeGreaterThanOrEqual(1.2);
+    expect(defaults["countTime"]).toBeLessThanOrEqual(1.6);
+    expect(read("wheel")).toContain("var TIME = Math.min(P.countTime, Math.max(0.5, D - OUT - START - 0.6));");
+  });
+
+  it("fades the columns a shorter end text does not use, and the separators left of its first digit", async () => {
+    await scaffold(["wheel", "--template", "number-wheel"]);
+    const html = read("wheel");
+    expect(html).toContain("var pad = count - digitsOf(last).length;");
+    expect(html).toContain("blank: cols.length < pad");
+    expect(html).toContain("if (cols.length <= pad) seps.push(");
+  });
+});
+
+describe("template slot-roll", () => {
+  it("lands on the target by its text, adds it when missing, and never spins a reel of fewer than two", async () => {
+    await scaffold(["spot", "--template", "slot-roll"]);
+    const html = read("spot");
+    expect(html).toContain("item.toLowerCase() === want.toLowerCase()");
+    expect(html).toContain('if (goal < 0) goal = items.push(want || "...") - 1;');
+    expect(html).toContain('if (items.length < 2) { items.unshift("..."); goal = 1; }');
+    expect(html).toContain('if (items.length < 3) items.push("...");');
+    // Whole turns (a fractional `laps` from clip set is rounded) plus the way to the target: the last frame is exactly the target on the band.
+    expect(html).toContain("var travel = Math.max(1, Math.round(P.laps)) * n + goal;");
+    // Only rows are cut, so a wide item is never clipped at its ends.
+    expect(html).toContain("clip-path: inset(0 -50%)");
+  });
+});
+
+describe("template tab-indicator", () => {
+  it("starts on the tab of an entry at 0 and on tab 1 otherwise, pulls a late entry in, and reads tabs by number or name", async () => {
+    await scaffold(["spot", "--template", "tab-indicator"]);
+    const html = read("spot");
+    expect(html).toContain("if (moves.length && moves[0].at <= 0.05) home = moves.shift().index;");
+    expect(html).toContain("at: Math.min(at, Math.max(0.3, D - OUT - 0.7))");
+    expect(html).toContain("/^\\d+$/.test(key) ? Number(key) - 1 : names.findIndex(");
+  });
+});
+
+describe("template freeze-cut", () => {
+  it("is a template over an image prop, with no freeze-frame operation: the flash never starts before the cut", async () => {
+    await scaffold(["spot", "--template", "freeze-cut"]);
+    const html = read("spot");
+    const image = declared(html).find((v) => v.id === "image")!;
+    expect(image).toMatchObject({ type: "image", default: "" });
+    expect(html).toContain("opacity: t < CUT ? 0 :");
+    // A white layer of plain opacity: a blend mode over the film once rendered it all white.
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template logo-sting", () => {
+  it("paints its own background, falls back to a monogram with no logo, and pulls a late landing in before the exit", async () => {
+    await scaffold(["spot", "--template", "logo-sting"]);
+    const html = read("spot");
+    expect(TEMPLATES.find((t) => t.id === "logo-sting")!.overlay).toBe(false);
+    expect(declared(html).find((v) => v.id === "logo")).toMatchObject({ type: "image", default: "" });
+    expect(html).toContain('mono.textContent = (Array.from(text)[0] || "\\u2022").toUpperCase();');
+    expect(html).toContain("var POP = Math.min(P.popAt, Math.max(0.05, D - OUT - 1.2));");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template pip-card", () => {
+  it("takes a picture by path only (a live video in a corner is the multicam layout) and keeps clear of a tall frame's bottom", async () => {
+    await scaffold(["spot", "--template", "pip-card"]);
+    const html = read("spot");
+    expect(declared(html).filter((v) => v.type === "image").map((v) => v.id)).toEqual(["image"]);
+    expect(html).not.toMatch(/<video|createElement\("video"\)/);
+    expect(html).toContain('S.format === "tall" ? "top-right" : "bottom-right"');
+    expect(html).toContain("var ENTER = Math.min(P.enterAt, Math.max(0.1, D - OUT - 0.7));");
+  });
+});
+
+describe("template work-cards", () => {
+  it("reads title:status lines, draws no icon, and shares one progress between the cards", async () => {
+    await scaffold(["spot", "--template", "work-cards"]);
+    const html = read("spot");
+    const items = declared(html).find((v) => v.id === "items")!;
+    expect(items).toMatchObject({ type: "string" });
+    expect(html).toContain('var at = item.indexOf(":");');
+    expect(html).not.toMatch(/class="icon"|<svg|<img/);
+    // One curve for every card; a bar only joins it once its card has started.
+    expect(html).toContain('var shared = M.ease("progress", (t - progAt) / progTime);');
+    expect(html).toContain("scaleX: shared * on");
+    expect(html).toContain("var progTime = Math.min(P.progressTime, Math.max(0.4, D - OUT - 0.2 - progAt));");
+  });
+});
+
+describe("template light-leak", () => {
+  it("is an overlay with no blend mode, seeded, clear exactly at both ends and never a full-frame wash", async () => {
+    await scaffold(["spot", "--template", "light-leak"]);
+    const html = read("spot");
+    const leak = TEMPLATES.find((t) => t.id === "light-leak")!;
+    expect(leak.overlay).toBe(true);
+    expect(leak.defaultDuration).toBeGreaterThanOrEqual(0.8);
+    expect(leak.defaultDuration).toBeLessThanOrEqual(1.2);
+    expect(html).not.toContain("mix-blend-mode");
+    expect(html).not.toMatch(/\bfilter\s*:|backdrop-filter/);
+    expect(html).toContain("var seed = seedOf(P.seed);");
+    // The envelope is a smoothstep of the clip's progress: 0 at the first frame and from D - END on.
+    expect(html).toContain("var env = u * u * (3 - 2 * u);");
+    // The strength is capped below 1 and the colour of the core is cream, not white.
+    expect(html).toContain("var CAP = 0.55;");
+    expect(html).toContain('mix(tint, "#fff0cf", 0.6)');
+    const intensity = declared(html).find((v) => v.id === "intensity")!;
+    expect(intensity).toMatchObject({ type: "number", max: 1 });
+  });
+});
+
+describe("template logo-sting band", () => {
+  it("leaves with the exit on a clip too short for it, so the band is never cut off", async () => {
+    await scaffold(["spot", "--template", "logo-sting"]);
+    expect(read("spot")).toContain("opacity: fade * fade * (1 - out) });");
+  });
+});
+
+describe("template light-leak fall", () => {
+  it("falls over at most 0.6 of the clip, so a very short clip still ends clear", async () => {
+    await scaffold(["spot", "--template", "light-leak", "--duration", "0.2"]);
+    expect(read("spot")).toContain("var END = Math.min(0.1, 0.6 * D);");
+  });
+});
+
+describe("template orbit", () => {
+  it("takes a logo or a word and up to 8 labels, starts from a seeded phase and ends on a ring that never depends on the seed", async () => {
+    await scaffold(["spot", "--template", "orbit"]);
+    const html = read("spot");
+    const variables = declared(html);
+    expect(variables.find((v) => v.id === "logo")).toMatchObject({ type: "image", default: "" });
+    expect(variables.find((v) => v.id === "items")).toMatchObject({ type: "string" });
+    expect(variables.find((v) => v.id === "turns")).toMatchObject({ type: "number", min: 0.25, max: 4 });
+    expect(variables.find((v) => v.id === "backdrop")).toMatchObject({ type: "number", default: 0 });
+    expect(TEMPLATES.find((t) => t.id === "orbit")!.overlay).toBe(true);
+    expect(html).toContain("var labels = parts(P.items, 8);");
+    // The seed only moves where the circling starts and which way it turns: the turns left are 0 once the ease has run out.
+    expect(html).toContain("var phase = (jitter(seed, 1) + 1) * Math.PI;");
+    expect(html).toContain('var left = 1 - M.ease("enter", (t - FIRST) / spinTime);');
+    expect(html).toContain("var a = rest[i] + dir * (P.turns * 2 * Math.PI + phase) * left;");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template locked-on", () => {
+  it("declares its target box as fractions of the frame that fit inside it, and keeps the box inside the frame with a margin", async () => {
+    await scaffold(["spot", "--template", "locked-on"]);
+    const html = read("spot");
+    const variables = declared(html);
+    const numbers = Object.fromEntries(variables.filter((v) => v.type === "number").map((v) => [v.id, v.default as number]));
+    for (const key of ["x", "y", "w", "h"]) expect(variables.find((v) => v.id === key), key).toMatchObject({ type: "number" });
+    expect(numbers["x"]! + numbers["w"]!).toBeLessThanOrEqual(0.96);
+    expect(numbers["y"]! + numbers["h"]!).toBeLessThanOrEqual(0.96);
+    expect(html).toContain("var bx = Math.min(Math.max(P.x * S.width, 0.04 * S.width), 0.96 * S.width - bw);");
+    // The brackets overshoot the corner: an under-damped spring, not a preset that stops dead.
+    expect(html).toContain("var SNAP = { response: 0.34, damping: 0.55 };");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("template spotlight", () => {
+  it("dims with one layer of plain alpha, two targets as fractions of the frame, no blend mode and a dim that stays under black", async () => {
+    await scaffold(["spot", "--template", "spotlight"]);
+    const html = read("spot");
+    const variables = declared(html);
+    for (const key of ["x", "y", "x2", "y2"]) expect(variables.find((v) => v.id === key), key).toMatchObject({ type: "number", min: 0, max: 1 });
+    expect(variables.find((v) => v.id === "dim")).toMatchObject({ type: "number", max: 0.95 });
+    expect(variables.find((v) => v.id === "shade")).toMatchObject({ type: "color" });
+    expect(html).toContain('dim.style.background = "radial-gradient(circle at "');
+    expect(html).not.toContain("mix-blend-mode");
+    expect(html).not.toMatch(/backdrop-filter|\bmask(-image)?\s*:/);
+    // Equal targets are no move.
+    expect(html).toContain("var moves = a.x !== b.x || a.y !== b.y;");
+  });
+});
+
+describe("template lean-in", () => {
+  it("is a transparent overlay with a side, a late-start pull-in, 2D scale and rotation only, and no matte or 3D", async () => {
+    await scaffold(["spot", "--template", "lean-in"]);
+    const html = read("spot");
+    const variables = declared(html);
+    expect(TEMPLATES.find((t) => t.id === "lean-in")!.overlay).toBe(true);
+    expect(variables.find((v) => v.id === "side")).toMatchObject({ type: "enum", default: "left" });
+    expect(variables.find((v) => v.id === "backdrop")).toMatchObject({ type: "number", default: 0 });
+    expect(variables.find((v) => v.id === "at")).toMatchObject({ type: "number", min: 0 });
+    // A late start is pulled in so the slide and the tilt (about a second) are done before the 0.3 s exit.
+    expect(html).toContain("var AT = Math.min(P.at, Math.max(0, D - OUT - 1));");
+    // The slow lean: scale 1 to 1.06 and 1 to 2 degrees over the hold.
+    expect(html).toContain("rotate: dir * (-(1 - q) * BACK + 1 + hold),");
+    expect(html).toContain("scale: (0.88 + 0.12 * q) * (1 + 0.06 * hold),");
+    expect(html).not.toMatch(/mix-blend-mode|perspective|rotate[XYZ]|matrix3d|mask/);
+  });
+
+  it("falls back to a default line for an empty text and hides an empty kicker", async () => {
+    await scaffold(["spot", "--template", "lean-in"]);
+    const html = read("spot");
+    expect(html).toContain('var text = String(P.text).trim() || "Lean in";');
+    expect(html).toContain("if (!kicker) kickerEl.style.display = \"none\";");
+  });
+});
+
+describe("template select-resize", () => {
+  it("declares the card's four sizes as fractions of the frame that fit inside it, and the two handle looks", async () => {
+    await scaffold(["spot", "--template", "select-resize"]);
+    const html = read("spot");
+    const variables = declared(html);
+    const numbers = Object.fromEntries(variables.filter((v) => v.type === "number").map((v) => [v.id, v.default as number]));
+    for (const key of ["x", "y", "fromW", "fromH", "toW", "toH"]) expect(variables.find((v) => v.id === key), key).toMatchObject({ type: "number" });
+    expect(numbers["x"]! + Math.max(numbers["fromW"]!, numbers["toW"]!)).toBeLessThanOrEqual(0.96);
+    expect(numbers["y"]! + Math.max(numbers["fromH"]!, numbers["toH"]!)).toBeLessThanOrEqual(0.96);
+    expect(numbers["toW"]!).toBeGreaterThan(numbers["fromW"]!);
+    const handles = variables.find((v) => v.id === "handles");
+    expect(handles?.type === "enum" && handles.options.map((o) => o.value)).toEqual(["corners", "all"]);
+    expect(variables.map((v) => v.id)).toEqual(expect.arrayContaining(["camera", "zoom", "hesitate", "pointer", "cursorSize", "backdrop"]));
+    expect(TEMPLATES.find((t) => t.id === "select-resize")!.overlay).toBe(true);
+  });
+
+  it("keeps whatever sizes and position a prop asks for inside the frame, with room for the handles, the cursor and the badge", async () => {
+    await scaffold(["spot", "--template", "select-resize"]);
+    const html = read("spot");
+    expect(html).toContain("var w1 = Math.min(maxR - edge, Math.max(minW, P.toW * S.width));");
+    expect(html).toContain("var h1 = Math.min(maxB - topEdge, Math.max(minH, P.toH * S.height));");
+    expect(html).toContain("var bx = Math.min(Math.max(P.x * S.width, edge), maxR - Math.max(w0, w1));");
+    expect(html).toContain("var by = Math.min(Math.max(P.y * S.height, topEdge), maxB - Math.max(h0, h1));");
+    // The cursor's overshoot past the drop point never takes the card beyond the same limits.
+    expect(html).toContain("return { w: Math.min(maxR - bx, Math.max(minW, c.x - bx)), h: Math.min(maxB - by, Math.max(minH, c.y - by)) };");
+  });
+
+  it("writes the card as layout on a 0.01 px grid, never a scale of its size, and takes the cursor from the kit (one copy)", async () => {
+    await scaffold(["spot", "--template", "select-resize"]);
+    const html = read("spot");
+    expect(html).toContain('box.style.width = stamp(size.w) + "px";');
+    expect(html).toContain('box.style.height = stamp(size.h) + "px";');
+    // The card's own transform is only the entry pop (a uniform scale); its size never goes through a scale.
+    expect(html).not.toMatch(/put\(box, \{[^}]*scale[XY]/);
+    expect(html).not.toMatch(/mix-blend-mode|backdrop-filter/);
+    // The cursor, its timing guard and its click are the kit's own text, the same in every cursor template.
+    expect(html).toContain(CURSOR_MATH);
+    expect(html).toContain(CURSOR_SCRIPT);
+    expect(html.match(/function journey/g)).toHaveLength(1);
+    // The press, the ring and the handles share one time.
+    expect(html).toContain("var clickAt = trip.legs[0].arrive + 0.04;");
+    expect(html).toContain('drawRipple(t, clickAt, press1.x, press1.y);');
+    expect(html).toContain('opacity: M.ease("enter", (t - clickAt) / 0.1)');
+  });
+});
+
+describe("template phone-fan", () => {
+  it("takes one picture per phone, and paints a missing one with the code device-frame uses (one copy, never a second)", async () => {
+    await scaffold(["fan", "--template", "phone-fan"]);
+    await scaffold(["frame", "--template", "device-frame"]);
+    const html = read("fan");
+    expect(declared(html).filter((v) => v.type === "image").map((v) => v.id)).toEqual(["shotLeft", "shotMiddle", "shotRight"]);
+    expect(declared(html).find((v) => v.id === "fan")).toMatchObject({ type: "number", min: 4, max: 24 });
+    // The helpers are the same text in both compositions.
+    const helper = (source: string, name: string) => new RegExp(`function ${name}\\([\\s\\S]*?\\n {6}}`).exec(source)![0];
+    for (const name of ["paintSkeleton", "dressPhone"]) expect(helper(html, name)).toBe(helper(read("frame"), name));
+    expect(html.match(/function paintSkeleton/g)).toHaveLength(1);
+    // The middle phone is the last child, so it is in front.
+    expect(html).toContain("var shots = [P.shotLeft, P.shotRight, P.shotMiddle];");
+    expect(html).not.toContain("mix-blend-mode");
+  });
+});
+
+describe("the seeded templates", () => {
+  it("take the seed hash and the jitter from the kit, never a private copy", async () => {
+    for (const id of ["emphasis-marker", "scene-background", "light-leak", "orbit"]) {
+      await scaffold([id, "--template", id]);
+      const html = read(id);
+      expect(html, id).toContain("function seedOf(text)");
+      // The one hash line, once per page.
+      expect(html.match(/\* 31 \+ ch\.charCodeAt\(0\)/g), id).toHaveLength(1);
+    }
+  });
+});
+
 describe("the plugin skill", () => {
   const skill = readFileSync(fileURLToPath(new URL("../skills/hyperframes/SKILL.md", import.meta.url)), "utf8").replace(/\r\n/g, "\n");
 
@@ -208,8 +500,8 @@ describe("frameshell hyperframes new --template", () => {
 describe("3D templates (ADR 0042)", () => {
   const threeTemplates = TEMPLATES.filter(usesThree);
 
-  it("product-shot is a 3D template", () => {
-    expect(threeTemplates.map((t) => t.id)).toContain("product-shot");
+  it("product-shot and logo-3d are 3D templates", () => {
+    expect(threeTemplates.map((t) => t.id)).toEqual(expect.arrayContaining(["product-shot", "logo-3d"]));
   });
 
   it.each(threeTemplates.map((t) => t.id))("%s gets the pinned three.js bundle next to it and loads it after the motion runtime", async (id) => {
@@ -234,6 +526,8 @@ describe("3D templates (ADR 0042)", () => {
     expect(THREE_RUNTIME).toMatch(/^\/\*! three\.js \d+\.\d+\.\d+ for Frameshell \(ADR 0042\)/);
     expect(THREE_RUNTIME).toContain("The MIT License");
     expect(THREE_RUNTIME).toContain("three.js authors");
+    // logo-3d parses its SVG with the bundle's SVGLoader.
+    expect(THREE_RUNTIME).toContain("SVGLoader");
     expect(THREE_RUNTIME).not.toMatch(/https:\/\/cdn\.|import\(/);
   });
 
@@ -290,6 +584,24 @@ describe("frameshell hyperframes update", () => {
     const forced = await update(["--force"]);
     expect(forced.report.compositions.every((c) => c.written)).toBe(true);
     for (const name of ["edited", "newer", "foreign"]) expect(readFileSync(runtimeOf(name), "utf8")).toBe(MOTION_RUNTIME);
+  });
+
+  it("lists the runtime that is bundled and leaves a frozen 0.4.0 copy as it is until asked (no pixel change for existing clips)", async () => {
+    expect(MOTION_RUNTIME_VERSION).toBe("0.5.0");
+    await scaffold(["frozen", "--template", "checklist"]);
+    const frozen = MOTION_RUNTIME.replace(`runtime ${MOTION_RUNTIME_VERSION}`, "runtime 0.4.0");
+    writeFileSync(runtimeOf("frozen"), frozen);
+    const html = read("frozen");
+    await scaffold(["next", "--template", "checklist"]);
+    await checkCompositions.run({ args: ["frozen"], cwd: project, project: { dir: project } });
+    const preview = await update(["--dry-run"]);
+    expect(preview.report.runtime).toBe("0.5.0");
+    expect(preview.report.compositions.find((c) => c.file.includes("/frozen/"))).toMatchObject({ status: "updated", from: "0.4.0" });
+    expect(preview.output).toContain("runtime 0.4.0 -> 0.5.0");
+    expect(readFileSync(runtimeOf("frozen"), "utf8")).toBe(frozen);
+    expect(read("frozen")).toBe(html);
+    await update();
+    expect(readFileSync(runtimeOf("frozen"), "utf8")).toBe(MOTION_RUNTIME);
   });
 
   it("updates one composition by name, and refuses one without a runtime", async () => {

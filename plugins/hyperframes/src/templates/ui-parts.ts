@@ -30,3 +30,36 @@ export const UI_HELPERS = String.raw`
       function parts(text, max) {
         return String(text).split("|").map(function (part) { return part.trim(); }).filter(Boolean).slice(0, max);
       }`;
+
+/** The five `<i>` blocks `paintSkeleton` (in {@link SCREEN_HELPERS}) draws, as the children of a screen-sized element. */
+export const SKELETON_HTML = "<i></i><i></i><i></i><i></i><i></i>";
+
+/**
+ * Page-script helpers of a device screen, shared by `device-frame` and `phone-fan`:
+ * `paintSkeleton(el, accent)` fills an element holding {@link SKELETON_HTML} with a plain app screen (light page,
+ * accent header, grey blocks), the stand-in for a missing screenshot; `dressPhone(device, screen, w, h)` gives a
+ * device box of `w` x `h` the dark bezel and rounded corners of a phone and sets its screen's height.
+ */
+export const SCREEN_HELPERS = String.raw`
+      // Placeholder screen: a light page, an accent header, grey blocks.
+      function paintSkeleton(el, accent) {
+        el.style.background = "#eef1f7";
+        var blocks = [[0, 0, 100, 13, accent], [6, 20, 40, 30, "#d9deea"], [54, 20, 40, 30, "#d9deea"], [6, 58, 88, 5, "#d9deea"], [6, 68, 60, 5, "#d9deea"]];
+        Array.prototype.forEach.call(el.children, function (block, i) {
+          block.style.left = blocks[i][0] + "%";
+          block.style.top = blocks[i][1] + "%";
+          block.style.width = blocks[i][2] + "%";
+          block.style.height = blocks[i][3] + "%";
+          block.style.background = blocks[i][4];
+          if (i === 0) block.style.borderRadius = "0";
+        });
+      }
+      // A phone: a dark bezel around the screen and rounded corners.
+      function dressPhone(device, screen, w, h) {
+        var bezel = w * 0.035;
+        device.style.padding = bezel + "px";
+        device.style.background = "#0a0c12";
+        device.style.borderRadius = w * 0.14 + "px";
+        screen.style.height = h - 2 * bezel + "px";
+        screen.style.borderRadius = w * 0.11 + "px";
+      }`;

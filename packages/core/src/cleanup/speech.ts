@@ -1,11 +1,8 @@
-import { type MediaClip, type Timeline, wordSpeaker } from "@frameshell/schema";
+import type { Timeline } from "@frameshell/schema";
 import { type EnergyProfile, profileLevel } from "../media/energy.js";
-import { type SourceTranscript, type Visible, visibleClips } from "../transcripts/verify.js";
-import { FrameGrid } from "../timeline/grid.js";
+import { placeWords } from "../transcripts/timeline-words.js";
+import type { SourceTranscript, Visible } from "../transcripts/verify.js";
 import type { SpeechAudio, SpeechWord } from "./plan.js";
-
-/** A word belongs to a clip when at least this much of it, or half of it when shorter, plays there (#455, ticket comment on word clocks). */
-const MIN_OVERLAP_S = 0.15;
 
 /** What {@link gatherSpeech} reads from the project. */
 export interface SpeechSources {
@@ -34,73 +31,27 @@ interface SpeechClip {
 
 /**
  * Kept words of `timeline` (program tracks already folded into media clips, see `withProgramSound`) placed on the
- * timeline clock, and the sound under them. A word counts for the clip that plays most of it, however many tracks
- * place the same words. Clips of assets without a current transcript or without audio are not speech.
+ * timeline clock by {@link placeWords} (shared with `word:` time references), and the sound under them. Clips of assets
+ * without a current transcript or without audio are not speech.
  */
 export async function gatherSpeech(timeline: Timeline, fps: number, sources: SpeechSources): Promise<GatheredSpeech> {
-  const grid = new FrameGrid(fps);
   const clips: SpeechClip[] = [];
-  const unchecked: GatheredSpeech["unchecked"] = [];
-  const words = new Map<string, SpeechWord>();
-  const skip = (clip: MediaClip, reason: string) => unchecked.push({ clip: clip.id, asset: clip.asset, reason });
-
-  for (const track of timeline.tracks) {
-    if (track.kind === "subtitles") continue;
-    const media = track.clips.filter((clip): clip is MediaClip => clip.type === "media" && clip.audio?.muted !== true);
-    const visible = visibleClips(media);
-    const here: { placed: Visible; source: Extract<SourceTranscript, { transcript: unknown }> }[] = [];
-    for (const placed of visible) {
-      const clip = placed.clip;
-      const source = sources.transcripts.get(clip.asset);
-      if (!source) continue;
-      if ("unchecked" in source) {
-        skip(clip, source.unchecked === "stale-transcript" ? "its transcript is older than the file" : "it has no transcript");
-        continue;
-      }
-      if (!(await sources.hasAudio(clip.asset))) {
-        skip(clip, "it has no audio");
-        continue;
-      }
-      let profile: EnergyProfile;
-      try {
-        profile = await sources.profile(clip.asset);
-      } catch (error) {
-        skip(clip, `its audio could not be read: ${(error as Error).message}`);
-        continue;
-      }
-      clips.push({ placed, profile });
-      here.push({ placed, source });
+  const { words, left } = await placeWords(timeline, fps, sources.transcripts, async (placed) => {
+    const asset = placed.clip.asset;
+    if (!(await sources.hasAudio(asset))) return "it has no audio";
+    try {
+      clips.push({ placed, profile: await sources.profile(asset) });
+    } catch (error) {
+      return `its audio could not be read: ${(error as Error).message}`;
     }
-    for (const { placed, source } of here) {
-      const { clip, speed } = placed;
-      const { transcript, rel } = source;
-      const toTimeline = (sourceSeconds: number) => clip.start + (sourceSeconds - clip.in) / speed;
-      for (const word of transcript.words) {
-        const overlap = Math.min(word.end, placed.out) - Math.max(word.start, clip.in);
-        if (overlap < Math.min(MIN_OVERLAP_S, (word.end - word.start) / 2) - 1e-9 || overlap <= 0) continue;
-        // The clip that plays most of the word keeps it.
-        const rival = here.find((other) => other.placed !== placed && other.source.rel === rel && overlapOf(word, other.placed) > overlap + 1e-9);
-        if (rival) continue;
-        const at = toTimeline(Math.max(word.start, clip.in));
-        const key = `${rel}#${word.id}@${grid.frame(at)}`;
-        if (words.has(key)) continue;
-        words.set(key, {
-          id: word.id,
-          text: transcript.edits[word.id]?.text ?? word.text,
-          transcript: rel,
-          speaker: wordSpeaker(transcript, word) ?? null,
-          at,
-          end: toTimeline(Math.min(word.end, placed.out)),
-          speechInside: word.speechInside === true,
-        });
-      }
-    }
-  }
-  return { words: [...words.values()].sort((a, b) => a.at - b.at || a.end - b.end), audio: speechAudio(clips, fps), unchecked, clips: clips.length };
-}
-
-function overlapOf(word: { start: number; end: number }, placed: Visible): number {
-  return Math.min(word.end, placed.out) - Math.max(word.start, placed.clip.in);
+    return null;
+  });
+  return {
+    words: words.map(({ id, text, transcript, speaker, at, end, speechInside }) => ({ id, text, transcript, speaker, at, end, speechInside })),
+    audio: speechAudio(clips, fps),
+    unchecked: left.map(({ clip, asset, reason }) => ({ clip, asset, reason })),
+    clips: clips.length,
+  };
 }
 
 /** {@link SpeechAudio} of the clips that play speech. */

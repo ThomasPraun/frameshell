@@ -1,7 +1,8 @@
 import { ErrorCode, type MusicShapeResult, RpcError } from "@frameshell/protocol";
 import { AUDIO_EFFECT_LIMITS, type AudioEffect, type ShapeSettings, type Timeline, isBuild } from "@frameshell/schema";
 import type { DipPoint } from "../media/duck.js";
-import { type GridLoader, resolveTimeRefArg } from "../timeline/time-ref.js";
+import type { TimelineGrid } from "../timeline/tempo.js";
+import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, unusableGrid } from "../timeline/time-ref.js";
 import { type MusicBuild, planBuildEffects } from "./builds.js";
 import { MUSIC_ENTRY_FADE_MS, needsEntryFade } from "./entry-fade.js";
 import { clipEnd } from "./fit.js";
@@ -15,6 +16,8 @@ export interface MusicShapeRequest {
   drop?: readonly (number | string)[] | undefined;
   /** Where the closing fade begins: a timeline time. */
   ending?: number | string | undefined;
+  /** The closing fade ends on a bar start of the timeline's grid: `fade` is stretched or shrunk to reach the nearest one. */
+  endOnBar?: boolean | undefined;
   lead: number;
   depth: number;
   hold: number;
@@ -51,12 +54,18 @@ export interface MusicShapePlan extends Omit<MusicShapeResult, "timeline" | "rev
 const invalid = (message: string, data: Record<string, unknown>) => new RpcError(ErrorCode.InvalidOperation, `music.shape: ${message}`, { op: "music.shape", ...data });
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 
+/** Shortest and longest closing fade of `music.shape`, seconds (the method's `fade` limits). */
+const MIN_FADE_S = 0.05;
+const MAX_FADE_S = 15;
+
 /**
  * The shaping of music clip `request.clip` of `timeline` (ADR 0037 slice 4): hits and ending resolved by the shared
  * TimeRef resolver, the dip curve ({@link shapeCurve}) over the clip, and the duck that goes again after it when the clip
- * carries duck keys. Reads only. Throws ClipNotFound or InvalidOperation.
+ * carries duck keys. `loadWords` reads the words the timeline plays for `word:` references. Reads only. Throws
+ * ClipNotFound or InvalidOperation.
  */
-export async function planMusicShape(timeline: Timeline, request: MusicShapeRequest, loadGrid: GridLoader): Promise<MusicShapePlan> {
+export async function planMusicShape(timeline: Timeline, request: MusicShapeRequest, loadGrid: GridLoader, loadWords?: WordLoader): Promise<MusicShapePlan> {
+  const words = onceWords(loadWords);
   const { track, clip } = findMusicClip(timeline, request.clip, "music.shape");
   const warnings: string[] = [];
   const keyed = clip.keys?.gain?.some((key) => key.auto === "music" || key.baseAuto === "music") === true;
@@ -68,6 +77,12 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
   const given = (request.drop?.length ?? 0) > 0 || request.ending !== undefined;
   if (request.clear === true && (given || request.build !== undefined)) {
     throw invalid("`clear` removes the clip's music keys and builds and takes no `drop`, `ending` or `build`.", { reason: "clear", field: "clear" });
+  }
+  if (request.endOnBar === true && request.ending === undefined) {
+    throw invalid("`endOnBar` snaps the end of the closing fade to a bar line: give `ending` (where the fade begins) too.", { reason: "endOnBar", field: "ending", hint: "Example: `{ clip, ending: 28, endOnBar: true }`." });
+  }
+  if (request.endOnBar === true && request.clear === true) {
+    throw invalid("`clear` removes the clip's music keys and takes no `endOnBar`.", { reason: "clear", field: "clear" });
   }
   if (request.build !== undefined && (request.drop?.length ?? 0) === 0) {
     throw invalid("`build` is the rising high-pass before a hit: give `drop` too.", { reason: "build", field: "build", hint: "Example: `{ clip, drop: [\"hit\"], build: 2 }`." });
@@ -88,7 +103,7 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
   let ending: number | null = null;
   if (settings) {
     const resolved: number[] = [];
-    for (const value of request.drop ?? []) resolved.push(round3(await resolveTimeRefArg("music.shape", "drop", value, timeline, loadGrid)));
+    for (const value of request.drop ?? []) resolved.push(round3(await resolveTimeRefArg("music.shape", "drop", value, timeline, loadGrid, words)));
     for (const at of [...new Set(resolved)].sort((a, b) => a - b)) {
       // A hit whose dip never reaches the clip writes nothing.
       if (at + settings.hold + settings.release <= playsFrom || at - settings.lead - SHAPE_STEP_S >= playsTo) {
@@ -96,10 +111,17 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
       } else drops.push(at);
     }
     if (request.ending !== undefined) {
-      const at = round3(await resolveTimeRefArg("music.shape", "ending", request.ending, timeline, loadGrid));
+      const at = round3(await resolveTimeRefArg("music.shape", "ending", request.ending, timeline, loadGrid, words));
       if (at >= playsTo) warnings.push(`The ending at ${at} s is after ${clip.id} ends (${round3(playsTo)} s): no fade written.`);
       else {
         ending = at;
+        if (request.endOnBar === true) {
+          const barEnd = await barEndOf(at, settings.fade, { grid: loadGrid, horizon: playsTo + settings.fade + 30 });
+          if (barEnd.fade !== settings.fade) {
+            warnings.push(`The closing fade from ${at} s ends on bar line ${barEnd.at} s (${barEnd.ref}): ${barEnd.fade} s instead of ${settings.fade} s.`);
+            settings.fade = barEnd.fade;
+          }
+        }
         if (at + settings.fade > playsTo) warnings.push(`The clip ends at ${round3(playsTo)} s, before the ${settings.fade} s fade from ${at} s is over: it is cut off there.`);
       }
     }
@@ -161,6 +183,7 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
     cleared: settings === null,
     drops,
     ending,
+    endsAt: ending === null || settings === null ? null : round3(ending + settings.fade),
     settings,
     curve,
     sweeps,
@@ -173,6 +196,29 @@ export async function planMusicShape(timeline: Timeline, request: MusicShapeRequ
     entryFade,
     noop: settings === null && !keyed && effects === undefined,
   };
+}
+
+/**
+ * The bar start of the timeline's grid a fade of `fade` seconds from `ending` should end on: the nearest to `ending + fade`
+ * that leaves a fade of at least {@link MIN_FADE_S} and at most {@link MAX_FADE_S} (the earlier one on a tie). Throws
+ * InvalidOperation when the timeline has no usable grid or no bar start is that near.
+ */
+async function barEndOf(ending: number, fade: number, source: { grid: GridLoader; horizon: number }): Promise<{ at: number; fade: number; ref: string }> {
+  const found = await source.grid(source.horizon);
+  const unusable = unusableGrid(found);
+  if (unusable) throw invalid(unusable.message, { reason: "grid", field: "endOnBar", ...(unusable.hint ? { hint: unusable.hint } : {}) });
+  const grid = found.grid as TimelineGrid;
+  const wanted = ending + fade;
+  const bars = grid.bars.filter((bar) => bar - ending >= MIN_FADE_S - 1e-9 && bar - ending <= MAX_FADE_S + 1e-9);
+  if (bars.length === 0) {
+    throw invalid(`no bar start of the grid is between ${MIN_FADE_S} and ${MAX_FADE_S} s after the ending at ${ending} s.`, {
+      reason: "endOnBar",
+      field: "endOnBar",
+      hint: "Give an `ending` inside the music the grid follows, or drop `endOnBar`.",
+    });
+  }
+  const at = bars.reduce((near, bar) => (Math.abs(bar - wanted) < Math.abs(near - wanted) - 1e-9 ? bar : near));
+  return { at: round3(at), fade: round3(at - ending), ref: `bar:${grid.bars.indexOf(at) + 1 + grid.barBase}` };
 }
 
 /** `Music shape: c_1a2b3c steps down before 12.4 s, fades out from 28 s` / `Music shape: c_1a2b3c cleared`. */

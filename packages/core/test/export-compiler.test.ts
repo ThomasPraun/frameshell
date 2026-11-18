@@ -16,6 +16,7 @@ import {
   audioFades,
   bakeRef,
   flattenTimeline,
+  gradeChainKey,
   gradeKey,
   gradeOf,
   grainSeed,
@@ -30,13 +31,16 @@ import {
   compileRender,
   fitInside,
   gifStep,
+  LIMITED_STATS_FILE,
+  MIX_FILE,
+  limitedAnalysis,
   loudnessAnalysis,
   mixStep,
   muxStep,
   paletteStep,
   parseLoudnessStats,
 } from "../src/index.js";
-import { TRUE_PEAK_CEILING } from "../src/export/compiler.js";
+import { truePeakCeiling } from "../src/export/true-peak.js";
 
 // Golden files: reviewed ffmpeg plans. Regenerate with UPDATE_GOLDEN=1 and review the diff.
 const GOLDEN_DIR = fileURLToPath(new URL("./golden/", import.meta.url));
@@ -465,6 +469,38 @@ describe("export compiler", () => {
         expect(graph).toContain("[bb0]format=gbrp,format=rgba[bg0]");
       });
     });
+
+    describe("colour grade (ADR 0031, #384)", () => {
+      const warm = { temperature: 0.4, saturation: 1.2 };
+      const graded: Timeline = {
+        ...layered,
+        tracks: layered.tracks.map((track) =>
+          track.kind === "video" ? { ...track, clips: track.clips.map((clip) => (clip.type === "hyperframes" ? ({ ...clip, grade: warm } as Clip) : clip)) } : track,
+        ),
+      };
+      const grades = new Map([[gradeChainKey([gradeOf({ type: "hyperframes", grade: warm })!]), "grade-warm.cube"]]);
+      const gradedPlan = compileRender({ ...input, timeline: graded, grades });
+      const graphs = Object.values(gradedPlan.files).join("\n");
+
+      it("grades a render before its scale, opacity and alpha, as footage (golden)", () => {
+        golden("grade-generated-plan", {
+          segments: gradedPlan.segments,
+          files: gradedPlan.files,
+          frame: compileFrame({ ...input, timeline: graded, grades, width: 1280, height: 720, at: 2, output: "/out/frame.png" }),
+        });
+        // Both renders: the VP9 alpha title on v2 and the opaque end card on v1, each graded right after it is read.
+        expect(graphs.match(/format=rgba,lut3d=file=grade-warm\.cube:interp=trilinear/g)?.length).toBeGreaterThanOrEqual(2);
+        expect(graphs).toMatch(/lut3d=file=grade-warm\.cube:interp=trilinear,[^\n;]*scale=[^\n;]*colorchannelmixer=aa=0\.8/);
+        expect(gradedPlan.warnings).toEqual(layeredPlan.warnings);
+      });
+
+      it("leaves the plan as it was without a grade, and draws a render without a table ungraded, with a warning", () => {
+        expect(compileRender({ ...input, grades })).toEqual(layeredPlan);
+        const missing = compileRender({ ...input, timeline: graded });
+        expect(missing.files).toEqual(layeredPlan.files);
+        expect(missing.warnings).toContain("Clip c_title has a colour grade with no table; it was exported ungraded.");
+      });
+    });
   });
 
   describe("loop (ADR 0039)", () => {
@@ -549,7 +585,7 @@ describe("export compiler", () => {
     it("plans lossless RGB segments, a palette pass and a GIF pass, with no audio (golden)", () => {
       const plan = gifPlan();
       expect(plan).toMatchObject({ container: "gif", loop: true, fps: "30/1", width: 1200, height: 675, frames: 240, warnings: [] });
-      expect(plan.audio).toEqual({ sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [] });
+      expect(plan.audio).toEqual({ sampleRate: 48_000, samples: 0, inputs: [], tracks: [], codec: [], truePeak: truePeakCeiling("pcm") });
       expect(mixStep(plan)).toBeNull();
       expect(loudnessAnalysis(plan)).toBeNull();
       golden("gif-plan", { segments: plan.segments, files: plan.files, palette: paletteStep(), gif: gifStep("/out/main.gif.partial") });
@@ -615,8 +651,29 @@ describe("export compiler", () => {
     const rate44 = compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio: { ...youtube1080.audio, sampleRate: 44_100 } }, loudness: -17, sources, resolution });
     for (const measured of [MEASURED, null]) {
       const filter = muxStep(rate44, measured, "/out.mp4").args.find((arg) => arg.startsWith("[1:a:0]"))!;
-      expect(filter).toContain(`aresample=44100,aresample=176400,alimiter=limit=${(10 ** (TRUE_PEAK_CEILING / 20)).toFixed(4)}:level=false:latency=true,aresample=44100,atrim=`);
+      expect(filter).toContain(`aresample=44100,aresample=176400,alimiter=limit=${(10 ** (rate44.audio.truePeak / 20)).toFixed(4)}:level=false:latency=true,aresample=44100,atrim=`);
     }
+  });
+
+  it("takes the limiter ceiling from the preset's codec and bitrate", () => {
+    const planOf = (audio: NonNullable<typeof youtube1080.audio>) =>
+      compileRender({ timeline, fps: 30, preset: { ...youtube1080, audio }, loudness: -17, sources, resolution });
+    expect(planOf({ codec: "aac", bitrateKbps: 320, sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("aac", 320));
+    expect(planOf({ codec: "aac", bitrateKbps: 96, sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("aac", 96));
+    expect(planOf({ codec: "opus", bitrateKbps: 128, sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("opus", 128));
+    expect(planOf({ codec: "pcm", sampleRate: 48_000 }).audio.truePeak).toBe(truePeakCeiling("pcm"));
+    expect(truePeakCeiling("aac", 320)).toBeLessThan(truePeakCeiling("pcm"));
+  });
+
+  it("adds the re-measure trim before the limiter, in the mux and in the loudness re-measure step", () => {
+    const plain = muxStep(plan, MEASURED, "/out.mp4").args.find((arg) => arg.startsWith("[1:a:0]"))!;
+    expect(plain).not.toContain("volume=");
+    const trimmed = muxStep(plan, MEASURED, "/out.mp4", 0.45).args.find((arg) => arg.startsWith("[1:a:0]"))!;
+    expect(trimmed).toContain("linear=true,volume=0.45dB,aresample=");
+    const check = limitedAnalysis(plan, MEASURED, 0.45)!.args;
+    const chain = trimmed.slice("[1:a:0]".length, trimmed.indexOf(",atrim="));
+    expect(check[check.indexOf("-af") + 1]).toBe(`${chain},loudnorm=I=-17:TP=-1:LRA=20:print_format=json:stats_file=${LIMITED_STATS_FILE}`);
+    expect(check).toEqual(expect.arrayContaining(["-i", MIX_FILE, "-f", "null"]));
   });
 
   it("plans single frames: in a cut, in a sped-up clip, in a gap and on a still, subtitles burned (golden)", () => {
@@ -1038,6 +1095,34 @@ describe("export compiler", () => {
         const loose = compileRender({ ...nestedInput, timeline: flattenTimeline(hosted(plain), both) });
         expect(playback).toEqual(loose);
         expect(JSON.stringify(playback)).not.toMatch(/qsin|eval=frame|alpha=1/);
+      });
+
+      it("grades every picture of a graded nested clip through one table after its own grade, its sound untouched (ADR 0031, golden)", () => {
+        const own = { saturation: 0.6 };
+        const look = { temperature: -0.3, contrast: 1.1 };
+        const scened: Timeline = {
+          ...scene,
+          tracks: scene.tracks.map((track) =>
+            track.id === "v1" && track.kind === "video" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, grade: own }) as Clip) } : track,
+          ),
+        };
+        const both = (source: string) => (source === "timelines/scene.json" ? scened : null);
+        const timeline = flattenTimeline(hosted({ ...host, grade: look } as Clip), both, 30);
+        const chain = (...grades: object[]) => gradeChainKey(grades.map((grade) => gradeOf({ type: "media", grade })!));
+        const grades = new Map([
+          [chain(own, look), "grade-cam.cube"],
+          [chain(look), "grade-badge.cube"],
+        ]);
+        const plan = compileRender({ ...nestedInput, timeline, grades });
+        golden("grade-nested-plan", { segments: plan.segments, files: plan.files, frame: compileFrame({ ...nestedInput, timeline, grades, width: 1280, height: 720, at: 2.1, output: "/out/frame.png" }) });
+        const graphs = Object.values(plan.files).join("\n");
+        expect(graphs).toContain("lut3d=file=grade-cam.cube:interp=trilinear");
+        expect(graphs).toContain("lut3d=file=grade-badge.cube:interp=trilinear");
+        // Nothing but the tables changes: the same plan with the grade lines taken out.
+        const strip = (text: string) => text.replaceAll(/,format=rgba,lut3d=file=grade-\w+\.cube:interp=trilinear/g, "");
+        expect(Object.values(plan.files).map(strip)).toEqual(Object.values(nestedPlan.files));
+        expect(plan.audio).toEqual(nestedPlan.audio);
+        expect(plan.warnings).toEqual(nestedPlan.warnings);
       });
     });
   });

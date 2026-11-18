@@ -39,7 +39,17 @@ import { DropLog } from "./drop-log.js";
 import { mediaSrc } from "./media-src.js";
 import { type ReadBlock, readAhead, readBlocks } from "./read-ahead.js";
 import { StretchChain } from "./time-stretch.js";
-import { type EncodedPicture, type VideoSource, isReadWhole, mattedPath, mattedSource, openVideoSource, splitMattedPath } from "./video-source.js";
+import {
+  type EncodedPicture,
+  type VideoSource,
+  isReadWhole,
+  mattedPath,
+  mattedSource,
+  matteOnlyPath,
+  matteOnlySource,
+  openVideoSource,
+  splitMattedPath,
+} from "./video-source.js";
 
 /** DedicatedWorkerGlobalScope, as far as the engine uses it (the DOM lib types `self` as Window). */
 interface WorkerScope {
@@ -70,7 +80,8 @@ const STATS_MS = 1000;
 interface Ready {
   from: number;
   to: number;
-  frame: VideoFrame;
+  /** Null for an alpha-only source: the colour is the frame another layer decoded (ADR 0032, `sharesLayer`). */
+  frame: VideoFrame | null;
   /** Alpha of a render or proxy with alpha; null when opaque. */
   alpha: AlphaPlane | null;
 }
@@ -89,7 +100,9 @@ interface Pending {
   from: number;
   to: number;
   gen: number;
-  /** An alpha frame is due too. */
+  /** A colour frame is due: false for an alpha-only source. */
+  colour: boolean;
+  /** An alpha frame is due. */
   alpha: boolean;
   frame: VideoFrame | null;
   /** Copied out of the alpha decoder's frame (so its pool is freed at once); `failed` when the copy failed (drawn opaque). */
@@ -116,10 +129,13 @@ interface LayerHost {
 
 /**
  * File and timing a span decodes from: a media or shot angle span's proxy (with its matte as alpha on a subject layer,
- * ADR 0032), or a generated span's ready render (one render frame per program frame).
+ * ADR 0032, or the matte alone when the subject draws its plate layer's frame), or a generated span's ready render
+ * (one render frame per program frame).
  */
 function decodableOf(span: VideoSpan): { path: string; timing: SpanTiming } | null {
-  if (span.kind === "media" && span.matte !== undefined) return { path: mattedPath(span.proxy, span.matte), timing: span };
+  if (span.kind === "media" && span.matte !== undefined) {
+    return { path: span.sharesLayer === undefined ? mattedPath(span.proxy, span.matte) : matteOnlyPath(span.matte), timing: span };
+  }
   if (span.kind === "media" || span.kind === "angle") return { path: span.proxy, timing: span };
   if (span.kind === "generated" && span.render?.state === "ready") {
     return { path: span.render.file, timing: { start: span.start, end: span.end, in: span.in, speed: span.hold ? 0 : 1 } };
@@ -138,9 +154,9 @@ function coverPixels(span: { cover?: LayerRect; size: Size | null }, image: Size
 
 /**
  * The decode pipeline of one video layer: its own `VideoDecoder` (plus one
- * for the alpha plane of renders, proxies with alpha and subject mattes), fed the layer's media and
- * rendered spans from a program frame on, keeping up to {@link MAX_AHEAD}
- * decoded frames in program order.
+ * for the alpha plane of renders, proxies with alpha and subject mattes; only that one for a subject drawn from its
+ * plate layer's frame), fed the layer's media and rendered spans from a program frame on, keeping up to
+ * {@link MAX_AHEAD} decoded frames in program order. A decoder no span ahead needs is closed at the next restart.
  */
 class LayerDecoder {
   #decoder: VideoDecoder | null = null;
@@ -190,13 +206,17 @@ class LayerDecoder {
     }
     this.#ready = kept;
     this.#clearPending();
-    for (const decoder of [this.#decoder, this.#alphaDecoder]) if (decoder && decoder.state === "configured") decoder.reset();
+    const program = this.host.program;
+    const spans = program?.layers[this.layer] ?? [];
+    const ahead = spans.flatMap((span) => (span.end > frame ? (decodableOf(span) ?? []) : []));
+    // Every path but a matte alone (`picture: null`) needs the colour decoder.
+    this.#decoder = settled(this.#decoder, ahead.some(({ path }) => splitMattedPath(path)?.picture !== null));
+    this.#alphaDecoder = settled(this.#alphaDecoder, ahead.length > 0);
     this.#configured = null;
     this.#alphaConfigured = null;
     void this.#feeder?.return(undefined);
     this.#fedUntil = frame;
-    const program = this.host.program;
-    this.#feeder = program ? this.#steps(program.layers[this.layer] ?? [], frame, this.#gen) : null;
+    this.#feeder = program ? this.#steps(spans, frame, this.#gen) : null;
     void this.pump();
   }
 
@@ -243,12 +263,12 @@ class LayerDecoder {
           break;
         }
         const { step, path, source, picture } = next.value;
-        const decoder = this.#decoderFor(path, source);
+        const decoder = source.alphaOnly ? null : this.#decoderFor(path, source);
         const alpha = picture.alpha ? this.#alphaDecoderFor(path, source) : null;
         const timestamp = ++this.#seq;
-        this.#pending.set(timestamp, { from: step.from, to: step.to, gen, alpha: alpha !== null, frame: null, alphaPlane: null });
+        this.#pending.set(timestamp, { from: step.from, to: step.to, gen, colour: decoder !== null, alpha: alpha !== null, frame: null, alphaPlane: null });
         this.#fedUntil = Math.max(this.#fedUntil, step.to);
-        decoder.decode(new EncodedVideoChunk({ type: picture.key ? "key" : "delta", timestamp, data: picture.data }));
+        decoder?.decode(new EncodedVideoChunk({ type: picture.key ? "key" : "delta", timestamp, data: picture.data }));
         if (alpha && picture.alpha) {
           alpha.decode(new EncodedVideoChunk({ type: picture.alpha.key ? "key" : "delta", timestamp, data: picture.alpha.data }));
         }
@@ -358,11 +378,11 @@ class LayerDecoder {
   /** Move complete entries at the head of `#pending` to `#ready`: colour and alpha finish at their own pace. */
   #flush(): void {
     for (const [timestamp, head] of this.#pending) {
-      if (!head.frame || (head.alpha && !head.alphaPlane)) break;
+      if ((head.colour && !head.frame) || (head.alpha && !head.alphaPlane)) break;
       this.#pending.delete(timestamp);
       if (head.gen !== this.#gen || head.from === head.to) {
         this.host.stats.discarded++;
-        head.frame.close();
+        head.frame?.close();
       } else {
         const alpha = head.alphaPlane && head.alphaPlane !== "failed" ? head.alphaPlane : null;
         this.#ready.push({ from: head.from, to: head.to, frame: head.frame, alpha });
@@ -388,7 +408,18 @@ class LayerDecoder {
 }
 
 function closeReady(ready: Ready): void {
-  ready.frame.close();
+  ready.frame?.close();
+}
+
+/** `decoder` reset for a new decode, or closed (null) when nothing ahead `needs` it: an idle decoder holds its slot. */
+function settled(decoder: VideoDecoder | null, needs: boolean): VideoDecoder | null {
+  if (!decoder || decoder.state === "closed") return decoder;
+  if (!needs) {
+    decoder.close();
+    return null;
+  }
+  if (decoder.state === "configured") decoder.reset();
+  return decoder;
 }
 
 /** The luma plane of `frame` (plane 0 of I420 / NV12, what software VP9 decode gives). */
@@ -520,7 +551,18 @@ class Engine implements LayerHost {
   #stretches = new Map<string, { chain: StretchChain; tail: Promise<void> }>();
 
   readonly #drops = new DropLog();
-  readonly stats: EngineStats = { decoded: 0, discarded: 0, drawn: 0, starved: 0, restarts: 0, audioChunks: 0, decoders: 0, graded: 0, dropped: this.#drops.drops };
+  readonly stats: EngineStats = {
+    decoded: 0,
+    discarded: 0,
+    drawn: 0,
+    starved: 0,
+    restarts: 0,
+    audioChunks: 0,
+    decoders: 0,
+    decodersPlayed: 0,
+    graded: 0,
+    dropped: this.#drops.drops,
+  };
 
   constructor(canvas: OffscreenCanvas, mediaUrl: string) {
     this.#canvas = canvas;
@@ -531,8 +573,12 @@ class Engine implements LayerHost {
     setInterval(() => this.#postStats(), STATS_MS);
   }
 
+  #openDecoders(): number {
+    return this.#layers.reduce((sum, layer) => sum + layer.decoders, 0);
+  }
+
   #postStats(): void {
-    this.stats.decoders = this.#layers.reduce((sum, layer) => sum + layer.decoders, 0);
+    this.stats.decoders = this.#openDecoders();
     this.stats.graded = this.#grader.passes;
     scope.postMessage({ type: "stats", stats: { ...this.stats, dropped: this.#drops.drops } });
   }
@@ -619,6 +665,7 @@ class Engine implements LayerHost {
     this.#anchor = anchor;
     this.#playFrom = from;
     this.#drops.start(from, program.fps);
+    this.stats.decodersPlayed = this.#openDecoders();
     this.#audioUntil = anchor.sample;
     this.#audioFadeFloor = anchor.sample;
     this.#scheduleAudio();
@@ -714,7 +761,10 @@ class Engine implements LayerHost {
     } else this.#drawBlack();
     if (playing) this.#scheduleAudio();
     for (const layer of this.#layers) void layer.pump();
-    if (playing) this.#drops.busy(performance.now() - started);
+    if (playing) {
+      this.#drops.busy(performance.now() - started);
+      this.stats.decodersPlayed = Math.max(this.stats.decodersPlayed, this.#openDecoders());
+    }
     if (playing || this.#drawn === "") this.queueTick();
   }
 
@@ -753,8 +803,9 @@ class Engine implements LayerHost {
       const decodable = decodableOf(span);
       if (!decodable) continue;
       const ready = pipeline.frameAt(want);
-      if (ready) {
-        const { frame } = ready;
+      const frame = ready && (ready.frame ?? this.#sharedFrame(span, want));
+      if (frame === "failed") continue;
+      if (ready && frame) {
         const decoded = { width: frame.displayWidth, height: frame.displayHeight };
         if (span.kind === "angle") {
           // Shots fill opaque tiles: an angle's alpha plane is not used.
@@ -762,7 +813,8 @@ class Engine implements LayerHost {
         } else {
           const cover = coverPixels(span, decoded);
           const glass = span.kind === "generated" && span.glass ? { glass: span.glass } : {};
-          const grade = span.kind === "media" && span.grade ? { grade: span.grade } : {};
+          // A render is graded like footage: its colour before its alpha plane masks it (ADR 0031).
+          const grade = span.grade ? { grade: span.grade } : {};
           const vignette = span.vignette ? { vignette: span.vignette } : {};
           const grain = span.grain ? { grain: span.grain } : {};
           parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette, ...grain });
@@ -794,6 +846,23 @@ class Engine implements LayerHost {
       this.stats.drawn++;
     }
     this.#announce(want);
+  }
+
+  /**
+   * The frame a subject span drawn from its plate (`sharesLayer`, ADR 0032 slice MX2) takes from that layer at `want`:
+   * the plate's decoded frame, never its grade's output, so each layer grades, shapes, masks and fades it itself (ADR
+   * 0031 order, as export). Null while the plate is still decoding it; `failed` when the plate cannot be read.
+   */
+  #sharedFrame(span: VideoSpan, want: number): VideoFrame | "failed" | null {
+    const layer = span.kind === "media" ? span.sharesLayer : undefined;
+    const plate = layer === undefined ? undefined : this.#layers[layer];
+    const plateSpan = layer === undefined ? null : programAt(this.#program!, want, layer);
+    const path = plateSpan ? decodableOf(plateSpan)?.path : undefined;
+    if (!plate || path === undefined) return "failed";
+    plate.dropBefore(want);
+    const ready = plate.frameAt(want);
+    if (ready?.frame) return ready.frame;
+    return plate.failed.has(path) ? "failed" : null;
   }
 
   #drawBlack(): void {
@@ -897,7 +966,7 @@ class Engine implements LayerHost {
     const tables = new Map<string, GradeTable>();
     for (const layer of next.layers) {
       for (const span of layer) {
-        if ((span.kind !== "media" && span.kind !== "still") || !span.grade) continue;
+        if ((span.kind !== "media" && span.kind !== "still" && span.kind !== "generated") || !span.grade) continue;
         const table = next.grades?.[span.grade] ?? this.#gradeTables.get(span.grade);
         if (table) tables.set(span.grade, table);
       }
@@ -1078,22 +1147,25 @@ class Engine implements LayerHost {
 
   // ---------- media I/O ----------
 
-  /** The proxy or render at `path` (or a proxy and its matte, `mattedPath`), opened once. */
+  /** The proxy or render at `path` (or a proxy and its matte, `mattedPath`, or a matte alone, `matteOnlyPath`), opened once. */
   source(path: string): Promise<VideoSource> {
     let source = this.#sources.get(path);
     if (!source) {
       const matted = splitMattedPath(path);
-      source = matted
-        ? Promise.all([this.source(matted.picture), this.source(matted.matte)]).then(([picture, matte]) => mattedSource(picture, matte))
-        : openVideoSource(
-            path,
-            (start, end) => this.fetch(path, start, end),
-            async () => {
-              const response = await fetch(this.#url(path));
-              if (!response.ok) throw new Error(`HTTP ${response.status}`);
-              return new Uint8Array(await response.arrayBuffer());
-            },
-          );
+      const picture = matted?.picture;
+      if (matted && picture === null) source = this.source(matted.matte).then(matteOnlySource);
+      else if (matted && picture) source = Promise.all([this.source(picture), this.source(matted.matte)]).then(([colour, matte]) => mattedSource(colour, matte));
+      else {
+        source = openVideoSource(
+          path,
+          (start, end) => this.fetch(path, start, end),
+          async () => {
+            const response = await fetch(this.#url(path));
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return new Uint8Array(await response.arrayBuffer());
+          },
+        );
+      }
       const opened = source;
       source.catch(() => {
         if (this.#sources.get(path) === opened) this.#sources.delete(path);

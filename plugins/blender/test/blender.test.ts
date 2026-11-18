@@ -1,10 +1,29 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BLENDER_PACKAGE } from "@frameshell/core";
 import type { ClipAdapter, PluginApi } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
-import { SUPPORTED_BLENDER, activate, frameCount, frameRate, insideProject, listingPath, parseBlenderVersion, propsSchema, scriptPath, sourceOf, supportedBlender } from "../src/index.js";
+import {
+  BlendDeps,
+  SUPPORTED_BLENDER,
+  activate,
+  describeRefusal,
+  frameCount,
+  renderWindow,
+  frameRate,
+  insideProject,
+  listingPath,
+  outsideProject,
+  outsideWarning,
+  parseBlenderVersion,
+  propsSchema,
+  scriptPath,
+  sourceOf,
+  supportedBlender,
+} from "../src/index.js";
 
 /** A checked-out text file with LF endings (Windows checkouts may turn them into CRLF). */
 const readText = (path: string | URL): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
@@ -32,21 +51,22 @@ describe("supported Blender versions", () => {
 describe("props", () => {
   const validate = (props: unknown) => propsSchema["~standard"].validate(props) as { value?: unknown; issues?: { message: string }[] };
 
-  it("accept scene, camera and the draft quality, or nothing", () => {
-    for (const props of [{}, { scene: "Scene" }, { camera: "Camera.001" }, { scene: "A", camera: "B", quality: "draft" }]) {
+  it("accept scene and camera, or nothing", () => {
+    for (const props of [{}, { scene: "Scene" }, { camera: "Camera.001" }, { scene: "A", camera: "B" }]) {
       expect(validate(props).issues, JSON.stringify(props)).toBeUndefined();
     }
   });
 
-  it("refuse final quality in this version, with what to do", () => {
-    expect(validate({ quality: "final" }).issues?.[0]?.message).toMatch(/"final" is not available in this version.*"draft"/);
-    expect(validate({ quality: "medium" }).issues?.[0]?.message).toMatch(/must be "draft"/);
+  it("refuse a quality prop: draft or final is the export's choice, and the message says how to pick it", () => {
+    for (const quality of ["draft", "final"]) {
+      expect(validate({ quality }).issues?.[0]?.message).toMatch(/unknown prop quality: .*draft render \(EEVEE\) and a final one \(Cycles\).*--quality draft.*Remove quality/);
+    }
   });
 
   it("refuse frame ranges, scripts and the file (the .blend is the source), naming the fix", () => {
     const messages = (props: unknown) => (validate(props).issues ?? []).map((issue) => issue.message).join("\n");
     expect(messages({ file: "a.blend" })).toMatch(/the \.blend is the clip's `source`/);
-    expect(messages({ frameStart: 1 })).toMatch(/unknown prop frameStart.*in and duration.*no scripts run/);
+    expect(messages({ frameStart: 1 })).toMatch(/unknown prop frameStart: props are scene and camera.*in and duration.*no scripts run/);
     expect(messages({ script: "import os" })).toMatch(/unknown prop script/);
     expect(messages({ scene: "", camera: 3 })).toMatch(/scene must be the name.*\n.*camera must be the name/);
     expect(messages([])).toMatch(/props must be an object/);
@@ -82,6 +102,16 @@ describe("source and range", () => {
     expect(frameCount({ id: "c", duration: 5 / 30 + 0.01 }, 30)).toBe(6);
   });
 
+  it("renderWindow draws from the clip's in point to its end, never fewer than one frame", () => {
+    expect(renderWindow({ id: "c", duration: 4 }, 30)).toEqual({ startFrame: 0, frames: 120 });
+    expect(renderWindow({ id: "c", in: 2, duration: 4 }, 30)).toEqual({ startFrame: 60, frames: 120 });
+    expect(renderWindow({ id: "c", in: 7 / 30, duration: 5 / 30 }, 30)).toEqual({ startFrame: 7, frames: 5 });
+    // Float error of a start snapped to the frame grid must not skip a frame: 0.19999 s is 5.9997 frames, frame 6.
+    expect(renderWindow({ id: "c", in: 0.19999, duration: 1 }, 30).startFrame).toBe(6);
+    expect(renderWindow({ id: "c", in: 1, duration: 0.001 }, 30)).toEqual({ startFrame: 30, frames: 1 });
+    expect(renderWindow({ id: "c", in: 1, duration: 0 }, 30)).toEqual({ startFrame: 30, frames: 1 });
+  });
+
   it("frameRate sends NTSC rates as exact fractions and the rest as they are", () => {
     expect(frameRate(30000 / 1001)).toBe("30000/1001");
     expect(frameRate(29.97)).toBe("30000/1001");
@@ -104,6 +134,72 @@ describe("source and range", () => {
     const abs = (rel: string) => (process.platform === "win32" ? `C:\\p\\${rel.replaceAll("/", "\\")}` : `/p/${rel}`);
     const found = insideProject(project, [abs("tex/b.png"), abs("lib/a.blend"), "/elsewhere/x.png", abs("scenes/s.blend"), abs(".frameshell/blender/x.json"), abs("tex/b.png")], "scenes/s.blend");
     expect(found).toEqual(["lib/a.blend", "tex/b.png"]);
+  });
+});
+
+describe("files outside the project", () => {
+  it("outsideProject keeps what insideProject drops as outside, absolute, sorted and unique", () => {
+    const project = process.platform === "win32" ? "C:\\p" : "/p";
+    const outsideRoot = process.platform === "win32" ? "D:\\lib" : "/lib";
+    const abs = (root: string, rel: string) => join(root, ...rel.split("/"));
+    const listed = [abs(outsideRoot, "z.blend"), abs(project, "tex/b.png"), abs(outsideRoot, "a.png"), abs(outsideRoot, "z.blend"), abs(project, "../p-sibling/c.png")];
+    expect(outsideProject(project, listed)).toEqual([abs(outsideRoot, "a.png"), abs(outsideRoot, "z.blend"), resolve(project, "..", "p-sibling", "c.png")].sort());
+    expect(insideProject(project, listed, "scenes/s.blend")).toEqual(["tex/b.png"]);
+  });
+
+  it("enter the key by content only, beside the listing: an edit or a file appearing changes it, its path never shows", async () => {
+    const project = mkdtempSync(join(tmpdir(), "frameshell-blender-outside-"));
+    const elsewhere = mkdtempSync(join(tmpdir(), "frameshell-blender-elsewhere-"));
+    try {
+      const lib = join(elsewhere, "lib.blend");
+      const later = join(elsewhere, "later.png");
+      writeFileSync(lib, "BLENDERone");
+      const deps = new BlendDeps(project);
+      const info = { hash: "0123456789abcdef" };
+      expect(await deps.outsideKey("scenes/s.blend", info, [])).toBeNull();
+      const key = await deps.outsideKey("scenes/s.blend", info, [later, lib]);
+      expect(key).toBe(listingPath("scenes/s.blend", info).replace(/deps\.json$/, "outside.json"));
+      const read = () => readFileSync(join(project, ...key!.split("/")), "utf8");
+      const first = read();
+      expect(JSON.parse(first)).toEqual({ outside: [{ missing: true }, { sha256: expect.stringMatching(/^[0-9a-f]{16}$/), bytes: 10 }] });
+      expect(first).not.toContain(basename(elsewhere));
+      writeFileSync(later, "png");
+      await deps.outsideKey("scenes/s.blend", info, [later, lib]);
+      const appeared = read();
+      expect(appeared).not.toBe(first);
+      writeFileSync(lib, "BLENDERtwo!");
+      await deps.outsideKey("scenes/s.blend", info, [later, lib]);
+      expect(read()).not.toBe(appeared);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it("the render warning names the clip, the .blend and the files, at most five of them", () => {
+    expect(outsideWarning("c1", "scenes/a.blend", ["/lib/x.blend"])).toBe(
+      "blender clip c1: scenes/a.blend loads a file from outside the project (/lib/x.blend); its content is in the render key, " +
+        "but Frameshell does not watch it: copy it into the project and relink to re-render on every change.",
+    );
+    const many = Array.from({ length: 7 }, (_, i) => `/lib/${i}.png`);
+    expect(outsideWarning("c1", "scenes/a.blend", many)).toMatch(/loads 7 files from outside the project \(\/lib\/0\.png, .*\/lib\/4\.png and 2 more\); their content/);
+  });
+});
+
+describe("refusals of render.py", () => {
+  it("say which scene frames a remapped clip needs, with both rates, and the same-rate message without them", () => {
+    const range = (detail: Record<string, unknown>) => describeRefusal("c1", "s.blend", { event: "error", code: "range", scene: "Scene", frameStart: 1, frameEnd: 4, frames: 6, ...detail }, 30);
+    expect(range({ lastFrame: 5, sceneFps: 24 })).toBe(
+      'blender clip c1: it needs scene frames 1 to 5 (the scene runs at 24 fps, the project at 30) but scene "Scene" of s.blend ends at frame 4 (4 frames). Raise its End frame or shorten the clip.',
+    );
+    expect(range({ lastFrame: 6, sceneFps: 30 })).toMatch(/needs scene frames 1 to 6 but scene "Scene"/);
+    expect(range({})).toMatch(/needs 6 frames from the scene's first frame \(1\) but/);
+  });
+
+  it("render.py samples another scene rate at the project's seconds, with no frame-rate refusal left", () => {
+    const text = readText(scriptPath("render.py"));
+    expect(text).toMatch(/scene\.frame_set\(whole, subframe=at - whole\)/);
+    expect(text).not.toMatch(/refuse\("fps"/);
   });
 });
 

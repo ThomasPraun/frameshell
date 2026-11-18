@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ViewedShape } from "../proposals.js";
-import { TempoSchema } from "@frameshell/schema";
+import { FormatIdSchema, TempoSchema } from "@frameshell/schema";
 import {
   MarkerListResultSchema,
   OperationResultSchema,
@@ -9,6 +9,14 @@ import {
   TrackDuckResultSchema,
   operationArgs,
 } from "../timeline.js";
+import {
+  CLIP_COMPARE_DEFAULT_TILE_WIDTH,
+  CLIP_COMPARE_MAX_LOOKS,
+  CLIP_COMPARE_MAX_TILE_WIDTH,
+  CLIP_COMPARE_MIN_TILE_WIDTH,
+  ClipCompareResultSchema,
+  ClipLookSchema,
+} from "../clip-compare.js";
 import { type MethodSpec, CwdParam, ViewParam } from "./shared.js";
 
 /** Daemon methods: clip edits, transitions, keys, ducking, markers, tempo and letterbox. */
@@ -149,6 +157,51 @@ export const clipMethods = {
     params: operationArgs["clip.key"].extend({ cwd: CwdParam, timeline: TimelineIdSchema }),
     result: OperationResultSchema,
   },
+  "clip.compare": {
+    description:
+      "Pick a look of a generated clip by eye (#482, ADR 0035): render one frame of an adapter clip (`blender`, `hyperframes`, `remotion`, ...) under up to " +
+      `${CLIP_COMPARE_MAX_LOOKS} candidate \`looks\` next to the clip as it is, and write them as one labelled PNG contact image. ` +
+      "A look changes the clip's `props` (merged over its own, key by key; null drops a key) and/or its `source`: for a Blender clip " +
+      "`{ props: { scene: \"Dusk\" } }` draws another scene of the same `.blend` (one scene per lighting setup), `{ props: { camera: \"Close\" } }` another camera, " +
+      "`{ source: \"scenes/hero-b.blend\" }` a copy of the file. Tile 1 is the clip as it is (`current`), then the looks in order. Every tile is the whole composed " +
+      "frame as `frame` renders it (layers above, captions), from each variant's own render: a draft (EEVEE/Workbench for a Blender clip), or the final when " +
+      "it is cached; a frame never starts a final. Each variant not rendered before is rendered first (a clip render job, one at a time: seconds for a draft, " +
+      "and the whole clip up to the frame is rendered, so compare on a short clip). A variant's render stays in the clip cache until the next `gc`, " +
+        "which removes it while no timeline uses it: `clip.set` with a look soon after reuses it, later it renders again. Never changes the timeline: keep a look with " +
+      "`clip.set` `props` (each tile's `flags`). `at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
+      "`.frameshell/looks/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. " +
+      'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "dusk", props: { scene: "Dusk" } }, { name: "rim", props: { scene: "Rim light" } }] }`. ' +
+      "Fails with ClipNotFound (no such adapter clip on a video track), InvalidOperation (not an adapter clip, `at` outside the clip, a look that sets nothing, " +
+      "a `source` outside the project), ClipRenderFailed (a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, " +
+      "or the Binary* errors when ffmpeg cannot be fetched.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Adapter clip id on a video track, as `timeline.show` reports it."),
+      looks: z
+        .array(ClipLookSchema)
+        .min(1)
+        .max(CLIP_COMPARE_MAX_LOOKS)
+        .describe(`Candidate variants, 1 to ${CLIP_COMPARE_MAX_LOOKS}, drawn in this order after the clip as it is.`),
+      at: z.number().nonnegative().optional().describe("Timeline seconds of the frame, inside the clip. Default: the clip's middle frame."),
+      out: z
+        .string()
+        .regex(/\.png$/i, { message: "must be a `.png` file" })
+        .optional()
+        .describe("PNG to write, absolute or relative to `cwd`; its folder is created. Default `.frameshell/looks/compare-<clip>-<frame>.png` in the project."),
+      tileWidth: z
+        .int()
+        .min(CLIP_COMPARE_MIN_TILE_WIDTH)
+        .max(CLIP_COMPARE_MAX_TILE_WIDTH)
+        .default(CLIP_COMPARE_DEFAULT_TILE_WIDTH)
+        .describe(
+          `Width of one tile, px, ${CLIP_COMPARE_MIN_TILE_WIDTH} to ${CLIP_COMPARE_MAX_TILE_WIDTH}; its height follows the frame. Default ${CLIP_COMPARE_DEFAULT_TILE_WIDTH}.`,
+        ),
+      projectFormat: FormatIdSchema.optional().describe("Format of the project to lay the frame out in (`format.list`), e.g. `9x16`. Default: the primary format."),
+      view: ViewParam,
+    }),
+    result: z.object({ ...ViewedShape, ...ClipCompareResultSchema.shape }),
+  },
   "track.duck": {
     mutating: true,
     description:
@@ -162,10 +215,12 @@ export const clipMethods = {
       "curve in the clip; preview and export play it like any gain key. One operation, one revert. Voice in nested timeline clips " +
       "is not heard (a warning says so), nor are multicam angles and mics: a program track in `under` is refused. A voice file " +
       "that cannot be decoded is named in the warnings. A hand key where someone speaks is dipped too and its level comes back on the next run. " +
-      "`level` first sets each clip's static gain (`audio.gain`) so the music's integrated loudness (EBU R128, measured once per file and cached) " +
-      "sits `level` dB under the voice's: the voice is every clip of the `under` tracks, its file's loudness plus its gain, averaged by the time it plays " +
-      "(about 12 dB under is a start; the style's `sound.musicUnderVoice`); a clip with gain keys of its own is left alone and named in the warnings. " +
-      "The depth, attack, release, threshold, gap and `level` are kept in `audio.duck` of each clip that gets duck keys, so `music.fit` runs the same duck again after it moves one. " +
+      "`level` first sets each clip's static gain (`audio.gain`) so the music's integrated loudness (EBU R128, measured over the part of its file the clip plays, " +
+      "once per file and part, cached) sits `level` dB under the voice's: the voice is every clip of the `under` tracks, the loudness of the part of its file it plays plus its gain, " +
+      "averaged by the time it plays. Pass a number of dB (about 12 is a start), or `\"style\"` for the project's own `sound.musicUnderVoice` (`style.show`; 12 unless `style.json` sets it); " +
+      "the number it came to is what is kept and reported. A clip with gain keys of its own is left alone and named in the warnings. " +
+      "The depth, attack, release, threshold, gap and `level` are kept in `audio.duck` of each clip that gets duck keys, so `music.fit`, `music.shape` and `music.grid` run the same duck again after they change one, " +
+      "and set the static gain again from `level` first (a clip with music keys or hand gain keys keeps its gain, a warning says so). " +
       "Example: `{ track: \"t_music\", under: [\"t_voice\"], depth: 8, level: 12 }`. Fails with InvalidOperation (`track` is not an audio " +
       "track, `under` names it or a program track), TrackNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
@@ -179,11 +234,12 @@ export const clipMethods = {
       threshold: z.number().min(-90).max(0).default(-38).describe("dBFS above which sound counts as speech. Default -38."),
       gap: z.number().min(0).max(30).default(0.6).describe("Seconds: speech stretches closer than this merge, so the music does not pump between words. Default 0.6."),
       level: z
-        .number()
-        .min(0)
-        .max(40)
+        .union([z.number().min(0).max(40), z.literal("style")])
         .optional()
-        .describe("dB the music's integrated loudness sits under the voice's: sets the static gain of each clip of `track` first. Default: the gains stay as they are."),
+        .describe(
+          "dB the music's integrated loudness sits under the voice's: sets the static gain of each clip of `track` first. " +
+            '`"style"` takes the number from the project\'s style (`sound.musicUnderVoice`, 12 dB unless `style.json` sets it). Default: the gains stay as they are.',
+        ),
     }),
     result: TrackDuckResultSchema,
   },

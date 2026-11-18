@@ -77,11 +77,16 @@ export const BinaryReportSchema = z.object({
   name: z.string().describe("Executable name without extension, e.g. `ffmpeg`."),
   package: z.string().describe("Managed package that ships it, e.g. `ffmpeg` (also ships `ffprobe`)."),
   source: z
-    .enum(["managed", "project", "global"])
+    .enum(["managed", "project", "global", "system"])
     .describe(
       "`managed`: pinned download under the app data dir. `project` / `global`: path from `binaries` in " +
-        "`frameshell.json` / the global `config.json`.",
+        "`frameshell.json` / the global `config.json`. `system`: the person's own install of a tool Frameshell never downloads " +
+        "(Blender), found where its installer puts it because no `binaries` override names one; `found` says how.",
     ),
+  found: z
+    .enum(["path", "standard"])
+    .optional()
+    .describe("Only with `source: \"system\"`: `path` = found on PATH, `standard` = at the product's usual install location (e.g. `/Applications/Blender.app`)."),
   path: z.string().nullable().describe("Absolute executable path; null when managed and no build is pinned for this platform."),
   installed: z.boolean().describe("True when the executable exists at `path`."),
   version: z.string().nullable().describe("Version reported by `<name> -version`; null when missing or not runnable."),
@@ -185,7 +190,8 @@ export const GcEntrySchema = z.object({
         "older recipe or fps). `energy`: cut-snapping envelope. `loudness`: EBU R128 reading of an asset in `.frameshell/loudness/` (content no asset has now). `beats`: onset envelope of the beat detector in `.frameshell/beats/` (the grids in `beats/` are project files and never deleted). `audio`: WAV extracted for transcription. `audio-fx`: baked " +
         "audio effects in `.frameshell/audio-fx/` no clip of any timeline plays now (ADR 0031). `voice`: " +
         "voice prints in `.frameshell/people/voices/` of content no asset has now. `clip`: " +
-        "generated-clip render no timeline uses. `context`: \"Chat about this\" frame capture or pick details in " +
+        "generated-clip render no timeline uses, or a file a clip plugin keeps for its clips that none of them names now (the " +
+        "Blender plugin's listings, length and version markers in `.frameshell/blender/`). `context`: \"Chat about this\" frame capture or pick details in " +
         "`.frameshell/context/`, older than 7 days. `proposal`: rejected, stale or aborted review-mode proposal in " +
         "`.frameshell/proposals/`, decided more than 7 days ago. `people`: face scan of content no asset has now (or of " +
         "other models) in `.frameshell/people/`. `shoot`: take comparison of a script or transcript that changed since, in " +
@@ -366,18 +372,19 @@ export const MatteStateSchema = z.object({
   error: z.string().nullable().describe("Why the matte could not be made; null otherwise."),
 });
 
-/** The final render of a generated clip that has two (ADR 0041 decision 11): its own cache entry and state. */
+/** The final render of a generated clip that has two (ADR 0041 decision 11, ADR 0035): its own cache entry and state. */
 export const ClipFinalRenderSchema = z.object({
   state: z
     .enum(["ready", "waiting", "queued", "rendering", "failed"])
     .describe(
       "`ready`: `file` holds it; the preview plays it instead of the draft. `waiting`: it is queued once the draft render is " +
-        "ready (a draft that failed must be fixed first). `queued` / `rendering`: a `clip` job is on it (`job`, `progress`), " +
+        "ready (a draft that failed must be fixed first); a plugin's own final (Blender's Cycles render) waits until a `render` with " +
+        "`quality: \"final\"` or no quality asks for it. `queued` / `rendering`: a `clip` job is on it (`job`, `progress`), " +
         "in the background unless an export or `frame` waits for it. `failed`: see `error`; final and untiered exports retry " +
         "it, except when the plugin refused it (motion blur on HDR content or shader transitions), where they use the draft " +
         "render with a warning.",
     ),
-  key: z.string().describe("Cache key: the draft's inputs plus the clip's `motionBlur` with its defaults filled in."),
+  key: z.string().describe("Cache key: the draft's inputs plus the clip's `motionBlur` with its defaults filled in, or plus the final tier of a plugin with finals."),
   file: z.string().nullable().describe("Project-relative cached render, `.frameshell/cache/clips/<key>.webm` or `.mp4`; null until ready."),
   hasAlpha: z.boolean().nullable().describe("True when `file` carries alpha; null until ready."),
   width: z.int().nullable().describe("Rendered width in pixels; null until ready."),
@@ -389,6 +396,13 @@ export const ClipFinalRenderSchema = z.object({
   refused: z
     .boolean()
     .describe("True when `failed` because the plugin refused the motion blur: exports and `frame` then use the draft render, never waiting for this one."),
+  onDemand: z
+    .boolean()
+    .optional()
+    .describe(
+      "True for a plugin's own final (ADR 0035, Blender's Cycles render): made only when a final or untiered `render` waits for it; " +
+        "`frame` and `review` never wait for it (they use it when `ready`, else the draft). Absent or false: the blurred final of ADR 0041.",
+    ),
 });
 
 /** Render cache state of one generated clip (SPEC §6.5). */
@@ -430,7 +444,10 @@ export const ClipRenderSchema = z.object({
     "Present when the clip keeps two renders (ADR 0041): one with `motionBlur`, on a plugin that applies it. The fields above " +
       "are then the draft render, sharp and rendered first (live preview, `render` with `quality: \"draft\"`), and `final` " +
       "the blurred one, queued after it (about `samples` times as long): the preview swaps it in once ready, and `render` " +
-      "with `quality: \"final\"` or no quality, and `frame`, wait for it. Absent: the clip has one render.",
+      "with `quality: \"final\"` or no quality, and `frame`, wait for it. Also present for a clip whose plugin renders finals " +
+      "(ADR 0035, Blender: EEVEE draft, Cycles final): its final is rendered only when `render` with `quality: \"final\"` or no " +
+      "quality needs it (over 5 minutes estimated asks for `yes`); `frame` and `review` use it when ready, else the draft with a " +
+      "warning. Absent: the clip has one render.",
   ),
 });
 
@@ -555,12 +572,18 @@ export const ClipLocationSchema = z.object({
   clip: z.string().describe("Clip id."),
 });
 
-/** Where a script scene's words sit on one timeline, as `script.outline` resolves them. */
+/** Where a script scene sits on one timeline, as `script.outline` resolves it: by its words, its linked clips or its heading. */
 export const SceneSpanSchema = z.object({
   timeline: z.string().describe("Timeline id (`timelines/<id>.json`)."),
-  start: z.number().describe("Timeline seconds where the first placed word of the range starts."),
-  end: z.number().describe("Timeline seconds where the last placed word of the range ends."),
-  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them)."),
+  start: z.number().describe("Timeline seconds where the scene starts: its first placed word, its earliest linked clip, or the planned start."),
+  end: z.number().describe("Timeline seconds where the scene ends: its last placed word, its latest linked clip end, or the planned end."),
+  words: z.int().describe("Distinct words of the range this timeline places (cut and muted ones are missing; counted once however many tracks place them); 0 for `clips` and `planned`."),
+  source: z
+    .enum(["words", "clips", "planned"])
+    .describe(
+      "`words`: the scene's `wordRange` as placed on this timeline. `clips`: the first start to the last end of this timeline's clips linked to the scene " +
+        "(a scene whose words are not placed there). `planned`: the time range written in the heading, only for a scene with no clip linked on any timeline, on `main` only.",
+    ),
 });
 
 /** One export preset as `export.presets` lists it. */
@@ -737,6 +760,14 @@ export const BatchEntrySchema = z.object({
   finishedAt: z.string().nullable().describe("ISO time it ended; null before."),
   duration: z.number().nullable().describe("Seconds the render took; null until it ended."),
   warnings: z.array(z.string()).describe("What this render skips, and assets of the row without verified provenance (ADR 0026)."),
+  hash: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(
+      "Fingerprint of the data this render was made from: the row's cells, the batch file's slots and the template timeline's content. " +
+        "A later run renders a `done` row again, reported in `changed`, when it differs; null in a manifest of an older version, which a run treats as unchanged.",
+    ),
   review: BatchReviewSchema.nullable()
     .default(null)
     .describe("The review of the rendered file (`batch.render` with `review`); null when the batch did not ask for one, the render has not ended `done` or a manifest of an older version has none."),
@@ -747,7 +778,9 @@ export const BatchManifestSchema = z.object({
   batch: z.string().describe("Absolute path of the batch file."),
   template: z.string().describe("Template timeline id."),
   out: z.string().describe("Absolute folder of the outputs and this manifest."),
-  state: z.enum(["running", "done"]).describe("`done` once every entry ended; `running` left behind means the daemon stopped mid-batch."),
+  state: z
+    .enum(["running", "done", "canceled"])
+    .describe("`done` once every entry ended; `canceled` once `batch.cancel` stopped it and the running render ended; `running` left behind means the daemon stopped mid-batch."),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   entries: z.array(BatchEntrySchema).describe("Row order, then format order."),

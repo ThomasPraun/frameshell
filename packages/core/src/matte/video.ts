@@ -1,12 +1,13 @@
-// Whole-asset subject matte (ADR 0032), in three passes over the proxy so memory holds one frame at a time:
-// 1. each frame through the model; the coarse alpha, smoothed forward in time, appended to a scratch file;
+// Whole-asset subject matte (ADR 0032), in passes over the video so memory holds one frame at a time:
+// 1. each proxy frame through the model; the coarse alpha, smoothed forward in time, appended to a scratch file;
 // 2. the scratch file smoothed backward in place, last frame first (forward + backward = no lag);
-// 3. each frame again as the gray guide, its smoothed alpha refined (`refineFrame`) and encoded as luma video.
+// 3. each proxy frame again as the colour guide, its smoothed alpha refined (`refineFrame`) and encoded as luma video;
+// 4. for a large source, each frame of the asset itself on the proxy's frame grid, refined and encoded the same way.
 import { spawn } from "node:child_process";
 import { dirname } from "node:path";
 import { open, statfs } from "node:fs/promises";
 import { readRawFrames } from "../media/raw-frames.js";
-import { PROXY_GOP, fpsRational } from "../media/recipe.js";
+import { PROXY_GOP, fpsRational, proxyFrameGrid } from "../media/recipe.js";
 import { loadOnnxModel } from "../onnx-web.js";
 import { runWorkerTask } from "../worker-task.js";
 import { SELFIE, coarseAlpha, modelInput } from "./models.js";
@@ -29,22 +30,59 @@ export interface MatteVideoRequest {
   fps: number;
   /** Frames expected, for progress only. */
   frames?: number | undefined;
-  /** Absolute path of the `.mp4` to write. */
-  output: string;
+  /** Absolute path of the proxy-size `.mp4` to write; null when only {@link MatteVideoRequest.full} is wanted. */
+  output: string | null;
+  /** The full-size matte to write too (pass 4), for a source above {@link FULL_MATTE_ABOVE_SHORT_SIDE}. */
+  full?: FullMatteRequest | undefined;
   /** Absolute path of the scratch file pass 1 writes and pass 2 rewrites (one byte per coarse pixel per frame, at most 128 px a side). */
   scratch: string;
+}
+
+/** The full-size matte of {@link MatteVideoRequest.full}: frame N is proxy frame N, at the asset's own size. */
+export interface FullMatteRequest {
+  /** Absolute path of the asset itself. */
+  source: string;
+  /** Matte size, {@link fullMatteSize} of the asset's picture. */
+  width: number;
+  /** See `width`. */
+  height: number;
+  /** Absolute path of the `.mp4` to write. */
+  output: string;
 }
 
 /** What {@link matteVideo} made. */
 export interface MatteVideoResult {
   frames: number;
-  /** Milliseconds in the model (pass 1) and in refining and encoding (pass 3). */
+  /** Milliseconds in the model (pass 1), refining and encoding at proxy size (pass 3) and at full size (pass 4). */
   inferMs: number;
   refineMs: number;
+  fullMs: number;
 }
 
 /** Longest side, pixels, the coarse alpha is stored at in the scratch file (halved until it fits). */
 export const COARSE_MAX_SIDE = 128;
+
+/**
+ * Sources with a short side above this get a full-size matte for export besides the proxy-size one (ADR 0032
+ * decision 9 as built): 1440p and 4K. A 1080p source keeps the proxy matte scaled up 2x: refining it at 1080p would
+ * add about 130 ms of CPU a frame, 1.5 times the whole proxy-size job (ADR 0032 "Slice MX1").
+ */
+export const FULL_MATTE_ABOVE_SHORT_SIDE = 1080;
+/**
+ * Short side, pixels, the full-size matte is capped at (larger sources are refined at this size and export scales
+ * it up). Bounds memory per frame: 3840x2160 holds the decoded RGB frame (25 MB), the matte (8 MB), the encoder's
+ * frame copy (12 MB) and the fit's planes at 1/8 size (about 10 MB), so under 100 MB with ffmpeg's pipe buffers.
+ */
+export const FULL_MATTE_MAX_SHORT_SIDE = 2160;
+
+/** Size of the full-size matte of a picture of `size` (even sides, short side capped), or null when it needs none. */
+export function fullMatteSize(size: PlaneSize): PlaneSize | null {
+  const short = Math.min(size.width, size.height);
+  if (short <= FULL_MATTE_ABOVE_SHORT_SIDE) return null;
+  const target = Math.min(short, FULL_MATTE_MAX_SHORT_SIDE);
+  const even = (side: number) => Math.max(2, Math.floor((side * target) / short / 2) * 2);
+  return { width: even(size.width), height: even(size.height) };
+}
 
 /** Free bytes of `path`'s volume, or null when the platform cannot say. */
 async function freeBytes(path: string): Promise<number | null> {
@@ -55,9 +93,6 @@ async function freeBytes(path: string): Promise<number | null> {
     return null;
   }
 }
-
-/** Share of the progress fraction of pass 1 (model); pass 3 (refine, encode) takes the rest. From the spike. */
-const INFER_SHARE = 0.4;
 
 /**
  * ffmpeg arguments encoding raw yuv420p frames of `size` from stdin as the matte video at `output`: H.264 on
@@ -90,6 +125,10 @@ export async function matteVideo(request: MatteVideoRequest, infer: MatteInfer, 
   let frames = 0;
   let inferMs = 0;
   let refineMs = 0;
+  let fullMs = 0;
+  const proxyCost = request.output === null ? 0 : refineCost(size);
+  const fullCost = request.full ? refineCost(request.full) : 0;
+  const total = inferCost + proxyCost + fullCost;
   try {
     let state: Float32Array | null = null;
     for await (const rgb of readRawFrames(request.ffmpeg, request.source, "format=rgb24", size.width * size.height * 3)) {
@@ -112,7 +151,7 @@ export async function matteVideo(request: MatteVideoRequest, infer: MatteInfer, 
       state = emaStep(state, stored.alpha, weight);
       await scratch.write(toBytes(state), 0, plane, frames * plane);
       frames++;
-      if (request.frames) onProgress?.(INFER_SHARE * Math.min(1, frames / request.frames));
+      if (request.frames) onProgress?.((inferCost / total) * Math.min(1, frames / request.frames));
     }
     if (!coarse || frames === 0) throw new Error(`${request.source} has no frames to matte`);
 
@@ -124,32 +163,86 @@ export async function matteVideo(request: MatteVideoRequest, infer: MatteInfer, 
       await scratch.write(toBytes(back), 0, plane, t * plane);
     }
 
-    const encoder = startEncoder(request.ffmpeg, matteEncodeArgs(request.output, size, request.fps));
-    const chroma = Buffer.alloc((size.width / 2) * (size.height / 2) * 2, 128);
-    let written = 0;
-    try {
-      for await (const gray of readRawFrames(request.ffmpeg, request.source, "format=gray,scale=out_range=pc", size.width * size.height)) {
-        if (written >= frames) throw new Error(`${request.source} gave more frames on its second read than its first (${frames})`);
-        const started = performance.now();
-        await scratch.read(bytes, 0, plane, written * plane);
-        const alpha = Float32Array.from(bytes, (value) => value / 255);
-        const luma = refineFrame(alpha, coarse, Float32Array.from(gray, (value) => value / 255), size);
-        await encoder.write(luma);
-        await encoder.write(chroma);
-        refineMs += performance.now() - started;
-        written++;
-        onProgress?.(INFER_SHARE + (1 - INFER_SHARE) * (written / frames));
-      }
-      if (written !== frames) throw new Error(`${request.source} gave ${written} frames on its second read, ${frames} on its first`);
-    } catch (error) {
-      encoder.kill();
-      throw error;
+    const smoothed = async (t: number) => {
+      await scratch.read(bytes, 0, plane, t * plane);
+      return Float32Array.from(bytes, (value) => value / 255);
+    };
+    if (request.output !== null) {
+      const output = request.output;
+      const share = (done: number) => onProgress?.((inferCost + proxyCost * (done / frames)) / total);
+      refineMs = await refinePass(request.ffmpeg, request.source, "format=rgb24", size, output, request.fps, frames, coarse, smoothed, share, true);
     }
-    await encoder.finish();
+    if (request.full) {
+      const full = request.full;
+      const share = (done: number) => onProgress?.((inferCost + proxyCost + fullCost * (done / frames)) / total);
+      // The proxy's own frame grid, so frame N is proxy frame N; ffmpeg applies the rotation as it does for the proxy.
+      const filter = `${proxyFrameGrid(request.fps)},scale=${full.width}:${full.height},format=rgb24`;
+      fullMs = await refinePass(request.ffmpeg, full.source, filter, full, full.output, request.fps, frames, coarse, smoothed, share, false);
+    }
   } finally {
     await scratch.close();
   }
-  return { frames, inferMs: Math.round(inferMs), refineMs: Math.round(refineMs) };
+  return { frames, inferMs: Math.round(inferMs), refineMs: Math.round(refineMs), fullMs: Math.round(fullMs) };
+}
+
+// Progress weights: CPU milliseconds per frame on an Apple M3 (ADR 0032 "Slice MX1"). Pass 1 is the model with its input;
+// a refine pass costs a fixed part (the fit runs at the same size whatever the frame) plus decoding, refining and
+// encoding per megapixel: about 60 ms at 960x540, 127 ms at 1920x1080 and 355 ms at 3840x2160.
+const inferCost = 20;
+function refineCost(size: PlaneSize): number {
+  return 50 + (37 * size.width * size.height) / 1e6;
+}
+
+/**
+ * Pass 3 or 4: every frame of `source` through `filter` (ending in `format=rgb24`, at `size`), its smoothed coarse
+ * alpha refined against it and encoded into `output`. `exact`: the source must give exactly `frames` frames (the
+ * proxy, read twice); else extra frames at its end are left out (the asset itself, through the same grid, may round
+ * its last frame differently) and a missing last frame repeats the one before. Returns the milliseconds spent.
+ */
+async function refinePass(
+  ffmpeg: string,
+  source: string,
+  filter: string,
+  size: PlaneSize,
+  output: string,
+  fps: number,
+  frames: number,
+  coarse: PlaneSize,
+  smoothed: (t: number) => Promise<Float32Array>,
+  onProgress: (done: number) => void,
+  exact: boolean,
+): Promise<number> {
+  const encoder = startEncoder(ffmpeg, matteEncodeArgs(output, size, fps));
+  const chroma = Buffer.alloc((size.width / 2) * (size.height / 2) * 2, 128);
+  let written = 0;
+  let spent = 0;
+  let last: Uint8Array | null = null;
+  try {
+    for await (const rgb of readRawFrames(ffmpeg, source, filter, size.width * size.height * 3)) {
+      if (written >= frames) {
+        if (exact) throw new Error(`${source} gave more frames on its second read than its first (${frames})`);
+        break;
+      }
+      const started = performance.now();
+      last = refineFrame(await smoothed(written), coarse, rgb, size);
+      await encoder.write(last);
+      await encoder.write(chroma);
+      spent += performance.now() - started;
+      written++;
+      onProgress(written);
+    }
+    if (!exact && last && written === frames - 1) {
+      await encoder.write(last);
+      await encoder.write(chroma);
+      written++;
+    }
+    if (written !== frames) throw new Error(`${source} gave ${written} frames for the matte, the proxy ${frames}`);
+  } catch (error) {
+    encoder.kill();
+    throw error;
+  }
+  await encoder.finish();
+  return spent;
 }
 
 /** `alpha` halved (2x2 mean) until its longest side is at most {@link COARSE_MAX_SIDE}. */

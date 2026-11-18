@@ -118,6 +118,12 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
       const dir = await compositionDir(projectDir, { id, source });
       return timingKinds(await readFile(join(dir.path, posix.basename(source)), "utf8").catch(() => ""));
     },
+    async declaredProps(clip) {
+      const { id, source } = clip as HyperframesClip;
+      if (!source || extname(source).toLowerCase() !== ".html") return null;
+      const dir = await compositionDir(projectDir, { id, source });
+      return declaredVariables(await readFile(join(dir.path, posix.basename(source)), "utf8").catch(() => ""));
+    },
     async render(clip, ctx: RenderContext) {
       const { id, source, props } = clip as HyperframesClip;
       requireEntry(id, source);
@@ -287,6 +293,27 @@ async function refuseObjectDeclarations(id: string, dir: { path: string; rel: st
       );
     }
   }
+}
+
+/**
+ * Ids of the variables the entry HTML declares in `data-composition-variables` (an array of `{id, ...}`); null when
+ * it declares none, or something HyperFrames does not read (an object, unparsable JSON).
+ */
+export function declaredVariables(html: string): string[] | null {
+  const [match] = html.matchAll(DECLARATION_ATTR);
+  if (!match) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[1] ?? decodeEntities(match[2] ?? ""));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const ids = parsed.flatMap((item) => {
+    const id = (item as { id?: unknown } | null)?.id;
+    return typeof id === "string" ? [id] : [];
+  });
+  return ids.length > 0 ? ids : null;
 }
 
 /** Decodes the entities a double-quoted HTML attribute value can carry around JSON. */

@@ -70,7 +70,7 @@ describe("frameshell music fit", () => {
     expect(() => parseTimelineCommand(["music", "fit"], { end: "30" })).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["music", "fit", "c_m"], { end: "30", layout: "solo" })).toThrow(/does not take --layout/);
     expect(() => parseTimelineCommand(["music", "fit", "c_m"], { end: "30", hit: "late" })).toThrow(/expected a number/);
-    expect(parseTimelineCommand(["music", "pick", "c_m"], { end: "30" })).toBeNull();
+    expect(parseTimelineCommand(["music", "nonsense", "c_m"], { end: "30" })).toBeNull();
   });
 
   it("plans, applies and reports where the music starts", () => {
@@ -150,6 +150,7 @@ describe("frameshell music shape", () => {
     });
     expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["slam"], build: "long" })).toThrow(/expected a number/);
     expect(() => parseTimelineCommand(["music", "fit", "c_m"], { end: "5", build: "2" })).toThrow(/does not take --build/);
+    expect(parseTimelineCommand(["music", "shape", "c_m"], { ending: "bar:17", "end-on-bar": true })!.params).toMatchObject({ ending: "bar:17", endOnBar: true });
     expect(parseTimelineCommand(["music", "shape", "c_m"], { clear: true })!.params).toEqual({ clip: "c_m", clear: true });
     expect(() => parseTimelineCommand(["music", "shape"], { drop: ["3"] })).toThrow(/takes 1 argument/);
     expect(() => parseTimelineCommand(["music", "shape", "c_m"], { drop: ["3"], exact: true })).toThrow(/does not take --exact/);
@@ -192,6 +193,9 @@ describe("frameshell music grid", () => {
       params: { to: "bar", maxShift: 0.4, skip: ["g1", "g3", "duck"], dryRun: true },
     });
     expect(parseTimelineCommand(["music", "grid"], {})!.params).toEqual({});
+    expect(parseTimelineCommand(["music", "grid"], { trim: "head", tracks: "video" })!.params).toEqual({ trim: "head", tracks: "video" });
+    expect(() => parseTimelineCommand(["music", "grid"], { trim: "middle" })).toThrow(/--trim: expected tail or head/);
+    expect(() => parseTimelineCommand(["music", "grid"], { tracks: "audio" })).toThrow(/--tracks: expected all or video/);
     expect(() => parseTimelineCommand(["music", "grid"], { to: "half" })).toThrow(/expected beat or bar/);
     expect(() => parseTimelineCommand(["music", "grid", "c_m"], {})).toThrow(/argument/);
     expect(() => parseTimelineCommand(["music", "grid"], { end: "3" })).toThrow(/does not take --end/);
@@ -202,4 +206,32 @@ describe("frameshell music grid", () => {
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain("music.grid: the timeline has no tempo");
   }, 60_000);
+});
+
+describe("frameshell music pick", () => {
+  it("parses its flags into music.pick params", () => {
+    expect(parseTimelineCommand(["music", "pick", "Music 2"], { keep: true, "dry-run": true })).toMatchObject({ method: "music.pick", params: { track: "Music 2", keep: true, dryRun: true } });
+    expect(parseTimelineCommand(["music", "pick", "t_1"], {})!.params).toEqual({ track: "t_1" });
+    expect(() => parseTimelineCommand(["music", "pick"], {})).toThrow(/takes 1 argument/);
+    expect(() => parseTimelineCommand(["music", "pick", "Music 2"], { exact: true })).toThrow(/does not take --exact/);
+  });
+
+  it("dry-runs, then keeps the chosen track as Music and removes the others", () => {
+    // Last of the file: the shape test above reads the Music 1 track this removes. The candidates test left Music 1 and Music 2.
+    const dry = frameshell(["music", "pick", "Music 2", "--dry-run"]);
+    expect(dry.stderr).toBe("");
+    expect(dry.code).toBe(0);
+    expect(dry.stdout).toMatch(/^Music pick · Music 2 \(t_[0-9a-f]+, assets\/.+\) kept, renamed Music, unmuted · dry run/);
+    expect(dry.stdout).toContain("removed Music 1");
+    expect(dry.stdout).toContain("Dry run: nothing changed");
+
+    const applied = frameshell(["music", "pick", "Music 2"]);
+    expect(applied.code).toBe(0);
+    expect(applied.stdout).toMatch(/tx tx_[0-9a-f]{8}/);
+    expect(applied.stdout).toContain("Next: ");
+    const shown = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout) as { tracks: { name?: string; muted?: boolean }[] };
+    const names = shown.tracks.filter((track) => track.name?.startsWith("Music"));
+    expect(names.map((track) => [track.name, track.muted === true])).toEqual([["Music", false]]);
+    expect(frameshell(["music", "pick", "Music"]).code).not.toBe(0);
+  }, 120_000);
 });

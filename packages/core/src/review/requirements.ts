@@ -1,7 +1,9 @@
 import type { ReviewMetrics, ReviewRequirementCheck, ReviewRequirements, ReviewSpan, ReviewWaivedWarning } from "@frameshell/protocol";
-import { REQUIREMENTS_FILE, type RequirementsFile, type ResolvedSubtitleTrack, type Timeline } from "@frameshell/schema";
+import { REQUIREMENTS_FILE, type RequirementsFile, type ResolvedSubtitleTrack, type Timeline, clipRequirements, staysInFrameMargin } from "@frameshell/schema";
+import { STILL_LEVEL } from "../analyze/rhythm.js";
 import { TimeRefError, resolveTimeRef } from "../timeline/time-ref.js";
-import { BLANK_SPREAD, STILL_ENERGY, stillSpans } from "./metrics.js";
+import { BLANK_SPREAD, stillSpans } from "./metrics.js";
+import type { BoxSpan } from "./placement.js";
 import type { MotionSeries } from "./source.js";
 
 // `requirements.json` judged against a run (#457): the assertions the person states, the craft warnings that are
@@ -13,6 +15,20 @@ export interface ClipSpan {
   start: number;
   end: number | null;
 }
+
+/** Where the pictures of the clips are in the film reviewed, for `staysInFrame`: `placement.ts` boxes in the film's pixels. */
+export interface FramePlacement {
+  /** Id of the project format reviewed. */
+  format: string;
+  /** The picture the film shows: the whole frame, or what letterbox bars leave of it; film pixels. */
+  picture: { left: number; top: number; width: number; height: number };
+  boxes: readonly BoxSpan[];
+  /** Why a clip has no box, by clip id, when known. */
+  unplaced: ReadonlyMap<string, string>;
+}
+
+/** Film pixels within which a box counts as touching an edge: the picture is cut there. */
+const EDGE_PX = 0.5;
 
 /** What {@link judgeRequirements} reads besides the file. */
 export interface JudgeInput {
@@ -29,6 +45,8 @@ export interface JudgeInput {
   timeline: Pick<Timeline, "id" | "markers" | "tempo"> | null;
   clips: readonly ClipSpan[] | null;
   tracks: readonly ResolvedSubtitleTrack[] | null;
+  /** For `staysInFrame`; null or absent when it was not measured (a file, or the timeline could not be laid out). */
+  placement?: FramePlacement | null | undefined;
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
@@ -47,7 +65,7 @@ function overlap(span: ReviewSpan, from: number, to: number): number {
 function endHold(series: MotionSeries, end: number): { seconds: number; blank: boolean } {
   const { times, energy, spread } = series;
   let i = times.length - 1;
-  while (i >= 1 && energy[i]! < STILL_ENERGY) i--;
+  while (i >= 1 && energy[i]! < STILL_LEVEL) i--;
   return { seconds: Math.max(0, end - times[Math.max(0, i)]!), blank: spread[spread.length - 1]! < BLANK_SPREAD };
 }
 
@@ -187,16 +205,18 @@ function captionChecks({ requirements, tracks, range, fps, timeline }: JudgeInpu
   ];
 }
 
-/** The per-clip checks: `appearsBy`, `before`, `keepsMoving`. */
-function clipChecks({ requirements, series, filmSeconds, range, timeline, clips }: JudgeInput): ReviewRequirementCheck[] {
+/** The per-clip checks: `appearsBy`, `before`, `keepsMoving`, `staysInFrame`. */
+function clipChecks({ requirements, series, filmSeconds, range, fps, timeline, clips, placement }: JudgeInput): ReviewRequirementCheck[] {
   const found: ReviewRequirementCheck[] = [];
   const byId = new Map((clips ?? []).map((clip) => [clip.id, clip]));
-  const still = stillSpans(series);
-  for (const { clip: id, appearsBy, before, keepsMoving } of requirements.clips) {
+  const still = stillSpans(series, fps);
+  for (const { clip: id, appearsBy, before, keepsMoving, staysInFrame } of clipRequirements(requirements.clips)) {
     const asked: [string, string | number][] = [];
     if (appearsBy !== undefined) asked.push(["clip.appearsBy", appearsBy]);
     if (before !== undefined) asked.push(["clip.before", before]);
     if (keepsMoving) asked.push(["clip.keepsMoving", keepsMoving.maxStatic]);
+    const margin = staysInFrameMargin(staysInFrame);
+    if (margin !== null) asked.push(["clip.staysInFrame", margin]);
     const clip = byId.get(id);
     for (const [check, expected] of asked) {
       if (clips === null || timeline === null) {
@@ -224,6 +244,8 @@ function clipChecks({ requirements, series, filmSeconds, range, timeline, clips 
           const ok = clip.start < other.start;
           found.push(item(check, ok ? "pass" : "fail", expected, round(clip.start), `clip ${id} starts at ${seconds(clip.start)}, ${ok ? "before" : "not before"} clip ${before} at ${seconds(other.start)}.`, id));
         }
+      } else if (check === "clip.staysInFrame") {
+        found.push(inFrameCheck(clip, margin!, filmSeconds, range, placement ?? null));
       } else {
         const to = clip.end ?? filmSeconds;
         if (clip.start >= range.to || to <= range.from) {
@@ -238,4 +260,65 @@ function clipChecks({ requirements, series, filmSeconds, range, timeline, clips 
     }
   }
   return found;
+}
+
+/** Seconds `spans` cover, merged where they touch or overlap. */
+function merged(spans: { from: number; to: number }[]): ReviewSpan[] {
+  const out: ReviewSpan[] = [];
+  for (const span of [...spans].sort((a, b) => a.from - b.from)) {
+    const last = out.at(-1);
+    if (last && span.from <= last.to + 1e-6) last.to = Math.max(last.to, span.to);
+    else out.push({ from: span.from, to: span.to, seconds: 0 });
+  }
+  return out.map((span) => ({ from: round(span.from), to: round(span.to), seconds: round(span.to - span.from) }));
+}
+
+/** The edges of `picture` that `box` touches or crosses, `margin` (share of the picture) inside each. */
+function edgesLeft(box: BoxSpan["box"], picture: FramePlacement["picture"], margin: number): string[] {
+  const x = Math.max(margin * picture.width, EDGE_PX);
+  const y = Math.max(margin * picture.height, EDGE_PX);
+  const edges: string[] = [];
+  if (box.x0 < picture.left + x) edges.push("left");
+  if (box.x1 > picture.left + picture.width - x) edges.push("right");
+  if (box.y0 < picture.top + y) edges.push("top");
+  if (box.y1 > picture.top + picture.height - y) edges.push("bottom");
+  return edges;
+}
+
+/**
+ * `staysInFrame` of `clip`: every box of what it draws (its alpha, or the faces of its footage) while it plays in the
+ * range keeps `margin` of the picture clear on every side; touching an edge is leaving, since the picture is cut there.
+ */
+function inFrameCheck(clip: ClipSpan, margin: number, filmSeconds: number, range: { from: number; to: number }, placement: FramePlacement | null): ReviewRequirementCheck {
+  const check = "clip.staysInFrame";
+  const to = Math.min(clip.end ?? filmSeconds, range.to);
+  const from = Math.max(clip.start, range.from);
+  if (from >= to) return item(check, "skipped", margin, null, `clip ${clip.id} plays outside the range reviewed.`, clip.id);
+  if (!placement) return item(check, "skipped", margin, null, `what clip ${clip.id} draws could not be placed in the frame (the run's warnings say why).`, clip.id);
+  const { format, picture } = placement;
+  const boxes = placement.boxes.filter((box) => box.clip === clip.id && box.to > from && box.from < to);
+  if (boxes.length === 0) {
+    const why =
+      placement.unplaced.get(clip.id) ??
+      "nothing it draws has a box here: a generated clip needs a render with an alpha plane, footage a cached `people scan` (`frameshell people scan`) with a face while it plays";
+    return { ...item(check, "skipped", margin, null, `clip ${clip.id} in format ${format}: ${why}.`, clip.id), format };
+  }
+  const edges = new Set<string>();
+  const out: { from: number; to: number }[] = [];
+  for (const box of boxes) {
+    const left = edgesLeft(box.box, picture, margin);
+    if (left.length === 0) continue;
+    for (const edge of left) edges.add(edge);
+    out.push({ from: Math.max(box.from, from), to: Math.min(box.to, to) });
+  }
+  const what = boxes[0]!.subject === "face" ? `a face of clip ${clip.id}` : `what clip ${clip.id} draws`;
+  const line = margin > 0 ? `within ${round(margin * 100)} % of the edge of the frame` : "the frame";
+  if (out.length === 0) {
+    return { ...item(check, "pass", margin, 0, `${what} stays inside ${margin > 0 ? `a ${round(margin * 100)} % margin of ` : ""}the frame of format ${format} (${boxes.length} samples).`, clip.id), format };
+  }
+  const spans = merged(out);
+  const total = round(spans.reduce((sum, span) => sum + span.seconds, 0));
+  const times = spans.map((span) => `${span.from} to ${span.to} s`).join(", ");
+  const verb = margin > 0 ? `comes ${line}` : "leaves the frame";
+  return { ...item(check, "fail", margin, total, `${what} ${verb} of format ${format} (${[...edges].join(", ")}) from ${times}.`, clip.id), format, spans };
 }

@@ -286,6 +286,23 @@ describe("hyperframes adapter", () => {
     expect(await validate("Launch")).toMatchObject({ issues: [{ message: expect.stringContaining("JSON object") }] });
     expect(await validate({ when: new Date(0) })).toMatchObject({ issues: [{ message: expect.stringContaining("plain JSON") }] });
   });
+
+  it("names the variables the entry declares, for a batch to check its slots against (ADR 0040)", async () => {
+    const adapter = createHyperframesAdapter({ projectDir: project });
+    const entry = join(project, ...SOURCE.split("/"));
+    const declared = (html: string) => {
+      writeFileSync(entry, html);
+      return adapter.declaredProps!({ id: "c_intro", type: "hyperframes", source: SOURCE });
+    };
+    expect(await declared(`<html data-composition-variables='[{"id":"title","type":"string","default":"T"},{"id":"accent","type":"color","default":"#fff"}]'>`)).toEqual(["title", "accent"]);
+    expect(await declared(`<html data-composition-variables="[{&quot;id&quot;:&quot;title&quot;}]">`)).toEqual(["title"]);
+    // Nothing declared, an empty list, an object HyperFrames ignores, bad JSON: any prop goes.
+    expect(await declared("<html></html>")).toBeNull();
+    expect(await declared(`<html data-composition-variables='[]'>`)).toBeNull();
+    expect(await declared(`<html data-composition-variables='{"title":"T"}'>`)).toBeNull();
+    expect(await declared(`<html data-composition-variables='[{'>`)).toBeNull();
+    expect(await adapter.declaredProps!({ id: "c_intro", type: "hyperframes" })).toBeNull();
+  });
 });
 
 describe("hyperframes live preview (ADR 0010)", () => {

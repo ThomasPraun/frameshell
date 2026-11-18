@@ -22,14 +22,16 @@ import { curveOf } from "./curve.js";
 import { type AnalyzeDiffHooks, type AnalyzeDiffRequest, runDiff } from "./diff.js";
 import { elementEvents, flashes, hitEvents, holds, soundHits } from "./events.js";
 import { inkOf } from "./ink.js";
-import { measureSync } from "./lip-run.js";
+import type { FileFaceScan } from "../people/scan-run.js";
+import { type FaceScanFilm, measureSync } from "./lip-run.js";
 import { measureLoudness } from "./loudness.js";
 import { type Look, LookBuilder } from "./look.js";
 import { PALETTE_SIZE, PaletteBuilder } from "./palette.js";
 import { MAX_PICTURE_S, readPicture } from "./picture.js";
 import { rhythmOf } from "./rhythm.js";
 import { sceneScores } from "./scene.js";
-import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
+import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLengthsRead, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
+import { styleSuggestions } from "./suggest.js";
 
 // `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness, tempo and audio of a reference video, on the managed ffmpeg.
 // Frame sampling and sheet tiling are `review`'s (`review/plan.ts`, `review/images.ts`); the beat detector is `media/beats.ts`.
@@ -60,6 +62,11 @@ export interface AnalyzeServiceOptions {
    * untrusted project, no model). Absent: the speech of every run is skipped.
    */
   transcribe?(root: string, wav: string, signal: AbortSignal | undefined): Promise<Recognised>;
+  /**
+   * Find the faces of a film that has no scan cached under `root` yet, and cache it there by content (the people scan of ADR 0020,
+   * which may download the face models); rejects when it cannot. Absent: only scans the project already has are used.
+   */
+  scanFaces?(root: string, film: FaceScanFilm, signal: AbortSignal | undefined, onProgress: (fraction: number) => void): Promise<FileFaceScan>;
 }
 
 /** What {@link AnalyzeServiceOptions.transcribe} heard. */
@@ -81,6 +88,8 @@ export interface AnalyzeRequest {
   threshold?: number | undefined;
   /** Recognise the speech (sentences, pace, pitch, voice against music, effects); default true. */
   speech?: boolean | undefined;
+  /** Find the faces of the film for mouth sync when it has no cached scan (the slow part; may download the face models); default true. */
+  faces?: boolean | undefined;
 }
 
 /** What a run reports while it works. */
@@ -164,7 +173,9 @@ export class AnalyzeService {
     if (series.frames < 1) throw new RpcError(ErrorCode.InvalidOperation, `analyze: ffmpeg decoded no picture from ${request.file}.`, { op: "analyze", field: "file" });
     if (truncated) warnings.push(`look, rhythm and events: measured on the first ${MAX_PICTURE_S / 60} minutes of the film.`);
     const cutFrames = cuts.map((cut) => cut.frame);
-    const { rhythm, changes } = rhythmOf(series.activity, fps, shots.map((shot) => shot.endFrame - shot.startFrame), cutFrames);
+    // The shots table keeps the whole film; the rhythm, like every picture number, stops where the picture was read.
+    const lengths = truncated ? shotLengthsRead(shots, series.frames) : shots.map((shot) => shot.endFrame - shot.startFrame);
+    const { rhythm, changes } = rhythmOf(series.activity, fps, lengths, cutFrames);
     stage("Telling the cuts apart", 0.45);
     const cutKinds = await classifyCuts(
       { ffmpeg, file: request.file, film: { width, height, fps }, changes, shotFrames: cutFrames, signal, progress: (fraction) => hooks.progress?.(0.45 + 0.05 * fraction) },
@@ -199,7 +210,15 @@ export class AnalyzeService {
       }
     } else warnings.push("audio: the video has no sound, so there is no loudness, tempo or hits.");
     stage("Looking for a talking face", 0.6);
-    const sync = await measureSync(root, ffmpeg, request.file, { fps, frames, width, height }, voiceDb, signal);
+    const scanFaces = this.#options.scanFaces?.bind(this.#options);
+    const sync = await measureSync(root, ffmpeg, request.file, { fps, frames, width, height }, voiceDb, {
+      signal,
+      faces: request.faces,
+      ...(scanFaces ? { scanFaces: (film: FaceScanFilm, abort: AbortSignal | undefined, onProgress: (fraction: number) => void) => scanFaces(root, film, abort, onProgress) } : {}),
+      ...(hooks.stage ? { stage: hooks.stage } : {}),
+      onScanProgress: (fraction) => hooks.progress?.(0.6 + 0.05 * fraction),
+      warn: (message) => warnings.push(message),
+    });
     events.sort((a, b) => a.startFrame - b.startFrame || a.endFrame - b.endFrame);
     const listed = capEvents(events, warnings);
 
@@ -223,6 +242,7 @@ export class AnalyzeService {
     if (unmeasured > 0) warnings.push(`look: ${unmeasured} shot${unmeasured === 1 ? "" : "s"} had no frame read (past the end of the picture pass) and carry the look of the nearest earlier shot, not their own.`);
     const lookOf = (builder: LookBuilder, shot: number) => builder.look() ?? fallbackLook(looks, shot, overallLook);
     const wholeLook = overallLook.look()!; // The picture pass read at least one frame.
+    const stats = shotStats(shots, fps);
     const result: AnalyzeResultShape = {
       file: request.file,
       name,
@@ -246,7 +266,7 @@ export class AnalyzeService {
         look: shotLook(lookOf(looks[i]!, i)),
         ink: ink.shots[i]!,
       })),
-      stats: shotStats(shots, fps),
+      stats,
       palette: palettes.overall,
       look: wholeLook,
       rhythm,
@@ -259,6 +279,7 @@ export class AnalyzeService {
       tempo: tempo ? withoutBeats(tempo) : null,
       audio,
       sheets,
+      suggestions: styleSuggestions({ palette: palettes.overall, curve, stats, rhythm, audio }),
       warnings,
       labels: { ...ANALYZE_RESULT_LABELS },
     };

@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 151;
+export const PROTOCOL_VERSION = 172;
 
 export {
   type MethodSpec,
@@ -68,6 +68,7 @@ export {
   COVER_MAX_CHARS,
   BatchManifestSchema,
 } from "./methods/shared.js";
+export { AUDIO_INSPECT_MAX } from "./methods/script-sound.js";
 
 const merged = {
   ...connectionMethods,
@@ -354,6 +355,8 @@ export type SoundSfxResult = MethodResult<"sound.sfx">;
 export type SoundPlaceResult = MethodResult<"sound.place">;
 /** Result of `sound.music`. */
 export type SoundMusicResult = MethodResult<"sound.music">;
+/** Result of `audio.inspect`. */
+export type AudioInspectResult = MethodResult<"audio.inspect">;
 
 /** `handshake` params. */
 export type HandshakeParams = MethodParams<"handshake">;
@@ -395,6 +398,8 @@ export type RenderParams = MethodParams<"render">;
 export type RenderResult = MethodResult<"render">;
 /** Result of `batch.render`. */
 export type BatchRenderResult = MethodResult<"batch.render">;
+/** Result of `batch.cancel`. */
+export type BatchCancelResult = MethodResult<"batch.cancel">;
 /** One row × format of a batch; see {@link BatchEntrySchema}. */
 export type BatchEntry = z.output<typeof BatchEntrySchema>;
 /** What `review` found on one rendered row; see {@link BatchReviewSchema}. */
@@ -465,6 +470,10 @@ export type ClipRendersResult = MethodResult<"clip.renders">;
 export type ClipLiveParams = MethodParams<"clip.live">;
 /** Result of `clip.live`. */
 export type ClipLiveResult = MethodResult<"clip.live">;
+/** `clip.compare` params. */
+export type ClipCompareParams = MethodParams<"clip.compare">;
+/** Result of `clip.compare`. */
+export type ClipCompareResult = MethodResult<"clip.compare">;
 /** `clip.verify` params. */
 export type ClipVerifyParams = MethodParams<"clip.verify">;
 /** Result of `clip.verify`. */
@@ -717,8 +726,10 @@ export const ErrorCode = {
   /** data: `{ provider, line, details, written: string[] }`: the provider failed on line `line`; `written` lists the takes kept. */
   SpeechFailed: -32047,
   /**
-   * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`: a paid generation
-   * waits for the person to confirm its cost; call again with `yes` (CLI `--yes`) and the `confirmation` token only once they did.
+   * Something waits for the person to confirm it; call again with `yes` (CLI `--yes`) only once they did. `voiceover.generate`
+   * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`, a paid generation
+   * (pass the `confirmation` token too). `render` data: `{ finals: { clip, type, format, seconds }[], seconds, limit, hint }`,
+   * final renders of generated clips estimated over `limit` seconds in all (`seconds` null when a plugin could not say).
    */
   ConfirmationRequired: -32048,
   /**

@@ -129,7 +129,7 @@ describe("planGridMoves", () => {
     expect(plan.moved).toBe(0);
     await expect(planGridMoves(state, 30, request({ skip: ["g9"] }), deps(state))).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
-      data: { reason: "skip", valid: ["g1", "g2", "duck"] },
+      data: { reason: "skip", valid: ["g1", "g2", "duck", "shape"] },
     });
   });
 
@@ -221,7 +221,7 @@ describe("planGridMoves", () => {
     music.keys = { gain: [{ at: 0, value: 0, auto: "duck" }, { at: 3, value: -7, auto: "duck" }] };
     const plan = await planGridMoves(state, 30, request({ dryRun: true }), deps(state));
     expect(plan.duck).toEqual({ under: ["t_v"], rerun: true, parameters: "defaults" });
-    expect(plan.duckAgain).toEqual({ track: "t_m", under: ["t_v"], settings: null });
+    expect(plan.duckAgain).toEqual({ track: "t_m", clip: expect.any(String), under: ["t_v"], settings: null });
     expect(plan.warnings).toContainEqual(expect.stringMatching(/^c_ma carries duck keys: duck would run again on t_m over t_v/));
 
     const skipped = await planGridMoves(state, 30, request({ skip: ["duck"] }), deps(state));

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { StyleSuggestionSchema } from "./brand.js";
 import { type ReviewSheet, ReviewTileSchema } from "./review.js";
 
 // `analyze` (#471, epic #451): measure a reference video's grammar (rhythm, colour, look, events, loudness, tempo) so an agent makes "like this" from numbers.
@@ -8,6 +9,9 @@ export const ANALYSIS_DIR = ".frameshell/analysis";
 
 /** Name of the manifest `analyze` writes in its folder: the result plus the beat lists. */
 export const ANALYSIS_MANIFEST = "analysis.json";
+
+/** Name of an analysis (its folder under {@link ANALYSIS_DIR}): letters, digits, `.`, `_` and `-`, at most 64, starting with a letter or digit. */
+export const ANALYSIS_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** The sheets `analyze` can write. */
 export const ANALYZE_SHEETS = ["contact", "shots", "diff"] as const;
@@ -401,6 +405,22 @@ export interface AnalyzeAudio {
   sections: AnalyzeSection[];
 }
 
+/**
+ * One `style.json` value an analysis suggests: the path and value as `style.set` takes them. Never applied by `analyze`;
+ * `style.apply` with `analysis` applies the ones the person agrees to.
+ */
+export interface AnalyzeStyleSuggestion {
+  /** A style path (`STYLE_PATHS`), e.g. `colors.accent`. */
+  path: string;
+  value: unknown;
+  /** What in the film it comes from, with the numbers. */
+  why: string;
+  /** Paths of the result fields it is read from, e.g. `palette`, `curve.moves`. */
+  from: string[];
+  /** ESTIMATED: read off measured fields by a heuristic. DECISION: a taste rule over them, with nothing measured to match. */
+  label: AnalyzeLabel;
+}
+
 /** One image `analyze` wrote: a `review` sheet of another kind. */
 export interface AnalyzeSheet extends Omit<ReviewSheet, "kind"> {
   kind: (typeof ANALYZE_SHEETS)[number];
@@ -448,6 +468,8 @@ export interface AnalyzeResultShape {
   /** Sentences with pace and pitch, voice against music, effects over the music and sections. Null when the video has no sound. */
   audio: AnalyzeAudio | null;
   sheets: AnalyzeSheet[];
+  /** Values for the project's `style.json` read from the film; never applied by `analyze`. */
+  suggestions: AnalyzeStyleSuggestion[];
   warnings: string[];
   /** MEASURED, ESTIMATED or DECISION for every value: the key is the path of a field (`shots[].ink`, `events`), and covers everything inside it. */
   labels: Record<string, AnalyzeLabel>;
@@ -508,7 +530,7 @@ const SyncSchema = z.object({
   confidence: z.number().nullable().describe("How alike mouth motion and voice level are at that offset, 0 to 1 (Pearson correlation). Under 0.2 there is no offset. Null when not measured."),
   track: z.string().nullable().describe("The face track of the people scan the mouth was read from (`t1`…); null when not measured."),
   frames: z.int().describe("Frames the two were compared on."),
-  reason: z.string().nullable().describe("Why there is no offset (no sound, no people scan of this file, a face that does not talk…); null when there is one."),
+  reason: z.string().nullable().describe("Why there is no offset (no sound, no face scan asked for or possible, no face for long enough, a face that does not talk…); null when there is one."),
 });
 
 const LabelsSchema = z.record(z.string(), z.enum(ANALYZE_LABELS));
@@ -708,6 +730,15 @@ const SheetSchema = z.object({
   tiles: z.array(ReviewTileSchema).describe("In reading order."),
 });
 
+const AnalyzeStyleSuggestionSchema = StyleSuggestionSchema.extend({
+  path: z.string().describe("Style path, as `style.set` takes it (`style show` lists every one), e.g. `colors.accent`."),
+  why: z.string().describe("What in the film it comes from, with the numbers."),
+  from: z.array(z.string()).describe("Paths of the result fields it is read from, e.g. `palette`, `curve.moves`, `audio.speech.overMusic.median`."),
+  label: z
+    .enum(ANALYZE_LABELS)
+    .describe("ESTIMATED: read off measured fields by a heuristic (check the frames). DECISION: a taste rule over them, with nothing measured to match. Say it when you show the suggestion."),
+});
+
 /**
  * What `analyze` measured. Typed by hand: inferred from the Zod object inside the `methods` registry it is too long
  * for TypeScript to print (TS7056).
@@ -731,11 +762,18 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
   events: z.array(EventSchema).describe("Flashes, appearing and disappearing elements, holds and sound hits, in time order. A hint to check on the sheets, not a guarantee."),
   curve: CurveSchema.describe("How much the picture changes over time (every cut is a spike) and the steady moves in it, each with the closest ease."),
   ink: InkSchema.describe("How much of the picture graphics and text cover over the whole film; each shot's own is in `shots[].ink`."),
-  sync: SyncSchema.describe("Mouth against voice for a talking face, from the face scan of `people scan` when this file has one cached; otherwise `reason` says why it is skipped."),
+  sync: SyncSchema.describe("Mouth against voice for a talking face, from the face scan of this file (found by the run, cached by content, as `people scan` does; `faces: false` only reads a cached one); otherwise `reason` says why it is skipped."),
   loudness: LoudnessSchema.nullable().describe("Null when the video has no sound."),
   tempo: TempoSchema.nullable().describe("Null when there is no sound, or no steady beat in it (see `warnings`)."),
   audio: AudioSchema.nullable().describe("What the sound does: `speech` (sentences with pace in words per second, pitch range, and the voice against the music under it), `effects` over the music and `sections` of steady level. All ESTIMATED: read from the mix by a heuristic, not from separated stems. Null when the video has no sound."),
   sheets: z.array(SheetSchema).describe("Every image written, in order; a kind with many tiles is split into several images."),
+  suggestions: z
+    .array(AnalyzeStyleSuggestionSchema)
+    .describe(
+      "Values for the project's `style.json` (ADR 0028) read from the film, at most one per path: `colors.bg` (the largest colour of the palette), `colors.ink` (the palette colour with the most contrast against it, 4.5:1 or more), " +
+        "`colors.accent` (the most saturated colour of the palette that is not grey), `motion.personality` (from the median length of the eased moves, else from the pace of the cutting) and `sound.musicUnderVoice` (how far the voice sits over the music). " +
+        "Never applied: show them to the person (take the grammar, never the content) and apply what they agree to with `style.apply` `{ analysis: <name>, paths: [...] }` (one journaled change; `revert` undoes it) or `style.set`. Empty when nothing fits.",
+    ),
   warnings: z.array(z.string()).describe("What could not be measured (no sound, no beat, sound too long for the beat detector…); empty when none."),
   labels: LabelsSchema.describe("MEASURED (read from the frames or the sound), ESTIMATED (a heuristic's hint: check the frames it names) or DECISION (a choice of the run) for every value: the key is the path of a field (`shots[].ink`, `events`) and covers all inside it; the most specific key wins. Say these words when you report a number."),
 });
@@ -778,6 +816,7 @@ export const ANALYZE_RESULT_LABELS: Readonly<Record<string, AnalyzeLabel>> = {
   "tempo.alternatives": "ESTIMATED",
   audio: "ESTIMATED",
   sheets: "MEASURED",
+  suggestions: "DECISION",
   warnings: "MEASURED",
 };
 

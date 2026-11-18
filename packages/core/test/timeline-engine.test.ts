@@ -469,7 +469,7 @@ describe("clip.move, trim, split, remove, set", () => {
     expect((await rejection(apply(before, "clip.set", { clip: "c_0001", audioFadeInMs: -1 }))).code).toBe(ErrorCode.InvalidParams);
   });
 
-  it("merges a media clip's grade field by field, removes a field with null, clears it, refuses other clips (ADR 0031)", async () => {
+  it("merges a media clip's grade field by field, removes a field with null, clears it, refuses audio tracks (ADR 0031)", async () => {
     const footage = await withClip();
     const warm = await apply(footage, "clip.set", { clip: "c_0001", grade: { temperature: 0.3, lut: "luts/warm.cube" } });
     expect(clipsOf(warm.timeline, "t_v")[0]).toMatchObject({ grade: { temperature: 0.3, lut: "luts/warm.cube" } });
@@ -491,8 +491,23 @@ describe("clip.move, trim, split, remove, set", () => {
     }
     const inside = (await apply(footage, "clip.set", { clip: "c_0001", grade: { lut: "luts/old/../warm.cube" } })).timeline;
     expect(clipsOf(inside, "t_v")[0]).toMatchObject({ grade: { lut: "luts/old/../warm.cube" } });
-    const card = (await apply(footage, "clip.add", { track: "t_v", type: "hyperframes", duration: 2, start: 30, props: { title: "A" } })).timeline;
-    expect((await rejection(apply(card, "clip.set", { clip: "c_0002", grade: { exposure: 1 } }))).message).toMatch(/only media clips take `grade`/);
+    const sound = (await apply(base(), "clip.add", { track: "t_a", asset: "assets/music.wav", out: 2 })).timeline;
+    expect((await rejection(apply(sound, "clip.set", { clip: "c_0001", grade: { exposure: 1 } }))).message).toMatch(/audio tracks take no `grade`/);
+  });
+
+  it("grades generated and nested timeline clips on video tracks, with their inverse (ADR 0031)", async () => {
+    const card = (await apply(base(), "clip.add", { track: "t_v", type: "hyperframes", duration: 2, props: { title: "A" } })).timeline;
+    const graded = await apply(card, "clip.set", { clip: "c_0001", grade: { exposure: 1, lut: "luts/warm.cube" } });
+    expect(clipsOf(graded.timeline, "t_v")[0]).toMatchObject({ type: "hyperframes", grade: { exposure: 1, lut: "luts/warm.cube" } });
+    expect(graded.warnings).toEqual([]);
+    expect(parseTimeline(graded.timeline).ok).toBe(true);
+    expect(clipsOf((await applyOperation(graded.timeline, graded.inverse, context())).timeline, "t_v")[0]).not.toHaveProperty("grade");
+
+    const nested = (await apply(base(), "clip.add", { track: "t_v", type: "timeline", source: "timelines/intro.json" })).timeline;
+    const host = await apply(nested, "clip.set", { clip: "c_0001", grade: { saturation: 0 } });
+    expect(clipsOf(host.timeline, "t_v")[0]).toMatchObject({ type: "timeline", grade: { saturation: 0 } });
+    expect(parseTimeline(host.timeline).ok).toBe(true);
+    expect(clipsOf((await apply(host.timeline, "clip.set", { clip: "c_0001", grade: null })).timeline, "t_v")[0]).not.toHaveProperty("grade");
   });
 
   it("merges a vignette field by field into media and generated clips, clears it, refuses nested timelines and audio (ADR 0043)", async () => {
@@ -1113,9 +1128,9 @@ describe("markers (ADR 0029)", () => {
     expect((await apply(t, "marker.add", { at: 3, label: "m_1 drop" })).timeline.markers).toHaveLength(4);
   });
 
-  it("a label shaped like beat:<number> or bar:<number> is refused on add and set, in any case", async () => {
+  it("a label shaped like beat:<number>, bar:<number> or word:<text> is refused on add and set, in any case", async () => {
     const t = await marked();
-    for (const label of ["beat:8", "BAR:2", "Beat: 3", "bar:2.5", "bar:8-0.2"]) {
+    for (const label of ["beat:8", "BAR:2", "Beat: 3", "bar:2.5", "bar:8-0.2", "word:over", "WORD:this#2"]) {
       expect((await rejection(apply(t, "marker.add", { at: 3, label }))).message, label).toMatch(/must not look like a beat or bar reference/);
       expect((await rejection(apply(t, "marker.set", { marker: "m_b", label }))).message, label).toMatch(/must not look like a beat or bar reference/);
     }

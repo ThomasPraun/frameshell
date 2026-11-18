@@ -1,14 +1,16 @@
-import { type DaemonConnection, type Progress, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult, timeRefOf } from "@frameshell/protocol";
 import { VOICEOVER_LINE_GAP_S, VOICEOVER_TEMPO_RANGE } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `voiceover` commands (ADR 0034), in `frameshell --help`. */
-export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes] [--no-verify]
+export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [--provider p] [--voice v] [--yes [--confirmation token]] [--no-verify]
                                Say each line of a voiceover script (\`voiceover: true\`) into
                                assets/voiceover/<script>/<line>.wav and import the takes; unchanged lines are reused.
                                Reports each take's phrases (split at silences) and, through the project's transcription
                                plugin, the misreads (--no-verify skips that).
-                               A paid provider needs --yes after the person confirmed the cost it reports
+                               A paid provider needs --yes after the person confirmed the cost it reports; the refusal
+                               prints a --confirmation token: pass it back so the run stays what the person saw (a script
+                               or price that changed meanwhile fails with ConfirmationStale and generates nothing)
   voiceover place <script> [--lines id,id] [--at line=time,line.2=time,…] [--tempo line.2=1.1,…] [--start t] [--gap s]
                            [--track id] [--replace] [--dry-run] [--timeline id]
                                Put the takes of a voiceover script on the timeline as phrase clips (one per phrase of each
@@ -25,7 +27,7 @@ export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [-
 
 /** Flags each `voiceover` command takes besides the global ones. */
 export const VOICEOVER_FLAGS: Record<string, readonly string[]> = {
-  "voiceover generate": ["lines", "provider", "voice", "yes", "no-verify"],
+  "voiceover generate": ["lines", "provider", "voice", "yes", "confirmation", "no-verify"],
   "voiceover place": ["lines", "at", "tempo", "start", "gap", "track", "replace", "dry-run", "timeline"],
 };
 
@@ -38,6 +40,8 @@ export type VoiceoverInvocation =
       provider?: string;
       voice?: string;
       yes: boolean;
+      /** Token of the ask the person confirmed (`ConfirmationRequired` data); only with `yes`. */
+      confirmation?: string;
       verify: boolean;
     }
   | {
@@ -62,6 +66,7 @@ export function parseVoiceover(
     provider?: string | undefined;
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
+    confirmation?: string | undefined;
     "no-verify"?: boolean | undefined;
     timeline?: string | undefined;
     at?: string | undefined;
@@ -81,6 +86,9 @@ export function parseVoiceover(
     if (lines.length === 0) throw new UsageError("--lines: expected line ids separated by commas, e.g. --lines hook-1,problem-2.");
   }
   if (sub === "place") return parsePlace(args[0]!, lines, options);
+  const confirmation = options.confirmation?.trim();
+  if (options.confirmation !== undefined && confirmation === "") throw new UsageError("--confirmation: expected the token the ConfirmationRequired refusal printed.");
+  if (confirmation !== undefined && options.yes !== true) throw new UsageError("--confirmation goes with --yes: it binds the confirmation to the ask the person saw.");
   return {
     kind: "voiceover.generate",
     script: args[0]!,
@@ -88,6 +96,7 @@ export function parseVoiceover(
     ...(options.provider !== undefined ? { provider: options.provider } : {}),
     ...(typeof options.voice === "string" ? { voice: options.voice } : {}),
     yes: options.yes === true,
+    ...(confirmation !== undefined ? { confirmation } : {}),
     verify: options["no-verify"] !== true,
   };
 }
@@ -101,7 +110,7 @@ function anchors(raw: string): Record<string, number | string> {
     const ref = cut < 0 ? "" : entry.slice(cut + 1).trim();
     if (key === "" || ref === "") throw new UsageError(`--at: expected line=time entries separated by commas (hook-1=hook+0.5,hook-2=beat:9), got "${entry.trim()}".`);
     if (key in found) throw new UsageError(`--at: ${key} is given twice.`);
-    found[key] = SECONDS_TEXT.test(ref) ? Number(ref) : ref;
+    found[key] = timeRefOf(ref);
   }
   return found;
 }
@@ -143,7 +152,7 @@ function parsePlace(script: string, lines: string[] | undefined, options: Parame
     ...(lines ? { lines } : {}),
     ...(options.at !== undefined ? { at: anchors(options.at) } : {}),
     ...(options.tempo !== undefined ? { tempo: tempos(options.tempo) } : {}),
-    ...(start !== undefined ? { start: SECONDS_TEXT.test(start) ? Number(start) : start } : {}),
+    ...(start !== undefined ? { start: timeRefOf(start) } : {}),
     ...(gap !== undefined ? { gap } : {}),
     ...(track !== undefined ? { track } : {}),
     replace: options.replace === true,
@@ -165,8 +174,64 @@ export async function executeVoiceover(
     return json ? `${JSON.stringify(placed, null, 2)}\n` : formatPlace(placed);
   }
   const { kind: _kind, ...params } = inv;
-  const result = await conn.request("voiceover.generate", { cwd, ...params }, progress ? { onProgress: progress } : {});
+  const result = await conn.request("voiceover.generate", { cwd, ...params }, progress ? { onProgress: progress } : {}).catch((error: unknown) => {
+    throw withConfirmationHint(error, inv);
+  });
   return json ? `${JSON.stringify(result, null, 2)}\n` : formatGenerate(result);
+}
+
+/**
+ * A `ConfirmationRequired` or `ConfirmationStale` refusal with the command that confirms it: the human output of an
+ * error is its message only, so the `confirmation` token the person's `--yes` must carry is printed there (JSON keeps it in `data`).
+ */
+function withConfirmationHint(error: unknown, inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>): unknown {
+  if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return error;
+  const token = (error.data as { confirmation?: unknown } | undefined)?.confirmation;
+  if (typeof token !== "string") return error;
+  const command = confirmCommand(inv, token);
+  if (command === null) return error;
+  return new RpcError(error.code, `${error.message}\nOnce the person confirmed this cost: ${command}`, error.data);
+}
+
+/**
+ * The command that confirms the ask of `inv`: the same script, lines, provider, voice and `--no-verify`, so the run it
+ * confirms is the one the person saw priced, plus `--yes --confirmation <token>`. Null when a word holds a line break,
+ * which no quoting carries alike across shells: the refusal then keeps its message without a command. Meant for sh and PowerShell, not cmd.exe.
+ */
+export function confirmCommand(
+  inv: Extract<VoiceoverInvocation, { kind: "voiceover.generate" }>,
+  token: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const parts = ["frameshell", "voiceover", "generate"];
+  const flags: [string | null, string | undefined][] = [
+    [null, inv.script],
+    ["--lines", inv.lines?.join(",")],
+    ["--provider", inv.provider],
+    ["--voice", inv.voice],
+  ];
+  for (const [flag, text] of flags) {
+    if (text === undefined) continue;
+    const word = shellWord(text, platform);
+    if (word === null) return null;
+    parts.push(...(flag === null ? [word] : [flag, word]));
+  }
+  if (!inv.verify) parts.push("--no-verify");
+  parts.push("--yes", "--confirmation", token);
+  return parts.join(" ");
+}
+
+/**
+ * `text` as one shell word: bare when plain, else in single quotes, where only the quote itself is special (`'\''` in
+ * sh, `''` in PowerShell on win32, where a leading `@` is quoted too: bare it is a splat). Null for a line break, and on
+ * win32 for a `"`, which PowerShell's legacy argument passing splits out of a quoted word.
+ */
+export function shellWord(text: string, platform: NodeJS.Platform = process.platform): string | null {
+  const windows = platform === "win32";
+  if (/^[\w./:@%+=,-]+$/.test(text) && !(windows && text.startsWith("@"))) return text;
+  if (/[\r\n\0]/.test(text) || (windows && text.includes('"'))) return null;
+  if (windows) return `'${text.replace(/['‘-‛]/g, (quote) => quote + quote)}'`;
+  return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
 function formatPlace(result: VoiceoverPlaceResult): string {

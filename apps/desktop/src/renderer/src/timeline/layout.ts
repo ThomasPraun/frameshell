@@ -19,7 +19,7 @@ import { type GroupTurn, type LaneMarks, type PaintedMark, TURN_LANE_HEIGHT, lan
 /** Height of the time ruler above the lanes, px. */
 export const RULER_HEIGHT = 22;
 
-/** Height of the scene band under the ruler, px; the band exists only while a script scene has words on the timeline. */
+/** Height of the scene band under the ruler, px; the band exists only while a script scene has a span on the timeline. */
 export const SCENE_BAND_HEIGHT = 18;
 
 /** Height of the marker lane right under the ruler, px; the lane exists only while the timeline has markers (ADR 0029). */
@@ -99,7 +99,7 @@ export interface ClipBox {
   elements: Readonly<Record<string, ElementAdjust>>;
   /** Stored `backdrop` of a generated clip (ADR 0031); null without one. */
   backdrop: Backdrop | null;
-  /** Stored `grade` of a media clip (ADR 0031) with every number filled; null without one. */
+  /** Stored `grade` of a media, generated or nested timeline clip (ADR 0031) with every number filled; null without one and for shots. */
   grade: NormalizedGrade | null;
   /** Ids of the formats the clip has a stored override in (ADR 0027 `formats`), sorted; empty without any. */
   formats: string[];
@@ -184,7 +184,7 @@ export interface TrackRow {
   clips: ClipBox[];
 }
 
-/** A script scene's words placed on the timeline, as the scene band shows it (ADR 0015). */
+/** A script scene placed on the timeline, as the scene band shows it (ADR 0015). */
 export interface SceneBox {
   /** Project-relative script, e.g. `scripts/plan.md`. */
   script: string;
@@ -192,12 +192,14 @@ export interface SceneBox {
   slug: string;
   /** Heading text. */
   title: string;
-  /** Timeline seconds of its first placed word. */
+  /** Timeline seconds of its first placed word, its earliest linked clip, or the planned start. */
   start: number;
-  /** Timeline seconds where its last placed word ends. */
+  /** Timeline seconds where its last placed word or its latest linked clip ends, or the planned end. */
   end: number;
   /** Ids of this timeline's clips whose `scriptRef` is the scene; the span is hollow while empty. */
   clips: string[];
+  /** What placed the span: its words, its linked clips, or the time range its heading plans (no clip linked yet). */
+  source: "words" | "clips" | "planned";
 }
 
 /** A timeline marker (ADR 0029) as the marker lane shows it. */
@@ -400,7 +402,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     keys: keyBoxes(fields["keys"]),
     elements: elementsOf(fields["elements"]),
     backdrop: kind === "generated" && typeof fields["backdrop"] === "object" && fields["backdrop"] !== null ? (fields["backdrop"] as Backdrop) : null,
-    grade: kind === "media" && typeof fields["grade"] === "object" && fields["grade"] !== null ? normalizeGrade(fields["grade"] as Grade) : null,
+    grade: kind !== "shot" && typeof fields["grade"] === "object" && fields["grade"] !== null ? normalizeGrade(fields["grade"] as Grade) : null,
     formats: typeof fields["formats"] === "object" && fields["formats"] !== null ? Object.keys(fields["formats"]).sort() : [],
   };
 }

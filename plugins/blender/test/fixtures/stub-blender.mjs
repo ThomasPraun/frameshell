@@ -32,6 +32,12 @@ const refuse = (code, detail) => {
 };
 
 if (script === "deps.py") {
+  if (config.hangDeps) {
+    // Never finishes, as a listing of a huge file: only a kill ends it.
+    writeFileSync(join(here, "pid"), String(process.pid));
+    setInterval(() => {}, 1000);
+    await new Promise(() => {});
+  }
   const paths = (model.links ?? []).map((link) => (link.startsWith("//") ? join(dirname(blend), link.slice(2)) : link));
   writeFileSync(request.out, JSON.stringify({ paths }));
   process.exit(0);
@@ -41,25 +47,36 @@ if (script === "deps.py") {
 const scenes = model.scenes ?? ["Scene"];
 if (request.scene !== null && !scenes.includes(request.scene)) refuse("scene", { scene: request.scene, scenes });
 const fps = model.fps ?? 24;
-if (Math.abs(fps - request.fps) > 0.001) refuse("fps", { scene: request.scene ?? scenes[0], sceneFps: fps, projectFps: request.fps });
+// scene_times / scene_frame of render.py: a scene at another rate is sampled at the project's seconds.
+const step = Math.abs(fps - request.fps) <= 0.001 ? 1 : fps / request.fps;
+const sceneFrame = (index) => {
+  const at = first + index * step;
+  return Math.abs(at - Math.round(at)) < 1e-6 ? Math.round(at) : at;
+};
 const cameras = model.cameras ?? ["Camera"];
 if (request.camera !== null && !cameras.includes(request.camera)) refuse("camera", { camera: request.camera, cameras });
 if (request.camera === null && cameras.length === 0) refuse("camera", { camera: null, scene: scenes[0], cameras });
 const first = model.frameStart ?? 1;
-if (first + request.frames - 1 > (model.frameEnd ?? 250)) refuse("range", { scene: scenes[0], frameStart: first, frameEnd: model.frameEnd ?? 250, frames: request.frames });
+const start = request.startFrame ?? 0;
+const lastFrame = sceneFrame(start + request.frames - 1);
+if (lastFrame > (model.frameEnd ?? 250) + 1e-6) {
+  refuse("range", { scene: scenes[0], frameStart: first, frameEnd: model.frameEnd ?? 250, startFrame: start, frames: request.frames, lastFrame: Number(lastFrame.toFixed(4)), sceneFps: fps });
+}
 
 writeFileSync(join(here, "pid"), String(process.pid));
 mkdirSync(request.outDir, { recursive: true });
 let hung = false;
-emit({ event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
+emit(request.quality === "final" ? { event: "start", frameStart: first, frames: request.frames, engine: "CYCLES", device: "CPU" } : { event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
 for (let index = 0; index < request.frames; index++) {
-  print(`Fra:${first + index} Mem:10.00M (Peak 10.00M) | Time:00:00.01 | Rendering`);
+  print(`Fra:${first + start + index} Mem:10.00M (Peak 10.00M) | Time:00:00.01 | Rendering`);
   if (config.crash && index === 1) {
     writeSync(2, 'Traceback (most recent call last):\n  File "render.py", line 1\nRuntimeError: stub crash\n');
     process.exit(1);
   }
   if (!(config.skipLast && index === request.frames - 1)) writeFileSync(join(request.outDir, `frame_${String(index).padStart(6, "0")}.png`), png(request.width, request.height));
-  emit({ event: "frame", index });
+  const shown = Number(sceneFrame(start + index).toFixed(4));
+  appendFileSync(join(here, "scene-frames.jsonl"), `${shown}\n`);
+  emit({ event: "frame", index, seconds: config.frameSeconds?.[index] ?? 0.05, sceneFrame: shown });
   if (config.hangAfter === index + 1) {
     // Never finishes, as a long final render: only a kill ends it.
     setInterval(() => {}, 1000);

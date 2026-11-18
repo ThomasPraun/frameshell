@@ -689,6 +689,164 @@ describe("motion blur in generated clips", () => {
   );
 });
 
+// Finals (ADR 0035 slice 2, on the draft/final model of ADR 0041 decision 11): a `final-card` is an adapter with
+// `finals`, like Blender. Its draft is blue and its final red; the final is rendered only when an export waits for it.
+describe("finals of generated clips", () => {
+  let dir = "";
+  let finalTrack = "";
+
+  beforeAll(async () => {
+    dir = tempDir();
+    await conn.request("project.init", { dir });
+    const configPath = join(dir, "frameshell.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
+    installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: dir, decision: "trust" });
+    mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
+    const card = (name: string, value: Record<string, unknown>) => writeFileSync(join(dir, "compositions", "cards", `${name}.json`), JSON.stringify(value));
+    card("quick", { color: "blue", finalColor: "red", seconds: 1, estimateSeconds: 120 });
+    card("slow", { color: "blue", finalColor: "red", seconds: 1, estimateSeconds: 240 });
+    card("other", { color: "blue", finalColor: "red", seconds: 1, estimateSeconds: 120, other: true });
+    card("unknown", { color: "blue", finalColor: "red", seconds: 1, noEstimate: true });
+    finalTrack = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
+  }, TIMEOUT);
+
+  const add = async (name: string, start: number) =>
+    (await conn.request("clip.add", { cwd: dir, track: finalTrack, type: "final-card", source: `compositions/cards/${name}.json`, start, duration: 1 })).changes
+      .added[0]!;
+  const states = async () => new Map((await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
+  const until = async (id: string, check: (info: ClipRenderInfo) => boolean) => {
+    let last: ClipRenderInfo | undefined;
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+      last = (await states()).get(id)!;
+      if (check(last)) return last;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    throw new Error(`clip ${id} never reached the expected state; last: ${JSON.stringify(last)}`);
+  };
+  const idle = async () => {
+    for (const deadline = Date.now() + 60_000; (await conn.request("job.list", { cwd: dir, active: true })).jobs.length > 0; ) {
+      if (Date.now() > deadline) throw new Error("jobs never settled");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+  const pixel = async (file: string, at = 0) => {
+    const { ffmpeg } = await mediaTools();
+    const args = ["-hide_banner", "-loglevel", "error", ...(at > 0 ? ["-ss", String(at)] : []), "-i", file, "-frames:v", "1"];
+    const rgb = await runBuffer(ffmpeg, [...args, "-vf", "crop=1:1:32:18,format=rgb24", "-f", "rawvideo", "-"]);
+    return { red: rgb[0]!, blue: rgb[2]! };
+  };
+  const isBlue = ({ red, blue }: { red: number; blue: number }) => red < 40 && blue > 150;
+  const exported = async (params: { quality?: "draft" | "final"; yes?: boolean } = {}) => {
+    const out = join(tempDir(), "out.mp4");
+    const started = await conn.request("render", { cwd: dir, timeline: "main", out, ...params });
+    for (const deadline = Date.now() + 120_000; Date.now() < deadline; ) {
+      const found = (await conn.request("job.list", { cwd: dir })).jobs.find((one) => one.id === started.job.id)!;
+      if (found.state === "done" || found.state === "failed") return { started, job: found, out };
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`render ${started.job.id} never finished`);
+  };
+  const confirmation = async (params: { quality?: "final" } = {}) => {
+    const error = await conn.request("render", { cwd: dir, timeline: "main", out: join(tempDir(), "refused.mp4"), ...params }).then(
+      () => null,
+      (caught: unknown) => caught as { code: number; message: string; data: { finals: { clip: string; seconds: number | null }[]; seconds: number | null; limit: number } },
+    );
+    expect(error).not.toBeNull();
+    expect(error!.code).toBe(ErrorCode.ConfirmationRequired);
+    return error!;
+  };
+
+  it(
+    "renders the draft in the background and never the final, which waits for an export",
+    async () => {
+      const quick = await add("quick", 0);
+      const info = await until(quick, (state) => state.state === "ready");
+      expect(info.final).toMatchObject({ state: "waiting", file: null, job: null, refused: false, onDemand: true });
+      expect(info.final!.key).not.toBe(info.key);
+      await idle();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect((await states()).get(quick)!.final).toMatchObject({ state: "waiting" });
+      const jobs = (await conn.request("job.list", { cwd: dir })).jobs.filter((job) => job.output?.endsWith(info.final!.key));
+      expect(jobs).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "draft exports use the draft with a warning; frames use the draft until the final exists; a final export makes it",
+    async () => {
+      const [quick] = [...(await states()).keys()];
+      const draft = await exported({ quality: "draft" });
+      expect(draft.job.state).toBe("done");
+      expect(draft.started.warnings).toEqual([expect.stringMatching(new RegExp(`^Clip ${quick} \\(final-card\\) is exported from its draft render`))]);
+      expect(isBlue(await pixel(draft.out, 0.5))).toBe(true);
+
+      const png = join(tempDir(), "frame.png");
+      const frame = await conn.request("frame", { cwd: dir, timeline: "main", at: 0.5, out: png });
+      expect(frame.warnings).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^Clip ${quick} \\(final-card\\) is drawn from its draft render`))]));
+      expect(isBlue(await pixel(png))).toBe(true);
+
+      // 120 s estimated: under the 5-minute limit, no confirmation.
+      const final = await exported({ quality: "final" });
+      expect(final.job.state).toBe("done");
+      expect(final.started.warnings.filter((warning) => warning.includes("draft"))).toEqual([]);
+      expect((await pixel(final.out, 0.5)).red).toBeGreaterThan(150);
+      expect((await states()).get(quick!)!.final).toMatchObject({ state: "ready", progress: 1 });
+
+      const again = await conn.request("frame", { cwd: dir, timeline: "main", at: 0.5, out: png });
+      expect(again.warnings.filter((warning) => warning.includes("draft"))).toEqual([]);
+      expect((await pixel(png)).red).toBeGreaterThan(150);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "asks for a confirmation when the missing finals are estimated over 5 minutes or unknown, and renders with yes",
+    async () => {
+      const slow = await add("slow", 1);
+      const other = await add("other", 2);
+      await until(slow, (state) => state.state === "ready");
+      await until(other, (state) => state.state === "ready");
+      // 240 + 120 s: the clip at 0 has its final already, so only these two count.
+      const refused = await confirmation();
+      expect(refused.data).toMatchObject({ seconds: 360, limit: 300, finals: [{ clip: slow, seconds: 240 }, { clip: other, seconds: 120 }] });
+      expect(refused.message).toMatch(/about 6 min.*`yes: true`/);
+      expect((await conn.request("job.list", { cwd: dir, active: true })).jobs).toEqual([]);
+      // A draft export needs no confirmation.
+      expect((await exported({ quality: "draft" })).job.state).toBe("done");
+
+      const confirmed = await exported({ yes: true });
+      expect(confirmed.job.state).toBe("done");
+      expect((await pixel(confirmed.out, 1.5)).red).toBeGreaterThan(150);
+      // Every final is cached now: nothing to confirm.
+      expect((await exported({ quality: "final" })).job.state).toBe("done");
+
+      const unknown = await add("unknown", 3);
+      await until(unknown, (state) => state.state === "ready");
+      expect((await confirmation({ quality: "final" })).data).toMatchObject({ seconds: null, finals: [{ clip: unknown, seconds: null }] });
+      await conn.request("clip.remove", { cwd: dir, clip: unknown });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "gc keeps both renders of a clip with a final",
+    async () => {
+      await idle();
+      const infos = [...(await states()).values()];
+      const keyOf = (path: string) => path.split("/").at(-1)!.split(".")[0]!;
+      const removed = (await conn.request("gc", { cwd: dir, dryRun: true })).removed.map((entry) => keyOf(entry.path));
+      for (const info of infos) {
+        expect(removed).not.toContain(info.key);
+        expect(removed).not.toContain(info.final!.key);
+      }
+    },
+    TIMEOUT,
+  );
+});
+
 // Timing (ADR 0029 decision 8): a `beat-card` whose card asks for beats and markers gets them inside its range, in
 // composition seconds; its key moves with them, while a clip that does not ask keeps its key.
 describe("timing in generated clips", () => {

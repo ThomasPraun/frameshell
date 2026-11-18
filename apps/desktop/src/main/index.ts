@@ -44,6 +44,8 @@ import {
   type Outcome,
   type ProjectView,
   type ModelProgress,
+  type VoiceoverProgress,
+  type VoiceoverRun,
   type PeopleChange,
   type PersonTarget,
   type TargetsChange,
@@ -123,7 +125,7 @@ import {
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
-import { runVoiceover } from "./voiceover.js";
+import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
@@ -1005,6 +1007,75 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   }
 }
 
+/**
+ * Voiceover in the app (ADR 0034 decisions 20 and 22): generate with progress and Cancel, the misread check only where it
+ * needs no download nobody agreed to, and place the takes on the main timeline. The renderer shows it all; the cost
+ * of a paid provider is asked here in a native box, and `yes` goes to the daemon only after the person confirms it.
+ */
+function registerVoiceoverIpc(): void {
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  ipcMain.handle(Channel.voiceoverVerifyPlan, (event) =>
+    outcome(async () => {
+      const dir = await dirOf(event.sender);
+      const { project } = await daemon.request("model.list", { cwd: dir });
+      const provider = project?.provider ?? APP_TRANSCRIPTION_PROVIDER;
+      const { plugins } = await daemon.request("plugin.list", { cwd: dir });
+      const pluginInstalled = plugins.some((plugin) => plugin.name === TRANSCRIPTION_PLUGIN);
+      const bytes = provider === APP_TRANSCRIPTION_PROVIDER && pluginInstalled ? await transcriptionDownload(dir) : 0;
+      return verifyPlanOf({ provider, pluginInstalled, bytes });
+    }),
+  );
+  ipcMain.handle(Channel.voiceoverGenerate, (event, path: string, verify: boolean) =>
+    outcome(async (): Promise<VoiceoverRun> => {
+      const dir = await dirOf(event.sender);
+      const said = text.app.dialogs;
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+      try {
+        const result = await runVoiceover(
+          (confirmed) =>
+            daemon.request(
+              "voiceover.generate",
+              { cwd: dir, script: path, yes: confirmed !== null, ...(confirmed ? { confirmation: confirmed.confirmation } : {}), verify },
+              { onProgress: (update) => send(event.sender, Channel.voiceoverProgress, progressOf(update)) },
+            ),
+          async (ask) => {
+            send(event.sender, Channel.voiceoverProgress, { stage: "confirm", line: null, fraction: null } satisfies VoiceoverProgress);
+            const { response } = await box({
+              type: "warning",
+              message: said.voiceoverCostTitle(ask.provider, ask.lines),
+              detail: `${ask.changed ? `${said.voiceoverCostChanged}\n\n` : ""}${ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost)}`,
+              buttons: [said.voiceoverGenerate, said.cancel],
+              defaultId: 1,
+              cancelId: 1,
+              noLink: true,
+            });
+            return response === 0;
+          },
+        );
+        return result ? { status: "done", result } : { status: "declined" };
+      } catch (error) {
+        const stopped = canceledRun(error);
+        if (stopped) return { status: "canceled", kept: stopped.kept };
+        throw error;
+      }
+    }),
+  );
+  ipcMain.handle(Channel.voiceoverCancel, (event) => outcome(async () => (await daemon.request("voiceover.cancel", { cwd: await dirOf(event.sender) })).canceled));
+  ipcMain.handle(Channel.voiceoverMarkers, (event) =>
+    outcome(async () => {
+      const view = await daemon.request("timeline.show", { cwd: await dirOf(event.sender), timeline: "main" }).catch(() => null);
+      return (view?.markers ?? []).map((marker) => marker.label);
+    }),
+  );
+  ipcMain.handle(Channel.voiceoverPlace, (event, path: string, start: string, replace: boolean) =>
+    outcome(async () => {
+      const at = startOf(start);
+      return daemon.request("voiceover.place", { cwd: await dirOf(event.sender), timeline: "main", script: path, ...(at !== undefined ? { start: at } : {}), replace });
+    }),
+  );
+}
+
 /** The transcript view's model picker (#427): thin daemon requests for the window's project, plus the file dialog. */
 function registerModelIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
@@ -1523,46 +1594,7 @@ function registerIpc(): void {
       return true;
     }),
   );
-  ipcMain.handle(Channel.filesVoiceover, (event, path: string) =>
-    outcome(async () => {
-      const { project } = await requireProject(stateOf(event.sender));
-      const said = text.app.dialogs;
-      const parent = BrowserWindow.fromWebContents(event.sender);
-      const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-      try {
-        // The misread check stays with the agent for now: it may download a transcription model, which the person has not agreed to here.
-        const result = await runVoiceover(
-          (confirmed) => daemon.request("voiceover.generate", { cwd: project.dir, script: path, yes: confirmed !== null, ...(confirmed ? { confirmation: confirmed.confirmation } : {}), verify: false }),
-          async (ask) => {
-            const { response } = await box({
-              type: "warning",
-              message: said.voiceoverCostTitle(ask.provider, ask.lines),
-              detail: `${ask.changed ? `${said.voiceoverCostChanged}\n\n` : ""}${ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost)}`,
-              buttons: [said.voiceoverGenerate, said.cancel],
-              defaultId: 1,
-              cancelId: 1,
-              noLink: true,
-            });
-            return response === 0;
-          },
-        );
-        if (!result) return false;
-        const generated = result.lines.filter((line) => line.state !== "cached").length;
-        const warnings = result.warnings.length > 0 ? `\n\n${result.warnings.join("\n")}` : "";
-        await box({
-          type: "info",
-          message: said.voiceoverDoneTitle(basename(path)),
-          detail: said.voiceoverDoneDetail(generated, result.lines.length - generated) + warnings,
-          buttons: [said.ok],
-          noLink: true,
-        });
-        return true;
-      } catch (error) {
-        await box({ type: "error", message: said.voiceoverFailed, detail: (error as Error).message, buttons: [said.ok], noLink: true });
-        return false;
-      }
-    }),
-  );
+  registerVoiceoverIpc();
   ipcMain.handle(Channel.filesReveal, async (event, path: string) => {
     const { project } = await requireProject(stateOf(event.sender));
     shell.showItemInFolder(projectPathOf(project.dir, path));
@@ -1714,6 +1746,12 @@ function registerIpc(): void {
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
       return daemon.request("matte.status", { cwd: project.dir, timeline, ...(view ? { view } : {}) });
+    }),
+  );
+  ipcMain.handle(Channel.mediaInspect, (event, assets: string[]) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      return daemon.request("audio.inspect", { cwd: project.dir, assets, spectrogram: true });
     }),
   );
   ipcMain.handle(Channel.clipsRenders, (event, timeline: string, format?: string) =>

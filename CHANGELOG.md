@@ -9,6 +9,365 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
+  `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
+  selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags
+  the bottom-right handle to a target size (`fromW`, `fromH`, `toW`, `toH` as fractions of the frame, kept inside it
+  with the handles, the cursor and the badge), lets go, and a badge shows the final `W x H`. The card is written as
+  layout on a 0.01 px grid, never a scale, and the cursor, its timing guard and the optional follow camera are the
+  existing cursor kit. `lean-in` slides a headline or quote card in from a side with a heavy spring, tilts it away and
+  back toward the viewer, then holds a slow lean (scale 1 to 1.06, rotation 1 to 2 degrees; 2D only, no matte). The
+  ticking to-do and the word behind the person of the same ticket were already built (`checklist`, `big-word`). The
+  `hyperframes` skill lists both.
+
+- Word references as times, #458 slice 4 part 3 (ADR 0029, epic #451; protocol 172): every time argument that takes a
+  TimeRef also takes `word:<text>[#n][+s|-s]`, the start of the nth time the timeline plays a word (`--from word:so
+  --to word:so#2`, `--at word:over+0.2`), or a transcript word id (`word:w_000012`). Words match on their spoken tokens
+  (case, accents and punctuation ignored, `20` meets "twenty", several words in a row for a phrase, compared token
+  for token so `maybe` never meets "may be"; text that also reads as a word plus an offset is refused); words a cut
+  removed do not count, and the same speech on two tracks counts once. The name is read on the timeline as the call
+  sees it (a review-mode proposal's own timeline included) and the history records seconds, so a later cut never moves
+  a recorded edit. A clip with a stale transcript refuses it naming `transcribe`; an unknown word lists the closest
+  played words. A marker label starting with `word:` is now refused. `cleanup` and word references share one placement
+  of transcript words on the timeline (`placeWords`). Not yet read by `requirements.json`.
+
+- `music.pick`, the last slice of #485 (ADR 0037; protocol 171, no schema change): `frameshell music pick <track> [--keep] [--dry-run]`
+  (MCP `music_pick`) keeps one of the candidate tracks `music candidates` placed. The chosen track (id or name, e.g.
+  `Music 2`) is unmuted and renamed `Music`, and the other candidate tracks (audio tracks named `Music <n>` that hold only
+  media clips) are removed with their clips; `--keep` mutes them and leaves them in place. A candidate with edits of its
+  own (several clips, or a clip with speed, keys, effects, fades or transitions, or a subtitle track following it) is never
+  removed: the result names it. Refused when the track is not a candidate or there is no other to pick between. One
+  transaction `Music pick: <track>` (one proposal in review mode); nothing is fitted or ducked again, the result's `next`
+  says `music fit` and `duck --level` follow. Skill updated.
+
+- Cut seam strips and the per-clip kit of `review`, slice RP3 of #457, the last (epic #451; protocol 170):
+  `--sheets cuts` (opt in, never a default) writes one row per cut, the whole frames 0.2 and 0.1 s before it, on it,
+  and 0.1 and 0.2 s after (`cut 3 -0.1`; a cut within 0.2 s of the range's edge repeats the edge frame, so every cut
+  keeps its row), up to 24 cuts thinned evenly with a warning naming how many were left out; a
+  timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds (found once per run, shared with the
+  metrics). `--pop <time>` (seconds, a marker, `beat:N`; resolved in the daemon by the shared TimeRef resolver) writes
+  the frame before and the frame at it side by side with their difference amplified 4 times. `--onion <clip>` blends
+  up to 24 frames of the clip's span (of `--range` inside it) into one image: the median background, each moving part
+  laid over at 25 %. `--speed <clip>` charts the clip's hero point speed per frame (a media clip: its keyed placement
+  through `placementAt` and the cover crop, sub-pixel, no render; a generated clip: the centre and area of its render's
+  alpha (alpha-weighted centroid and area, not its bounding box) at up to 90 frames; no render, a render that fails, no
+  alpha or alpha on fewer than two frames skipped with the reason, never a failed run) and lists in `metrics.speed` the `linear`
+  stretches (speed within 2.5 % over 6 frames and 20 % of the move) and dead `stop`s (under 0.25 px per frame for 4
+  frames between two moving stretches), ESTIMATED, warnings only, thresholds as data in `review/thresholds.ts` (2.5 %,
+  not 5 %: the middle of the `in-out` key ease varies by 4 %). With only the kit and no `--sheets`, a run writes the
+  kit's sheets (and the metrics with `--speed`, the safe sheet with `--platform`). `--crop-at` crops `pop` and `onion`
+  too; both `pop` frames take the crop of the frame at the pop. New sheet kinds and tile
+  tags `pop`, `onion`, `speed`; `encodeRgbPng` joins `encodeGrayPng`. `onion`, `speed` with a file, a clip that is not
+  on a video track or plays outside the range, and `pop` on the first frame or past the film are InvalidOperation.
+
+- Motion templates, slice TP4 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
+  new <name> --template` takes four more. `orbit` has labels circle a logo or a word, from a seeded start phase, and
+  slow to a stop on an evenly spaced ring that never depends on the seed. `locked-on` snaps four corner brackets onto a
+  target box (`x`, `y`, `w`, `h` as fractions of the frame, kept inside it) with an overshoot, then a pulse and a small
+  label. `spotlight` dims the frame except a soft pool of light, one layer of plain alpha with no blend mode, which
+  moves to a second target and lights a label at each. `phone-fan` opens three phones from a stack like a hand of cards,
+  one picture each, sized so the fan fits every format. The plain app screen and the phone bezel `device-frame` drew are
+  now `paintSkeleton` and `dressPhone` in `ui-parts.ts`, shared with `phone-fan`. Fixes in `logo-sting` and
+  `light-leak`: the light band now leaves with the exit on a clip under 1.55 s instead of being cut off, its
+  geometry test checks the band outside the frame without leaning on its fade, and `light-leak` falls over at most
+  0.6 of the clip, so its last rendered frame is clear on a clip of 0.2 s too. The `hyperframes` skill lists them.
+- Beat helpers in the motion runtime, slice MH of #458 (ADR 0029 decision 8, ADR 0033, epic #451; plugin only, no
+  protocol change): runtime 0.5.0 adds `beats`, `beatAt` (`{ index, beat, bar, phase }`), `beatTime`, `sinceBeat`,
+  `springOnBeat`, `markers`, `hasBeats` and `frameshellTiming`. They read `window.frameshellTiming` (a composition that
+  asked with `<meta name="frameshell-timing" content="beats markers">`) and are pure functions of `t`, so seeking stays
+  exact; beats before the first and after the last of the clip continue at the nearest period. With no usable grid
+  (no tag, `beatsProblem` set) they use a nominal `{ bpm, offset, meter }` the composition passes, or the clip's own
+  seconds, so a composition looks the same without music. The `checklist` template takes an `onBeats` prop: its ticks
+  land on the first beats at or after `tickStart` (the tag is added by hand, so a plain checklist never re-keys on the
+  music). A clip keeps its frozen 0.4.0 runtime until `frameshell hyperframes update`, which now reports 0.5.0; no
+  pixel of an existing clip changes. The plugin skill lists the helpers.
+- The scene band shows a storyboard that has no transcript words, #662 (ADR 0015 amended, epic #451; protocol 169):
+  every `span` of `script.outline` carries a `source`. A scene whose words a timeline does not place gets a `clips`
+  span there, the first start to the last end of the clips linked to it (the box follows them when they move, and a
+  pick selects them). A scene with no clip linked anywhere gets a `planned` span on `main` from the time range in its
+  heading (`## Proof (bars 4-9, 0:06-0:18)`: clock readings win, bars and `bar:4-bar:10` go through the TimeRef
+  resolver on the main timeline's tempo; a range that cannot be read is a warning). The band draws planned boxes with
+  long dashes and the screen-reader list says "planned"; `frameshell script outline` prints where each scene is placed.
+  Dragging a scene to move its clips is a later ticket.
+- Batch closes #477 (ADR 0040 "Limits in v1" emptied, epic #451; protocol 168): a row whose data changed renders again
+  without `--force`. Each manifest entry now stores a `hash` of the row's cells, the batch file's slots and the template
+  timeline's content (not its revision); a `done` row whose hash differs is rendered and listed in the result's new
+  `changed` (the CLI prints it), a manifest from before hashes counts as unchanged, and `force` is for what the hash
+  does not see (a swapped file edited in place, `preset`, `quality`). A props slot naming a prop the clip's
+  composition does not declare fails the row with InvalidOperation data `{ row, slot, reason: "unknown prop", prop,
+  declared }`, in `--dry-run` too: the new optional plugin-API hook `ClipAdapter.declaredProps(clip)` names the
+  top-level props a composition declares, HyperFrames answers from `data-composition-variables` of the entry (an object
+  or an empty list declares nothing), and an adapter without the hook, or a composition without declarations, keeps
+  accepting any prop. New method `batch.cancel { file, out? }` (CLI `batch cancel <file> [--out dir]`, MCP
+  `batch_cancel`, replay-keyed like every mutating method): no further row is queued, the running row's render job is
+  canceled, the entries not ended become `canceled` and the manifest's `state` `canceled` (new value; `failed` re-runs
+  such rows); a Ctrl-C in `frameshell batch` asks the daemon, and the CLI also ends when another process cancels the
+  manifest. The skill (`batch.md`) and `docs/mcp.md` list the `yes` param and `batch_cancel`, and a CLI test covers
+  `batch --yes` (ConfirmationRequired, then the render with a stub final). Tests: `batch-service` (hash, cancel,
+  unknown prop), `batch-method` (daemon cancel and declared props), `batch-cli`, hyperframes `declaredProps`.
+- Audition dialog, slice AP of #463 (ADR 0038 "Audition page as built", epic #451; protocol 167): the person picks a
+  sound by ear. In the Explorer, right-click two or more selected sound files (Audition N sounds…), a folder such as
+  `assets/sound/`, or a `Music <rank>` track that `music candidates` made: each sound gets play/stop, a spectrogram,
+  its loudness and true peak, and the kind and seed of a generated take; Match loudness plays them all at the quietest
+  one's level, and Use this selects the file. Read-only: nothing on the timeline changes. English and Spanish.
+- Daemon method `audio.inspect { assets, spectrogram? }` (MCP `audio_inspect`), read-only: per file the integrated
+  loudness, true peak and loudness range from the per-asset loudness cache, the length, the `fssd` facts of a generated
+  take (a sound shorter than one 400 ms gating block, which EBU R128 reads as silence, gets the loudness of that one
+  block, flagged `shortSound`), and with `spectrogram: true` a 64-row log-frequency spectrogram of up to 400 columns in dB computed on the one
+  FFT in a worker thread (kept in memory, not on disk: no new `gc` kind). Files with no sound are listed in `skipped`.
+- Blender clips, slice 6 of #482 (ADR 0035, epic #451; plugin only, no protocol or plugin-API change): a render draws only
+  the clip's window, frames `floor(in * fps)` to `in + duration`, instead of everything from the scene's first frame.
+  `render.py` takes `startFrame` and names its files from 0; the encode pads the head with transparent frames (one
+  `lavfi` input and `concat`, same flags and `-fflags +bitexact`; a clip with no head trim encodes exactly as before),
+  so file time is still composition time. Progress, the written-frames check and the 5-minute finals estimate count the
+  window, so a trimmed final is estimated on what it draws. Owner decision on #482: a head trim re-renders, so the range
+  key marker is `range/<inMs>-<endMs>ms.json` (every Blender clip renders once more); `gc` recognises the old and new
+  names. The opt-in real test has a case with `in` above 0; not run with a real Blender yet.
+- `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
+  `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
+  version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
+  as an input and nothing wrote it in the last minute; `finals.json`, unknown names and symlinks stay. It is a new
+  optional plugin-API hook, `ClipAdapter.gc(context)` with `AdapterGcContext { projectDir, inputs, dryRun,
+  keepNewerThan, signal }`, so core never learns the plugin's layout: `ClipRenderer.gc` gathers the paths each adapter's
+  `inputs()` returned while it keys every clip (the rule that keeps the clip renders), and skips the hooks with the
+  same reasons when a clip has no key or a render or export job runs. `InputsContext` gets a `signal`, aborted when the
+  daemon stops: the Blender that lists a `.blend`'s files (up to 5 minutes) is killed with it and no longer outlives the
+  daemon.
+- The opt-in real Blender test has a positive control for the driver trap: the same library's driver does write its file
+  with auto-exec on and a frame evaluated, so "marker absent" under `-Y` means something. Not run with a real Blender
+  yet.
+- Motion templates, slice TP3 of #466 (ADR 0033, epic #451; plugin only, no protocol change): `frameshell hyperframes
+  new <name> --template` takes four more. `logo-sting` is a short brand hit on its own background (the logo lands with a
+  spring and a ring, a light band sweeps across, the name rises; a monogram stands in for a missing logo). `pip-card`
+  is a still picture in a rounded corner card with an optional caption chip, over a talking head (image prop only: a
+  live video in a corner stays the multicam picture-in-picture layout, owner decision 2026-11-16). `work-cards` shows
+  task cards from a `title:status` list that come in staggered, pulse when they start and follow one shared progress,
+  with no icons. `light-leak` is a seeded warm glow, a clip about a second long on a track above a cut, clear at its
+  first frame and the last tenth of a second, `hue` and `intensity` props, no blend mode: an overlay, so the cut underneath keeps its
+  length. Each pulls late cues in before the 0.3 s exit and lays out in all four formats. The hash of `seed` that
+  `emphasis-marker` and `scene-background` each carried is one `SEED_HELPERS` in the kit, shared with `light-leak`.
+  The `hyperframes` and Frameshell skills list them.
+- `analyze` finds the faces for mouth sync itself, slice AL of #471 (ADR 0020 decision 16, epic #451; protocol 165): a
+  reference file anywhere on disk no longer needs `people scan` first. When the project has no scan of the file's
+  content, the run makes it with the same scanner as `people.scan` (the one `scanFileFaces` step) and caches it in
+  `.frameshell/people/`, so `people scan` of a copy finds it again. On by default; the first run may download the face
+  models. New `faces` param (`--no-faces`) skips the scan and still uses one already cached; a scan that cannot run
+  (no model, no network, untrusted runtime) is a skipped `sync` with the reason and a warning, never a failed run.
+  `analyze.diff` has no `faces`. `gc` leaves face scans alone while an `analyze` job runs (a scan of a file outside
+  `assets/` is swept as unused afterwards; it is regenerable). The mouth is still picture motion in the face box: the
+  5-point SFace landmarks have no mouth opening.
+- `review` frames per beat and crops, slice RP2 of #457 (epic #451; protocol 164): `--sheets beats` (opt in, never a
+  default) writes one frame per beat of the timeline's tempo grid, the one `tempo show` lists (`tempoGrid` through the
+  daemon's grid loader), a quarter beat after each hit (the last beat takes the length of the one before), bar starts
+  labelled `bar N` and the rest `beat N` like the `bar:N`/`beat:N` time references, up to 60 tiles thinned evenly with
+  bar starts kept first; tile tag `beat`. No tempo, a LOW-confidence or unmeasured grid, or a `--file` writes no sheet
+  and says why in `warnings`. `--crop-at x,y[,size]` (`cropAt` on the wire) crops every tile of the run but the safe
+  sheet's around a point of the frame (size = share of the width, default 0.25, frame proportions kept) from the same
+  captures, inside the picture letterbox bars leave; with `--clip id` the point is in that clip's own picture and
+  follows its keyed position and scale, through the format's cover crop (ADR 0043 slice 4 as built). Each tile lists
+  its `crop` in film pixels. `cropAt.clip` with a file, or naming no video clip, is InvalidOperation.
+- Review mode: the proposal bar lists the `requirements.json` values a proposal sets, clears or waives
+  (`Requirements: film.maxSeconds 30 → 20`), in English and Spanish. A `review` of a proposal whose requirements hold no
+  valid file now says so in `warnings` and judges the film without them, instead of dropping them silently.
+- The clip inspector's Colour section now shows for generated clips and nested timeline clips on video tracks, not only
+  media clips (slice 9 of #384, ADR 0031, epic #451; no wire change). Same sliders, LUT and Reset, one `ui` `clip.set`
+  per release; the LOG note stays on footage, and shots have no colour section. The reset tooltip no longer says "footage".
+- The app finishes voiceover, slice VA of #470 (ADR 0034 decision 22, epic #451; protocol 163): "Generate voiceover…" on a
+  voiceover script now opens a dialog with progress per line and a Stop button, then a report of every line (generated,
+  already there, copied; heard as written, maybe the transcription, misread, with what the script said against what was
+  heard) and the form of "Place voiceover…", which asks where to start (seconds, a marker, `beat:N`, `bar:N`, resolved by
+  the daemon's TimeRef rules) and places the phrases on the main timeline in one transaction, with "replace" for takes
+  already placed. "Place voiceover…" is also in the script's own menu. The misread check runs only when transcription is
+  already on the machine, or after the person agrees to its download in the dialog; never a silent download. Stop is the
+  new internal `voiceover.cancel`: it stops the generations of its own connection only (never an agent's run in
+  front of it; a call still waiting its turn ends at once), the line being said is abandoned, the takes saved before it
+  are kept and imported, and the stopped call fails with `SpeechFailed` (`data.canceled`); it answers `canceled: false`
+  when it had nothing to stop and the dialog gives the button back. The dialog keeps keys and focus inside it, moves to
+  the project window when its detached panel closes, and the progress bar is one fraction of the whole run. `FRAMESHELL_SPEECH_STAND_IN=slow` adds
+  `stand-in-slow` for the e2e. The native "ready" and error boxes are gone (the dialog says it); the cost box stays.
+- `frameshell voiceover generate --yes --confirmation <token>` binds a CLI confirmation to the ask the person saw: the
+  `ConfirmationRequired` refusal prints the confirming command with its token and the `--lines`, `--provider`,
+  `--voice` and `--no-verify` it was made with, and a script or price that changed
+  meanwhile fails with `ConfirmationStale` instead of charging more than was confirmed.
+- Requirements of `review` stay in frame and go through the config journal, sixth slice of #457 (epic #451; protocol
+  162; `review.require`, `review.waive`, `clip.staysInFrame`, config document `requirements`): a clip requirement
+  `staysInFrame` (`true` or `{ margin }`, a share of the frame kept clear on every side) fails when what the clip draws
+  leaves the frame of the format reviewed: a generated clip's alpha (the boxes the safe-zone check already reads) or a
+  footage clip's faces (a cached `people scan`), after the format's cover crop and inside letterbox bars; touching an
+  edge is leaving it. The check names the `format` and the `spans` (timeline seconds) that leave, and is skipped with
+  why for a clip with nothing placed (a render with no alpha, no face scan). `requirements.json` is a config document
+  of ADR 0036 (keys `requirements:film.<field>`, `captions.minSize`, `fail`, `clip:<id>.<field>`,
+  `waiver:<check>[:<clip>]`): `frameshell review require <path> <value> [--clip id]` and `frameshell review waive
+  <check> <reason> [--clip id]` (`--remove`) change it one value at a time in the caller's transaction, so `history`
+  lists them, `revert` and `tx abort` undo them and review mode holds them in the proposal; a `file.write` of the file
+  and a hand edit are journaled like `style.json`'s, and `review` with `view: proposal` judges the proposal's version.
+  Older files load unchanged; waivers stay in `requirements.json` keyed by clip id (no field on timeline clips). Not
+  yet: requirement lines in the app's proposal bar, `staysInFrame` for clips inside a nested timeline.
+
+- Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 161): a scene at another frame rate than the project is
+  time-remapped with seconds kept (project frame k shows scene frame `start + k × scene fps / project fps` through a
+  subframe; no ratio is refused) instead of refused. Files a `.blend` loads from outside the project (owner decision
+  2026-11-16) render, their content hashes are a key input with no path in it (`outside.json` beside `deps.json`), and
+  every render of such a clip warns, naming them. Blender is found without `binaries.blender` where its installers put it
+  (macOS `/Applications/Blender.app`, Windows `Program Files\Blender Foundation\Blender <x.y>` newest supported, Linux
+  PATH and `/snap/bin`; PATH on every platform), by generic `UserInstall.standardPaths` data read by one lookup in
+  `BinaryManager.locate`; an override still wins. `doctor` reports such an install as source `system` with `found`
+  (`standard` or `path`). Not run with a real Blender: the opt-in real test now also checks the remap at a subframe, the
+  outside-file warning and that a scripted driver of a linked library outside the project stays off under `-Y`.
+
+- Loudness over the part of a file a clip plays, `duck --level style` and the level set again, slice MU2 of #485 (ADR
+  0037, epic #451; protocol 160). `LoudnessStore` reads the seconds a clip plays (`in` to `out`, on whole frames) and
+  caches them beside the whole-file reading in `.frameshell/loudness/` (`<hash>-l1-r<start ms>-<end ms>.json`, same `gc`
+  kind; a part that spans the file or is under one 400 ms block is the whole-file reading, so nothing is measured
+  twice). `music candidates --end` reads each file over the part its fit leaves playing, and `duck --level` reads each
+  music clip, and each voice clip (a file cut into over 8 pieces is read whole), over its played part. `duck --level
+  style` (`track.duck` `level: "style"`) takes the project's `sound.musicUnderVoice`; the number is what is kept in
+  `audio.duck.level` and reported with `level.source`. `music fit`, `music shape` and `music grid` set the clip's static
+  gain again from the stored `level` before they write the keys and run the duck again (a clip with gain keys of its own
+  keeps its gain, with a warning).
+
+- Documented limit of the export's loudness loop: it adds at most +3 dB (`MAX_TRIM_DB`), and when that cap binds the file
+  ends under the target by more than 0.15 LU (a transient-heavy mix that is quiet before the limiter, at AAC 128 kbps,
+  ceiling -4.9 dBTP). Kept on purpose (owner decision 2026-11-16); see SPEC §3.5 step 4 and ADR 0038 "Not done".
+
+- Subject mattes follow colour edges and 4K plates get a full-size matte, slice MX1 of #461 (ADR 0032, epic #451;
+  protocol 159): the guided filter fits the coarse alpha against the frame's three colour channels (He et al.'s colour
+  guided filter), so an edge between two colours of the same brightness is found (error at a same-luma disc's edge 0.045
+  against 0.145 with the gray guide). A source whose short side is above 1080 px also gets `<key>.full.mp4`, refined on
+  the asset's own frames on the proxy's frame grid at its size (short side at most 2160), which `render`, `frame` and
+  `cover` draw through; the preview keeps the proxy-size matte. `matte.prepare` returns it as `full` and
+  `frameshell matte` prints it. `MATTE_VERSION` 2: older mattes are made again. Measured on an Apple M3 under heavy load:
+  refinement 47 ms per 540p frame (gray guide 21 ms), the full-size pass 355 ms per 4K frame, about 2 minutes per minute
+  of video for the matte and about 11 more for a 4K source's full-size one.
+
+- More sound checks in `review`, slice RA1 of #457 (epic #451; protocol 158; `metrics.sound.music`, `edges`, `harsh`,
+  craft checks `masking`, `edge-click`, `harsh`). On a timeline, still never mixed: `music` is the voice against the music
+  alone per 0.5 s window where the voice speaks, judged by the style guide's `sound.musicUnderVoice` (`style.json`, 12 dB
+  by default) less 3 dB, never under 0; the stretches under it are `masking` (the existing `voice-bed` keeps judging the
+  voice against everything at 6 dB). `edges` lists clips starting with no fade inside sound their asset already plays
+  before the in point, at -45 dBFS or more and 19 dB or more over the rest of the film's sound in the 10 ms before
+  (`edge-click`; earshot's 9x click ratio); a clip played from its asset's start, picking up the same sound or a
+  dissolve is no cut-in. On a `--file`, `harsh` measures the 2 to 6 kHz band of the decoded mix per 400 ms against that
+  band in the loudest 400 ms (at least 20 dB under the whole mix there), and the stretches over 6 dB above it are `harsh`
+  (earshot's rule, with the mix's loudest moment standing in for the music's). Thresholds are data in
+  `review/thresholds.ts`; every finding is a warning unless `requirements.json` lists its check in `fail`. Not yet:
+  masking per 1/3-octave band (the envelopes are broadband), a click in an exported file placed on a clip edge, and the
+  ADR 0038 decision 5 lint rules over the whole timeline.
+- Code templates, slice TP1 of #466 (ADR 0033, epic #451): `frameshell hyperframes new <name> --template code-typing`,
+  `code-diff` or `code-morph` scaffold a code window. `code-typing` types a snippet key by key with the uneven rhythm of
+  `typing-field`, a caret that blinks at rest, an indent that arrives with its Enter, waits after the lines named in
+  `pauses` and a timing guard that types faster in a clip too short for it. `code-diff` shows two snippets as a unified
+  diff: unchanged and removed lines come in, then each change is lit in turn (a removed line on a red wash with a strike
+  through it, an added line sliding in on a green one). `code-morph` turns one snippet into another: tokens both have
+  travel to their new place, the rest fade out or rise in. Props `code` / `before` / `after`, `language` (`js`,
+  `python`, `shell`, `json`, `plain`), `highlight`, `title`, `numbers`, `card`, `accent`, `size`, `bg`, `backdrop`, plus
+  timing props per template; the type shrinks until the longest line and every row fit in each format. A small built-in
+  tokenizer colours keywords, strings, numbers, comments and calls (no highlighter dependency, no network); the face is
+  the system monospace and the window colour and accent come from `style.json` (`colors.card`, `colors.accent`). The
+  character width is measured on the rendering machine. The skill lists the three templates; the opt-in real-render test
+  covers layout in the four formats, cold-versus-reseek frames, the typed text, the pauses, the diff turns and the morph
+  end state.
+- Wheel, roll, tab and freeze templates, slice TP2 of #466 (ADR 0033, epic #451): `slot-roll` spins a reel of words or
+  numbers (`items`, one `|`-separated prop) past a highlighted band and lands on `target` (added to the reel when it is
+  not in it; empty lands on the last), which flashes in the accent colour and pulses. `number-wheel` is an odometer:
+  every digit is a column that rolls to its final digit (left columns first, the two lowest turn twice), ends on exactly
+  the text `counter` would print (columns and separators left of the first digit of a shorter end fade out as they land)
+  and holds; the slots are as wide as the widest digit, measured on the rendering machine
+  (`1ch` is only the 0), and one line high, so nothing shifts while it rolls; count time 1.4 s by default (0.6 to 3).
+  `tab-indicator` is a row of tabs with a pill or an underline that stretches between them: the edge it moves toward
+  leaves first and the other follows, both springs retargeted at each time of `plan` (`2@1.2|4@2.4`: tab number or
+  name). `freeze-cut` is the owner's 2026-11-16 decision: a template over a still image prop, not a freeze-frame
+  operation on the timeline; the still drifts and sways, then on the beat it stops dead with a punch-in toward a focus
+  point, a white flash and an optional label (make the still with an exported frame). Typed props with bounds and the
+  per-format layout as in the other templates; every one pulls a late beat in so it lands before the 0.3 s exit. The
+  `laps` of `slot-roll` is rounded to whole turns and its reel never has fewer than three items; the
+  freeze sway stays inside the room the punch scale gains. The number format of `counter` moved to the kit (`NUMBER_FORMAT`, `GROUPING_VARIABLE`) so `number-wheel` shares it. The
+  skill lists the four; the opt-in real-render test covers layout, cold-versus-reseek frames and alpha in the four
+  formats, the digits shown at the start, mid-roll and the end, the band after a roll, the indicator edges before, in
+  and after a move, and the flash, punch-in and hold of the freeze.
+- Style suggestions from a reference analysis, slice of #471 (ADR 0028 slice 4, epic #451; protocol 157): `analyze`
+  returns `suggestions` (also in `analysis.json`), values for `style.json` read from the film, each with `path`,
+  `value`, `why`, `from` (the result fields) and its own label: `colors.bg` (the palette's largest colour, a quarter of
+  the picture or more), `colors.ink` (most contrast against it, 4.5:1 or more), `colors.accent` (most saturated colour
+  that is not grey), `motion.personality` (the personality whose standard move is nearest the median eased move, else
+  energetic or calm from the pace of the cutting, a DECISION) and `sound.musicUnderVoice` (how far the voice sits over
+  the music). Never applied by `analyze`. `style.apply` takes `analysis` (and `paths`) instead of `name`, CLI
+  `frameshell style apply --from-analysis <analysis> [--only <path,...>]`: the picked suggestions merge value by value
+  as one journaled change that `revert` undoes, held by review mode. `labels` gains `suggestions` (DECISION); `analyze`
+  prints them. The analysis name pattern is one constant (`ANALYSIS_NAME_PATTERN`).
+- `clip compare` and the Blender playbook, slice 3 of #482 (ADR 0035, epic #451): `frameshell clip compare <clip> --look
+  [name:]key=value[,...] [--at s] [--out file.png] [--tile-width px] [--format id]` (daemon method `clip.compare`, MCP
+  `clip_compare`) renders one frame of a generated clip under up to 11 variants next to the clip as it is, as one
+  labelled PNG, through the export `frame` path and the sheet writer `grade.compare` and `review` share. A variant is
+  props merged over the clip's own and/or another `source`, so one `.blend` with a scene per lighting setup is compared
+  with `--look dusk:scene=Dusk`; each tile is drawn from its own render (a Blender clip: its draft, never a final) and
+  the command prints the `clip set --props` that keeps it. Changes nothing. The `blender` skill grows from a stub into a
+  playbook: which route (Blender, three.js, imported media), preparing a `.blend` (fps, length, camera, alpha,
+  files inside the project, no add-ons or scripts), a look recipe, looks compared on one frame, draft to final with the
+  confirmation, and a failure-and-fix table of the plugin's messages. Protocol 156.
+- `logo-3d` template, slice 3 of #473 (ADR 0042, epic #451): `frameshell hyperframes new mark --template logo-3d
+  [--component <svg of brand show>]` extrudes an SVG logo with three.js `SVGLoader` and `ExtrudeGeometry` in the
+  `product-shot` studio, revealed by a rise (depth grows out of the flat logo), a swing or a drop, with a glint, a slow
+  turn, a soft shadow on a wall behind it and an optional headline. Props `logo` (an SVG inside the composition; empty
+  shows a built-in mark), `depth`, `bevel`, `colors` (one colour or the SVG's own fills), `color`, `finish`, `reveal`,
+  `spin`, `title`, `size`, `shadows`, `backdrop`. Filled paths only (holes and even-odd fills work); a missing file, a
+  raster or an SVG with nothing filled fails the render naming the file. The three.js bundle gains `SVGLoader`
+  (`pnpm gen:three`, +29 KB), and the studio's finish presets and asset loader move into `three-kit.ts` for both 3D
+  templates. The 3D playbook gains an "A 3D logo" section. `title-3d` is not built (blocked on the Archivo licence). The
+  opt-in real-render test checks both fills, alpha, `clip.verify` at tolerance 0 and the three failure messages.
+- Colour grade on generated clips and nested timeline clips, slice 8 of #384 (ADR 0031, epic #451; protocol 153):
+  `clip set --grade-*` (`clip.set` `grade`, MCP `clip_set`) now takes adapter clips and nested timeline clips on video
+  tracks too. A render is graded first in its part, before its alpha, as footage is (export `lut3d` right after it is
+  read; the preview grades the decoded colour before the alpha plane masks it). A nested timeline clip's grade follows
+  the own grade of every picture inside it, at any depth: flattening records the hosts' grades on each picture
+  (`hostGrades`) and export and the preview fold the chain into one table (`gradeChainOf`, `gradeChainTable`), so it
+  comes before that picture's vignette and grain; sound and shots are untouched. Plans of timelines without nested
+  grades are unchanged. Tests: chain tables, flattening two levels deep, two goldens, the managed ffmpeg on a nested
+  still and a VP9 alpha render, and the preview's tables against the ones export writes.
+- Motion film playbook refreshed, slice of #453 (epic #451; no protocol change): `reference/motion-films.md` and its router
+  row in `SKILL.md` now cover what landed since the first version: the brief written as `requirements.json` at the
+  storyboard gate and `review` exiting 1 on it at the critique gate, `analyze` audio fields (`pace`, `pitch`,
+  `voiceOverMusic`, `effects`, `sections`, `--no-speech`) as measured targets, a `grade analyze` / `grade compare` pass on
+  supplied footage, `beat:N` / `bar:N` in every time argument, `voiceover place --tempo`, `music shape --drop --build`,
+  the `beatsProblem` codes of generated clips that read beats and markers, and `batch` typed slots with `--review`. Links
+  go to the reference pages instead of repeating them.
+- Music fit follow-ups of #485 (ADR 0037 "Follow-ups as built", epic #451; protocol 152): `music shape --ending <time>
+  --end-on-bar` (MCP `music_shape` `endOnBar`; result `endsAt`) stretches or shrinks the closing fade so it ends on the
+  bar start of the grid nearest to `--ending + --fade`. `music grid` carries the hits stored by `music shape` with the
+  shots that moved (result `shape`: the shaping, keys and builds, runs again in the same transaction before the duck;
+  `--skip shape` leaves them). `music grid --trim head` (`trim: "head"`) moves a cut as a roll edit (tail before it and
+  head after it trimmed to the beat, nothing ripples), and `--tracks all` (default; `video` keeps the old behaviour)
+  also reads program-track shot changes (`kind: "program"`, always rolled, since the group clock keeps running) and
+  entries of clips alone on upper video tracks (`kind: "entry"`, moved whole). Each cut of the result gains `kind`, and
+  `out` is null for an entry.
+- Per-row voiceover and CSV rows for batch, a slice of #477 (ADR 0040 and 0034 slice 4, epic #451; protocol 154): a batch
+  slot written `voiceover` takes a voiceover script path per row (or `{ script, lines, at, tempo, start, gap, track,
+  replace }`) and places the script's existing takes as phrase clips on the row's variant, in memory, with the planner
+  and writer of `voiceover.place` (same spacing, anchors, tempo, fades, overlap rules), so a row per language gets its
+  own voice without a second placement path. Batch still never generates: a line with no take fails the row naming it.
+  A subtitle track that follows the voice track needs every take transcribed, and a voice that runs past the template
+  adds a warning with the new length to the entry. The rows may be a CSV file next to the batch file (`"csv":
+  "launch.csv"` instead of `rows`): header `id` and slot names (`price:number` types a column; otherwise the type of the
+  template's value), comma, `;` or tab, quoted cells, an empty cell leaves the slot to the template, and every wrong cell
+  is reported with its line and column. Tests: `batch-csv`, `batch-plan`, and a daemon test with the stand-in voice
+  that places, renders and refuses rows. Skill `batch.md`, `docs/mcp.md` and `batch.json` updated.
+- Blender finals, slice 2 of #482 (ADR 0035 as amended by ADR 0041 decision 11, epic #451; protocol 155): every `blender`
+  clip keeps two renders. The draft (EEVEE, or Workbench) renders in the background for the preview and draft exports.
+  The final (Cycles: 80 samples, adaptive threshold 0.02, OpenImageDenoise, fixed seed, 6 bounces, no caustics,
+  persistent data, the first GPU backend Blender finds) is rendered only when a `render` with `quality: "final"` or no
+  quality needs it, and the export waits for it. `clip.renders` shows it as `final` with `onDemand: true`, `waiting`
+  until then; Chat about this does not hold its frame for it. `render
+  --quality draft` adds a warning per clip exported from its draft. When the missing finals are estimated over 5 minutes
+  in all, `render` fails with `ConfirmationRequired` (`data.finals` lists each clip's estimate, `data.seconds` the total)
+  and queues nothing, until it is called again with `yes: true` (CLI `render --yes`, MCP `render` `yes`). `batch.render`
+  asks the same over the finals of every chosen row before the first row queues (`yes`, CLI `batch --yes`; entries of
+  `data.finals` name their `row`). Estimates are frames x megapixels x the per-frame rate that `.blend`'s last final
+  took on this machine, its first frame (start-up, kernel compile) left out (`.frameshell/blender/finals.json`), else
+  the project's last, else 5 s. `frame` and `review` use a cached final and otherwise the draft, with a warning;
+  they never start a final. Plugin API (additive, `apiVersion` stays 1): `ClipAdapter.finals` with `estimate`, and
+  `RenderContext.tier`; a final's key adds `final: true`, so draft keys are unchanged. Tests use the stand-in Blender and
+  a `final-card` fixture adapter; the opt-in real test renders a Cycles final.
+
 - Per-phrase tempo for voiceover, slice 5 of #470 (ADR 0034 decision 21, epic #451; protocol 151): `voiceover place
   --tempo hook-1.2=1.1,fix-1=0.9` (MCP `voiceover_place` `tempo`; keys as in `--at`) plays single phrases at 0.8 to 1.25
   times their speed as the phrase clip's `speed`, pitch kept in the preview (WSOLA) and the export (`atempo`) by the #499
@@ -1072,6 +1431,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
+  from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
+  so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.
+  Files under an hour are unchanged.
+
+- `review` measures motion on the scale of `analyze`, slice RR of #457 (epic #451, #471; owner decision 2026-11-17;
+  protocol 166): a `--file` is read on every frame with `analyze`'s reader (grey frames 64 px on the long side) instead
+  of up to 15 samples a second at 320 px, and its shots are found the way `analyze` finds them (ffmpeg scene scores at
+  0.3). A timeline stays sampled through `frame` (at most 90 samples, now 64 px too) and every threshold applies per
+  sample interval; `metrics.picture.sampled` says so. Still pictures, visual events and bursts use `analyze/rhythm.ts`
+  only (`STILL_LEVEL`, `bigChanges`, `stillRuns`, `bursts`); review's own `STILL_ENERGY`, `EVENT_FLOOR` and
+  `EVENT_MEDIAN_FACTOR` are gone. New `metrics.rhythm` (`label`, `shotLengthCv`, `stillShare`, `bursts`): on a file
+  MEASURED and the numbers `analyze` reports for it, on a timeline ESTIMATED from its samples and clip cuts; the CLI
+  prints it on one line. **Verdicts shift:** a picture is still under 0.5 grey levels of change (was 0.35, on a different
+  picture size), so slow drifts and noisy holds now count as still; a hold lasts to the end of its last frame (`n`
+  frames = `n / fps`, one frame longer than before), so `static` warnings, `film.maxStatic`, `clip.keepsMoving` and a
+  waiver's `to` read up to a frame longer, and a hold of exactly 3 s at 30 fps is now 3 s, not 2.967; a file's holds
+  shorter than 1/15 s and changes between two old samples are now seen; visual events are big changes (4 times the
+  median within 0.5 s and at least 1 level, 15 % of the grey range, or a file's scene cut) instead of peaks over 2.5 times the
+  film's median, so `events`, `largestGap` and the sync of a file change; near-blank (`blank`, `frame-0`) reads the
+  64 px picture, where thin detail on a flat frame weighs less. Every motion reading (`analyze`'s picture,
+  `analyze.diff`'s activity, a reviewed file and a reviewed timeline's samples) now takes one grey, the rounded Rec. 709
+  luma of RGB frames (`greyOf`), instead of ffmpeg's Y plane for `analyze.diff` and `review`: a change of colour alone
+  (a hue turn, a grade ramp) now moves the picture there too, so their still stretches shrink and their alignment can
+  shift on coloured footage. A file over an hour is measured on its first hour, with a warning, and its gap and shots
+  stop there. The MCP server's instructions list the current sheets (with `beats` and `cropAt`) and the rhythm metrics.
+- The preview draws a person lifted in front of a word from the frame the plate track already decoded, slice MX2 of
+  #461 (ADR 0032, epic #451): a subject span that shows the same source frame of the same proxy as a span of the plate
+  decodes only its matte, so a word behind the head runs one decoder fewer per plate layer (2 instead of 3 for one
+  clip, 4 instead of 6 for a dissolve or wipe of the plate under the word). Grade, shape, matte and opacity stay per
+  layer, as export applies them. Any span that does not line up keeps its own decoder. A preview layer now closes a
+  decoder no clip ahead of the playhead needs, instead of keeping it open and idle.
+- A tool's install folders outside its supported range are a fallback, not the answer (`findUserInstall`, Blender on
+  Windows): an old `Blender 3.6` folder in `Program Files` no longer hides a supported `blender` on PATH; the later
+  rules look first, and only when they find nothing is the newest folder outside the range taken, so `doctor` still says
+  "out of range" and never "not installed".
+- Raw frame reads (`readRawFrames`: subject mattes, face detection, people scans, `review`, `analyze`) copy each pipe
+  chunk once into its frame instead of joining chunks as they come, which copied a 4K RGB frame hundreds of times.
+- The `blender` clip's `quality` prop is gone (owner decision on #501): props are `scene` and `camera`, and a `quality`
+  prop is refused with how to choose draft or final at export.
+
 - `brand import-figma` sanitises the folder in a worker thread (#467): a synthetic 13 MB frame took 4.7 s on a loaded
   host, long enough to stall every other daemon call.
 - Internal: the daemon method registry is split into one module per area under `packages/protocol/src/methods/`
@@ -1083,6 +1483,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back, before the cut to length, the loop fades and the encode. `loudnorm` alone let sharp synthesized transients
   through at -0.8 dBTP after the AAC encode; the half dB of headroom covers what the encoder adds. Only the final mux
   step changes: golden plans differ in that filter chain, nothing on the wire.
+- Export loudness after the true-peak limiter lands within 0.15 LU of the target, and the limiter's ceiling follows the
+  codec (last slice of #463, ADR 0038, epic #451; no wire change). The limiter of #519 took up to 0.6 LU (more on
+  hostile transients) off the integrated loudness: when it can engage (the true peak plus the gain to the target, which
+  is what `loudnorm` applies in linear mode, not its `target_offset`, reaches the ceiling) the export now measures the
+  limited mix again with `loudnorm` in analysis mode, adds the missing
+  difference as `volume` before the limiter (once two measurements show how much of a dB the limiter lets through,
+  the step divides by that), and measures once more, at most three measurements and ±3 dB, keeping the
+  closest; a mix the limiter cannot touch costs nothing extra. The ceiling is no longer -1.5 dBFS for every codec but
+  `TRUE_PEAK_CEILINGS` (`export/true-peak.ts`): -1.2 dBTP for PCM, -1.8 for Opus from 64 kbps, -2.3 for AAC from
+  160 kbps, -4.9 below, each from the overshoot ffmpeg's encoders add to hot transients (the data and its source are in
+  the file). `RenderPlan.audio.truePeak` carries it, `muxStep` takes the trim, `limitedAnalysis` is the new step;
+  golden plans differ in the limiter's `limit` and the plan's `audio.truePeak`. Real-ffmpeg tests export a transient
+  fixture (and a quiet one, at -33 LUFS, but for AAC 128 kbps) as AAC 320 and 128 kbps, Opus and PCM: each ends under -1 dBTP and within
+  0.15 LU of -17. The re-measures report progress inside the mux step.
+- Docs of the sound features, last slice of #463 (ADR 0038 "as built" for the slices after the first, SPEC decision 43,
+  GLOSSARY terms music take, section and true-peak ceiling, CLAUDE.md rows): #463 is done but for the CC0 set, the
+  audition page and the energetic music preset, which the owner postponed.
 - Preview playback tests count two kinds of dropped frames (#567, ADR 0001 amendment): the engine reports, per play,
   the frames it passed over that a display tick wanted but were not decoded, or that followed a tick of its own longer
   than a frame (starved), and those no tick wanted while it was idle (cadence: the host gave it no tick in time), with
@@ -1150,6 +1567,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Small fixes, slice SF of #471 (epic #451, parts of #470 and #482; no wire change): a `voiceover.generate` call now
+  stops when its connection closes (Ctrl+C in the CLI, a dropped MCP connection, the app quitting), through the same
+  stop as `voiceover.cancel` (takes finished before stay written, other clients' calls untouched, a waiting client no
+  longer sits behind a run nobody listens to; ADR 0034 as built; the skill no longer says a dropped connection keeps
+  the run going). The confirming command a paid refusal prints quotes its words for the shell (single quotes, `'\''`
+  in sh and `''` in PowerShell on Windows) and is left out for a word with a line break, instead of double quotes
+  that expanded `$` and a backtick (on Windows also a leading `@`, a PowerShell splat, is quoted and a `"` leaves the
+  command out). The `voiceover.generate` description now says a closed connection stops the call. `docs/binaries.md` says a Blender folder outside the supported range is taken on
+  Windows only when nothing else is found, `blender.exe` on PATH included, as the code does.
+  `InputsContext.signal` of the plugin API is typed optional, as its doc already said (`PLUGIN_API_VERSION` stays
+  `"1"`).
+- Skill: reference handling by type, closes #471. `reference-video.md` opens with "What kind of reference": a frame
+  (what to take and what not, ESTIMATED by eye, `grade analyze` on a still for the levels), a video (the existing
+  steps) or a library (`brand capture` / `brand import-figma`, `style show`, `style set`, then one or two videos).
+  `motion-films.md` and `reels.md` link to it.
+- `clip compare --look a:scene=2024` (#482) keeps `scene` and `camera` values as text, so a scene named `2024` or a
+  camera named `001` is found; `null` still drops the key. The `clip.compare` description now names `ClipRenderFailed`
+  for a variant whose render fails (it said InvalidOperation) and says variant renders stay cached only until `gc`.
+- The Blender playbook quotes `doctor`'s real lines for a Blender that is missing or out of range.
 - Test runs no longer fill the system temp dir: vitest gives each test file its own `TMPDIR` (`fsv-*`, removed after the
   file and swept again at the end of the run, stale ones after a day) and warns about temp dirs that still escaped it;
   Playwright e2e runs under one temp root removed at teardown. Before, every run left hundreds of `frameshell-*` and

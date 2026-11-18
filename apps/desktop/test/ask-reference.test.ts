@@ -234,4 +234,14 @@ describe("agent input", () => {
     expect(framePending([{ ...draft("ready"), final: final("failed") }])).toBe(true);
     expect(framePending([{ ...draft("ready"), final: final("failed", true) }])).toBe(false);
   });
+
+  it("never holds the frame for a plugin's own final, which only a final export renders (ADR 0035)", () => {
+    const unrendered = { key: "k", file: null, hasAlpha: null, width: null, height: null, duration: null, job: null, progress: 0, error: null };
+    const draft = (state: ClipRenderInfo["state"]): ClipRenderInfo => ({ clip: "c_0100", track: "v2", type: "blender", source: "scene.blend", ...unrendered, state });
+    const final = (state: ClipFinalRenderInfo["state"]): ClipFinalRenderInfo => ({ ...unrendered, state, refused: false, onDemand: true });
+    expect(framePending([{ ...draft("ready"), final: final("waiting") }])).toBe(false);
+    expect(framePending([{ ...draft("ready"), final: final("rendering") }])).toBe(false);
+    expect(framePending([{ ...draft("ready"), final: final("failed") }])).toBe(false);
+    expect(framePending([{ ...draft("rendering"), final: final("waiting") }])).toBe(true);
+  });
 });

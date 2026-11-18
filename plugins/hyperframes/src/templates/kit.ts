@@ -6,6 +6,7 @@ export type TemplateVariable =
   | { id: string; type: "string"; label: string; default: string; maxLength?: number }
   | { id: string; type: "number"; label: string; default: number; min: number; max: number; step?: number; unit?: string }
   | { id: string; type: "color"; label: string; default: string }
+  | { id: string; type: "boolean"; label: string; default: boolean }
   | { id: string; type: "image"; label: string; default: string; description?: string }
   | { id: string; type: "enum"; label: string; default: string; options: { value: string; label: string }[] };
 
@@ -160,6 +161,40 @@ export const FLAT_HELPERS = String.raw`
       // M.write with every scale made flat.
       function put(element, pose) {
         M.write(element, { x: pose.x, y: pose.y, rotate: pose.rotate, scale: flat(pose.scale), scaleX: flat(pose.scaleX), scaleY: flat(pose.scaleY), opacity: pose.opacity });
+      }`;
+
+/**
+ * Page-script helpers of the seeded templates (`emphasis-marker`, `scene-background`, `light-leak`): `seedOf(text)`
+ * turns a `seed` prop into an integer 0..9972 (a small string hash), and `jitter(seed, k)` is a repeatable value
+ * -1..1 for the k-th choice of that seed. Same seed and k, same value, so every seek paints the same frame. Written
+ * on one line each, so a composition stays under the lint's 300-line warning.
+ */
+export const SEED_HELPERS = String.raw`
+      function seedOf(text) { var s = 0; String(text).split("").forEach(function (ch) { s = (s * 31 + ch.charCodeAt(0)) % 9973; }); return s; }
+      function jitter(seed, k) { var x = Math.imul(seed * 977 + k * 7919 + 1, 2654435761) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return ((x >>> 0) % 2001) / 1000 - 1; }`;
+
+/** The `grouping` prop of a template that prints a number: where the thousands separator goes. Pairs with {@link NUMBER_FORMAT}. */
+export const GROUPING_VARIABLE: TemplateVariable = {
+  id: "grouping",
+  type: "enum",
+  label: "Thousands separator",
+  default: "comma",
+  options: [
+    { value: "comma", label: "Comma: 12,840" },
+    { value: "space", label: "Space: 12 840" },
+    { value: "none", label: "None: 12840" },
+  ],
+};
+
+/** Page-script `format(value)`: one text for one value (fixed `P.decimals`, a `P.grouping` separator every three digits). */
+export const NUMBER_FORMAT = String.raw`
+      // Same text for the same value everywhere: fixed decimals, then a separator every three digits.
+      var SEP = P.grouping === "comma" ? "," : P.grouping === "space" ? String.fromCharCode(160) : "";
+      function format(value) {
+        var fixed = Math.abs(value).toFixed(P.decimals).split(".");
+        var whole = SEP ? fixed[0].replace(/\B(?=(\d{3})+(?!\d))/g, SEP) : fixed[0];
+        var negative = value < 0 && Number(fixed.join(".")) !== 0;
+        return (negative ? "-" : "") + whole + (fixed[1] ? "." + fixed[1] : "");
       }`;
 
 /** The two props of a template that can sit on its own background: a colour and how solid it is (0 = transparent over footage). */

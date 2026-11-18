@@ -27,6 +27,7 @@ import {
   type Timeline,
   type Transcript,
   formatOf,
+  primaryFormatId,
   formatTimeline,
   subjectOf,
   programGroup,
@@ -36,7 +37,7 @@ import {
   showsPicture,
   subtitleTracks,
 } from "@frameshell/schema";
-import type { ClipEnsureOptions } from "../clips/renderer.js";
+import type { ClipEnsureOptions, FinalRenderState } from "../clips/renderer.js";
 import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
@@ -55,6 +56,8 @@ import {
   loudnessAnalysis,
   mixStep,
   muxStep,
+  limitedAnalysis,
+  LIMITED_STATS_FILE,
   paletteStep,
   parseLoudnessStats,
 } from "./compiler.js";
@@ -70,6 +73,7 @@ import {
 import { bundledFontMetrics } from "./font-metrics.js";
 import { writeFonts } from "./fonts.js";
 import { gradeFiles } from "./grade.js";
+import { LOUDNESS_PASSES, limiterEngages, settleTrim } from "./true-peak.js";
 import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying } from "../fs-util.js";
@@ -93,6 +97,8 @@ export interface ExecuteRenderOptions {
 
 /** Share of overall progress spent encoding video segments; the rest is the mux. */
 const VIDEO_SHARE = 0.85;
+/** Share of the mux step the loudness re-measures (up to {@link LOUDNESS_PASSES} extra passes) take when they run. */
+const REMEASURE_SHARE = 0.5;
 
 /**
  * Run a compiled plan with ffmpeg: video segments in parallel with the
@@ -142,18 +148,39 @@ export async function executeRender(plan: RenderPlan, options: ExecuteRenderOpti
     await measuring;
     const measured = analysis ? parseLoudnessStats(await readFile(join(workDir, LOUDNESS_STATS_FILE), "utf8")) : null;
 
-    report({ step: "mux", progress: VIDEO_SHARE });
+    // Progress of a stretch (`from`..`to` of `seconds / duration`) of the mux step's `lo`..`hi` share.
+    const muxProgress = (from: number, to: number, lo: number, hi: number) => (seconds: number) =>
+      report({
+        step: "mux",
+        progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * (lo + (hi - lo) * (from + (to - from) * Math.min(1, seconds / plan.duration))),
+      });
+    // The limiter lowers the loudness a little (SPEC §3.5 step 4): measure it again and add the difference back.
+    let remeasures = 0;
+    const trim =
+      measured && plan.container !== "gif" && limiterEngages(measured, plan.loudness, plan.audio.truePeak)
+        ? await settleTrim(plan.loudness, async (trimDb) => {
+            const pass = remeasures++;
+            await run(
+              limitedAnalysis(plan, measured, trimDb)!.args,
+              muxProgress(pass / LOUDNESS_PASSES, (pass + 1) / LOUDNESS_PASSES, 0, REMEASURE_SHARE),
+            );
+            const limited = parseLoudnessStats(await readFile(join(workDir, LIMITED_STATS_FILE), "utf8"));
+            return limited ? Number(limited.input_i) : null;
+          })
+        : 0;
+
+    // The re-measures ran only when `remeasures` counted: the encode then fills the rest of the mux step.
+    const muxFrom = remeasures > 0 ? REMEASURE_SHARE : 0;
+    report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * muxFrom });
     await mkdir(dirname(output), { recursive: true });
-    const muxProgress = (from: number, to: number) => (seconds: number) =>
-      report({ step: "mux", progress: VIDEO_SHARE + (1 - VIDEO_SHARE) * (from + (to - from) * Math.min(1, seconds / plan.duration)) });
     if (plan.container === "gif") {
       // No sound to mix: the palette over every segment, then the GIF through it (ADR 0039).
-      await run(paletteStep().args, muxProgress(0, 0.4));
-      await run(gifStep(partial).args, muxProgress(0.4, 1));
+      await run(paletteStep().args, muxProgress(0, 0.4, muxFrom, 1));
+      await run(gifStep(partial).args, muxProgress(0.4, 1, muxFrom, 1));
     } else {
-      const mux = muxStep(plan, measured, partial);
+      const mux = muxStep(plan, measured, partial, trim);
       await writeFiles(workDir, mux.files);
-      await run(mux.args, muxProgress(0, 1));
+      await run(mux.args, muxProgress(0, 1, muxFrom, 1));
     }
     await renameRetrying(partial, output);
   } finally {
@@ -176,6 +203,25 @@ export interface RenderRequest {
   formats?: readonly string[] | undefined;
   /** A file meant to repeat (ADR 0039); refused with `cover`. */
   loop?: boolean | undefined;
+  /**
+   * The person agreed to wait for the final renders of generated clips this export makes (ADR 0035): without it
+   * {@link ExportService.render} refuses when they are estimated over {@link FINAL_CONFIRM_SECONDS} in all.
+   */
+  yes?: boolean | undefined;
+}
+
+/** Above this many seconds of missing final renders in all, a final or untiered export waits for a confirmation (ADR 0035 decision 4). */
+export const FINAL_CONFIRM_SECONDS = 5 * 60;
+
+/** A final render an export would make and wait for: the clip, the format it is rendered in, and its estimate. */
+export interface DueFinal {
+  clip: string;
+  type: string;
+  format: string;
+  /** Estimated seconds; null when the plugin could not say. */
+  seconds: number | null;
+  /** Batch row (ADR 0040) whose render makes it; absent for a plain `render`. */
+  row?: string;
 }
 
 /** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
@@ -184,6 +230,8 @@ export interface PlannedRender {
   result: Omit<RenderResult, "job" | "renders"> & { renders: Omit<RenderResult["renders"][number], "job">[] };
   /** Placed assets without verified provenance (ADR 0026), also at the end of `result.warnings`. */
   provenance: string[];
+  /** Final renders of generated clips the jobs would make and wait for (ADR 0035); empty for a draft export. */
+  finals: DueFinal[];
   /** Queue one job per format; synchronous. */
   start(): RenderResult;
 }
@@ -246,6 +294,11 @@ export interface ExportServiceOptions {
      * `tier`: `draft` takes the sharp render of a clip with motion blur, `final` or absent the blurred one (ADR 0041).
      */
     ensure(root: string, timeline: Timeline, options?: ClipEnsureOptions): Promise<ReadonlyMap<string, GeneratedSource>>;
+    /**
+     * Final renders of the clips whose plugin renders finals (ADR 0035), at `size` (absent: the project resolution);
+     * see `ClipRenderer.finals`. Absent: no clip has one.
+     */
+    finals?(root: string, timeline: Timeline, size?: { width: number; height: number }): Promise<FinalRenderState[]>;
   };
   /**
    * Audio effects bakes (ADR 0031): `needs` lists the bakes a flattened timeline plays, `ensure` bakes what is
@@ -301,7 +354,9 @@ export class ExportService {
    * Every format is checked and compiled before any job is queued. Returns at once.
    */
   async render(root: string, params: RenderRequest): Promise<RenderResult> {
-    return (await this.planRender(root, params)).start();
+    const planned = await this.planRender(root, params);
+    if (params.yes !== true) confirmFinals(planned.finals);
+    return planned.start();
   }
 
   /**
@@ -370,6 +425,10 @@ export class ExportService {
         : new Map<string, GeneratedSource>();
       const plan = compileRender({ ...input, generated: standIn, audioFx: standInBakes, mattes: standInMattes });
       const output = params.formats ? withSuffix(base, format.id) : base;
+      // ADR 0035: a draft export says which clips have a better render; a final one lists the finals it would wait for.
+      const finals = layered.length > 0 ? ((await this.#options.clips?.finals?.(root, own, renderSize)) ?? []) : [];
+      const drafts = params.quality === "draft" ? finals.map((final) => draftWarning(final)) : [];
+      const due = params.quality === "draft" ? [] : finals.flatMap((final) => (final.state === "missing" ? [{ clip: final.clip, type: final.type, format: format.id, seconds: final.seconds }] : []));
       // Before formats a configured default preset of another aspect letterboxed the project into its size.
       const overridden =
         params.preset === undefined && config?.export?.defaultPreset !== undefined && format.primary && preset.video.fit === undefined && !sameAspect(preset.video, format)
@@ -379,7 +438,7 @@ export class ExportService {
                 "size, add and render the format of its aspect (`frameshell format add`).",
             ]
           : [];
-      return { format, input, renderSize, plan, output, warnings: [...overridden, ...(cover?.warnings ?? []), ...captions.warnings, ...plan.warnings] };
+      return { format, input, renderSize, plan, output, due, warnings: [...overridden, ...(cover?.warnings ?? []), ...captions.warnings, ...plan.warnings, ...drafts] };
     }));
     const provenance = (await this.#options.provenance?.(root, [...sources.keys()])) ?? [];
     const first = planned[0]!;
@@ -410,6 +469,7 @@ export class ExportService {
     return {
       result,
       provenance,
+      finals: planned.flatMap(({ due }) => due),
       start: () => {
         const queued = planned.map(({ format, input, renderSize, plan, output, warnings }) => {
           const job = this.#options.jobs.enqueue({
@@ -427,6 +487,7 @@ export class ExportService {
                   onProgress: (fraction) => ctx.update({ progress: fraction }),
                   size: renderSize,
                   tier: params.quality,
+                  waitForFinals: true,
                   onWarning: (warning) => ctx.update({ warning }),
                 });
               }
@@ -522,13 +583,16 @@ export class ExportService {
    * flattened and the format's overrides applied, with the project's resolution (the unit of clip offsets) and the format's layout. What
    * `review` measures graphics and faces on. Unknown format ids count as the primary, as in {@link ExportService.resolvedSubtitles}.
    */
-  async resolvedTimeline(root: string, loaded: LoadedTimeline, projectFormat?: string): Promise<{ timeline: Timeline; fps: number; project: Size; layout: FormatLayout }> {
+  async resolvedTimeline(root: string, loaded: LoadedTimeline, projectFormat?: string): Promise<{ timeline: Timeline; fps: number; project: Size; layout: FormatLayout; format: string }> {
     const format = (await this.#formatOf(root, projectFormat, loaded.formats)) ?? undefined;
     const resolved = await this.#resolved(root, loaded.timeline.id, loaded, format);
+    const project = (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION;
     return {
       ...resolved,
-      project: (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION,
+      project,
       layout: { cover: format?.cover ?? false, captionScale: format?.captionScale ?? 1 },
+      // An unknown `projectFormat` is laid out as the primary, so it is named as the primary.
+      format: (format ?? (await this.#formatOf(root, undefined, loaded.formats)))?.id ?? primaryFormatId(project),
     };
   }
 
@@ -805,6 +869,49 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** The warning of a draft export for a clip whose plugin renders finals (ADR 0035 decision 4). */
+function draftWarning(final: FinalRenderState): string {
+  return (
+    `Clip ${final.clip} (${final.type}) is exported from its draft render, not its final one: export with quality final ` +
+    "(or no quality) for the delivery."
+  );
+}
+
+/**
+ * Throws ConfirmationRequired when the final renders an export (or a batch, `what`) would make are estimated over
+ * {@link FINAL_CONFIRM_SECONDS} in all, or a plugin could not estimate one (ADR 0035 decision 4).
+ */
+export function confirmFinals(due: readonly DueFinal[], what = { subject: "This export", draft: "export with quality draft" }): void {
+  if (due.length === 0) return;
+  const known = due.every((final) => final.seconds !== null);
+  const seconds = due.reduce((sum, final) => sum + (final.seconds ?? 0), 0);
+  if (known && seconds <= FINAL_CONFIRM_SECONDS) return;
+  const formats = due.some((other) => other.format !== due[0]!.format);
+  const each = due
+    .map((final) => {
+      const where = [final.row, formats ? final.format : undefined].filter((part) => part !== undefined).join(" ");
+      return `${final.type} clip ${final.clip}${where ? ` [${where}]` : ""} ${final.seconds === null ? "unknown" : about(final.seconds)}`;
+    })
+    .join(", ");
+  const hint =
+    "Ask the person whether to wait; call again with `yes: true` (CLI `--yes`) only once they agreed, or " +
+    `${what.draft} to use the draft renders now (with a warning).`;
+  throw new RpcError(
+    ErrorCode.ConfirmationRequired,
+    `${what.subject} renders the final ${due.length === 1 ? "render" : "renders"} of ${due.length} generated ${due.length === 1 ? "clip" : "clips"} ` +
+      `first, estimated at ${known ? about(seconds) : "an unknown time"} on this machine (${each}): more than ${FINAL_CONFIRM_SECONDS / 60} minutes ` +
+      `needs the person's confirmation. ${hint}`,
+    { finals: due, seconds: known ? seconds : null, limit: FINAL_CONFIRM_SECONDS, hint },
+  );
+}
+
+/** `about 12 min` / `about 5.1 min` / `about 40 s`: tenths rounded up below 10 minutes, so a total over the limit never reads as it. */
+function about(seconds: number): string {
+  if (seconds < 90) return `about ${Math.max(1, Math.round(seconds))} s`;
+  const minutes = seconds / 60;
+  return `about ${minutes < 10 ? Math.ceil(minutes * 10) / 10 : Math.round(minutes)} min`;
 }
 
 /** ffmpeg encoder a preset's codec renders with when no quality tier is asked for. */

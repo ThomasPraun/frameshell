@@ -1,4 +1,4 @@
-import type { DaemonConnection, StyleChange, StyleListResult, StyleShowResult } from "@frameshell/protocol";
+import { ANALYSIS_NAME_PATTERN, type DaemonConnection, type StyleChange, type StyleListResult, type StyleShowResult } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `style` commands (ADR 0028), in `frameshell --help`. */
@@ -12,6 +12,9 @@ export const STYLE_USAGE = `  style show                   The project's style g
   style apply <name> [--replace]
                                Copy a user style (style list) or a motion personality (playful, premium, corporate,
                                energetic, calm) into style.json, value by value; --replace overwrites the file
+  style apply --from-analysis <analysis> [--only <path,...>]
+                               Apply the style suggestions of an analyze run (colours, motion personality, music
+                               under the voice) the person agreed to: all, or only the paths given. One change
   style save <name> [--force]  Save the project's style.json as a user style for other projects (--force overwrites)
   style list                   User styles on this machine and the motion personalities
 `;
@@ -20,7 +23,7 @@ export const STYLE_USAGE = `  style show                   The project's style g
 export const STYLE_FLAGS: Record<string, readonly string[]> = {
   "style show": [],
   "style set": [],
-  "style apply": ["replace"],
+  "style apply": ["replace", "from-analysis", "only"],
   "style save": ["force"],
   "style list": [],
 };
@@ -30,11 +33,20 @@ export type StyleInvocation =
   | { kind: "style.show" }
   | { kind: "style.set"; path: string; value: unknown }
   | { kind: "style.apply"; name: string; replace: boolean }
+  | { kind: "style.apply"; analysis: string; paths?: string[] }
   | { kind: "style.save"; name: string; force: boolean }
   | { kind: "style.list" };
 
-/** Parse `style <sub> …`; null when the shape is wrong. Throws `UsageError` for a value given in several words. */
-export function parseStyle(rest: string[], options: { replace?: boolean | undefined; force?: boolean | undefined }): StyleInvocation | null {
+/** Flag values the `style` commands read. */
+export interface StyleOptions {
+  replace?: boolean | undefined;
+  force?: boolean | undefined;
+  "from-analysis"?: string | undefined;
+  only?: string | undefined;
+}
+
+/** Parse `style <sub> …`; null when the shape is wrong. Throws `UsageError` for a value given in several words or a misplaced flag. */
+export function parseStyle(rest: string[], options: StyleOptions): StyleInvocation | null {
   const [sub, ...args] = rest;
   switch (sub) {
     case "show":
@@ -45,8 +57,19 @@ export function parseStyle(rest: string[], options: { replace?: boolean | undefi
       if (args.length > 2) throw new UsageError("style set takes one path and one value: quote a value with spaces, e.g. style set brand.promise \"Edit video like code.\"");
       return args.length === 2 ? { kind: "style.set", path: args[0]!, value: styleValue(args[1]!) } : null;
     }
-    case "apply":
-      return args.length === 1 ? { kind: "style.apply", name: args[0]!, replace: options.replace === true } : null;
+    case "apply": {
+      const analysis = options["from-analysis"];
+      if (analysis === undefined) {
+        if (options.only !== undefined) throw new UsageError("--only picks suggestions of an analysis: style apply --from-analysis <analysis> --only colors.accent,motion.personality");
+        return args.length === 1 ? { kind: "style.apply", name: args[0]!, replace: options.replace === true } : null;
+      }
+      if (args.length > 0) throw new UsageError("style apply takes a user style name or --from-analysis <analysis>, not both.");
+      if (options.replace) throw new UsageError("--replace copies a whole user style; suggestions of an analysis only merge.");
+      if (!ANALYSIS_NAME_PATTERN.test(analysis)) throw new UsageError(`--from-analysis takes the name of an analyze run (its folder under .frameshell/analysis/); got "${analysis}".`);
+      const paths = options.only?.split(",").map((path) => path.trim()).filter((path) => path !== "");
+      if (options.only !== undefined && paths!.length === 0) throw new UsageError("--only takes style paths separated by commas, e.g. --only colors.accent,motion.personality");
+      return { kind: "style.apply", analysis, ...(paths ? { paths } : {}) };
+    }
     case "save":
       return args.length === 1 ? { kind: "style.save", name: args[0]!, force: options.force === true } : null;
     default:
@@ -76,6 +99,10 @@ export async function executeStyle(conn: DaemonConnection, inv: StyleInvocation,
       return json ? print(result) : changed(`Set ${inv.path}`, result);
     }
     case "style.apply": {
+      if ("analysis" in inv) {
+        const result = await conn.request("style.apply", { cwd, analysis: inv.analysis, ...(inv.paths ? { paths: inv.paths } : {}) });
+        return json ? print(result) : changed(`Applied the suggestions of analysis ${inv.analysis}`, result);
+      }
       const result = await conn.request("style.apply", { cwd, name: inv.name, ...(inv.replace ? { replace: true } : {}) });
       return json ? print(result) : changed(`${inv.replace ? "Replaced the style with" : "Applied"} ${inv.name}`, result);
     }

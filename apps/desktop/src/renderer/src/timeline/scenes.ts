@@ -6,19 +6,19 @@ import type { FileNode } from "../../../shared/api.js";
 import type { SceneBox } from "./layout.js";
 
 /**
- * Scene spans of `timeline` from script outlines: a scene with words placed on
- * that timeline gets a box from its first to its last placed word, in start order.
- * Scenes without a word range, or whose words that timeline does not place,
- * have no time to show and are left out. A box's `clips` are the clips of
- * that timeline linked to the scene, so a scene realized only on another
- * timeline still reads as unfilled here.
+ * Scene spans of `timeline` from script outlines: a scene with a span on that
+ * timeline (its placed words, else its linked clips, else the range its
+ * heading plans, ADR 0015) gets a box, in start order. A scene with no span there, or an
+ * empty one, has no time to show and is left out. A box's `clips` are the
+ * clips of that timeline linked to the scene, so a scene realized only on
+ * another timeline still reads as unfilled here; a `planned` box has none.
  */
 export function sceneBoxes(outlines: readonly ScriptOutlineResult[], timeline: string): SceneBox[] {
   const boxes: SceneBox[] = [];
   for (const outline of outlines) {
     for (const scene of outline.scenes) {
       const span = scene.span.find((candidate) => candidate.timeline === timeline);
-      if (!scene.wordRange || !span || !(span.end > span.start)) continue;
+      if (!span || !(span.end > span.start)) continue;
       boxes.push({
         script: outline.path,
         slug: scene.slug,
@@ -26,6 +26,7 @@ export function sceneBoxes(outlines: readonly ScriptOutlineResult[], timeline: s
         start: span.start,
         end: span.end,
         clips: scene.clips.filter((clip) => clip.timeline === timeline).map((clip) => clip.clip),
+        source: span.source,
       });
     }
   }
@@ -37,9 +38,12 @@ export function scriptFiles(nodes: readonly FileNode[]): string[] {
   return nodes.flatMap((node) => (node.kind === "dir" ? scriptFiles(node.children) : isScriptPath(node.path) ? [node.path] : []));
 }
 
-/** Files whose change can move a scene span besides the timeline, which its revision covers: scripts and transcripts. */
+/**
+ * Files whose change can move a scene span besides the timeline, which its revision covers: scripts, transcripts,
+ * and beats files (a planned span written in bars follows the grid).
+ */
 export function affectsScenes(paths: readonly string[]): boolean {
-  return paths.some((path) => isScriptPath(path) || path.startsWith("transcripts/"));
+  return paths.some((path) => isScriptPath(path) || path.startsWith("transcripts/") || path.startsWith("beats/"));
 }
 
 /**
@@ -94,6 +98,7 @@ export function sameBoxes(a: readonly SceneBox[], b: readonly SceneBox[]): boole
         box.title === b[index]!.title &&
         box.start === b[index]!.start &&
         box.end === b[index]!.end &&
+        box.source === b[index]!.source &&
         box.clips.length === b[index]!.clips.length &&
         box.clips.every((clip, k) => clip === b[index]!.clips[k]),
     )

@@ -4,6 +4,10 @@ import {
   type MediaClip,
   applyGradeTable,
   cubeText,
+  gradeChainKey,
+  gradeChainLuts,
+  gradeChainOf,
+  gradeChainTable,
   gradeKey,
   gradeOf,
   gradeTable,
@@ -21,11 +25,13 @@ const media = (grade?: MediaClip["grade"]): MediaClip => ({ id: "c_a", type: "me
 const SWAP = ["# comment", "TITLE \"swap\"", "LUT_3D_SIZE 2", "", ...[0, 1].flatMap((b) => [0, 1].flatMap((g) => [0, 1].map((r) => `${b} ${g} ${r}`)))].join("\r\n");
 
 describe("colour grade (ADR 0031)", () => {
-  it("reads only grades that change colours, on media clips, keyed alike when they look alike", () => {
+  it("reads only grades that change colours, on media, generated and nested clips, keyed alike when they look alike", () => {
     expect(gradeOf(media())).toBeNull();
     expect(gradeOf(media({ exposure: 0, contrast: 1 }))).toBeNull();
     expect(gradeOf(media({ lut: "luts/a.cube", lutMix: 0 }))).toBeNull();
-    expect(gradeOf({ type: "hyperframes", grade: { exposure: 1 } })).toBeNull();
+    expect(gradeOf({ type: "hyperframes", grade: { exposure: 1 } })).toMatchObject({ exposure: 1 });
+    expect(gradeOf({ type: "timeline", grade: { saturation: 0 } })).toMatchObject({ saturation: 0 });
+    expect(gradeOf({ type: "shot", grade: { exposure: 1 } })).toBeNull();
     expect(gradeOf(media({ exposure: 1 }))).toEqual({ exposure: 1, temperature: 0, tint: 0, contrast: 1, saturation: 1, lut: null, lutMix: 1 });
     expect(gradeKey(normalizeGrade({ exposure: 1 }))).toBe(gradeKey(normalizeGrade({ exposure: 1, saturation: 1 })));
     expect(parseTimeline({ schemaVersion: 1, id: "main", revision: 1, tracks: [{ id: "v", kind: "video", clips: [media({ saturation: 9 })] }] }).ok).toBe(false);
@@ -77,7 +83,51 @@ describe("colour grade (ADR 0031)", () => {
     const flat = { size: 2, data: new Float32Array(24).fill(100.9 / 255) };
     expect(applyGradeTable(flat, [10, 200, 30])).toEqual([100, 100, 100]);
   });
+
+  it("chains a clip's own grade and its nested hosts' in order, leaving out grades that change nothing", () => {
+    expect(gradeChainOf(media())).toBeNull();
+    const own = { saturation: 0.5 };
+    const inner = { exposure: 0.5 };
+    const outer = { lut: "luts/swap.cube" };
+    const placed = Object.assign(media(own), { hostGrades: [inner, { contrast: 1 }, outer] });
+    expect(gradeChainOf(placed)).toEqual([normalizeGrade(own), normalizeGrade(inner), normalizeGrade(outer)]);
+    expect(gradeChainOf(Object.assign(media(), { hostGrades: [inner] }))).toEqual([normalizeGrade(inner)]);
+    // A chain of one keeps its grade's key, so tables and plans of clips without nested grades keep their names.
+    expect(gradeChainKey([normalizeGrade(own)])).toBe(gradeKey(normalizeGrade(own)));
+    expect(gradeChainKey([normalizeGrade(own), normalizeGrade(inner)])).not.toBe(gradeChainKey([normalizeGrade(inner), normalizeGrade(own)]));
+    expect(gradeChainLuts([normalizeGrade(outer), normalizeGrade({ lut: "luts/a.cube", lutMix: 0 }), normalizeGrade(outer)])).toEqual(["luts/swap.cube"]);
+  });
+
+  it("bakes a chain into one table: each grade on what the one before left, as large as its largest LUT", () => {
+    const one = normalizeGrade({ exposure: 0.3, contrast: 1.2 });
+    expect(gradeChainTable([{ grade: one, lut: null }])).toEqual(gradeTable(one, null));
+    // Contrast, then saturation: one grade does them in that order too.
+    const chained = gradeChainTable([
+      { grade: normalizeGrade({ contrast: 1.3 }), lut: null },
+      { grade: normalizeGrade({ saturation: 0.4 }), lut: null },
+    ]);
+    const single = gradeTable(normalizeGrade({ contrast: 1.3, saturation: 0.4 }), null);
+    // At most one step of the 6-decimal rounding, as stored in single precision.
+    for (let i = 0; i < single.data.length; i++) expect(Math.abs(chained.data[i]! - single.data[i]!)).toBeLessThanOrEqual(1.5e-6);
+    // Swapping red and blue twice gives the picture back; an inner LUT larger than the table sizes it.
+    const swap = parseCube(SWAP);
+    const twice = gradeChainTable([
+      { grade: normalizeGrade({ lut: "luts/swap.cube" }), lut: swap },
+      { grade: normalizeGrade({ lut: "luts/swap.cube" }), lut: swap },
+    ]);
+    expect(twice).toEqual(gradeTable(normalizeGrade({}), null));
+    const big = parseCube(cubeText(gradeTableOfSize(40)));
+    expect(gradeChainTable([{ grade: normalizeGrade({ lut: "luts/big.cube" }), lut: big }, { grade: one, lut: null }]).size).toBe(40);
+  });
 });
+
+/** An identity table of `size` points per side. */
+function gradeTableOfSize(size: number): { size: number; data: Float32Array } {
+  const data = new Float32Array(size ** 3 * 3);
+  let n = 0;
+  for (let b = 0; b < size; b++) for (let g = 0; g < size; g++) for (let r = 0; r < size; r++) data.set([r / (size - 1), g / (size - 1), b / (size - 1)], (n++) * 3);
+  return { size, data };
+}
 
 describe("LOG footage hint (ADR 0031 decision 9)", () => {
   it("reads HDR and logarithmic transfer curves, wide-gamut primaries, tags first", () => {

@@ -7,7 +7,7 @@ import {
   fontSetup,
   pageHead,
 } from "./kit.js";
-import { WINDOW_DOTS_CSS, WINDOW_DOTS_HTML } from "./ui-parts.js";
+import { SCREEN_HELPERS, SKELETON_HTML, WINDOW_DOTS_CSS, WINDOW_DOTS_HTML } from "./ui-parts.js";
 
 /**
  * Device frame (#466): a browser window or a phone around a real screenshot,
@@ -78,7 +78,7 @@ export const deviceFrame: Template = {
           <div id="device">
             <div id="bar">${WINDOW_DOTS_HTML}<span id="address"></span></div>
             <div id="screen">
-              <div id="skeleton"><i></i><i></i><i></i><i></i><i></i></div>
+              <div id="skeleton">${SKELETON_HTML}</div>
               <img id="shot" alt="" />
               <div id="island"></div>
             </div>
@@ -92,6 +92,7 @@ export const deviceFrame: Template = {
       var S = M.stage();
       var unit = Math.min(S.width, S.height);
       ${COLOR_HELPERS}
+      ${SCREEN_HELPERS}
 
       // Layout per format: the box the device may fill, as fractions of the frame. wide, square, tall.
       var L = M.pick({ w: 0.74, h: 0.8 }, { w: 0.8, h: 0.78 }, { w: 0.84, h: 0.76 });
@@ -121,12 +122,7 @@ export const deviceFrame: Template = {
       if (phone) {
         // A phone: a dark bezel around the screen, an island at the top, no bar.
         bar.style.display = "none";
-        var bezel = devW * 0.035;
-        device.style.padding = bezel + "px";
-        device.style.background = "#0a0c12";
-        device.style.borderRadius = devW * 0.14 + "px";
-        screenBox.style.height = devH - 2 * bezel + "px";
-        screenBox.style.borderRadius = devW * 0.11 + "px";
+        dressPhone(device, screenBox, devW, devH);
       } else {
         // A browser: a bar of 5 % of the width with the dots and the address, the screen below it.
         var barH = Math.max(18, devW * 0.05);
@@ -145,22 +141,7 @@ export const deviceFrame: Template = {
       // The screenshot, or a plain app skeleton (light page, accent header, grey blocks) when there is none.
       var shot = document.getElementById("shot");
       var skeleton = document.getElementById("skeleton");
-      skeleton.style.background = "#eef1f7";
-      var blocks = [
-        [0, 0, 100, 13, P.accent],
-        [6, 20, 40, 30, "#d9deea"],
-        [54, 20, 40, 30, "#d9deea"],
-        [6, 58, 88, 5, "#d9deea"],
-        [6, 68, 60, 5, "#d9deea"],
-      ];
-      Array.prototype.forEach.call(skeleton.children, function (el, i) {
-        el.style.left = blocks[i][0] + "%";
-        el.style.top = blocks[i][1] + "%";
-        el.style.width = blocks[i][2] + "%";
-        el.style.height = blocks[i][3] + "%";
-        el.style.background = blocks[i][4];
-        if (i === 0) el.style.borderRadius = "0";
-      });
+      paintSkeleton(skeleton, P.accent);
       skeleton.style.transformOrigin = P.focusX * 100 + "% " + P.focusY * 100 + "%";
       if (P.screenshot) {
         shot.src = P.screenshot;

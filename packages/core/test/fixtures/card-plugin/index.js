@@ -9,8 +9,14 @@
 // `ctx.warn` when the render is blurred.
 // `beat-card` asks for the card's { timing } kinds (ADR 0029 decision 8); a card's { requireTiming } fails the render
 // unless the timing it got is that JSON, and its live page sets `window.cardTiming` to what it got.
+// `final-card` renders finals (ADR 0035): its final render (`ctx.tier` "final") paints { finalColor } and waits
+// { finalDelayMs } more; `finals.estimate` answers the card's { estimateSeconds } (default 1), or throws with { noEstimate }.
+// `gc-card` keeps a marker `.frameshell/card-state/<state>.json` per clip, `state` = the clip's props.state, else the card's
+// { state }, else "a", and has a `gc` hook (ADR 0035 slice 5): it deletes the markers no clip names that are older than
+// the host's floor, and logs every call to `.frameshell/gc-calls.jsonl`. `.frameshell/gc-fail` makes the hook throw.
+// Its `inputs` keep the signal they got in `globalThis.cardSignals`, to see the host abort it when it stops.
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Standard Schema v1 validator, hand-written: the fixture has no dependencies. */
@@ -32,6 +38,11 @@ export function activate(api) {
   const still = {
     type: "still",
     propsSchema,
+    // A card with `declares` names the props its composition declares, as a typed HyperFrames composition does (ADR 0040).
+    async declaredProps(clip) {
+      const card = await readCard(clip).catch(() => ({}));
+      return Array.isArray(card.declares) ? card.declares : null;
+    },
     // A card with `needsContext` proves the host gives `inputs` the project and `ensureBinary` (ADR 0035).
     async inputs(clip, context) {
       if (!clip.source) return [];
@@ -46,6 +57,7 @@ export function activate(api) {
       const card = await readCard(clip);
       if (card.fail) throw new Error(`card ${clip.source} asks to fail`);
       const blurred = ctx.motionBlur !== undefined;
+      const final = ctx.tier === "final";
       if (blurred && card.refuseBlur) throw Object.assign(new Error(`card ${clip.source} cannot be motion-blurred`), { code: "MOTION_BLUR_REFUSED" });
       if (blurred && card.warn) ctx.warn?.(card.warn);
       if (blurred && card.requireBlur && JSON.stringify(ctx.motionBlur) !== JSON.stringify(card.requireBlur)) throw new Error(`card ${clip.source} got motion blur ${JSON.stringify(ctx.motionBlur)}`);
@@ -53,7 +65,7 @@ export function activate(api) {
       if (card.requireTiming && JSON.stringify(ctx.timing) !== JSON.stringify(card.requireTiming)) throw new Error(`card ${clip.source} got timing ${JSON.stringify(ctx.timing)}`);
       const steps = 5;
       for (let step = 1; step <= steps; step++) {
-        await new Promise((resolve) => setTimeout(resolve, ((card.delayMs ?? 0) + (blurred ? (card.blurDelayMs ?? 0) : 0)) / steps));
+        await new Promise((resolve) => setTimeout(resolve, ((card.delayMs ?? 0) + (blurred ? (card.blurDelayMs ?? 0) : 0) + (final ? (card.finalDelayMs ?? 0) : 0)) / steps));
         if (ctx.signal.aborted) throw new Error("aborted");
         ctx.progress({ fraction: step / (steps + 1), message: "Painting" });
       }
@@ -61,7 +73,7 @@ export function activate(api) {
       const file = join(ctx.outDir, "card.webm");
       const size = `${ctx.width}x${ctx.height}`;
       const alpha = card.alpha ?? 1;
-      const color = (blurred ? card.blurColor : undefined) ?? card.color ?? "white";
+      const color = (final ? card.finalColor : undefined) ?? (blurred ? card.blurColor : undefined) ?? card.color ?? "white";
       await new Promise((resolve, reject) =>
         execFile(
           ffmpeg,
@@ -95,6 +107,49 @@ export function activate(api) {
   api.registerClipType(card);
   api.registerClipType({ ...card, type: "token-card", styleTokens: true });
   api.registerClipType({ ...card, type: "blur-card", motionBlur: true });
+  api.registerClipType({
+    ...card,
+    type: "final-card",
+    finals: {
+      async estimate(clip, ctx) {
+        const card = await readCard(clip);
+        if (card.noEstimate) throw new Error("no estimate");
+        if (ctx.projectDir !== project || !(ctx.width > 0 && ctx.height > 0 && ctx.fps > 0)) throw new Error("estimate got no format");
+        return card.estimateSeconds ?? 1;
+      },
+    },
+  });
+  const stateDir = ".frameshell/card-state";
+  api.registerClipType({
+    ...card,
+    type: "gc-card",
+    async inputs(clip, context) {
+      if (!clip.source) return [];
+      if (!(context?.signal instanceof AbortSignal)) throw new Error("inputs got no signal");
+      (globalThis.cardSignals ??= []).push(context.signal);
+      const card = await readCard(clip).catch(() => ({}));
+      return [clip.source, `${stateDir}/${clip.props?.state ?? card.state ?? "a"}.json`];
+    },
+    async gc(context) {
+      if (!(context.signal instanceof AbortSignal)) throw new Error("gc got no signal");
+      await mkdir(join(context.projectDir, ".frameshell"), { recursive: true });
+      await appendFile(
+        join(context.projectDir, ".frameshell", "gc-calls.jsonl"),
+        `${JSON.stringify({ inputs: [...context.inputs].sort(), dryRun: context.dryRun, floor: context.keepNewerThan })}\n`,
+      );
+      if (await stat(join(context.projectDir, ".frameshell", "gc-fail")).catch(() => null)) throw new Error("gc-card asked to fail");
+      const removed = [];
+      for (const name of await readdir(join(context.projectDir, ...stateDir.split("/"))).catch(() => [])) {
+        const rel = `${stateDir}/${name}`;
+        const file = join(context.projectDir, ...rel.split("/"));
+        const info = await stat(file);
+        if (!name.endsWith(".json") || context.inputs.has(rel) || info.mtimeMs >= context.keepNewerThan) continue;
+        if (!context.dryRun) await rm(file);
+        removed.push({ path: rel, bytes: info.size });
+      }
+      return removed;
+    },
+  });
   api.registerClipType({
     ...card,
     type: "beat-card",

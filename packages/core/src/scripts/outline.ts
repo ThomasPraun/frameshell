@@ -2,8 +2,10 @@ import { constants } from "node:fs";
 import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ErrorCode, RpcError, type ScriptOutlineResult } from "@frameshell/protocol";
-import { type ScriptOutline, isScriptPath, parseScript, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
-import { resolveWordRanges } from "./words.js";
+import { type AnyClip, type ScriptOutline, type ScriptPlannedRange, isScriptPath, parseScript, parseScriptPlan, parseTimeline, scriptRefPathProblem, splitScriptRef } from "@frameshell/schema";
+import { FrameGrid } from "../timeline/grid.js";
+import { clipEnd } from "../timeline/timing.js";
+import { type SceneSpan, resolveWordRanges } from "./words.js";
 
 /** Largest script read (1 MiB, ~150k words). Bigger files are refused, never loaded whole. */
 export const MAX_SCRIPT_BYTES = 1024 * 1024;
@@ -14,26 +16,35 @@ export const MAX_SCRIPT_BYTES = 1024 * 1024;
  * Scripts are read fresh every call; the file is the source of truth.
  */
 
+/** Timeline seconds a heading's planned range names (a number, or a TimeRef like `bar:4` on the main timeline's grid); throws why it cannot be read. */
+export type PlannedTime = (ref: number | string) => Promise<number>;
+
+/** Timeline the planned range of a scene heading is drawn on (ADR 0015). */
+const PLANNED_TIMELINE = "main";
+
 /**
  * Outline `file` (absolute, or relative to `cwd`, then to `root`) with the
  * clips of every `timelines/*.json` linked to each scene, the timeline span of
- * each scene's `words` range, and the clips linked to the whole script (`scriptRef` without `#anchor`). Throws
- * `OutsideProject` or `ScriptNotFound`.
+ * each scene (`source` `words`: its `words` range; `clips`: the union of the clips linked to it on a
+ * timeline that places none of its words; `planned`: the range its heading writes, only for a scene with no
+ * linked clip, on `main`, bars and beats read through `plannedTime`), and the clips linked to the whole script
+ * (`scriptRef` without `#anchor`). Throws `OutsideProject` or `ScriptNotFound`.
  */
-export async function outlineScript(root: string, cwd: string, file: string): Promise<ScriptOutlineResult> {
+export async function outlineScript(root: string, cwd: string, file: string, plannedTime?: PlannedTime): Promise<ScriptOutlineResult> {
   const { path, text } = await locateScript(root, cwd, file);
-  const outline = parseScript(text);
+  const { outline, planned } = parseScriptPlan(text);
   const { refs, warnings } = await clipRefs(root);
   const resolved = await resolveWordRanges(root, outline.scenes.map((scene) => ({ slug: scene.slug, range: scene.wordRange })));
   const scenes = outline.scenes.map((scene, index) => ({
     ...scene,
     ref: `${path}#${scene.slug}`,
     clips: [] as { timeline: string; clip: string }[],
-    span: resolved.spans[index]!,
+    span: [...resolved.spans[index]!],
   }));
   const bySlug = new Map(scenes.map((scene) => [scene.slug, scene]));
   const clips: ScriptOutlineResult["clips"] = [];
   const unresolved: ScriptOutlineResult["unresolved"] = [];
+  const reach = new Map<string, Map<string, { start: number; end: number }>>();
   for (const ref of refs) {
     const { path: target, anchor } = splitScriptRef(ref.scriptRef);
     if (target !== path) continue;
@@ -43,10 +54,53 @@ export async function outlineScript(root: string, cwd: string, file: string): Pr
       continue;
     }
     const scene = bySlug.get(anchor);
-    if (scene) scene.clips.push(location);
-    else unresolved.push(ref);
+    if (!scene) {
+      unresolved.push({ timeline: ref.timeline, clip: ref.clip, scriptRef: ref.scriptRef });
+      continue;
+    }
+    scene.clips.push(location);
+    const timelines = reach.get(scene.slug) ?? new Map<string, { start: number; end: number }>();
+    const seen = timelines.get(ref.timeline);
+    timelines.set(ref.timeline, { start: Math.min(seen?.start ?? ref.start, ref.start), end: Math.max(seen?.end ?? ref.end, ref.end) });
+    reach.set(scene.slug, timelines);
+  }
+  for (const [index, scene] of scenes.entries()) {
+    const placed = new Set(scene.span.map((span) => span.timeline));
+    for (const [timeline, { start, end }] of reach.get(scene.slug) ?? []) {
+      if (!placed.has(timeline) && end > start) scene.span.push({ timeline, start, end, words: 0, source: "clips" });
+    }
+    const plan = planned[index];
+    if (scene.span.length === 0 && scene.clips.length === 0 && plan) {
+      const span = await plannedSpan(scene.slug, plan, plannedTime, resolved.warnings);
+      if (span) scene.span.push(span);
+    }
   }
   return { path, meta: outline.meta, clips, scenes, unresolved, warnings: [...outline.warnings, ...resolved.warnings, ...warnings] };
+}
+
+/** The span a heading's range plans on {@link PLANNED_TIMELINE}; a range that cannot be read becomes a warning. */
+async function plannedSpan(slug: string, plan: ScriptPlannedRange, time: PlannedTime | undefined, warnings: string[]): Promise<SceneSpan | null> {
+  const read = async (ref: number | string) => {
+    if (typeof ref === "number") return ref;
+    if (!time) throw new Error("this reader has no timeline to read bars on");
+    return time(ref);
+  };
+  try {
+    const start = round(await read(plan.start));
+    const end = round(await read(plan.end));
+    if (!(end > start)) {
+      warnings.push(`Scene "${slug}": heading range ${plan.start}..${plan.end} is ${start}..${end} s on ${PLANNED_TIMELINE}, which ends before it starts; not planned.`);
+      return null;
+    }
+    return { timeline: PLANNED_TIMELINE, start, end, words: 0, source: "planned" };
+  } catch (error) {
+    warnings.push(`Scene "${slug}": heading range ${plan.start}..${plan.end} cannot be placed on ${PLANNED_TIMELINE}: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+function round(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
 }
 
 /**
@@ -200,10 +254,31 @@ async function listScripts(root: string): Promise<string[]> {
     .sort();
 }
 
+/** A clip with a `scriptRef`, and where it plays on its timeline (`end` = `start` when its length is unknown). */
+interface LinkedClip {
+  timeline: string;
+  clip: string;
+  scriptRef: string;
+  start: number;
+  end: number;
+}
+
+/** Frame grid fine enough that `clipEnd` only rounds to a millisecond, as stored times are. */
+const MILLISECONDS = new FrameGrid(1000);
+
+/** A nested timeline without a `duration` has no length here: reading its file for a band is not worth it. */
+const noNestedLength = async (): Promise<number> => {
+  throw new Error("nested timeline length not read");
+};
+
+async function playsUntil(clip: AnyClip): Promise<number> {
+  return clipEnd(clip, MILLISECONDS, noNestedLength).catch(() => clip.start);
+}
+
 /** `scriptRef` of every clip in every timeline file; unreadable files are skipped with a warning. */
-async function clipRefs(root: string): Promise<{ refs: { timeline: string; clip: string; scriptRef: string }[]; warnings: string[] }> {
+async function clipRefs(root: string): Promise<{ refs: LinkedClip[]; warnings: string[] }> {
   const names = (await readdir(join(root, "timelines")).catch(() => [])).filter((name) => name.endsWith(".json")).sort();
-  const refs: { timeline: string; clip: string; scriptRef: string }[] = [];
+  const refs: LinkedClip[] = [];
   const warnings: string[] = [];
   for (const name of names) {
     const id = name.slice(0, -".json".length);
@@ -219,7 +294,9 @@ async function clipRefs(root: string): Promise<{ refs: { timeline: string; clip:
     }
     for (const track of parsed.value.tracks) {
       if (track.kind === "subtitles") continue;
-      for (const clip of track.clips) if (clip.scriptRef) refs.push({ timeline: id, clip: clip.id, scriptRef: clip.scriptRef });
+      for (const clip of track.clips) {
+        if (clip.scriptRef) refs.push({ timeline: id, clip: clip.id, scriptRef: clip.scriptRef, start: clip.start, end: await playsUntil(clip) });
+      }
     }
   }
   return { refs, warnings };

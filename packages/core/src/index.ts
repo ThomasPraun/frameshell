@@ -21,6 +21,7 @@ export { type ConfigRules, type ConfigState, PLAIN_RULES, applyConfigPatch, conf
 export { FORMAT_RULES, type FormatKeyValue, formatState, formatsFromState } from "./config/project-doc.js";
 export { CONFIG_DOC_NAMES, planConfigRevert } from "./config/revert.js";
 export { STYLE_KEY, checkedStyleState, styleConfigDocument, stylePathOf, styleState, styleWritten } from "./style/doc.js";
+export { REQUIREMENTS_KEY, checkedRequirementsState, requirementsConfigDocument, requirementsState, requirementsWritten } from "./review/requirements-doc.js";
 export { StyleService, type StyleServiceOptions } from "./style/service.js";
 export {
   type FaceScans,
@@ -85,7 +86,7 @@ export {
   faceSuggestions,
 } from "./people/face-suggest.js";
 export { ANGLE_SPEAKER_SHARE, type AngleSuggestInput, angleSuggestions } from "./people/angle-suggest.js";
-export { type ScanProjectDeps, readProjectFaceScans, scanProjectFaces } from "./people/scan-run.js";
+export { type FileFaceScan, type ScanFileDeps, type ScanFileInput, type ScanProjectDeps, readProjectFaceScans, scanFileFaces, scanProjectFaces } from "./people/scan-run.js";
 export { FBANK_BINS, FBANK_SAMPLE_RATE, type Fbank, fbank, subtractMean } from "./people/fbank.js";
 export {
   type CampplusFiles,
@@ -118,6 +119,9 @@ export {
   BLENDER_PACKAGE,
   BLENDER_TOOL,
   type UserInstall,
+  type PlatformFamily,
+  type StandardPath,
+  platformFamily,
   DEFAULT_MODELS,
   DEFAULT_PACKAGES,
   CHROME_HEADLESS_SHELL_PACKAGE,
@@ -258,12 +262,15 @@ export {
   FONTS_DIR,
   gifStep,
   loudnessAnalysis,
+  limitedAnalysis,
+  LIMITED_STATS_FILE,
   mixStep,
   muxStep,
   paletteStep,
   parseLoudnessStats,
 } from "./export/compiler.js";
 export { assSubtitles, assCentiseconds } from "./export/ass.js";
+export { LOUDNESS_PASSES, LOUDNESS_TOLERANCE_LU, MAX_TRIM_DB, TRUE_PEAK_CEILINGS, limiterEngages, settleTrim, truePeakCeiling } from "./export/true-peak.js";
 export { fontSource, writeFonts } from "./export/fonts.js";
 export { type GradeFiles, gradeFile, gradeFiles, readLut } from "./export/grade.js";
 export { type FontMetrics, parseFontMetrics } from "@frameshell/schema";
@@ -310,6 +317,8 @@ export {
 } from "./media/energy.js";
 export { ENERGY_DIR, EnergyStore, type EnergyStoreOptions } from "./media/energy-store.js";
 export { LOUDNESS_DIR, LoudnessStore, type LoudnessStoreOptions } from "./media/loudness-store.js";
+export { SPECTROGRAM_RATE, SPECTROGRAM_ROWS, SPECTROGRAM_MAX_COLUMNS, SPECTROGRAM_LOW_HZ, SPECTROGRAM_HIGH_HZ, SPECTROGRAM_FLOOR_DB, type Spectrogram, spectrogram } from "./media/spectrogram.js";
+export { type AudioFacts, AudioInspector, type AudioInspectorOptions, type TakeFacts, takeFacts } from "./media/audio-inspect.js";
 export {
   ANALYSIS_RATE as BEAT_ANALYSIS_RATE,
   BEAT_DETECTOR,
@@ -352,7 +361,7 @@ export {
   classifyAudioFx,
   sweepCommands,
 } from "./media/audio-fx.js";
-export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, sidecarArgs } from "./media/recipe.js";
+export { PROXY_GOP, RECIPE_VERSION, SIDECAR_SAMPLE_RATE, alphaProxyArgs, proxyArgs, proxyFrameGrid, sidecarArgs } from "./media/recipe.js";
 export { type Manifest, MediaStore } from "./media/store.js";
 export { type EnergySnapperOptions, energySnapper } from "./timeline/snap.js";
 export { type ClipKeyInput, clipCacheKey } from "./clips/cache-key.js";
@@ -364,6 +373,7 @@ export {
   type ClipRendererOptions,
   type ClipEnsureOptions,
   type ClipTier,
+  type FinalRenderState,
   type RegisteredClipType,
   type RenderProbe,
   type RenderedClip,
@@ -470,7 +480,9 @@ export {
   CONTRAST_GAIN,
   GUIDED_EPS,
   GUIDED_RADIUS,
+  GUIDED_REFERENCE_SHORT_SIDE,
   GUIDED_SUBSAMPLE,
+  type GuidedOptions,
   type PlaneSize,
   TEMPORAL_TAU_S,
   boxMean,
@@ -478,13 +490,29 @@ export {
   emaStep,
   emaWeight,
   guidedFilter,
+  guidedFilterRgb,
+  guidedScale,
   refineFrame,
   resizeBilinear,
   smoothForwardBackward,
 } from "./matte/refine.js";
 export { MATTE_MODEL_PIN, type MatteModelSpec, SELFIE, coarseAlpha, modelInput } from "./matte/models.js";
-export { MATTES_DIR, MATTE_VERSION, type MatteInfo, classifyMatte, matteKey, mattePaths, readMatteInfo, writeMatteInfo } from "./matte/cache.js";
 export {
+  MATTES_DIR,
+  MATTE_VERSION,
+  type MatteInfo,
+  type MatteVariant,
+  classifyMatte,
+  matteKey,
+  mattePaths,
+  readMatteInfo,
+  writeMatteInfo,
+} from "./matte/cache.js";
+export {
+  FULL_MATTE_ABOVE_SHORT_SIDE,
+  FULL_MATTE_MAX_SHORT_SIDE,
+  type FullMatteRequest,
+  fullMatteSize,
   type MatteFiles,
   type MatteInfer,
   type MatteVideoRequest,
@@ -495,7 +523,7 @@ export {
   matteInWorker,
   matteVideo,
 } from "./matte/video.js";
-export { type MatteJobDeps, type MatteTarget, computeMatte, formatEta } from "./matte/job.js";
+export { type MatteJobDeps, type MatteTarget, type MattesMade, computeMatte, formatEta } from "./matte/job.js";
 export { standInMatte } from "./matte/stand-in.js";
 export { readRawFrames } from "./media/raw-frames.js";
 export { type PreparedPhoto, SEGMENT_MODEL_PIN, SegmentService, type SegmentServiceOptions, readPhotoRgb } from "./segment/service.js";
@@ -510,7 +538,16 @@ export {
   planSync,
 } from "./multicam/sync.js";
 export { COMMAND_SPEECH_PROVIDER, commandSpeechProvider, readCommandSpeechProvider } from "./voiceover/command.js";
-export { PAID_STAND_IN_PRICE_PER_WORD, PAID_STAND_IN_SPEECH_PROVIDER, STAND_IN_SPEECH_PROVIDER, paidStandInSpeechProvider, standInSpeechProvider } from "./voiceover/stand-in.js";
+export {
+  PAID_STAND_IN_PRICE_PER_WORD,
+  PAID_STAND_IN_SPEECH_PROVIDER,
+  SLOW_STAND_IN_DELAY_MS,
+  SLOW_STAND_IN_SPEECH_PROVIDER,
+  STAND_IN_SPEECH_PROVIDER,
+  paidStandInSpeechProvider,
+  slowStandInSpeechProvider,
+  standInSpeechProvider,
+} from "./voiceover/stand-in.js";
 export { TAKE_KEY_VERSION, type TakeInput, type TakeMark, VOICEOVER_DIR, takeKey, takeMarkOf, takeWavBytes } from "./voiceover/takes.js";
 export { TRIM_LEAD_S, TRIM_RANGE_DB, TRIM_TAIL_S, type TrimmedTake, trimSilence } from "./voiceover/trim.js";
 export { VOICE_TRACK_NAME, planVoiceoverPlacement, runVoiceoverPlan } from "./voiceover/place.js";
@@ -526,14 +563,16 @@ export {
 } from "./analyze/service.js";
 export { DEFAULT_CUT_THRESHOLD, type Cut, type Shot, type ShotStats, detectCuts, frameStart, shotStats, shotsOf } from "./analyze/shots.js";
 export { PALETTE_SIZE, type PaletteColor, PaletteBuilder } from "./analyze/palette.js";
-export { type LoudnessReading, measureLoudness, parseLoudness } from "./analyze/loudness.js";
+export { type LoudnessReading, type SoundRange, measureLoudness, parseLoudness } from "./analyze/loudness.js";
 export { GradeAnalyzer, type GradeAnalyzeRequest, type GradeAnalyzerOptions } from "./grade/analyze.js";
+export { CLIP_COMPARE_DIR, ClipComparer, type ClipCompareRequest, type ClipComparerOptions, type ClipVariant, applyLook, propsFlags, withVariant } from "./clips/compare.js";
 export { GRADE_COMPARE_DIR, GradeComparer, type GradeCompareRequest, type GradeComparerOptions, columnsFor, lookFlags, withGrade } from "./grade/compare.js";
 export { type FrameLevels, meanLevels, parseSignalstats } from "./grade/levels.js";
 export { type GradeCorrection, type GradeSuggestion, SUGGEST as GRADE_SUGGEST, correctionFlags, suggestGrade } from "./grade/suggest.js";
 export { type Look, LookBuilder, frameLook } from "./analyze/look.js";
 export { type Burst, type Rhythm, bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "./analyze/rhythm.js";
 export { type SoundHit, elementEvents, flashes, holds, hitEvents, soundHits } from "./analyze/events.js";
+export { type SuggestionInput, contrastRatio, styleSuggestions } from "./analyze/suggest.js";
 export { type SfxRender, type SfxSpec, synthesizeSfx } from "./sound/sfx.js";
 export { SFX_TRACK_NAME, type SoundItem, type SoundWish, soundWarnings } from "./sound/place.js";
 export { MUSIC_KEY_VERSION, type MusicMark, SFX_KEY_VERSION, SOUND_DIR, type SoundMark, musicFile, musicKey, musicMarkOf, sfxFile, sfxKey, sfxWavBytes, soundMarkOf } from "./sound/takes.js";

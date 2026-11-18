@@ -309,4 +309,24 @@ describe("voiceover.place", () => {
     // Lines whose take no clip plays say nothing.
     expect(regenerated.warnings.filter((text) => text.includes("was replaced by other speech"))).toHaveLength(1);
   });
+
+  it("places for the app's own author (a `desktop/` client) as one transaction, and again with replace", async () => {
+    await generate();
+    const app = await connectToDaemon(daemon.socketPath, { client: "desktop/test" });
+    try {
+      const params = { cwd: root, timeline: "main", script: "scripts/launch-vo.md", lines: ["fix-1"], start: 1.5 };
+      const first = await app.request("voiceover.place", params as never);
+      expect(first.tx).toMatch(/^tx_/);
+      expect(first.placed[0]).toMatchObject({ start: 1.5 });
+      await expect(app.request("voiceover.place", params as never)).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+      const again = await app.request("voiceover.place", { ...params, start: 4, replace: true } as never);
+      expect(again.placed[0]).toMatchObject({ start: 4 });
+      expect(timeline().tracks.flatMap((track) => (track.kind === "audio" && track.name === "Voiceover" ? track.clips : []))).toHaveLength(first.placed.length);
+      await expect(app.request("voiceover.place", { ...params, start: "nowhere", replace: true } as never)).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+      const last = await app.request("voiceover.place", { ...params, start: 2, replace: true } as never);
+      expect(last.placed[0]).toMatchObject({ start: 2 });
+    } finally {
+      app.close();
+    }
+  }, 60_000);
 });

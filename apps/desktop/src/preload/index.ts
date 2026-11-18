@@ -50,7 +50,6 @@ const api: FrameshellApi = {
     },
     onChanged: (listener) => subscribe(Channel.filesChanged, listener),
     trash: (path) => invokeOutcome(Channel.filesTrash, path),
-    generateVoiceover: (path) => invokeOutcome(Channel.filesVoiceover, path),
     reveal: (path) => ipcRenderer.invoke(Channel.filesReveal, path),
     copyPath: (path) => ipcRenderer.invoke(Channel.filesCopyPath, path),
     pathOf: (file) => webUtils.getPathForFile(file),
@@ -125,6 +124,7 @@ const api: FrameshellApi = {
     assets: () => invokeOutcome(Channel.mediaAssets),
     bakes: (timeline, view) => invokeOutcome(Channel.mediaBakes, timeline, view),
     mattes: (timeline, view) => invokeOutcome(Channel.mediaMattes, timeline, view),
+    inspect: (assets) => invokeOutcome(Channel.mediaInspect, assets),
     read: (path) => invokeOutcome(Channel.mediaRead, path),
     onChanged: (listener) => subscribe(Channel.mediaChanged, listener),
     import: (paths) => invokeOutcome(Channel.mediaImport, paths),
@@ -145,6 +145,14 @@ const api: FrameshellApi = {
   },
   multicam: {
     turns: (timeline, group) => invokeOutcome(Channel.multicamTurns, timeline, group),
+  },
+  voiceover: {
+    verifyPlan: () => invokeOutcome(Channel.voiceoverVerifyPlan),
+    generate: (path, verify) => invokeOutcome(Channel.voiceoverGenerate, path, verify),
+    cancel: () => invokeOutcome(Channel.voiceoverCancel),
+    onProgress: (listener) => subscribe(Channel.voiceoverProgress, listener),
+    markers: () => invokeOutcome(Channel.voiceoverMarkers),
+    place: (path, start, replace) => invokeOutcome(Channel.voiceoverPlace, path, start, replace),
   },
   models: {
     list: () => invokeOutcome(Channel.modelsList),
