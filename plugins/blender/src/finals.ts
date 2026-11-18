@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { STATE_DIR } from "./deps.js";
 
@@ -46,9 +46,30 @@ export class FinalTimes {
     const measured = await this.#read();
     measured.sources[source] = Number(rate.toFixed(4));
     measured.last = measured.sources[source]!;
+    await this.#write(measured);
+  }
+
+  /**
+   * Drops the rates of .blend files not in `keep` (project-relative paths, the ones current clips use) and keeps `last`.
+   * Does nothing for a file modified at or after `opts.keepNewerThan` (a final may be recording) or with nothing to drop.
+   * Returns the bytes the file shrinks by (with `dryRun`, would shrink by, writing nothing), or null when it is left as it is.
+   */
+  async prune(keep: ReadonlySet<string>, opts: { dryRun: boolean; keepNewerThan: number }): Promise<{ bytes: number } | null> {
+    const info = await stat(this.#file).catch(() => null);
+    if (!info?.isFile() || info.mtimeMs >= opts.keepNewerThan) return null;
+    const measured = await this.#read();
+    const kept = Object.fromEntries(Object.entries(measured.sources).filter(([source]) => keep.has(source)));
+    if (Object.keys(kept).length === Object.keys(measured.sources).length) return null;
+    const next: Measured = { sources: kept, last: measured.last };
+    const text = serialize(next);
+    if (!opts.dryRun) await this.#write(next, text);
+    return { bytes: Math.max(0, info.size - Buffer.byteLength(text)) };
+  }
+
+  async #write(measured: Measured, text = serialize(measured)): Promise<void> {
     await mkdir(join(this.#file, ".."), { recursive: true });
     const temp = `${this.#file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-    await writeFile(temp, `${JSON.stringify(measured, null, 2)}\n`);
+    await writeFile(temp, text);
     await rename(temp, this.#file);
   }
 
@@ -62,6 +83,10 @@ export class FinalTimes {
       return { sources: {}, last: null };
     }
   }
+}
+
+function serialize(measured: Measured): string {
+  return `${JSON.stringify(measured, null, 2)}\n`;
 }
 
 function megapixels(width: number, height: number): number {

@@ -2,6 +2,7 @@ import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { AdapterGcContext, AdapterGcEntry } from "@frameshell/plugin-api";
 import { STATE_DIR } from "./deps.js";
+import { FINALS_FILE, FinalTimes } from "./finals.js";
 
 /** A listing folder: `<.blend content hash, 16 hex>-<path hash, 8 hex>` (see `listingPath` in `deps.ts`). */
 const LISTING_DIR = /^[0-9a-f]{16}-[0-9a-f]{8}$/;
@@ -12,9 +13,10 @@ const VERSION_FILE = /^\d+(?:\.\d+){1,2}\.json$/;
 /**
  * Deletes the files the adapter keeps in {@link STATE_DIR} that no current clip names as an input (ADR 0035 slice 5):
  * listing folders of saved .blend versions, range markers of lengths no clip has, version markers of other Blenders.
- * Entries are recognised by name alone; anything else there (`finals.json`, unknown names, symlinks) stays, and so does
- * whatever was modified at or after `keepNewerThan`, so a listing a key check writes during `gc` survives. Returns what
- * went (or, with `dryRun`, what would), sorted by path.
+ * `finals.json` is not deleted but pruned of the .blend files no clip names as an input (its `last` rate stays), and is
+ * reported as one entry with the bytes it shrank by. Entries are recognised by name alone; anything else there (unknown
+ * names, symlinks) stays, and so does whatever was modified at or after `keepNewerThan`, so a listing a key check writes
+ * during `gc` survives. Returns what went (or, with `dryRun`, what would), sorted by path.
  */
 export async function sweepState(context: AdapterGcContext): Promise<AdapterGcEntry[]> {
   const { projectDir, inputs } = context;
@@ -42,6 +44,8 @@ export async function sweepState(context: AdapterGcContext): Promise<AdapterGcEn
       if (pattern.test(name) && !inputs.has(rel)) await drop(rel, false);
     }
   }
+  const pruned = await new FinalTimes(projectDir).prune(inputs, { dryRun: context.dryRun, keepNewerThan: context.keepNewerThan }).catch(() => null);
+  if (pruned) removed.push({ path: FINALS_FILE, bytes: pruned.bytes });
   return removed.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 

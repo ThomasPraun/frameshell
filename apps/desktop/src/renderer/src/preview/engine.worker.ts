@@ -488,6 +488,11 @@ interface Part {
   alpha: AlphaPlane | null;
   size: Size;
   placement: Placement;
+  /**
+   * The span's own placement, without keys or transitions: the grain plate is sized from it (ADR 0043 "Units": cells
+   * are counted before keys and transition zooms, as export sizes the plate from the unkeyed layer). Absent: `placement`.
+   */
+  fixed?: Placement;
   /** A shot's angle: drawn cut into its tile instead of placed. */
   angle: AngleSpan | null;
   /** Program frame shown: a reframed angle's cut depends on it. */
@@ -795,7 +800,7 @@ class Engine implements LayerHost {
         else if (still.state === "ready") {
           const cover = coverPixels(span, { width: still.bitmap.width, height: still.bitmap.height });
           const look = { ...(span.grade ? { grade: span.grade } : {}), ...(span.vignette ? { vignette: span.vignette } : {}), ...(span.grain ? { grain: span.grain } : {}) };
-          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, angle: null, frame: want, shape, ...cover, ...look });
+          parts.push({ layer: pipeline.layer, image: still.bitmap, alpha: null, size: span.size, placement, fixed: span.placement, angle: null, frame: want, shape, ...cover, ...look });
           key += `|s${pipeline.layer}:${span.clip}`;
         }
         continue;
@@ -817,7 +822,7 @@ class Engine implements LayerHost {
           const grade = span.grade ? { grade: span.grade } : {};
           const vignette = span.vignette ? { vignette: span.vignette } : {};
           const grain = span.grain ? { grain: span.grain } : {};
-          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette, ...grain });
+          parts.push({ layer: pipeline.layer, image: frame, alpha: ready.alpha, size: span.size ?? decoded, placement, fixed: span.placement, angle: null, frame: want, shape, ...cover, ...glass, ...grade, ...vignette, ...grain });
         }
         key += `|f${pipeline.layer}:${ready.from}`;
       } else if (!pipeline.failed.has(decodable.path)) {
@@ -976,15 +981,18 @@ class Engine implements LayerHost {
 
   /**
    * `part`'s picture through its grade, vignette and grain; null (drawn as it is) when the pass cannot run, or the
-   * grade's table is unknown and there is nothing else. `placed`: where it is drawn on the `output` canvas, which sizes
-   * the grain in project pixels as export does (`grainPlate` of the layer and the source pixels that show).
+   * grade's table is unknown and there is nothing else. `placed`: where it is drawn on the `output` canvas (the whole frame
+   * for a covering span); the grain is sized in project pixels from the unkeyed layer (`Part.fixed`) as export does
+   * (`grainPlate` of the layer and the source pixels that show).
    */
   #looked(part: Part, placed: LayerRect, output: Size): ImageBitmap | null {
     const image = part.image as GradeSource;
     const [width, height] = image instanceof VideoFrame ? [image.displayWidth, image.displayHeight] : [image.width, image.height];
     const crop = part.cover ?? { left: 0, top: 0, width, height };
     const project = this.#program!.resolution;
-    const layer = { width: (placed.width * project.width) / output.width, height: (placed.height * project.height) / output.height };
+    // A covering span fills the frame whatever its keys; any other counts cells on the unkeyed layer, as export does.
+    const fixed = part.fixed && !part.cover ? layerRect(part.size, output, project, part.fixed) : placed;
+    const layer = { width: (fixed.width * project.width) / output.width, height: (fixed.height * project.height) / output.height };
     // The cover crop is in decoded pixels; export counts the source's own.
     const source = { width: Math.round((crop.width * part.size.width) / width), height: Math.round((crop.height * part.size.height) / height) };
     const look: PictureLook = {
