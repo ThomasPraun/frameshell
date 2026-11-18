@@ -329,6 +329,7 @@ export {
   normalizeGrade,
   parseCube,
 } from "./grade.js";
+export { GRADE_LOOKS, type BuiltInLook, findLook, lookGrade, lookNames } from "./grade-looks.js";
 export {
   type FrameSize,
   type LetterboxBar,

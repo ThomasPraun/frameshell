@@ -56,6 +56,18 @@ describe("method registry JSON Schema", () => {
     expect(() => parseParams("asset.import", { cwd, files: ["relative.mp4"] })).toThrow(/params\.files\.0/);
   });
 
+  it("lists the built-in colour looks with no params, as a read, and lets grade.compare name one", () => {
+    expect(schemas["grade.looks"]).toMatchObject({ params: { additionalProperties: false } });
+    expect(schemas["grade.looks"].mutating).toBeFalsy();
+    expect(parseParams("grade.looks", {})).toEqual({});
+    expect(() => parseParams("grade.looks", { cwd: process.cwd() })).toThrow(/cwd/);
+    const result = methods["grade.looks"].result.parse({ looks: [{ name: "warm", summary: "Golden.", grade: { temperature: 0.28 } }] });
+    expect(result.looks[0]!.name).toBe("warm");
+    const look = parseParams("grade.compare", { cwd: process.cwd(), timeline: "main", clip: "c_a", looks: [{ look: "warm", saturation: 1.1 }] }).looks[0]!;
+    expect(look).toEqual({ look: "warm", saturation: 1.1 });
+    expect(schemas["grade.compare"].params).toMatchObject({ properties: { looks: { items: { properties: { look: { type: "string" } } } } } });
+  });
+
   it("flags only connection plumbing and app-only methods as internal, so tool generators skip them", () => {
     const internal = Object.entries(schemas)
       .filter(([, schema]) => schema.internal)

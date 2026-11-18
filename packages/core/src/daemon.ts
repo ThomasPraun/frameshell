@@ -44,6 +44,7 @@ import {
   type ShotClip,
   type Timeline,
   type Transcript,
+  GRADE_LOOKS,
   REQUIREMENTS_FILE,
   STYLE_FILE,
   USER_STYLES_DIR,
@@ -1954,6 +1955,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const analysis = await gradeAnalyzer.analyze(dir, shown.timeline, { timeline, fps: shown.fps, clip, at, from, to, samples });
       return { view: shown.view, proposal: shown.proposal, ...analysis };
     },
+    "grade.looks": async () => ({ looks: GRADE_LOOKS.map(({ name, summary, grade }) => ({ name, summary, grade: { ...grade } })) }),
     "grade.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));

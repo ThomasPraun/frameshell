@@ -1,5 +1,6 @@
 import type { LogHint } from "@frameshell/schema";
 import { GRADE_LIMITS, type NormalizedGrade, logFootageHint } from "@frameshell/schema/grade";
+import { GRADE_LOOKS } from "@frameshell/schema/grade-looks";
 import { useEffect, useRef, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
 import { cubeFiles } from "../grade/luts.js";
@@ -37,7 +38,8 @@ const NEUTRAL: NormalizedGrade = {
 
 /**
  * A video-track clip's colour grade (ADR 0031, #384; media, generated or nested timeline clip): five sliders for the correction (exposure, white balance, contrast,
- * saturation), a project `.cube` LUT with its mix, and a reset. Dragging a slider shows its value; the release is one
+ * saturation), a Look menu (the built-in looks of `grade-looks.ts`: one `clip.set grade` writes that look's five numbers,
+ * leaving the LUT), a project `.cube` LUT with its mix, and a reset. Dragging a slider shows its value; the release is one
  * `clip.set grade` that changes that number only, so a drag is one undo step and the agent's other numbers stay.
  * LUTs are the `.cube` files the project holds, listed through the window's file tree. A note says when the footage
  * looks like LOG or HDR (`logFootageHint`): grading it is allowed, but Rec.709 looks and white balance do not fit it.
@@ -77,6 +79,26 @@ export function ColourControl({
           </span>
         )}
       </span>
+      <label className="clip-field colour-grade-look" data-tip={t.inspector.gradeLookTitle}>
+        <span className="clip-field-label is-static">{t.inspector.gradeLook}</span>
+        <select
+          className="clip-field-select"
+          aria-label={t.inspector.gradeLook}
+          data-testid="grade-look"
+          value=""
+          onChange={(event) => {
+            const look = GRADE_LOOKS.find((entry) => entry.name === event.target.value);
+            if (look) onSend({ op: "clip.set", args: { clip, grade: { ...look.grade } } }, { label: "Apply look" });
+          }}
+        >
+          <option value="">{t.inspector.gradeLookChoose}</option>
+          {GRADE_LOOKS.map((look) => (
+            <option key={look.name} value={look.name}>
+              {t.inspector.gradeLooks[look.name] ?? look.name}
+            </option>
+          ))}
+        </select>
+      </label>
       <span className="colour-grade-sliders">
         {SLIDERS.map(({ name, step }) => (
           <GradeSlider key={name} name={name} step={step} stored={shown[name]} onCommit={(value) => set({ [name]: value })} />

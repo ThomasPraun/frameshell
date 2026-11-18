@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 173;
+export const PROTOCOL_VERSION = 174;
 
 export {
   type MethodSpec,
@@ -482,6 +482,10 @@ export type ClipVerifyResult = MethodResult<"clip.verify">;
 export type GradeAnalyzeParams = MethodParams<"grade.analyze">;
 /** Result of `grade.analyze`. */
 export type GradeAnalyzeResult = MethodResult<"grade.analyze">;
+/** `grade.looks` params. */
+export type GradeLooksParams = MethodParams<"grade.looks">;
+/** Result of `grade.looks`. */
+export type GradeLooksResult = MethodResult<"grade.looks">;
 /** `grade.compare` params. */
 export type GradeCompareParams = MethodParams<"grade.compare">;
 /** Result of `grade.compare`. */
