@@ -57,7 +57,7 @@ export function withTiming(inputProps: Record<string, unknown>, timing: RenderTi
  */
 export const TIMING_HELPER_SOURCE = `// Timeline timing for a clip with props.timing, e.g. {"composition":"intro","timing":["beats","markers"]}.
 // Frameshell passes it as the input prop ${TIMING_INPUT}. Times are composition seconds: frame / fps.
-import { useVideoConfig } from "remotion";
+import { getInputProps, useVideoConfig } from "remotion";
 
 export interface FrameshellBeat {
   /** Composition seconds. */
@@ -99,9 +99,13 @@ export interface FrameshellTiming {
   wordsProblem?: string;
 }
 
-/** The timing of this clip, or null when it did not ask (or in the Remotion Studio). */
+/**
+ * The timing of this clip, or null when it did not ask (or in the Remotion Studio). Reads the composition's props
+ * first; when its calculateMetadata returned props without the timing, falls back to the render's input props.
+ */
 export function useFrameshellTiming(): FrameshellTiming | null {
   const { props } = useVideoConfig();
-  return ((props as Record<string, unknown>)["${TIMING_INPUT}"] as FrameshellTiming | undefined) ?? null;
+  const fromProps = (props as Record<string, unknown>)["${TIMING_INPUT}"] as FrameshellTiming | undefined;
+  return fromProps ?? ((getInputProps() as Record<string, unknown>)["${TIMING_INPUT}"] as FrameshellTiming | undefined) ?? null;
 }
 `;

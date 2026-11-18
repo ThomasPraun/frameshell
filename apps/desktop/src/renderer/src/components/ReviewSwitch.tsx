@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { t } from "../i18n.js";
 import { setReviewEnabled, useReview } from "../review/store.js";
 
@@ -9,8 +9,12 @@ import { setReviewEnabled, useReview } from "../review/store.js";
 export function ReviewSwitch() {
   const { enabled } = useReview();
   const [failure, setFailure] = useState<string | null>(null);
-  // The daemon's answer takes a moment to come back as an event: show the click at once.
+  // The daemon's answer takes a moment to come back as an event: show the click until the store agrees with it
+  // (the reply alone is not enough: the box would jump back before the event arrives), or until the call fails.
   const [asked, setAsked] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (asked === enabled) setAsked(null);
+  }, [asked, enabled]);
   return (
     <div className="review-switch">
       <label data-tip={t.review.switchHint}>
@@ -22,7 +26,7 @@ export function ReviewSwitch() {
             setAsked(wanted);
             void setReviewEnabled(wanted).then((message) => {
               setFailure(message);
-              setAsked(null);
+              if (message !== null) setAsked(null);
             });
           }}
         />

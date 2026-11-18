@@ -144,7 +144,7 @@ describe("direct edits seen by the daemon's watcher", () => {
 
 describe("edits made while no daemon ran", () => {
   it("are journaled as `file` operations when the project opens", async () => {
-    const { conn, dir, edit } = await setup();
+    const { conn, dir, read, edit } = await setup();
     await conn.request("track.add", { cwd: dir, kind: "video" });
     conn.close();
     await daemon!.close();
@@ -155,13 +155,15 @@ describe("edits made while no daemon ran", () => {
     daemon = await startDaemon({ socketPath: uniqueSocketPath() });
     const again = await connectToDaemon(daemon.socketPath, { client: "cli/test", session: "term-2" });
     connections.push(again);
-    const changed = next(again, "timeline.changed", (event) => event.author === "file");
-    // Opening the project attaches the watcher, which takes the file in; no timeline call needed.
+    // Opening the project attaches the watcher, which takes the file in; no timeline call needed. On a loaded machine
+    // the file can be taken in before the subscription is registered, so the history is read, not only the event.
     await again.request("events.subscribe", { cwd: dir, events: ["timeline.changed"] });
-
-    expect(await changed).toMatchObject({ timeline: "main", revision: 2, author: "file" });
-    const history = await again.request("history", { cwd: dir, timeline: "main" });
-    expect(history.transactions.map((tx) => tx.author)).toEqual(["cli:term-1", "file"]);
+    const authors = async () => (await again.request("history", { cwd: dir, timeline: "main" })).transactions.map((tx) => tx.author);
+    await expect.poll(authors, { timeout: 20_000 }).toContain("file");
+    // The watcher lists the folder once more after it is ready: a second ingest of the same file would show by then.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(await authors()).toEqual(["cli:term-1", "file"]);
+    expect(read()).toMatchObject({ revision: 2, tracks: [{ name: "Offline" }] });
   });
 });
 
