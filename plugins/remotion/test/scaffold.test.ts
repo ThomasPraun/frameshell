@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { REACT_VERSION, REMOTION_VERSION, newComposition } from "../src/index.js";
+import { REACT_VERSION, REMOTION_VERSION, TIMING_HELPER_SOURCE, newComposition } from "../src/index.js";
 
 let project: string;
 
@@ -38,6 +38,19 @@ describe("frameshell remotion new", () => {
     expect(component).toContain("useVideoConfig()");
     expect(component).not.toMatch(/AbsoluteFill style=\{\{[^}]*background/);
     expect(read(".gitignore")).toBe("node_modules/\n");
+  });
+
+  it("writes the timing hook once and never overwrites it", async () => {
+    const first = (await run("intro")) as { output: string };
+    expect(first.output).toContain("src/frameshell-timing.ts");
+    const hook = read("src/frameshell-timing.ts");
+    expect(hook).toContain("export function useFrameshellTiming(): FrameshellTiming | null");
+    expect(hook).toContain('["frameshellTiming"]');
+    expect(hook).toBe(TIMING_HELPER_SOURCE);
+    writeFileSync(join(project, "compositions", "remotion", "src", "frameshell-timing.ts"), "// mine");
+    const second = (await run("outro")) as { output: string };
+    expect(second.output).not.toContain("frameshell-timing");
+    expect(read("src/frameshell-timing.ts")).toBe("// mine");
   });
 
   it("adds later compositions without touching the project files, printing the registration", async () => {
