@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `music.pick`, the last slice of #485 (ADR 0037; protocol 171, no schema change): `frameshell music pick <track> [--keep] [--dry-run]`
+  (MCP `music_pick`) keeps one of the candidate tracks `music candidates` placed. The chosen track (id or name, e.g.
+  `Music 2`) is unmuted and renamed `Music`, and the other candidate tracks (audio tracks named `Music <n>` that hold only
+  media clips) are removed with their clips; `--keep` mutes them and leaves them in place. A candidate with edits of its
+  own (several clips, or a clip with speed, keys, effects, fades or transitions, or a subtitle track following it) is never
+  removed: the result names it. Refused when the track is not a candidate or there is no other to pick between. One
+  transaction `Music pick: <track>` (one proposal in review mode); nothing is fitted or ducked again, the result's `next`
+  says `music fit` and `duck --level` follow. Skill updated.
+
 - Cut seam strips and the per-clip kit of `review`, slice RP3 of #457, the last (epic #451; protocol 170):
   `--sheets cuts` (opt in, never a default) writes one row per cut, the whole frames 0.2 and 0.1 s before it, on it,
   and 0.1 and 0.2 s after (`cut 3 -0.1`; a cut within 0.2 s of the range's edge repeats the edge frame, so every cut
