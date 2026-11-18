@@ -392,7 +392,7 @@ const SPEECH: ProviderKind<SpeechProvider> = {
   registered: (plugin) => plugin.speechProviders,
   declared: (manifest) => manifest.contributes.speechProviders,
   notFound: ErrorCode.SpeechProviderNotFound,
-  hint: () => INSTALL_HINT,
+  hint: (id) => (id === "openai" ? " Install the OpenAI provider with `frameshell plugin install @frameshell/openai-speech`." : INSTALL_HINT),
 };
 
 /** Official plugin of each official clip type, for install hints. */

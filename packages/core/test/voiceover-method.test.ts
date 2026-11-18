@@ -152,6 +152,7 @@ describe("voiceover.generate", () => {
     writeFileSync(join(root, "scripts", "plain.md"), "## Intro\nHola.");
     await expect(generate({ script: "scripts/plain.md", provider: "stand-in" })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
     await expect(generate({ provider: "nobody" })).rejects.toMatchObject({ code: ErrorCode.SpeechProviderNotFound, data: { provider: "nobody", available: ["stand-in"] } });
+    await expect(generate({ provider: "openai" })).rejects.toMatchObject({ code: ErrorCode.SpeechProviderNotFound, message: expect.stringContaining("frameshell plugin install @frameshell/openai-speech") });
     await expect(generate({ voice: "soprano" })).rejects.toMatchObject({ code: ErrorCode.InvalidParams, message: expect.stringContaining("voices: tone, low") });
     writeFileSync(join(root, "scripts", "launch-vo.md"), script(LINES, []));
     await expect(generate()).rejects.toMatchObject({ code: ErrorCode.InvalidParams, message: expect.stringContaining("available: stand-in") });

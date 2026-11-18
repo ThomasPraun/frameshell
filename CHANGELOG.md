@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAI speech provider, slice CS of #676 (ADR 0034 decision 24, epic #451; plugin only, no protocol change; closes
+  #676): `frameshell plugin install @frameshell/openai-speech` adds the paid provider `openai` for
+  `frameshell voiceover generate --provider openai` (default voice `alloy`, model `gpt-4o-mini-tts`, changed with
+  `FRAMESHELL_OPENAI_SPEECH_MODEL`). The key is read from the `OPENAI_API_KEY` environment variable only, and never
+  reaches a project file, the history, a progress message or an error (upstream error texts are scrubbed). The cost
+  box and `ConfirmationRequired` show an estimate from a price table with its source and date (`src/prices.ts`),
+  approximate for the token-billed default model. `SpeechProviderNotFound` for `openai` names the plugin. Tests run
+  against a stub HTTP server; no real key or call.
 - Remotion timing binding, slice RB of #458 (ADR 0029 decision 8, owner decision Q6, epic #451; plugin only, no protocol
   change): a `remotion` clip asks for the timeline's beats and markers with `props.timing` (`["beats", "markers"]`;
   unknown words are refused with the allowed ones) and its composition finds them in the reserved input prop

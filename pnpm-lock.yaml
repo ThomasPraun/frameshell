@@ -249,6 +249,12 @@ importers:
         specifier: 0.187.0
         version: 0.187.0
 
+  plugins/openai-speech:
+    devDependencies:
+      '@frameshell/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
   plugins/remotion:
     devDependencies:
       '@frameshell/core':

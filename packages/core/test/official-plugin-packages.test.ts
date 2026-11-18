@@ -17,5 +17,6 @@ describe("official plugin npm packages", () => {
     expect(output).toContain("@frameshell/hyperframes@");
     expect(output).toContain("@frameshell/remotion@");
     expect(output).toContain("@frameshell/blender@");
+    expect(output).toContain("@frameshell/openai-speech@");
   });
 });
