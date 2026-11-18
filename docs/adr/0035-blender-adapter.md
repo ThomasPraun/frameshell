@@ -48,7 +48,7 @@ From the review of the draft:
 
 ## Plugin API: `inputs(clip, context?)`
 
-`ClipAdapter.inputs` gets an optional second argument, `InputsContext { projectDir, ensureBinary, signal }` (`signal` since slice 5), passed by `ClipRenderer` on every key check. Additive (like `refreshRenders`, ADR 0009): `PLUGIN_API_VERSION` stays `"1"`, existing adapters ignore it, and an adapter that needs it fails with "this Frameshell is too old" when it is absent. No protocol or schema change, no `PROTOCOL_VERSION` bump, no `gen:json-schema`.
+`ClipAdapter.inputs` gets an optional second argument, `InputsContext { projectDir, ensureBinary, signal? }` (`signal` since slice 5; typed optional, `signal?: AbortSignal | undefined`, since a host older than slice 5 passes none, #471; still `PLUGIN_API_VERSION` `"1"`), passed by `ClipRenderer` on every key check. Additive (like `refreshRenders`, ADR 0009): `PLUGIN_API_VERSION` stays `"1"`, existing adapters ignore it, and an adapter that needs it fails with "this Frameshell is too old" when it is absent. No protocol or schema change, no `PROTOCOL_VERSION` bump, no `gen:json-schema`.
 
 ## Design
 

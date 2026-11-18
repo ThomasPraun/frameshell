@@ -290,6 +290,8 @@ interface RequestContext {
   progress(update: Progress): void;
   /** This connection, as the target of its event subscriptions. */
   sink: EventSink;
+  /** Aborts when this connection closes: work that only this client waits for stops with it. */
+  closed: AbortSignal;
 }
 
 /** One handler per registry method; params arrive already validated. */
@@ -2131,6 +2133,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const canceledWaiting = new Promise<never>((_resolve, reject) => {
         stop.signal.addEventListener("abort", () => reject(voiceoverCanceledBeforeStart(provider ?? null)), { once: true });
       });
+      // A closed connection cancels its own run like `voiceover.cancel` does: same `stop`, same result, takes kept.
+      const onClosed = () => stop.abort();
+      if (request.closed.aborted) onClosed();
+      else request.closed.addEventListener("abort", onClosed, { once: true });
       const run = Promise.race([turn, canceledWaiting]).then(work);
       const none = () => undefined;
       const settled = Promise.all([turn, run.then(none, none)]).then(none);
@@ -2139,6 +2145,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         if (voiceoverRuns.get(key) === settled) voiceoverRuns.delete(key);
       });
       return run.finally(() => {
+        request.closed.removeEventListener("abort", onClosed);
         calls.delete(call);
         if (calls.size === 0 && voiceoverCalls.get(key) === calls) voiceoverCalls.delete(key);
       });
@@ -3659,8 +3666,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     let handshaken = false;
     const caller: Caller = { client: "", session: null };
     const sink: EventSink = { notify: (method, params) => writeMessage(socket, { jsonrpc: "2.0", method, params }) };
+    const closedConnection = new AbortController();
     socket.on("error", () => socket.destroy());
     socket.on("close", () => {
+      closedConnection.abort();
       events.drop(sink);
       for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
       targets.drop(caller);
@@ -3703,6 +3712,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             if (request.id !== undefined) writeMessage(socket, { jsonrpc: "2.0", method: "progress", params: { requestId: request.id, ...update } });
           },
           sink,
+          closed: closedConnection.signal,
         };
         const handler = handlers[method] as (p: typeof params, c: Caller, r: RequestContext) => Promise<unknown>;
         const result = await (idempotencyKey === null
