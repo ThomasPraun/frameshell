@@ -16,8 +16,8 @@ export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [-
                                Put the takes of a voiceover script on the timeline as phrase clips (one per phrase of each
                                take, cut at its silences) on the audio track Voiceover, in one transaction. Run
                                \`voiceover generate\` first. --at anchors a line (hook-1) or one phrase of it (hook-1.2) at a
-                               time: seconds, a marker (hook, hook+0.5), a beat or bar of the grid (beat:9, bar:3) or a word
-                               (word:over; commas separate the entries, so a label with a comma needs its marker id). A line with no --at follows
+                               time on the timeline clock, in any form the timeline help's time paragraph lists (hook+0.5;
+                               commas separate the entries, so a label with a comma needs its marker id). A line with no --at follows
                                the one before it by --gap seconds (default ${VOICEOVER_LINE_GAP_S}); the first starts at --start, else after the
                                track's last clip. --tempo sets the speed of single phrases (line.N, or a line id = its phrase 1 only:
                                ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max}, 1 = as spoken, pitch kept): the clip plays at that speed and the effective length is

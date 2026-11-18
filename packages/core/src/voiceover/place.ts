@@ -32,8 +32,8 @@ export interface PlaceDeps {
   root: string;
   load(): Promise<LoadedTimeline>;
   /**
-   * Seconds a time reference names on `loaded`'s timeline, in any form the protocol's `TimeRef` describes (seconds,
-   * markers, beats, bars, words the timeline plays); throws `TimeRefError`.
+   * Seconds a time reference names on `loaded`'s timeline, in any form the protocol's `TimeRef` describes; throws
+   * `TimeRefError`.
    */
   resolve(ref: number | string, loaded: LoadedTimeline): Promise<number>;
 }

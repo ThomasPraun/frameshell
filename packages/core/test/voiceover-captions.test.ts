@@ -59,6 +59,26 @@ describe("captionLine", () => {
     expect(digits.timing).toBe("heard");
   });
 
+  it("finds digits the transcription wrote far from where the spread puts the number", () => {
+    // The spread puts "23" at about 0.43 to 1.86 s; it was said at 2.2 s, after a long "Son": out of its slot.
+    const line = captionLine(
+      { display: "Son 23 pestañas.", phrases: [{ from: 0, to: 3 }], heard: [word("Son", 0.02, 0.98), word("23", 2.2), word("pestañas.", 2.55, 0.4)] },
+      "es",
+      BIG,
+    );
+    expect(line.timing).toBe("heard");
+    expect(line.missing).toEqual([]);
+    expect(line.words[1]).toEqual({ text: "23", start: 2.2, end: 2.5 });
+  });
+
+  it("splits one heard word shared by two display words between them", () => {
+    const line = captionLine({ display: "We can not stop.", phrases: [{ from: 0, to: 2 }], heard: [word("We", 0.02, 0.2), word("cannot", 0.4, 0.5), word("stop.", 1.1, 0.4)] }, "en", BIG);
+    expect(line.timing).toBe("heard");
+    const [, can, not] = line.words;
+    expect(can).toEqual({ text: "can", start: 0.4, end: 0.65 });
+    expect(not).toEqual({ text: "not", start: 0.65, end: 0.9 });
+  });
+
   it("puts a respelled name over the words it was said as", () => {
     const line = captionLine(
       { display: "Frameshell las cierra.", phrases: whole, heard: [word("freim", 0.02, 0.2), word("shel", 0.25, 0.2), word("las", 0.6, 0.2), word("cierra.", 0.9, 0.4)] },
@@ -231,6 +251,23 @@ describe("voiceover.captions", () => {
     expect(result.warnings.some((warning) => warning.includes("spread over each take's phrases"))).toBe(true);
     expect(result.lines).toEqual([{ id: "hook-1", timing: "proportional", words: 3, chunks: ["Son", "23", "pestañas."], missing: [], placed: true }]);
     expect(transcript("hook-1")).toMatchObject({ provider: "voiceover-script", model: "proportional" });
+  }, 60_000);
+
+  it("times a take by the heard words its transcript already holds when the project can no longer transcribe", async () => {
+    await withTranscriber();
+    await generateAndPlace();
+    heard([word("Son", at(0)), word("veintitrés", at(1)), word("pestañas.", at(2))]);
+    await captions({ lines: ["hook-1"] });
+    const timed = transcript("hook-1");
+    await conn.request("project.trust", { cwd: root, decision: "deny" });
+
+    const result = await captions({ lines: ["hook-1"] });
+    expect(result.timing.status).toBe("proportional");
+    expect(result.lines).toEqual([{ id: "hook-1", timing: "heard", words: 3, chunks: ["Son", "23", "pestañas."], missing: [], placed: true }]);
+    expect(result.warnings.some((warning) => warning.includes("timed by the words its current transcript holds (fake-heard)"))).toBe(true);
+    const kept = transcript("hook-1");
+    expect(kept).toMatchObject({ provider: "fake-heard", model: "fake-model" });
+    expect(kept.words.map((w) => [w.id, w.start, w.end])).toEqual(timed.words.map((w) => [w.id, w.start, w.end]));
   }, 60_000);
 
   it("plans without writing on a dry run", async () => {

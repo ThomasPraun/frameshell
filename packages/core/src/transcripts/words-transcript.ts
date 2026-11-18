@@ -19,12 +19,15 @@ export interface BuiltTranscript {
   /** Absolute path to write it to. */
   path: string;
   transcript: Transcript;
+  /** Ids of words whose hand edits were dropped: no word of `words` matched them again. */
+  droppedEdits: string[];
 }
 
 /**
  * The transcript of `asset` (SPEC §5.4) made of `words` already timed on the asset's clock, in time order, for the
  * callers that time words themselves (shoot session takes, voiceover captions). Word ids and their human edits are
- * kept from the transcript already there, as `transcribe` keeps them. Throws when the words make no valid transcript,
+ * kept from the transcript already there, as `transcribe` keeps them; edits of words not found again are dropped and
+ * listed. Throws when the words make no valid transcript,
  * and what {@link resolveTranscript} throws.
  */
 export async function transcriptFromWords(root: string, asset: string, words: readonly TranscriptWord[], source: WordsTranscriptSource): Promise<BuiltTranscript> {
@@ -48,5 +51,5 @@ export async function transcriptFromWords(root: string, asset: string, words: re
   };
   const checked = parseTranscript(transcript);
   if (!checked.ok) throw new Error(`the words of ${asset} do not make a valid transcript:\n${checked.error}`);
-  return { rel, path, transcript };
+  return { rel, path, transcript, droppedEdits: assigned.droppedEdits };
 }

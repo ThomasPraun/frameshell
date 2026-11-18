@@ -308,8 +308,8 @@ export const scriptSoundMethods = {
       "phrases (the ranges `voiceover.generate` reports) and every phrase becomes a media clip of the take (`in`/`out` on " +
       "whole frames, `scriptRef` `<script>#<scene>`) on an audio track: `track`, else the one named `Voiceover`, made when absent. " +
       "The phrases of a line keep the spacing the take has. Where a line goes: `at` maps a line id (`hook-1`) or one phrase of it " +
-      "(`hook-1.2`, counting from 1) to a time in any form a time argument takes (the TimeRef forms each `at` value describes: " +
-      "seconds, markers, beats and bars, words the timeline plays), resolved by the same rules; the clip starts on the frame nearest it, " +
+      "(`hook-1.2`, counting from 1) to a time in any form a time argument takes (see the TimeRef description of each `at` " +
+      "value), resolved by the same rules; the clip starts on the frame nearest it, " +
       "so the first sound follows by 20 ms of air kept in the phrase. A line (or phrase) with no `at` follows the one before it by " +
       `\`gap\` seconds (default ${VOICEOVER_LINE_GAP_S}); the first one starts at \`start\`, else right after the track's last clip, else 0. ` +
       "Voice never overlaps itself: a phrase that would start before the previous one ends, or on a clip already on the track, fails " +
@@ -412,8 +412,12 @@ export const scriptSoundMethods = {
       "`veintitrés`, `Frameshell` over `freim shel`). A display word the voice did not say is listed in `missing` and timed " +
       "between its neighbours; a line too little of which was heard (`unaligned`), and every line when the transcription " +
       "cannot run (an untrusted project, no transcription plugin, a failed run: `timing.reason` says which), has its words " +
-      "spread over its phrases by length instead. The words become the take's transcript (`transcripts/…words.json`, " +
-      "word ids and hand edits kept where a word is found again), so a subtitle track that follows the voice track shows " +
+      "spread over its phrases by length instead (when it cannot run, a take whose current transcript holds heard words is " +
+      "timed by those). Digits the transcription wrote meet the spelled number. The words become the take's transcript " +
+      "(`transcripts/…words.json`, word ids and hand edits kept where a word is found again, other hand edits dropped with " +
+      "a warning), written before the transaction and outside the history: `revert` and a rejected proposal undo the " +
+      "phrases and the track, never the transcript (it stays even when the transaction fails), and other subtitle tracks following these " +
+      "takes show the display words too; `transcribe` on a take puts the heard words back. A subtitle track that follows the voice track shows " +
       "them; then, in one transaction `Voiceover captions: …`, the subtitle track (`track`, else the first one that " +
       "follows the voice track, else a new one named `Voiceover captions`) gets one hand-chunked phrase per phrase of each " +
       "take, split at words so no cue holds more words or characters than the track's style allows, replacing the " +
@@ -445,7 +449,10 @@ export const scriptSoundMethods = {
       timeline: z.string().describe("Timeline id."),
       revision: z.int().describe("Revision after the change; the one before the call when nothing was written."),
       dryRun: z.boolean().describe("Nothing was written."),
-      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null on a dry run."),
+      tx: z
+        .string()
+        .nullable()
+        .describe("Transaction holding the phrases and the track (`revert` removes them, not the transcripts: `transcribe` puts the heard words back); null on a dry run."),
       script: z.string().describe("Script file, project-relative."),
       track: z
         .object({

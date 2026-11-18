@@ -8,6 +8,7 @@ import { ErrorCode, type Progress, RpcError, type ValidatedParams, type Voiceove
 import { type CaptionPhrase, type NumberLanguage, type Track, numberLanguage, resolveSubtitleStyle, spokenTokens } from "@frameshell/schema";
 import type { StepResult } from "../sound/place.js";
 import { type TimedWord, alignWords } from "../transcripts/align.js";
+import { resolveTranscript } from "../transcripts/transcriber.js";
 import { type BuiltTranscript, transcriptFromWords } from "../transcripts/words-transcript.js";
 import type { VerifyServices } from "./generate.js";
 import { type LoadedTimeline, VOICE_TRACK_NAME } from "./place.js";
@@ -27,7 +28,9 @@ export const SCRIPT_TIMING = { provider: "voiceover-script", model: "proportiona
 
 /** Most words and characters one cue may hold: the subtitle track style's `maxWords`/`maxChars`. */
 export interface CaptionLimits {
+  /** Most words one cue holds. */
   maxWords: number;
+  /** Most characters one cue holds, spaces included, unless it is a single word. */
   maxChars: number;
 }
 
@@ -43,6 +46,7 @@ export interface CaptionLineInput {
 
 /** A line's display words on the take clock, grouped by phrase. */
 export interface CaptionedLine {
+  /** How the words were timed: by the words heard, or spread over the phrases (`unaligned`, `proportional`). */
   timing: VoiceoverCaptionsResult["lines"][number]["timing"];
   /** Display words in order, take seconds (3 decimals). */
   words: TimedWord[];
@@ -93,8 +97,8 @@ export function chunkSizes(words: readonly string[], limits: CaptionLimits): num
 
 /**
  * Time the display words of one line on its take (pure). With `heard`, each display word is matched by
- * {@link alignWords} as the words it is said as (`23` as `veintitrés` in `language`), against the heard words in their
- * time slots: a word takes the span of every heard word it covers (a number said in three words spans all three); one
+ * {@link alignWords} as the words it is said as (`23` as `veintitrés` in `language`), against the heard words read the
+ * same way (digits the transcription wrote meet the spelled number), in their time slots: a word takes the span of every heard word it covers (a number said in three words spans all three); one
  * not heard is `missing` and shares the time between its neighbours. When fewer than half the words are heard as
  * written the line is `unaligned`, and with nothing heard `proportional`: the words are spread over the phrases by the
  * length of what is said. Every word then sits inside the phrase it starts in, and the words of each phrase are cut
@@ -113,7 +117,9 @@ export function captionLine(input: CaptionLineInput, language: NumberLanguage | 
   if (input.heard !== null) {
     const heard = [...input.heard].sort((a, b) => a.start - b.start);
     const expected = texts.map((text, i) => ({ text: said[i]!.join(" ") || text, start: spread[i]!.start, end: spread[i]!.end }));
-    const hearing = alignWords(expected, heard);
+    // One entry per heard word, so the indexes `alignWords` returns still name `heard`.
+    const heardSaid = heard.map((word) => ({ ...word, text: spokenTokens(word.text, language).join(" ") || word.text }));
+    const hearing = alignWords(expected, heardSaid);
     if (hearing.filter((found) => found.status === "heard").length * 2 < texts.length) {
       timing = "unaligned";
     } else {
@@ -126,7 +132,8 @@ export function captionLine(input: CaptionLineInput, language: NumberLanguage | 
     }
   }
 
-  // In order and inside one phrase each: a heard word shared by two display words would otherwise overlap.
+  // In order and inside one phrase each: a heard word shared by two display words would otherwise overlap. Words that
+  // start together (one heard token for both) split its span by weight, so neither is left without time.
   const words: TimedWord[] = [];
   const owner: number[] = [];
   for (const [i, span] of spans.entries()) {
@@ -134,8 +141,16 @@ export function captionLine(input: CaptionLineInput, language: NumberLanguage | 
     let end = span!.end;
     const previous = words.at(-1);
     if (previous) {
-      start = Math.max(start, previous.start);
-      previous.end = Math.min(previous.end, start);
+      if (start <= previous.start && previous.end > previous.start) {
+        const shared = Math.min(previous.end, Math.max(end, previous.start));
+        const split = previous.start + ((shared - previous.start) * weights[i - 1]!) / (weights[i - 1]! + weights[i]!);
+        start = split;
+        end = Math.max(end, previous.end);
+        previous.end = split;
+      } else {
+        start = Math.max(start, previous.start);
+        previous.end = Math.min(previous.end, start);
+      }
     }
     // The phrase the word starts in, so its caption shows when it is said; a word said across a silence ends there.
     const k = Math.max(phraseOf(start, phrases), owner.at(-1) ?? 0);
@@ -226,12 +241,15 @@ function round(seconds: number): number {
 
 /** What planning needs of the daemon. */
 export interface CaptionsDeps {
+  /** Project root. */
   root: string;
+  /** The timeline as the caller sees it. */
   load(): Promise<LoadedTimeline>;
   /** The project's transcription provider, as the misread check of `voiceover.generate` uses it. */
   transcription: VerifyServices;
   /** `sha256:<hex>` of a project file. */
   hash(rel: string): Promise<string>;
+  /** Reports the transcription's progress to the caller. */
   progress(update: Progress): void;
   /** Aborted when the daemon stops. */
   signal: AbortSignal;
@@ -239,18 +257,25 @@ export interface CaptionsDeps {
 
 /** What the transaction will do; {@link runCaptionsPlan} writes it after the daemon wrote `transcripts`. */
 export interface CaptionsPlan {
+  /** Timeline id. */
   timeline: string;
+  /** Revision the plan read; the transaction fails when the timeline moved on. */
   revision: number;
   /** Transaction label. */
   label: string;
+  /** Script file, project-relative. */
   script: string;
+  /** The subtitle track the captions go on; `id` null when the transaction makes it. */
   track: VoiceoverCaptionsResult["track"];
   /** Every phrase the subtitle track keeps: its phrases on other assets, then one per phrase of each take. */
   phrases: CaptionPhrase[];
   /** The take transcripts to write first. */
   transcripts: BuiltTranscript[];
+  /** How the takes were timed as a whole. */
   timing: VoiceoverCaptionsResult["timing"];
+  /** Report of each line, in script order. */
   lines: VoiceoverCaptionsResult["lines"];
+  /** Problems found while planning. */
   warnings: string[];
 }
 
@@ -324,26 +349,43 @@ export async function planVoiceoverCaptions(params: VoiceoverCaptionsParams, dep
   const timing: CaptionsPlan["timing"] = checked
     ? { status: "heard", provider: transcription.providerId, model: heard.verification.model, reason: null }
     : { status: "proportional", provider: transcription.providerId, model: null, reason: (heard.verification.reason ?? "").replace(/^Verification skipped: /, "Not transcribed: ") };
-  if (!checked) warnings.push(`${timing.reason} The words are spread over each take's phrases instead of timed by what was heard.`);
+  if (!checked) warnings.push(`${timing.reason} The words are spread over each take's phrases instead of timed by what was heard, unless the take's current transcript holds heard words.`);
 
   const numbers = numberLanguage(language);
   const transcripts: BuiltTranscript[] = [];
   const phrases: CaptionPhrase[] = [];
   const report: CaptionsPlan["lines"] = [];
   for (const take of takes) {
-    const words = heard.checks.get(take.line.id)?.words ?? null;
+    const assetHash = await deps.hash(take.file);
+    let words = heard.checks.get(take.line.id)?.words ?? null;
+    let heardBy = { provider: transcription.providerId, model: heard.verification.model ?? transcription.model ?? "default" };
+    if (words === null) {
+      // Real timing already on file (an earlier `transcribe` or heard run of this take) beats a spread guess.
+      const earlier = (await resolveTranscript(deps.root, take.file)).previous;
+      if (earlier && earlier.assetHash === assetHash && earlier.provider !== SCRIPT_TIMING.provider && earlier.words.length > 0) {
+        words = earlier.words.map((word) => ({ text: word.text, start: word.start, end: word.end }));
+        heardBy = { provider: earlier.provider, model: earlier.model };
+        warnings.push(`Line ${take.line.id}: not transcribed now, so timed by the words its current transcript holds (${earlier.provider}).`);
+      }
+    }
     const line = captionLine({ display: take.line.display, phrases: take.phrases, heard: words }, numbers, limits);
     if (line.timing === "unaligned") {
-      warnings.push(`Line ${take.line.id}: too little of its take was heard as the line (heard ${JSON.stringify(words!.map((word) => word.text).join(" "))}), so its words are spread over its phrases; check the take with \`voiceover generate\`.`);
+      warnings.push(
+        `Line ${take.line.id}: fewer than half its written words were heard as written (heard ${JSON.stringify(words!.map((word) => word.text).join(" "))}), so its words are spread over its phrases. ` +
+          "Respelled names count as not heard: if the take sounds right there is nothing to fix; if it misreads the line, generate it again with `voiceover generate`.",
+      );
     }
-    const source = line.timing === "heard" ? { provider: transcription.providerId, model: heard.verification.model ?? transcription.model ?? "default" } : SCRIPT_TIMING;
+    const source = line.timing === "heard" ? heardBy : SCRIPT_TIMING;
     const fresh: TranscriptWord[] = line.words.map((word) => ({ text: word.text, start: word.start, end: word.end }));
     let built: BuiltTranscript;
     try {
-      built = await transcriptFromWords(deps.root, take.file, fresh, { assetHash: await deps.hash(take.file), ...source, language });
+      built = await transcriptFromWords(deps.root, take.file, fresh, { assetHash, ...source, language });
     } catch (error) {
       if (error instanceof RpcError) throw error;
       throw invalid("lines", `line ${take.line.id}: ${(error as Error).message}`);
+    }
+    if (built.droppedEdits.length > 0) {
+      warnings.push(`Line ${take.line.id}: the hand edits of words ${built.droppedEdits.join(", ")} of ${built.rel} were dropped: those words are not in the line's display form.`);
     }
     transcripts.push(built);
     const ids = built.transcript.words.map((word) => word.id);
