@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { AdapterGcContext } from "@frameshell/plugin-api";
@@ -121,6 +121,52 @@ describe("gc of .frameshell/blender", () => {
     const removed = await sweepState(context([...inUse, `${STATE}/range/300-900ms.json`]));
     expect(removed.map((entry) => entry.path)).toEqual([`${stale}/`, `${STATE}/range/0-900ms.json`, `${STATE}/range/700ms.json`, `${STATE}/version/5.0.1.json`]);
     expect(exists(`${STATE}/range/300-900ms.json`)).toBe(true);
+  });
+
+  describe("finals.json", () => {
+    const FINALS = `${STATE}/finals.json`;
+    const body = JSON.stringify({ sources: { "scenes/used.blend": 4.5, "scenes/gone.blend": 7 }, last: 7 }, null, 2) + "\n";
+    /** What a sweep reports about finals.json alone (the project also has the stale entries the cases above delete). */
+    const sweptFinals = async (gc: AdapterGcContext) => (await sweepState(gc)).filter((entry) => entry.path === FINALS);
+    const read = () => JSON.parse(readFileSync(join(project, ...FINALS.split("/")), "utf8")) as { sources: Record<string, number>; last: number | null };
+
+    it("drops the rate of a .blend no clip uses, keeps the one in use and `last`, and reports the bytes it shrank by", async () => {
+      put(FINALS, body);
+      const removed = await sweptFinals(context(["scenes/used.blend"]));
+      const after = readFileSync(join(project, ...FINALS.split("/")), "utf8");
+      expect(removed).toEqual([{ path: FINALS, bytes: body.length - after.length }]);
+      expect(removed[0]!.bytes).toBeGreaterThan(0);
+      expect(read()).toEqual({ sources: { "scenes/used.blend": 4.5 }, last: 7 });
+    });
+
+    it("leaves the file as it is on a dry run, and reports the same entry", async () => {
+      put(FINALS, body);
+      const would = await sweptFinals(context(["scenes/used.blend"], { dryRun: true }));
+      expect(would.map((entry) => entry.path)).toEqual([FINALS]);
+      expect(readFileSync(join(project, ...FINALS.split("/")), "utf8")).toBe(body);
+      expect(await sweptFinals(context(["scenes/used.blend"]))).toEqual(would);
+    });
+
+    it("keeps a file written at or after the grace floor", async () => {
+      put(FINALS, body, new Date(Date.now() - 1000));
+      expect(await sweptFinals(context([]))).toEqual([]);
+      expect(readFileSync(join(project, ...FINALS.split("/")), "utf8")).toBe(body);
+    });
+
+    it("keeps a file whose .blend files are all in use", async () => {
+      put(FINALS, body);
+      expect(await sweptFinals(context(["scenes/used.blend", "scenes/gone.blend"]))).toEqual([]);
+      expect(readFileSync(join(project, ...FINALS.split("/")), "utf8")).toBe(body);
+    });
+
+    it("is harmless when the file is missing or not JSON", async () => {
+      rmSync(join(project, ...FINALS.split("/")), { force: true });
+      expect(await sweptFinals(context([]))).toEqual([]);
+      expect(exists(FINALS)).toBe(false);
+      put(FINALS, "not json {");
+      expect(await sweptFinals(context([]))).toEqual([]);
+      expect(readFileSync(join(project, ...FINALS.split("/")), "utf8")).toBe("not json {");
+    });
   });
 
   it("finds nothing to do in a project that never ran Blender", async () => {
