@@ -1,0 +1,275 @@
+{
+  "machine": {
+    "cpu": "Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz",
+    "logicalCpus": 8,
+    "memGb": 20,
+    "os": "win32 10.0.26300",
+    "node": "v26.13.1"
+  },
+  "runs": [
+    {
+      "variant": "int8",
+      "mode": "main",
+      "voice": "ef_dora",
+      "totalMs": 45198,
+      "peakRssMb": 528,
+      "loadMs": 1869,
+      "loadCpuMs": 1641,
+      "firstRunMs": 3916,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 11126,
+          "rtf": 4.636,
+          "cpuMs": 10999,
+          "cpuRtf": 4.583,
+          "g2pMs": 0.87
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.13,
+          "ms": 28226,
+          "rtf": 4.608,
+          "cpuMs": 27859,
+          "cpuRtf": 4.548,
+          "g2pMs": 0.95
+        }
+      ]
+    },
+    {
+      "variant": "int8",
+      "mode": "worker",
+      "voice": "ef_dora",
+      "totalMs": 43806,
+      "peakRssMb": 645,
+      "loadMs": 2301,
+      "loadCpuMs": 2125,
+      "firstRunMs": 3662,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 10114,
+          "rtf": 4.214,
+          "cpuMs": 9969,
+          "cpuRtf": 4.154,
+          "g2pMs": 1.59
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.13,
+          "ms": 27566,
+          "rtf": 4.501,
+          "cpuMs": 27280,
+          "cpuRtf": 4.454,
+          "g2pMs": 0.41
+        }
+      ]
+    },
+    {
+      "variant": "q8f16",
+      "mode": "main",
+      "voice": "ef_dora",
+      "totalMs": 47818,
+      "peakRssMb": 538,
+      "loadMs": 4974,
+      "loadCpuMs": 4704,
+      "firstRunMs": 3593,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 11264,
+          "rtf": 4.693,
+          "cpuMs": 11171,
+          "cpuRtf": 4.655,
+          "g2pMs": 0.74
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.22,
+          "ms": 27936,
+          "rtf": 4.488,
+          "cpuMs": 27610,
+          "cpuRtf": 4.435,
+          "g2pMs": 0.4
+        }
+      ]
+    },
+    {
+      "variant": "q8f16",
+      "mode": "worker",
+      "voice": "ef_dora",
+      "totalMs": 46666,
+      "peakRssMb": 641,
+      "loadMs": 4842,
+      "loadCpuMs": 4532,
+      "firstRunMs": 2961,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 10818,
+          "rtf": 4.508,
+          "cpuMs": 10765,
+          "cpuRtf": 4.485,
+          "g2pMs": 2.04
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.22,
+          "ms": 27861,
+          "rtf": 4.476,
+          "cpuMs": 27563,
+          "cpuRtf": 4.428,
+          "g2pMs": 0.46
+        }
+      ]
+    },
+    {
+      "variant": "fp32",
+      "mode": "main",
+      "voice": "ef_dora",
+      "totalMs": 47902,
+      "peakRssMb": 1234,
+      "loadMs": 3248,
+      "loadCpuMs": 2968,
+      "firstRunMs": 4852,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 10377,
+          "rtf": 4.324,
+          "cpuMs": 10296,
+          "cpuRtf": 4.29,
+          "g2pMs": 1.72
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.22,
+          "ms": 29352,
+          "rtf": 4.715,
+          "cpuMs": 29187,
+          "cpuRtf": 4.689,
+          "g2pMs": 0.26
+        }
+      ]
+    },
+    {
+      "variant": "fp32",
+      "mode": "worker",
+      "voice": "ef_dora",
+      "totalMs": 47495,
+      "peakRssMb": 1262,
+      "loadMs": 2537,
+      "loadCpuMs": 2125,
+      "firstRunMs": 3575,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 11820,
+          "rtf": 4.925,
+          "cpuMs": 11672,
+          "cpuRtf": 4.863,
+          "g2pMs": 1.51
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.22,
+          "ms": 29386,
+          "rtf": 4.721,
+          "cpuMs": 29187,
+          "cpuRtf": 4.689,
+          "g2pMs": 0.42
+        }
+      ]
+    }
+  ]
+}

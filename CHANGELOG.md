@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   typed aspect), one `letterbox.set` per choice, reading and writing the bars of the format shown. Image projects stay
   out of scope (recorded in ADR 0043). `parseAspect` moves to `@frameshell/schema/finish`, shared by the CLI's
   `letterbox set` and the menu, and a number field no longer sends its value twice when Enter is followed by leaving it.
+- OpenAI speech provider, slice CS of #676 (ADR 0034 decision 24, epic #451; plugin only, no protocol change; closes
+  #676): `frameshell plugin install @frameshell/openai-speech` adds the paid provider `openai` for
+  `frameshell voiceover generate --provider openai` (default voice `alloy`, model `gpt-4o-mini-tts`, changed with
+  `FRAMESHELL_OPENAI_SPEECH_MODEL`). The key is read from the `OPENAI_API_KEY` environment variable only, and never
+  reaches a project file, the history, a progress message or an error (upstream error texts are scrubbed). The cost
+  box and `ConfirmationRequired` show an estimate from a price table with its source and date (`src/prices.ts`),
+  approximate for the token-billed default model. `SpeechProviderNotFound` for `openai` names the plugin. Tests run
+  against a stub HTTP server; no real key or call.
+- Remotion timing binding, slice RB of #458 (ADR 0029 decision 8, owner decision Q6, epic #451; plugin only, no protocol
+  change): a `remotion` clip asks for the timeline's beats and markers with `props.timing` (`["beats", "markers"]`;
+  unknown words are refused with the allowed ones) and its composition finds them in the reserved input prop
+  `frameshellTiming` (`RenderTiming` as is: `beats`, `tempo`, `beatsProblem`, `markers`, composition seconds), in
+  `selectComposition`, the render and the live page alike. Clips without the prop keep their render keys and input
+  props; a clip that asks may not set `inputProps.frameshellTiming` itself (refused). `frameshell remotion new` also
+  writes `src/frameshell-timing.ts` (types and `useFrameshellTiming()`) when missing. The plugin skill and ADR 0029
+  ("Remotion binding as built") describe it. Word times in the timing and a shared `beatAt` stay for later.
 - `title-3d` template, slice 3b of #473 (ADR 0042, epic #451; plugin only, no protocol change; closes #473):
   `frameshell hyperframes new title --template title-3d` extrudes a short title of Archivo Black letters
   (`THREE.TextGeometry`) in the `product-shot` studio, laid out in at most three lines that wrap and shrink to the
@@ -1631,9 +1647,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TSDoc named only markers, beats and bars; they now point to the `TimeRef` forms, `word:` included. `review --pop`
   with a number is taken as seconds straight, with no stub timeline; a marker, beat or word still resolves against the
   timeline. The plugin API TSDoc of `ClipAdapter.gc` states the real contract of the host's `gc`: one call per clip
-  type, which inputs it gets, and when it is not called. Not changed: the stale temp-root sweep for e2e (PR #640 is not
-  on main yet) and `grade.analyze`/`grade.compare` for generated clips (they need a clip render and a nullable `asset`
-  in the result, a wire change).
+  type, which inputs it gets, and when it is not called. Not changed: the stale temp-root sweep for e2e (the unit-test
+  side, PR #640, is on main; the e2e side is done in slice SF3) and `grade.analyze`/`grade.compare` for generated clips
+  (they need a clip render and a nullable `asset` in the result, a wire change).
+
+- Small fixes, slice SF3 of #451 (no wire change): the e2e run root `fse-*` that a killed run left in the system temp
+  dir is swept at the next start when it is older than a day, by the same helper as the unit tests' `fsv-*` dirs
+  (`scripts/stale-temp-dirs.mjs`, one sweep with a unit test), before `TMPDIR` moves so a parallel run's young root
+  stays. `review` of words behind the person now measures only inside the range reviewed (a word that plays outside it
+  is not listed, one that straddles an end is sampled in its part inside), and one word whose alpha or matte cannot be
+  read (an ffmpeg exit) is an `unplaced` entry and a `behind:` warning instead of failing the whole review. When the
+  samples of a word fall on both sides of the 15 to 65 % bands, the entry keeps the verdict of the farthest sample and
+  its message says part of the word floats and part is eaten. `readyMatte` (review) and `matte.status` read one
+  `matteLookup`, so both judge the ingest the same way (texts and states unchanged). `sound.place` and `sound.music`
+  write through the `inOneTransaction` helper that `voiceover.place` uses, so a stale-revision refusal now carries the
+  helper's generic text.
 
 - Small fixes, slice SF of #471 (epic #451, parts of #470 and #482; no wire change): a `voiceover.generate` call now
   stops when its connection closes (Ctrl+C in the CLI, a dropped MCP connection, the app quitting), through the same

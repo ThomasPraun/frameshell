@@ -27,6 +27,7 @@ import {
   type AdapterClip,
   type FormatEntry,
   type PlatformId,
+  clipLength,
   letterboxPicture,
   type RequirementsFile,
   type ResolvedSubtitleTrack,
@@ -412,7 +413,7 @@ export class ReviewService {
         const sound = await this.#sound(root, request, source, loaded ? flat : null, seconds, ffmpeg, envelope, scratch, warnings, signal);
         const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
         const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
-        const behind = loaded ? await this.#behind(root, loaded, flat, source, ffmpeg, join(scratch, "behind"), warnings, signal) : null;
+        const behind = loaded ? await this.#behind(root, loaded, flat, source, seconds, ffmpeg, join(scratch, "behind"), warnings, signal) : null;
         metrics = reviewMetrics({
           fps: source.fps,
           range: seconds,
@@ -705,14 +706,17 @@ export class ReviewService {
   /**
    * Each clip on a track `behind` a plate in the timeline reviewed (ADR 0032): for a generated clip with alpha, the
    * share of it the person's matte covers and whether it meets a face of the plate clip, at the first, middle and last
-   * frame of its time under the person (`behind.ts`). Root tracks only, as the timeline file names them. Null when no
-   * shown track is behind one.
+   * frame of its time under the person (`behind.ts`), inside `range` (timeline seconds): a clip that plays outside it
+   * is not listed, one that straddles an end is sampled in the part that is in. A clip that cannot be measured is an
+   * `unplaced` entry and a warning, never a failed review. Root tracks only, as the timeline file names them. Null when
+   * no shown track is behind one.
    */
   async #behind(
     root: string,
     loaded: LoadedTimeline,
     flat: () => Promise<Flat>,
     source: FilmSource,
+    range: { from: number; to: number },
     ffmpeg: string,
     work: string,
     warnings: string[],
@@ -769,6 +773,7 @@ export class ReviewService {
       const plate = plates.get(track.id)!;
       for (const listed of track.clips) {
         signal?.throwIfAborted();
+        if (listed.start + clipLength(listed, { fps }) <= range.from || listed.start >= range.to) continue;
         const word = { clip: listed.id, track: track.id, plate };
         const unplaced = (message: string) => found.push({ ...word, from: null, to: null, samples: [], verdict: "unplaced", message });
         if (listed.type === "media" || listed.type === "timeline") {
@@ -785,7 +790,7 @@ export class ReviewService {
           unplaced(`clip ${clip.id} has a render with no alpha plane: it fills the frame, so there is no word shape to measure.`);
           continue;
         }
-        const spans = within(subjectSpans(resolved.timeline, plate), clip.start, clip.start + clip.duration);
+        const spans = within(subjectSpans(resolved.timeline, plate), Math.max(clip.start, range.from), Math.min(clip.start + clip.duration, range.to));
         const frames = sampleFrames(spans, fps);
         if (frames.length === 0) {
           unplaced(`the person is never drawn over clip ${clip.id}: no media clip of plate track ${plate} plays under it, or a shown track between them covers the person then.`);
@@ -793,33 +798,41 @@ export class ReviewService {
         }
         const samples: ReviewBehindSample[] = [];
         let missing: string | null = null;
-        for (const frame of frames) {
-          const at = frame / fps;
-          const subject = (spans.find((span) => at >= span.from - 1e-6 && at < span.to) ?? spans.find((span) => at < span.to) ?? spans.at(-1)!).clip;
-          const [matte, size] = await Promise.all([matteOf(subject.asset), sizeOf(subject.asset)]);
-          if (!size || "missing" in matte) {
-            missing = `the person over clip ${clip.id} would come from ${subject.asset}, ${"missing" in matte ? matte.missing : "which has no picture"}.`;
-            break;
+        try {
+          for (const frame of frames) {
+            const at = frame / fps;
+            const subject = (spans.find((span) => at >= span.from - 1e-6 && at < span.to) ?? spans.find((span) => at < span.to) ?? spans.at(-1)!).clip;
+            const [matte, size] = await Promise.all([matteOf(subject.asset), sizeOf(subject.asset)]);
+            if (!size || "missing" in matte) {
+              missing = `the person over clip ${clip.id} would come from ${subject.asset}, ${"missing" in matte ? matte.missing : "which has no picture"}.`;
+              break;
+            }
+            const shown = (frame + 0.5) / fps;
+            const [alpha, person] = await Promise.all([
+              alphaMask({ ffmpeg, render, fps, work: join(work, `${clip.id}-${frame}`), signal }, (clip.in ?? 0) + at - clip.start, BEHIND_WIDTH),
+              matteFrame(ffmpeg, matte, Math.min(matte.frames - 1, matteFrameAt(subject, frame, fps))),
+            ]);
+            const coverage =
+              alpha && person
+                ? coveredShare(
+                    alpha,
+                    clipRectInFilm({ clip, source: render, generated: true, base: false }, shown, film, project, layout),
+                    person,
+                    clipRectInFilm({ clip: subject, source: size, generated: false, base: base === plate }, shown, film, project, layout),
+                  )
+                : null;
+            let face: boolean | null = null;
+            if (scanned.has(subject.asset)) {
+              face = coverage !== null && faces.some((box) => box.track === plate && box.clip === subject.id && box.from <= at + 1e-6 && at < box.to && boxesMeet(box.box, coverage.box));
+            } else noScan.add(subject.asset);
+            samples.push({ at: round(at), plateClip: subject.id, covered: coverage ? round(coverage.share) : null, face });
           }
-          const shown = (frame + 0.5) / fps;
-          const [alpha, person] = await Promise.all([
-            alphaMask({ ffmpeg, render, fps, work: join(work, `${clip.id}-${frame}`), signal }, (clip.in ?? 0) + at - clip.start, BEHIND_WIDTH),
-            matteFrame(ffmpeg, matte, Math.min(matte.frames - 1, matteFrameAt(subject, frame, fps))),
-          ]);
-          const coverage =
-            alpha && person
-              ? coveredShare(
-                  alpha,
-                  clipRectInFilm({ clip, source: render, generated: true, base: false }, shown, film, project, layout),
-                  person,
-                  clipRectInFilm({ clip: subject, source: size, generated: false, base: base === plate }, shown, film, project, layout),
-                )
-              : null;
-          let face: boolean | null = null;
-          if (scanned.has(subject.asset)) {
-            face = coverage !== null && faces.some((box) => box.track === plate && box.clip === subject.id && box.from <= at + 1e-6 && at < box.to && boxesMeet(box.box, coverage.box));
-          } else noScan.add(subject.asset);
-          samples.push({ at: round(at), plateClip: subject.id, covered: coverage ? round(coverage.share) : null, face });
+        } catch (error) {
+          signal?.throwIfAborted();
+          const message = `clip ${clip.id} is not measured (${(error as Error).message.split("\n")[0]})`;
+          warnings.push(`behind: ${message}.`);
+          unplaced(`${message}.`);
+          continue;
         }
         if (missing !== null) unplaced(missing);
         else found.push(behindEntry(word, spans[0]!.from, spans.at(-1)!.to, samples));

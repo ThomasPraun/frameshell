@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestProject } from "vitest/node";
 import { mediaTools } from "./packages/core/test/media-tools.js";
+import { sweepStaleTempDirs } from "./scripts/stale-temp-dirs.mjs";
 
 declare module "vitest" {
   export interface ProvidedContext {
@@ -14,8 +15,6 @@ declare module "vitest" {
 
 /** Prefix of the per-test-file temp dir `vitest.temp-dir.ts` makes and removes. */
 export const FILE_TEMP_PREFIX = "fsv-";
-/** Dirs older than this are from a killed run and removed; younger ones may belong to a parallel run. */
-const STALE_MS = 24 * 60 * 60 * 1000;
 /** Names of temp dirs tests and the product make; any that escape a test file's dir show up in the warning. */
 const LEAK_PATTERN = /^(frameshell-|fs-|fsv-)/;
 
@@ -28,8 +27,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
   await mediaTools();
   const system = tmpdir();
   const started = Date.now();
-  const stale = readdirSync(system).filter((name) => name.startsWith(FILE_TEMP_PREFIX) && !modifiedSince(join(system, name), started - STALE_MS));
-  await Promise.all(stale.map((name) => remove(join(system, name))));
+  await sweepStaleTempDirs(system, FILE_TEMP_PREFIX, started);
   const registry = join(system, `${FILE_TEMP_PREFIX}run-${process.pid}.txt`);
   writeFileSync(registry, "");
   project.provide("tempDirRegistry", registry);

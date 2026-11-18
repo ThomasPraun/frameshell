@@ -1,0 +1,70 @@
+{
+  "tag": "en-sapi-zira",
+  "maker": "command powershell -NoProfile -Command Add-Type -AssemblyName System.Speech; $r = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8); $t = $r.ReadToEnd(); $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SelectVoice('Microsoft Zira Desktop'); $f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono); New-Item -ItemType Directory -Force -Path (Split-Path -Parent '{out}') | Out-Null; $s.SetOutputToWaveFile('{out}', $f); $s.Speak($t); $s.Dispose()",
+  "lang": "en",
+  "model": "large-v3-turbo-q5_0",
+  "wer": 0.069,
+  "edits": 4,
+  "words": 58,
+  "clean": 3,
+  "doubtful": 1,
+  "misread": 1,
+  "checkSeconds": 637,
+  "lines": [
+    {
+      "id": "en-01",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Today I will show you how to edit a video in three minutes.",
+      "misreads": [],
+      "audioS": 3.91,
+      "ms": 5092,
+      "cpuMs": null
+    },
+    {
+      "id": "en-02",
+      "status": "clean",
+      "wer": 0,
+      "heard": "The agent trims the pauses, and you correct the timeline.",
+      "misreads": [],
+      "audioS": 4.2,
+      "ms": 2249,
+      "cpuMs": null
+    },
+    {
+      "id": "en-03",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Download the model once, then everything runs offline on your laptop.",
+      "misreads": [],
+      "audioS": 5.05,
+      "ms": 1916,
+      "cpuMs": null
+    },
+    {
+      "id": "en-04",
+      "status": "misread",
+      "wer": 0.143,
+      "heard": "It costs $25 a month, or $240 a year.",
+      "misreads": [
+        "missing: \"dollars\" -> \"\"",
+        "missing: \"dollars\" -> \"\""
+      ],
+      "audioS": 5.37,
+      "ms": 2828,
+      "cpuMs": null
+    },
+    {
+      "id": "en-05",
+      "status": "doubtful",
+      "wer": 0.2,
+      "heard": "Frame shell keeps every change in a journal you can undo",
+      "misreads": [
+        "changed: \"Frameshell\" -> \"Frame shell\""
+      ],
+      "audioS": 3.76,
+      "ms": 1755,
+      "cpuMs": null
+    }
+  ]
+}

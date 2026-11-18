@@ -94,6 +94,14 @@ describe("behind: entries and craft warnings", () => {
     expect(behindWarnings([behindEntry(words, 1, 3, [sample(1, 0.45)])])).toEqual([]);
   });
 
+  it("keeps the farthest sample's verdict when samples fall on both sides of the band, and says so", () => {
+    const both = behindEntry(words, 1, 3, [sample(1, 0.1), sample(2, 0.4), sample(3, 0.9)]);
+    expect(both.verdict).toBe("eaten");
+    expect(both.message).toContain("The samples fall on both sides of the band: part of the word floats, part is eaten.");
+    expect(behindEntry(words, 1, 3, [sample(1, 0.1), sample(2, 0.4)]).message).not.toContain("both sides");
+    expect(behindEntry(words, 1, 3, [sample(1, 0.8), sample(2, 0.4)]).message).not.toContain("both sides");
+  });
+
   it("warns when the word meets a face, whatever its share; no scan (null) is no flag", () => {
     const face = behindEntry(words, 1, 3, [sample(1, 0.4, false), sample(2, 0.45, true), sample(3, 0.5, true)]);
     const found = behindWarnings([face]);
