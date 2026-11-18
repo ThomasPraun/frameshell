@@ -4,11 +4,13 @@ import {
   COLOR_HELPERS,
   FLAT_HELPERS,
   PLACEHOLDER,
+  STEP_TIMES,
   type Template,
   type TemplateInput,
   type TemplateVariable,
   backdropVariables,
   fontSetup,
+  onBeatsVariable,
   pageHead,
 } from "./kit.js";
 import { UI_HELPERS } from "./ui-parts.js";
@@ -20,7 +22,8 @@ import { UI_HELPERS } from "./ui-parts.js";
  * and the bar. The progress is one curve for the whole clip (`progressAt`,
  * `progressTime`); a card's bar joins it when the card starts, so the cards
  * never show different amounts of work. Transparent unless `backdrop` is
- * raised.
+ * raised. With `onBeats` each card starts (pulses) on a beat of the
+ * timeline's music, landing a moment before it.
  */
 export const workCards: Template = {
   id: "work-cards",
@@ -50,6 +53,7 @@ export const workCards: Template = {
       },
       { id: "startAt", type: "number", label: "Seconds until the first card (pulled in on a short clip)", default: 0.3, min: 0.1, max: 3, step: 0.1, unit: "s" },
       { id: "gap", type: "number", label: "Seconds between cards (shortened on a short clip)", default: 0.5, min: 0.1, max: 2, step: 0.05, unit: "s" },
+      onBeatsVariable("each card's start (its pulse)", "startAt"),
       { id: "progressAt", type: "number", label: "Seconds until the shared progress starts filling", default: 1.2, min: 0.3, max: 6, step: 0.1, unit: "s" },
       { id: "progressTime", type: "number", label: "Seconds the shared progress takes to fill", default: 2, min: 0.5, max: 6, step: 0.1, unit: "s" },
       { id: "pulse", type: "number", label: "Pulse of a card when it starts, 0 = none", default: 0.7, min: 0, max: 1, step: 0.05 },
@@ -154,6 +158,9 @@ export const workCards: Template = {
       var progAt = Math.min(P.progressAt, Math.max(0.3, room - 0.6));
       var progTime = Math.min(P.progressTime, Math.max(0.4, D - OUT - 0.2 - progAt));
       var LEAD = 0.25; // seconds from a card landing to its start (the pulse and the bar joining)
+      ${STEP_TIMES}
+      // The starts are the steps, or the beats: a card lands LEAD before its beat and pulses on it.
+      var starts = stepTimes(start + LEAD, gap, n, P.onBeats);
 
       M.bind("${id}", function (t) {
         var out = M.ease("exit", (t - (D - OUT)) / OUT);
@@ -163,9 +170,9 @@ export const workCards: Template = {
         // One progress for every card.
         var shared = M.ease("progress", (t - progAt) / progTime);
         for (var i = 0; i < n; i++) {
-          var at = start + i * gap;
+          var began = starts[i];
+          var at = began - LEAD;
           var s = M.spring("default", t - at);
-          var began = at + LEAD;
           // The pulse: a swell and a ring that fade within half a second of the card starting.
           var f = (t - began) / 0.5;
           var bump = f > 0 && f < 1 ? Math.sin(Math.PI * f) : 0;

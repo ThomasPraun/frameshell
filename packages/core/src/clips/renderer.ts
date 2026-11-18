@@ -32,6 +32,7 @@ import type { JobContext, JobQueue } from "../jobs/queue.js";
 import { hashFile } from "../media/store.js";
 import { readStyleTokens } from "../style/tokens.js";
 import { type NestedReader, resolveNested, resolveNestedIn } from "../timeline/nested.js";
+import type { TimelineWords } from "../timeline/time-ref.js";
 import { clipCacheKey } from "./cache-key.js";
 import { clipTiming } from "./timing.js";
 
@@ -109,6 +110,12 @@ export interface ClipRendererOptions {
    * that ask for beats (ADR 0029 decision 8). Default: none, so such clips get no beats.
    */
   beatsOf?(root: string, asset: string): Promise<BeatsFile | null>;
+  /**
+   * Transcript words `timeline` plays, as `word:` references read them (`readTimelineWords`). Feeds
+   * `RenderContext.timing` of clips that ask for words; read on each key check of such a clip only. Default: none, so
+   * such clips get `wordsProblem` `no-transcript`.
+   */
+  wordsOf?(root: string, timeline: Timeline, fps: number): Promise<TimelineWords>;
   /** Watch attached projects for composition edits. Default true. */
   watch?: boolean;
   /** Quiet time after the last file event before re-checking keys. Default 200 ms. */
@@ -793,8 +800,15 @@ export class ClipRenderer {
     try {
       const kinds = registered.adapter.timing ? await registered.adapter.timing(structuredClone(clip), context) : [];
       if (!Array.isArray(kinds)) throw new Error('timing() must return an array such as ["beats", "markers"]');
-      const beatsOf = this.#options.beatsOf;
-      timing = await clipTiming({ clip, timeline, fps: format.fps, kinds, beatsOf: async (asset) => (beatsOf ? beatsOf(root, asset) : null) });
+      const { beatsOf, wordsOf } = this.#options;
+      timing = await clipTiming({
+        clip,
+        timeline,
+        fps: format.fps,
+        kinds,
+        beatsOf: async (asset) => (beatsOf ? beatsOf(root, asset) : null),
+        ...(wordsOf ? { wordsOf: () => wordsOf(root, timeline, format.fps) } : {}),
+      });
     } catch (error) {
       return { key: null, error: `${registered.plugin.name} could not say which timing ${clip.id} reads: ${(error as Error)?.message ?? error}` };
     }

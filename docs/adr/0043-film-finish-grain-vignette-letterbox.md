@@ -94,6 +94,10 @@ A preset or format of another aspect than the source *fits* a picture into the f
 - **Model** (`renderer/src/finish/model.ts`, pure, tested): the sliders' stored values with defaults, the menu's choices, the `letterbox.set` arguments and the stored aspect of a format. `ClipBox` (`timeline/layout.ts`) gains `vignette` and `grain`, null for shots and nested clips.
 - **Not measured:** the ADR 0001 frame budget of a grained and vignetted 1080p part. `preview-thresholds` has no such scenario and building one is more than this slice; it stays open (the grade, vignette and grain share one WebGL2 pass, so the cost of one more step is small, but no number is claimed).
 
+## Preview grain size, as built (small fixes SF4, desktop only, no wire change)
+
+The preview sizes a grain plate from the span's unkeyed placement (`Part.fixed` in `engine.worker.ts`, fed from the span's `placement`, which `fixedPlacement` makes without keys or transitions), as export's `lookedChain` sizes it from `layerRect(..., placed.placement)`. Before, `#looked` used the keyed placement of the frame, so a scale key changed the cell count from frame to frame in the preview only. `layerRect` and `grainPlate` are the ones both sides already call; a covering span still counts the whole frame. `preview-grain.test.ts` holds the data the plate is sized from.
+
 ## Image projects
 
 Out of scope (owner, 2026-11-18): vignette, grain and letterbox are for video projects. The daemon does not refuse them in an image project and `frame` export and the preview draw what a file stores, but the app shows no Finish section or letterbox menu there and nothing is promised. No further slice is planned; an image-project finish would need its own decision.

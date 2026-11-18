@@ -5,7 +5,8 @@ import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from 
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
-import { mediaTools, runBuffer, testBinaryManager } from "./media-tools.js";
+import { coverPixels, countFrames, decode } from "./cover-fixtures.js";
+import { testBinaryManager } from "./media-tools.js";
 
 // The `cover` method and the `cover` option of `render` on a 1 s project, with real ffmpeg.
 const MEDIA_TIMEOUT = 180_000;
@@ -40,20 +41,6 @@ afterAll(async () => {
   conn.close();
   await daemon.close();
 });
-
-/** Pixels of the default cover colour (#ffd426, within a small tolerance for chroma subsampling) in a `width`x`height` RGB24 buffer. */
-function coverPixels(rgb: Buffer): number {
-  let count = 0;
-  for (let i = 0; i + 2 < rgb.length; i += 3) {
-    if (Math.abs(rgb[i]! - 0xff) < 24 && Math.abs(rgb[i + 1]! - 0xd4) < 24 && Math.abs(rgb[i + 2]! - 0x26) < 40) count++;
-  }
-  return count;
-}
-
-async function decode(file: string, filter: string): Promise<Buffer> {
-  const { ffmpeg } = await mediaTools();
-  return runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", file, "-vf", filter, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
-}
 
 async function finished(id: string): Promise<JobInfo> {
   for (const deadline = Date.now() + 120_000; Date.now() < deadline; ) {
@@ -155,9 +142,7 @@ describe("render with a cover frame", () => {
       const first = coverPixels(await decode(result.output, "select=eq(n\\,0)"));
       const later = coverPixels(await decode(result.output, "select=eq(n\\,15)"));
       expect(first).toBeGreaterThan(later + 20_000);
-      const { ffprobe } = await mediaTools();
-      const counted = await runBuffer(ffprobe, ["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", result.output]);
-      expect(Number(counted.toString().trim())).toBe(30);
+      expect(await countFrames(result.output)).toBe(30);
     },
     MEDIA_TIMEOUT,
   );

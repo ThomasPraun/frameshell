@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CommandResult } from "@frameshell/plugin-api";
-import { type CheckReport, type UpdateReport, checkCompositions, newComposition, updateRuntime } from "../src/index.js";
+import { type CheckReport, type UpdateReport, checkCompositions, createHyperframesAdapter, newComposition, updateRuntime } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "../src/motion-runtime.js";
 import { CURSOR_MATH, CURSOR_SCRIPT } from "../src/templates/cursor-kit.js";
 import { TEMPLATES, type TemplateVariable, usesThree } from "../src/templates/index.js";
@@ -212,6 +212,32 @@ describe("template pip-card", () => {
     expect(html).not.toMatch(/<video|createElement\("video"\)/);
     expect(html).toContain('S.format === "tall" ? "top-right" : "bottom-right"');
     expect(html).toContain("var ENTER = Math.min(P.enterAt, Math.max(0.1, D - OUT - 0.7));");
+  });
+});
+
+describe("templates that put their steps on beats (onBeats)", () => {
+  const stepped = ["checklist", "notification-stack", "work-cards"];
+
+  it("are the ones that declare onBeats, off by default, with one shared copy of the step schedule", async () => {
+    expect(TEMPLATES.filter((t) => placeholderVariables(t).some((v) => v.id === "onBeats")).map((t) => t.id).sort()).toEqual(stepped);
+    for (const id of stepped) {
+      await scaffold([id, "--template", id]);
+      const html = read(id);
+      expect(declared(html).find((v) => v.id === "onBeats")).toMatchObject({ type: "boolean", default: false });
+      expect(html.match(/function stepTimes\(/g)).toHaveLength(1);
+      expect(html).toContain("P.onBeats)");
+      // Asked through the prop, never a scaffolded meta tag: a plain clip keeps its key when the music moves.
+      expect(html).not.toContain("frameshell-timing");
+    }
+  });
+
+  it("ask the adapter for beats only while the clip's onBeats is true", async () => {
+    await scaffold(["list", "--template", "checklist"]);
+    const adapter = createHyperframesAdapter({ projectDir: project });
+    const clip = { id: "c_1", source: "compositions/hyperframes/list/index.html" };
+    expect(await adapter.timing!(clip)).toEqual([]);
+    expect(await adapter.timing!({ ...clip, props: { onBeats: false } })).toEqual([]);
+    expect(await adapter.timing!({ ...clip, props: { onBeats: true } })).toEqual(["beats"]);
   });
 });
 

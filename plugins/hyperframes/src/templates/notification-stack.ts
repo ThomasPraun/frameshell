@@ -3,11 +3,13 @@ import {
   BACKDROP_SETUP,
   COLOR_HELPERS,
   PLACEHOLDER,
+  STEP_TIMES,
   type Template,
   type TemplateInput,
   type TemplateVariable,
   backdropVariables,
   fontSetup,
+  onBeatsVariable,
   pageHead,
 } from "./kit.js";
 import { UI_HELPERS } from "./ui-parts.js";
@@ -17,7 +19,8 @@ import { UI_HELPERS } from "./ui-parts.js";
  * each new one pushing the older ones down, smaller and fainter, until they
  * fade out. `notification` shows OS-style cards, `chat` message bubbles with
  * an avatar. Items are one `|`-separated prop of `Sender: message`. Transparent
- * unless `backdrop` is raised.
+ * unless `backdrop` is raised. With `onBeats` the cards drop on the beats of
+ * the timeline's music, from the first one at or after `startAt`.
  */
 export const notificationStack: Template = {
   id: "notification-stack",
@@ -59,6 +62,7 @@ export const notificationStack: Template = {
       },
       { id: "startAt", type: "number", label: "Seconds until the first card", default: 0.4, min: 0.1, max: 3, step: 0.1, unit: "s" },
       { id: "gap", type: "number", label: "Seconds between cards", default: 0.9, min: 0.3, max: 3, step: 0.05, unit: "s" },
+      onBeatsVariable("the cards", "startAt"),
       { id: "card", type: "color", label: "Card colour", default: tokens.colors.card ?? "#f1f3f9" },
       { id: "accent", type: "color", label: "Icon and avatar colour", default: tokens.colors.accent ?? PLACEHOLDER.accent },
       { id: "size", type: "number", label: "Type size, 1 = the format's default", default: 1, min: 0.5, max: 1.6, step: 0.05 },
@@ -152,6 +156,9 @@ export const notificationStack: Template = {
         return el;
       });
 
+      ${STEP_TIMES}
+      var arrive = stepTimes(P.startAt, P.gap, n, P.onBeats);
+
       var D = S.duration;
       var OUT = 0.3;
       var step = CARD * STEP * fs;
@@ -162,10 +169,10 @@ export const notificationStack: Template = {
         // Holds never stop: a slow push over the whole clip.
         M.write(stack, { scale: 1 + 0.02 * Math.min(1, t / D) - 0.02 * out, opacity: 1 - out });
         for (var i = 0; i < n; i++) {
-          var at = P.startAt + i * P.gap;
+          var at = arrive[i];
           // Rank: how many cards have arrived after this one, each counted as it settles; 0 is the newest.
           var rank = 0;
-          for (var j = i + 1; j < n; j++) rank += M.spring("default", t - (P.startAt + j * P.gap));
+          for (var j = i + 1; j < n; j++) rank += M.spring("default", t - arrive[j]);
           var s = M.spring("default", t - at);
           var older = Math.max(0, 1 - 0.2 * rank) * Math.min(1, Math.max(0, 3.2 - rank));
           M.write(cards[i], {

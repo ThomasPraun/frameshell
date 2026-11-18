@@ -16,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when missing, and refuses one whose render has transparency (`has-alpha`) and a nested timeline (`nested`, pointing at
   the clips inside and at `grade compare`). Both results gain `kind` and a nullable `asset`. Owner decision
   2026-11-18.
+- Words in the timing of generated clips, the final slice of #458 (ADR 0029 "Words in timing as built", epic #451; no
+  protocol change, plugin API `apiVersion` stays "1"): a clip whose adapter's `timing()` returns `words` gets
+  `RenderContext.timing.words`, the transcript words the timeline plays that start inside the clip (`{ at, end, text,
+  id }`, composition seconds, `text` as corrected), read from the same placement as `word:` references. A stale
+  transcript, or a timeline with no transcribed word, gives `words: []` and the stable code `wordsProblem`
+  (`no-transcript`, `stale-transcript`; `RENDER_WORDS_PROBLEMS` words them), never a failed render. HyperFrames asks with
+  `words` in the `frameshell-timing` meta tag, Remotion with `"words"` in `props.timing` (`src/frameshell-timing.ts`
+  gains `FrameshellWord`, `words` and `wordsProblem`; a parity test holds it to `RenderTiming`). Only clips that ask
+  read the transcripts and render again when one changes; every other key is unchanged.
+- HyperFrames templates ask for beats by themselves: a clip whose props set `onBeats` to true gets the beat grid without
+  the meta tag, and one with `onBeats` false or unset keeps its key, so it never renders again when the music moves.
+  `notification-stack` (cards drop on beats) and `work-cards` (each card pulses on a beat) gain `onBeats`, with
+  `checklist`; the three share one step schedule (`stepTimes`, nominal fallback to the steps).
 - Still finals for look-dev, slice 7 of #482 (ADR 0035, epic #451; protocol 176): `frameshell frame --final [--yes]`
   and `frameshell clip compare --final [--yes]` (MCP `frame_capture` / `clip_compare` with `final`) draw a Blender clip
   shown at that frame from a Cycles final of that one frame instead of its EEVEE draft, unless its whole final is
@@ -221,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
-  as an input and nothing wrote it in the last minute; `finals.json`, unknown names and symlinks stay. It is a new
+  as an input and nothing wrote it in the last minute; unknown names and symlinks stay (`finals.json` is not deleted, and
+  is pruned of unused `.blend` rates since SF4, see Fixed). It is a new
   optional plugin-API hook, `ClipAdapter.gc(context)` with `AdapterGcContext { projectDir, inputs, dryRun,
   keepNewerThan, signal }`, so core never learns the plugin's layout: `ClipRenderer.gc` gathers the paths each adapter's
   `inputs()` returned while it keys every clip (the rule that keeps the clip renders), and skips the hooks with the
@@ -1662,6 +1676,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Review switch (ADR 0019, test hardening #515, #516, #533): the "Review agent changes before applying" checkbox keeps
+  the click until the review state agrees with it (or the call fails), instead of jumping back when the daemon's reply
+  arrives before its event; this was the cause of the flaky checkbox in the review and config-proposal e2e specs.
+- ADR 0001 harness counts frames dropped at cuts from the engine's draws, slice PB of #573 (epic #451; e2e harness
+  only, no src or wire change): `analyze` took the dropped frames at a cut from the page's rAF probes, so a main
+  thread that read a frame late counted as a drop although the engine had drawn it. New `cutEdgeDrops` in
+  `e2e/draw-log.ts` takes the undrawn run at the end of the segment before a cut and at the start of the one after,
+  and classifies it with the same `classifyDrops` as interior drops. Threshold 1 now fails on stray frames or starved
+  drops at cuts; cadence drops are reported in its detail (ADR 0001 amendment #567, owner decision 2026-11-18). The
+  stray frames, freeze and A/V numbers still come from the probes. The full 30 min re-measure stays with the owner.
+- Small fixes, slice SF4 of #451 (no wire change): (1) the preview sizes a clip's grain cells from the clip's unkeyed
+  placement, as export does (ADR 0043 "Units"), so a zoom key no longer changes the grain size from frame to frame in
+  the preview only. (2) `gc` prunes `.frameshell/blender/finals.json` of the `.blend` files no clip uses (the file stays,
+  with its `last` rate; a file written in the last minute is left; reported as one `gc` entry with the bytes saved;
+  ADR 0035). (3) The Remotion `useFrameshellTiming()` hook falls back to `getInputProps().frameshellTiming` when a
+  composition's `calculateMetadata` returned props without it; projects that already have `src/frameshell-timing.ts`
+  keep their copy (never overwritten) and can add the fallback by hand. Not in this slice: the `ui.seek` view while a
+  proposal is open (needs the app to report which view it shows: a wire change), `music.fit` bar-ending re-snap, held
+  edge frames in `frame` stills.
 - Small fixes, slice SF2 of #451 (no wire change): the `ui.seek` description and the batch `VariantContext.resolve`
   TSDoc named only markers, beats and bars; they now point to the `TimeRef` forms, `word:` included. `review --pop`
   with a number is taken as seconds straight, with no stub timeline; a marker, beat or word still resolves against the

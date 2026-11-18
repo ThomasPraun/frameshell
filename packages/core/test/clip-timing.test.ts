@@ -1,7 +1,11 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { RENDER_BEATS_PROBLEMS } from "@frameshell/plugin-api";
-import type { AdapterClip, BeatsFile, Timeline } from "@frameshell/schema";
+import { RENDER_BEATS_PROBLEMS, RENDER_WORDS_PROBLEMS } from "@frameshell/plugin-api";
+import { type AdapterClip, type BeatsFile, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
 import { type ClipKeyInput, type ClipTimingInput, clipCacheKey, clipTiming } from "../src/index.js";
+import { readTimelineWords } from "../src/transcripts/timeline-words.js";
+import { tempDir } from "./helpers.js";
 
 // Timing of generated clips (ADR 0029 decision 8): the beats and markers inside a clip, in composition seconds, and
 // only for clips that ask, so the render key of every other clip stays as it was.
@@ -53,7 +57,7 @@ const input = (over: Partial<ClipTimingInput> = {}): ClipTimingInput => ({
 describe("clipTiming", () => {
   it("is undefined for a clip that asks for nothing, or only for kinds it does not know", async () => {
     expect(await clipTiming(input({ kinds: [] }))).toBeUndefined();
-    expect(await clipTiming(input({ kinds: ["bars", "words"] }))).toBeUndefined();
+    expect(await clipTiming(input({ kinds: ["bars", "tempo"] }))).toBeUndefined();
   });
 
   it("lists the beats inside the clip in composition seconds, numbered as beat:N and bar:N name them", async () => {
@@ -164,5 +168,161 @@ describe("render keys with timing", () => {
     const low = await keyFor({ beatsOf: async () => beatsFile({ detector: "onset-flux@1", confidence: 0.3 }) });
     expect(await keyFor({ beatsOf: async () => beatsFile({ asset: "assets/b.wav", detector: "onset-flux@1", confidence: 0.25 }) })).toBe(low);
     expect(new Set([unreadable, low, await keyFor({ beatsOf: async () => null }), await keyFor({ timeline: timeline(null) })]).size).toBe(4);
+  });
+});
+
+// Words (ADR 0029 "Words in timing as built"): the transcript words the timeline plays, as `word:` references read
+// them (`readTimelineWords`), that start inside the clip.
+describe("clipTiming words", () => {
+  const HASH = `sha256:${"1".repeat(64)}`;
+  const SAID: [string, number, number][] = [
+    ["so", 1, 1.4],
+    ["here", 3.5, 3.9],
+    ["is", 4, 4.2],
+    ["the", 4.5, 4.7],
+    ["hook", 5.5, 6.1],
+    ["after", 6, 6.4],
+  ];
+  const transcript = (edits: Transcript["edits"] = {}): Transcript => ({
+    schemaVersion: 1,
+    asset: "assets/talk.mp4",
+    assetHash: HASH,
+    provider: "test",
+    model: "test",
+    language: "en",
+    words: SAID.map(([text, start, end], index) => ({ id: `w_${String(index + 1).padStart(6, "0")}`, text, start, end })),
+    edits,
+  });
+  /** A project holding the talk's transcript; `hash` is the asset's current hash (another one makes it stale). */
+  const project = (edits: Transcript["edits"] = {}) => {
+    const root = tempDir();
+    mkdirSync(join(root, "transcripts"), { recursive: true });
+    writeFileSync(join(root, "transcripts", "talk.words.json"), JSON.stringify(transcript(edits)));
+    return root;
+  };
+  const talk = (extra: Record<string, unknown> = {}) => ({ id: "c_talk", type: "media", asset: "assets/talk.mp4", start: 0, in: 0, out: 10, ...extra });
+  const on = (clips: unknown[], extra: Partial<Timeline> = {}): Timeline =>
+    ({ schemaVersion: 1, id: "main", revision: 1, tracks: [{ id: "t_v", kind: "video", clips: [card] }, { id: "t_a", kind: "audio", clips }], ...extra }) as Timeline;
+  const wordsIn = (root: string, timeline: Timeline, over: Partial<ClipTimingInput> = {}, hash: string | null = HASH) =>
+    clipTiming(
+      input({
+        kinds: ["words"],
+        timeline,
+        wordsOf: () => readTimelineWords(root, timeline, FPS, async () => hash),
+        ...over,
+      }),
+    );
+
+  it("lists the words that start inside the clip, in composition seconds, with their ids", async () => {
+    // The card shows timeline 4..6 s as composition 1..3 s: "is", "the" and "hook" start inside; "after" ends past it.
+    expect(await wordsIn(project(), on([talk()]))).toEqual({
+      words: [
+        { at: 1, end: 1.2, text: "is", id: "w_000003" },
+        { at: 1.5, end: 1.7, text: "the", id: "w_000004" },
+        { at: 2.5, end: 3.1, text: "hook", id: "w_000005" },
+      ],
+    });
+  });
+
+  it("follows the footage: a trim, a move or a speed change of the talk moves the words; a trim of the card shifts them", async () => {
+    const root = project();
+    // The talk starts 0.5 s later: "here" (3.5 s in the file) now starts at timeline 4 s.
+    const moved = await wordsIn(root, on([talk({ start: 0.5 })]));
+    expect(moved?.words?.map((word) => [word.text, word.at])).toEqual([
+      ["here", 1],
+      ["is", 1.5],
+      ["the", 2],
+    ]);
+    // At double speed file second 8..12 plays at timeline 4..6: no word is said there.
+    expect(await wordsIn(root, on([talk({ out: 20, speed: 2 })]))).toEqual({ words: [] });
+    const fast = await wordsIn(root, on([talk({ start: 3, speed: 2 })]));
+    // Timeline second = 3 + file second / 2: "here" at 4.75, "is" at 5, "the" at 5.25, "hook" at 5.75, "after" at 6.
+    expect(fast?.words?.map((word) => [word.text, word.at])).toEqual([
+      ["here", 1.75],
+      ["is", 2],
+      ["the", 2.25],
+      ["hook", 2.75],
+    ]);
+    // A head trim of the card (in 1.5 instead of 1): the same timeline words, half a second later in the composition.
+    const trimmed = await wordsIn(root, on([talk()]), { clip: { ...card, in: 1.5 } });
+    expect(trimmed?.words?.map((word) => word.at)).toEqual([1.5, 2, 3]);
+  });
+
+  it("carries the text as the person corrected it", async () => {
+    const corrected = await wordsIn(project({ w_000005: { text: "Hook!" } }), on([talk()]));
+    expect(corrected?.words?.find((word) => word.id === "w_000005")?.text).toBe("Hook!");
+  });
+
+  it("gives no words and a stable code for a stale transcript or a timeline with no transcribed word, never an error", async () => {
+    const root = project();
+    expect(await wordsIn(root, on([talk()]), {}, `sha256:${"2".repeat(64)}`)).toEqual({ words: [], wordsProblem: "stale-transcript" });
+    expect(await wordsIn(tempDir(), on([talk()]))).toEqual({ words: [], wordsProblem: "no-transcript" });
+    expect(await wordsIn(root, on([]))).toEqual({ words: [], wordsProblem: "no-transcript" });
+    expect(await clipTiming(input({ kinds: ["words"] }))).toEqual({ words: [], wordsProblem: "no-transcript" });
+    // Speech elsewhere on the timeline: nothing said during the card is no problem.
+    expect(await wordsIn(root, on([talk({ out: 2 })]))).toEqual({ words: [] });
+    for (const code of ["no-transcript", "stale-transcript"] as const) expect(RENDER_WORDS_PROBLEMS[code]).toMatch(/\.$/);
+  });
+
+  it("reads words only when the clip asks for them", async () => {
+    let reads = 0;
+    const counting = () => {
+      reads++;
+      return Promise.resolve({ words: [], unchecked: [] });
+    };
+    await clipTiming(input({ kinds: ["beats", "markers"], wordsOf: counting }));
+    expect(reads).toBe(0);
+    await clipTiming(input({ kinds: ["words"], wordsOf: counting }));
+    expect(reads).toBe(1);
+  });
+
+  it("hears the host's words for a clip inside a nested timeline, keyed in the flattened timeline", async () => {
+    const inner = { schemaVersion: 1, id: "inner", revision: 0, tracks: [{ id: "t_in", kind: "video", clips: [{ ...card, id: "c_inner", start: 0.5, in: 0 }] }] } as Timeline;
+    const host = {
+      schemaVersion: 1,
+      id: "main",
+      revision: 1,
+      tracks: [
+        { id: "t_v", kind: "video", clips: [{ id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 3.5, duration: 3 }] },
+        { id: "t_a", kind: "audio", clips: [talk()] },
+      ],
+    } as Timeline;
+    const flat = flattenTimeline(host, (source) => (source === "timelines/inner.json" ? inner : null));
+    const nested = flat.tracks.flatMap((track): readonly { id: string }[] => ("clips" in track ? track.clips : [])).find((clip) => clip.id === "c_nest/c_inner") as AdapterClip;
+    // The inner card plays at timeline 4..6 s from composition 0: "is", "the", "hook".
+    const heard = await wordsIn(project(), flat, { clip: nested });
+    expect(heard?.words?.map((word) => [word.text, word.at])).toEqual([
+      ["is", 0],
+      ["the", 0.5],
+      ["hook", 1.5],
+    ]);
+  });
+});
+
+describe("render keys with words", () => {
+  const base: ClipKeyInput = {
+    plugin: { name: "@frameshell/hyperframes", version: "0.1.0" },
+    clip: card,
+    inputs: [{ path: card.source!, hash: "sha256:aaa" }],
+    format: { fps: FPS, width: 1920, height: 1080 },
+  };
+  const words = (texts: [string, number][]) => ({ words: texts.map(([text, at], index) => ({ id: `w_${index}`, text, asset: "assets/talk.mp4", clip: "c_talk", track: "t_a", language: "en", at, end: at + 0.2 })), unchecked: [] });
+  const keyFor = async (kinds: string[], read: ReturnType<typeof words>) => {
+    const timing = await clipTiming(input({ kinds, timeline: timeline(null), wordsOf: async () => read }));
+    return clipCacheKey({ ...base, ...(timing ? { timing } : {}) });
+  };
+
+  it("keeps the key of a clip that does not ask, whatever is said", async () => {
+    const plain = clipCacheKey(base);
+    expect(await keyFor([], words([["is", 4]]))).toBe(plain);
+    expect(await keyFor([], words([["was", 4.5]]))).toBe(plain);
+  });
+
+  it("changes for a clip that asks when a word inside it changes or moves, not for a word outside it", async () => {
+    const asked = await keyFor(["words"], words([["is", 4], ["later", 9]]));
+    expect(asked).not.toBe(clipCacheKey(base));
+    expect(await keyFor(["words"], words([["is", 4], ["much later", 9.5]]))).toBe(asked);
+    expect(await keyFor(["words"], words([["was", 4], ["later", 9]]))).not.toBe(asked);
+    expect(await keyFor(["words"], words([["is", 4.1], ["later", 9]]))).not.toBe(asked);
   });
 });

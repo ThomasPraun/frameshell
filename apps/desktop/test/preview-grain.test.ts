@@ -3,7 +3,8 @@ import type { Timeline } from "@frameshell/schema";
 import { type ResolvedGrain, grainOf, grainPlate, grainSeed, grainSpread, grainStrength } from "@frameshell/schema/finish";
 import { describe, expect, it } from "vitest";
 import { type PictureGrain, grainCell, grainDelta, mixBits } from "../src/renderer/src/preview/grain.js";
-import { compileProgram, programAt } from "../src/renderer/src/preview/program.js";
+import { layerRect } from "@frameshell/schema/composite";
+import { compileProgram, programAt, spanPlacement } from "../src/renderer/src/preview/program.js";
 
 // Seam under test: a clip's grain (ADR 0043) in the preview: the program spans carry `grainOf`, and the pass's model
 // (`grain.ts`, which the WebGL2 shader runs step for step) moves a picture by the spread export's plate is held to,
@@ -120,6 +121,47 @@ describe("grain in the preview (ADR 0043)", () => {
     const look = { grain: grain(0.5), crop, plate, phase: 0 };
     expect(grainCell(-1, 4, look)).toBe(grainCell(0, 4, look));
     expect(grainCell(40, 40, look)).toBe(grainCell(31, 17, look));
+  });
+
+  it("sizes the plate from the span's unkeyed placement, so a zoom key never changes the cells of a frame", () => {
+    const zooming: Timeline = {
+      ...timeline,
+      tracks: [
+        {
+          id: "v1",
+          kind: "video",
+          clips: [
+            {
+              id: "c_zoom",
+              type: "media",
+              asset: TALK,
+              start: 0,
+              in: 0,
+              out: 4,
+              transform: { scale: 0.5 },
+              grain: { size: 2 },
+              keys: { scale: [{ at: 0, value: 0.5 }, { at: 2, value: 1 }] },
+            },
+          ],
+        },
+      ],
+    };
+    const program = compileProgram(view(zooming), assets, { resolution: HD });
+    const span = programAt(program, 0, 0);
+    if (span?.kind !== "media" || !span.grain) throw new Error("expected a grained media span");
+    // What the engine feeds `Part.fixed` and `grainPlate` from: the plate follows `span.placement`, never `spanPlacement`.
+    const plateAt = (placement: typeof span.placement) => {
+      const rect = layerRect(span.size!, HD, HD, placement);
+      return grainPlate(span.grain!.size, { width: rect.width, height: rect.height }, span.size!);
+    };
+    const first = spanPlacement(span, 0, FPS);
+    const zoomed = spanPlacement(span, 45, FPS);
+    expect(zoomed.scale).toBeGreaterThan(first.scale);
+    // The keyed layer is bigger, so sizing from it would give another plate; the unkeyed one gives export's.
+    expect(plateAt(zoomed)).not.toEqual(plateAt(span.placement));
+    expect(plateAt(span.placement)).toEqual(grainPlate(2, { width: 960, height: 540 }, { width: 1920, height: 1080 }));
+    const later = programAt(program, 45, 0);
+    expect(later && "placement" in later ? later.placement : null).toEqual(span.placement);
   });
 
   it("mixes bits as the shader's uint arithmetic does", () => {

@@ -159,15 +159,16 @@ describe("remotion props", () => {
 describe("remotion props: timing (ADR 0029 decision 8)", () => {
   const validate = (value: unknown) => propsSchema["~standard"].validate(value) as { issues?: { message: string; path?: string[] }[] };
 
-  it("takes the kinds beats and markers", () => {
+  it("takes the kinds beats, markers and words", () => {
     expect(validate({ composition: "Intro", timing: ["beats", "markers"] }).issues).toBeUndefined();
+    expect(validate({ composition: "Intro", timing: ["words", "beats"] }).issues).toBeUndefined();
     expect(validate({ composition: "Intro", timing: ["markers"], inputProps: { title: "A" } }).issues).toBeUndefined();
     expect(validate({ composition: "Intro", timing: [] }).issues).toBeUndefined();
   });
 
   it("refuses unknown kinds and a timing that is not a list, naming the kinds", () => {
     expect(validate({ composition: "Intro", timing: ["beats", "bars"] }).issues).toEqual([
-      { message: 'unknown timing "bars": use "beats" and/or "markers", e.g. ["beats", "markers"]', path: ["timing"] },
+      { message: 'unknown timing "bars": use "beats", "markers" and/or "words", e.g. ["beats", "markers"]', path: ["timing"] },
     ]);
     expect(validate({ composition: "Intro", timing: "beats" }).issues?.[0]?.message).toMatch(/timing must be a list/);
   });
@@ -189,6 +190,7 @@ describe("remotion adapter timing()", () => {
   it("returns the kinds the clip lists, sorted and once each", async () => {
     expect(await timing({ composition: "Intro", timing: ["markers", "beats", "markers"] })).toEqual(["beats", "markers"]);
     expect(await timing({ composition: "Intro", timing: ["markers"] })).toEqual(["markers"]);
+    expect(await timing({ composition: "Intro", timing: ["words", "beats"] })).toEqual(["beats", "words"]);
   });
 
   it("returns none for a clip without the prop, with an empty list or without props", async () => {

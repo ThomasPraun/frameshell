@@ -55,6 +55,8 @@ test("opens a file in the editor and saves an edit through the daemon", async ()
 });
 
 test("runs a command in a real terminal whose session is set", async () => {
+  // The first PowerShell prompt can take about a minute on a loaded Windows runner (#533): `runInTerminal` waits for it.
+  if (isWindows) test.setTimeout(180_000);
   const sessionLabel = page.getByTestId("active-session");
   await expect(sessionLabel).toHaveText(/^term-[0-9a-f]{8}$/);
   const session = (await sessionLabel.textContent())!;
