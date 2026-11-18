@@ -26,7 +26,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       writeBlend(project, SOURCE, { fps: 10, links: ["//../tex.png", "/outside/elsewhere.png", join(project, "scenes", "lib.blend")] });
       const inputs = await adapter().inputs!(clip(), inputsContext(project, stub.path));
       expect(inputs.slice(0, 2)).toEqual([SOURCE, ".frameshell/blender/version/4.5.3.json"]);
-      expect(inputs[2]).toBe(".frameshell/blender/range/500ms.json");
+      expect(inputs[2]).toBe(".frameshell/blender/range/0-500ms.json");
       expect(inputs[3]).toMatch(/^\.frameshell\/blender\/[0-9a-f]{16}-[0-9a-f]{8}\/deps\.json$/);
       expect(inputs.slice(4)).toEqual(["scenes/lib.blend", "tex.png", inputs[3]!.replace(/deps\.json$/, "outside.json")]);
       expect(JSON.parse(readFileSync(join(project, inputs[3]!), "utf8"))).toEqual({ blend: SOURCE, paths: ["scenes/lib.blend", "tex.png"], outside: 1 });
@@ -127,16 +127,20 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(readFileSync(join(project, after[1]!), "utf8")).not.toBe(readFileSync(join(project, before[1]!), "utf8"));
     });
 
-    it("put the length rendered in the key, and nothing of the clip's placement", async () => {
+    it("put the part rendered (its start and its end) in the key, and nothing of the clip's placement", async () => {
       const blender = adapter();
       const short = await blender.inputs!(clip({ duration: 1 }), inputsContext(project, stub.path));
       const moved = await blender.inputs!(clip({ duration: 1, start: 30 }), inputsContext(project, stub.path));
       const longer = await blender.inputs!(clip({ duration: 2 }), inputsContext(project, stub.path));
       const trimmedIn = await blender.inputs!(clip({ duration: 1, in: 1 }), inputsContext(project, stub.path));
       expect(moved).toEqual(short);
-      expect(short[2]).toBe(".frameshell/blender/range/1000ms.json");
-      expect(longer[2]).toBe(".frameshell/blender/range/2000ms.json");
-      expect(trimmedIn[2]).toBe(".frameshell/blender/range/2000ms.json");
+      expect(short[2]).toBe(".frameshell/blender/range/0-1000ms.json");
+      expect(longer[2]).toBe(".frameshell/blender/range/0-2000ms.json");
+      // A head trim changes what is rendered (the head is not), so it re-renders: owner decision on #482, 2026-11-17.
+      expect(trimmedIn[2]).toBe(".frameshell/blender/range/1000-2000ms.json");
+      const sameEndOtherStart = await blender.inputs!(clip({ duration: 0.5, in: 1.5 }), inputsContext(project, stub.path));
+      expect(sameEndOtherStart[2]).toBe(".frameshell/blender/range/1500-2000ms.json");
+      expect(JSON.parse(readFileSync(join(project, trimmedIn[2]!), "utf8"))).toEqual({ inMs: 1000, endMs: 2000 });
     });
 
     it("refuse a Blender outside 4.5 LTS and 5.x, one that is missing, and a host without the inputs context", async () => {
@@ -175,7 +179,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       const [run] = stub.runs("render.py");
       const blend = join(project, "scenes", "intro.blend");
       expect(run!.slice(0, 9)).toEqual(["-b", "--factory-startup", "-Y", blend, "--python-exit-code", "1", "-P", scriptPath("render.py"), "--"]);
-      expect(JSON.parse(run![9]!)).toEqual({ scene: "Scene", camera: "Camera", width: 64, height: 36, fps: 10, frames: 5, outDir: join(ctx.outDir, "frames"), quality: "draft" });
+      expect(JSON.parse(run![9]!)).toEqual({ scene: "Scene", camera: "Camera", width: 64, height: 36, fps: 10, startFrame: 0, frames: 5, outDir: join(ctx.outDir, "frames"), quality: "draft" });
       expect(stub.runs("render.py")).toHaveLength(1);
 
       const size = { width: 64, height: 36 };
@@ -196,13 +200,43 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(progress.map((update) => update.message)).toEqual(expect.arrayContaining(["Starting Blender 4.5.3", "Rendering", "Encoding", "Done"]));
     });
 
-    it("renders up to the end of the clip's part: in + duration, at the project fps, from the scene's first frame", async () => {
+    it("renders only the clip's part, frames in*fps up to (in + duration)*fps, and pads the head transparent so file time is composition time", async () => {
       writeBlend(project, SOURCE, { fps: 20 });
-      const { ctx } = renderContext(project, stub.path, { fps: 20 });
+      const { ctx, progress } = renderContext(project, stub.path, { fps: 20 });
       await adapter().render(clip({ in: 0.25, duration: 0.5 }), ctx);
-      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 20, frames: 15 });
-      const frames = (await decodeRgba(join(ctx.outDir, "render.webm"))).length / (64 * 36 * 4);
-      expect(frames).toBe(15);
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ fps: 20, startFrame: 5, frames: 10 });
+      // Scene frames 6 to 15: the head (1 to 5) is not drawn.
+      expect(stub.sceneFrames()).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+      const size = { width: 64, height: 36 };
+      const rgba = await decodeRgba(join(ctx.outDir, "render.webm"));
+      expect(rgba.length / (size.width * size.height * 4)).toBe(15);
+      for (let frame = 0; frame < 15; frame++) {
+        expect(alphaAt(rgba, size, frame, 2, 2), `corner of frame ${frame}`).toBe(0);
+        // Panel: transparent in the padded head, drawn from the first frame of the window.
+        const panel = alphaAt(rgba, size, frame, 24, 18);
+        if (frame < 5) expect(panel, `panel of frame ${frame}`).toBe(0);
+        else expect(panel, `panel of frame ${frame}`).toBeGreaterThanOrEqual(149);
+      }
+      // Progress counts the window's frames: the `Fra:` lines start at scene frame 6, and still end at the render's share.
+      const rendering = progress.filter((update) => update.message === "Rendering").map((update) => update.fraction);
+      expect(rendering[0]).toBeLessThan(0.2);
+      expect(Math.max(...rendering)).toBeCloseTo(0.9);
+    });
+
+    it("pads the head at the exact NTSC rate, and reruns are byte-identical with and without a head", async () => {
+      writeBlend(project, SOURCE, { fps: 29.97003, frameStart: 1, frameEnd: 100 });
+      const ntsc = renderContext(project, stub.path, { fps: 30000 / 1001 });
+      const result = await adapter().render(clip({ in: 0.2, duration: 0.2 }), ntsc.ctx);
+      // in 0.2 s is frame 6 (5.994 plus the 1e-3 slack, floored), end frame 12: a window of 6 after a head of 6.
+      expect(JSON.parse(stub.runs("render.py")[0]![9]!)).toMatchObject({ startFrame: 5, frames: 7 });
+      expect((await decodeRgba(result.file)).length / (64 * 36 * 4)).toBe(12);
+
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 100 });
+      for (const extra of [{ duration: 0.3 }, { in: 0.2, duration: 0.3 }]) {
+        const first = await adapter().render(clip(extra), renderContext(project, stub.path).ctx);
+        const again = await adapter().render(clip(extra), renderContext(project, stub.path).ctx);
+        expect(readFileSync(again.file).equals(readFileSync(first.file))).toBe(true);
+      }
     });
 
     it("asks for exactly the frames of an end snapped to the frame grid, and a scene whose last frame is the clip's end renders", async () => {
@@ -268,6 +302,18 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       await expect(adapter().render(clip({ props: { camera: "Nope" } }), renderContext(project, stub.path).ctx)).rejects.toThrow(/no camera object "Nope"\. Its cameras: Camera\./);
       writeBlend(project, SOURCE, { fps: 10, cameras: [] });
       await expect(adapter().render(clip(), renderContext(project, stub.path).ctx)).rejects.toThrow(/has no active camera\. Set one in Blender/);
+    });
+
+    it("counts the frames written against the window, not the clip's end", async () => {
+      stub.configure({ skipLast: true });
+      await expect(adapter().render(clip({ in: 0.2, duration: 0.3 }), renderContext(project, stub.path).ctx)).rejects.toThrow(/Blender wrote 2 of 3 frames of scenes\/intro\.blend/);
+    });
+
+    it("refuses a window that runs past the scene's end even when its head is not rendered", async () => {
+      writeBlend(project, SOURCE, { fps: 10, frameStart: 1, frameEnd: 4 });
+      await expect(adapter().render(clip({ in: 0.2, duration: 0.3 }), renderContext(project, stub.path).ctx)).rejects.toThrow(
+        /needs scene frames 1 to 5 but scene "Scene" of scenes\/intro\.blend ends at frame 4 \(4 frames\)/,
+      );
     });
 
     it("fails with Blender's own output when it crashes, and when it writes fewer frames than asked", async () => {
@@ -404,6 +450,15 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect((await blender.gc!(gcContext(long))).map((entry) => entry.path)).toEqual([short[2]!]);
     });
 
+    it("recognises the key markers an older plugin wrote (<endMs>ms.json) and deletes them when no clip names them", async () => {
+      const blender = adapter();
+      const current = await blender.inputs!(clip(), inputsContext(project, stub.path));
+      writeFileSync(join(project, STATE, "range", "500ms.json"), "{}");
+      const removed = await blender.gc!(gcContext(current));
+      expect(removed.map((entry) => entry.path)).toEqual([".frameshell/blender/range/500ms.json"]);
+      expect(existsSync(join(project, current[2]!))).toBe(true);
+    });
+
     it("kills the Blender that lists a .blend's files when the host stops, rejects, and lists again on the next check", async () => {
       stub.configure({ hangDeps: true });
       const stopping = new AbortController();
@@ -449,6 +504,14 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(JSON.parse(stub.runs("render.py").at(-1)![9]!)).toMatchObject({ quality: "final", frames: 5 });
       expect(progress.map((update) => update.message)).toContain("Rendering the final (Cycles)");
       expect(alphaAt(await decodeRgba(result.file), { width: 64, height: 36 }, 0, 2, 2)).toBe(0);
+    });
+
+    it("estimate the window only: a clip trimmed at the head costs the frames it draws, not the ones before it", async () => {
+      // Frames 10 to 20 at 10 fps: a window of 10 frames, against 20 untrimmed.
+      const format = { projectDir: project, fps: 10, width: 1000, height: 1000 };
+      expect(await adapter().finals!.estimate(clip({ in: 1, duration: 1 }), format)).toBe(10 + 10 * 5);
+      expect(await adapter().finals!.estimate(clip({ duration: 2 }), format)).toBe(10 + 20 * 5);
+      expect(await adapter().finals!.estimate(clip({ in: 1, duration: 2 }), format)).toBe(10 + 20 * 5);
     });
 
     it("estimate frames x megapixels x 5 s plus start-up before any final ran here, then the rate this .blend's last final took", async () => {

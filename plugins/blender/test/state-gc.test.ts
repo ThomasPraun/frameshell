@@ -41,24 +41,24 @@ describe("gc of .frameshell/blender", () => {
     put(`${stale}/outside.json`, "stale-outside");
     put(`${onlyOutside}/deps.json`, "d");
     put(`${onlyOutside}/outside.json`, "o");
-    put(`${STATE}/range/500ms.json`, "{}");
-    put(`${STATE}/range/900ms.json`, "{}");
+    put(`${STATE}/range/0-500ms.json`, "{}");
+    put(`${STATE}/range/0-900ms.json`, "{}");
     put(`${STATE}/version/4.5.3.json`, "{}");
     put(`${STATE}/version/5.0.1.json`, "{}");
     put(`${STATE}/finals.json`, "{}");
   });
 
-  const inUse = [`${live}/deps.json`, `${onlyOutside}/outside.json`, `${STATE}/range/500ms.json`, `${STATE}/version/4.5.3.json`];
+  const inUse = [`${live}/deps.json`, `${onlyOutside}/outside.json`, `${STATE}/range/0-500ms.json`, `${STATE}/version/4.5.3.json`];
 
   it("deletes listing folders, length markers and version markers no clip names, and keeps what one does", async () => {
     const removed = await sweepState(context(inUse));
     expect(removed).toEqual([
       { path: `${stale}/`, bytes: "stale-deps".length + "stale-outside".length },
-      { path: `${STATE}/range/900ms.json`, bytes: 2 },
+      { path: `${STATE}/range/0-900ms.json`, bytes: 2 },
       { path: `${STATE}/version/5.0.1.json`, bytes: 2 },
     ]);
     for (const kept of [...inUse, `${live}/deps.json`, `${onlyOutside}/deps.json`, `${STATE}/finals.json`]) expect(exists(kept)).toBe(true);
-    for (const gone of [stale, `${STATE}/range/900ms.json`, `${STATE}/version/5.0.1.json`]) expect(exists(gone)).toBe(false);
+    for (const gone of [stale, `${STATE}/range/0-900ms.json`, `${STATE}/version/5.0.1.json`]) expect(exists(gone)).toBe(false);
   });
 
   it("keeps a listing folder when either of its two key inputs is in use", async () => {
@@ -69,8 +69,8 @@ describe("gc of .frameshell/blender", () => {
 
   it("lists the same entries on a dry run and deletes nothing", async () => {
     const would = await sweepState(context(inUse, { dryRun: true }));
-    expect(would.map((entry) => entry.path)).toEqual([`${stale}/`, `${STATE}/range/900ms.json`, `${STATE}/version/5.0.1.json`]);
-    expect(exists(`${stale}/deps.json`) && exists(`${STATE}/range/900ms.json`) && exists(`${STATE}/version/5.0.1.json`)).toBe(true);
+    expect(would.map((entry) => entry.path)).toEqual([`${stale}/`, `${STATE}/range/0-900ms.json`, `${STATE}/version/5.0.1.json`]);
+    expect(exists(`${stale}/deps.json`) && exists(`${STATE}/range/0-900ms.json`) && exists(`${STATE}/version/5.0.1.json`)).toBe(true);
     expect(await sweepState(context(inUse))).toEqual(would);
   });
 
@@ -105,14 +105,22 @@ describe("gc of .frameshell/blender", () => {
     const floor = Date.now() - 60_000;
     // A fresh outside.json in an otherwise old, unused folder keeps the whole folder.
     put(`${stale}/outside.json`, "fresh", new Date(Date.now() - 1000));
-    put(`${STATE}/range/700ms.json`, "{}", new Date(Date.now() - 1000));
+    put(`${STATE}/range/0-700ms.json`, "{}", new Date(Date.now() - 1000));
     const removed = await sweepState(context(inUse, { keepNewerThan: floor }));
-    expect(removed.map((entry) => entry.path)).toEqual([`${STATE}/range/900ms.json`, `${STATE}/version/5.0.1.json`]);
+    expect(removed.map((entry) => entry.path)).toEqual([`${STATE}/range/0-900ms.json`, `${STATE}/version/5.0.1.json`]);
     expect(exists(`${stale}/deps.json`)).toBe(true);
-    expect(exists(`${STATE}/range/700ms.json`)).toBe(true);
+    expect(exists(`${STATE}/range/0-700ms.json`)).toBe(true);
     // The same files are old against a later floor: only what the inputs name stays.
     const later = await sweepState(context(inUse, { keepNewerThan: Date.now() + HOUR }));
-    expect(later.map((entry) => entry.path)).toEqual([`${stale}/`, `${STATE}/range/700ms.json`]);
+    expect(later.map((entry) => entry.path)).toEqual([`${stale}/`, `${STATE}/range/0-700ms.json`]);
+  });
+
+  it("recognises range markers with a start (<inMs>-<endMs>ms.json) and those an older plugin wrote (<endMs>ms.json)", async () => {
+    put(`${STATE}/range/300-900ms.json`, "{}");
+    put(`${STATE}/range/700ms.json`, "{}");
+    const removed = await sweepState(context([...inUse, `${STATE}/range/300-900ms.json`]));
+    expect(removed.map((entry) => entry.path)).toEqual([`${stale}/`, `${STATE}/range/0-900ms.json`, `${STATE}/range/700ms.json`, `${STATE}/version/5.0.1.json`]);
+    expect(exists(`${STATE}/range/300-900ms.json`)).toBe(true);
   });
 
   it("finds nothing to do in a project that never ran Blender", async () => {

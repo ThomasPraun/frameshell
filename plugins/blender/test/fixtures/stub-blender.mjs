@@ -57,9 +57,10 @@ const cameras = model.cameras ?? ["Camera"];
 if (request.camera !== null && !cameras.includes(request.camera)) refuse("camera", { camera: request.camera, cameras });
 if (request.camera === null && cameras.length === 0) refuse("camera", { camera: null, scene: scenes[0], cameras });
 const first = model.frameStart ?? 1;
-const lastFrame = sceneFrame(request.frames - 1);
+const start = request.startFrame ?? 0;
+const lastFrame = sceneFrame(start + request.frames - 1);
 if (lastFrame > (model.frameEnd ?? 250) + 1e-6) {
-  refuse("range", { scene: scenes[0], frameStart: first, frameEnd: model.frameEnd ?? 250, frames: request.frames, lastFrame: Number(lastFrame.toFixed(4)), sceneFps: fps });
+  refuse("range", { scene: scenes[0], frameStart: first, frameEnd: model.frameEnd ?? 250, startFrame: start, frames: request.frames, lastFrame: Number(lastFrame.toFixed(4)), sceneFps: fps });
 }
 
 writeFileSync(join(here, "pid"), String(process.pid));
@@ -67,13 +68,13 @@ mkdirSync(request.outDir, { recursive: true });
 let hung = false;
 emit(request.quality === "final" ? { event: "start", frameStart: first, frames: request.frames, engine: "CYCLES", device: "CPU" } : { event: "start", frameStart: first, frames: request.frames, engine: "BLENDER_EEVEE_NEXT" });
 for (let index = 0; index < request.frames; index++) {
-  print(`Fra:${first + index} Mem:10.00M (Peak 10.00M) | Time:00:00.01 | Rendering`);
+  print(`Fra:${first + start + index} Mem:10.00M (Peak 10.00M) | Time:00:00.01 | Rendering`);
   if (config.crash && index === 1) {
     writeSync(2, 'Traceback (most recent call last):\n  File "render.py", line 1\nRuntimeError: stub crash\n');
     process.exit(1);
   }
   if (!(config.skipLast && index === request.frames - 1)) writeFileSync(join(request.outDir, `frame_${String(index).padStart(6, "0")}.png`), png(request.width, request.height));
-  const shown = Number(sceneFrame(index).toFixed(4));
+  const shown = Number(sceneFrame(start + index).toFixed(4));
   appendFileSync(join(here, "scene-frames.jsonl"), `${shown}\n`);
   emit({ event: "frame", index, seconds: config.frameSeconds?.[index] ?? 0.05, sceneFrame: shown });
   if (config.hangAfter === index + 1) {

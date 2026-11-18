@@ -104,6 +104,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   take (a sound shorter than one 400 ms gating block, which EBU R128 reads as silence, gets the loudness of that one
   block, flagged `shortSound`), and with `spectrogram: true` a 64-row log-frequency spectrogram of up to 400 columns in dB computed on the one
   FFT in a worker thread (kept in memory, not on disk: no new `gc` kind). Files with no sound are listed in `skipped`.
+- Blender clips, slice 6 of #482 (ADR 0035, epic #451; plugin only, no protocol or plugin-API change): a render draws only
+  the clip's window, frames `floor(in * fps)` to `in + duration`, instead of everything from the scene's first frame.
+  `render.py` takes `startFrame` and names its files from 0; the encode pads the head with transparent frames (one
+  `lavfi` input and `concat`, same flags and `-fflags +bitexact`; a clip with no head trim encodes exactly as before),
+  so file time is still composition time. Progress, the written-frames check and the 5-minute finals estimate count the
+  window, so a trimmed final is estimated on what it draws. Owner decision on #482: a head trim re-renders, so the range
+  key marker is `range/<inMs>-<endMs>ms.json` (every Blender clip renders once more); `gc` recognises the old and new
+  names. The opt-in real test has a case with `in` above 0; not run with a real Blender yet.
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it

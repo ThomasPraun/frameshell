@@ -6,7 +6,7 @@
 import type { PluginApi } from "@frameshell/plugin-api";
 import { createBlenderAdapter } from "./adapter.js";
 
-export { type BlenderAdapterOptions, type BlenderProps, CLIP_TYPE, createBlenderAdapter, describeRefusal, frameCount, frameRate, outsideWarning, propsSchema, sourceOf } from "./adapter.js";
+export { type BlenderAdapterOptions, type BlenderProps, CLIP_TYPE, createBlenderAdapter, describeRefusal, frameCount, frameRate, outsideWarning, propsSchema, renderWindow, sourceOf } from "./adapter.js";
 export { type BlenderEvent, SUPPORTED_BLENDER, VersionProbe, parseBlenderVersion, runBlender, scriptPath, supportedBlender } from "./blender.js";
 export { BlendDeps, type BlendFiles, STATE_DIR, insideProject, listingPath, outsideProject } from "./deps.js";
 export { DEFAULT_SECONDS_PER_MEGAPIXEL, FINALS_FILE, FinalTimes } from "./finals.js";

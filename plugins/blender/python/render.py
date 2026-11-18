@@ -3,8 +3,9 @@
 #
 # Run by the @frameshell/blender adapter inside the user's Blender, never by anyone else:
 #   blender -b --factory-startup -Y <file.blend> --python-exit-code 1 -P render.py -- '<json>'
-# Renders `frames` frames at the project's rate from the scene's first frame (a scene at another rate is sampled at the
-# same seconds, through subframes), to RGBA PNGs `frame_000000.png`... in `outDir`
+# Renders `frames` frames at the project's rate, from project frame `startFrame` counted from the scene's first frame (a
+# scene at another rate is sampled at the same seconds, through subframes), to RGBA PNGs `frame_000000.png`... in `outDir`,
+# numbered from 0 for the window alone (the adapter pads the head before `startFrame`)
 # (`quality` draft: EEVEE, or Workbench; final: Cycles). It reads only the JSON request, prints `FRAMESHELL <json>`
 # lines the adapter parses, and never saves the .blend. Apache-2.0 is GPL-3.0-compatible, as blender.org asks of bpy scripts.
 # Written against Blender 4.5 LTS and 5.x (ADR 0035); the checks below are what changed between them.
@@ -145,10 +146,11 @@ def main():
         refuse("camera", camera=None, scene=scene.name, cameras=sorted(o.name for o in scene.objects if o.type == "CAMERA"))
 
     first = scene.frame_start
+    start = request.get("startFrame", 0)
     frames = request["frames"]
-    last = scene_frame(first, frames - 1, step)
+    last = scene_frame(first, start + frames - 1, step)
     if last > scene.frame_end + EPSILON:
-        refuse("range", scene=scene.name, frameStart=first, frameEnd=scene.frame_end, frames=frames, lastFrame=round(last, 4), sceneFps=scene_fps)
+        refuse("range", scene=scene.name, frameStart=first, frameEnd=scene.frame_end, startFrame=start, frames=frames, lastFrame=round(last, 4), sceneFps=scene_fps)
 
     final = request.get("quality") == "final"
     device = use_cycles(scene) if final else None
@@ -177,7 +179,7 @@ def main():
     else:
         emit(event="start", frameStart=first, frames=frames, engine=engine, device=device)
     for index in range(frames):
-        at = scene_frame(first, index, step)
+        at = scene_frame(first, start + index, step)
         whole = math.floor(at)
         scene.frame_set(whole, subframe=at - whole)
         render.filepath = os.path.join(out_dir, "frame_%06d" % index)
