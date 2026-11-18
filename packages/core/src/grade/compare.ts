@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ErrorCode, type GradeCompareResultShape, type GradeLook, RpcError } from "@frameshell/protocol";
-import { GRADE_LIMITS, type Grade, type MediaClip, type Timeline, gradeOf } from "@frameshell/schema";
+import { GRADE_LIMITS, type Grade, type MediaClip, type Timeline, findLook, gradeOf, lookNames } from "@frameshell/schema";
 import { readLut } from "../export/grade.js";
 import { type ExportService, type LoadedTimeline, pool } from "../export/service.js";
 import { captureParallelism } from "../review/source.js";
@@ -61,12 +61,13 @@ export class GradeComparer {
 
     const warnings: string[] = [];
     if (track.hidden) warnings.push(`Track ${track.id} is hidden: the frame does not show clip ${clip.id}, so every tile looks the same.`);
-    await checkLuts(root, request.looks);
+    const looks = resolveLooks(request.looks);
+    await checkLuts(root, looks);
     const current = media.grade && gradeOf(media) ? media.grade : null;
     const tiles: Tile[] = [{ label: "", kind: "neutral", grade: null, flags: "--clear-grade" }];
     if (current) tiles.push({ label: "", kind: "current", grade: current, flags: "" });
     const names: string[] = ["neutral", ...(current ? ["current"] : [])];
-    for (const [i, { name, ...grade }] of request.looks.entries()) {
+    for (const [i, { name, ...grade }] of looks.entries()) {
       const label = name ?? `look ${i + 1}`;
       if (!gradeOf({ type: "media", grade })) warnings.push(`Look "${label}" changes nothing: its tile is the neutral picture.`);
       tiles.push({ label: "", kind: "look", grade, flags: lookFlags(grade, current) });
@@ -138,8 +139,30 @@ export function compareFrame(id: string, start: number, end: number, fps: number
   return Math.max(first, Math.min(last, Math.floor(at * fps + 1e-6)));
 }
 
+/** A look of the request with its built-in `look` filled in: a name and a whole grade. */
+export type ResolvedLook = Grade & { name?: string | undefined };
+
+/**
+ * `looks` with each `look: "<name>"` replaced by the built-in look's numbers, the fields the request gives written
+ * over them (the tile is named after the built-in look unless the look has a `name`). Throws `InvalidParams` naming the
+ * valid looks for a name that is not one, before any frame is rendered.
+ */
+export function resolveLooks(looks: readonly GradeLook[]): ResolvedLook[] {
+  return looks.map(({ look, ...own }, i) => {
+    if (look === undefined) return own;
+    const builtIn = findLook(look);
+    if (!builtIn) {
+      const valid = lookNames.join(", ");
+      throw new RpcError(ErrorCode.InvalidParams, `grade.compare: look ${i + 1} asks for the built-in look "${look}", which does not exist. Built-in looks: ${valid}.`, {
+        issues: [{ path: ["looks", i, "look"], message: `unknown look "${look}"; one of ${valid}` }],
+      });
+    }
+    return { name: builtIn.name, ...builtIn.grade, ...Object.fromEntries(Object.entries(own).filter(([, value]) => value !== undefined)) };
+  });
+}
+
 /** Refuse a look whose LUT cannot be read before any frame is rendered, naming the look. */
-async function checkLuts(root: string, looks: readonly GradeLook[]): Promise<void> {
+async function checkLuts(root: string, looks: readonly ResolvedLook[]): Promise<void> {
   const checked = new Set<string>();
   for (const [i, look] of looks.entries()) {
     if (look.lut === undefined || checked.has(look.lut)) continue;

@@ -119,6 +119,10 @@ describe("review: pop", () => {
         expect(error!.message).toContain("`pop`");
       }
       expect((await refused({ pop: "nowhere" }))!.code).toBe(ErrorCode.InvalidOperation);
+      // A `word:` reference reads the timeline's words: with none transcribed it says so, instead of "this caller cannot read" them.
+      const noWords = await refused({ pop: "word:hook" });
+      expect(noWords!.code).toBe(ErrorCode.InvalidOperation);
+      expect(noWords!.message).toContain("no transcribed words");
     },
     MEDIA_TIMEOUT,
   );

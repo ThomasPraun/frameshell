@@ -33,6 +33,10 @@
       "types": "./dist/grade.d.ts",
       "default": "./dist/grade.js"
     },
+    "./grade-looks": {
+      "types": "./dist/grade-looks.d.ts",
+      "default": "./dist/grade-looks.js"
+    },
     "./formats": {
       "types": "./dist/formats.d.ts",
       "default": "./dist/formats.js"

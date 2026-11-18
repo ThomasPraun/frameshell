@@ -5,6 +5,8 @@ import {
   ErrorCode,
   REVIEW_KEEP,
   REVIEW_PICKED_SHEETS,
+  type ReviewBehind,
+  type ReviewBehindSample,
   type ReviewDelivery,
   type ReviewLoudness,
   type ReviewMetrics,
@@ -84,13 +86,14 @@ import { speedChart } from "./chart.js";
 import { Frames, type KitSheetOptions, type SheetImagesOptions, writeOnionSheet, writePopSheet, writeSheetImages } from "./images.js";
 import { writeSheet } from "./sheet.js";
 import { type HeroSample, peakSpeed, spansOf, speedOf } from "./speed.js";
-import { SPEED_ALPHA_WIDTH } from "./thresholds.js";
+import { BEHIND_WIDTH, SPEED_ALPHA_WIDTH } from "./thresholds.js";
 import { deliveryChecks } from "./delivery.js";
 import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
 import { fileBandEnvelope, fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
 import { fileSound, heardClips, timelineSound } from "./sound.js";
-import { type BoxSpan, type ClipPicture, alphaHero, clipHero, clipPointInFilm, faceBoxes, graphicBoxes } from "./placement.js";
+import { type BoxSpan, type ClipPicture, alphaHero, alphaMask, clipHero, clipPointInFilm, clipRectInFilm, faceBoxes, graphicBoxes, matteFrame } from "./placement.js";
+import { behindEntry, boxesMeet, coveredShare, matteFrameAt, sampleFrames, subjectSpans, within } from "./behind.js";
 import { type ClipSpan, type FramePlacement, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt, withinPicture } from "./safe.js";
@@ -117,6 +120,15 @@ interface Placed {
   laidOut: boolean;
 }
 
+/** A finished subject matte: absolute path, size, frame rate and frame count (`<key>.json`). */
+export interface ReadyMatte {
+  path: string;
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
+}
+
 /** Options for {@link ReviewService}. */
 export interface ReviewServiceOptions {
   timelines: Pick<TimelineService, "viewTimeline" | "show">;
@@ -135,6 +147,11 @@ export interface ReviewServiceOptions {
   grid?(root: string, timeline: { timeline: Timeline; fps: number }, horizon: number): Promise<TempoResult>;
   /** Size of the picture of a project asset, null when it has none (`MediaService.probe`); absent: taken as the film's. */
   pictureSize?(root: string, asset: string): Promise<Size | null>;
+  /**
+   * The finished proxy-size subject matte of a project asset (ADR 0032), read only: review never starts a matte job.
+   * `missing` says why there is none. Absent: words behind the person are not measured.
+   */
+  readyMatte?(root: string, asset: string): Promise<ReadyMatte | { missing: string }>;
   /** Absolute ffmpeg and ffprobe for the project rooted at `root`. */
   ffmpeg(root: string): Promise<string>;
   ffprobe(root: string): Promise<string>;
@@ -395,6 +412,7 @@ export class ReviewService {
         const sound = await this.#sound(root, request, source, loaded ? flat : null, seconds, ffmpeg, envelope, scratch, warnings, signal);
         const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
         const delivery = request.file && request.preset ? await this.#delivery(root, request, ffmpeg, loudness, warnings, signal) : null;
+        const behind = loaded ? await this.#behind(root, loaded, flat, source, ffmpeg, join(scratch, "behind"), warnings, signal) : null;
         metrics = reviewMetrics({
           fps: source.fps,
           range: seconds,
@@ -411,6 +429,7 @@ export class ReviewService {
           sound,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
           ...(speedClip ? { speed } : {}),
+          ...(behind ? { behind } : {}),
         });
         if (request.requirementsError !== undefined) warnings.push(`requirements: the proposal's requirements are invalid (${request.requirementsError.split("\n")[0]}), so the film is judged without them.`);
         const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
@@ -681,6 +700,135 @@ export class ReviewService {
       }
     }
     return { boxes: found, opaque, laidOut: true };
+  }
+
+  /**
+   * Each clip on a track `behind` a plate in the timeline reviewed (ADR 0032): for a generated clip with alpha, the
+   * share of it the person's matte covers and whether it meets a face of the plate clip, at the first, middle and last
+   * frame of its time under the person (`behind.ts`). Root tracks only, as the timeline file names them. Null when no
+   * shown track is behind one.
+   */
+  async #behind(
+    root: string,
+    loaded: LoadedTimeline,
+    flat: () => Promise<Flat>,
+    source: FilmSource,
+    ffmpeg: string,
+    work: string,
+    warnings: string[],
+    signal?: AbortSignal,
+  ): Promise<ReviewBehind[] | null> {
+    const plates = new Map(loaded.timeline.tracks.flatMap((track) => (track.kind === "video" && track.behind !== undefined && track.hidden !== true ? [[track.id, track.behind] as const] : [])));
+    if (plates.size === 0) return null;
+    let resolved: Flat;
+    try {
+      resolved = await flat();
+    } catch (error) {
+      warnings.push(`behind: words behind the person are not measured (${(error as Error).message.split("\n")[0]}).`);
+      return null;
+    }
+    const film = { width: source.width, height: source.height };
+    const { project, layout, fps } = resolved;
+    const tracks = resolved.timeline.tracks.filter((track) => track.kind === "video" && plates.has(track.id));
+    let renders: ReadonlyMap<string, GeneratedSource> = new Map();
+    if (this.#options.generated && tracks.some((track) => track.kind === "video" && track.clips.some((clip) => clip.type !== "media" && clip.type !== "timeline"))) {
+      try {
+        const otherSize = film.width !== project.width || film.height !== project.height;
+        renders = await this.#options.generated(root, resolved.timeline, otherSize ? film : undefined);
+      } catch (error) {
+        signal?.throwIfAborted();
+        warnings.push(`behind: the renders of the words cannot be read (${(error as Error).message.split("\n")[0]}).`);
+      }
+    }
+    const once = <T>(cache: Map<string, Promise<T>>, key: string, read: () => Promise<T>): Promise<T> => {
+      let known = cache.get(key);
+      if (!known) cache.set(key, (known = read()));
+      return known;
+    };
+    const mattes = new Map<string, Promise<ReadyMatte | { missing: string }>>();
+    const matteOf = (asset: string) => once(mattes, asset, () => this.#options.readyMatte?.(root, asset) ?? Promise.resolve({ missing: "this daemon reads no mattes" }));
+    const sizes = new Map<string, Promise<Size | null>>();
+    const sizeOf = (asset: string) => once(sizes, asset, () => this.#options.pictureSize?.(root, asset) ?? Promise.resolve(film));
+    let scans: readonly ScannedAsset[] = [];
+    if (this.#options.faceScans) {
+      try {
+        scans = await this.#options.faceScans(root);
+      } catch (error) {
+        warnings.push(`behind: faces are not checked (${(error as Error).message.split("\n")[0]}).`);
+      }
+    }
+    const faces = faceBoxes(resolved.timeline, scans, film, project, layout);
+    const scanned = new Set(scans.map((entry) => entry.asset));
+    const base = resolved.timeline.tracks.find(showsPicture)?.id;
+    const noScan = new Set<string>();
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+
+    const found: ReviewBehind[] = [];
+    for (const track of tracks) {
+      if (track.kind !== "video") continue;
+      const plate = plates.get(track.id)!;
+      for (const listed of track.clips) {
+        signal?.throwIfAborted();
+        const word = { clip: listed.id, track: track.id, plate };
+        const unplaced = (message: string) => found.push({ ...word, from: null, to: null, samples: [], verdict: "unplaced", message });
+        if (listed.type === "media" || listed.type === "timeline") {
+          unplaced(`clip ${listed.id} is not a generated clip: only what a generated clip's render draws (its alpha) is measured behind the person.`);
+          continue;
+        }
+        const clip = listed as AdapterClip;
+        const render = renders.get(clip.id);
+        if (!render) {
+          unplaced(`clip ${clip.id} has no render yet, so what it draws is not known.`);
+          continue;
+        }
+        if (!render.hasAlpha) {
+          unplaced(`clip ${clip.id} has a render with no alpha plane: it fills the frame, so there is no word shape to measure.`);
+          continue;
+        }
+        const spans = within(subjectSpans(resolved.timeline, plate), clip.start, clip.start + clip.duration);
+        const frames = sampleFrames(spans, fps);
+        if (frames.length === 0) {
+          unplaced(`the person is never drawn over clip ${clip.id}: no media clip of plate track ${plate} plays under it, or a shown track between them covers the person then.`);
+          continue;
+        }
+        const samples: ReviewBehindSample[] = [];
+        let missing: string | null = null;
+        for (const frame of frames) {
+          const at = frame / fps;
+          const subject = (spans.find((span) => at >= span.from - 1e-6 && at < span.to) ?? spans.find((span) => at < span.to) ?? spans.at(-1)!).clip;
+          const [matte, size] = await Promise.all([matteOf(subject.asset), sizeOf(subject.asset)]);
+          if (!size || "missing" in matte) {
+            missing = `the person over clip ${clip.id} would come from ${subject.asset}, ${"missing" in matte ? matte.missing : "which has no picture"}.`;
+            break;
+          }
+          const shown = (frame + 0.5) / fps;
+          const [alpha, person] = await Promise.all([
+            alphaMask({ ffmpeg, render, fps, work: join(work, `${clip.id}-${frame}`), signal }, (clip.in ?? 0) + at - clip.start, BEHIND_WIDTH),
+            matteFrame(ffmpeg, matte, Math.min(matte.frames - 1, matteFrameAt(subject, frame, fps))),
+          ]);
+          const coverage =
+            alpha && person
+              ? coveredShare(
+                  alpha,
+                  clipRectInFilm({ clip, source: render, generated: true, base: false }, shown, film, project, layout),
+                  person,
+                  clipRectInFilm({ clip: subject, source: size, generated: false, base: base === plate }, shown, film, project, layout),
+                )
+              : null;
+          let face: boolean | null = null;
+          if (scanned.has(subject.asset)) {
+            face = coverage !== null && faces.some((box) => box.track === plate && box.clip === subject.id && box.from <= at + 1e-6 && at < box.to && boxesMeet(box.box, coverage.box));
+          } else noScan.add(subject.asset);
+          samples.push({ at: round(at), plateClip: subject.id, covered: coverage ? round(coverage.share) : null, face });
+        }
+        if (missing !== null) unplaced(missing);
+        else found.push(behindEntry(word, spans[0]!.from, spans.at(-1)!.to, samples));
+      }
+    }
+    if (noScan.size > 0) {
+      warnings.push(`behind: ${[...noScan].join(", ")} ${noScan.size === 1 ? "has" : "have"} no cached face scan, so no word over it was checked against a face (\`frameshell people scan\` first).`);
+    }
+    return found;
   }
 
   /**

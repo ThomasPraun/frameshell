@@ -9,6 +9,7 @@ import {
   GradeAnalyzeResultSchema,
   GradeCompareResultSchema,
   GradeLookSchema,
+  GradeLooksResultSchema,
 } from "../grade.js";
 import {
   ClipVerifyResultSchema,
@@ -183,12 +184,23 @@ export const jobMethods = {
     }),
     result: z.object({ ...ViewedShape, ...GradeAnalyzeResultSchema.shape }),
   },
+  "grade.looks": {
+    description:
+      "The built-in colour looks (ADR 0031 decision 8): `warm`, `cool`, `filmic`, `punchy`, `faded`, `mono`, each a name, a one-line summary and the " +
+      "correction numbers it sets (`exposure`, `temperature`, `tint`, `contrast`, `saturation`; no LUT file, nothing bundled). A look is only numbers: " +
+      "keep one by passing them to `clip.set` `grade` (the CLI's `clip set --grade-look <name>` does it), after which the clip holds its own copy; " +
+      "see it first on one frame with `grade.compare` (`looks: [{ look: \"warm\" }]`). Judgment, not colour science: a starting point for Rec.709 footage, " +
+      "to look at and adjust. Reads a fixed table: needs no project and writes nothing. Example: `{}`.",
+    params: z.strictObject({}),
+    result: GradeLooksResultSchema,
+  },
   "grade.compare": {
     description:
       "Pick a colour look by eye (ADR 0031): render one frame of a media clip under up to " +
       `${GRADE_COMPARE_MAX_LOOKS} candidate \`looks\` next to a neutral baseline and write them as one labelled PNG contact image. ` +
       "Each look is a whole grade in the fields of `clip.set` `grade` (`exposure`, `temperature`, `tint`, `contrast`, `saturation`, `lut`, `lutMix`) plus an optional `name`, " +
-      "drawn in place of the clip's own grade (fields left out are neutral, not the clip's). Tile 1 is the clip with no grade (`neutral`); tile 2 its " +
+      "drawn in place of the clip's own grade (fields left out are neutral, not the clip's); `look` names a built-in look (`grade.looks`) whose numbers it starts " +
+      "from, the fields given win (`{ look: \"warm\", saturation: 1.1 }`).Tile 1 is the clip with no grade (`neutral`); tile 2 its " +
       "stored grade (`current`) when it has one; then the looks in order. Every tile is the whole composed frame as `frame` renders it " +
       "(export compiler, layers above, captions), so what you pick is what exports. Never changes the timeline: keep a look with `clip.set` `grade` " +
       "(each tile's `flags` are the `clip set` flags). Correct first (`grade.analyze` suggests a correction: compare it as a look), then style with LUTs. " +
@@ -196,7 +208,7 @@ export const jobMethods = {
       "`.frameshell/grade/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. Takes about a second per tile. " +
       'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "warm", temperature: 0.25, saturation: 1.1 }, { name: "teal", lut: "luts/teal.cube", lutMix: 0.6 }] }`. ' +
       "Fails with ClipNotFound (no such clip on a video track), InvalidOperation (not a media clip, `at` outside the clip), InvalidParams (a look's LUT " +
-      "outside the project, missing or not a 3D `.cube`), FormatNotFound, TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
+      "outside the project, missing or not a 3D `.cube`; a `look` that is not a built-in one, naming the valid ones), FormatNotFound, TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

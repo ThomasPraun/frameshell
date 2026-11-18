@@ -44,6 +44,7 @@ import {
   type ShotClip,
   type Timeline,
   type Transcript,
+  GRADE_LOOKS,
   REQUIREMENTS_FILE,
   STYLE_FILE,
   USER_STYLES_DIR,
@@ -69,7 +70,7 @@ import { ExportService, readTranscriptFile, subjectAssets } from "./export/servi
 import { BatchService } from "./batch/service.js";
 import { findClip } from "./batch/variant.js";
 import { EventHub, type EventSink } from "./events.js";
-import { canonicalPath, canonicalPathSync, exists, writeTextAtomic } from "./fs-util.js";
+import { canonicalPath, canonicalPathSync, exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
 import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
@@ -180,7 +181,8 @@ import { InspectService } from "./inspect/service.js";
 import { resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
-import { canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
+import { type VerifyServices, canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
+import { planVoiceoverCaptions, runCaptionsPlan } from "./voiceover/captions.js";
 import { planVoiceoverPlacement, runVoiceoverPlan } from "./voiceover/place.js";
 import { type SfxRequest, generateSfx } from "./sound/generate.js";
 import { allWarnings, planSounds, runPlan } from "./sound/place.js";
@@ -696,6 +698,70 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const settle = async (key: string, tx: TxRef) => {
     if (!transactions.isOpen(key, tx)) await timelines.ready(tx.id);
   };
+
+  /** The project's transcription provider as voiceover takes go through it (misread check, captions), like `transcribe`. */
+  const takeTranscription = async (dir: string): Promise<VerifyServices> => {
+    const config = await readProjectConfig(dir);
+    const providerId = config.transcription?.provider ?? "whisper-cpp";
+    return {
+      providerId,
+      provider: () => plugins.transcriptionProvider(dir, providerId),
+      model: config.transcription?.model ?? (await models.defaultFor(providerId)),
+      language: config.transcription?.language ?? null,
+      tools: transcriberTools({ dir, binaries: config.binaries }),
+      extractAudio: options.extractAudio,
+    };
+  };
+
+  /**
+   * Run the steps `write` hands to `apply` as one transaction of the caller labelled `label` (joined to the caller's open
+   * one, if any). Each step checks the revision its predecessor left: a person's edit in between fails the step
+   * instead of writing onto a timeline they have changed.
+   */
+  const inOneTransaction = async <T extends { revision: number }>(
+    op: string,
+    at: { dir: string; cwd: string; timeline: string; caller: Caller; revision: number; label: string },
+    write: (apply: (step: { op: string; args: object }) => Promise<{ revision: number; warnings: string[]; added: string[] }>) => Promise<T>,
+  ): Promise<T & { tx: string }> => {
+    const { dir, cwd, timeline, caller } = at;
+    const key = authorOf(caller);
+    const next = transactions.next(key, { standalone: true });
+    const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: at.label };
+    await transactions.touching(key, tx, { root: dir, timeline });
+    const author = journalAuthorOf(caller);
+    try {
+      let expected = at.revision;
+      const written = await write(async (step) => {
+        const request = step as OperationRequest;
+        const result = await timelines.apply({
+          root: dir,
+          cwd,
+          timeline,
+          request,
+          author,
+          tx,
+          prepare: async (current) => {
+            if (current.revision !== expected) {
+              throw new RpcError(ErrorCode.StaleRevision, `${op}: timeline ${timeline} changed from revision ${expected} to ${current.revision} while it was written. Check it with timeline show.`, {
+                op,
+                timeline,
+                revision: expected,
+                current: current.revision,
+              });
+            }
+            return request;
+          },
+        });
+        expected = result.revision;
+        await transactions.applied(key, tx);
+        return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
+      });
+      return { ...written, tx: tx.id };
+    } finally {
+      await settle(key, tx);
+    }
+  };
+
   const replays = new IdempotencyCache();
   /** The beats file that records project-relative `asset`, or null when it was never measured. Throws `InvalidProjectFile` for a broken one. */
   const beatsOf = async (dir: string, asset: string) => (await ownBeatsFile(dir, asset))?.file ?? null;
@@ -840,6 +906,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     pictureSize: async (dir, asset) => {
       const { video } = await media.probe(dir, asset);
       return video ? { width: video.width, height: video.height } : null;
+    },
+    // The proxy-size matte as `matte.status` finds it, never queued: review measures what export would draw now.
+    readyMatte: async (dir, asset) => {
+      const info = (await media.list(dir)).find((one) => one.path === asset);
+      if (info?.kind !== "media" || info.state === "failed") return { missing: "which is not an ingested video" };
+      if (info.media?.video?.still === true) return { missing: "a still picture, which has no matte" };
+      if (info.state !== "ready" || info.hash === null || info.proxy === null) return { missing: "whose proxy is not made yet" };
+      const key = matteKey(info.hash, matteModel, (await readEnclosingProject(dir))?.config.fps ?? 30);
+      const made = await readMatteInfo(dir, key, info.hash);
+      if (!made) return { missing: `whose matte is not made yet (\`frameshell matte ${asset}\`; review never starts one)` };
+      return { path: join(dir, ...mattePaths(key).video.split("/")), width: made.width, height: made.height, fps: made.fps, frames: made.frames };
     },
   });
   const brands = new BrandService({
@@ -1671,13 +1748,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
-      // A marker or beat names a time of the timeline, also when its exported file is reviewed. Seconds need no
+      // A marker, beat, bar or word names a time of the timeline, also when its exported file is reviewed. Seconds need no
       // timeline, so a file review with no timeline in the project still takes them.
       let pop: number | undefined;
       if (typeof popRef === "string") {
         const loaded = await timelines.viewTimeline(dir, timeline, reviewView);
-        pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded));
-      } else if (popRef !== undefined) pop = await resolveTimeRefArg("review", "pop", popRef, { id: "" });
+        pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded), wordLoaderFor(dir)(loaded));
+      } else pop = popRef;
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
       const proposed = shownRequirements?.proposal ? requirementsFromState(shownRequirements.state) : null;
@@ -1943,6 +2020,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const analysis = await gradeAnalyzer.analyze(dir, shown.timeline, { timeline, fps: shown.fps, clip, at, from, to, samples });
       return { view: shown.view, proposal: shown.proposal, ...analysis };
     },
+    "grade.looks": async () => ({ looks: GRADE_LOOKS.map(({ name, summary, grade }) => ({ name, summary, grade: { ...grade } })) }),
     "grade.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
@@ -2062,19 +2140,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "voiceover.generate": async ({ cwd, script, lines, provider, voice, yes, confirmation, verify }, _caller, request) => {
       const dir = await root(cwd);
-      // The misread check goes through the project's own transcription provider, like `transcribe`.
-      const config = await readProjectConfig(dir);
-      const transcriptionId = config.transcription?.provider ?? "whisper-cpp";
-      const verifyServices = verify
-        ? {
-            providerId: transcriptionId,
-            provider: () => plugins.transcriptionProvider(dir, transcriptionId),
-            model: config.transcription?.model ?? (await models.defaultFor(transcriptionId)),
-            language: config.transcription?.language ?? null,
-            tools: transcriberTools({ dir, binaries: config.binaries }),
-            extractAudio: options.extractAudio,
-          }
-        : null;
+      const verifyServices = verify ? await takeTranscription(dir) : null;
       // Built in: the daemon's own list, then this machine's `command` provider (global config only, ADR 0034).
       const command = await readCommandSpeechProvider(dirs.configDir);
       const builtIn = new Map([...(options.speechProviders ?? []), ...(command ? [command] : [])].map((speech) => [speech.id, speech] as const));
@@ -2150,6 +2216,38 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         if (calls.size === 0 && voiceoverCalls.get(key) === calls) voiceoverCalls.delete(key);
       });
     },
+    "voiceover.captions": async (params, caller, request) => {
+      const { cwd, timeline, dryRun } = params;
+      const dir = await root(cwd);
+      const plan = await transcribing(dir, async () =>
+        planVoiceoverCaptions(params, {
+          root: dir,
+          load: async () => loadFor(dir, timeline, caller),
+          transcription: await takeTranscription(dir),
+          hash: (rel) => media.hash(dir, rel),
+          progress: (update) => {
+            try {
+              request.progress(update);
+            } catch {
+              // Connection closed.
+            }
+          },
+          signal: AbortSignal.any([voiceoverAbort.signal, request.closed]),
+        }),
+      );
+      const report = { timeline, dryRun, script: plan.script, timing: plan.timing, lines: plan.lines, transcripts: plan.transcripts.map((built) => built.rel) };
+      if (dryRun) return { ...report, revision: plan.revision, tx: null, track: plan.track, warnings: plan.warnings };
+      // The words first: the phrases name their ids, and a subtitle track shows nothing without them.
+      for (const built of plan.transcripts) await writeJsonAtomic(built.path, built.transcript);
+      const written = await inOneTransaction("voiceover.captions", { dir, cwd, timeline, caller, revision: plan.revision, label: plan.label }, (apply) => runCaptionsPlan(plan, apply));
+      return {
+        ...report,
+        revision: written.revision,
+        tx: written.tx,
+        track: { ...plan.track, id: written.track },
+        warnings: [...new Set([...plan.warnings, ...written.warnings])],
+      };
+    },
     "voiceover.cancel": async ({ cwd }, _caller, request) => {
       const mine = [...(voiceoverCalls.get(canonicalPathSync(await root(cwd))) ?? [])].filter((call) => call.sink === request.sink);
       for (const call of mine) call.stop.abort();
@@ -2171,51 +2269,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         const warnings = !dryRun && plan.remove.length > 0 ? [...plan.warnings, `Nothing was placed, so \`replace\` removed nothing: ${plan.remove.join(", ")} stay on the timeline.`] : plan.warnings;
         return { ...report, revision: plan.revision, tx: null, placed: planned.map((clip) => ({ ...clip, clip: null })), replaced: dryRun ? plan.remove : [], warnings };
       }
-      const key = authorOf(caller);
-      const next = transactions.next(key, { standalone: true });
-      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: plan.label };
-      await transactions.touching(key, tx, { root: dir, timeline });
-      const author = journalAuthorOf(caller);
-      try {
-        // Each step checks the revision its predecessor left: a person's edit in between fails the step instead of putting phrases on a timeline they have changed.
-        let expected = plan.revision;
-        const written = await runVoiceoverPlan(plan, async (step) => {
-          const request = step as OperationRequest;
-          const result = await timelines.apply({
-            root: dir,
-            cwd,
-            timeline,
-            request,
-            author,
-            tx,
-            prepare: async (current) => {
-              if (current.revision !== expected) {
-                throw new RpcError(ErrorCode.StaleRevision, `voiceover.place: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the phrases were placed. Check it with timeline show.`, {
-                  op: "voiceover.place",
-                  timeline,
-                  revision: expected,
-                  current: current.revision,
-                });
-              }
-              return request;
-            },
-          });
-          expected = result.revision;
-          await transactions.applied(key, tx);
-          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
-        });
-        return {
-          ...report,
-          revision: written.revision,
-          tx: tx.id,
-          track: { ...plan.track, id: written.track },
-          placed: planned.map((clip, index) => ({ ...clip, clip: written.clipIds[index]! })),
-          replaced: plan.remove,
-          warnings: [...new Set([...plan.warnings, ...written.warnings])],
-        };
-      } finally {
-        await settle(key, tx);
-      }
+      const written = await inOneTransaction("voiceover.place", { dir, cwd, timeline, caller, revision: plan.revision, label: plan.label }, (apply) => runVoiceoverPlan(plan, apply));
+      return {
+        ...report,
+        revision: written.revision,
+        tx: written.tx,
+        track: { ...plan.track, id: written.track },
+        placed: planned.map((clip, index) => ({ ...clip, clip: written.clipIds[index]! })),
+        replaced: plan.remove,
+        warnings: [...new Set([...plan.warnings, ...written.warnings])],
+      };
     },
     "audio.inspect": async ({ cwd, assets, spectrogram }) => {
       const dir = await root(cwd);

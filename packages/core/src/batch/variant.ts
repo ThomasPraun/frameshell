@@ -25,7 +25,7 @@ export interface VariantContext {
   source(asset: string): Promise<SourceInfo>;
   /** True when the asset has a transcript (`transcripts/<asset>.words.json`). */
   hasTranscript(asset: string): Promise<boolean>;
-  /** Seconds a TimeRef names on `loaded` (markers, `beat:`, `bar:`); throws a `TimeRefError`. */
+  /** Seconds a TimeRef names on `loaded` (every form the protocol `TimeRef` lists, `word:` included); throws a `TimeRefError`. */
   resolve(ref: number | string, loaded: { timeline: Timeline; fps: number }): Promise<number>;
   /** Seconds the timeline runs, or null when it cannot be told (a nested timeline that fails to load). */
   duration(timeline: Timeline): Promise<number | null>;

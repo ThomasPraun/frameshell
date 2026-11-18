@@ -1,7 +1,8 @@
-import type { ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSound, ReviewSpan, ReviewSpeed, ReviewSync } from "@frameshell/protocol";
+import type { ReviewBehind, ReviewFinding, ReviewDelivery, ReviewLoudness, ReviewMetrics, ReviewSafeFlag, ReviewSeam, ReviewShortCue, ReviewSound, ReviewSpan, ReviewSpeed, ReviewSync } from "@frameshell/protocol";
 import type { ResolvedSubtitleTrack } from "@frameshell/schema";
 import { bigChanges, rhythmOf, stillRuns } from "../analyze/rhythm.js";
 import { type Cut, frameStart, shotLengthsRead, shotsOf } from "../analyze/shots.js";
+import { behindWarnings } from "./behind.js";
 import { deliveryWarnings } from "./delivery.js";
 import { seamWarnings } from "./loop.js";
 import { safeWarnings } from "./safe.js";
@@ -70,6 +71,8 @@ export interface MetricsInput {
   safe?: readonly { platform: string; flags: readonly ReviewSafeFlag[] }[];
   /** The speed graphs `speed` asked for; absent: none. */
   speed?: readonly ReviewSpeed[];
+  /** Words on tracks behind a plate (ADR 0032); absent: the timeline has none. */
+  behind?: readonly ReviewBehind[];
 }
 
 /** Runs of consecutive samples (first and last index) where `test` holds, starting at index `from`. */
@@ -239,6 +242,7 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
   if (delivery) craft.push(...deliveryWarnings(delivery));
   for (const { platform, flags } of input.safe ?? []) craft.push(...safeWarnings(platform, flags));
   if (sound) craft.push(...soundListWarnings(sound));
+  if (input.behind) craft.push(...behindWarnings(input.behind));
 
   craft.sort((a, b) => (a.from ?? -1) - (b.from ?? -1));
   // Every finding is a warning until `requirements.json` is applied (`judgeRequirements`).
@@ -255,5 +259,6 @@ export function reviewMetrics(input: MetricsInput): ReviewMetrics {
     waived: [],
     requirements: null,
     ...(input.speed ? { speed: [...input.speed] } : {}),
+    ...(input.behind ? { behind: [...input.behind] } : {}),
   };
 }

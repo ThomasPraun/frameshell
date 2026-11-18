@@ -4,7 +4,9 @@ export default defineConfig({
   test: {
     include: ["packages/*/test/**/*.test.ts", "plugins/*/test/**/*.test.ts", "apps/*/test/**/*.test.ts", "scripts/*.test.mjs"],
     // Installs the pinned ffmpeg once for media tests (tens of MB), kept under .cache/.
+    // `vitest.temp-dir.ts` gives each file its own TMPDIR, removed after; the global setup warns about escapes.
     globalSetup: ["./vitest.global-setup.ts"],
+    setupFiles: ["./vitest.temp-dir.ts"],
     // The CLI names an agent among its parent processes (ADR 0025): tests run from an agent's shell must not be one.
     env: {
       FRAMESHELL_AGENT_COMMANDS: "claude=,codex=,gemini=,aider=,opencode=,amp=,goose=,cursor-agent=,qwen=,copilot=,crush=,pi=",
