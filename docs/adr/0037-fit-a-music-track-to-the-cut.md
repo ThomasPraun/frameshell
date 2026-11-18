@@ -171,7 +171,7 @@ Protocol 160; no schema change (`audio.duck.level` is the same number).
 
 ## `music.pick` as built (keep one candidate, #485)
 
-Protocol 170; no schema change, no new operation: it writes `track.set` and `track.remove`, which already have history labels, so no string is added to the app.
+Protocol 171; no schema change, no new operation: it writes `track.set` and `track.remove`, which already have history labels, so no string is added to the app.
 
 - **Method.** `music.pick { track, keep?, dryRun? }` (CLI `music pick <track> [--keep] [--dry-run]`, MCP `music_pick`). `track` is a track id or the name `Music <n>`. Planned by `music/pick.ts` (pure), written by `daemon.ts` as one standalone transaction `Music pick: <name>` (one proposal in review mode), checked against a timeline that changed meanwhile (`StaleRevision`), like `music.candidates`.
 - **What is a candidate.** The one rule `music.candidates` writes, read from the timeline: an audio track named like `candidateName` (`CANDIDATE_TRACK_NAME` in `music/candidates.ts`, exported so there is one pattern) that holds only media clips. No second detection rule and nothing stored.
