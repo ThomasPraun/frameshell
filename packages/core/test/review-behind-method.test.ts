@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type DaemonConnection, type ReviewBehind, connectToDaemon } from "@frameshell/protocol";
 import { type Daemon, startDaemon, writeFaceScan } from "../src/index.js";
 import { makeMarkerClip } from "./face-fixture.js";
@@ -14,6 +14,17 @@ import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 // scan puts its face on the square's top 20 rows. Three words, one second each: 37.5 % covered, none, all and the face;
 // then a still picture, which is no generated clip. `review`'s own frame captures make the matte, as `frame` does.
 const MEDIA_TIMEOUT = 300_000;
+
+/** Clip id whose alpha reads fail like an ffmpeg exit would (the work dir of a read names its clip); null: none. */
+const failing = vi.hoisted(() => ({ clip: null as string | null }));
+vi.mock("../src/review/placement.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/review/placement.js")>();
+  const alphaMask: typeof original.alphaMask = (input, at, width) => {
+    if (failing.clip !== null && input.work.includes(`${failing.clip}-`)) return Promise.reject(new Error("ffmpeg exited with 1: Error opening input\nsecond line"));
+    return original.alphaMask(input, at, width);
+  };
+  return { ...original, alphaMask };
+});
 
 let daemon: Daemon;
 let conn: DaemonConnection;
@@ -120,6 +131,47 @@ describe("review: words behind the person", () => {
         [words.face, "fail"],
       ]);
       expect(metrics.requirements!.failed).toBe(2);
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("review: words behind the person, range and failures", () => {
+  it(
+    "lists only the words that play in the range and samples a straddling one inside it",
+    async () => {
+      // Words play 0-1 (fine), 1-2 (far), 2-3 (face), a still at 3-4: the range 1.5 to 2.5 holds half of two of them.
+      const { metrics } = await conn.request("review", { cwd: project, sheets: ["metrics"], from: 1.5, to: 2.5 });
+      const found = metrics!.behind!;
+      expect(found.map((candidate) => candidate.clip).sort()).toEqual([words.far, words.face].sort());
+      const far = entry(found, "far");
+      expect(far.from).toBe(1.5);
+      expect(far.to).toBe(2);
+      expect(far.samples.every((sample) => sample.at >= 1.5 && sample.at < 2)).toBe(true);
+      const face = entry(found, "face");
+      expect(face.from).toBe(2);
+      expect(face.to).toBe(2.5);
+      expect(face.samples.every((sample) => sample.at >= 2 && sample.at < 2.5)).toBe(true);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "reports a word whose alpha cannot be read as not measured and still measures the others",
+    async () => {
+      failing.clip = words.far!;
+      try {
+        const result = await conn.request("review", { cwd: project, sheets: ["metrics"] });
+        const found = result.metrics!.behind!;
+        expect(entry(found, "far")).toMatchObject({ verdict: "unplaced", from: null, to: null, samples: [] });
+        expect(entry(found, "far").message).toBe(`clip ${words.far} is not measured (ffmpeg exited with 1: Error opening input).`);
+        expect(result.warnings).toContain(`behind: clip ${words.far} is not measured (ffmpeg exited with 1: Error opening input).`);
+        expect(entry(found, "fine").verdict).toBe("fine");
+        expect(entry(found, "face").verdict).toBe("eaten");
+        expect(entry(found, "still").verdict).toBe("unplaced");
+      } finally {
+        failing.clip = null;
+      }
     },
     MEDIA_TIMEOUT,
   );
