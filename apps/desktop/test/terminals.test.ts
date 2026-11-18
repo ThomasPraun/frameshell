@@ -117,10 +117,11 @@ describe("TerminalManager", () => {
   // node-pty; quitting before that left Electron hung at exit with the pseudoconsole open (#109).
   it("killAll settles once every shell has exited, even one killed right after it started", async () => {
     const { manager, output, exits, launch } = setup();
-    const fresh = manager.create(launch("term-fresh"), { cols: 80, rows: 24 });
     const started = manager.create(launch("term-started"), { cols: 80, rows: 24 });
     await waitForPrompt(output, started.id);
     manager.write(started.id, echoSession);
+    // Created after the wait so this shell is still killed right after it starts (#109).
+    const fresh = manager.create(launch("term-fresh"), { cols: 80, rows: 24 });
     await manager.killAll();
     expect(exits.has(fresh.id)).toBe(true);
     expect(exits.has(started.id)).toBe(true);

@@ -216,11 +216,13 @@ describe("formats of a project", () => {
     async () => {
       const result = await conn.request("render", { cwd: project, formats: ["16x9", "9x16"], cover: { text: "hola", at: 0.5 } });
       expect(result.warnings).toEqual([]);
+      expect(result.renders.map((render) => render.format)).toEqual(["16x9", "9x16"]);
+      const sizes: Record<string, [number, number]> = { "16x9": [1920, 1080], "9x16": [1080, 1920] };
       const boxes = new Map<string, { width: number; height: number }>();
       for (const render of result.renders) {
         expect((await finished(render.job.id)).state).toBe("done");
         const { streams } = (await ffprobeJson(render.output, ["-select_streams", "v:0", "-show_entries", "stream=width,height"])) as { streams: { width: number; height: number }[] };
-        expect([streams[0]!.width, streams[0]!.height]).toEqual([render.width, render.height]);
+        expect([streams[0]!.width, streams[0]!.height]).toEqual(sizes[render.format]);
         expect(await countFrames(render.output)).toBe(30);
         const first = await decode(render.output, "select=eq(n\\,0)");
         const later = await decode(render.output, "select=eq(n\\,15)");

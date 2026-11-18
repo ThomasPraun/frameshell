@@ -30,7 +30,7 @@ beforeAll(() => {
   userDirs = join(parent, "user");
   project = join(parent, "promo");
   expect(frameshell(["init", project, "--no-skill"], parent).code).toBe(0);
-  // The status call starts the daemon here, so no test pays for its cold start.
+  // The status call starts the daemon once, so the first test does not pay for its cold start.
   const status = JSON.parse(frameshell(["status", "--json"]).stdout) as { daemon: { pid: number } };
   daemonPid = status.daemon.pid;
 }, 120_000);
