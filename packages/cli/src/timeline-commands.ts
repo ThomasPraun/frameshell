@@ -95,9 +95,10 @@ mutations print the new revision):
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
   grade analyze <clip> [--at s | --from s --to s] [--samples n]
                                Measure the clip's source picture (before its own grade) with ffmpeg signalstats and
-                               suggest a bounded correction (a generated clip is measured from its draft render, made
-                               when missing; one with transparency and a nested timeline are refused, see grade compare): exposure, white balance, contrast, saturation, in the
-                               fields of clip set --grade-*. --at (timeline seconds) measures one frame; --from and
+                               suggest a bounded correction: exposure, white balance, contrast, saturation, in the
+                               fields of clip set --grade-*. A generated clip is measured from its draft render (made
+                               when missing); one with transparency and a nested timeline are refused, see grade
+                               compare. --at (timeline seconds) measures one frame; --from and
                                --to a range, --samples frames spread over it (default 8, 1 to 32); none: the whole
                                clip. Prints the levels, why each number, and the clip set command to apply it.
                                Changes nothing; judge it by eye with frame (a sunset is meant to be warm)
@@ -105,8 +106,9 @@ mutations print the new revision):
                                numbers: plain grade numbers in one table, no LUT files. Keep one with clip set --grade-look
   grade compare <clip> --look [name:]field=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px]
                 [--format id]
-                               Render one frame of a media, generated or nested timeline clip under up to 16 looks next to a neutral baseline (and
-                               its current grade) as one labelled PNG, through the export frame path. A look is a whole
+                               Render one frame of a media, generated or nested timeline clip under up to 16 looks
+                               next to a neutral baseline (and its current grade) as one labelled PNG, through the
+                               export frame path. A look is a whole
                                grade: exposure, temperature, tint, contrast, saturation, lut, lut-mix (left out =
                                neutral), e.g. --look warm:temperature=0.25,saturation=1.1; a bare built-in look name is
                                a look (--look warm), and look=<name> starts one from it (--look mine:look=warm,saturation=1.1,

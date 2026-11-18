@@ -166,9 +166,9 @@ export const jobMethods = {
       "spread evenly over that part; with none of them the whole clip, `samples` frames (a still is one frame). Footage tagged or named as LOG or HDR " +
       "gets a warning: its levels are flat by design. A generated clip (hyperframes, blender, ...) is measured from its cached DRAFT render, " +
       "the picture before its own grade (`asset` is null, `kind` `generated`); a missing render is queued and waited for, as `frame` does, " +
-      "so the first call can take as long as that render; a render with transparency is refused (`has-alpha`: its levels would count the empty parts as black), " +
+      "so the first call can take as long as that render; a render with transparency is refused (`has-alpha`: its levels would count the empty parts as black; transparency is only known once the render exists, so the refusal can follow a render that stays cached), " +
       "and so is a nested timeline (`nested`): analyze a clip inside it. Writes no project file, takes about a second for a few frames. " +
-      "Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound (no such clip on a video track), InvalidOperation (reason `nested`: a nested timeline; `not-gradable`: a multicam shot; `has-alpha`: a generated clip whose render has transparency; " +
+      "Example: `{ timeline: \"main\", clip: \"c_1a2b3c\" }`. Fails with ClipNotFound (no such clip on a video track), InvalidOperation (reason `nested`: a nested timeline; `not-gradable`: a multicam shot; `has-alpha`: a generated clip whose render has transparency; `no-render`: no render came back for a generated clip; " +
       "a frame or range outside the clip, `at` with `from`/`to`, a source with no picture), ClipRenderFailed (a generated clip that cannot be rendered), TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
@@ -210,7 +210,7 @@ export const jobMethods = {
       "`at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
       "`.frameshell/grade/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. Takes about a second per tile. " +
       'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "warm", temperature: 0.25, saturation: 1.1 }, { name: "teal", lut: "luts/teal.cube", lutMix: 0.6 }] }`. ' +
-      "Fails with ClipNotFound (no such clip on a video track), InvalidOperation (reason `not-gradable`: a multicam shot; `at` outside the clip), InvalidParams (a look's LUT " +
+      "Fails with ClipNotFound (no such clip on a video track), InvalidOperation (reason `not-gradable`: a multicam shot; `at` outside the clip), NestedTimelineUnavailable (a nested clip with no `duration` whose timeline file is missing, invalid or cyclic), InvalidParams (a look's LUT " +
       "outside the project, missing or not a 3D `.cube`; a `look` that is not a built-in one, naming the valid ones), FormatNotFound, TimelineNotFound, AssetNotFound, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,

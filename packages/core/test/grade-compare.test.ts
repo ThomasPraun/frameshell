@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
 import { type Timeline, lookGrade, lookNames } from "@frameshell/schema";
-import { type Daemon, GradeComparer, SHEET_GAP, columnsFor, lookFlags, resolveLooks, startDaemon, withGrade } from "../src/index.js";
+import { type Daemon, GradeComparer, NestedTimelineError, SHEET_GAP, columnsFor, lookFlags, resolveLooks, startDaemon, withGrade } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
@@ -266,6 +266,31 @@ describe("grade swap on generated and nested clips", () => {
     await expect(comparer.compare("/p", { timeline, fps: 30 }, { clip: "s", looks: [{ exposure: 1 }], tileWidth: 160 })).rejects.toMatchObject({
       code: ErrorCode.InvalidOperation,
       data: { reason: "not-gradable", field: "clip" },
+    });
+  });
+});
+
+describe("grade.compare on a nested clip whose length is unknown", () => {
+  it("answers NestedTimelineUnavailable naming the clip and the broken file, not an internal error", async () => {
+    const nestedTimeline = {
+      version: 1,
+      id: "main",
+      revision: 1,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "n", type: "timeline", source: "timelines/gone.json", start: 0 }] }],
+    } as unknown as Timeline;
+    const never = async (): Promise<never> => {
+      throw new Error("must not be called");
+    };
+    const comparer = new GradeComparer({
+      exports: { frame: never },
+      ffmpeg: never,
+      nestedDuration: () => async (source) => {
+        throw new NestedTimelineError("missing", [source], "");
+      },
+    });
+    await expect(comparer.compare("/p", { timeline: nestedTimeline, fps: 30 }, { clip: "n", looks: [{ exposure: 1 }], tileWidth: 160 })).rejects.toMatchObject({
+      code: ErrorCode.NestedTimelineUnavailable,
+      data: { clip: "n", track: "v1", broken: "timelines/gone.json", reason: "missing" },
     });
   });
 });

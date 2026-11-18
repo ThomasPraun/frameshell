@@ -8,7 +8,7 @@ import { type ExportService, type LoadedTimeline, pool } from "../export/service
 import { captureParallelism } from "../review/source.js";
 import { type SheetTile, writeSheet } from "../review/sheet.js";
 import { FrameGrid } from "../timeline/grid.js";
-import { clipEnd } from "../timeline/timing.js";
+import { NestedTimelineError, clipEnd, nestedClipError } from "../timeline/timing.js";
 import { round } from "./levels.js";
 import { correctionFlags } from "./suggest.js";
 
@@ -62,7 +62,10 @@ export class GradeComparer {
     const { track, clip } = found;
     if (clip.type === "shot") throw invalid("not-gradable", `clip ${clip.id} is a multicam shot: only media, generated and nested timeline clips take a grade.`, "clip");
     // A nested clip with no `duration` plays the rest of its timeline, which only the nested file knows.
-    const end = await clipEnd(clip as GradableClip, new FrameGrid(fps), this.#options.nestedDuration(root, timeline.id, fps));
+    const end = await clipEnd(clip as GradableClip, new FrameGrid(fps), this.#options.nestedDuration(root, timeline.id, fps)).catch((error: unknown) => {
+      if (error instanceof NestedTimelineError) throw nestedClipError(error, { timeline: timeline.id, track: track.id, clip, op: "grade.compare" });
+      throw error;
+    });
     const frame = compareFrame(clip.id, clip.start, end, fps, request.at, "grade.compare");
 
     const warnings: string[] = [];
