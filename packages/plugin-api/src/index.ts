@@ -164,7 +164,8 @@ export interface ClipAdapter {
    * {@link inputs} returned for the clips of that type only. It is called even when no clip of that type is left
    * (`inputs` is then empty and all its files are unused), but never when the project has no generated clip at all
    * (plugins are not even loaded), nor when a clip's key is unknown (invalid timeline, plugin missing or untrusted,
-   * adapter error), nor while a render or export job of the project runs; `gc` reports why it was skipped. Delete only
+   * adapter error), nor while a render or export job of the project runs; `gc` reports why it was skipped in the last two
+   * cases. Delete only
    * entries the adapter itself made, recognised by name, that are not in {@link AdapterGcContext.inputs} and are older
    * than {@link AdapterGcContext.keepNewerThan}; return what was deleted (or, with `dryRun`, what would be). Throwing
    * leaves the rest as it is, the other adapters still run, and `gc` reports why.

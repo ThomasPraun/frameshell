@@ -1676,7 +1676,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       let pop: number | undefined;
       if (typeof popRef === "string") {
         const loaded = await timelines.viewTimeline(dir, timeline, reviewView);
-        pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded));
+        pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded), wordLoaderFor(dir)(loaded));
       } else pop = popRef;
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
