@@ -25,6 +25,7 @@ import {
   elementStyles,
   motionBlurOf,
 } from "@frameshell/schema";
+import { generatedFrameAt } from "../export/compiler.js";
 import { readJsonIfExists, renameRetrying, writeJsonAtomic } from "../fs-util.js";
 import { type GcClass, sweep } from "../gc.js";
 import type { JobContext, JobQueue } from "../jobs/queue.js";
@@ -158,6 +159,13 @@ export interface ClipEnsureOptions {
    * warning, so a frame or a review never waits for a render that can take half an hour.
    */
   waitForFinals?: boolean | undefined;
+  /**
+   * Timeline seconds of the one frame a still draws (`frame` and `clip.compare` asked for `final`; never `review`, ADR 0035
+   * slice 7). With `tier` `final`, a clip shown at that frame whose adapter renders windowed finals (`finals.windowed`)
+   * and has no motion blur is drawn from its whole final when cached, else from a final of that frame alone, rendered
+   * (interactive) and waited for; a failure throws, never falls back to the draft. Every other clip as without it.
+   */
+  stillFinalAt?: number | undefined;
   /**
    * Something to tell about a clip's render in use: its draft render stands in because the plugin refused the final
    * one (motion blur, ADR 0041 decision 8), or the adapter changed a setting to render it (`RenderContext.warn`).
@@ -449,7 +457,7 @@ export class ClipRenderer {
    * with a warning (decision 8). See {@link ClipEnsureOptions}.
    */
   async ensure(root: string, timeline: Timeline, options: ClipEnsureOptions = {}): Promise<Map<string, RenderedClip>> {
-    const { onProgress, size, tier = "final", waitForFinals = false, onWarning } = options;
+    const { onProgress, size, tier = "final", waitForFinals = false, stillFinalAt, onWarning } = options;
     const placed = generatedClips(timeline);
     const rendered = new Map<string, RenderedClip>();
     if (placed.length === 0) return rendered;
@@ -467,13 +475,26 @@ export class ClipRenderer {
       const { final } = keyed;
       const failed = final ? this.#failed.get(entryId(root, final.key)) : undefined;
       const cachedFinal = final?.tier === "final" && tier === "final" && !waitForFinals ? await this.#ready(root, final.key) : null;
+      const still = stillFinalAt !== undefined && tier === "final" && !waitForFinals && !cachedFinal ? stillFrame(keyed, clip, stillFinalAt, format.fps) : null;
       let got: Obtained;
       if (!final || tier === "draft") got = await this.#obtain(root, keyed, clip, format, backgroundFinal(final));
       else if (cachedFinal) got = { ready: cachedFinal };
-      else if (final.tier === "final" && !waitForFinals) {
+      else if (still !== null) {
+        const stillKeyed = await this.#keyOf(root, clip, adapters, format, timeline, still);
+        if (stillKeyed.key === null || !stillKeyed.final) throw renderFailed(timeline.id, clip, stillKeyed.key === null ? stillKeyed.error : "its adapter keyed no final");
         onWarning?.(
-          `Clip ${clip.id} (${clip.type}) is drawn from its draft render: its final render is made only by a final export ` +
-            "(`render` with quality final, or no quality).",
+          `Clip ${clip.id} (${clip.type}) is drawn from a final render of this frame alone (composition frame ${still}); ` +
+            "a final export (`render` with quality final, or no quality) renders its whole final.",
+        );
+        got = await this.#obtain(root, stillKeyed.final, stillClip(clip, still, format.fps), format);
+      } else if (final.tier === "final" && !waitForFinals) {
+        const windowed = keyed.registered.adapter.finals?.windowed === true;
+        const exported = "a final export (`render` with quality final, or no quality)";
+        onWarning?.(
+          `Clip ${clip.id} (${clip.type}) is drawn from its draft render: ` +
+            (stillFinalAt !== undefined && !windowed
+              ? `${keyed.registered.plugin.name} renders finals only of the whole clip, made by ${exported}.`
+              : `its final render is made only by ${exported}${stillFinalAt === undefined && windowed ? ", or for one frame by `frame` or `clip.compare` with `final`" : ""}.`),
         );
         got = await this.#obtain(root, keyed, clip, format);
       } else if (failed?.refused) got = await sharp(clip, keyed, failed.error);
@@ -521,9 +542,11 @@ export class ClipRenderer {
   /**
    * Final renders of the generated clips of `timeline` whose adapter renders finals (ADR 0035), in track then time
    * order, at the project resolution or `size`; never renders. A missing final carries the adapter's estimate of its
-   * time. Clips without a key are left out: {@link check} and {@link ensure} report them.
+   * time. Clips without a key are left out: {@link check} and {@link ensure} report them. With `stillAt` (timeline
+   * seconds), what {@link ensure} with `stillFinalAt` would draw instead (slice 7): a clip's whole final when cached, else
+   * its final of that one frame; clips that would get neither (not shown there, no windowed finals) are left out.
    */
-  async finals(root: string, timeline: Timeline, size?: { width: number; height: number }): Promise<FinalRenderState[]> {
+  async finals(root: string, timeline: Timeline, size?: { width: number; height: number }, stillAt?: number): Promise<FinalRenderState[]> {
     const placed = generatedClips(timeline);
     if (placed.length === 0) return [];
     const adapters = await this.#options.adapters(root);
@@ -536,11 +559,25 @@ export class ClipRenderer {
       const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
       if (keyed.key === null || !keyed.final) continue;
       const about = { clip: clip.id, type: clip.type };
-      if (await this.#ready(root, keyed.final.key)) states.push({ ...about, state: "ready", seconds: null });
-      else if (this.#pending.has(entryId(root, keyed.final.key))) states.push({ ...about, state: "rendering", seconds: null });
+      if (await this.#ready(root, keyed.final.key)) {
+        states.push({ ...about, state: "ready", seconds: null });
+        continue;
+      }
+      let due = keyed.final;
+      let sized = clip;
+      if (stillAt !== undefined) {
+        const still = stillFrame(keyed, clip, stillAt, format.fps);
+        if (still === null) continue;
+        const stillKeyed = await this.#keyOf(root, clip, adapters, format, timeline, still);
+        if (stillKeyed.key === null || !stillKeyed.final) continue;
+        due = stillKeyed.final;
+        sized = stillClip(clip, still, format.fps);
+      }
+      if (await this.#ready(root, due.key)) states.push({ ...about, state: "ready", seconds: null });
+      else if (this.#pending.has(entryId(root, due.key))) states.push({ ...about, state: "rendering", seconds: null });
       else {
         const seconds = await Promise.resolve()
-          .then(() => finals.estimate(structuredClone(clip), { projectDir: root, ...format }))
+          .then(() => finals.estimate(structuredClone(sized), { projectDir: root, ...format }))
           .then((value) => (Number.isFinite(value) && value >= 0 ? value : null), () => null);
         states.push({ ...about, state: "missing", seconds });
       }
@@ -726,8 +763,19 @@ export class ClipRenderer {
     }
   }
 
-  /** Keys of `clip`, placed on `timeline` (whose beats and markers a clip that asks for timing reads). */
-  async #keyOf(root: string, clip: AdapterClip, adapters: ReadonlyMap<string, RegisteredClipType>, format: ClipFormat, timeline: Timeline): Promise<Keyed> {
+  /**
+   * Keys of `clip`, placed on `timeline` (whose beats and markers a clip that asks for timing reads). With `still`, its
+   * `final` is the final of that one composition frame (slice 7): the adapter's inputs are those of {@link stillClip},
+   * its timing still the whole clip's, as the frame shows it in the whole final.
+   */
+  async #keyOf(
+    root: string,
+    clip: AdapterClip,
+    adapters: ReadonlyMap<string, RegisteredClipType>,
+    format: ClipFormat,
+    timeline: Timeline,
+    still?: number,
+  ): Promise<Keyed> {
     const registered = adapters.get(clip.type);
     if (!registered) {
       const reason = (await this.#options.unavailable?.(root, clip.type)) ?? `No loaded plugin renders \`${clip.type}\` clips.`;
@@ -736,7 +784,8 @@ export class ClipRenderer {
     const context = { projectDir: root, ensureBinary: (name: string) => this.#options.ensureBinary(root, name), signal: this.#stopping.signal };
     let paths: string[];
     try {
-      paths = registered.adapter.inputs ? await registered.adapter.inputs(structuredClone(clip), context) : [];
+      const shown = still === undefined ? clip : stillClip(clip, still, format.fps);
+      paths = registered.adapter.inputs ? await registered.adapter.inputs(structuredClone(shown), context) : [];
     } catch (error) {
       return { key: null, error: `${registered.plugin.name} could not list the inputs of ${clip.id}: ${(error as Error)?.message ?? error}` };
     }
@@ -774,7 +823,12 @@ export class ClipRenderer {
       blur || finals
         ? {
             ...draft,
-            key: clipCacheKey({ ...recipe, ...(blur ? { motionBlur: blur } : {}), ...(finals ? { final: true as const } : {}) }),
+            key: clipCacheKey({
+              ...recipe,
+              ...(blur ? { motionBlur: blur } : {}),
+              ...(finals ? { final: true as const } : {}),
+              ...(still !== undefined ? { still } : {}),
+            }),
             ...(blur ? { motionBlur: blur } : {}),
             ...(finals ? { tier: "final" as const } : {}),
           }
@@ -962,6 +1016,21 @@ const IGNORED = new Set([".frameshell", ".git", "node_modules", "timelines", "ex
  */
 function backgroundFinal(final: Variant | null): boolean {
   return final !== null && final.tier !== "final";
+}
+
+/**
+ * Composition frame of `clip` that a still at timeline `at` draws from a final of that frame alone (ADR 0035 slice 7), or
+ * null when it gets none: its adapter has no windowed finals (`finals.windowed`), its final is blurred (that key ignores the
+ * window), or the clip does not show at `at`.
+ */
+function stillFrame(keyed: Variant & { final: Variant | null }, clip: AdapterClip, at: number, fps: number): number | null {
+  if (keyed.final?.tier !== "final" || keyed.final.motionBlur || keyed.registered.adapter.finals?.windowed !== true) return null;
+  return generatedFrameAt(clip, at, fps);
+}
+
+/** `clip` narrowed to composition frame `frame` alone: what a windowed adapter renders and estimates for a still final. */
+function stillClip(clip: AdapterClip, frame: number, fps: number): AdapterClip {
+  return { ...clip, in: frame / fps, duration: 1 / fps };
 }
 
 /** A render error; `refused`: the adapter refused the motion blur ({@link MOTION_BLUR_REFUSED}). */

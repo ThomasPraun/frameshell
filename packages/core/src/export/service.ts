@@ -222,6 +222,8 @@ export interface DueFinal {
   seconds: number | null;
   /** Batch row (ADR 0040) whose render makes it; absent for a plain `render`. */
   row?: string;
+  /** Look-sheet tile (`clip.compare`) whose still makes it (ADR 0035 slice 7); absent otherwise. */
+  look?: string;
 }
 
 /** A render validated and compiled by {@link ExportService.planRender}, not queued yet. */
@@ -296,9 +298,9 @@ export interface ExportServiceOptions {
     ensure(root: string, timeline: Timeline, options?: ClipEnsureOptions): Promise<ReadonlyMap<string, GeneratedSource>>;
     /**
      * Final renders of the clips whose plugin renders finals (ADR 0035), at `size` (absent: the project resolution);
-     * see `ClipRenderer.finals`. Absent: no clip has one.
+     * with `stillAt`, the finals a still at that time would draw (slice 7); see `ClipRenderer.finals`. Absent: no clip has one.
      */
-    finals?(root: string, timeline: Timeline, size?: { width: number; height: number }): Promise<FinalRenderState[]>;
+    finals?(root: string, timeline: Timeline, size?: { width: number; height: number }, stillAt?: number): Promise<FinalRenderState[]>;
   };
   /**
    * Audio effects bakes (ADR 0031): `needs` lists the bakes a flattened timeline plays, `ensure` bakes what is
@@ -533,7 +535,10 @@ export class ExportService {
 
   /**
    * Capture one composited frame as an image, written atomically to `out`; the format defaults from its extension.
-   * `loaded`: the timeline to capture instead of the file (a review-mode proposal's version).
+   * `loaded`: the timeline to capture instead of the file (a review-mode proposal's version). `final`: generated clips
+   * with windowed finals shown at `at` are drawn from a final (ADR 0035 slice 7): their whole final when cached, else a
+   * final of that frame alone, which waits for the person's confirmation (`yes`) when estimated over
+   * {@link FINAL_CONFIRM_SECONDS} or unknown.
    */
   async frame(
     root: string,
@@ -545,11 +550,48 @@ export class ExportService {
       projectFormat?: string | undefined;
       format?: FrameFormat | undefined;
       quality?: number | undefined;
+      final?: boolean | undefined;
+      yes?: boolean | undefined;
     },
     loaded?: LoadedTimeline,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
+    const resolved = await this.#frameTimeline(root, params, loaded);
+    if (params.final === true && params.yes !== true) {
+      confirmFinals(await this.#dueStills(root, resolved, params), { subject: "This frame", draft: "call `frame` without `final` (CLI: no --final)" });
+    }
+    return this.#capture(root, params, resolved);
+  }
+
+  /**
+   * The final renders `frame` with `final` at `params.at` would make and wait for (ADR 0035 slice 7), with their
+   * estimates; empty when every clip it would draw from a final has one cached. Never renders.
+   */
+  async stillFinals(root: string, params: { timeline: string; at: number; projectFormat?: string | undefined }, loaded?: LoadedTimeline): Promise<DueFinal[]> {
+    return this.#dueStills(root, await this.#frameTimeline(root, params, loaded), params);
+  }
+
+  /** The timeline a `frame` of `params` captures: flattened, in its project format, with `loaded`'s format list. */
+  async #frameTimeline(root: string, params: { timeline: string; projectFormat?: string | undefined }, loaded?: LoadedTimeline): Promise<LoadedTimeline> {
     const format = (await this.#formatOf(root, params.projectFormat, loaded?.formats)) ?? undefined;
-    return this.#capture(root, params, { ...(await this.#resolved(root, params.timeline, loaded, format)), ...(loaded?.formats ? { formats: loaded.formats } : {}) });
+    return { ...(await this.#resolved(root, params.timeline, loaded, format)), ...(loaded?.formats ? { formats: loaded.formats } : {}) };
+  }
+
+  /** Missing still finals of a `frame` at `params.at` of the already resolved timeline; see {@link stillFinals}. */
+  async #dueStills(root: string, resolved: LoadedTimeline, params: { at: number; projectFormat?: string | undefined }): Promise<DueFinal[]> {
+    const finals = this.#options.clips?.finals;
+    if (!finals || generatedClipIds(resolved.timeline).length === 0) return [];
+    const { shape } = await this.#frameShape(root, resolved, params.projectFormat);
+    const states = await finals(root, resolved.timeline, shape.primary ? undefined : { width: shape.width, height: shape.height }, params.at);
+    return states.flatMap((final) => (final.state === "missing" ? [{ clip: final.clip, type: final.type, format: shape.id, seconds: final.seconds }] : []));
+  }
+
+  /** Project formats as `resolved` sees them, and the one `projectFormat` names (the primary when absent); FormatNotFound otherwise. */
+  async #frameShape(root: string, resolved: LoadedTimeline, projectFormat: string | undefined) {
+    const config = (await readEnclosingProject(root))?.config;
+    const project: FormatSource = { ...(config ?? { resolution: DEFAULT_RESOLUTION }), ...(resolved.formats ? { formats: resolved.formats } : {}) };
+    const found = resolveFormat(resolved.timeline, project, projectFormat);
+    if (!found) throw formatNotFound(projectFormat!, project);
+    return { project, shape: found.format };
   }
 
   /**
@@ -697,25 +739,26 @@ export class ExportService {
       projectFormat?: string | undefined;
       format?: FrameFormat | undefined;
       quality?: number | undefined;
+      final?: boolean | undefined;
     },
     resolved: LoadedTimeline,
     cover?: CoverLayout | null,
   ): Promise<Omit<FrameResult, "view" | "proposal">> {
     const format = params.format ?? frameFormatOf(params.out);
-    const config = (await readEnclosingProject(root))?.config;
-    const project: FormatSource = { ...(config ?? { resolution: DEFAULT_RESOLUTION }), ...(resolved.formats ? { formats: resolved.formats } : {}) };
+    const { project, shape } = await this.#frameShape(root, resolved, params.projectFormat);
     const resolution = project.resolution;
     const { timeline, fps } = resolved;
-    const found = resolveFormat(timeline, project, params.projectFormat);
-    if (!found) throw formatNotFound(params.projectFormat!, project);
-    const shape = found.format;
     const size = params.preset ? outputSize(await this.#preset(root, params.preset), shape, true, "frame") : { width: shape.width, height: shape.height };
     const partial = join(dirname(params.out), `.${basename(params.out)}.partial-${randomBytes(4).toString("hex")}`);
     const renderSize = shape.primary ? undefined : { width: shape.width, height: shape.height };
     const warnings = new Set<string>();
     const generated =
       generatedClipIds(timeline).length > 0 && this.#options.clips
-        ? await this.#options.clips.ensure(root, timeline, { size: renderSize, onWarning: (warning) => warnings.add(warning) })
+        ? await this.#options.clips.ensure(root, timeline, {
+            size: renderSize,
+            onWarning: (warning) => warnings.add(warning),
+            ...(params.final === true ? { stillFinalAt: params.at } : {}),
+          })
         : new Map();
     const sources = await this.#sources(root, timeline);
     const matted = subjectAssets(timeline, (asset) => movingPicture(sources.get(asset)), params.at);
@@ -891,7 +934,7 @@ export function confirmFinals(due: readonly DueFinal[], what = { subject: "This 
   const formats = due.some((other) => other.format !== due[0]!.format);
   const each = due
     .map((final) => {
-      const where = [final.row, formats ? final.format : undefined].filter((part) => part !== undefined).join(" ");
+      const where = [final.row, final.look, formats ? final.format : undefined].filter((part) => part !== undefined).join(" ");
       return `${final.type} clip ${final.clip}${where ? ` [${where}]` : ""} ${final.seconds === null ? "unknown" : about(final.seconds)}`;
     })
     .join(", ");

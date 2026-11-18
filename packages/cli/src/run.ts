@@ -130,10 +130,14 @@ ${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draf
                                final first. Over 5 minutes estimated: refused until --yes, which you
                                pass only after the person agreed to wait
   frame --at <s> --out <file> [--timeline id] [--preset p] [--format png|jpg|webp|<format id>] [--quality 1-100]
+        [--final [--yes]]
                                Write the frame showing at <s> seconds as an image, image type from the
                                extension of <file> unless --format png|jpg|webp. --format <format id> (e.g.
                                9x16): lay the frame out as that format of the project. Size: the format's
-                               (default the project resolution), or the preset's
+                               (default the project resolution), or the preset's. A Blender clip shows its
+                               draft unless its final is cached; --final renders a final (Cycles) of this
+                               one frame first (its whole final when cached). Over 5 minutes estimated:
+                               refused until --yes, which you pass only once the person agreed
   cover [--text word] [--at s] [--color #rrggbb] [--out file] [--timeline id] [--preset p] [--format png|jpg|webp] [--quality 1-100]
                                Write a cover image: a frame with one big word over it, checked readable at
                                180 px wide (warns when the word is too long). --text alone picks the frame
@@ -187,7 +191,7 @@ const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc",
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "yes", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "pop", "onion", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "no-faces", "from-analysis", "only"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "pop", "onion", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "no-faces", "from-analysis", "only"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -203,7 +207,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin list": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
   render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "yes"],
-  frame: ["at", "out", "timeline", "preset", "format", "quality"],
+  frame: ["at", "out", "timeline", "preset", "format", "quality", "final", "yes"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
   ...REVIEW_FLAGS,
   ...ANALYZE_FLAGS,
@@ -267,7 +271,7 @@ type Invocation =
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
   | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string }; loop?: true; yes?: true }
   | { kind: "cover"; text?: string; at?: number; color?: string; out?: string; timeline?: string; preset?: string; format?: FrameFormat; quality?: number }
-  | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; projectFormat?: string; format?: FrameFormat; quality?: number }
+  | { kind: "frame"; at: number; out: string; timeline?: string; preset?: string; projectFormat?: string; format?: FrameFormat; quality?: number; final?: true; yes?: true }
   | { kind: "inspect"; at: number; point: { x: number; y: number } | null; px: { x: number; y: number } | null; timeline?: string; segment: boolean }
   | { kind: "script.outline"; file: string }
   | { kind: "script.check"; file: string }
@@ -596,6 +600,7 @@ function parseBuiltin(
     "reset-edits"?: boolean | undefined;
     voice?: string | boolean | undefined;
     yes?: boolean | undefined;
+    final?: boolean | undefined;
     formats?: string | undefined;
     rows?: string | undefined;
     failed: boolean;
@@ -719,6 +724,7 @@ function parseBuiltin(
       throw new UsageError("`frameshell frame` needs --at <seconds> (a number >= 0), e.g. --at 12.5.");
     }
     if (!out) throw new UsageError("`frameshell frame` needs --out <file.png>.");
+    if (options.yes && !options.final) throw new UsageError("`frameshell frame` takes --yes only with --final: it agrees to wait for final renders.");
     // --format names the image type or, for anything else, a format of the project (ADR 0027): their ids never clash.
     const image = options.format === "png" || options.format === "jpg" || options.format === "webp" ? options.format : undefined;
     const projectFormat = options.format !== undefined && image === undefined ? options.format : undefined;
@@ -738,6 +744,8 @@ function parseBuiltin(
       ...(projectFormat ? { projectFormat } : {}),
       ...(format ? { format } : {}),
       ...(quality !== undefined ? { quality } : {}),
+      ...(options.final ? { final: true as const } : {}),
+      ...(options.yes ? { yes: true as const } : {}),
     };
   }
   if (command === "transcribe") {

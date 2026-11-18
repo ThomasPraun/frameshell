@@ -810,7 +810,7 @@ export function compileFrame(input: FrameInput): FramePlan {
 
 /** Timeline frame showing at `at` seconds; `InvalidOperation` with the valid range when outside the `frames` the timeline has. */
 function frameAt(timeline: string, at: number, fps: number, frames: number): number {
-  const frame = Math.floor((at + 0.0005) * fps);
+  const frame = timelineFrame(at, fps);
   if (frame < 0 || frame >= frames) {
     const last = seconds(frames - 1, fps);
     throw new RpcError(ErrorCode.InvalidOperation, `at ${at} s is outside timeline ${timeline} (frames start from 0 to ${last} s).`, {
@@ -821,6 +821,26 @@ function frameAt(timeline: string, at: number, fps: number, frames: number): num
     });
   }
   return frame;
+}
+
+/** Timeline frame whose span holds `at` seconds; half a millisecond of slack for 3-decimal stored times. */
+function timelineFrame(at: number, fps: number): number {
+  return Math.floor((at + 0.0005) * fps);
+}
+
+/**
+ * Frame of `clip`'s render (composition frame at the project fps, file time = composition time) that {@link compileFrame}
+ * reads for the frame showing at timeline `at` of the flattened timeline holding it; null when the clip's own span does
+ * not hold that frame (a transition handle there holds an edge frame). Placement as {@link asFootage} and `layoutTimeline`
+ * give it: speed 1, start on the frame grid, `in` rounded to a frame.
+ */
+export function generatedFrameAt(clip: AdapterClip, at: number, fps: number): number | null {
+  const grid = new FrameGrid(fps);
+  const frame = timelineFrame(at, fps);
+  const start = grid.frame(clip.start);
+  const end = Math.max(start + 1, grid.frame(clip.start + clip.duration));
+  if (frame < start || frame >= end) return null;
+  return Math.round((clip.in ?? 0) * fps) + frame - start;
 }
 
 /**

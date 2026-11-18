@@ -209,6 +209,15 @@ export interface FinalRenders {
    * Throwing counts as an unknown time, which is asked about too.
    */
   estimate(clip: unknown, context: EstimateContext): number | Promise<number>;
+  /**
+   * Optional. True when {@link ClipAdapter.render} draws only the clip's part `[in, in + duration)` of its composition,
+   * with the frames before `in` transparent (file time t is still composition time t), and {@link ClipAdapter.inputs}
+   * names that part, so a narrower clip keys apart. The host then makes a final of one frame for a still (`frame` and
+   * `clip.compare` with `final`, ADR 0035 slice 7): it hands `render` (with `tier` "final") and {@link estimate} a copy of
+   * the clip narrowed to that frame, `in` = frame / fps and `duration` = 1 / fps. Absent: stills of the clip use its
+   * whole final when cached, else its draft. Hosts older than this never ask for one.
+   */
+  readonly windowed?: boolean | undefined;
 }
 
 /** Project facts for {@link FinalRenders.estimate}: what the final would be rendered for. */

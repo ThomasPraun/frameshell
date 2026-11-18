@@ -114,6 +114,7 @@ mutations print the new revision):
                                --tile-width 160 to 960 (default 480). Prints the clip set command that keeps each look.
                                Changes nothing
   clip compare <clip> --look [name:]key=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px] [--format id]
+               [--final [--yes]]
                                Render one frame of a generated clip (blender, hyperframes, ...) under up to 11 variants next
                                to the clip as it is, as one labelled PNG, through the export frame path. A variant is
                                props merged over the clip's own (key=value, JSON values but scene and camera always text;
@@ -122,9 +123,11 @@ mutations print the new revision):
                                --look b:source=scenes/hero-b.blend; a whole look as JSON: --look '{"name":"x","props":{...}}'.
                                --at picks the frame (default the clip's middle); --out the image (default
                                .frameshell/looks/compare-<clip>-<frame>.png); --tile-width 160 to 960 (default 480).
-                               Each variant not rendered before renders first (a Blender clip: its draft; the whole clip
-                               up to the frame, so use a short one); a still never starts a final. Prints the clip set
-                               command that keeps each variant's props. Changes nothing
+                               Each variant not rendered before renders first (a Blender clip: its draft, the clip's
+                               whole part, so use a short one). --final draws each tile from a final instead (Cycles: a
+                               final of that one frame per variant, unless its whole final is cached); over 5 minutes
+                               estimated it is refused until --yes, which you pass only once the person agreed. Prints
+                               the clip set command that keeps each variant's props. Changes nothing
   clip set <clip> [--speed x] [--gain dB] [--muted | --unmuted] [--audio-fade-in ms] [--audio-fade-out ms]
            [--x px] [--y px] [--scale k] [--opacity 0-1] [--props json] [--elements json | --clear-elements]
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
@@ -433,6 +436,9 @@ export const TIMELINE_COMMANDS = new Set(["timeline", "track", "captions", "clip
 /** Flags these commands read; declared once for `parseArgs`. */
 export const TIMELINE_OPTIONS = {
   timeline: { type: "string" },
+  // `final` and `yes` are `frame` flags too: one definition for the shared parser.
+  final: { type: "boolean" },
+  yes: { type: "boolean" },
   name: { type: "string", multiple: true },
   "mic-file": { type: "string", multiple: true },
   "mic-name": { type: "string", multiple: true },
@@ -636,7 +642,7 @@ const ALLOWED: Record<string, string[]> = {
   "grade analyze": ["at", "from", "to", "samples"],
   "grade looks": [],
   "grade compare": ["look", "at", "out", "tile-width", "format"],
-  "clip compare": ["look", "at", "out", "tile-width", "format"],
+  "clip compare": ["look", "at", "out", "tile-width", "format", "final", "yes"],
   "clip set": [
     "speed",
     "gain",
@@ -1467,7 +1473,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (looks.length > 11) throw new UsageError(`--look: at most 11 looks, got ${looks.length}.`);
       const tileWidth = num("tile-width");
       if (tileWidth !== undefined && (!Number.isInteger(tileWidth) || tileWidth < 160 || tileWidth > 960)) throw new UsageError("--tile-width: expected a whole number of px from 160 to 960.");
-      Object.assign(params, { clip: args[0], looks, at: num("at"), out: str("out"), tileWidth, projectFormat: str("format") });
+      if (values["yes"] === true && values["final"] !== true) throw new UsageError("`frameshell clip compare` takes --yes only with --final: it agrees to wait for final renders.");
+      Object.assign(params, {
+        clip: args[0],
+        looks,
+        at: num("at"),
+        out: str("out"),
+        tileWidth,
+        projectFormat: str("format"),
+        ...(values["final"] === true ? { final: true } : {}),
+        ...(values["yes"] === true ? { yes: true } : {}),
+      });
       break;
     }
     case "image cutout":

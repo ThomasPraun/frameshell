@@ -23,6 +23,11 @@ export interface ClipKeyInput {
   timing?: RenderTiming;
   /** True for the final render of an adapter with finals (ADR 0035); absent for its draft and for other adapters. */
   final?: true;
+  /**
+   * Composition frame (project fps) of a final of that one frame (ADR 0035 slice 7), made for a still; absent for every
+   * other render. Keyed by the host, so a still never shares an entry with the clip's whole final.
+   */
+  still?: number;
 }
 
 /**
@@ -50,6 +55,8 @@ export function clipCacheKey(input: ClipKeyInput): string {
     timing: input.timing,
     // Absent drops out like `style`: a draft keeps the key the clip had before its adapter rendered finals.
     final: input.final,
+    // Absent drops out like `style`.
+    still: input.still,
   });
   return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
 }

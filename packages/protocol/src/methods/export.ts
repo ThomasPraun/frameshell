@@ -307,9 +307,14 @@ export const exportMethods = {
       "(ADR 0017) is exported: `at: 0`. `projectFormat` captures the frame as that format of the project lays it out " +
       "(ADR 0027), e.g. `9x16`; with `view: proposal` that includes a format only an open review proposal adds (ADR 0036). Size: the preset's when `preset` is given (it must have the format's aspect), else the " +
       "format's (default: the primary, i.e. the project resolution). A generated clip with motion blur whose blurred render was refused (HDR content, shader " +
-      "transitions) is drawn from its sharp render, and a 3D composition renders its blur with at most 8 samples: `warnings` says so. Fails with InvalidOperation (`at` outside the " +
+      "transitions) is drawn from its sharp render, and a 3D composition renders its blur with at most 8 samples: `warnings` says so. " +
+      "A generated clip with a final render (Blender: Cycles) is drawn from its final when cached, else from its draft (a warning says so). " +
+      "`final: true` draws a Blender clip shown at `at` from a final instead: its whole final when cached, else a final of that one frame alone, " +
+      "rendered first and waited for (seconds to a minute; cached until the next `gc`): confirm a look on one final still before a whole final. " +
+      "When those stills are estimated over 5 minutes in all, or a plugin cannot say, nothing renders: it fails with ConfirmationRequired as " +
+      "`render` does until the person agrees (`yes: true`). Fails with InvalidOperation (`at` outside the " +
       "timeline, data.valid has the range; a preset of another aspect), ExportUnsupported, PresetNotFound, " +
-      "FormatNotFound, TimelineNotFound.",
+      "FormatNotFound, TimelineNotFound, ClipRenderFailed (a final still that fails is an error, never the draft), ConfirmationRequired.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -328,6 +333,20 @@ export const exportMethods = {
         .max(100)
         .optional()
         .describe(`JPEG and WebP quality, 1 (smallest) to 100 (best). Default ${DEFAULT_FRAME_QUALITY}. PNG is lossless and ignores it.`),
+      final: z
+        .boolean()
+        .optional()
+        .describe(
+          "Draw generated clips whose plugin renders a final of one frame (Blender) from a final: the whole final when cached, else a final of this " +
+            "frame alone. Default false: their draft unless a final is cached. Other clips are drawn as without it.",
+        ),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "With `final`: the person agreed to wait for the final stills when they are estimated over 5 minutes in all. Never set it without " +
+            "their explicit agreement. Default false.",
+        ),
       view: ViewParam,
     }),
     result: z.object({
@@ -345,7 +364,8 @@ export const exportMethods = {
         .array(z.string())
         .describe(
           "What the frame is not quite as asked: a generated clip with motion blur whose blurred render was refused (HDR content, shader transitions) " +
-            "shows its sharp render, and a 3D composition caps its blur samples; empty when none.",
+            "shows its sharp render, a 3D composition caps its blur samples, a clip with a final render shows its draft (without `final`, or when its " +
+            "plugin renders only whole finals) or a final of this frame alone (with `final`); empty when none.",
         ),
     }),
   },

@@ -72,6 +72,9 @@ describe("clip compare", () => {
       params: { timeline: "intro", clip: "c_hero", looks: [{ name: "dusk", props: { scene: "Dusk" } }, { source: "scenes/b.blend" }], at: 1.5, out: "sheet.png", tileWidth: 320, projectFormat: "9x16" },
     });
     expect(parseTimelineCommand(["clip", "compare", "c_hero"], { look: ["scene=Dusk"] })!.params).toEqual({ clip: "c_hero", looks: [{ props: { scene: "Dusk" } }] });
+    expect(parseTimelineCommand(["clip", "compare", "c_hero"], { look: ["scene=Dusk"], final: true, yes: false })!.params).toEqual({ clip: "c_hero", looks: [{ props: { scene: "Dusk" } }], final: true });
+    expect(parseTimelineCommand(["clip", "compare", "c_hero"], { look: ["scene=Dusk"], final: true, yes: true })!.params).toMatchObject({ final: true, yes: true });
+    expect(() => parseTimelineCommand(["clip", "compare", "c_hero"], { look: ["scene=Dusk"], yes: true })).toThrow(/takes --yes only with --final/);
   });
 
   it("refuses no look, too many, a bad tile width and other commands' flags", () => {
