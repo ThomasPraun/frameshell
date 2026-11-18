@@ -10,7 +10,7 @@ Read this when a shot needs a real 3D object in studio light: a product turning 
 | A scene the template cannot say (several parts that open, a second object, a different set) | The same page edited by hand: copy `product-shot`'s studio (`studio()`, `ready()`) and keep the rules below |
 | A lit set, an animated character, a Cycles-quality final | The `blender` skill with the person's own Blender when `frameshell doctor` lists it; never three.js |
 | A 3D logo from an SVG | The `logo-3d` template: `frameshell hyperframes new mark --template logo-3d --component assets/brand/acme-com/logo-1.svg`, then props (`depth`, `bevel`, `colors`, `color`, `finish`, `reveal`, `spin`, `title`). See [A 3D logo](#a-3d-logo) |
-| Extruded 3D text | No template yet. Use DOM text over the canvas (the `big-word` and `kinetic-headline` templates), or a model the person supplies as a GLB |
+| Extruded 3D text (a title of one to three short lines) | The `title-3d` template: `frameshell hyperframes new title --template title-3d`, then props (`text`, `subtitle`, `depth`, `bevel`, `colors`, `color`, `color2`, `finish`, `reveal`, `spin`). See [A 3D title](#a-3d-title). Another typeface or characters it lacks: DOM text over the canvas (`big-word`, `kinetic-headline`), or a model the person supplies as a GLB |
 | A product the person has no model or label for | No 3D. Show the real UI or photo |
 
 ## Studio defaults
@@ -96,6 +96,18 @@ The `logo-3d` template extrudes the filled paths of an SVG with `THREE.SVGLoader
 - **Reveal.** `rise` grows the depth out of the flat logo while it settles from a slight turn (the default, reads best at the start of a film); `turn` swings it in from the side; `drop` falls and settles. Each lands by about 1.2 s; the glint sweeps at 0.45 s, then `spin` turns it slowly until the end. The headline rises at 0.9 s.
 - **Limits.** One extrusion depth for the whole logo, no per-path height. Holes work (an `O` or a ring), including even-odd fills. A logo of hundreds of tiny paths (a traced photo) builds slowly and shades noisily: use the simplified mark.
 - **Over footage.** Transparent like the product shot: put it on a track above, end it 0.4 s before the cut or let its exit finish, or raise `backdrop` toward 1 for a full-frame card.
+
+## A 3D title
+
+The `title-3d` template builds each letter of `text` with `THREE.TextGeometry` from a typeface JSON, in the same studio as the product shot, on a faint wall that only catches the shadow.
+
+- **Typeface.** Archivo Black, the one face: its outlines are converted at build time (`pnpm gen:typeface`) into `frameshell-title.typeface.json`, copied next to the page like the three.js bundle and refreshed by `hyperframes update`. It covers printable Latin: ASCII, Latin-1 accents (`ñ`, `é`, `¿`), common punctuation and `€`. A character outside that fails the render naming it (the text prop says which); there is no kerning, so keep it to short words. The brand's own face is not used here: the title is 3D art, not brand text. For brand type, use DOM text.
+- **Text.** At most three lines: break with `\n` or let long lines wrap. The title shrinks (down to 40 %) until its widest line fits the format's width, so it fills 16:9, 1:1 and 9:16 differently on purpose; more than three lines, or a text that does not fit even at 40 %, fails the render. Three to twelve letters read best: a title is a hook, not a paragraph.
+- **Colour and finish.** `color` paints every letter; `colors: blend` mixes it into `color2` from the first letter to the last. `finish: gloss` (default) catches the glint; `chrome` reads as a metal sign on a dark `bg` with `backdrop` raised; `matte` reads as paper or plastic.
+- **Depth.** `depth` is a fraction of the letter size: 0.2 to 0.4 reads as a title, 0.6 and more as a chunky sign. `bevel` rounds the edges (0.5 default); the rounding is capped so the counters of `a`, `e` and `o` never close.
+- **Reveal.** `letters` (default) swings each letter up from flat on a snappy spring, a stagger step after the last (the whole stagger takes at most 0.5 s); `rise` grows the depth of the whole title out of the flat text while it settles from a slight turn; `drop` lets each letter fall from above the frame with a small alternating tilt. Each lands by about 1.2 s, the glint sweeps at 0.6 s, then `spin` turns the title slowly until the end. `subtitle` is DOM text that rises at 0.9 s under the title.
+- **Limits.** One finish and one depth for the whole title, no per-letter height, no kerning. Triangles scale with the letter count, so a 60-character text renders slower than a 6-character one on the software renderer.
+- **Over footage.** Transparent like the other 3D templates: put it on a track above and end it 0.4 s before the cut, or raise `backdrop` toward 1 for a full-frame card.
 
 ## A GLB from Blender
 

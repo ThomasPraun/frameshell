@@ -224,6 +224,9 @@ importers:
         specifier: 0.9.30
         version: 0.9.30(@types/node@22.20.4)
     devDependencies:
+      '@expo-google-fonts/archivo-black':
+        specifier: 0.4.1
+        version: 0.4.1
       '@frameshell/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -236,6 +239,9 @@ importers:
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
+      opentype.js:
+        specifier: 2.0.0
+        version: 2.0.0
       puppeteer-core:
         specifier: 25.12.0
         version: 25.12.0
@@ -3761,6 +3767,10 @@ packages:
   open@8.4.2:
     resolution: {integrity: sha512-7x81NCL719oNbsq/3mh+hVrAWmFuEYUqrq/Iw3kUzH8ReypT9QQ0BLoJS7/G9k6N81XjW4qHWtjWwe/9eLy1EQ==}
     engines: {node: '>=12'}
+
+  opentype.js@2.0.0:
+    resolution: {integrity: sha512-kCyjv6xdDY1W/jLWZ/L3QhhTlKUqDZMQ5+Jdlw12b3dXkKNpYBqqlMMj0YDQPShWFTMwgZI1hG14kN3XUDSg/A==}
+    hasBin: true
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -8145,6 +8155,8 @@ snapshots:
       define-lazy-prop: 2.0.0
       is-docker: 2.2.1
       is-wsl: 2.2.0
+
+  opentype.js@2.0.0: {}
 
   optionator@0.9.4:
     dependencies:

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `title-3d` template, slice 3b of #473 (ADR 0042, epic #451; plugin only, no protocol change; closes #473):
+  `frameshell hyperframes new title --template title-3d` extrudes a short title of Archivo Black letters
+  (`THREE.TextGeometry`) in the `product-shot` studio, laid out in at most three lines that wrap and shrink to the
+  format's width, arriving letter by letter on a spring stagger (`letters`), as one rise out of the flat text (`rise`)
+  or dropping in (`drop`), with a glint, a slow turn and an optional headline. Props `text` (a line break is `\n`),
+  `subtitle`, `depth`, `bevel`, `colors` (`single` or a `blend` into `color2`), `color`, `finish` (default `gloss`),
+  `reveal`, `spin`, `ink`, `size`, `shadows`, `bg`, `backdrop`. The letters come from `frameshell-title.typeface.json`,
+  copied next to the page (a new `ThreeTemplate.assets`, hashed with the composition and refreshed by
+  `hyperframes update` like the bundles; `UpdateReport.typeface`): the Archivo Black outlines (SIL OFL 1.1, no Reserved
+  Font Name) of printable Latin (ASCII, Latin-1, common punctuation, `€`), converted at build time by `pnpm gen:typeface`
+  with opentype.js 2.0.0 (MIT), a devDependency used only by that script, never in the three.js bundle or the runtime
+  dependencies, with a `--check` drift test. A character the typeface lacks, a fourth line, a missing or broken typeface
+  fail the render naming the cause. The 3D playbook gains "A 3D title"; the README lists both licences. The opt-in
+  real-render test checks the first frame, alpha, `clip.verify` at tolerance 0, every reveal, a wrapped title, a colour
+  blend and the failure messages.
 - Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
   `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
   selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags

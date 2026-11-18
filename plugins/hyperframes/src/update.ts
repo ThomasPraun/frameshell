@@ -5,6 +5,7 @@ import { compositionDir } from "./adapter.js";
 import { COMPOSITIONS, entryOf, scaffoldedEntries } from "./check.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "./motion-runtime.js";
 import { THREE_HEADER, THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "./three-runtime.js";
+import { TITLE_TYPEFACE, TITLE_TYPEFACE_FILE, TITLE_TYPEFACE_HEADER, TITLE_TYPEFACE_VERSION } from "./title-typeface.js";
 
 const USAGE = "usage: frameshell hyperframes update [<composition>] [--dry-run] [--force]; <composition> is a name (`intro`), a composition directory or its HTML entry";
 
@@ -23,7 +24,7 @@ export type RuntimeStatus =
 
 /** One frozen copy's result in `data.compositions` of `frameshell hyperframes update`. */
 export interface RuntimeUpdate {
-  /** Project-relative, `/`-separated path of the copy: `frameshell-motion.js`, or `frameshell-three.js` of a 3D composition. */
+  /** Project-relative, `/`-separated path of the copy: `frameshell-motion.js`, or `frameshell-three.js` and `frameshell-title.typeface.json` of a 3D composition. */
   file: string;
   status: RuntimeStatus;
   /** Version the copy named before; null when it named none. */
@@ -38,6 +39,8 @@ export interface UpdateReport {
   runtime: string;
   /** three.js version the plugin bundles (ADR 0042). */
   three: string;
+  /** Version of the title typeface the plugin bundles (`title-3d`, ADR 0042). */
+  typeface: string;
   dryRun: boolean;
   compositions: RuntimeUpdate[];
 }
@@ -66,6 +69,13 @@ const THREE: Bundle = {
   version: THREE_VERSION,
   label: "three.js",
   header: THREE_HEADER,
+};
+const TYPEFACE: Bundle = {
+  file: TITLE_TYPEFACE_FILE,
+  text: TITLE_TYPEFACE,
+  version: TITLE_TYPEFACE_VERSION,
+  label: "title typeface",
+  header: TITLE_TYPEFACE_HEADER,
 };
 
 /** Version named in the first line of a copy, as numbers; null when it is not a Frameshell copy of `bundle`. */
@@ -96,7 +106,8 @@ function parseArgs(args: readonly string[]): { composition: string | undefined; 
  * `frameshell hyperframes update [<composition>] [--dry-run] [--force]`:
  * refreshes the frozen copies of the motion runtime (`frameshell-motion.js`)
  * that `hyperframes new --template` put next to compositions (ADR 0033), and
- * of the three.js bundle (`frameshell-three.js`) next to 3D ones (ADR 0042).
+ * of the three.js bundle (`frameshell-three.js`) and the title typeface
+ * (`frameshell-title.typeface.json`) next to 3D ones (ADR 0042).
  * A copy never changes by itself, so a clip renders the same after a plugin
  * upgrade; this applies runtime fixes on request. Older Frameshell copies are
  * replaced; an edited copy, a newer one or a file that is not ours is kept
@@ -104,20 +115,20 @@ function parseArgs(args: readonly string[]): { composition: string | undefined; 
  * refreshed copy re-render.
  */
 export const updateRuntime: PluginCommand = {
-  description: "Refresh the frozen frameshell-motion.js (and frameshell-three.js) copies in motion compositions (--dry-run to preview)",
+  description: "Refresh the frozen frameshell-motion.js (and frameshell-three.js, title typeface) copies in motion compositions (--dry-run to preview)",
   async run(ctx: CommandContext): Promise<CommandResult> {
     const { composition, dryRun, force } = parseArgs(ctx.args);
     const entries = composition === undefined ? await scaffoldedEntries(ctx.project.dir) : [await entryOf(composition, ctx)];
-    const report: UpdateReport = { runtime: MOTION_RUNTIME_VERSION, three: THREE_VERSION, dryRun, compositions: [] };
+    const report: UpdateReport = { runtime: MOTION_RUNTIME_VERSION, three: THREE_VERSION, typeface: TITLE_TYPEFACE_VERSION, dryRun, compositions: [] };
     const bundleOf = new Map<string, Bundle>();
     for (const entry of entries) {
       const dir = await compositionDir(ctx.project.dir, { id: entry, source: entry });
-      for (const bundle of [MOTION, THREE]) {
+      for (const bundle of [MOTION, THREE, TYPEFACE]) {
         const path = join(dir.path, bundle.file);
         const file = posix.join(dir.rel, bundle.file);
         const text = await readFile(path, "utf8").catch(() => null);
         if (text === null) {
-          if (bundle === THREE) continue;
+          if (bundle !== MOTION) continue;
           if (composition !== undefined) throw new Error(`${file} does not exist: ${entry} is not a motion composition (scaffold one with \`frameshell hyperframes new <name> --template <id>\`)`);
           break;
         }

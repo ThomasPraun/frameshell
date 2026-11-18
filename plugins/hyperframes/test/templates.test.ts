@@ -11,6 +11,7 @@ import { MOTION_RUNTIME, MOTION_RUNTIME_FILE, MOTION_RUNTIME_VERSION } from "../
 import { CURSOR_MATH, CURSOR_SCRIPT } from "../src/templates/cursor-kit.js";
 import { TEMPLATES, type TemplateVariable, usesThree } from "../src/templates/index.js";
 import { THREE_RUNTIME, THREE_RUNTIME_FILE, THREE_VERSION } from "../src/three-runtime.js";
+import { TITLE_TYPEFACE, TITLE_TYPEFACE_FILE, TITLE_TYPEFACE_VERSION } from "../src/title-typeface.js";
 
 let project: string;
 type Outcome = Exclude<CommandResult, string | void>;
@@ -500,8 +501,34 @@ describe("frameshell hyperframes new --template", () => {
 describe("3D templates (ADR 0042)", () => {
   const threeTemplates = TEMPLATES.filter(usesThree);
 
-  it("product-shot and logo-3d are 3D templates", () => {
-    expect(threeTemplates.map((t) => t.id)).toEqual(expect.arrayContaining(["product-shot", "logo-3d"]));
+  it("product-shot, logo-3d and title-3d are 3D templates", () => {
+    expect(threeTemplates.map((t) => t.id)).toEqual(expect.arrayContaining(["product-shot", "logo-3d", "title-3d"]));
+  });
+
+  it("only title-3d gets the title typeface, at the composition root where the cache key sees it", async () => {
+    const result = await scaffold(["title", "--template", "title-3d"]);
+    expect(read("title", TITLE_TYPEFACE_FILE)).toBe(TITLE_TYPEFACE);
+    expect(result.output).toContain(`${TITLE_TYPEFACE_FILE} is frozen the same way`);
+    const html = read("title");
+    expect(html).toContain(`"${TITLE_TYPEFACE_FILE}"`);
+    expect(html).toContain("new THREE.Font(data)");
+    expect(html).toContain("new THREE.TextGeometry(");
+    expect(html).not.toMatch(/opentype/i);
+    for (const id of ["product-shot", "logo-3d"]) {
+      await scaffold([id, "--template", id]);
+      expect(existsSync(join(dirOf(id), TITLE_TYPEFACE_FILE))).toBe(false);
+    }
+  });
+
+  it("title-3d names the cause of a missing typeface, a broken one and a character it lacks in the page", async () => {
+    await scaffold(["title", "--template", "title-3d"]);
+    const html = read("title");
+    // The load helper names the file; the parse checks and the glyph check name theirs (rejections reach __hf.buildReady).
+    expect(html).toContain(`title-3d cannot load " + path + ": "`);
+    expect(html).toContain(`title-3d: ${TITLE_TYPEFACE_FILE} is not valid JSON`);
+    expect(html).toContain(`title-3d: ${TITLE_TYPEFACE_FILE} is not a typeface`);
+    expect(html).toContain("has no glyph for");
+    expect(html).toContain('ready("title-3d", loaded)');
   });
 
   it.each(threeTemplates.map((t) => t.id))("%s gets the pinned three.js bundle next to it and loads it after the motion runtime", async (id) => {
@@ -642,6 +669,25 @@ describe("frameshell hyperframes update", () => {
     expect(readFileSync(bundle("shot"), "utf8")).toBe(THREE_RUNTIME);
     await update(["edit", "--force"]);
     expect(readFileSync(bundle("edit"), "utf8")).toBe(THREE_RUNTIME);
+  });
+
+  it("refreshes an older title typeface of a title-3d composition and keeps an edited one unless --force", async () => {
+    await scaffold(["old", "--template", "title-3d"]);
+    await scaffold(["edit", "--template", "title-3d"]);
+    const typeface = (name: string) => join(dirOf(name), TITLE_TYPEFACE_FILE);
+    writeFileSync(typeface("old"), TITLE_TYPEFACE.replace(`"frameshellTypeface":"${TITLE_TYPEFACE_VERSION}"`, '"frameshellTypeface":"0.9.0"'));
+    writeFileSync(typeface("edit"), TITLE_TYPEFACE.replace('"familyName":"Archivo Black"', '"familyName":"Mine"'));
+    const { report, output } = await update();
+    expect(report.typeface).toBe(TITLE_TYPEFACE_VERSION);
+    expect(report.compositions.filter((item) => item.file.endsWith(TITLE_TYPEFACE_FILE))).toEqual([
+      { file: `compositions/hyperframes/edit/${TITLE_TYPEFACE_FILE}`, status: "modified", from: TITLE_TYPEFACE_VERSION, written: false },
+      { file: `compositions/hyperframes/old/${TITLE_TYPEFACE_FILE}`, status: "updated", from: "0.9.0", written: true },
+    ]);
+    expect(output).toContain(`updated title typeface 0.9.0 -> ${TITLE_TYPEFACE_VERSION}`);
+    expect(output).toContain("edited copy of title typeface");
+    expect(readFileSync(typeface("old"), "utf8")).toBe(TITLE_TYPEFACE);
+    await update(["edit", "--force"]);
+    expect(readFileSync(typeface("edit"), "utf8")).toBe(TITLE_TYPEFACE);
   });
 
   it("rejects unknown flags and a second composition", async () => {
