@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Built-in looks, slice 10 of #384 (ADR 0031 decision 8, epic #451; protocol 173; closes #384): six colour looks,
+  `warm`, `cool`, `filmic`, `punchy`, `faded` and `mono`, as plain grade numbers (exposure, temperature, tint,
+  contrast, saturation) in one table in the schema package: no `.cube` file is generated or bundled, so no licence
+  is touched, and export and the preview needed no change. `frameshell grade looks` (MCP `grade_looks`) lists them
+  with a summary and their numbers. `clip set --grade-look <name>` copies a look's numbers into the clip's own
+  `grade`, like `--glass` copies the style: the clip keeps its copy if the table changes, and explicit `--grade-*`
+  flags win over it. `grade compare --look warm` takes a built-in name as a look, and `--look
+  mine:look=warm,saturation=1.1` (MCP `looks: [{ look: "warm", saturation: 1.1 }]`) starts one from it; an unknown
+  name is refused naming the valid ones. The clip inspector's Colour group has a Look menu that sets the five
+  numbers in one undoable step (English and Spanish).
+
 - Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
   `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
   selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags

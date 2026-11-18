@@ -82,6 +82,10 @@ const en = {
   gradeLutHint: "Put .cube files in the project to list them here",
   gradeLutMix: "LUT mix",
   gradeLutMixTitle: "How much of the LUT's look shows: 0 none, 1 all of it",
+  gradeLook: "Look",
+  gradeLookTitle: "Start from a built-in look: it sets the five correction numbers below in one step (the LUT stays); adjust them after",
+  gradeLookChoose: "Choose a look…",
+  gradeLooks: { warm: "Warm", cool: "Cool", filmic: "Filmic", punchy: "Punchy", faded: "Faded", mono: "Mono" } as Record<string, string>,
   gradeLog: (kind: "transfer" | "primaries" | "name", value: string) =>
     `May be LOG or HDR footage (${kind === "transfer" ? `transfer curve tagged ${value}` : kind === "primaries" ? `colour primaries tagged ${value}` : `file name says ${value}`}): Rec.709 looks and white balance may not fit it`,
   gradeLogTitle:
@@ -310,6 +314,10 @@ const es: typeof en = {
   gradeLutHint: "Pon archivos .cube en el proyecto para verlos aquí",
   gradeLutMix: "Mezcla de LUT",
   gradeLutMixTitle: "Cuánto se ve del look del LUT: 0 nada, 1 todo",
+  gradeLook: "Look",
+  gradeLookTitle: "Parte de un look integrado: fija de una vez los cinco valores de corrección de abajo (el LUT se queda); ajústalos después",
+  gradeLookChoose: "Elige un look…",
+  gradeLooks: { warm: "Cálido", cool: "Frío", filmic: "Cinematográfico", punchy: "Intenso", faded: "Desvaído", mono: "Monocromo" } as Record<string, string>,
   gradeLog: (kind, value) =>
     `Puede ser material LOG o HDR (${kind === "transfer" ? `curva de transferencia marcada ${value}` : kind === "primaries" ? `primarios de color marcados ${value}` : `el nombre del archivo dice ${value}`}): los looks y el balance de blancos para Rec.709 pueden no ajustarse`,
   gradeLogTitle:

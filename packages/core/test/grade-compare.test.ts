@@ -3,8 +3,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
-import type { Timeline } from "@frameshell/schema";
-import { type Daemon, SHEET_GAP, columnsFor, lookFlags, startDaemon, withGrade } from "../src/index.js";
+import { type Timeline, lookGrade, lookNames } from "@frameshell/schema";
+import { type Daemon, SHEET_GAP, columnsFor, lookFlags, resolveLooks, startDaemon, withGrade } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
 
@@ -26,6 +26,30 @@ describe("lookFlags", () => {
 
   it("quotes a LUT path the shell would split", () => {
     expect(lookFlags({ lut: "luts/my look.cube" }, null)).toBe('--grade-lut "luts/my look.cube"');
+  });
+});
+
+describe("built-in looks in compare", () => {
+  it("fills a named look with the table's numbers, the fields given winning, and names the tile after it", () => {
+    const [warm, mine, plain] = resolveLooks([{ look: "warm" }, { look: "warm", name: "mine", saturation: 1.5 }, { exposure: 1 }]);
+    expect(warm).toEqual({ name: "warm", ...lookGrade("warm") });
+    expect(mine).toEqual({ ...lookGrade("warm"), name: "mine", saturation: 1.5 });
+    expect(plain).toEqual({ exposure: 1 });
+  });
+
+  it("refuses an unknown look as InvalidParams, listing the valid names and the look's place", () => {
+    const error = (() => {
+      try {
+        resolveLooks([{ exposure: 1 }, { look: "sepia" }]);
+      } catch (caught) {
+        return caught as { code: number; message: string; data?: unknown };
+      }
+      throw new Error("did not throw");
+    })();
+    expect(error.code).toBe(ErrorCode.InvalidParams);
+    expect(error.message).toContain('"sepia"');
+    for (const name of lookNames) expect(error.message).toContain(name);
+    expect(error.data).toMatchObject({ issues: [{ path: ["looks", 1, "look"] }] });
   });
 });
 
@@ -128,6 +152,36 @@ describe("grade.compare", () => {
       // Read only: the timeline file is byte for byte as it was, and no scratch is left behind.
       expect(await timelineFile()).toBe(before);
       expect(readdirSync(join(project, ".frameshell", "cache")).filter((name) => name.startsWith("grade-compare")).flatMap((name) => readdirSync(join(project, ".frameshell", "cache", name)))).toEqual([]);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it("lists the built-in looks through the daemon, equal to the schema's table", async () => {
+    const result = await conn.request("grade.looks", {});
+    expect(methods["grade.looks"].result.safeParse(result).success).toBe(true);
+    expect(result.looks.map((look) => look.name)).toEqual([...lookNames]);
+    expect(result.looks.find((look) => look.name === "warm")!.grade).toEqual(lookGrade("warm"));
+  });
+
+  it(
+    "draws a look given by name exactly as the same fields written out, and refuses an unknown name",
+    async () => {
+      const before = await timelineFile();
+      const named = await conn.request("grade.compare", { cwd: project, timeline: "main", clip: still, tileWidth: 160, looks: [{ look: "warm" }, { name: "explicit", ...lookGrade("warm") }, { look: "warm", temperature: 0, name: "less" }] });
+      expect(named.tiles.map((tile) => tile.label)).toEqual(["1 neutral", "2 warm", "3 explicit", "4 less"]);
+      expect(named.tiles[1]!.flags).toBe(named.tiles[2]!.flags);
+      expect(named.tiles[1]!.grade).toEqual(lookGrade("warm"));
+      expect(named.tiles[3]!.grade).toEqual({ ...lookGrade("warm"), temperature: 0 });
+      const tile = { width: 160, height: 90 };
+      const [byName, written, lessWarm] = await Promise.all([1, 2, 3].map((i) => tileColour(named.path, i, 4, tile)));
+      expect(byName).toEqual(written);
+      expect(byName![0]! - byName![2]!).toBeGreaterThan(5);
+      expect(lessWarm![0]! - lessWarm![2]!).toBeLessThan(byName![0]! - byName![2]!);
+      expect(await timelineFile()).toBe(before);
+      await expect(conn.request("grade.compare", { cwd: project, timeline: "main", clip: still, looks: [{ look: "sepia" }] })).rejects.toMatchObject({
+        code: ErrorCode.InvalidParams,
+        message: expect.stringMatching(/"sepia".*warm, cool, filmic, punchy, faded, mono/),
+      });
     },
     MEDIA_TIMEOUT,
   );

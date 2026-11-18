@@ -8,6 +8,7 @@ import type {
   GradeAnalyzeResult,
   ClipCompareResult,
   GradeCompareResult,
+  GradeLooksResult,
   HistoryResult,
   MarkerListResult,
   MulticamCreateResult,
@@ -30,7 +31,7 @@ import type {
   TrackSummary,
 } from "@frameshell/protocol";
 import { timeRefOf } from "@frameshell/protocol";
-import { glassOf, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
+import { findLook, glassOf, lookGrade, lookNames, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -99,12 +100,16 @@ mutations print the new revision):
                                --to a range, --samples frames spread over it (default 8, 1 to 32); none: the whole
                                clip. Prints the levels, why each number, and the clip set command to apply it.
                                Changes nothing; judge it by eye with frame (a sunset is meant to be warm)
+  grade looks                  The built-in looks (warm, cool, filmic, punchy, faded, mono) with what each does and its
+                               numbers: plain grade numbers in one table, no LUT files. Keep one with clip set --grade-look
   grade compare <clip> --look [name:]field=value[,...] [--look ...] [--at s] [--out file.png] [--tile-width px]
                 [--format id]
                                Render one frame of a media clip under up to 16 looks next to a neutral baseline (and
                                its current grade) as one labelled PNG, through the export frame path. A look is a whole
                                grade: exposure, temperature, tint, contrast, saturation, lut, lut-mix (left out =
-                               neutral), e.g. --look warm:temperature=0.25,saturation=1.1. --at picks the frame (default
+                               neutral), e.g. --look warm:temperature=0.25,saturation=1.1; a bare built-in look name is
+                               a look (--look warm), and look=<name> starts one from it (--look mine:look=warm,saturation=1.1,
+                               the fields given win). --at picks the frame (default
                                the clip's middle); --out the image (default .frameshell/grade/compare-<clip>-<frame>.png);
                                --tile-width 160 to 960 (default 480). Prints the clip set command that keeps each look.
                                Changes nothing
@@ -125,7 +130,7 @@ mutations print the new revision):
            [--voice | --audio-effects json | --clear-audio-effects] [--script-ref ref | --clear-script-ref]
            [--glass] [--backdrop-blur px] [--backdrop-saturate x] [--backdrop-dim 0-1] [--clear-backdrop]
            [--grade-exposure stops] [--grade-temperature -1..1] [--grade-tint -1..1] [--grade-contrast x]
-           [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
+           [--grade-look name] [--grade-saturation x] [--grade-lut file.cube | none] [--grade-lut-mix 0-1] [--clear-grade]
            [--motion-blur] [--motion-blur-shutter deg] [--motion-blur-samples n] [--motion-blur-blend linear|srgb]
            [--clear-motion-blur] [--vignette 0-1] [--vignette-radius 0-1.5] [--vignette-softness 0-1] [--clear-vignette]
            [--grain 0-1] [--grain-size 1-4] [--grain-seed n] [--clear-grain]
@@ -150,7 +155,9 @@ mutations print the new revision):
                                to 1 warm, tint -1 green to 1 magenta), contrast and saturation factors (1 = unchanged),
                                then a 3D .cube LUT (project file, up to 65 points, Rec.709 input; none removes it) at
                                --grade-lut-mix (default 1). A nested timeline clip's grade follows the grades of the
-                               clips inside it. Export and the preview apply the same table; --clear-grade removes it
+                               clips inside it. Export and the preview apply the same table; --clear-grade removes it.
+                               --grade-look warm|cool|filmic|punchy|faded|mono writes that built-in look's five numbers
+                               into the clip's grade (a copy: grade looks lists them); explicit --grade-* flags win over it
                                --motion-blur blurs a generated clip's moves like a camera (ADR 0041): each frame is the
                                average of --motion-blur-samples pictures (default 8, 1 to 64) across a shutter of
                                --motion-blur-shutter degrees (default 180, centred on the frame), averaged in linear light
@@ -478,6 +485,7 @@ export const TIMELINE_OPTIONS = {
   "grade-saturation": { type: "string" },
   "grade-lut": { type: "string" },
   "grade-lut-mix": { type: "string" },
+  "grade-look": { type: "string" },
   "clear-grade": { type: "boolean" },
   "motion-blur": { type: "boolean" },
   "motion-blur-shutter": { type: "string" },
@@ -626,6 +634,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip reframe": ["format", "person", "anchor"],
   "clip verify": ["probes", "tolerance"],
   "grade analyze": ["at", "from", "to", "samples"],
+  "grade looks": [],
   "grade compare": ["look", "at", "out", "tile-width", "format"],
   "clip compare": ["look", "at", "out", "tile-width", "format"],
   "clip set": [
@@ -657,6 +666,7 @@ const ALLOWED: Record<string, string[]> = {
     "grade-saturation",
     "grade-lut",
     "grade-lut-mix",
+    "grade-look",
     "clear-grade",
     "motion-blur",
     "motion-blur-shutter",
@@ -744,6 +754,7 @@ const ARITY: Record<string, [number, number]> = {
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
   "grade analyze": [1, 1],
+  "grade looks": [0, 0],
   "grade compare": [1, 1],
   "clip compare": [1, 1],
   "clip set": [1, 1],
@@ -794,10 +805,17 @@ const LOOK_FIELDS: Record<string, string> = {
   lut: "lut",
   "lut-mix": "lutMix",
   lutMix: "lutMix",
+  look: "look",
 };
 
-/** One `--look`: `[name:]field=value[,field=value...]`, e.g. `warm:temperature=0.25,saturation=1.1` or `teal:lut=luts/teal.cube,lut-mix=0.6`. */
+/**
+ * One `--look`: `[name:]field=value[,field=value...]`, e.g. `warm:temperature=0.25,saturation=1.1` or
+ * `teal:lut=luts/teal.cube,lut-mix=0.6`. A bare built-in look name is a look by itself (`warm`), and `look=<name>`
+ * starts a look from a built-in one (`mine:look=warm,saturation=1.1`); the daemon resolves the numbers.
+ */
 export function parseLook(raw: string): Record<string, string | number> {
+  const bare = raw.trim();
+  if (!/[=:]/.test(bare) && findLook(bare)) return { look: bare };
   const colon = raw.indexOf(":");
   const named = colon >= 0 && colon < raw.indexOf("=");
   const look: Record<string, string | number> = named ? { name: raw.slice(0, colon).trim() } : {};
@@ -807,10 +825,10 @@ export function parseLook(raw: string): Record<string, string | number> {
     const field = LOOK_FIELDS[key];
     if (!field || value === undefined || value === "" || more.length > 0) {
       throw new UsageError(
-        `--look: expected [name:]field=value[,field=value...] with fields exposure, temperature, tint, contrast, saturation, lut, lut-mix, e.g. warm:temperature=0.25,saturation=1.1; got "${raw}".`,
+        `--look: expected a built-in look (${lookNames.join(", ")}) or [name:]field=value[,field=value...] with fields look, exposure, temperature, tint, contrast, saturation, lut, lut-mix, e.g. warm:temperature=0.25,saturation=1.1; got "${raw}".`,
       );
     }
-    if (field === "lut") {
+    if (field === "lut" || field === "look") {
       look[field] = value;
       continue;
     }
@@ -909,6 +927,10 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     if (values["timeline"] !== undefined) throw new UsageError("`frameshell tx` spans every timeline; it does not take --timeline.");
     const method = `tx.${rest[0]}` as "tx.begin" | "tx.commit" | "tx.abort";
     return { kind: "timeline", method, params: method === "tx.begin" ? { label: args[0] } : {}, withCwd: method === "tx.begin" };
+  }
+  if (command === "grade looks") {
+    if (values["timeline"] !== undefined) throw new UsageError("`frameshell grade looks` lists a fixed table; it does not take --timeline.");
+    return { kind: "timeline", method: "grade.looks", params: {}, withCwd: false };
   }
   const num = (flag: string): number | undefined => {
     const raw = values[flag];
@@ -1210,24 +1232,29 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
           : backdropFlags.length > 0
             ? { blur: num("backdrop-blur"), saturate: num("backdrop-saturate"), dim: num("backdrop-dim") }
             : undefined;
-      const gradeFlags = (["grade-exposure", "grade-temperature", "grade-tint", "grade-contrast", "grade-saturation", "grade-lut", "grade-lut-mix"] as const).filter(
+      const gradeFlags = (["grade-look", "grade-exposure", "grade-temperature", "grade-tint", "grade-contrast", "grade-saturation", "grade-lut", "grade-lut-mix"] as const).filter(
         (flag) => str(flag) !== undefined,
       );
       if (values["clear-grade"] === true && gradeFlags.length > 0) throw new UsageError("Pass --clear-grade alone, without --grade-*.");
       const lut = str("grade-lut");
+      // A built-in look is copied into the clip's own numbers, like --glass copies the style; the explicit flags win over it.
+      const lookName = str("grade-look");
+      const look = lookName === undefined ? {} : lookGrade(lookName);
+      if (!look) throw new UsageError(`--grade-look: no built-in look "${lookName}"; one of ${lookNames.join(", ")} (frameshell grade looks lists them).`);
+      const explicit = {
+        exposure: num("grade-exposure"),
+        temperature: num("grade-temperature"),
+        tint: num("grade-tint"),
+        contrast: num("grade-contrast"),
+        saturation: num("grade-saturation"),
+        lut: lut === "none" ? null : lut,
+        lutMix: num("grade-lut-mix"),
+      };
       const grade =
         values["clear-grade"] === true
           ? null
           : gradeFlags.length > 0
-            ? {
-                exposure: num("grade-exposure"),
-                temperature: num("grade-temperature"),
-                tint: num("grade-tint"),
-                contrast: num("grade-contrast"),
-                saturation: num("grade-saturation"),
-                lut: lut === "none" ? null : lut,
-                lutMix: num("grade-lut-mix"),
-              }
+            ? { ...look, ...Object.fromEntries(Object.entries(explicit).filter(([, value]) => value !== undefined)) }
             : undefined;
       const blurFlags = (["motion-blur-shutter", "motion-blur-samples", "motion-blur-blend"] as const).filter((flag) => str(flag) !== undefined);
       if (values["clear-motion-blur"] === true && (values["motion-blur"] === true || blurFlags.length > 0)) {
@@ -1668,6 +1695,7 @@ export async function executeTimeline(
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
+  if (inv.method === "grade.looks") return formatGradeLooks(result as GradeLooksResult);
   if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
   if (inv.method === "clip.compare") return formatClipCompare(result as ClipCompareResult);
   if (inv.method === "track.duck") return formatTrackDuck(result as TrackDuckResult);
@@ -1717,6 +1745,18 @@ export function formatGradeAnalyze(result: GradeAnalyzeResult): string {
   for (const reason of result.reasons) lines.push(`  ${reason}`);
   if (result.flags !== "") lines.push(`Apply: frameshell clip set ${result.clip} ${result.flags}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** `grade looks` for people: each built-in look with what it does and its numbers as `clip set` flags. */
+export function formatGradeLooks(result: GradeLooksResult): string {
+  const lines = ["Built-in looks (plain numbers, no LUT files; a clip keeps its own copy):"];
+  for (const look of result.looks) {
+    lines.push(`  ${look.name.padEnd(8)} ${look.summary}`);
+    const g = look.grade;
+    lines.push(`           exposure ${g.exposure ?? 0}  temperature ${g.temperature ?? 0}  tint ${g.tint ?? 0}  contrast ${g.contrast ?? 1}  saturation ${g.saturation ?? 1}`);
+  }
+  lines.push("Keep one with `frameshell clip set <clip> --grade-look <name>` (explicit --grade-* flags win over it), or see it first: `frameshell grade compare <clip> --look <name>`.");
   return `${lines.join("\n")}\n`;
 }
 
