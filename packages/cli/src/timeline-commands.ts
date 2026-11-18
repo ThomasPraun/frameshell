@@ -400,7 +400,12 @@ mutations print the new revision):
   offset: --at bar:8, --from bar:2 --to bar:6, --start beat:17-0.1, --at beat:2.5 (halfway between beats 2 and 3).
   Past the measured part they continue at the tempo. With a pickup, bar:N is not beat:(meter*(N-1)+1). They need
   a tempo (tempo set) and are refused on a LOW confidence grid or with no beats file, like --snap-to beat|bar.
-  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit). word: names are still refused.
+  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit).
+  word:<text> is the start of a word the timeline plays, #n for the nth time it is said (from 1), with the same
+  optional offset: --at word:over, --from word:this#2 --to word:idea+0.3, --at word:w_000012 (a transcript word id).
+  Case, accents and punctuation are ignored and digits meet spelled numbers (word:20 finds "twenty"); words a cut
+  removed do not count, so the same name means a later word after a cut. It needs current transcripts
+  (transcribe); a clip with a stale one refuses it. The quotes-only form ("this#2") is not accepted: write word:.
   --group-clock times (multicam reframe --at, multicam paint) stay seconds.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -925,16 +930,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     }
     return parts;
   };
-  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N` or `bar:N`, optionally `+s` or `-s`) for the daemon to resolve. */
+  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N`, `bar:N` or `word:<text>`, optionally `+s` or `-s`) for the daemon to resolve. */
   const when = (flag: string): number | string | undefined => {
     const raw = values[flag];
     if (raw === undefined) return undefined;
-    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
+    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, beat:N / bar:N or word:<text>, got "${String(raw)}".`);
     return timeRefOf(raw);
   };
   /** One time given as text: seconds as a number, else the name for the daemon to resolve. */
   const whenOf = (raw: string, flag: string): number | string => {
-    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
+    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, beat:N / bar:N or word:<text>, got "${raw}".`);
     return timeRefOf(raw);
   };
   const list = (flag: string): string[] | undefined => {

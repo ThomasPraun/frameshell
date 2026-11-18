@@ -3,7 +3,7 @@ import type { AnyClip, ClipTrack, Timeline } from "@frameshell/schema";
 import type { LoudnessReading, SoundRange } from "../analyze/loudness.js";
 import { isBinaryError } from "../binaries/errors.js";
 import { candidateTarget, gainFor, peakWarning, playedRange } from "../media/loudness-plan.js";
-import { resolveTimeRefArg } from "../timeline/time-ref.js";
+import { onceWords, resolveTimeRefArg } from "../timeline/time-ref.js";
 import { type MusicFitDeps, planMusicFit } from "./run.js";
 
 /** What `music.candidates` needs from the project besides what `music.fit` does. */
@@ -53,8 +53,9 @@ export async function planMusicCandidates(timeline: Timeline, fps: number, reque
     if (seen.has(asset)) throw invalid(`${asset} is given twice.`, { reason: "duplicate", field: "assets", hint: "Each candidate is a different file." });
     seen.add(asset);
   }
-  const end = request.end === undefined ? null : await resolveTimeRefArg("music.candidates", "end", request.end, timeline, deps.loadGrid);
-  const from = request.from === undefined ? 0 : await resolveTimeRefArg("music.candidates", "from", request.from, timeline, deps.loadGrid);
+  const loadWords = onceWords(deps.loadWords);
+  const end = request.end === undefined ? null : await resolveTimeRefArg("music.candidates", "end", request.end, timeline, deps.loadGrid, loadWords);
+  const from = request.from === undefined ? 0 : await resolveTimeRefArg("music.candidates", "from", request.from, timeline, deps.loadGrid, loadWords);
   if (end !== null && end <= from) {
     throw invalid(`end (${end} s) is not after from (${from} s): there is no picture to fit the music to.`, { reason: "end before from", field: "end", hint: "Give an `end` later than `from`." });
   }

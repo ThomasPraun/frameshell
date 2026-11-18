@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Word references as times, #458 slice 4 part 3 (ADR 0029, epic #451; protocol 172): every time argument that takes a
+  TimeRef also takes `word:<text>[#n][+s|-s]`, the start of the nth time the timeline plays a word (`--from word:so
+  --to word:so#2`, `--at word:over+0.2`), or a transcript word id (`word:w_000012`). Words match on their spoken tokens
+  (case, accents and punctuation ignored, `20` meets "twenty", several words in a row for a phrase, compared token
+  for token so `maybe` never meets "may be"; text that also reads as a word plus an offset is refused); words a cut
+  removed do not count, and the same speech on two tracks counts once. The name is read on the timeline as the call
+  sees it (a review-mode proposal's own timeline included) and the history records seconds, so a later cut never moves
+  a recorded edit. A clip with a stale transcript refuses it naming `transcribe`; an unknown word lists the closest
+  played words. A marker label starting with `word:` is now refused. `cleanup` and word references share one placement
+  of transcript words on the timeline (`placeWords`). Not yet read by `requirements.json`.
+
 - `music.pick`, the last slice of #485 (ADR 0037; protocol 171, no schema change): `frameshell music pick <track> [--keep] [--dry-run]`
   (MCP `music_pick`) keeps one of the candidate tracks `music candidates` placed. The chosen track (id or name, e.g.
   `Music 2`) is unmuted and renamed `Music`, and the other candidate tracks (audio tracks named `Music <n>` that hold only

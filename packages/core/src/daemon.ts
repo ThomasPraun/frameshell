@@ -165,7 +165,8 @@ import { NestedTimelineError, clipEnd, timelineDuration } from "./timeline/timin
 import { TimelineWatcher } from "./timeline/watcher.js";
 import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
-import { type GridLoader, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
+import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
+import { readTimelineWords } from "./transcripts/timeline-words.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -696,6 +697,20 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const replays = new IdempotencyCache();
   /** The beats file that records project-relative `asset`, or null when it was never measured. Throws `InvalidProjectFile` for a broken one. */
   const beatsOf = async (dir: string, asset: string) => (await ownBeatsFile(dir, asset))?.file ?? null;
+  /** The words `timeline` plays (cleanup's placement of transcript words), for `word:` time references; a transcript of other content is stale. */
+  const wordsOf = (dir: string, timeline: Timeline, fps: number) => readTimelineWords(dir, timeline, fps, (rel) => media.hash(dir, rel));
+  /**
+   * Word loader for a method that resolves TimeRefs of its own, one per call: however many `word:` references the call
+   * holds, the words of one timeline state are read once.
+   */
+  const wordLoaderFor = (dir: string) => {
+    const read = new WeakMap<Timeline, WordLoader>();
+    return (loaded: { timeline: Timeline; fps: number }): WordLoader => {
+      let load = read.get(loaded.timeline);
+      if (!load) read.set(loaded.timeline, (load = onceWords(() => wordsOf(dir, loaded.timeline, loaded.fps))));
+      return load;
+    };
+  };
   /**
    * Beat grid loader for a method that resolves TimeRefs of its own, one per call: however many `beat:`/`bar:`
    * references the call holds, the grid is read once, and again only when a reference reaches further than it did.
@@ -730,6 +745,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     txOpen: (tx) => transactions.isOpenTx(tx),
     config: configJournal,
     beatsOf,
+    wordsOf,
     onProposal: ({ root, endsTx, ...change }) => {
       events.publish("proposal.changed", root, { project: root, ...change });
       // A building proposal closed unapplied ends its transaction (ADR 0019 §7).
@@ -787,7 +803,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     applyInMemory: (dir, id, loaded, request) => timelines.applyInMemory(dir, id, loaded, request),
     source: (dir, asset) => timelines.source(dir, asset, "batch.render"),
     hasTranscript: async (dir, asset) => (await readTranscriptFile(dir, asset)) !== null,
-    resolveTime: (dir, ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridLoaderFor(dir)(loaded)),
+    resolveTime: (dir, ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridLoaderFor(dir)(loaded), wordLoaderFor(dir)(loaded)),
     duration: async (dir, id, timeline, fps) => {
       try {
         return await timelineDuration(timeline, new FrameGrid(fps), timelines.nestedDuration(dir, id, fps));
@@ -1015,7 +1031,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             const prepared = prepare ? await prepare(current, request) : request;
             if (!snapTo) return prepared;
             const fps = (await readEnclosingProject(dir))?.config.fps ?? 30;
-            return snapRequest(prepared, { timeline: current, fps, snapTo: snapTo as SnapToKind, beatsOf: (asset) => beatsOf(dir, asset) });
+            return snapRequest(prepared, {
+              timeline: current,
+              fps,
+              snapTo: snapTo as SnapToKind,
+              beatsOf: (asset) => beatsOf(dir, asset),
+              wordsOf: () => wordsOf(dir, current, fps),
+            });
           }
         : undefined;
     const tx = transactions.next(key);
@@ -1983,7 +2005,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const plannedTime = (ref: number | string) =>
         (main ??= loadFor(dir, "main", caller).then((loaded) => {
           const grid = gridLoaderFor(dir)(loaded);
-          return (next: number | string) => resolveTimeRefAsync(next, loaded.timeline, grid);
+          const words = wordLoaderFor(dir)(loaded);
+          return (next: number | string) => resolveTimeRefAsync(next, loaded.timeline, grid, words);
         }))
           .then((resolve) => resolve(ref));
       return outlineScript(dir, cwd, file, plannedTime);
@@ -2129,10 +2152,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { cwd, timeline, dryRun } = params;
       const dir = await root(cwd);
       const gridOf = gridLoaderFor(dir);
+      const wordsOn = wordLoaderFor(dir);
       const plan = await planVoiceoverPlacement(params, {
         root: dir,
         load: async () => loadFor(dir, timeline, caller),
-        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
+        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded), wordsOn(loaded)),
       });
       const report = { timeline, script: plan.script, track: plan.track, lines: plan.lines, dryRun };
       const planned = plan.clips.map((clip) => ({ line: clip.line, phrase: clip.phrase, file: clip.file, in: clip.in, out: clip.out, start: clip.start, end: clip.end, speed: clip.speed, duration: clip.duration, anchor: clip.anchor }));
@@ -2219,11 +2243,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { cwd, timeline } = params;
       const dir = await root(cwd);
       const gridOf = gridLoaderFor(dir);
+      const wordsOn = wordLoaderFor(dir);
       const plan = await planSounds(params, {
         root: dir,
         timeline,
         load: async () => loadFor(dir, timeline, caller),
-        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
+        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded), wordsOn(loaded)),
         take: (spec) => serialSound(dir, () => makeTake(dir, spec)),
         sfxUnderVoice: async () => resolveStyle(await readStyleFile(dir)).sound.sfxUnderVoice.value,
       });
@@ -2281,10 +2306,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { cwd, timeline } = params;
       const dir = await root(cwd);
       const gridOf = gridLoaderFor(dir);
+      const wordsOn = wordLoaderFor(dir);
       const plan = await planMusic(params, {
         load: async () => loadFor(dir, timeline, caller),
         duration: async () => (await timelines.show(dir, timeline, await viewOf(dir, caller, undefined))).duration,
-        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded)),
+        resolve: (ref, loaded) => resolveTimeRefAsync(ref, loaded.timeline, gridOf(loaded), wordsOn(loaded)),
         take: (spec) =>
           serialSound(dir, () => generateMusic({ root: dir, spec, importAssets: (files) => media.import(dir, files, "copy"), credit: (file) => creditTake(dir, file) })),
         musicUnderVoice: () => styleMusicUnderVoice(dir),
@@ -2530,6 +2556,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const { operations, duckAgain, shapeAgain, ...report } = await planMusicFit(loaded, fps, { clip, end, from, hit, exact, skip, dryRun }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
+        loadWords: () => wordsOf(dir, loaded, fps),
         ...hitSources(dir),
       });
       if (dryRun || operations.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...report };
@@ -2554,6 +2581,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         loaded,
         { clip, drop, ending, endOnBar, lead, depth, hold, release, fade, build, buildFrom, buildTo, clear, dryRun },
         (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
+        () => wordsOf(dir, loaded, fps),
       );
       const result = { timeline, ...report };
       if (dryRun || noop) return { ...result, revision: loaded.revision, dryRun, applied: false, tx: null };
@@ -2576,6 +2604,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       for (const asset of assets) rels.push((await resolveAsset(dir, resolve(cwd, asset))).rel);
       const plan = await planMusicCandidates(loaded, fps, { assets: rels, end, from, loudness }, {
         loadGrid: (horizon) => tempoGrid({ fps, timeline: loaded, horizon, beatsOf: (asset) => beatsOf(dir, asset) }),
+        loadWords: () => wordsOf(dir, loaded, fps),
         ...hitSources(dir),
         reading: (asset, range) => loudnessStore.reading(dir, asset, range),
         duration: async (asset) => {
@@ -3067,8 +3096,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const gridOf = gridLoaderFor(dir)({ timeline: loaded, fps });
-      const from = fromRef === undefined ? undefined : await resolveTimeRefArg("captions.set", "from", fromRef, loaded, gridOf);
-      const to = toRef === undefined ? undefined : await resolveTimeRefArg("captions.set", "to", toRef, loaded, gridOf);
+      const wordsOn = wordLoaderFor(dir)({ timeline: loaded, fps });
+      const from = fromRef === undefined ? undefined : await resolveTimeRefArg("captions.set", "from", fromRef, loaded, gridOf, wordsOn);
+      const to = toRef === undefined ? undefined : await resolveTimeRefArg("captions.set", "to", toRef, loaded, gridOf, wordsOn);
       const track = loaded.tracks.find((candidate) => candidate.id === trackId);
       const invalid = (message: string, field: string) =>
         new RpcError(ErrorCode.InvalidOperation, `captions.set: ${message}`, { op: "captions.set", reason: field, field });
@@ -3128,8 +3158,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { timeline: loaded, fps } = await loadFor(dir, timeline, caller);
       const gridOf = gridLoaderFor(dir)({ timeline: loaded, fps });
-      const from = fromRef === undefined ? undefined : await resolveTimeRefArg("multicam.direct", "from", fromRef, loaded, gridOf);
-      const to = toRef === undefined ? undefined : await resolveTimeRefArg("multicam.direct", "to", toRef, loaded, gridOf);
+      const wordsOn = wordLoaderFor(dir)({ timeline: loaded, fps });
+      const from = fromRef === undefined ? undefined : await resolveTimeRefArg("multicam.direct", "from", fromRef, loaded, gridOf, wordsOn);
+      const to = toRef === undefined ? undefined : await resolveTimeRefArg("multicam.direct", "to", toRef, loaded, gridOf, wordsOn);
       const found = groupOf(loaded, group, "multicam.direct");
       const loadedRules = await loadDirectorRules(dir, cwd, rules, template);
       const measured = await groupTurns(turnsSource, dir, found);
@@ -3566,7 +3597,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // A name is read on the timeline the app shows, as the person sees it.
       const dir = await root(cwd);
       const loaded = await loadFor(dir, ui.shown(key).timeline, caller);
-      return ui.command(key, { kind: "seek", at: await resolveTimeRefArg("ui.seek", "at", at, loaded.timeline, gridLoaderFor(dir)(loaded)) });
+      return ui.command(key, { kind: "seek", at: await resolveTimeRefArg("ui.seek", "at", at, loaded.timeline, gridLoaderFor(dir)(loaded), wordLoaderFor(dir)(loaded)) });
     },
     "ui.play": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "play" }),
     "ui.pause": async ({ cwd }) => ui.command(await projectKey(cwd), { kind: "pause" }),

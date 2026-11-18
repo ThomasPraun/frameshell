@@ -3,7 +3,7 @@ import { parseSound } from "../src/sound-commands.js";
 import { UsageError, parseTimelineCommand } from "../src/timeline-commands.js";
 
 // Seam under test: the CLI turns every timeline time flag into a number (seconds) or the text the daemon resolves as a
-// TimeRef (a marker, `beat:N`, `bar:N`, ADR 0029 slice 4), and never parses a name itself.
+// TimeRef (a marker, `beat:N`, `bar:N`, `word:<text>`, ADR 0029 slice 4), and never parses a name itself.
 
 describe("time flags that take a TimeRef", () => {
   it("captions set sends --from and --to as seconds or as text", () => {
@@ -11,6 +11,12 @@ describe("time flags that take a TimeRef", () => {
     expect(parseTimelineCommand(["captions", "set", "t_1"], { ...base, from: "12.5", to: "bar:4-0.2" })!.params).toMatchObject({ from: 12.5, to: "bar:4-0.2" });
     expect(parseTimelineCommand(["captions", "set", "t_1"], { ...base, from: "hook" })!.params).toMatchObject({ from: "hook" });
     expect(() => parseTimelineCommand(["captions", "set", "t_1"], { ...base, to: " " })).toThrow(UsageError);
+  });
+
+  it("cut, marker add and captions set send word: references as text for the daemon", () => {
+    expect(parseTimelineCommand(["cut"], { from: "word:so", to: "word:this#2+0.2" })!.params).toMatchObject({ from: "word:so", to: "word:this#2+0.2" });
+    expect(parseTimelineCommand(["marker", "add"], { at: "word:w_000012", label: "cta" })!.params).toMatchObject({ at: "word:w_000012", label: "cta" });
+    expect(parseTimelineCommand(["captions", "set", "t_1"], { text: "*idea*", from: "word:idea", to: "word:20" })!.params).toMatchObject({ from: "word:idea", to: "word:20" });
   });
 
   it("direct sends --from and --to as seconds or as text", () => {

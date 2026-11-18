@@ -1,6 +1,6 @@
 import { type CleanupCandidate, type CleanupResult, ErrorCode, RpcError } from "@frameshell/protocol";
-import { type Timeline, withProgramSound } from "@frameshell/schema";
-import { sourceTranscripts } from "../transcripts/verify.js";
+import type { Timeline } from "@frameshell/schema";
+import { heardTranscripts } from "../transcripts/timeline-words.js";
 import { type SpeechSources, gatherSpeech } from "./speech.js";
 import { type PlannedCut, planCleanup } from "./plan.js";
 
@@ -42,9 +42,7 @@ export async function planTimelineCleanup(projectDir: string, timeline: Timeline
       hint: "Lower `breath`, or raise `pauses`.",
     });
   }
-  // Words are heard, not seen: a program track counts as its angles' sound.
-  const heard = withProgramSound(timeline);
-  const transcripts = await sourceTranscripts(projectDir, heard, deps.assetHash);
+  const { heard, transcripts } = await heardTranscripts(projectDir, timeline, deps.assetHash);
   const speech = await gatherSpeech(heard, fps, { transcripts, profile: deps.profile, hasAudio: deps.hasAudio });
   if (speech.clips === 0) {
     const why = speech.unchecked.map((entry) => `${entry.clip} (${entry.asset}): ${entry.reason}`);
