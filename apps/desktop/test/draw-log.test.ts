@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyDrops, dropsIn } from "../e2e/draw-log.js";
+import { classifyDrops, cutEdgeDrops, dropsIn } from "../e2e/draw-log.js";
 import type { PlayDrops } from "../src/renderer/src/preview/drop-log.js";
 import { type RunLog, analyze, checkThresholds } from "../e2e/preview-analysis.js";
 
@@ -74,5 +74,120 @@ describe("ADR 0001 analysis, interior drops", () => {
     const starved = analyze(run(drawn, lateProbes, engine([8], [2])));
     expect(starved.video).toMatchObject({ interiorStarved: 1, interiorCadence: 1 });
     expect(checkThresholds(starved).find((check) => check.id === 3)?.pass).toBe(false);
+  });
+});
+
+describe("cutEdgeDrops", () => {
+  // Source 10..16 plays from program frame 0 (frames 0-5), source 40..45 from 6 (frames 6-10), source 70..73 from 11.
+  const segments = [
+    { inF: 10, outF: 16, pF: 0 },
+    { inF: 40, outF: 45, pF: 6 },
+    { inF: 70, outF: 73, pF: 11 },
+  ];
+  const all = Array.from({ length: 14 }, (_, p) => p);
+  const without = (...gone: number[]) => all.filter((p) => !gone.includes(p));
+
+  it("is empty when the last and first frames at the cut were drawn", () => {
+    expect(cutEdgeDrops(all, engine([], []), segments, 0)).toEqual({ starved: [], cadence: [] });
+  });
+
+  it("takes the undrawn run at the end of one segment and the start of the next, nothing from other cuts", () => {
+    const drawn = without(4, 5, 6, 11);
+    expect(cutEdgeDrops(drawn, null, segments, 0)).toEqual({ starved: [4, 5, 6], cadence: [] });
+    expect(cutEdgeDrops(drawn, null, segments, 1)).toEqual({ starved: [11], cadence: [] });
+  });
+
+  it("stops a run at its segment, and ignores a hole that does not touch the cut", () => {
+    expect(cutEdgeDrops(without(2, 6), null, segments, 0)).toEqual({ starved: [6], cadence: [] });
+    expect(cutEdgeDrops([], engine([], []), segments, 0).starved).toHaveLength(6 + 5);
+  });
+
+  it("gives each frame the engine's kind", () => {
+    expect(cutEdgeDrops(without(5, 6), engine([6], [5]), segments, 0)).toEqual({ starved: [6], cadence: [5] });
+  });
+});
+
+describe("ADR 0001 analysis, drops at cuts", () => {
+  const segments = [
+    { inF: 10, outF: 16, pF: 0 },
+    { inF: 40, outF: 45, pF: 6 },
+  ];
+  const run = (drawn: number[], probes: [number, number][], dropped: RunLog["dropped"] = null): RunLog => ({
+    fps: 30,
+    sampleRate: 48_000,
+    segments,
+    probes,
+    drawn,
+    dropped,
+    anchor: { frame: 0, sample: 0 },
+    audioStart: 0,
+    audio: new Float32Array(0),
+    audioGaps: 0,
+    timestamps: [{ contextTime: 1, performanceTime: 1000 }],
+    expected: null,
+  });
+  // The page's rAF read every second frame only, so its probes miss the last frame of segment 0 (source 15).
+  const lateProbes = segments.flatMap((s, k) =>
+    Array.from({ length: s.outF - s.inF }, (_, i): [number, number] => [(k * 10 + i) * 34, i % 2 === 0 ? s.inF + i : s.inF + i - 1]),
+  );
+  const all = Array.from({ length: 11 }, (_, p) => p);
+  const threshold1 = (summary: ReturnType<typeof analyze>) => checkThresholds(summary).find((check) => check.id === 1)!;
+
+  it("counts none when the probes miss a frame at the cut that the engine drew", () => {
+    const summary = analyze(run(all, lateProbes));
+    expect(summary.cutsMeasured).toBe(1);
+    expect(summary.video).toMatchObject({ droppedFramesTotal: 0, droppedStarved: 0, droppedCadence: 0 });
+    expect(threshold1(summary).pass).toBe(true);
+  });
+
+  it("fails threshold 1 on a frame at the cut the engine never drew and did not call cadence", () => {
+    const drawn = all.filter((p) => p !== 5);
+    const summary = analyze(run(drawn, lateProbes, engine([5], [])));
+    expect(summary.video).toMatchObject({ droppedFramesTotal: 1, droppedStarved: 1, droppedCadence: 0 });
+    expect(threshold1(summary).pass).toBe(false);
+    expect(analyze(run(drawn, lateProbes)).video.droppedStarved).toBe(1);
+  });
+
+  it("reports cadence drops at a cut without failing threshold 1", () => {
+    const drawn = all.filter((p) => p !== 6);
+    const summary = analyze(run(drawn, lateProbes, engine([], [6])));
+    expect(summary.video).toMatchObject({ droppedFramesTotal: 1, droppedStarved: 0, droppedCadence: 1 });
+    const check = threshold1(summary);
+    expect(check.pass).toBe(true);
+    expect(check.detail).toContain("cadence 1 [6]");
+  });
+
+  it("counts a run reaching into the segment once, at the cut", () => {
+    const drawn = all.filter((p) => p !== 4 && p !== 5);
+    const video = analyze(run(drawn, lateProbes, engine([4, 5], []))).video;
+    expect(video).toMatchObject({ droppedStarved: 2, interiorDrops: 0 });
+  });
+
+  describe("a cut the probes never saw", () => {
+    // Three segments of 20 frames; the engine draws none of the middle one and the probes see the outer two only.
+    const three = [0, 1, 2].map((k) => ({ inF: 100 * k, outF: 100 * k + 20, pF: 20 * k }));
+    const probes = [0, 2].flatMap((k): [number, number][] => Array.from({ length: 20 }, (_, i) => [(k * 25 + i) * 34, three[k]!.inF + i]));
+    const stalled = (dropped: RunLog["dropped"]): RunLog => ({
+      ...run(
+        Array.from({ length: 60 }, (_, p) => p).filter((p) => p < 20 || p >= 40),
+        probes,
+        dropped,
+      ),
+      segments: three,
+    });
+
+    it("still counts the undrawn frames, once, at the cuts", () => {
+      const summary = analyze(stalled(null));
+      expect(summary.cutsMeasured).toBe(0);
+      expect(summary.video).toMatchObject({ droppedFramesTotal: 20, droppedStarved: 20, interiorDrops: 0 });
+      expect(threshold1(summary).pass).toBe(false);
+    });
+
+    it("reports them as cadence when the engine says so", () => {
+      const cadence = Array.from({ length: 20 }, (_, i) => 20 + i);
+      const summary = analyze(stalled(engine([], cadence)));
+      expect(summary.video).toMatchObject({ droppedFramesTotal: 20, droppedStarved: 0, droppedCadence: 20, interiorDrops: 0 });
+      expect(threshold1(summary).pass).toBe(true);
+    });
   });
 });

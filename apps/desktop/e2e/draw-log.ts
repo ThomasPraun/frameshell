@@ -2,6 +2,7 @@
 /// <reference lib="dom" />
 import type { Page } from "@playwright/test";
 import type { PlayDrops } from "../src/renderer/src/preview/drop-log.js";
+import type { Segment } from "./preview-analysis.js";
 
 // Program frames the engine drew, from every `data-shown` change of the preview frame. The engine worker draws without
 // the page's main thread (ADR 0001): a page rAF that runs late misses frames that did reach the screen, so drops are
@@ -80,6 +81,30 @@ export function dropsIn(drawn: readonly number[], engine: PlayDrops | null | und
   const missing: number[] = [];
   for (let frame = from; frame < to; frame++) if (!seen.has(frame)) missing.push(frame);
   return classifyDrops(missing, engine);
+}
+
+/**
+ * Program frames never drawn at cut `k`, the cut between `segments[k]` and `segments[k + 1]`: the run of undrawn
+ * frames at the end of segment k, counted back from its last frame, then the run at the start of segment k + 1. A run
+ * stays inside its segment; a drawn last (first) frame leaves that side empty.
+ */
+export function cutEdgeMissing(drawn: ReadonlySet<number>, segments: readonly Segment[], k: number): number[] {
+  const before = segments[k]!;
+  const after = segments[k + 1]!;
+  const tail: number[] = [];
+  for (let frame = before.pF + before.outF - before.inF - 1; frame >= before.pF && !drawn.has(frame); frame--) tail.push(frame);
+  const head: number[] = [];
+  for (let frame = after.pF; frame < after.pF + after.outF - after.inF && !drawn.has(frame); frame++) head.push(frame);
+  return [...tail.reverse(), ...head];
+}
+
+/**
+ * Dropped program frames at cut `k` by the engine's kind, from the frames it drew: the run of undrawn frames
+ * around the cut, classified like any other drop. A page rAF that read a stale canvas does not enter here.
+ */
+export function cutEdgeDrops(drawn: Iterable<number>, engine: PlayDrops | null | undefined, segments: readonly Segment[], k: number): Drops {
+  const seen = drawn instanceof Set ? (drawn as ReadonlySet<number>) : new Set(drawn);
+  return classifyDrops(cutEdgeMissing(seen, segments, k), engine);
 }
 
 /** `drops` for an annotation: counts and frames of each kind, then the engine's tick times when known. */
