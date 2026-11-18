@@ -149,3 +149,15 @@ export const SPEED_STOP_PX = 0.25;
 export const SPEED_STOP_FRAMES = 4;
 /** Width a generated clip's alpha is read at for its hero point, px; the centre is an alpha-weighted mean, finer than a pixel. */
 export const SPEED_ALPHA_WIDTH = 480;
+
+// Words behind the person (ADR 0032, #461): the share of a word that the subject's matte covers. The 30 to 55 % that reads
+// best is the claude-video-effects recipe quoted in #461; the warning bands are the owner's decision there (2026-11-17).
+
+/** Shares of the word covered (0 to 1) that read best: the person clearly in front, the word still read. */
+export const BEHIND_FINE = [0.3, 0.55] as const;
+/** Under this share the word floats beside the person instead of behind them: a warning. */
+export const BEHIND_FLOATS = 0.15;
+/** Over this share the person eats the word: a warning. Between the bands and the fine range, a gentle note only. */
+export const BEHIND_EATEN = 0.65;
+/** Width a word's render alpha is read at for its covered share, px; the matte is read at its own (proxy) size. */
+export const BEHIND_WIDTH = 320;

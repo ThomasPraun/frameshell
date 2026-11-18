@@ -185,7 +185,8 @@
           "click",
           "masking",
           "edge-click",
-          "harsh"
+          "harsh",
+          "behind"
         ]
       }
     },
@@ -217,12 +218,13 @@
               "click",
               "masking",
               "edge-click",
-              "harsh"
+              "harsh",
+              "behind"
             ],
             "description": "The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."
           },
           "clip": {
-            "description": "Waive only warnings whose time overlaps this clip. Absent: every warning of the check, including those about the whole film.",
+            "description": "Waive only warnings whose time overlaps this clip; a warning about one clip (`behind`: the word's clip) only when it is this clip. Absent: every warning of the check, including those about the whole film.",
             "type": "string",
             "minLength": 1
           },

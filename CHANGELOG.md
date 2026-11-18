@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review` measures a word behind the person, slice MX3 of #461 (ADR 0032, #457 follow-up, epic #451; protocol 173):
+  on a timeline with a track `behind` a plate, `metrics.behind` lists each clip on it with the share of the word the
+  person's matte covers at the first, middle and last frame of its time under the person (the word's render alpha
+  against the matte frame export draws, both placed in the film through keys and the format's cover crop) and whether
+  its box meets a face of the plate clip (a cached `people scan`). Under 15 % (it floats) or over 65 % (the person eats
+  it), or over a face, is a craft warning of the new check `behind`, which names 30 to 55 % as the target; between the
+  bands the entry carries a note only. The warning carries its `clip`, so a waiver of one word covers that word only.
+  Review reads finished mattes and never queues one; a still or media word, an opaque render or a plate with no matte
+  is `unplaced` with the reason. CLI `review` prints the entries; skill `critique.md` and `reels.md` teach them.
 - Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
   `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
   selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags
