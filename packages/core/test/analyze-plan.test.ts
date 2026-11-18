@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseLoudness } from "../src/analyze/loudness.js";
 import { PaletteBuilder } from "../src/analyze/palette.js";
 import { analysisName } from "../src/analyze/service.js";
-import { MIN_CUT_GAP_FRAMES, detectCuts, frameAt, frameStart, parseSceneScores, shotMiddle, shotStats, shotsOf } from "../src/analyze/shots.js";
+import { MIN_CUT_GAP_FRAMES, detectCuts, frameAt, frameStart, parseSceneScores, shotLengthsRead, shotMiddle, shotStats, shotsOf } from "../src/analyze/shots.js";
 
 // The pure parts of `analyze` (#471): cuts, shots, palette, loudness text, names.
 
@@ -61,6 +61,14 @@ describe("shots", () => {
 
   it("shotsOf ignores cuts outside the film and holds one shot without cuts", () => {
     expect(shotsOf([{ frame: 0, score: 1 }, { frame: 100, score: 1 }], 100)).toEqual([{ index: 1, startFrame: 0, endFrame: 100, cutScore: null }]);
+  });
+
+  it("shotLengthsRead keeps the parts of the shots a truncated read saw", () => {
+    const shots = shotsOf([{ frame: 30, score: 0.5 }, { frame: 75, score: 0.7 }, { frame: 120, score: 0.6 }], 200);
+    expect(shotLengthsRead(shots, 200)).toEqual([30, 45, 45, 80]);
+    // Read up to frame 90: the third shot is cut short, the last was never seen.
+    expect(shotLengthsRead(shots, 90)).toEqual([30, 45, 15]);
+    expect(shotLengthsRead(shots, 90, 40)).toEqual([35, 15]);
   });
 
   it("shotMiddle is a frame inside the shot, even of one frame", () => {

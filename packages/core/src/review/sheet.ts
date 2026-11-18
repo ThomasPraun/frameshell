@@ -80,6 +80,27 @@ export async function writeSheet(ffmpeg: string, tiles: readonly SheetTile[], op
   return { width: columns * (tile.width + SHEET_GAP) + SHEET_GAP, height: rows * (tile.height + SHEET_GAP) + SHEET_GAP, columns, rows };
 }
 
+/** Times the difference of the `pop` sheet is amplified: a change of 16 grey levels shows as 64. */
+export const DIFFERENCE_GAIN = 4;
+
+/**
+ * Write the absolute difference of two PNGs of one size, per channel, amplified {@link DIFFERENCE_GAIN} times (clipped),
+ * to PNG `out`: black where nothing changed. Rejects with ffmpeg's error.
+ */
+export async function writeDifference(ffmpeg: string, a: string, b: string, out: string, signal?: AbortSignal): Promise<void> {
+  // `blend` needs planar input; `colorlevels` maps 0..1/gain of the input to the full range.
+  const max = (1 / DIFFERENCE_GAIN).toFixed(4);
+  await runTool(
+    ffmpeg,
+    [
+      ...["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", a, "-i", b],
+      ...["-filter_complex", `[0:v]format=gbrp[a];[1:v]format=gbrp[b];[a][b]blend=all_mode=difference,colorlevels=rimax=${max}:gimax=${max}:bimax=${max},format=rgb24`],
+      ...["-frames:v", "1", out],
+    ],
+    signal ? { signal } : {},
+  );
+}
+
 /** `drawbox` filters (each led by a comma) that shade the zones of `shade` red and outline their inner edge; none without `shade`. */
 export function shadeFilters(tile: { width: number; height: number }, shade: ShadeFractions | undefined): string {
   if (!shade) return "";

@@ -17,6 +17,7 @@ import type {
   MulticamTurnsResult,
   MusicCandidatesResult,
   MusicGridResult,
+  MusicPickResult,
   MusicShapeResult,
   MusicFitResult,
   MethodName,
@@ -334,8 +335,14 @@ mutations print the new revision):
                                with --end each is fitted like music fit slides a clip (its own final hit lands on
                                --end) and they are ranked: files that cover the picture first, then by how sure the
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
-                               Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
-                               gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
+                               Choose with music pick <track>. Each clip gets a 5 ms fade in (audio.fadeInMs).
+                               One transaction (revert it)
+  music pick <track> [--keep] [--dry-run]
+                               Keep one candidate (its track id or name, e.g. "Music 2"): unmute it, rename it Music and
+                               remove the other candidate tracks with their clips (--keep leaves them in place, muted).
+                               A candidate you worked on (more than one clip, or a clip with speed, keys, effects, fades)
+                               is never removed: it is named and left. Nothing is fitted, shaped or ducked again; music
+                               fit and duck --level follow. --dry-run changes nothing. One transaction (revert it)
   music shape <clip> [--drop <time>]… [--ending <time> [--end-on-bar]] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
                      [--build s [--build-from Hz] [--build-to Hz]] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
@@ -561,6 +568,7 @@ export const TIMELINE_OPTIONS = {
   "min-confidence": { type: "string" },
   skip: { type: "string", multiple: true },
   "dry-run": { type: "boolean" },
+  keep: { type: "boolean" },
   hit: { type: "string" },
   drop: { type: "string", multiple: true },
   ending: { type: "string" },
@@ -698,6 +706,7 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
+  "music pick": ["keep", "dry-run"],
   "music shape": ["drop", "ending", "end-on-bar", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
   "music grid": ["to", "max-shift", "trim", "tracks", "skip", "dry-run"],
   "tx begin": [],
@@ -755,6 +764,7 @@ const ARITY: Record<string, [number, number]> = {
   cleanup: [0, 0],
   "music fit": [1, 1],
   "music candidates": [2, 7],
+  "music pick": [1, 1],
   "music shape": [1, 1],
   "music grid": [0, 0],
   "tx begin": [1, 1],
@@ -1512,6 +1522,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music pick":
+      method = "music.pick";
+      Object.assign(params, {
+        track: args[0],
+        keep: values["keep"] === true ? true : undefined,
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "music shape":
       method = "music.shape";
       Object.assign(params, {
@@ -1638,6 +1656,7 @@ export async function executeTimeline(
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
+  if (inv.method === "music.pick") return formatMusicPick(result as MusicPickResult);
   if (inv.method === "music.shape") return formatMusicShape(result as MusicShapeResult);
   if (inv.method === "music.grid") return formatMusicGrid(result as MusicGridResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
@@ -1817,6 +1836,19 @@ function formatMusicCandidates(result: MusicCandidatesResult): string {
   for (const skip of result.skipped) lines.push(`Left out ${skip.asset}: ${skip.reason}`);
   lines.push(`Ranking: ${result.ranking}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicPick(result: MusicPickResult): string {
+  const { chosen } = result;
+  const lines = [`Music pick · ${chosen.name} (${chosen.track}, ${chosen.asset}) kept${chosen.renamedTo ? `, renamed ${chosen.renamedTo}` : ""}${chosen.unmuted ? ", unmuted" : ""}${result.dryRun ? " · dry run" : ""}`];
+  for (const track of result.removed) lines.push(`  removed ${track.name} (${track.track}, ${track.asset})`);
+  for (const track of result.muted) lines.push(`  muted ${track.name} (${track.track}, ${track.asset}), left in place`);
+  for (const track of result.left) lines.push(`  left ${track.name} (${track.track}, ${track.asset}): ${track.reason}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`Next: ${result.next}`);
+  else if (result.dryRun) lines.push("Dry run: nothing changed; run again without --dry-run.");
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }

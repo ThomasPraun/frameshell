@@ -75,6 +75,7 @@ import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
 import { musicCandidatesLabel, planMusicCandidates } from "./music/candidates.js";
+import { musicPickLabel, planMusicPick } from "./music/pick.js";
 import { MUSIC_ENTRY_FADE_MS } from "./music/entry-fade.js";
 import { type GridWord, musicGridLabel, planGridMoves } from "./music/grid-moves.js";
 import { musicFitLabel, planMusicFit } from "./music/run.js";
@@ -1662,12 +1663,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
       return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
     },
-    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, view }, caller) => {
+    review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, pop: popRef, onion, speed, view }, caller) => {
       if (preset !== undefined && file === undefined) {
         throw new RpcError(ErrorCode.InvalidParams, "`preset` checks an exported file against its export plan: pass `file` too.", { issues: [{ path: ["file"], message: "required with `preset`" }] });
       }
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
+      // A marker or beat names a time of the timeline, also when its exported file is reviewed. Seconds need no
+      // timeline, so a file review with no timeline in the project still takes them.
+      let pop: number | undefined;
+      if (typeof popRef === "string") {
+        const loaded = await timelines.viewTimeline(dir, timeline, reviewView);
+        pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded));
+      } else if (popRef !== undefined) pop = await resolveTimeRefArg("review", "pop", popRef, { id: "" });
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
       const proposed = shownRequirements?.proposal ? requirementsFromState(shownRequirements.state) : null;
@@ -1675,6 +1683,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         timeline,
         ...(proposed ? { requirements: proposed.file, ...(proposed.error !== undefined ? { requirementsError: proposed.error } : {}) } : {}),
         ...(cropAt ? { cropAt } : {}),
+        ...(pop !== undefined ? { pop } : {}),
+        ...(onion !== undefined ? { onion } : {}),
+        ...(speed !== undefined ? { speed } : {}),
         ...(file ? { file: resolve(cwd, file) } : {}),
         from,
         to,
@@ -2632,6 +2643,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         }
       });
       return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...plan, candidates: placed, warnings: [...warnings] };
+    },
+    "music.pick": async ({ cwd, timeline, track, keep, dryRun }, caller) => {
+      const dir = await root(cwd);
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const { report, requests } = planMusicPick(loaded, { track, keep });
+      if (dryRun || requests.length === 0) return { timeline, revision: loaded.revision, dryRun, applied: false, tx: null, ...report };
+      // Nothing slow is planned, but a track removed from an older timeline could take a clip the person just edited.
+      await assertFresh(dir, timeline, caller, "music.pick", loaded.revision, "the pick");
+      const warnings = new Set(report.warnings);
+      const written = await writeSteps({ dir, cwd, timeline, caller, label: musicPickLabel(report), revision: loaded.revision, warnings }, async (write) => {
+        for (const request of requests) await write(request);
+      });
+      return { timeline, revision: written.revision, dryRun, applied: true, tx: written.tx, ...report, warnings: [...warnings] };
     },
     "music.grid": async ({ cwd, timeline, to, maxShift, trim, tracks, dryRun, skip }, caller) => {
       const dir = await root(cwd);

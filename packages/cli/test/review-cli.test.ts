@@ -181,6 +181,21 @@ describe("frameshell review", () => {
     120_000,
   );
 
+  it(
+    "writes the per-clip kit alone: the --pop pair and the --speed chart with its line",
+    () => {
+      const shown = JSON.parse(frameshell(["timeline", "show", "--json"]).stdout) as { tracks: { kind: string; clips: { id: string }[] }[] };
+      const clip = shown.tracks.find((track) => track.kind === "video")!.clips[0]!.id;
+      const result = frameshell(["review", "--pop", "0.5", "--speed", clip]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(/pop\.png\s+\d+x\d+\s+pop, 3 tiles/);
+      expect(result.stdout).toMatch(/speed\.png\s+\d+x\d+\s+speed, 1 tiles/);
+      expect(result.stdout).not.toContain("contact.png");
+      expect(result.stdout).toContain(`[ESTIMATED] speed of ${clip} (placement, 30 of 30 frames): peak 0 px/frame, no linear move or dead stop`);
+    },
+    120_000,
+  );
+
   it("rejects --preset without --file", () => {
     expect(frameshell(["review", "--preset", "youtube-1080p"]).stderr).toContain("--preset checks an exported file against its export plan: pass --file too");
   });
@@ -190,7 +205,9 @@ describe("frameshell review", () => {
     expect(frameshell(["review", "--range", "5"]).stderr).toContain("--range takes two seconds");
     expect(frameshell(["review", "--range", "5,2"]).code).toBe(2);
     expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("unknown: poster");
-    expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("seam, beats, metrics");
+    expect(frameshell(["review", "--sheets", "contact,poster"]).stderr).toContain("seam, beats, cuts, metrics");
+    expect(frameshell(["review", "--sheets", "pop"]).stderr).toContain("unknown: pop");
+    expect(frameshell(["review", "--onion", " "]).stderr).toContain("--onion takes a clip id");
     expect(frameshell(["review", "--every", "0"]).stderr).toContain("--every takes seconds above 0");
     expect(frameshell(["review", "--crop-at", "0.5"]).stderr).toContain("--crop-at takes x,y");
     expect(frameshell(["review", "--clip", "c_1"]).stderr).toContain("pass --crop-at x,y too");

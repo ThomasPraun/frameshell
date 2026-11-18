@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   ErrorCode,
   REVIEW_KEEP,
-  REVIEW_SHEETS,
+  REVIEW_PICKED_SHEETS,
   type ReviewDelivery,
   type ReviewLoudness,
   type ReviewMetrics,
@@ -16,11 +16,13 @@ import {
   type ReviewSheet,
   type ReviewSheetKind,
   type ReviewSound,
+  type ReviewSpeed,
   type ReviewSync,
   RpcError,
   type TimelineViewName,
 } from "@frameshell/protocol";
 import {
+  type AdapterClip,
   type FormatEntry,
   type PlatformId,
   letterboxPicture,
@@ -49,35 +51,46 @@ import { soundsOn } from "../sound/place.js";
 import type { TimelineService } from "../timeline/service.js";
 import type { TempoResult } from "../timeline/tempo.js";
 import { unusableGrid } from "../timeline/time-ref.js";
+import { encodeRgbPng } from "../segment/png.js";
 import {
   type BeatGrid,
   type CropRect,
   type Critical,
+  type CutPick,
   DEFAULT_CROP_SIZE,
   type FramePick,
+  type FrameRange,
   MAX_SAFE_TILES,
   beatPicks,
   contactPicks,
   cropRect,
+  cutPicks,
   frameIndex,
   frameRange,
   frameTime,
   motionPeaks,
+  onionPicks,
   phonePicks,
+  popPicks,
   seamPicks,
   sheetLayout,
   stripPicks,
   STRIPS,
   tileLabel,
   timelineCritical,
+  timelineSampleStep,
 } from "./plan.js";
-import { Frames, type SheetImagesOptions, writeSheetImages } from "./images.js";
+import { speedChart } from "./chart.js";
+import { Frames, type KitSheetOptions, type SheetImagesOptions, writeOnionSheet, writePopSheet, writeSheetImages } from "./images.js";
+import { writeSheet } from "./sheet.js";
+import { type HeroSample, peakSpeed, spansOf, speedOf } from "./speed.js";
+import { SPEED_ALPHA_WIDTH } from "./thresholds.js";
 import { deliveryChecks } from "./delivery.js";
 import { seamOf, seamVerdict } from "./loop.js";
 import { reviewMetrics, visualEvents } from "./metrics.js";
 import { fileBandEnvelope, fileClicks, fileEnvelope, fileOnsets, takeOnsets } from "./onsets.js";
 import { fileSound, heardClips, timelineSound } from "./sound.js";
-import { type BoxSpan, type ClipPicture, clipPointInFilm, faceBoxes, graphicBoxes } from "./placement.js";
+import { type BoxSpan, type ClipPicture, alphaHero, clipHero, clipPointInFilm, faceBoxes, graphicBoxes } from "./placement.js";
 import { type ClipSpan, type FramePlacement, judgeRequirements } from "./requirements.js";
 import { readRequirementsFile } from "./requirements-file.js";
 import { boxCrossings, cueCrossings, filmInsets, safeFlags, sameOrientation, subjectsAt, withinPicture } from "./safe.js";
@@ -86,6 +99,16 @@ import { syncMetrics } from "./sync.js";
 
 /** A timeline flattened for a format, as `ExportService.resolvedTimeline` gives it. */
 type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
+
+/** A clip of a video track of the flattened timeline, as `ReviewService.#videoClip` finds it. */
+interface VideoClip {
+  clip: ClipPicture["clip"];
+  placed: ClipPicture;
+  /** Timeline seconds it starts and ends. */
+  start: number;
+  end: number;
+  resolved: Flat;
+}
 
 /** What `ReviewService.#boxes` placed: graphics and faces, generated clips with no alpha, and whether the timeline was laid out at all. */
 interface Placed {
@@ -154,13 +177,20 @@ export interface ReviewRequest {
   requirementsError?: string | undefined;
   /** Crop every tile but the `safe` sheet's around this point. */
   cropAt?: CropAt | undefined;
+  /** Seconds of a pop: the `pop` sheet shows the frame before and the frame at it, and their difference. */
+  pop?: number | undefined;
+  /** Clip id whose frames the `onion` sheet blends. */
+  onion?: string | undefined;
+  /** Clip id whose hero point the `speed` sheet charts. */
+  speed?: string | undefined;
 }
 
 /** Where review runs are written, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
 export const REVIEW_DIR = [".frameshell", "review"] as const;
 
 /**
- * `review` (#457): contact sheet, phone sheet, fast-motion strips, loop seam and `metrics.json` of a timeline or an
+ * `review` (#457): contact sheet, phone sheet, fast-motion strips, loop seam, cut strips, the per-clip kit (pop pair,
+ * onion skin, speed graph) and `metrics.json` of a timeline or an
  * exported file, written to `.frameshell/review/<n>/`. Frames come from the `frame` method (timeline) or ffmpeg (file); sampling
  * is in `plan.ts` and tiling in `sheet.ts`, which #471 `analyze` shares.
  */
@@ -180,6 +210,11 @@ export class ReviewService {
         reason: "file",
       });
     }
+    for (const field of ["onion", "speed"] as const) {
+      if (request.file && request[field] !== undefined) {
+        throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` names a clip of the timeline, and a file has no clips: review the timeline.`, { op: "review", field, reason: "file" });
+      }
+    }
     const scratch = join(root, ".frameshell", "cache", "review", randomBytes(6).toString("hex"));
     await mkdir(scratch, { recursive: true });
     try {
@@ -195,10 +230,23 @@ export class ReviewService {
           valid: { min: 0, max: last },
         });
       }
-      const safePlatforms = await this.#safePlatforms(root, request, source, warnings);
-      // `beats` is written only when named: it needs a tempo, which most films do not set.
-      const asked = (kind: ReviewSheetKind) => (kind === "beats" ? request.sheets?.includes(kind) === true : request.sheets === undefined || request.sheets.includes(kind));
-      const kinds = REVIEW_SHEETS.filter((kind) => (kind === "safe" ? safePlatforms.length > 0 : asked(kind)));
+      const pop = request.pop === undefined ? null : popPicks(source.frames, frameIndex(request.pop, source.fps));
+      if (request.pop !== undefined && !pop) {
+        const last = frameTime(source.frames - 1, source.fps);
+        throw new RpcError(ErrorCode.InvalidOperation, `review: \`pop\` ${request.pop} s is ${request.pop < 1 / source.fps ? "the first frame, which has no frame before it" : "past the film's last frame"} (a pop is looked at from ${frameTime(1, source.fps)} to ${last} s).`, {
+          op: "review",
+          field: "pop",
+          reason: "out of range",
+          valid: { min: frameTime(1, source.fps), max: last },
+        });
+      }
+      // With only the per-clip kit asked for, the run is a debugging look: no default sheets.
+      const kitOnly = request.sheets === undefined && (request.pop !== undefined || request.onion !== undefined || request.speed !== undefined);
+      const safePlatforms = kitOnly && !request.platform ? [] : await this.#safePlatforms(root, request, source, warnings);
+      // `beats` and `cuts` are written only when named: a tempo most films do not set, a strip per cut that floods a long film.
+      const asked = (kind: (typeof REVIEW_PICKED_SHEETS)[number]) =>
+        kind === "beats" || kind === "cuts" ? request.sheets?.includes(kind) === true : !kitOnly && (request.sheets === undefined || request.sheets.includes(kind));
+      const kinds = REVIEW_PICKED_SHEETS.filter((kind) => (kind === "safe" ? safePlatforms.length > 0 : asked(kind)));
       const frames = new Frames(source, join(scratch, "frames"));
       const aspect = source.width / source.height;
       const sheets: ReviewSheet[] = [];
@@ -223,6 +271,11 @@ export class ReviewService {
       const placed = (topic: string): Promise<Placed> => (placing ??= this.#boxes(root, flat, source, join(scratch, "boxes"), warnings, topic, signal));
       const crop = request.cropAt ? await this.#cropper(root, request, request.cropAt, frame, loaded ? flat : null, loaded ? picture : null) : undefined;
       if (crop && kinds.includes("safe")) warnings.push("safe: the safe-zone sheet shows whole frames, not the `cropAt` crop: its zones lie on the frame's edges.");
+      const onion = request.onion === undefined ? null : await this.#clipFrames(root, request, "onion", request.onion, frame, flat, range);
+      const speedClip = request.speed === undefined ? null : await this.#clipFrames(root, request, "speed", request.speed, frame, flat, range);
+      let cutting: Promise<number[]> | undefined;
+      /** Frames where a shot starts, found once for the `cuts` sheet and the metrics. */
+      const cutFrames = (): Promise<number[]> => (cutting ??= this.#cuts(request, source, critical, ffmpeg, warnings, signal));
       // After `cropAt` is checked, so a refused clip leaves no empty run folder.
       const { run, dir } = await this.#nextRun(root);
 
@@ -280,6 +333,13 @@ export class ReviewService {
           const picks = seamPicks(range);
           if (picks) await write("seam", picks, "seam");
           else warnings.push("seam: the range is a single frame, so there is no seam to look at.");
+        } else if (kind === "cuts") {
+          const found = cutPicks(source.fps, range, await cutFrames());
+          if (found.picks.length === 0) warnings.push("cuts: no cut falls inside the range reviewed, so there is no seam strip to show.");
+          else {
+            if (found.dropped > 0) warnings.push(`cuts: ${found.cuts} cuts in the range; the sheet shows ${found.cuts - found.dropped} of them spread evenly and leaves ${found.dropped} out (narrow the range to see them).`);
+            await write("cuts", found.picks, "cuts", false, { label: (pick, at) => tileLabel(at, pick.tag, (pick as CutPick).name) });
+          }
         } else if (kind === "beats") {
           const grid = loaded ? await this.#beatGrid(root, loaded, source, warnings) : null;
           if (!loaded) warnings.push("beats: a file has no tempo grid: review the timeline for the beats sheet.");
@@ -300,8 +360,29 @@ export class ReviewService {
         }
       }
 
+      const kit: KitSheetOptions = { ffmpeg, fps: source.fps, aspect, frames, layout: sheetLayout("pop", aspect), dir, scratch, signal, ...(crop ? { crop } : {}) };
+      if (pop) {
+        signal?.throwIfAborted();
+        sheets.push({ kind: "pop", ...(await writePopSheet({ ...kit, picks: pop })) });
+      }
+      if (onion) {
+        signal?.throwIfAborted();
+        const picks = onionPicks(onion.frames);
+        const label = tileLabel(frameTime(picks[0]!.frame, source.fps), "onion", `onion ${request.onion} ${picks.length} frames to ${frameTime(picks.at(-1)!.frame, source.fps).toFixed(2)}`);
+        sheets.push({ kind: "onion", ...(await writeOnionSheet({ ...kit, layout: sheetLayout("onion", aspect), picks, label })) });
+      }
+      const speed: ReviewSpeed[] = [];
+      if (speedClip) {
+        signal?.throwIfAborted();
+        const found = await this.#speed(root, request.speed!, speedClip, source, { ffmpeg, dir, scratch, warnings, signal });
+        speed.push(found.speed);
+        if (found.sheet) sheets.push(found.sheet);
+      }
+
       let metrics: ReviewMetrics | null = null;
-      if (request.sheets === undefined || request.sheets.includes("metrics")) {
+      const wantsMetrics = request.sheets === undefined ? !kitOnly || request.speed !== undefined : request.sheets.includes("metrics");
+      if (request.speed !== undefined && !wantsMetrics) warnings.push("speed: its linear moves and dead stops are listed in `metrics.speed`: add `metrics` to the sheets to get them.");
+      if (wantsMetrics) {
         signal?.throwIfAborted();
         const series = await motion();
         const seconds = { from: frameTime(range.first, source.fps), to: frameTime(range.end, source.fps) };
@@ -309,7 +390,7 @@ export class ReviewService {
         let decoded: Promise<Float32Array> | undefined;
         /** The 10 ms envelope of a file's sound, decoded once for the sync and the sound review list. */
         const envelope = (file: string) => (decoded ??= fileEnvelope(ffmpeg, file, join(scratch, "sound")));
-        const cuts = await this.#cuts(request, source, critical, ffmpeg, warnings, signal);
+        const cuts = await cutFrames();
         const sync = await this.#sync(root, request, source, loaded ? flat : null, series, cuts, critical, seconds, envelope, warnings, signal);
         const sound = await this.#sound(root, request, source, loaded ? flat : null, seconds, ffmpeg, envelope, scratch, warnings, signal);
         const seam = await this.#seam(source, range, frames, ffmpeg, warnings, signal);
@@ -329,6 +410,7 @@ export class ReviewService {
           delivery,
           sound,
           safe: safeZones.map(({ platform, flags }) => ({ platform, flags })),
+          ...(speedClip ? { speed } : {}),
         });
         if (request.requirementsError !== undefined) warnings.push(`requirements: the proposal's requirements are invalid (${request.requirementsError.split("\n")[0]}), so the film is judged without them.`);
         const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
@@ -432,14 +514,29 @@ export class ReviewService {
       const fixed = cropRect(frame, { x: at.x * frame.width, y: at.y * frame.height }, size, bars);
       return () => fixed;
     }
-    const resolved = await flat!();
+    const { clip, placed, start, end, resolved } = await this.#videoClip(root, request, "cropAt.clip", at.clip, frame, flat!);
+    const last = Math.max(start, end - 0.5 / resolved.fps);
+    return (_pick, seconds) => {
+      // The middle of the frame, where the capture takes it.
+      const shown = Math.min(Math.max(seconds + 0.5 / resolved.fps, clip.start), last);
+      const point = clipPointInFilm(placed, shown, at, frame, resolved.project, resolved.layout);
+      return cropRect(frame, point, size, bars);
+    };
+  }
+
+  /**
+   * The clip `id` of a video track of the flattened timeline, with the size of its own picture. Throws InvalidOperation,
+   * naming `field`, when there is no such clip or it has no picture.
+   */
+  async #videoClip(root: string, request: ReviewRequest, field: string, id: string, frame: Size, flat: () => Promise<Flat>): Promise<VideoClip> {
+    const resolved = await flat();
     const base = resolved.timeline.tracks.find(showsPicture);
-    const track = resolved.timeline.tracks.find((candidate) => candidate.kind === "video" && candidate.clips.some((clip) => clip.id === at.clip));
-    const clip = track?.kind === "video" ? track.clips.find((candidate) => candidate.id === at.clip) : undefined;
+    const track = resolved.timeline.tracks.find((candidate) => candidate.kind === "video" && candidate.clips.some((clip) => clip.id === id));
+    const clip = track?.kind === "video" ? track.clips.find((candidate) => candidate.id === id) : undefined;
     if (!track || !clip) {
-      throw new RpcError(ErrorCode.InvalidOperation, `review: \`cropAt.clip\` ${at.clip} is not a clip of a video track of timeline ${request.timeline} (\`timeline.show\` lists the clip ids).`, {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` ${id} is not a clip of a video track of timeline ${request.timeline} (\`timeline.show\` lists the clip ids).`, {
         op: "review",
-        field: "cropAt.clip",
+        field,
         reason: "not found",
       });
     }
@@ -447,20 +544,102 @@ export class ReviewService {
     let source: Size | null = frame;
     if ("asset" in clip && this.#options.pictureSize) source = await this.#options.pictureSize(root, clip.asset);
     if (!source) {
-      throw new RpcError(ErrorCode.InvalidOperation, `review: \`cropAt.clip\` ${at.clip} plays ${"asset" in clip ? clip.asset : "a clip"}, which has no picture to follow.`, {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` ${id} plays ${"asset" in clip ? clip.asset : "a clip"}, which has no picture to follow.`, {
         op: "review",
-        field: "cropAt.clip",
+        field,
         reason: "no picture",
       });
     }
-    const placed: ClipPicture = { clip, source, generated, base: base?.id === track.id };
     const length = "asset" in clip ? (clip.out - clip.in) / (clip.speed ?? 1) : (clip.duration ?? 0);
-    const last = clip.start + Math.max(0, length - 0.5 / resolved.fps);
-    return (_pick, seconds) => {
-      // The middle of the frame, where the capture takes it.
-      const shown = Math.min(Math.max(seconds + 0.5 / resolved.fps, clip.start), last);
-      const point = clipPointInFilm(placed, shown, at, frame, resolved.project, resolved.layout);
-      return cropRect(frame, point, size, bars);
+    return { clip, placed: { clip, source, generated, base: base?.id === track.id }, start: clip.start, end: clip.start + length, resolved };
+  }
+
+  /** The clip `id` of {@link #videoClip} and the frames of the range it plays in; InvalidOperation when it plays in none. */
+  async #clipFrames(root: string, request: ReviewRequest, field: "onion" | "speed", id: string, frame: Size, flat: () => Promise<Flat>, range: FrameRange): Promise<VideoClip & { frames: FrameRange }> {
+    const found = await this.#videoClip(root, request, field, id, frame, flat);
+    const fps = found.resolved.fps;
+    const frames = { first: Math.max(range.first, frameIndex(found.start, fps)), end: Math.min(range.end, Math.ceil(found.end * fps - 1e-6)) };
+    if (frames.first >= frames.end) {
+      throw new RpcError(ErrorCode.InvalidOperation, `review: \`${field}\` ${id} plays from ${found.start} to ${Math.round(found.end * 1000) / 1000} s, outside the range reviewed.`, {
+        op: "review",
+        field,
+        reason: "out of range",
+      });
+    }
+    return { ...found, frames };
+  }
+
+  /**
+   * The speed graph of a clip's hero point over `found.frames`: a media clip's picture as its keys place it, every frame;
+   * a generated clip's alpha (centre and area), at up to 90 frames. Writes the chart as the `speed` sheet. A generated clip
+   * with no render, no alpha, a render that fails or alpha on fewer than two frames is skipped with the reason, in the
+   * entry and in `warnings`.
+   */
+  async #speed(
+    root: string,
+    id: string,
+    found: VideoClip & { frames: FrameRange },
+    source: FilmSource,
+    out: { ffmpeg: string; dir: string; scratch: string; warnings: string[]; signal?: AbortSignal | undefined },
+  ): Promise<{ speed: ReviewSpeed; sheet: ReviewSheet | null }> {
+    const { resolved, placed, frames } = found;
+    const fps = source.fps;
+    const film = { width: source.width, height: source.height };
+    const count = frames.end - frames.first;
+    const entry = { clip: id, label: "ESTIMATED" as const, hero: placed.generated ? ("alpha" as const) : ("placement" as const), from: frameTime(frames.first, fps), to: frameTime(frames.end, fps), frames: count };
+    const skip = (reason: string) => {
+      out.warnings.push(`speed: ${id} is not measured: ${reason}.`);
+      return { speed: { ...entry, samples: 0, peak: 0, spans: [], sheet: null, skipped: reason }, sheet: null };
+    };
+    let samples: HeroSample[];
+    if (placed.generated) {
+      const otherSize = film.width !== resolved.project.width || film.height !== resolved.project.height;
+      try {
+        const renders = this.#options.generated ? await this.#options.generated(root, resolved.timeline, otherSize ? film : undefined) : null;
+        const render = renders?.get(id);
+        if (!render) return skip("its clip has no render to read");
+        if (!render.hasAlpha) return skip("its render has no alpha plane, so what it draws has no centre to follow");
+        const step = timelineSampleStep(count);
+        samples = await alphaHero(
+          { ffmpeg: out.ffmpeg, clip: found.clip as AdapterClip, render, film, project: resolved.project, work: join(out.scratch, "speed"), signal: out.signal },
+          { first: frames.first, count: Math.ceil(count / step), step },
+          fps,
+          SPEED_ALPHA_WIDTH,
+        );
+      } catch (error) {
+        // As the safe-zone boxes do: a render or alpha read that fails is a reason in the result, never a failed run.
+        out.signal?.throwIfAborted();
+        return skip(`its render could not be read (${(error as Error).message.split("\n")[0]})`);
+      }
+      if (samples.length < 2) return skip("its alpha shows on fewer than two of the frames read, so there is no move to measure");
+    } else {
+      samples = [];
+      for (let frame = frames.first; frame < frames.end; frame++) samples.push({ frame, ...clipHero(placed, (frame + 0.5) / fps, film, resolved.project, resolved.layout) });
+    }
+    const intervals = speedOf(samples);
+    const spans = spansOf(intervals);
+    const peak = peakSpeed(intervals);
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    const layout = sheetLayout("speed", film.width / film.height);
+    const tile = { width: layout.tileWidth, height: Math.round(layout.tileWidth * 0.28) };
+    const work = join(out.scratch, "speed-chart");
+    await mkdir(work, { recursive: true });
+    const chart = speedChart(intervals, spans, { first: samples[0]?.frame ?? frames.first, end: samples.at(-1)?.frame ?? frames.end }, tile.width, tile.height);
+    await writeFile(join(work, "chart.png"), encodeRgbPng(chart.pixels, chart.width, chart.height));
+    const counted = (kind: string) => spans.filter((span) => span.kind === kind).length;
+    const label = tileLabel(entry.from, "speed", `speed ${id} peak ${round(peak)} px/frame, ${counted("linear")} linear, ${counted("stop")} stop`);
+    const path = join(out.dir, "speed.png");
+    const size = await writeSheet(out.ffmpeg, [{ path: join(work, "chart.png"), label }], { out: path, columns: 1, tile, scratch: join(work, "sheet"), ...(out.signal ? { signal: out.signal } : {}) });
+    const sheet: ReviewSheet = { kind: "speed", path, ...size, tile, tiles: [{ at: entry.from, frame: frames.first, tag: "speed", label, row: 0, column: 0 }] };
+    return {
+      speed: {
+        ...entry,
+        samples: samples.length,
+        peak: round(peak),
+        spans: spans.map((span) => ({ from: frameTime(span.from, fps), to: frameTime(Math.min(frames.end, span.to + 1), fps), kind: span.kind, speed: round(span.speed) })),
+        sheet: path,
+      },
+      sheet,
     };
   }
 
