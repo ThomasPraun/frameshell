@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { LiveContext, PluginApi, RenderContext, RenderProgress } from "@frameshell/plugin-api";
+import type { LiveContext, PluginApi, RenderContext, RenderProgress, RenderTiming } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
 import { patchedBundle, withSheet } from "../src/elements.js";
 import {
@@ -153,6 +153,48 @@ describe("remotion props", () => {
     expect(validate({ composition: "Intro", inputProps: { when: new Date() } }).issues).toHaveLength(1);
     expect(validate({ composition: "Intro", title: "Launch" }).issues?.[0]?.message).toMatch(/unknown prop title: composition props go inside inputProps/);
     expect(validate("Intro").issues).toHaveLength(1);
+  });
+});
+
+describe("remotion props: timing (ADR 0029 decision 8)", () => {
+  const validate = (value: unknown) => propsSchema["~standard"].validate(value) as { issues?: { message: string; path?: string[] }[] };
+
+  it("takes the kinds beats and markers", () => {
+    expect(validate({ composition: "Intro", timing: ["beats", "markers"] }).issues).toBeUndefined();
+    expect(validate({ composition: "Intro", timing: ["markers"], inputProps: { title: "A" } }).issues).toBeUndefined();
+    expect(validate({ composition: "Intro", timing: [] }).issues).toBeUndefined();
+  });
+
+  it("refuses unknown kinds and a timing that is not a list, naming the kinds", () => {
+    expect(validate({ composition: "Intro", timing: ["beats", "bars"] }).issues).toEqual([
+      { message: 'unknown timing "bars": use "beats" and/or "markers", e.g. ["beats", "markers"]', path: ["timing"] },
+    ]);
+    expect(validate({ composition: "Intro", timing: "beats" }).issues?.[0]?.message).toMatch(/timing must be a list/);
+  });
+
+  it("refuses the reserved input prop while the clip asks for timing, and only then", () => {
+    const own = { frameshellTiming: { beats: [] } };
+    const refused = validate({ composition: "Intro", timing: ["beats"], inputProps: own }).issues;
+    expect(refused).toHaveLength(1);
+    expect(refused![0]!.message).toMatch(/inputProps\.frameshellTiming is reserved/);
+    expect(refused![0]!.path).toEqual(["inputProps", "frameshellTiming"]);
+    expect(validate({ composition: "Intro", inputProps: own }).issues).toBeUndefined();
+    expect(validate({ composition: "Intro", timing: [], inputProps: own }).issues).toBeUndefined();
+  });
+});
+
+describe("remotion adapter timing()", () => {
+  const timing = (props: unknown) => adapter(fakeRemotion().load).timing!({ id: "c_1", source: SOURCE, props });
+
+  it("returns the kinds the clip lists, sorted and once each", async () => {
+    expect(await timing({ composition: "Intro", timing: ["markers", "beats", "markers"] })).toEqual(["beats", "markers"]);
+    expect(await timing({ composition: "Intro", timing: ["markers"] })).toEqual(["markers"]);
+  });
+
+  it("returns none for a clip without the prop, with an empty list or without props", async () => {
+    expect(await timing({ composition: "Intro", inputProps: { frameshellTiming: 1 } })).toEqual([]);
+    expect(await timing({ composition: "Intro", timing: [] })).toEqual([]);
+    expect(await timing(undefined)).toEqual([]);
   });
 });
 
@@ -377,6 +419,35 @@ describe("remotion adapter render", () => {
     expect(progress.every((p, i) => i === 0 || p.fraction >= progress[i - 1]!.fraction)).toBe(true);
   });
 
+  const grid: RenderTiming = {
+    beats: [{ at: 0.5, beat: 3, bar: 1 }, { at: 1, beat: 4 }],
+    tempo: { bpm: 120, meter: 4 },
+    markers: [{ at: 0.75, id: "m_1", label: "drop" }],
+  };
+
+  it("passes ctx.timing to selectComposition and the render as inputProps.frameshellTiming, next to the clip's own", async () => {
+    const { load, calls } = fakeRemotion();
+    const { ctx } = context(tempDir());
+    await adapter(load).render({ id: "c_1", source: SOURCE, props: { composition: "Intro", timing: ["beats", "markers"], inputProps: { title: "Hola" } } }, { ...ctx, timing: grid });
+    expect(calls.render[0]!["inputProps"]).toEqual({ title: "Hola", frameshellTiming: grid });
+    expect(calls.select[0]).toMatchObject({ inputProps: { title: "Hola", frameshellTiming: grid } });
+  });
+
+  it("reaches the composition with beatsProblem when there is no usable grid", async () => {
+    const { load, calls } = fakeRemotion();
+    const { ctx } = context(tempDir());
+    const problem: RenderTiming = { beats: [], beatsProblem: "no-beats" };
+    await adapter(load).render({ id: "c_1", source: SOURCE, props: { composition: "Intro", timing: ["beats"] } }, { ...ctx, timing: problem });
+    expect(calls.render[0]!["inputProps"]).toEqual({ frameshellTiming: { beats: [], beatsProblem: "no-beats" } });
+  });
+
+  it("leaves a clip that did not ask exactly as it was", async () => {
+    const { load, calls } = fakeRemotion();
+    await adapter(load).render({ id: "c_1", source: SOURCE, props: { composition: "Intro", inputProps: { title: "Hola" } } }, context(tempDir()).ctx);
+    expect(calls.render[0]!["inputProps"]).toEqual({ title: "Hola" });
+    expect(calls.select[0]).toMatchObject({ inputProps: { title: "Hola" } });
+  });
+
   it("names the entry's compositions when props.composition is not one of them", async () => {
     const { load } = fakeRemotion([
       { id: "Intro", width: 1920, height: 1080, fps: 30, durationInFrames: 30 },
@@ -580,6 +651,18 @@ describe("remotion adapter live preview (ADR 0010)", () => {
     expect(head).not.toMatch(/<\/script/i);
     expect(head).not.toMatch(/[\u2028\u2029]/);
     expect(load(head).window["remotion_inputProps"]).toBe(JSON.stringify({ title: "</script>\u2028" }));
+  });
+
+  it("puts the timing in the page's input props as render does, and nothing for a clip that did not ask", async () => {
+    withInternals();
+    const { load: loadRemotion, calls } = fakeRemotion();
+    const grid: RenderTiming = { beats: [{ at: 0.5, beat: 1, bar: 1 }], tempo: { bpm: 120, meter: 4 }, markers: [{ at: 1, id: "m_1", label: "</script>\u2028" }] };
+    const asked = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro", timing: ["beats", "markers"], inputProps: { title: "Hola" } } }, { ...live, timing: grid });
+    expect(load(asked.head).window["remotion_inputProps"]).toBe(JSON.stringify({ title: "Hola", frameshellTiming: grid }));
+    expect(asked.head).not.toMatch(/<\/script/i);
+    expect(calls.select.at(-1)).toMatchObject({ inputProps: { title: "Hola", frameshellTiming: grid } });
+    const plain = await adapter(loadRemotion).livePreview!({ id: "c_1", source: SOURCE, props: { composition: "Intro", inputProps: { title: "Hola" } } }, live);
+    expect(load(plain.head).window["remotion_inputProps"]).toBe(JSON.stringify({ title: "Hola" }));
   });
 
   it("refuses a bundle without the page globals it drives, naming them and the Remotion version", async () => {
