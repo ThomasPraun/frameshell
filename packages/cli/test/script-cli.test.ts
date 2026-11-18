@@ -125,7 +125,10 @@ describe("frameshell script check", () => {
 });
 
 describe("frameshell shoot", () => {
-  it("adds a take, prints its deviations, accepts them and chooses a take", () => {
+  // The three tests share one take: later ones continue from the state the earlier ones left.
+  let take: string;
+
+  beforeAll(() => {
     writeFileSync(join(project, "scripts", "take.md"), ["---", "shoot: true", "---", "## Hook", "Hola a todos"].join("\n"));
     const bytes = "fake take";
     // Outside assets/: no ingest (and no ffmpeg download) starts for it.
@@ -133,20 +136,27 @@ describe("frameshell shoot", () => {
     writeFileSync(join(project, "takes", "t1.wav"), bytes);
     const words = ["hola", "a", "todas"].map((text, index) => ({ id: `w_00000${index + 1}`, text, start: index * 0.4, end: index * 0.4 + 0.3 }));
     const assetHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-    mkdirSync(join(project, "transcripts"), { recursive: true });
     mkdirSync(join(project, "transcripts", "takes"), { recursive: true });
     writeFileSync(join(project, "transcripts", "takes", "t1.words.json"), JSON.stringify({ schemaVersion: 1, asset: "takes/t1.wav", assetHash, provider: "t", model: "t", language: "es", words }));
+  });
 
+  it("adds a take and prints its deviations", () => {
     const added = frameshell(["shoot", "add", "scripts/take.md", "takes/t1.wav", "--scene", "hook"]);
     expect(added.code, added.stderr).toBe(0);
     expect(added.stdout).toMatch(/^Added take (k_[0-9a-f]{6}) \(takes\/t1\.wav, from #hook\) to shoots\/take\.json\n {2}1 deviation, covers hook$/m);
-    const take = /take (k_[0-9a-f]{6})/.exec(added.stdout)![1]!;
+    take = /take (k_[0-9a-f]{6})/.exec(added.stdout)![1]!;
     const status = frameshell(["shoot", "status", "scripts/take.md"]);
     expect(status.stdout).toMatch(/^ {2}#hook {2}deviations {2}take k_[0-9a-f]{6} {2}1 pending$/m);
     expect(status.stdout).toMatch(/^ {2}d_[0-9a-f]{10} {2}changed {2}line 5 @0\.80s {2}"todos" heard "todas" {2}\(maybe transcription\)$/m);
+  });
+
+  it("accepts the deviations and chooses the take", () => {
     expect(frameshell(["shoot", "accept", "scripts/take.md", take]).stdout).toBe(`Accepted 1 deviation of take ${take}\n`);
     expect(JSON.parse(frameshell(["shoot", "status", "scripts/take.md", "--json"]).stdout).scenes[0]).toMatchObject({ state: "done" });
     expect(frameshell(["shoot", "choose", "scripts/take.md", "hook", take]).stdout).toBe(`Scene #hook: ${take} (was default)\n`);
+  });
+
+  it("discards a take with --restore and exits 2 on bad usage", () => {
     expect(frameshell(["shoot", "discard", "scripts/take.md", take, "--restore"]).code).toBe(0);
     expect(frameshell(["shoot", "status"]).code).toBe(2);
     expect(frameshell(["shoot", "status", "scripts/take.md", "--undo"]).code).toBe(2);

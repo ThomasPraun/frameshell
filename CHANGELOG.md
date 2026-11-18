@@ -1655,6 +1655,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Review switch (ADR 0019, test hardening #515, #516, #533): the "Review agent changes before applying" checkbox keeps
+  the click until the review state agrees with it (or the call fails), instead of jumping back when the daemon's reply
+  arrives before its event; this was the cause of the flaky checkbox in the review and config-proposal e2e specs.
+
 - Small fixes, slice SF2 of #451 (no wire change): the `ui.seek` description and the batch `VariantContext.resolve`
   TSDoc named only markers, beats and bars; they now point to the `TimeRef` forms, `word:` included. `review --pop`
   with a number is taken as seconds straight, with no stub timeline; a marker, beat or word still resolves against the

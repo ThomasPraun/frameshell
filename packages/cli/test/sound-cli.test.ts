@@ -30,9 +30,10 @@ beforeAll(() => {
   userDirs = join(parent, "user");
   project = join(parent, "promo");
   expect(frameshell(["init", project, "--no-skill"], parent).code).toBe(0);
+  // The status call starts the daemon here, so no test pays for its cold start.
   const status = JSON.parse(frameshell(["status", "--json"]).stdout) as { daemon: { pid: number } };
   daemonPid = status.daemon.pid;
-});
+}, 120_000);
 
 afterAll(async () => {
   for (let i = 0; daemonPid && i < 100; i++) {
@@ -138,7 +139,7 @@ describe("frameshell sound music", () => {
     expect(lines[4]).toMatch(/^c_\w+ {2}t_\w+ \(new audio track Music\) {2}start 20\.000 s, gain -12 dB$/);
     expect(result.stdout).toContain("the timeline's tempo now follows this clip");
     expect(result.stdout).toMatch(/transaction tx_\w+/);
-  });
+  }, 120_000);
 
   it("only writes the take with --no-place, as JSON", () => {
     const result = JSON.parse(frameshell(["sound", "music", "lofi", "--length", "6", "--chords", "Dm9,G13", "--seed", "3", "--no-place", "--json"]).stdout) as { bars: number; bpm: number; clip: string | null; chords: string[] };
