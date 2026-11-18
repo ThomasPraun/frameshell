@@ -324,6 +324,7 @@ function formatMetrics(metrics: ReviewMetrics): string[] {
     lines.push(`  [${graph.label}] speed of ${graph.clip} (${graph.hero}, ${graph.samples} of ${graph.frames} frames): peak ${graph.peak} px/frame, ${graph.spans.length === 0 ? "no linear move or dead stop" : `${graph.spans.length} to look at`}`);
     for (const span of graph.spans) lines.push(`    ${span.kind === "linear" ? "linear move" : "dead stop"} ${span.from} to ${span.to} s at ${span.speed} px/frame`);
   }
+  for (const word of metrics.behind ?? []) lines.push(`  behind ${word.plate}: clip ${word.clip} ${word.verdict}: ${word.message}`);
   if (seam) lines.push(`  loop seam: the last frame (${seam.last} s) differs from the first by ${seam.jump} of 255 (${seam.verdict})`);
   if (delivery) {
     lines.push(`  delivery against ${delivery.timeline} with ${delivery.preset} (${delivery.format}): ${delivery.checks.every((check) => check.ok) ? "as planned" : "differs"}`);

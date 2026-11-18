@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GradeSchema } from "@frameshell/schema";
+import { GRADE_LOOKS, GradeSchema, lookNames } from "@frameshell/schema";
 
 // `grade.analyze` (#384, ADR 0031): measured levels of a clip's picture and a bounded correction suggestion, never applied.
 
@@ -74,7 +74,10 @@ export const GRADE_COMPARE_MAX_TILE_WIDTH = 960;
 /** Longest look name, characters. */
 export const GRADE_LOOK_NAME_MAX = 40;
 
-/** One candidate of `grade.compare`: a whole grade (the fields of `clip.set` `grade`) and the name its tile shows. */
+/**
+ * One candidate of `grade.compare`: a whole grade (the fields of `clip.set` `grade`) and the name its tile shows. `look`
+ * names a built-in look ({@link GradeLooksResultSchema}) whose numbers it starts from; the fields given override them.
+ */
 export const GradeLookSchema = GradeSchema.extend({
   name: z
     .string()
@@ -82,10 +85,31 @@ export const GradeLookSchema = GradeSchema.extend({
     .min(1)
     .max(GRADE_LOOK_NAME_MAX)
     .optional()
-    .describe(`Label of the tile, at most ${GRADE_LOOK_NAME_MAX} characters, e.g. \`warm\`. Default \`look <n>\`.`),
+    .describe(`Label of the tile, at most ${GRADE_LOOK_NAME_MAX} characters, e.g. \`warm\`. Default the built-in look's name (\`look\`), else \`look <n>\`.`),
+  look: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(`A built-in look to start from (${lookNames.join(", ")}; \`grade.looks\` lists them with their numbers): its numbers fill the fields left out, the fields given win.`),
 }).describe(
-  "A whole grade drawn in place of the clip's own, not merged with it: fields left out are neutral (exposure 0, temperature 0, tint 0, contrast 1, saturation 1, no LUT).",
+  "A whole grade drawn in place of the clip's own, not merged with it: fields left out are neutral (exposure 0, temperature 0, tint 0, contrast 1, saturation 1, no LUT), or the numbers of the built-in `look` when one is named.",
 );
+
+/** One built-in look of `grade.looks`. */
+export const GradeBuiltInLookSchema = z.object({
+  name: z.string().describe("The word to give `clip set --grade-look` and a `grade.compare` look's `look`, e.g. `warm`."),
+  summary: z.string().describe("One line of what the look does to a picture."),
+  grade: GradeSchema.describe("Every correction number the look sets, in the fields of `clip.set` `grade` (no LUT). A clip that takes the look keeps its own copy of them."),
+});
+
+/** Result of `grade.looks`. */
+export const GradeLooksResultSchema = z.object({
+  looks: z.array(GradeBuiltInLookSchema).describe(`The built-in looks (${GRADE_LOOKS.length}), in a fixed order.`),
+});
+
+/** Result of `grade.looks`. */
+export type GradeLooksResultShape = z.infer<typeof GradeLooksResultSchema>;
 
 /** One tile of a `grade.compare` sheet. */
 export const GradeCompareTileSchema = z.object({

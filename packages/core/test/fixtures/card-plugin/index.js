@@ -1,5 +1,6 @@
 // Test fixture: a clip adapter that renders a flat colour card with ffmpeg, like a HyperFrames clip but in
-// milliseconds. The composition is a JSON file: { color, alpha, seconds, delayMs, fail }. Props: { label? }.
+// milliseconds. The composition is a JSON file: { color, alpha, seconds, delayMs, fail }. Props: { label? }. With
+// { box: [x, y, width, height] } (fractions of the frame) only that rectangle is painted, the rest transparent: a word.
 // Live preview (ADR 0010): the page is `live.html` next to the card; the card's { liveRoot, liveEntry, liveFail }
 // override or break it. `still` renders the same cards but has no live preview. `token-card` takes the style's token
 // sheet (ADR 0028); a card's { requireStyle } fails the render unless the sheet it got contains that text.
@@ -18,6 +19,17 @@
 import { execFile } from "node:child_process";
 import { appendFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+
+/** ffmpeg inputs (after a first `-f lavfi`) of a transparent frame with only `box` painted. */
+function boxed(box, color, alpha, ctx, seconds) {
+  const [x, y, width, height] = box;
+  const size = `${Math.round(width * ctx.width)}x${Math.round(height * ctx.height)}`;
+  return [
+    ...["-i", `color=c=black@0.0:s=${ctx.width}x${ctx.height}:r=${ctx.fps}:d=${seconds},format=yuva420p`],
+    ...["-f", "lavfi", "-i", `color=c=${color}@${alpha}:s=${size}:r=${ctx.fps}:d=${seconds},format=yuva420p`],
+    ...["-filter_complex", `[0][1]overlay=x=${Math.round(x * ctx.width)}:y=${Math.round(y * ctx.height)}:format=auto,format=yuva420p`],
+  ];
+}
 
 /** Standard Schema v1 validator, hand-written: the fixture has no dependencies. */
 const propsSchema = {
@@ -79,7 +91,7 @@ export function activate(api) {
           ffmpeg,
           [
             ...["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"],
-            ...["-i", `color=c=${color}@${alpha}:s=${size}:r=${ctx.fps}:d=${card.seconds ?? 2},format=rgba`],
+            ...(card.box ? boxed(card.box, color, alpha, ctx, card.seconds ?? 2) : ["-i", `color=c=${color}@${alpha}:s=${size}:r=${ctx.fps}:d=${card.seconds ?? 2},format=rgba`]),
             ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-crf", "30", "-b:v", "0", "-deadline", "realtime", file],
           ],
           (error, _stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve()),

@@ -29,6 +29,7 @@ export const CRAFT_CHECKS = [
   "masking",
   "edge-click",
   "harsh",
+  "behind",
 ] as const;
 
 /** One of {@link CRAFT_CHECKS}. */
@@ -123,7 +124,9 @@ export function clipRequirements(clips: readonly ClipRequirement[]): ClipRequire
 /** A craft warning the person accepts, with why. A waived warning is still reported (`metrics.waived`), never dropped. */
 export const WaiverSchema = z.strictObject({
   check: CraftCheckSchema.describe("The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."),
-  clip: ClipId.optional().describe("Waive only warnings whose time overlaps this clip. Absent: every warning of the check, including those about the whole film."),
+  clip: ClipId.optional().describe(
+    "Waive only warnings whose time overlaps this clip; a warning about one clip (`behind`: the word's clip) only when it is this clip. Absent: every warning of the check, including those about the whole film.",
+  ),
   reason: z.string().trim().min(1).describe("Why the warning is accepted: shown beside the waived warning."),
 });
 

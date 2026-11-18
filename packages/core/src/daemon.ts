@@ -44,6 +44,7 @@ import {
   type ShotClip,
   type Timeline,
   type Transcript,
+  GRADE_LOOKS,
   REQUIREMENTS_FILE,
   STYLE_FILE,
   USER_STYLES_DIR,
@@ -905,6 +906,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     pictureSize: async (dir, asset) => {
       const { video } = await media.probe(dir, asset);
       return video ? { width: video.width, height: video.height } : null;
+    },
+    // The proxy-size matte as `matte.status` finds it, never queued: review measures what export would draw now.
+    readyMatte: async (dir, asset) => {
+      const info = (await media.list(dir)).find((one) => one.path === asset);
+      if (info?.kind !== "media" || info.state === "failed") return { missing: "which is not an ingested video" };
+      if (info.media?.video?.still === true) return { missing: "a still picture, which has no matte" };
+      if (info.state !== "ready" || info.hash === null || info.proxy === null) return { missing: "whose proxy is not made yet" };
+      const key = matteKey(info.hash, matteModel, (await readEnclosingProject(dir))?.config.fps ?? 30);
+      const made = await readMatteInfo(dir, key, info.hash);
+      if (!made) return { missing: `whose matte is not made yet (\`frameshell matte ${asset}\`; review never starts one)` };
+      return { path: join(dir, ...mattePaths(key).video.split("/")), width: made.width, height: made.height, fps: made.fps, frames: made.frames };
     },
   });
   const brands = new BrandService({
@@ -2008,6 +2020,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const analysis = await gradeAnalyzer.analyze(dir, shown.timeline, { timeline, fps: shown.fps, clip, at, from, to, samples });
       return { view: shown.view, proposal: shown.proposal, ...analysis };
     },
+    "grade.looks": async () => ({ looks: GRADE_LOOKS.map(({ name, summary, grade }) => ({ name, summary, grade: { ...grade } })) }),
     "grade.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
