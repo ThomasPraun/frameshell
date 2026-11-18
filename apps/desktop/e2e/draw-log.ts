@@ -82,6 +82,37 @@ export function dropsIn(drawn: readonly number[], engine: PlayDrops | null | und
   return classifyDrops(missing, engine);
 }
 
+/** Kept segment of a cut list: source frames `[inF, outF)` play from program frame `pF`. */
+interface CutSegment {
+  inF: number;
+  outF: number;
+  pF: number;
+}
+
+/**
+ * Program frames never drawn at cut `k`, the cut between `segments[k]` and `segments[k + 1]`: the run of undrawn
+ * frames at the end of segment k, counted back from its last frame, then the run at the start of segment k + 1. A run
+ * stays inside its segment; a drawn last (first) frame leaves that side empty.
+ */
+export function cutEdgeMissing(drawn: ReadonlySet<number>, segments: readonly CutSegment[], k: number): number[] {
+  const before = segments[k]!;
+  const after = segments[k + 1]!;
+  const tail: number[] = [];
+  for (let frame = before.pF + before.outF - before.inF - 1; frame >= before.pF && !drawn.has(frame); frame--) tail.push(frame);
+  const head: number[] = [];
+  for (let frame = after.pF; frame < after.pF + after.outF - after.inF && !drawn.has(frame); frame++) head.push(frame);
+  return [...tail.reverse(), ...head];
+}
+
+/**
+ * Dropped program frames at cut `k` by the engine's kind, from the frames it drew (#573): the run of undrawn frames
+ * around the cut, classified like any other drop. A page rAF that read a stale canvas does not enter here.
+ */
+export function cutEdgeDrops(drawn: Iterable<number>, engine: PlayDrops | null | undefined, segments: readonly CutSegment[], k: number): Drops {
+  const seen = drawn instanceof Set ? (drawn as ReadonlySet<number>) : new Set(drawn);
+  return classifyDrops(cutEdgeMissing(seen, segments, k), engine);
+}
+
 /** `drops` for an annotation: counts and frames of each kind, then the engine's tick times when known. */
 export function describeDrops(drops: Drops, engine?: PlayDrops | null): string {
   const busy = engine ? `; engine tick max ${engine.busyMaxMs} ms, p95 ${engine.busyP95Ms} ms` : "";

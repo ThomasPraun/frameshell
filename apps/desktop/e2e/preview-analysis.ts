@@ -1,7 +1,7 @@
 // ADR 0001 measurement analysis for the real preview, ported from spikes/gapless-preview/scripts (analyze.mjs,
 // audio-residual.mjs, repeated-quanta.mjs, check-thresholds.mjs). Pure: raw logs in, metrics and verdicts out.
 import type { PlayDrops } from "../src/renderer/src/preview/drop-log.js";
-import { classifyDrops } from "./draw-log.js";
+import { type Drops, classifyDrops, cutEdgeDrops, cutEdgeMissing, describeDrops } from "./draw-log.js";
 
 /** Kept segment of the cut list: source frames `[inF, outF)` play from program frame `pF`. */
 export interface Segment {
@@ -54,7 +54,12 @@ export interface Summary {
   video: {
     strayFramesTotal: number;
     cutsWithStrayFrames: number;
+    /** Program frames never drawn at the measured cuts, from the engine's draws (#573); threshold 1 fails on the starved ones. */
     droppedFramesTotal: number;
+    droppedStarved: number;
+    droppedCadence: number;
+    /** The frames behind the counts above, for the threshold detail. */
+    cutDrops: Drops;
     cutsWithFreezeGe1Frame: number;
     freezeMsMean: number;
     freezeMsP95: number;
@@ -90,6 +95,7 @@ export function analyze(run: RunLog): Summary {
     av.push(cut.videoCutT - ctxToPerf(run, spliceCtx));
   }
   const measured = video.cuts.filter((c) => !c.missing);
+  const cutDrops: Drops = { starved: measured.flatMap((c) => c.dropped.starved), cadence: measured.flatMap((c) => c.dropped.cadence) };
   const freezes = measured.map((c) => c.freezeMs);
   return {
     cuts: run.segments.length - 1,
@@ -99,7 +105,10 @@ export function analyze(run: RunLog): Summary {
     video: {
       strayFramesTotal: measured.reduce((s, c) => s + c.strayFrames, 0),
       cutsWithStrayFrames: measured.filter((c) => c.strayFrames > 0).length,
-      droppedFramesTotal: measured.reduce((s, c) => s + c.dropped, 0),
+      droppedFramesTotal: cutDrops.starved.length + cutDrops.cadence.length,
+      droppedStarved: cutDrops.starved.length,
+      droppedCadence: cutDrops.cadence.length,
+      cutDrops,
       cutsWithFreezeGe1Frame: measured.filter((c) => c.dup >= 1).length,
       freezeMsMean: r1(mean(freezes)),
       freezeMsP95: r1(pct(freezes, 0.95)),
@@ -126,7 +135,7 @@ export function analyze(run: RunLog): Summary {
 
 type VideoCut =
   | { k: number; missing: true }
-  | { k: number; missing?: false; dropped: number; strayFrames: number; freezeMs: number; dup: number; videoCutT: number };
+  | { k: number; missing?: false; dropped: Drops; strayFrames: number; freezeMs: number; dup: number; videoCutT: number };
 
 function analyzeVideo(run: RunLog) {
   const FDms = 1000 / run.fps;
@@ -149,6 +158,8 @@ function analyzeVideo(run: RunLog) {
       lastIdx.set(x.seg, i);
     }
   });
+  // Drops at cuts and inside segments both come from the engine's draws, never from the page's probes (#573).
+  const drawn = new Set(run.drawn);
   const cuts: VideoCut[] = [];
   for (let k = 0; k + 1 < run.segments.length; k++) {
     const a = lastIdx.get(k);
@@ -157,26 +168,27 @@ function analyzeVideo(run: RunLog) {
       cuts.push({ k, missing: true });
       continue;
     }
-    const tail = run.segments[k]!.outF - 1 - d[a]!.f;
-    const head = d[b]!.f - run.segments[k + 1]!.inF;
     const strays = d.slice(a + 1, b);
     const freeze = d[b]!.t0 - d[a]!.t0 - FDms + (d[b]!.t1 - d[b]!.t0 - FDms);
     cuts.push({
       k,
-      dropped: Math.max(0, tail) + Math.max(0, head),
+      dropped: cutEdgeDrops(drawn, run.dropped, run.segments, k),
       strayFrames: strays.length,
       freezeMs: freeze,
       dup: Math.max(0, Math.round(freeze / FDms)),
       videoCutT: d[b]!.t0,
     });
   }
+  // A run of undrawn frames at a cut can reach past the segment's first or last frame: it counts at the cut only.
+  const atCuts = new Set<number>();
+  for (let k = 0; k + 1 < run.segments.length; k++) for (const frame of cutEdgeMissing(drawn, run.segments, k)) atCuts.add(frame);
   let interiorFrames = 0;
-  const drawn = new Set(run.drawn);
   const missing: number[] = [];
   for (const s of run.segments) {
     for (let f = s.inF + 1; f < s.outF - 1; f++) {
       interiorFrames++;
-      if (!drawn.has(s.pF + f - s.inF)) missing.push(s.pF + f - s.inF);
+      const frame = s.pF + f - s.inF;
+      if (!drawn.has(frame) && !atCuts.has(frame)) missing.push(frame);
     }
   }
   const interior = classifyDrops(missing, run.dropped);
@@ -282,7 +294,11 @@ export function checkThresholds(s: Summary): { id: number; pass: boolean; detail
   const av = s.avOffsetAtCutMs;
   const exact = a.deviatingSamples === null ? "not checked" : `${a.deviatingSamples} of ${a.comparedSamples} samples deviate`;
   return [
-    { id: 1, pass: v.strayFramesTotal === 0 && v.droppedFramesTotal === 0, detail: `stray ${v.strayFramesTotal}, dropped at cuts ${v.droppedFramesTotal}` },
+    {
+      id: 1,
+      pass: v.strayFramesTotal === 0 && v.droppedStarved === 0,
+      detail: `stray ${v.strayFramesTotal}, dropped at cuts ${describeDrops(v.cutDrops)}`,
+    },
     {
       id: 2,
       pass: pc(v.cutsWithFreezeGe1Frame, s.cuts) <= 5 && v.freezeMsP95 <= 17 && v.freezeMsMax <= 167,
