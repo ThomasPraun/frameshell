@@ -897,11 +897,12 @@ export const MarkerSchema = z.strictObject({
 });
 
 /**
- * True for text shaped like a grid reference (`beat:8`, `BAR: 2.5`, `bar:8-0.2`). Not part of {@link MarkerSchema}, so a
- * timeline saved with such a label still loads; writes refuse it and the TimeRef resolver reads it as the grid.
+ * True for text shaped like a TimeRef scheme: a grid reference (`beat:8`, `BAR: 2.5`, `bar:8-0.2`) or a word one
+ * (`word:over`). Not part of {@link MarkerSchema}, so a timeline saved with such a label still loads; writes refuse it
+ * and the TimeRef resolver reads it as the scheme.
  */
-export function isGridRefLabel(label: string): boolean {
-  return /^(?:beat|bar):\s*[.\d]/i.test(label);
+export function isSchemeRefLabel(label: string): boolean {
+  return /^(?:(?:beat|bar):\s*[.\d]|word:)/i.test(label);
 }
 
 /** Key two marker labels clash on: labels are unique per timeline ignoring case. */

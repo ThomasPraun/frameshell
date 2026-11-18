@@ -87,7 +87,7 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
     type: CLIP_TYPE,
     propsSchema,
     finals: {
-      estimate: (clip, ctx) => times.estimate(sourceOf(clip as BlenderClip), frameCount(clip as BlenderClip, ctx.fps), ctx.width, ctx.height),
+      estimate: (clip, ctx) => times.estimate(sourceOf(clip as BlenderClip), renderWindow(clip as BlenderClip, ctx.fps).frames, ctx.width, ctx.height),
     },
     async inputs(clip, context?: InputsContext) {
       if (!context) throw new Error("this Frameshell is too old for the blender plugin: update Frameshell");
@@ -103,7 +103,7 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
         source,
         // The key hashes files, so the version and the length rendered travel as files named by them.
         await marker(projectDir, `${STATE_DIR}/version/${version}.json`, `${JSON.stringify({ blender: version })}\n`),
-        await marker(projectDir, `${STATE_DIR}/range/${endMs(clip as BlenderClip)}ms.json`, `${JSON.stringify({ endMs: endMs(clip as BlenderClip) })}\n`),
+        await marker(projectDir, `${STATE_DIR}/range/${inMs(clip as BlenderClip)}-${endMs(clip as BlenderClip)}ms.json`, `${JSON.stringify({ inMs: inMs(clip as BlenderClip), endMs: endMs(clip as BlenderClip) })}\n`),
         listingPath(source, info),
         ...linked.inside,
         ...(outside ? [outside] : []),
@@ -123,13 +123,14 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       const ffmpeg = await ctx.ensureBinary("ffmpeg");
       const { outside } = await deps.list(source, blender, await deps.hash(source));
       if (outside.length > 0) ctx.warn?.(outsideWarning(id, source, outside));
-      const frames = frameCount(clip as BlenderClip, ctx.fps);
+      const { startFrame, frames } = renderWindow(clip as BlenderClip, ctx.fps);
       // Hosts older than finals pass no tier: they get the draft, as before.
       const quality = ctx.tier === "final" ? "final" : "draft";
       const framesDir = join(ctx.outDir, "frames");
       await mkdir(framesDir, { recursive: true });
       ctx.progress({ fraction: 0, message: `Starting Blender ${version}` });
-      let first = 1;
+      // `Fra:` lines name scene frames: the scene's first frame plus the window's start is where the window begins.
+      let first = startFrame + 1;
       const rendering = quality === "final" ? "Rendering the final (Cycles)" : "Rendering";
       const fraction = (done: number) => ctx.progress({ fraction: RENDER_SHARE * Math.min(1, Math.max(0, done / frames)), message: rendering });
       const frameSeconds: number[] = [];
@@ -137,12 +138,12 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
         blender,
         join(projectDir, ...source.split("/")),
         scriptPath("render.py"),
-        { scene: props.scene ?? null, camera: props.camera ?? null, width: ctx.width, height: ctx.height, fps: ctx.fps, frames, outDir: framesDir, quality },
+        { scene: props.scene ?? null, camera: props.camera ?? null, width: ctx.width, height: ctx.height, fps: ctx.fps, startFrame, frames, outDir: framesDir, quality },
         {
           cwd: ctx.outDir,
           signal: ctx.signal,
           onEvent: (event: BlenderEvent) => {
-            if (event.event === "start") first = event.frameStart;
+            if (event.event === "start") first = event.frameStart + startFrame;
             else if (event.event === "frame") {
               fraction(event.index + 1);
               if (typeof event.seconds === "number") frameSeconds.push(event.seconds);
@@ -163,7 +164,7 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       }
       ctx.progress({ fraction: RENDER_SHARE, message: "Encoding" });
       const output = join(ctx.outDir, "render.webm");
-      await encode(ffmpeg, framesDir, output, ctx.fps, ctx.signal);
+      await encode(ffmpeg, framesDir, output, { fps: ctx.fps, width: ctx.width, height: ctx.height, pad: startFrame }, ctx.signal);
       ctx.progress({ fraction: 1, message: "Done" });
       return { file: output, hasAlpha: true };
     },
@@ -190,19 +191,39 @@ export function sourceOf(clip: BlenderClip): string {
   return normal;
 }
 
-/** Composition time of the clip's last frame in whole milliseconds, only to name the key's range file (frames come from {@link frameCount}). */
+/** Composition time of the clip's first frame in whole milliseconds, only to name the key's range file (frames come from {@link renderWindow}). */
+function inMs(clip: BlenderClip): number {
+  return Math.round((clip.in ?? 0) * 1000);
+}
+
+/** Composition time of the clip's last frame in whole milliseconds, only to name the key's range file (frames come from {@link renderWindow}). */
 function endMs(clip: BlenderClip): number {
   return Math.round(((clip.in ?? 0) + clip.duration) * 1000);
 }
 
 /**
- * Frames to render at the project's `fps`, from the scene's first frame, so file time t shows composition time t: up to
- * the clip's end. `render.py` shows each at its time on the scene's own clock, so a scene at another rate keeps seconds.
+ * Frames up to the clip's end at the project's `fps`, counted from the scene's first frame, so file time t shows
+ * composition time t. `render.py` shows each at its time on the scene's own clock, so a scene at another rate keeps seconds.
  * Counted from the unrounded end; 1e-3 of a frame absorbs the float error of ends snapped to the frame grid
- * (92/30 s * 30 is 92.00000000000001), which must not ask for one frame more.
+ * (92/30 s * 30 is 92.00000000000001), which must not ask for one frame more. Always at least one past the window's start.
  */
 export function frameCount(clip: BlenderClip, fps: number): number {
-  return Math.max(1, Math.ceil(((clip.in ?? 0) + clip.duration) * fps - 1e-3));
+  return Math.max(startFrameOf(clip, fps) + 1, Math.ceil(((clip.in ?? 0) + clip.duration) * fps - 1e-3));
+}
+
+/** First frame of the clip's part (`in`), counted from the scene's first frame; the same 1e-3 of a frame as {@link frameCount}. */
+function startFrameOf(clip: BlenderClip, fps: number): number {
+  return Math.max(0, Math.floor((clip.in ?? 0) * fps + 1e-3));
+}
+
+/**
+ * What a render draws (ADR 0035 slice 6): the clip's part only, frames `startFrame` up to {@link frameCount}. `frames` is
+ * the length of that window: how many files `render.py` writes, what progress counts and what a final is estimated on.
+ * The head before it is not rendered; the encode pads it transparent, so file time t is still composition time t.
+ */
+export function renderWindow(clip: BlenderClip, fps: number): { startFrame: number; frames: number } {
+  const startFrame = startFrameOf(clip, fps);
+  return { startFrame, frames: frameCount(clip, fps) - startFrame };
 }
 
 /** `-framerate` value for the PNG sequence: NTSC rates as the exact fraction (29.97 is 30000/1001), others as they are. */
@@ -262,14 +283,30 @@ export function describeRefusal(clip: string, source: string, error: Extract<Ble
 /**
  * PNG frames to VP9 with alpha, multithreaded libvpx (`-auto-alt-ref 0` is what keeps alpha). The speed flags are
  * ADR 0009's, which `fastVp9` in `plugins/remotion/src/adapter.ts` applies to Remotion's stitcher; `-crf 20` is
- * this adapter's own choice (ADR 0035), not Remotion's.
+ * this adapter's own choice (ADR 0035), not Remotion's. With `pad` frames (a clip trimmed at the head) that many transparent
+ * frames are concatenated before the sequence; with none the command is the plain one.
  */
-async function encode(ffmpeg: string, framesDir: string, output: string, fps: number, signal: AbortSignal): Promise<void> {
+async function encode(
+  ffmpeg: string,
+  framesDir: string,
+  output: string,
+  format: { fps: number; width: number; height: number; pad: number },
+  signal: AbortSignal,
+): Promise<void> {
+  const { fps, width, height, pad } = format;
   const threads = String(Math.min(16, Math.max(1, availableParallelism())));
+  const rate = frameRate(fps);
+  const frames = ["-framerate", rate, "-start_number", "0", "-i", join(framesDir, "frame_%06d.png")];
+  // `d` is half a frame short of `pad` frames: the source then ends after exactly `pad`, whatever the float error of the rate.
+  const padded = [
+    "-f", "lavfi", "-i", `color=c=black@0.0:s=${width}x${height}:r=${rate}:d=${((pad - 0.5) / fps).toFixed(6)},format=yuva420p`,
+    ...frames,
+    "-filter_complex", "[1:v]format=yuva420p[body];[0:v][body]concat=n=2:v=1:a=0[padded]", "-map", "[padded]",
+  ];
   const args = [
     "-hide_banner", "-loglevel", "error", "-y",
-    "-framerate", frameRate(fps), "-start_number", "0", "-i", join(framesDir, "frame_%06d.png"),
-    "-an", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-b:v", "0", "-crf", "20",
+    ...(pad > 0 ? padded : frames),
+    "-an","-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-b:v", "0", "-crf", "20",
     "-row-mt", "1", "-threads", threads, "-deadline", "good", "-cpu-used", "4",
     // Without these the WebM muxer writes random UIDs: two encodes of the same frames would differ in bytes.
     "-fflags", "+bitexact", "-flags:v", "+bitexact",

@@ -5,7 +5,7 @@ import { type BeatsFile, type Timeline, createProjectConfig, createTimeline } fr
 import { describe, expect, it } from "vitest";
 import { TimelineService } from "../src/timeline/service.js";
 import { tempoGrid } from "../src/timeline/tempo.js";
-import { GridNeeded, TimeRefError, resolveTimeRef, resolveTimeRefs } from "../src/timeline/time-ref.js";
+import { GridNeeded, TimeRefError, WordsNeeded, resolveTimeRef, resolveTimeRefs } from "../src/timeline/time-ref.js";
 import { tempDir } from "./helpers.js";
 
 // Seam under test: the TimeRef resolver (pure), and the daemon's use of it in front of the engine.
@@ -73,8 +73,9 @@ describe("resolveTimeRef", () => {
     expect(failure(() => resolveTimeRef("   ", scope)).message).toContain("empty");
   });
 
-  it("keeps word: reserved, and says beat: and bar: need a tempo when the timeline has none", () => {
-    expect(failure(() => resolveTimeRef("word:over", scope)).message).toContain("word references");
+  it("asks for the words on word:, and says beat: and bar: need a tempo when the timeline has none", () => {
+    expect(failure(() => resolveTimeRef("word:over", scope))).toBeInstanceOf(WordsNeeded);
+    expect(failure(() => resolveTimeRef("word:over", scope)).message).toContain("words the timeline plays");
     expect(failure(() => resolveTimeRef("beat:32", scope)).message).toContain("the timeline has no tempo");
     expect(failure(() => resolveTimeRef("bar:8", scope)).hint).toContain("tempo.set");
   });

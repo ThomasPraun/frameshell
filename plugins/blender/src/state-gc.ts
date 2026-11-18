@@ -5,8 +5,8 @@ import { STATE_DIR } from "./deps.js";
 
 /** A listing folder: `<.blend content hash, 16 hex>-<path hash, 8 hex>` (see `listingPath` in `deps.ts`). */
 const LISTING_DIR = /^[0-9a-f]{16}-[0-9a-f]{8}$/;
-/** `range/<ms>ms.json` and `version/<major.minor[.patch]>.json`, the key markers `adapter.ts` writes. */
-const RANGE_FILE = /^\d+ms\.json$/;
+/** `range/<inMs>-<endMs>ms.json` (before slice 6 `<endMs>ms.json`, still recognised so it goes) and `version/<major.minor[.patch]>.json`, the key markers `adapter.ts` writes. */
+const RANGE_FILE = /^(?:\d+-)?\d+ms\.json$/;
 const VERSION_FILE = /^\d+(?:\.\d+){1,2}\.json$/;
 
 /**

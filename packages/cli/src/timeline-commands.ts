@@ -17,6 +17,7 @@ import type {
   MulticamTurnsResult,
   MusicCandidatesResult,
   MusicGridResult,
+  MusicPickResult,
   MusicShapeResult,
   MusicFitResult,
   MethodName,
@@ -334,8 +335,14 @@ mutations print the new revision):
                                with --end each is fitted like music fit slides a clip (its own final hit lands on
                                --end) and they are ranked: files that cover the picture first, then by how sure the
                                hit is. A file that cannot be placed is listed and left out. --dry-run changes nothing.
-                               Choose with track set <track> --unmuted, then track remove <others> --force. Each clip
-                               gets a 5 ms fade in (audio.fadeInMs). One transaction (revert it)
+                               Choose with music pick <track>. Each clip gets a 5 ms fade in (audio.fadeInMs).
+                               One transaction (revert it)
+  music pick <track> [--keep] [--dry-run]
+                               Keep one candidate (its track id or name, e.g. "Music 2"): unmute it, rename it Music and
+                               remove the other candidate tracks with their clips (--keep leaves them in place, muted).
+                               A candidate you worked on (more than one clip, or a clip with speed, keys, effects, fades)
+                               is never removed: it is named and left. Nothing is fitted, shaped or ducked again; music
+                               fit and duck --level follow. --dry-run changes nothing. One transaction (revert it)
   music shape <clip> [--drop <time>]… [--ending <time> [--end-on-bar]] [--lead s] [--depth dB] [--hold s] [--release s] [--fade s]
                      [--build s [--build-from Hz] [--build-to Hz]] [--clear] [--dry-run]
                                Shape the level of a music clip around the picture: the music steps down BEFORE each --drop
@@ -393,7 +400,12 @@ mutations print the new revision):
   offset: --at bar:8, --from bar:2 --to bar:6, --start beat:17-0.1, --at beat:2.5 (halfway between beats 2 and 3).
   Past the measured part they continue at the tempo. With a pickup, bar:N is not beat:(meter*(N-1)+1). They need
   a tempo (tempo set) and are refused on a LOW confidence grid or with no beats file, like --snap-to beat|bar.
-  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit). word: names are still refused.
+  music fit --end/--from take them too (bar:16 is read on the clip as it is before the fit).
+  word:<text> is the start of a word the timeline plays, #n for the nth time it is said (from 1), with the same
+  optional offset: --at word:over, --from word:this#2 --to word:idea+0.3, --at word:w_000012 (a transcript word id).
+  Case, accents and punctuation are ignored and digits meet spelled numbers (word:20 finds "twenty"); words a cut
+  removed do not count, so the same name means a later word after a cut. It needs current transcripts
+  (transcribe); a clip with a stale one refuses it. The quotes-only form ("this#2") is not accepted: write word:.
   --group-clock times (multicam reframe --at, multicam paint) stay seconds.
 
 History (per terminal session; mutations print their op and tx ids). The session is FRAMESHELL_SESSION (set in
@@ -556,6 +568,7 @@ export const TIMELINE_OPTIONS = {
   "min-confidence": { type: "string" },
   skip: { type: "string", multiple: true },
   "dry-run": { type: "boolean" },
+  keep: { type: "boolean" },
   hit: { type: "string" },
   drop: { type: "string", multiple: true },
   ending: { type: "string" },
@@ -693,6 +706,7 @@ const ALLOWED: Record<string, string[]> = {
   cleanup: ["pauses", "no-pauses", "breath", "retakes", "min-confidence", "skip", "dry-run"],
   "music fit": ["end", "from", "hit", "exact", "skip", "dry-run"],
   "music candidates": ["end", "from", "loudness", "dry-run"],
+  "music pick": ["keep", "dry-run"],
   "music shape": ["drop", "ending", "end-on-bar", "lead", "depth", "hold", "release", "fade", "build", "build-from", "build-to", "clear", "dry-run"],
   "music grid": ["to", "max-shift", "trim", "tracks", "skip", "dry-run"],
   "tx begin": [],
@@ -750,6 +764,7 @@ const ARITY: Record<string, [number, number]> = {
   cleanup: [0, 0],
   "music fit": [1, 1],
   "music candidates": [2, 7],
+  "music pick": [1, 1],
   "music shape": [1, 1],
   "music grid": [0, 0],
   "tx begin": [1, 1],
@@ -915,16 +930,16 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
     }
     return parts;
   };
-  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N` or `bar:N`, optionally `+s` or `-s`) for the daemon to resolve. */
+  /** A time flag: seconds as a number, else the text (a marker id or label, `beat:N`, `bar:N` or `word:<text>`, optionally `+s` or `-s`) for the daemon to resolve. */
   const when = (flag: string): number | string | undefined => {
     const raw = values[flag];
     if (raw === undefined) return undefined;
-    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${String(raw)}".`);
+    if (typeof raw !== "string" || raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, beat:N / bar:N or word:<text>, got "${String(raw)}".`);
     return timeRefOf(raw);
   };
   /** One time given as text: seconds as a number, else the name for the daemon to resolve. */
   const whenOf = (raw: string, flag: string): number | string => {
-    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, or beat:N / bar:N, got "${raw}".`);
+    if (raw.trim() === "") throw new UsageError(`--${flag}: expected seconds, a marker id or label, beat:N / bar:N or word:<text>, got "${raw}".`);
     return timeRefOf(raw);
   };
   const list = (flag: string): string[] | undefined => {
@@ -1507,6 +1522,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
         dryRun: values["dry-run"] === true ? true : undefined,
       });
       break;
+    case "music pick":
+      method = "music.pick";
+      Object.assign(params, {
+        track: args[0],
+        keep: values["keep"] === true ? true : undefined,
+        dryRun: values["dry-run"] === true ? true : undefined,
+      });
+      break;
     case "music shape":
       method = "music.shape";
       Object.assign(params, {
@@ -1633,6 +1656,7 @@ export async function executeTimeline(
   if (inv.method === "cleanup") return formatCleanup(result as CleanupResult);
   if (inv.method === "music.fit") return formatMusicFit(result as MusicFitResult);
   if (inv.method === "music.candidates") return formatMusicCandidates(result as MusicCandidatesResult);
+  if (inv.method === "music.pick") return formatMusicPick(result as MusicPickResult);
   if (inv.method === "music.shape") return formatMusicShape(result as MusicShapeResult);
   if (inv.method === "music.grid") return formatMusicGrid(result as MusicGridResult);
   if (inv.method === "multicam.create") return formatMulticamCreate(result as MulticamCreateResult);
@@ -1812,6 +1836,19 @@ function formatMusicCandidates(result: MusicCandidatesResult): string {
   for (const skip of result.skipped) lines.push(`Left out ${skip.asset}: ${skip.reason}`);
   lines.push(`Ranking: ${result.ranking}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMusicPick(result: MusicPickResult): string {
+  const { chosen } = result;
+  const lines = [`Music pick · ${chosen.name} (${chosen.track}, ${chosen.asset}) kept${chosen.renamedTo ? `, renamed ${chosen.renamedTo}` : ""}${chosen.unmuted ? ", unmuted" : ""}${result.dryRun ? " · dry run" : ""}`];
+  for (const track of result.removed) lines.push(`  removed ${track.name} (${track.track}, ${track.asset})`);
+  for (const track of result.muted) lines.push(`  muted ${track.name} (${track.track}, ${track.asset}), left in place`);
+  for (const track of result.left) lines.push(`  left ${track.name} (${track.track}, ${track.asset}): ${track.reason}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (result.applied && result.tx) lines.push(`Next: ${result.next}`);
+  else if (result.dryRun) lines.push("Dry run: nothing changed; run again without --dry-run.");
   if (result.applied && result.tx) lines.push(`revision ${result.revision} · tx ${result.tx} (\`frameshell revert ${result.tx}\` undoes it)`);
   return `${lines.join("\n")}\n`;
 }

@@ -47,7 +47,7 @@ import {
   elementStyles,
   gainAt,
   isShotClip,
-  isGridRefLabel,
+  isSchemeRefLabel,
   markerLabelKey,
   findMarker,
   orderedFrameRect,
@@ -2672,8 +2672,8 @@ class Edit {
 
   /** Refuse `label` when another marker than `self` holds it, ignoring case. */
   claimLabel(label: string, self: string | null): void {
-    if (isGridRefLabel(label)) {
-      throw this.invalid(`label "${label}" must not look like a beat or bar reference (\`beat:8\`, \`bar:2\`): it would shadow the grid.`, {
+    if (isSchemeRefLabel(label)) {
+      throw this.invalid(`label "${label}" must not look like a beat or bar reference (\`beat:8\`, \`bar:2\`) or a word one (\`word:…\`): it would shadow it.`, {
         field: "label",
         hint: "Pick another label.",
       });

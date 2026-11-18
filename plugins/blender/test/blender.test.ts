@@ -12,6 +12,7 @@ import {
   activate,
   describeRefusal,
   frameCount,
+  renderWindow,
   frameRate,
   insideProject,
   listingPath,
@@ -99,6 +100,16 @@ describe("source and range", () => {
     expect(frameCount({ id: "c", duration: 1 / 24 }, 24)).toBe(1);
     expect(frameCount({ id: "c", in: 7 / 30, duration: 5 / 30 }, 30)).toBe(12);
     expect(frameCount({ id: "c", duration: 5 / 30 + 0.01 }, 30)).toBe(6);
+  });
+
+  it("renderWindow draws from the clip's in point to its end, never fewer than one frame", () => {
+    expect(renderWindow({ id: "c", duration: 4 }, 30)).toEqual({ startFrame: 0, frames: 120 });
+    expect(renderWindow({ id: "c", in: 2, duration: 4 }, 30)).toEqual({ startFrame: 60, frames: 120 });
+    expect(renderWindow({ id: "c", in: 7 / 30, duration: 5 / 30 }, 30)).toEqual({ startFrame: 7, frames: 5 });
+    // Float error of a start snapped to the frame grid must not skip a frame: 0.19999 s is 5.9997 frames, frame 6.
+    expect(renderWindow({ id: "c", in: 0.19999, duration: 1 }, 30).startFrame).toBe(6);
+    expect(renderWindow({ id: "c", in: 1, duration: 0.001 }, 30)).toEqual({ startFrame: 30, frames: 1 });
+    expect(renderWindow({ id: "c", in: 1, duration: 0 }, 30)).toEqual({ startFrame: 30, frames: 1 });
   });
 
   it("frameRate sends NTSC rates as exact fractions and the rest as they are", () => {
