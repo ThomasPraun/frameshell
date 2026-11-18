@@ -20,8 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hyperframes update` like the bundles; `UpdateReport.typeface`): the Archivo Black outlines (SIL OFL 1.1, no Reserved
   Font Name) of printable Latin (ASCII, Latin-1, common punctuation, `€`), converted at build time by `pnpm gen:typeface`
   with opentype.js 2.0.0 (MIT), a devDependency used only by that script, never in the three.js bundle or the runtime
-  dependencies, with a `--check` drift test. A character the typeface lacks, a fourth line, a missing or broken typeface
-  fail the render naming the cause. The 3D playbook gains "A 3D title"; the README lists both licences. The opt-in
+  dependencies, with a `--check` drift test. The title never passes 90 % of the frame width at any `size` (up to 1.4),
+  and its height stays inside the frame and above the headline. A character the typeface lacks, a fourth line, a word
+  too long for the width even at 40 %, a missing or broken typeface fail the render naming the cause. The 3D playbook gains "A 3D title"; the README lists both licences. The opt-in
   real-render test checks the first frame, alpha, `clip.verify` at tolerance 0, every reveal, a wrapped title, a colour
   blend and the failure messages.
 - Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):

@@ -529,6 +529,20 @@ describe("3D templates (ADR 0042)", () => {
     expect(html).toContain(`title-3d: ${TITLE_TYPEFACE_FILE} is not a typeface`);
     expect(html).toContain("has no glyph for");
     expect(html).toContain('ready("title-3d", loaded)');
+    expect(html).toContain("the text prop is empty");
+    expect(html).toContain("scaffold another title-3d composition");
+  });
+
+  it("title-3d fits the title to the format's width at any size, fails on a word that does not fit, and keeps clear of the headline", async () => {
+    await scaffold(["title", "--template", "title-3d"]);
+    const html = read("title");
+    // The width bound uses the share the camera frames (fillW * size) and the end of the push-in, so size 1.4 stays in frame.
+    expect(html).toContain("var FIT = 0.9;");
+    expect(html).toContain("var avail = AVAIL * Math.min(1, (FIT * 0.96) / (L.fillW * P.size)) / SIZE");
+    // A single overlong word cannot wrap: it fails naming the word, as a text of more than 3 lines does.
+    expect(html).toContain("does not fit the format's width even at");
+    expect(html).toContain("Math.min(s, heightFit(lines.length))");
+    expect(html).toContain("if (P.subtitle) room = Math.min(room,");
   });
 
   it.each(threeTemplates.map((t) => t.id))("%s gets the pinned three.js bundle next to it and loads it after the motion runtime", async (id) => {

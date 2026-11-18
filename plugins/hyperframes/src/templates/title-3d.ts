@@ -116,6 +116,9 @@ export const title3d: ThreeTemplate = {
       // World units: the title is at most AVAIL wide, whatever the format; the camera frames that width as the
       // format's share, so the shadow wall and the shadow camera of the studio always cover it.
       var AVAIL = 3.6, MAX_LINES = 3, MIN_SCALE = 0.4;
+      // The widest line covers at most FIT of the frame width, also at the end of the push-in (0.96 of the distance).
+      // The format's share times size passes the frame width from size 1.14 up, so the width bounds the title there.
+      var FIT = 0.9;
       var tan = Math.tan(rad(camera.fov / 2));
       var baseH = AVAIL / L.fillW / (S.width / S.height);
       var SIZE = L.size * baseH;
@@ -150,20 +153,30 @@ export const title3d: ThreeTemplate = {
         if (current) lines.push(current);
         return lines;
       }
-      // At most MAX_LINES lines at the largest scale (1 down to MIN_SCALE) where the widest line fits AVAIL.
+      // At most MAX_LINES lines at the largest scale (1 down to MIN_SCALE) where the widest line fits the title width
+      // (AVAIL, or less where size makes the frame narrower than that). The block's height can shrink the scale
+      // further when it would reach the frame edge or the headline.
       function layout(text) {
         var given = text.split("\\n").map(function (line) { return line.trim(); }).filter(Boolean);
-        if (given.length === 0) throw new Error("title-3d needs a text: the title prop is empty");
+        if (given.length === 0) throw new Error("title-3d needs a text: the text prop is empty");
         if (given.length > MAX_LINES) throw new Error("title-3d shows at most " + MAX_LINES + " lines, the text has " + given.length + " (join some with spaces)");
-        var avail = AVAIL / SIZE, lines = [];
+        var avail = AVAIL * Math.min(1, (FIT * 0.96) / (L.fillW * P.size)) / SIZE, lines = [];
         for (var s = 1; s > MIN_SCALE - 1e-6; s -= 0.1) {
           lines = [];
           given.forEach(function (line) { wrap(line, avail / s).forEach(function (part) { lines.push(part); }); });
           var widest = Math.max.apply(null, lines.map(inkWidth));
-          if (lines.length <= MAX_LINES && widest * s <= avail + 1e-6) return { lines: lines, scale: s };
+          if (lines.length <= MAX_LINES && widest * s <= avail + 1e-6) return { lines: lines, scale: Math.min(s, heightFit(lines.length)) };
         }
         if (lines.length > MAX_LINES) throw new Error("title-3d: the text does not fit in " + MAX_LINES + " lines even at " + MIN_SCALE * 100 + " % size, shorten it");
-        return { lines: lines, scale: Math.min(MIN_SCALE, avail / widest) };
+        var long = lines.reduce(function (a, b) { return inkWidth(b) > inkWidth(a) ? b : a; });
+        throw new Error("title-3d: " + JSON.stringify(long) + " does not fit the format's width even at " + MIN_SCALE * 100 + " % size, use a shorter word or break it with a space");
+      }
+      // Largest scale at which n lines stay inside the frame: 80 % of its height, or only the part above the headline
+      // when there is one (the title sits L.raise above the centre, the headline reaches up from L.bottom).
+      function heightFit(n) {
+        var room = 0.8;
+        if (P.subtitle) room = Math.min(room, 2 * (0.5 - L.raise - (L.bottom + L.sub * P.size * 1.2 + 0.03) * unit / S.height));
+        return room / (n * 1.05 * L.size * P.size);
       }
 
       // Builds one extruded mesh per drawn letter, centred on its own middle so it can turn and drop in place.
@@ -276,6 +289,9 @@ export const title3d: ThreeTemplate = {
         try { data = JSON.parse(text); } catch (error) { throw new Error("title-3d: ${TITLE_TYPEFACE_FILE} is not valid JSON (" + error.message + "): restore it with \`frameshell hyperframes update --force\`"); }
         if (!data || !data.glyphs || !data.resolution) throw new Error("title-3d: ${TITLE_TYPEFACE_FILE} is not a typeface (no glyphs or resolution): restore it with \`frameshell hyperframes update --force\`");
         build(new THREE.Font(data));
+      }).catch(function (error) {
+        if (/ cannot load /.test(error.message)) error.message += " (if the file was deleted, scaffold another title-3d composition and copy its ${TITLE_TYPEFACE_FILE} here)";
+        throw error;
       });
       ready("title-3d", loaded).then(function () { paint(last); }, function () {});
       M.bind("${id}", paint);

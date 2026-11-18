@@ -43,11 +43,11 @@ describe("title typeface (Archivo Black, SIL OFL 1.1)", () => {
   });
 
   it("covers ASCII, Latin-1 and the punctuation of everyday titles", () => {
-    const wanted = [...range(0x20, 0x7e), ...range(0xa1, 0xff).filter((ch) => ch !== "­"), " ", "–", "—", "‘", "’", "“", "”", "•", "…", "€", "™"];
+    const wanted = [...range(0x20, 0x7e), ...range(0xa1, 0xff).filter((ch) => ch !== "\u00ad"), "\u00a0", "–", "—", "‘", "’", "“", "”", "•", "…", "€", "™"];
     expect(wanted.filter((ch) => !typeface.glyphs[ch])).toEqual([]);
     expect(typeface.glyphs[" "]).toMatchObject({ ha: expect.any(Number) });
     expect(typeface.glyphs[" "]!.o).toBeUndefined();
-    expect(typeface.glyphs[" "]!.ha).toBe(typeface.glyphs[" "]!.ha);
+    expect(typeface.glyphs["\u00a0"]!.ha).toBe(typeface.glyphs[" "]!.ha);
   });
 
   it("writes every outline in the commands three.js reads, with whole numbers", () => {

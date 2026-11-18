@@ -370,13 +370,36 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D titl
   );
 
   it(
-    "fails the render naming the cause for a character the typeface lacks, too many lines, a broken typeface and a missing one",
+    "keeps a long line inside the frame at the largest size, and with a headline keeps the letters above it",
+    async () => {
+      const { dir } = await scaffold("title-3d");
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      const edges = (pixels: Buffer) => {
+        let n = 0;
+        for (let y = 0; y < HEIGHT; y++) for (const x of [0, 1, WIDTH - 2, WIDTH - 1]) n += pixels[(y * WIDTH + x) * 4 + 3]! > 16 ? 1 : 0;
+        return n;
+      };
+      const wide = await adapter.render({ ...clip, props: { reveal: "rise", text: "WWWWWWW", size: 1.4, subtitle: "", backdrop: 0 } }, ctx(dir, manager));
+      for (const at of [1.2, DURATION - 0.1]) {
+        const pixels = await frameAt(ffmpeg, wide.file, at);
+        expect(count(pixels, opaque), `letters at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.03);
+        expect(edges(pixels), `letter pixels in the outer columns at ${at} s`).toBe(0);
+      }
+    },
+    600_000,
+  );
+
+  it(
+    "fails the render naming the cause for a character the typeface lacks, too many lines, a word too long for the width, a broken typeface and a missing one",
     async () => {
       const { dir, composition } = await scaffold("title-3d");
       const manager = binaries();
       const adapter = createHyperframesAdapter({ projectDir: dir });
       await expect(adapter.render({ ...clip, props: { text: "Hi 日" } }, ctx(dir, manager))).rejects.toThrow(/no glyph for .* \(U\+65E5\)/);
       await expect(adapter.render({ ...clip, props: { text: "a\nb\nc\nd" } }, ctx(dir, manager))).rejects.toThrow(/at most 3 lines/);
+      await expect(adapter.render({ ...clip, props: { text: "Supercalifragilisticexpialidocious" } }, ctx(dir, manager))).rejects.toThrow(/"Supercalifragilisticexpialidocious" does not fit the format's width even at 40 % size/);
       const typeface = join(composition, "frameshell-title.typeface.json");
       writeFileSync(typeface, "{ not json");
       await expect(adapter.render({ ...clip, props: { text: "Hi" } }, ctx(dir, manager))).rejects.toThrow(/frameshell-title\.typeface\.json is not valid JSON/);
