@@ -1,0 +1,45 @@
+{
+  "name": "@frameshell/openai-speech",
+  "version": "0.1.0",
+  "description": "Official Frameshell speech provider: OpenAI text to speech with your own API key, for voiceovers.",
+  "license": "Apache-2.0",
+  "author": "Frameshell contributors",
+  "homepage": "https://github.com/ThomasPraun/frameshell/tree/main/plugins/openai-speech#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasPraun/frameshell.git",
+    "directory": "plugins/openai-speech"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasPraun/frameshell/issues"
+  },
+  "keywords": [
+    "frameshell",
+    "frameshell-plugin",
+    "openai",
+    "text-to-speech"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "frameshell-plugin.json",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@frameshell/plugin-api": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

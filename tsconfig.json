@@ -11,6 +11,7 @@
     { "path": "plugins/whisper-cpp" },
     { "path": "plugins/hyperframes" },
     { "path": "plugins/remotion" },
-    { "path": "plugins/blender" }
+    { "path": "plugins/blender" },
+    { "path": "plugins/openai-speech" }
   ]
 }
