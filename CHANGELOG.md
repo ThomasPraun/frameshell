@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Words in the timing of generated clips, the final slice of #458 (ADR 0029 "Words in timing as built", epic #451; no
+  protocol change, plugin API `apiVersion` stays "1"): a clip whose adapter's `timing()` returns `words` gets
+  `RenderContext.timing.words`, the transcript words the timeline plays that start inside the clip (`{ at, end, text,
+  id }`, composition seconds, `text` as corrected), read from the same placement as `word:` references. A stale
+  transcript, or a timeline with no transcribed word, gives `words: []` and the stable code `wordsProblem`
+  (`no-transcript`, `stale-transcript`; `RENDER_WORDS_PROBLEMS` words them), never a failed render. HyperFrames asks with
+  `words` in the `frameshell-timing` meta tag, Remotion with `"words"` in `props.timing` (`src/frameshell-timing.ts`
+  gains `FrameshellWord`, `words` and `wordsProblem`; a parity test holds it to `RenderTiming`). Only clips that ask
+  read the transcripts and render again when one changes; every other key is unchanged.
+- HyperFrames templates ask for beats by themselves: a clip whose props set `onBeats` to true gets the beat grid without
+  the meta tag, and one with `onBeats` false or unset keeps its key, so it never renders again when the music moves.
+  `notification-stack` (cards drop on beats) and `work-cards` (each card pulses on a beat) gain `onBeats`, with
+  `checklist`; the three share one step schedule (`stepTimes`, nominal fallback to the steps).
+
 - Still finals for look-dev, slice 7 of #482 (ADR 0035, epic #451; protocol 176): `frameshell frame --final [--yes]`
   and `frameshell clip compare --final [--yes]` (MCP `frame_capture` / `clip_compare` with `final`) draw a Blender clip
   shown at that frame from a Cycles final of that one frame instead of its EEVEE draft, unless its whole final is

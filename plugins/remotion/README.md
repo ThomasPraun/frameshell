@@ -18,7 +18,7 @@ The plugin does not depend on Remotion. It loads `@remotion/bundler` and `@remot
 
 The project's `remotion.config.ts` (or `.js`) applies as with Remotion's CLI: its webpack override (e.g. Tailwind via `@remotion/tailwind-v4`) and OpenGL renderer. Output settings in it are ignored, since clips are always VP9 with alpha. Reading it needs `@remotion/cli` in the Remotion project; Remotion has no public API for this, so the plugin uses the CLI's own config loader.
 
-A clip can ask for the timeline's beats and markers with `props.timing` (`["beats", "markers"]`, ADR 0029): they arrive in the composition as the reserved input prop `frameshellTiming`, in renders and live preview alike. `frameshell remotion new` writes `src/frameshell-timing.ts` with the types and a `useFrameshellTiming()` hook. Clips that do not ask are unchanged.
+A clip can ask for the timeline's beats, markers and transcript words with `props.timing` (any of `["beats", "markers", "words"]`, ADR 0029): they arrive in the composition as the reserved input prop `frameshellTiming`, in renders and live preview alike. `frameshell remotion new` writes `src/frameshell-timing.ts` with the types and a `useFrameshellTiming()` hook. Clips that do not ask are unchanged.
 
 Renders use the headless Chrome Frameshell manages, never a browser Remotion would download.
 

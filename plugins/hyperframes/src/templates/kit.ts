@@ -1,4 +1,5 @@
 import { MOTION_RUNTIME_FILE } from "../motion-runtime.js";
+import { ON_BEATS_PROP } from "../timing.js";
 import { type BrandTokens, type FontToken, fontCopyName } from "./tokens.js";
 
 /** One typed prop of a template: a HyperFrames composition variable with its bounds. */
@@ -204,6 +205,30 @@ export function backdropVariables(tokens: BrandTokens): TemplateVariable[] {
     { id: "backdrop", type: "number", label: "Solid background behind it, 0 = transparent over footage, 1 = opaque", default: 0, min: 0, max: 1, step: 0.05 },
   ];
 }
+
+/**
+ * The {@link ON_BEATS_PROP} prop of a template with a stepped schedule: true asks the adapter for the music's beats
+ * (no meta tag needed) and puts the steps on them. `steps` names the steps in the label (`the ticks`).
+ */
+export function onBeatsVariable(steps: string, from: string): TemplateVariable {
+  return { id: ON_BEATS_PROP, type: "boolean", label: `Put ${steps} on the music's beats from ${from}`, default: false };
+}
+
+/**
+ * Page-script `stepTimes(start, gap, count, onBeats)`: the times of `count` steps from `start`, `gap` apart, or with
+ * `onBeats` the clip's beats from the first one at or after `start` (motion runtime 0.5.0, ADR 0029 decision 8).
+ * Without a usable grid the beats fall back to those same steps (the nominal grid), so `onBeats` never changes a
+ * clip that has none. Needs `M`.
+ */
+export const STEP_TIMES = String.raw`
+      function stepTimes(start, gap, count, onBeats) {
+        var steps = { bpm: 60 / gap, offset: start };
+        var from = onBeats ? M.beatAt(start, steps) : null;
+        var first = from ? (from.phase > 1e-6 ? from.index + 1 : from.index) : 0;
+        var times = [];
+        for (var i = 0; i < count; i++) times.push(onBeats ? M.beatTime(first + i, steps) : start + i * gap);
+        return times;
+      }`;
 
 /** CSS of the optional background element `<div id="backdrop">`, the first child of the clip. */
 export const BACKDROP_CSS = "#backdrop { position: absolute; inset: 0; }";

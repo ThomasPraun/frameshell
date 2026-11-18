@@ -17,6 +17,8 @@ frameshell hyperframes update           # refresh the frozen motion runtime copi
 
 `check [<composition>] [--strict] [--json]` runs the HyperFrames linter ([`@hyperframes/lint`](https://www.npmjs.com/package/@hyperframes/lint)) in the daemon, with no network and no telemetry, plus Frameshell's GSAP and three.js seek-safety rules (the vendored three.js bundle itself is not linted). It prints `file:line:column severity rule message` and a fix per finding; errors exit 1, warnings only with `--strict`. The plugin never uses the `hyperframes` CLI.
 
+A composition can read the timeline's beats, markers and transcript words inside the clip as `window.frameshellTiming` by asking with `<meta name="frameshell-timing" content="beats markers words">` (ADR 0029); the `checklist`, `notification-stack` and `work-cards` templates ask for beats when their `onBeats` prop is true. Clips that ask for nothing never render again when the music, a marker or a transcript changes.
+
 While a clip renders, the Frameshell desktop preview plays its composition live at the playhead (ADR 0010); export always uses the render. When the user picks an element of a clip with the Pick tool (ADR 0011), the live page names the file it comes from, the composition or one of its `data-composition-src` sub-compositions.
 
 Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. Headless Chrome downloads on the first render. Usage for agents: [`skills/hyperframes/SKILL.md`](skills/hyperframes/SKILL.md).

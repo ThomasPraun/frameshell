@@ -3,11 +3,13 @@ import {
   BACKDROP_SETUP,
   COLOR_HELPERS,
   PLACEHOLDER,
+  STEP_TIMES,
   type Template,
   type TemplateInput,
   type TemplateVariable,
   backdropVariables,
   fontSetup,
+  onBeatsVariable,
   pageHead,
 } from "./kit.js";
 
@@ -17,8 +19,8 @@ import {
  * Up to eight items, separated by `|` in one prop so a revision is one
  * `clip set`. Transparent unless `backdrop` is raised. With `onBeats` the ticks
  * land on the beats of the timeline's music (motion runtime 0.5.0, ADR 0029
- * decision 8): the entry also needs `<meta name="frameshell-timing" content="beats">`,
- * which is not scaffolded so a plain checklist never re-renders when the music moves.
+ * decision 8): the prop itself asks the adapter for the beats, so a checklist
+ * without it never re-renders when the music moves.
  */
 export const checklist: Template = {
   id: "checklist",
@@ -37,12 +39,7 @@ export const checklist: Template = {
       },
       { id: "tickStart", type: "number", label: "Seconds until the first tick", default: 1, min: 0.3, max: 6, step: 0.1, unit: "s" },
       { id: "tickGap", type: "number", label: "Seconds between ticks", default: 0.7, min: 0.2, max: 3, step: 0.05, unit: "s" },
-      {
-        id: "onBeats",
-        type: "boolean",
-        label: "Tick on the music's beats from tickStart (needs the frameshell-timing meta tag with beats in the entry)",
-        default: false,
-      },
+      onBeatsVariable("the ticks", "tickStart"),
       { id: "ink", type: "color", label: "Text colour", default: tokens.colors.ink ?? PLACEHOLDER.ink },
       { id: "accent", type: "color", label: "Tick colour", default: tokens.colors.accent ?? PLACEHOLDER.accent },
       { id: "size", type: "number", label: "Type size, 1 = the format's default", default: 1, min: 0.5, max: 1.6, step: 0.05 },
@@ -120,17 +117,8 @@ export const checklist: Template = {
         rows.push({ row: row, fill: fill, tick: tick, text: row.lastChild });
       });
 
-      // Tick times: the steps above, or the clip's beats from the first one at or after tickStart. Without a usable
-      // grid the beats fall back to those same steps (nominal grid), so onBeats never changes a clip that has none.
-      var steps = { bpm: 60 / P.tickGap, offset: P.tickStart };
-      var first = 0;
-      if (P.onBeats) {
-        var from = M.beatAt(P.tickStart, steps);
-        first = from.phase > 1e-6 ? from.index + 1 : from.index;
-      }
-      var tickTimes = rows.map(function (_, i) {
-        return P.onBeats ? M.beatTime(first + i, steps) : P.tickStart + i * P.tickGap;
-      });
+      ${STEP_TIMES}
+      var tickTimes = stepTimes(P.tickStart, P.tickGap, n, P.onBeats);
 
       var D = S.duration;
       var OUT = 0.3;

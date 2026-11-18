@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { RenderTiming } from "@frameshell/plugin-api";
 import { MOTION_RUNTIME } from "../src/motion-runtime.js";
 import { checklist } from "../src/templates/checklist.js";
+import type { Template } from "../src/templates/kit.js";
+import { notificationStack } from "../src/templates/notification-stack.js";
+import { workCards } from "../src/templates/work-cards.js";
 
-// The checklist page script runs here against the bundled runtime and a stub page, so the tick times can be read
-// from the fill of each box after a seek (a box fills when its tick lands).
-const INPUT = { id: "list", width: 1920, height: 1080, duration: 5, tokens: { colors: {}, brand: {}, used: [], problem: null } };
+// The page scripts of the templates with stepped schedules run here against the bundled runtime and a stub page, so
+// the step times can be read from an opacity after a seek (a checklist box fills when its tick lands, a card shows
+// when it arrives).
+const TOKENS = { colors: {}, brand: {}, used: [], problem: null };
 
 /** An element stub that remembers whatever is set on it and hands out the same child for the same name. */
 function element(): Record<string, unknown> {
@@ -26,14 +30,22 @@ function element(): Record<string, unknown> {
   });
 }
 
-/** Opacity (0 to 1) of each item's box fill at clip second `t`, for a page with `timing` and the clip props `given`. */
-function fills(timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]): number[][] {
-  const html = checklist.render(INPUT);
+/** The element of a created row whose opacity marks its step. */
+type Mark = (row: Record<string, unknown>) => { style: { opacity: string } };
+const boxFill: Mark = (row) => (row["firstChild"] as Record<string, unknown>)["firstChild"] as { style: { opacity: string } };
+
+/**
+ * Opacity (0 to 1) of each created row's `mark` at clip second `t`, for `template`'s page with `timing` and the clip
+ * props `given`.
+ */
+function opacities(template: Template, mark: Mark, timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]): number[][] {
+  const duration = template.defaultDuration;
+  const html = template.render({ id: "list", width: 1920, height: 1080, duration, tokens: TOKENS });
   const attribute = /data-composition-variables='([^']*)'/.exec(html)![1]!.replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]!).at(-1)!;
   const rows: Record<string, unknown>[] = [];
   const named = new Map<string, unknown>();
-  const root = { getAttribute: (name: string) => ({ "data-composition-id": "list", "data-width": "1920", "data-height": "1080", "data-duration": "5" })[name] ?? null };
+  const root = { getAttribute: (name: string) => ({ "data-composition-id": "list", "data-width": "1920", "data-height": "1080", "data-duration": String(duration) })[name] ?? null };
   const page: Record<string, unknown> = {
     __hyperframes: { getVariables: () => given },
     addEventListener: () => undefined,
@@ -57,16 +69,20 @@ function fills(timing: RenderTiming | undefined, given: Record<string, unknown>,
   const timeline = (page["__timelines"] as Record<string, { seek(t: number): void }>)["list"]!;
   return times.map((t) => {
     timeline.seek(t);
-    return rows.map((row) => Number(((row["firstChild"] as Record<string, unknown>)["firstChild"] as { style: { opacity: string } }).style.opacity));
+    return rows.map((row) => Number(mark(row).style.opacity));
   });
 }
 
-/** Seconds at which each of the four default items starts to fill, to 10 ms, found by scanning the clip. */
-function tickTimes(timing: RenderTiming | undefined, given: Record<string, unknown>): number[] {
+const fills = (timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]) => opacities(checklist, boxFill, timing, given, ...times);
+
+/** Seconds at which each of the first `count` rows starts to show its mark, to 10 ms, found by scanning the clip. */
+function stepTimes(template: Template, mark: Mark, count: number, timing: RenderTiming | undefined, given: Record<string, unknown>): number[] {
   const steps = Array.from({ length: 400 }, (_, i) => i / 100);
-  const seen = fills(timing, given, ...steps);
-  return [0, 1, 2, 3].map((item) => steps[seen.findIndex((row) => row[item]! > 0)]! - 0.01);
+  const seen = opacities(template, mark, timing, given, ...steps);
+  return Array.from({ length: count }, (_, item) => steps[seen.findIndex((row) => row[item]! > 0)]! - 0.01);
 }
+
+const tickTimes = (timing: RenderTiming | undefined, given: Record<string, unknown>) => stepTimes(checklist, boxFill, 4, timing, given);
 
 const BEATS: RenderTiming = { beats: Array.from({ length: 10 }, (_, k) => ({ at: 0.25 + k * 0.5, beat: 3 + k })), tempo: { bpm: 120, meter: 4 } };
 // Default tickStart 1 s, tickGap 0.7 s: ticks at 1, 1.7, 2.4, 3.1.
@@ -99,5 +115,25 @@ describe("checklist ticks on the music's beats", () => {
     const forward = fills(BEATS, { onBeats: true }, 0.5, 1.3, 2, 3);
     const shuffled = fills(BEATS, { onBeats: true }, 3, 0.5, 2, 1.3);
     expect(shuffled).toEqual([forward[3], forward[0], forward[2], forward[1]]);
+  });
+});
+
+describe("other templates with steps on the music's beats", () => {
+  const card: Mark = (row) => row as unknown as { style: { opacity: string } };
+  const near = (times: number[]) => times.map((s) => expect.closeTo(s, 1));
+
+  it("drops notification cards on the first beats at or after startAt, or on the steps without onBeats or a grid", () => {
+    // Default startAt 0.4 s, gap 0.9 s, three cards.
+    expect(stepTimes(notificationStack, card, 3, BEATS, {})).toEqual(near([0.4, 1.3, 2.2]));
+    expect(stepTimes(notificationStack, card, 3, undefined, { onBeats: true })).toEqual(near([0.4, 1.3, 2.2]));
+    expect(stepTimes(notificationStack, card, 3, BEATS, { onBeats: true })).toEqual(near([0.75, 1.25, 1.75]));
+  });
+
+  it("starts work cards on beats: each lands a quarter second before its beat and pulses on it", () => {
+    // Default startAt 0.3 s, gap 0.5 s, three cards: they land at 0.3, 0.8, 1.3 and start 0.25 s later.
+    expect(stepTimes(workCards, card, 3, BEATS, {})).toEqual(near([0.3, 0.8, 1.3]));
+    expect(stepTimes(workCards, card, 3, { beats: [], beatsProblem: "no-beats" }, { onBeats: true })).toEqual(near([0.3, 0.8, 1.3]));
+    // The first beat at or after 0.55 s is 0.75 s, then 1.25 and 1.75: the cards land 0.25 s before each.
+    expect(stepTimes(workCards, card, 3, BEATS, { onBeats: true })).toEqual(near([0.5, 1, 1.5]));
   });
 });

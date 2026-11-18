@@ -143,7 +143,7 @@ export interface ClipAdapter {
   readonly finals?: FinalRenders;
   /**
    * Optional. Which of the timeline's timing this clip's render reads (ADR 0029 decision 8): `beats` (the beat grid,
-   * with bar starts) and `markers`. Only the kinds returned reach {@link RenderContext.timing} and count in the clip's
+   * with bar starts), `markers` and `words` (the transcript words the timeline plays). Only the kinds returned reach {@link RenderContext.timing} and count in the clip's
    * render key, so a clip that asks for none never re-renders when the music or a marker moves. Called on every key
    * check, like {@link inputs}, with the same `context`. Absent or empty: none. When it throws, or returns something
    * other than an array, the clip has no render key: it is unavailable (preview and export say why) until it answers.
@@ -234,7 +234,7 @@ export interface EstimateContext {
 export type RenderTier = "draft" | "final";
 
 /** What a clip can ask of the timeline's timing through {@link ClipAdapter.timing}. */
-export type RenderTimingKind = "beats" | "markers";
+export type RenderTimingKind = "beats" | "markers" | "words";
 
 /**
  * The timeline's timing inside one clip (ADR 0029 decision 8), in composition seconds (file time of the render: the
@@ -253,6 +253,13 @@ export interface RenderTiming {
   readonly beatsProblem?: RenderBeatsProblem;
   /** Markers of the timeline inside the clip, ascending; present when the clip asked for `markers`. */
   readonly markers?: readonly RenderMarker[];
+  /**
+   * Transcript words the timeline plays that start inside the clip, ascending; present when the clip asked for
+   * `words`. Empty when the timeline's words cannot be read; {@link wordsProblem} says why.
+   */
+  readonly words?: readonly RenderWord[];
+  /** Why {@link words} is empty although asked, as a stable code (part of the render key); absent when it is not. */
+  readonly wordsProblem?: RenderWordsProblem;
 }
 
 /**
@@ -268,6 +275,19 @@ export const RENDER_BEATS_PROBLEMS: Readonly<Record<RenderBeatsProblem, string>>
   "no-beats": "The music clip has no beat grid yet: run `frameshell beats measure` on its asset.",
   "broken-beats": "The music's beats file cannot be read or is not valid.",
   "low-confidence": "The music's beat grid is LOW confidence: check it with `frameshell beats show`, then correct or confirm it.",
+};
+
+/**
+ * Why a clip that asked for `words` got none ({@link RenderTiming.wordsProblem}), as `word:` time references refuse:
+ * a heard clip's transcript is older than its file, or the timeline plays no transcribed word. A code, as
+ * {@link RenderBeatsProblem}; {@link RENDER_WORDS_PROBLEMS} words it.
+ */
+export type RenderWordsProblem = "no-transcript" | "stale-transcript";
+
+/** One sentence per {@link RenderWordsProblem}, for an adapter or composition that shows why a clip has no words. */
+export const RENDER_WORDS_PROBLEMS: Readonly<Record<RenderWordsProblem, string>> = {
+  "no-transcript": "The timeline plays no transcribed word: run `frameshell transcribe` on the footage.",
+  "stale-transcript": "A transcript on the timeline is older than its file: run `frameshell transcribe` on that asset again.",
 };
 
 /** One beat of {@link RenderTiming.beats}. */
@@ -288,6 +308,18 @@ export interface RenderMarker {
   readonly label: string;
   /** `red`, `orange`, `yellow`, `green`, `blue` or `purple`; absent: the app's accent. */
   readonly color?: string;
+}
+
+/** One word of {@link RenderTiming.words}: a transcript word as the timeline plays it. */
+export interface RenderWord {
+  /** Composition seconds the word starts. */
+  readonly at: number;
+  /** Composition seconds the word ends (the clip that plays it may cut it short). */
+  readonly end: number;
+  /** As the person corrected it in the transcript, else as transcribed. */
+  readonly text: string;
+  /** Transcript word id (`w_000012`), as `word:w_000012` names it. */
+  readonly id: string;
 }
 
 /**
@@ -422,7 +454,7 @@ export interface RenderContext {
    */
   readonly tier?: RenderTier;
   /**
-   * The timeline's beats and markers inside the clip, of the kinds {@link ClipAdapter.timing} asked for (ADR 0029
+   * The timeline's beats, markers and words inside the clip, of the kinds {@link ClipAdapter.timing} asked for (ADR 0029
    * decision 8); absent when it asked for none. Part of the render key.
    */
   readonly timing?: RenderTiming;

@@ -67,6 +67,16 @@ describe("timing kinds a composition asks for", () => {
     expect(timingKinds(ASKING)).toEqual(["beats", "markers"]);
     expect(timingKinds("<META content='Markers' NAME='frameshell-timing'>")).toEqual(["markers"]);
     expect(timingKinds('<meta name=frameshell-timing content="beats,  bars">')).toEqual(["beats"]);
+    expect(timingKinds('<meta name="frameshell-timing" content="Words markers">')).toEqual(["markers", "words"]);
+  });
+
+  it("asks for beats when the clip's props set onBeats to true, and only then", () => {
+    expect(timingKinds("<html></html>", { onBeats: true })).toEqual(["beats"]);
+    expect(timingKinds('<meta name="frameshell-timing" content="words">', { onBeats: true })).toEqual(["beats", "words"]);
+    expect(timingKinds(ASKING, { onBeats: true })).toEqual(["beats", "markers"]);
+    for (const props of [undefined, {}, { onBeats: false }, { onBeats: "true" }, { onBeats: 1 }]) {
+      expect(timingKinds("<html></html>", props)).toEqual([]);
+    }
   });
 
   it("asks for nothing without the tag, or with another meta tag", () => {
@@ -79,6 +89,8 @@ describe("timing kinds a composition asks for", () => {
     expect(await adapter.timing!({ id: "c_1", source: SOURCE })).toEqual(["beats", "markers"]);
     writeFileSync(join(project, SOURCE), "<html></html>");
     expect(await adapter.timing!({ id: "c_1", source: SOURCE })).toEqual([]);
+    expect(await adapter.timing!({ id: "c_1", source: SOURCE, props: { onBeats: false } })).toEqual([]);
+    expect(await adapter.timing!({ id: "c_1", source: SOURCE, props: { onBeats: true } })).toEqual(["beats"]);
     expect(await adapter.timing!({ id: "c_1" })).toEqual([]);
     expect(await adapter.timing!({ id: "c_1", source: "compositions/hyperframes/gone/index.html" })).toEqual([]);
   });
