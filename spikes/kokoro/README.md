@@ -20,6 +20,7 @@ the managed onnxruntime-web 1.30.0, the number speller (`spellNumbersIn`), the W
 | `src/lines.ts` | Test lines (display form; spoken form = `spellNumbersIn`) |
 | `src/g2p-show.ts` | Prints phonemes and token counts of every line |
 | `src/bench-one.ts`, `src/bench.ts` | Cold load, ms and real-time factor per line (wall and thread CPU), peak RSS, main thread vs worker |
+| `src/yardstick.ts` | YuNet on one 512×288 frame through the same loader, to scale times to a machine where YuNet's time is known |
 | `src/synth.ts` | Kokoro takes of the quality lines (one variant, voice, language, G2P options) |
 | `src/baseline.ts` | Takes from a TTS program run like the `command` provider (stdin text, `{out}`) |
 | `scripts/sapi-command.txt` | Windows SAPI (Zira, en-US) as such a program |
