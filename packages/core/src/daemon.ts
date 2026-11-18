@@ -842,6 +842,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { video } = await media.probe(dir, asset);
       return video ? { width: video.width, height: video.height } : null;
     },
+    // The proxy-size matte as `matte.status` finds it, never queued: review measures what export would draw now.
+    readyMatte: async (dir, asset) => {
+      const info = (await media.list(dir)).find((one) => one.path === asset);
+      if (info?.kind !== "media" || info.state === "failed") return { missing: "which is not an ingested video" };
+      if (info.media?.video?.still === true) return { missing: "a still picture, which has no matte" };
+      if (info.state !== "ready" || info.hash === null || info.proxy === null) return { missing: "whose proxy is not made yet" };
+      const key = matteKey(info.hash, matteModel, (await readEnclosingProject(dir))?.config.fps ?? 30);
+      const made = await readMatteInfo(dir, key, info.hash);
+      if (!made) return { missing: `whose matte is not made yet (\`frameshell matte ${asset}\`; review never starts one)` };
+      return { path: join(dir, ...mattePaths(key).video.split("/")), width: made.width, height: made.height, fps: made.fps, frames: made.frames };
+    },
   });
   const brands = new BrandService({
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),

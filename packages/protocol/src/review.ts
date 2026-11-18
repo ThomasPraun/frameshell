@@ -173,8 +173,10 @@ export const ReviewCraftWarningSchema = z.object({
         "`voice-bed`: the bed comes within 6 dB of the voice. `sfx-repeat`: one effect file plays more than twice. `machine-gun`: one effect file 4 times or more in a row, each within 1 s of the last. " +
         "`chopped`: a clip ends with its sound above -35 dB of its loudest. `ending`: the music is cut on the last frame, or a file's sound is not down at its end or peaks in its last 15 %. " +
         "`click`: a click in a file's sound. `masking`: under the voice the music comes within the style's `musicUnderVoice` minus 3 dB of it. " +
-        "`edge-click`: a clip starts with no fade mid-sound, 19 dB or more over what played just before. `harsh`: a file's 2 to 6 kHz band comes over 6 dB above that band at its loudest moment.",
+        "`edge-click`: a clip starts with no fade mid-sound, 19 dB or more over what played just before. `harsh`: a file's 2 to 6 kHz band comes over 6 dB above that band at its loudest moment. " +
+        "`behind`: a word on a track behind the person (ADR 0032) is covered under 15 % or over 65 % by the person's matte at a frame measured, or meets a face of the plate clip (`metrics.behind`).",
     ),
+  clip: z.string().optional().describe("The clip the warning is about (`behind`: the word's clip); a waiver naming a clip covers it only when it names this one. Absent: about a time of the film."),
   from: z.number().nullable().describe("Seconds the thing starts; null when it is about the whole film."),
   to: z.number().nullable(),
   message: z.string(),
@@ -414,7 +416,7 @@ export type ReviewFinding = Omit<ReviewCraftWarning, "severity">;
 /** A craft warning a waiver of `requirements.json` covers: kept in the report with the reason, out of `craft`. */
 export const ReviewWaivedWarningSchema = ReviewCraftWarningSchema.omit({ severity: true }).extend({
   reason: z.string().describe("The waiver's reason."),
-  clip: z.string().optional().describe("The clip the waiver names; absent for a waiver of the whole check."),
+  clip: z.string().optional().describe("The clip the waiver names, else the clip the warning is about; absent for a waiver of the whole check."),
 });
 
 /** See {@link ReviewWaivedWarningSchema}. */
@@ -527,6 +529,46 @@ export const ReviewSpeedSchema = z.object({
 /** See {@link ReviewSpeedSchema}. */
 export type ReviewSpeed = z.output<typeof ReviewSpeedSchema>;
 
+/** How much of a word behind the person the person covers, as `review` judges it. */
+export const BEHIND_VERDICTS = ["fine", "near", "floats", "eaten", "unplaced"] as const;
+
+/** One frame of a word behind the person, measured. */
+export const ReviewBehindSampleSchema = z.object({
+  at: z.number().describe("Timeline seconds of the frame (its start)."),
+  plateClip: z.string().describe("The plate clip whose subject is drawn over the word then."),
+  covered: z
+    .number()
+    .nullable()
+    .describe("Share of the word's alpha (weighted by it) where the matte is the person, 0 to 1, 3 decimals; null when the word draws nothing at that frame."),
+  face: z.boolean().nullable().describe("The box of the word's alpha meets a face box of the plate clip at that frame; null when the plate's asset has no cached `people scan`."),
+});
+
+/** See {@link ReviewBehindSampleSchema}. */
+export type ReviewBehindSample = z.output<typeof ReviewBehindSampleSchema>;
+
+/** A generated clip on a track `behind` a plate (ADR 0032): how much of it the person covers. */
+export const ReviewBehindSchema = z.object({
+  clip: z.string().describe("The word's clip: a generated clip on the track behind the plate."),
+  track: z.string().describe("Its track, `behind` the plate track."),
+  plate: z.string().describe("The plate track, whose footage's matte lifts the person over the word."),
+  from: z.number().nullable().describe("Timeline seconds the person is first drawn over the word; null when never (`unplaced`)."),
+  to: z.number().nullable().describe("Timeline seconds the last such frame ends."),
+  samples: z
+    .array(ReviewBehindSampleSchema)
+    .describe("Up to 3 frames: the first, the middle and the last of the word's time behind the person. The matte frame is the one export draws there (`in`, speed, proxy frame grid)."),
+  verdict: z
+    .enum(BEHIND_VERDICTS)
+    .describe(
+      "From the sample farthest from 30-55 % covered, the share that reads best: `fine` (all within), `near` (between 15 and 65 %: a note, no warning), " +
+        "`floats` (under 15 %: the word floats beside the person) or `eaten` (over 65 %: the person hides it), both `behind` craft warnings; " +
+        "`unplaced` when it cannot be measured (no render, a render with no alpha, no matte made yet, a still or a nested or generated plate, never under the person): `message` says why.",
+    ),
+  message: z.string(),
+});
+
+/** See {@link ReviewBehindSchema}. */
+export type ReviewBehind = z.output<typeof ReviewBehindSchema>;
+
 /**
  * The numbers of a run: what a picture sheet cannot tell. Measured on the film's grey frames (Rec. 709 luma) at 64 px on
  * the long side (the scale of `analyze`) and its sound.
@@ -557,6 +599,10 @@ export const ReviewMetricsSchema = z.object({
   waived: z.array(ReviewWaivedWarningSchema).describe("Craft warnings a waiver of `requirements.json` covers, with its reason: accepted, not gone; empty when none."),
   requirements: ReviewRequirementsSchema.nullable().describe("`requirements.json` judged: its checks, its waivers and what failed; null when the project has none."),
   speed: z.array(ReviewSpeedSchema).optional().describe("With `speed`: the speed graph of the clip's hero point, with its linear moves and dead stops. Absent without `speed`."),
+  behind: z
+    .array(ReviewBehindSchema)
+    .optional()
+    .describe("A timeline with a track `behind` a plate (ADR 0032): each generated clip on such a track, with the share of it the person covers and a face check. Absent otherwise."),
 });
 
 /** See {@link ReviewMetricsSchema}. */

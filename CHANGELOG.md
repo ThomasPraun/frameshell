@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Built-in looks, slice 10 of #384 (ADR 0031 decision 8, epic #451; protocol 173; closes #384): six colour looks,
+- Built-in looks, slice 10 of #384 (ADR 0031 decision 8, epic #451; protocol 174; closes #384): six colour looks,
   `warm`, `cool`, `filmic`, `punchy`, `faded` and `mono`, as plain grade numbers (exposure, temperature, tint,
   contrast, saturation) in one table in the schema package: no `.cube` file is generated or bundled, so no licence
   is touched, and export and the preview needed no change. `frameshell grade looks` (MCP `grade_looks`) lists them
@@ -19,7 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mine:look=warm,saturation=1.1` (MCP `looks: [{ look: "warm", saturation: 1.1 }]`) starts one from it; an unknown
   name is refused naming the valid ones. The clip inspector's Colour group has a Look menu that sets the five
   numbers in one undoable step (English and Spanish).
-
+- `review` measures a word behind the person, slice MX3 of #461 (ADR 0032, #457 follow-up, epic #451; protocol 173):
+  on a timeline with a track `behind` a plate, `metrics.behind` lists each clip on it with the share of the word the
+  person's matte covers at the first, middle and last frame of its time under the person (the word's render alpha
+  against the matte frame export draws, both placed in the film through keys and the format's cover crop) and whether
+  its box meets a face of the plate clip (a cached `people scan`). Under 15 % (it floats) or over 65 % (the person eats
+  it), or over a face, is a craft warning of the new check `behind`, which names 30 to 55 % as the target; between the
+  bands the entry carries a note only. The warning carries its `clip`, so a waiver of one word covers that word only.
+  Review reads finished mattes and never queues one; a still or media word, an opaque render or a plate with no matte
+  is `unplaced` with the reason. CLI `review` prints the entries; skill `critique.md` and `reels.md` teach them.
 - Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
   `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
   selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags
@@ -1597,6 +1605,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   camera named `001` is found; `null` still drops the key. The `clip.compare` description now names `ClipRenderFailed`
   for a variant whose render fails (it said InvalidOperation) and says variant renders stay cached only until `gc`.
 - The Blender playbook quotes `doctor`'s real lines for a Blender that is missing or out of range.
+- Test runs no longer fill the system temp dir: vitest gives each test file its own `TMPDIR` (`fsv-*`, removed after the
+  file and swept again at the end of the run, stale ones after a day) and warns about temp dirs that still escaped it;
+  Playwright e2e runs under one temp root removed at teardown. Before, every run left hundreds of `frameshell-*` and
+  `fs-*` dirs behind (94 GB over many parallel runs).
 - The Voice switch of the clip inspector no longer deletes the builds `music shape` wrote (#485, ADR 0037): the switch,
   "Voice preset" and Voice off replace only the voice effects and keep every `highpassSweep` build in place, and the
   switch reads "on" only while the clip has a non-build effect. `isBuild` moved to `@frameshell/schema`.

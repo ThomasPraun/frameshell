@@ -27,7 +27,7 @@ function frameshell(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}) {
   return { code: result.status, stdout: result.stdout, stderr: result.stderr, elapsedMs: Date.now() - startedAt };
 }
 
-const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "frameshell-cli-")));
+const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "fs-cli-")));
 
 // Probe by pid: connecting would itself reset the idle timer.
 function isAlive(pid: number): boolean {

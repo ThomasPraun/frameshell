@@ -81,8 +81,11 @@ export function judgeRequirements(input: JudgeInput): { metrics: ReviewMetrics; 
 
   const byId = new Map((input.clips ?? []).map((clip) => [clip.id, clip]));
   const end = (clip: ClipSpan) => clip.end ?? input.filmSeconds;
-  const covers = (waiver: RequirementsFile["waivers"][number], from: number | null, to: number | null): boolean => {
+  const covers = (waiver: RequirementsFile["waivers"][number], warning: { clip?: string | undefined; from: number | null; to: number | null }): boolean => {
     if (waiver.clip === undefined) return true;
+    // A warning about one clip (`behind`) is that clip's alone, whatever else plays then.
+    if (warning.clip !== undefined) return warning.clip === waiver.clip;
+    const { from, to } = warning;
     const clip = byId.get(waiver.clip);
     if (!clip || from === null) return false;
     const last = Math.max(to ?? from, from);
@@ -93,7 +96,7 @@ export function judgeRequirements(input: JudgeInput): { metrics: ReviewMetrics; 
   const craft: ReviewMetrics["craft"] = [];
   const waived: ReviewWaivedWarning[] = [];
   for (const { severity: _severity, ...warning } of metrics.craft) {
-    const found = requirements.waivers.flatMap((waiver, index) => (waiver.check === warning.check && covers(waiver, warning.from, warning.to) ? [index] : []));
+    const found = requirements.waivers.flatMap((waiver, index) => (waiver.check === warning.check && covers(waiver, warning) ? [index] : []));
     for (const index of found) matched[index]!++;
     if (found.length > 0) {
       const first = requirements.waivers[found[0]!]!;
