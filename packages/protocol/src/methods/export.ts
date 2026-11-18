@@ -389,7 +389,7 @@ export const exportMethods = {
       "The per-clip kit: `pop` (a time) writes the frame before and the frame at it side by side with their difference amplified 4 times, to see what jumps; " +
       "`onion` (a clip id) blends up to 24 frames of the clip's span (or of `from`/`to` inside it) into one image, each moving part at 25 %, so the spacing between positions shows whether the motion tightens into its keys; " +
       "`speed` (a clip id) charts the speed of the clip's hero point per frame (a media clip: its picture as its keys place it, exact; a generated clip: the centre and size of its render's alpha, a render without alpha is skipped with the reason) and lists in `metrics.speed` " +
-      "the `linear` stretches (no ease) and the dead `stop`s mid-move, both warnings. With any of the three and no `sheets`, the run writes only their sheets (and `metrics` with `speed`); `cropAt` crops the `pop` and `onion` tiles too. " +
+      "the `linear` stretches (no ease) and the dead `stop`s mid-move, both warnings. With any of the three and no `sheets`, the run writes only their sheets (and `metrics` with `speed`, the safe sheet with `platform`); `cropAt` crops the `pop` and `onion` tiles too (both `pop` frames take the crop of the frame at `pop`). " +
       "The MCP tool returns the sheets as images. " +
       "Fails with InvalidOperation (a range outside the film, a file with no picture, `cropAt.clip`, `onion` or `speed` with a `file` or naming no picture clip, `pop` outside the film or on its first frame), AssetNotFound (`file` missing), " +
       "TimelineNotFound, FormatNotFound.",

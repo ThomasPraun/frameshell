@@ -153,15 +153,17 @@ export type KitSheetOptions = Pick<SheetImagesOptions, "ffmpeg" | "fps" | "aspec
 
 /**
  * The `pop` sheet, `pop.png`: the frame before and the frame of a pop side by side, then their difference amplified
- * {@link DIFFERENCE_GAIN} times (black where nothing changed), each cropped like the run's other tiles.
+ * {@link DIFFERENCE_GAIN} times (black where nothing changed). Both frames take the crop of the pop's frame, so a crop
+ * that follows a moving clip compares one part of the film, not the crop's own move.
  */
 export async function writePopSheet(options: KitSheetOptions & { picks: readonly [FramePick, FramePick] }): Promise<SheetImage> {
   const { ffmpeg, fps, aspect, layout, dir, picks, signal } = options;
+  const [before, after] = picks;
+  const crop = options.crop;
   const work = join(options.scratch, "pop");
   await mkdir(work, { recursive: true });
   try {
-    const { path, crops } = await pickedFrames(options, picks, join(work, "crop"));
-    const [before, after] = picks;
+    const { path, crops } = await pickedFrames({ ...options, crop: crop ? () => crop(after, frameTime(after.frame, fps)) : undefined }, picks, join(work, "crop"));
     const difference = join(work, "difference.png");
     await writeDifference(ffmpeg, path(before.frame), path(after.frame), difference, signal);
     const at = (pick: FramePick) => frameTime(pick.frame, fps);
@@ -244,7 +246,11 @@ export async function writeOnionSheet(options: KitSheetOptions & { picks: readon
     const tile = { width: layout.tileWidth, height: tileHeight(layout.tileWidth, aspect) };
     const bytes = tile.width * tile.height * 3;
     const decoded: Uint8Array[] = [];
-    for await (const frame of readRawFrames(ffmpeg, join(work, "frames", "o%05d.png"), `scale=${tile.width}:${tile.height}:flags=area,format=rgb24`, bytes)) decoded.push(Uint8Array.from(frame));
+    for await (const frame of readRawFrames(ffmpeg, join(work, "frames", "o%05d.png"), `scale=${tile.width}:${tile.height}:flags=area,format=rgb24`, bytes)) {
+      // Leaving the loop stops the reader's ffmpeg.
+      signal?.throwIfAborted();
+      decoded.push(Uint8Array.from(frame));
+    }
     const blended = join(work, "onion.png");
     await writeFile(blended, encodeRgbPng(onionBlend(decoded), tile.width, tile.height));
     const out = join(dir, "onion.png");

@@ -36,13 +36,14 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
                                --crop-at x,y[,size]: crop every tile (not the safe sheet's) around a point, fractions
                                of the frame, size = crop width as a share of it (default 0.25); with --clip id the
                                point is in that clip's picture and the crop follows its keyed moves and scale.
-                               Per-clip kit (alone, without --sheets, the run writes only these): --pop t (seconds or
-                               a marker, hook+0.5, beat:8) = the frame before t and the frame at t side by side with
-                               their difference x4; --onion clip = up to 24 frames of the clip (or of --range inside
-                               it) blended into one image, each moving part at 25 %: the spacing shows whether motion
-                               eases into its keys; --speed clip = chart of the clip's hero point speed per frame (a
-                               media clip's keyed placement, a generated clip's alpha) and its linear stretches and
-                               dead stops in metrics.speed (warnings only). --crop-at crops --pop and --onion too.
+                               Per-clip kit (alone, without --sheets, the run writes only these, plus the safe sheet
+                               with --platform): --pop t (seconds or a marker, hook+0.5, beat:8) = the frame before t
+                               and the frame at t side by side with their difference x4; --onion clip = up to 24 frames
+                               of the clip (or of --range inside it) blended into one image, each moving part at 25 %:
+                               the spacing shows whether motion eases into its keys; --speed clip = chart of the clip's
+                               hero point speed per frame (a media clip's keyed placement, a generated clip's alpha) and
+                               its linear stretches and dead stops in metrics.speed (warnings only). --crop-at crops
+                               --pop and --onion too (both --pop frames take the crop of the frame at t).
                                --preset p (with --file): check the file against the export plan of --timeline (and
                                --format) with that preset: size, frame rate, length, codecs, loudness.
                                --file reviews an exported video (the file

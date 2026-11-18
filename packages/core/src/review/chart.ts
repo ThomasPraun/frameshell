@@ -1,4 +1,4 @@
-import type { FrameSpan, SpeedInterval } from "./speed.js";
+import { type FrameSpan, type SpeedInterval, peakSpeed } from "./speed.js";
 
 // The chart of `review --speed` (#457), drawn into RGB pixels with no library: speed over the clip's frames, linear
 // stretches shaded amber, dead stops red. Pure; `encodeRgbPng` writes it and the sheet step burns the label in.
@@ -39,7 +39,7 @@ export function speedChart(intervals: readonly SpeedInterval[], spans: readonly 
   const bottom = height - PAD;
   const span = Math.max(1, frames.end - frames.first);
   const xOf = (frame: number) => Math.round(left + ((frame - frames.first) / span) * (right - left));
-  const peak = Math.max(0, ...intervals.map((interval) => interval.speed));
+  const peak = peakSpeed(intervals);
   const ceiling = peak > 0 ? peak * 1.1 : 1;
   const yOf = (speed: number) => Math.round(bottom - (Math.min(speed, ceiling) / ceiling) * (bottom - top));
 

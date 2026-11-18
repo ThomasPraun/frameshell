@@ -35,6 +35,13 @@ export function speedOf(samples: readonly HeroSample[]): SpeedInterval[] {
   return intervals;
 }
 
+/** The fastest speed of `intervals`, 0 when there is none. A loop, not a spread: an hour of frames is too many arguments. */
+export function peakSpeed(intervals: readonly SpeedInterval[]): number {
+  let peak = 0;
+  for (const interval of intervals) if (interval.speed > peak) peak = interval.speed;
+  return peak;
+}
+
 /** The thresholds {@link spansOf} judges by; the defaults are review's (`thresholds.ts`). */
 export interface SpeedThresholds {
   linearSpread: number;

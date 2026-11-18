@@ -521,7 +521,7 @@ export const ReviewSpeedSchema = z.object({
   peak: z.number().describe("Fastest speed, film px per frame: the centre's travel plus half the change of the size."),
   spans: z.array(ReviewSpeedSpanSchema).describe("Linear moves and dead stops, in time order; empty when the move eases (or nothing moves)."),
   sheet: z.string().nullable().describe("The chart (`speed` sheet), absolute path; null when skipped."),
-  skipped: z.string().optional().describe("Why the clip was not measured (a generated clip whose render has no alpha, or no render); absent when it was."),
+  skipped: z.string().optional().describe("Why the clip was not measured (a generated clip with no render, a render that cannot be read or has no alpha, or alpha on fewer than two frames); absent when it was."),
 });
 
 /** See {@link ReviewSpeedSchema}. */

@@ -2,7 +2,12 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, RpcError, connectToDaemon } from "@frameshell/protocol";
+import type { AdapterClip } from "@frameshell/schema";
+import type { GeneratedSource } from "../src/export/compiler.js";
 import { type Daemon, startDaemon } from "../src/index.js";
+import { alphaHero } from "../src/review/placement.js";
+import { spansOf, speedOf as speedOfSamples } from "../src/review/speed.js";
+import { SPEED_ALPHA_WIDTH } from "../src/review/thresholds.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
 
@@ -203,6 +208,36 @@ describe("review: speed", () => {
       const stops = (await speedOf()).spans.filter((span) => span.kind === "stop");
       // Frames 9 to 17 show the held position: 0.3 s to the end of frame 17.
       expect(stops).toEqual([{ from: 0.3, to: 0.6, kind: "stop", speed: 0 }]);
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("review: speed of a generated clip's alpha", () => {
+  it(
+    "follows the alpha of a real render and finds its linear move",
+    async () => {
+      const dir = tempDir();
+      const render = join(dir, "slide.webm");
+      // A 320x180 transparent frame with a 60x40 white box moving right 4 px a frame (120 px/s at 30 fps) from x 40.
+      await run(ffmpeg, [
+        ...["-hide_banner", "-loglevel", "error", "-y"],
+        ...["-f", "lavfi", "-i", "color=c=black@0.0:s=320x180:r=30:d=1,format=yuva420p"],
+        ...["-f", "lavfi", "-i", "color=c=white:s=60x40:r=30:d=1,format=yuva420p"],
+        ...["-filter_complex", "[0][1]overlay=x='40+120*t':y=70:format=auto,format=yuva420p"],
+        ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", render],
+      ]);
+      const wide = { width: 1920, height: 1080 };
+      const source: GeneratedSource = { path: render, hasAlpha: true, width: 320, height: 180 };
+      const clip = { id: "title", type: "hyperframes", start: 0, duration: 1 } as unknown as AdapterClip;
+      const samples = await alphaHero({ ffmpeg, clip, render: source, film: wide, project: wide, work: join(dir, "work") }, { first: 0, count: 30, step: 1 }, 30, SPEED_ALPHA_WIDTH);
+      expect(samples.length).toBeGreaterThan(25);
+      // The render fills a film 6 times larger: 24 film px a frame.
+      const intervals = speedOfSamples(samples);
+      expect(intervals[10]!.speed).toBeCloseTo(24, 0);
+      const spans = spansOf(intervals);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]!.kind).toBe("linear");
     },
     MEDIA_TIMEOUT,
   );

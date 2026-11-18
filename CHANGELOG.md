@@ -11,18 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cut seam strips and the per-clip kit of `review`, slice RP3 of #457, the last (epic #451; protocol 170):
   `--sheets cuts` (opt in, never a default) writes one row per cut, the whole frames 0.2 and 0.1 s before it, on it,
-  and 0.1 and 0.2 s after (`cut 3 -0.1`), up to 24 cuts thinned evenly with a warning naming how many were left out; a
+  and 0.1 and 0.2 s after (`cut 3 -0.1`; a cut within 0.2 s of the range's edge repeats the edge frame, so every cut
+  keeps its row), up to 24 cuts thinned evenly with a warning naming how many were left out; a
   timeline's cuts are its clip edges, a file's the scene cuts `analyze` finds (found once per run, shared with the
   metrics). `--pop <time>` (seconds, a marker, `beat:N`; resolved in the daemon by the shared TimeRef resolver) writes
   the frame before and the frame at it side by side with their difference amplified 4 times. `--onion <clip>` blends
   up to 24 frames of the clip's span (of `--range` inside it) into one image: the median background, each moving part
   laid over at 25 %. `--speed <clip>` charts the clip's hero point speed per frame (a media clip: its keyed placement
   through `placementAt` and the cover crop, sub-pixel, no render; a generated clip: the centre and area of its render's
-  alpha at up to 90 frames, a render without alpha skipped with the reason) and lists in `metrics.speed` the `linear`
+  alpha (alpha-weighted centroid and area, not its bounding box) at up to 90 frames; no render, a render that fails, no
+  alpha or alpha on fewer than two frames skipped with the reason, never a failed run) and lists in `metrics.speed` the `linear`
   stretches (speed within 2.5 % over 6 frames and 20 % of the move) and dead `stop`s (under 0.25 px per frame for 4
   frames between two moving stretches), ESTIMATED, warnings only, thresholds as data in `review/thresholds.ts` (2.5 %,
   not 5 %: the middle of the `in-out` key ease varies by 4 %). With only the kit and no `--sheets`, a run writes the
-  kit's sheets (and the metrics with `--speed`). `--crop-at` crops `pop` and `onion` too. New sheet kinds and tile
+  kit's sheets (and the metrics with `--speed`, the safe sheet with `--platform`). `--crop-at` crops `pop` and `onion`
+  too; both `pop` frames take the crop of the frame at the pop. New sheet kinds and tile
   tags `pop`, `onion`, `speed`; `encodeRgbPng` joins `encodeGrayPng`. `onion`, `speed` with a file, a clip that is not
   on a video track or plays outside the range, and `pop` on the first frame or past the film are InvalidOperation.
 

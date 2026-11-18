@@ -212,9 +212,10 @@ export interface CutPick extends FramePick {
 
 /**
  * The tiles of the `cuts` sheet: for every cut (film frames where a new shot starts) inside the range, the whole frames
- * {@link CUT_OFFSETS_S} from it, clamped to the range and one per frame within the cut (a cut near the range's edge has
- * fewer), named `cut N -0.1` with `N` counting the cuts of the range from 1. A cut on the range's first frame has no
- * picture before it and is left out. Over `cap` tiles, cuts are dropped evenly, numbers kept; `dropped` counts them.
+ * {@link CUT_OFFSETS_S} from it, clamped to the range, named `cut N -0.1` with `N` counting the cuts of the range from 1.
+ * Every cut gets all its tiles, so each fills one row of the sheet: an offset clamped to the range's edge, or rounded
+ * onto its neighbour's frame at a low frame rate, repeats that frame. A cut on the range's first frame has no picture
+ * before it and is left out. Over `cap` tiles, cuts are dropped evenly, numbers kept; `dropped` counts them.
  */
 export function cutPicks(fps: number, range: FrameRange, cuts: readonly number[], cap = MAX_CUT_TILES): { picks: CutPick[]; cuts: number; dropped: number } {
   const inside = [...new Set(cuts)].filter((frame) => frame > range.first && frame < range.end).sort((a, b) => a - b);
@@ -222,11 +223,8 @@ export function cutPicks(fps: number, range: FrameRange, cuts: readonly number[]
   const shown = inside.length > keep ? evenly(inside.map((frame, i) => ({ frame, n: i + 1 })), keep) : inside.map((frame, i) => ({ frame, n: i + 1 }));
   const picks: CutPick[] = [];
   for (const { frame: cut, n } of shown) {
-    const seen = new Set<number>();
     for (const offset of CUT_OFFSETS_S) {
       const frame = Math.min(range.end - 1, Math.max(range.first, cut + Math.round(offset * fps)));
-      if (seen.has(frame)) continue;
-      seen.add(frame);
       picks.push({ frame, tag: "cut", name: `cut ${n} ${offset === 0 ? "0" : `${offset > 0 ? "+" : ""}${offset}`}` });
     }
   }

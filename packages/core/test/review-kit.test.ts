@@ -20,12 +20,33 @@ describe("review cuts sheet picks", () => {
     expect(sheetLayout("cuts", 16 / 9).columns).toBe(5);
   });
 
-  it("clamps the frames to the range and keeps one per frame within a cut", () => {
+  it("clamps the frames to the range and repeats the edge frame, so every cut keeps its five tiles", () => {
     const { picks } = cutPicks(10, range(0, 100), [99]);
     expect(picks.map((pick) => [pick.frame, pick.name])).toEqual([
       [97, "cut 1 -0.2"],
       [98, "cut 1 -0.1"],
       [99, "cut 1 0"],
+      [99, "cut 1 +0.1"],
+      [99, "cut 1 +0.2"],
+    ]);
+  });
+
+  it("starts the cut after a clamped one on the next row", () => {
+    const { picks } = cutPicks(30, range(0, 300), [3, 150]);
+    expect(picks).toHaveLength(10);
+    expect(picks.slice(0, 5).map((pick) => pick.frame)).toEqual([0, 0, 3, 6, 9]);
+    expect(picks[5]!.name).toBe("cut 2 -0.2");
+    expect(picks.slice(5).every((pick) => pick.name.startsWith("cut 2 "))).toBe(true);
+  });
+
+  it("at a low frame rate an offset rounded onto the cut repeats its frame", () => {
+    const { picks } = cutPicks(5, range(0, 100), [50]);
+    expect(picks.map((pick) => [pick.frame, pick.name])).toEqual([
+      [49, "cut 1 -0.2"],
+      [50, "cut 1 -0.1"],
+      [50, "cut 1 0"],
+      [51, "cut 1 +0.1"],
+      [51, "cut 1 +0.2"],
     ]);
   });
 

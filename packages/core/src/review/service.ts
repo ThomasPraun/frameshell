@@ -83,7 +83,7 @@ import {
 import { speedChart } from "./chart.js";
 import { Frames, type KitSheetOptions, type SheetImagesOptions, writeOnionSheet, writePopSheet, writeSheetImages } from "./images.js";
 import { writeSheet } from "./sheet.js";
-import { type HeroSample, spansOf, speedOf } from "./speed.js";
+import { type HeroSample, peakSpeed, spansOf, speedOf } from "./speed.js";
 import { SPEED_ALPHA_WIDTH } from "./thresholds.js";
 import { deliveryChecks } from "./delivery.js";
 import { seamOf, seamVerdict } from "./loop.js";
@@ -572,7 +572,8 @@ export class ReviewService {
   /**
    * The speed graph of a clip's hero point over `found.frames`: a media clip's picture as its keys place it, every frame;
    * a generated clip's alpha (centre and area), at up to 90 frames. Writes the chart as the `speed` sheet. A generated clip
-   * with no render or no alpha is skipped with the reason, in the entry and in `warnings`.
+   * with no render, no alpha, a render that fails or alpha on fewer than two frames is skipped with the reason, in the
+   * entry and in `warnings`.
    */
   async #speed(
     root: string,
@@ -593,24 +594,31 @@ export class ReviewService {
     let samples: HeroSample[];
     if (placed.generated) {
       const otherSize = film.width !== resolved.project.width || film.height !== resolved.project.height;
-      const renders = this.#options.generated ? await this.#options.generated(root, resolved.timeline, otherSize ? film : undefined) : null;
-      const render = renders?.get(id);
-      if (!render) return skip("its clip has no render to read");
-      if (!render.hasAlpha) return skip("its render has no alpha plane, so what it draws has no centre to follow");
-      const step = timelineSampleStep(count);
-      samples = await alphaHero(
-        { ffmpeg: out.ffmpeg, clip: found.clip as AdapterClip, render, film, project: resolved.project, work: join(out.scratch, "speed"), signal: out.signal },
-        { first: frames.first, count: Math.ceil(count / step), step },
-        fps,
-        SPEED_ALPHA_WIDTH,
-      );
+      try {
+        const renders = this.#options.generated ? await this.#options.generated(root, resolved.timeline, otherSize ? film : undefined) : null;
+        const render = renders?.get(id);
+        if (!render) return skip("its clip has no render to read");
+        if (!render.hasAlpha) return skip("its render has no alpha plane, so what it draws has no centre to follow");
+        const step = timelineSampleStep(count);
+        samples = await alphaHero(
+          { ffmpeg: out.ffmpeg, clip: found.clip as AdapterClip, render, film, project: resolved.project, work: join(out.scratch, "speed"), signal: out.signal },
+          { first: frames.first, count: Math.ceil(count / step), step },
+          fps,
+          SPEED_ALPHA_WIDTH,
+        );
+      } catch (error) {
+        // As the safe-zone boxes do: a render or alpha read that fails is a reason in the result, never a failed run.
+        out.signal?.throwIfAborted();
+        return skip(`its render could not be read (${(error as Error).message.split("\n")[0]})`);
+      }
+      if (samples.length < 2) return skip("its alpha shows on fewer than two of the frames read, so there is no move to measure");
     } else {
       samples = [];
       for (let frame = frames.first; frame < frames.end; frame++) samples.push({ frame, ...clipHero(placed, (frame + 0.5) / fps, film, resolved.project, resolved.layout) });
     }
     const intervals = speedOf(samples);
     const spans = spansOf(intervals);
-    const peak = Math.max(0, ...intervals.map((interval) => interval.speed));
+    const peak = peakSpeed(intervals);
     const round = (value: number) => Math.round(value * 1000) / 1000;
     const layout = sheetLayout("speed", film.width / film.height);
     const tile = { width: layout.tileWidth, height: Math.round(layout.tileWidth * 0.28) };
