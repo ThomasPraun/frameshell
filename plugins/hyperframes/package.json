@@ -39,10 +39,12 @@
     "@hyperframes/producer": "0.9.30"
   },
   "devDependencies": {
+    "@expo-google-fonts/archivo-black": "0.4.1",
     "@frameshell/core": "workspace:*",
     "@frameshell/plugin-api": "workspace:*",
     "@frameshell/schema": "workspace:*",
     "esbuild": "0.28.2",
+    "opentype.js": "2.0.0",
     "puppeteer-core": "25.12.0",
     "three": "0.187.0"
   },

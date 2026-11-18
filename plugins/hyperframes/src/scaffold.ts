@@ -89,7 +89,10 @@ export const newComposition: PluginCommand = {
     }
     await writeFile(join(dir, MOTION_RUNTIME_FILE), MOTION_RUNTIME);
     const three = usesThree(template);
-    if (three) await writeFile(join(dir, THREE_RUNTIME_FILE), THREE_RUNTIME);
+    if (three) {
+      await writeFile(join(dir, THREE_RUNTIME_FILE), THREE_RUNTIME);
+      for (const asset of template.assets ?? []) await writeFile(join(dir, asset.file), asset.text);
+    }
     for (const { from, to } of fontSetup(tokens).copies) {
       await mkdir(dirname(join(dir, to)), { recursive: true });
       await copyFile(join(project.dir, ...from.split("/")), join(dir, to));
@@ -107,6 +110,7 @@ export const newComposition: PluginCommand = {
         ? [
             `3D: ${THREE_RUNTIME_FILE} (three.js ${THREE_VERSION}, MIT, frozen the same way) renders on the software renderer, one frame at a time; ` +
               "keep models and textures inside the composition directory.",
+            ...(template.assets ?? []).map((asset) => `${asset.file} is frozen the same way (\`hyperframes update\` refreshes it).`),
           ]
         : []),
       tokens.used.length > 0

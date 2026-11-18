@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -292,6 +292,119 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D logo
       await expect(adapter.render({ ...clip, props: { logo: "missing.svg" } }, ctx(dir, manager))).rejects.toThrow(/missing\.svg/);
       await expect(adapter.render({ ...clip, props: { logo: "logo.png" } }, ctx(dir, manager))).rejects.toThrow(/logo\.png/);
       await expect(adapter.render({ ...clip, props: { logo: "lines.svg" } }, ctx(dir, manager))).rejects.toThrow(/lines\.svg has no filled paths/);
+    },
+    600_000,
+  );
+});
+
+// The 3D title template (ADR 0042): extruded Archivo Black letters from the shipped typeface JSON, on SwiftShader.
+describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("3D title (real HyperFrames, SwiftShader)", () => {
+  const ctx = (dir: string, manager: BinaryManager) => ({
+    projectDir: dir,
+    outDir: tempDir(),
+    fps: 30,
+    width: WIDTH,
+    height: HEIGHT,
+    signal: new AbortController().signal,
+    ensureBinary: (name: string) => manager.ensure(name),
+    progress: () => {},
+  });
+  /** RGBA pixels of the frame at `at` seconds of `file`. */
+  const frameAt = async (ffmpeg: string, file: string, at: number) =>
+    (
+      await execFileAsync(ffmpeg, ["-v", "error", "-c:v", "libvpx-vp9", "-ss", String(at), "-i", file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"], {
+        encoding: "buffer",
+        maxBuffer: 1 << 26,
+      })
+    ).stdout;
+  const count = (pixels: Buffer, test: (r: number, g: number, b: number, a: number) => boolean) => {
+    let n = 0;
+    for (let p = 0; p < pixels.length; p += 4) if (test(pixels[p]!, pixels[p + 1]!, pixels[p + 2]!, pixels[p + 3]!)) n++;
+    return n;
+  };
+  const red = (r: number, g: number, b: number, a: number) => a > 200 && r > 90 && r > 2 * g && r > 1.4 * b;
+  const blue = (r: number, g: number, b: number, a: number) => a > 200 && b > 90 && b > 1.3 * r && b > 1.15 * g;
+  const opaque = (_r: number, _g: number, _b: number, a: number) => a > 200;
+
+  it(
+    "paints the letters from the first frame when the depth rises, keeps alpha, and passes clip verify (cold vs reseek identical) with letter by letter arrival",
+    async () => {
+      const { dir } = await scaffold("title-3d");
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const props = { text: "HELLO", color: "#e11d48", reveal: "rise", subtitle: "", backdrop: 0 };
+      const rendered = await createHyperframesAdapter({ projectDir: dir }).render({ ...clip, props }, ctx(dir, manager));
+      // The first frame already shows the flat letters: the render waited for __hf.buildReady (the typeface), not for the clock.
+      for (const at of [0.05, 1]) {
+        const pixels = await frameAt(ffmpeg, rendered.file, at);
+        expect(count(pixels, red), `red letter pixels at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.01);
+        expect(count(pixels, (_r, _g, _b, a) => a < 16), `transparent pixels at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.4);
+      }
+      const result = await verify(dir, { ...props, reveal: "letters" }, 0);
+      expect(result).toMatchObject({ ok: true, worst: null, warnings: [] });
+      expect(result.probes).toHaveLength(12);
+      expect(result.distinct).toBeGreaterThan(8);
+    },
+    600_000,
+  );
+
+  it(
+    "paints a title in every reveal, wraps a long one into lines, and blends two colours across the letters",
+    async () => {
+      const { dir } = await scaffold("title-3d");
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      for (const reveal of ["letters", "rise", "drop"]) {
+        const rendered = await adapter.render({ ...clip, props: { reveal, text: "Hi\nthere", color: "#e11d48", subtitle: "", backdrop: 0 } }, ctx(dir, manager));
+        expect(count(await frameAt(ffmpeg, rendered.file, 1.2), opaque), `${reveal}: letter pixels at 1.2 s`).toBeGreaterThan(WIDTH * HEIGHT * 0.03);
+      }
+      const long = await adapter.render({ ...clip, props: { reveal: "rise", text: "A very long title that has to wrap over lines", subtitle: "", backdrop: 0 } }, ctx(dir, manager));
+      expect(count(await frameAt(ffmpeg, long.file, 1.2), opaque), "wrapped title pixels").toBeGreaterThan(WIDTH * HEIGHT * 0.03);
+      const blended = await adapter.render({ ...clip, props: { reveal: "rise", text: "HHHHHH", colors: "blend", color: "#e11d48", color2: "#0ea5e9", finish: "matte", subtitle: "", backdrop: 0 } }, ctx(dir, manager));
+      const pixels = await frameAt(ffmpeg, blended.file, 1.2);
+      expect(count(pixels, red), "red letters of the blend").toBeGreaterThan(WIDTH * HEIGHT * 0.002);
+      expect(count(pixels, blue), "blue letters of the blend").toBeGreaterThan(WIDTH * HEIGHT * 0.002);
+    },
+    600_000,
+  );
+
+  it(
+    "keeps a long line inside the frame at the largest size, and with a headline keeps the letters above it",
+    async () => {
+      const { dir } = await scaffold("title-3d");
+      const manager = binaries();
+      const ffmpeg = await manager.ensure("ffmpeg");
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      const edges = (pixels: Buffer) => {
+        let n = 0;
+        for (let y = 0; y < HEIGHT; y++) for (const x of [0, 1, WIDTH - 2, WIDTH - 1]) n += pixels[(y * WIDTH + x) * 4 + 3]! > 16 ? 1 : 0;
+        return n;
+      };
+      const wide = await adapter.render({ ...clip, props: { reveal: "rise", text: "WWWWWWW", size: 1.4, subtitle: "", backdrop: 0 } }, ctx(dir, manager));
+      for (const at of [1.2, DURATION - 0.1]) {
+        const pixels = await frameAt(ffmpeg, wide.file, at);
+        expect(count(pixels, opaque), `letters at ${at} s`).toBeGreaterThan(WIDTH * HEIGHT * 0.03);
+        expect(edges(pixels), `letter pixels in the outer columns at ${at} s`).toBe(0);
+      }
+    },
+    600_000,
+  );
+
+  it(
+    "fails the render naming the cause for a character the typeface lacks, too many lines, a word too long for the width, a broken typeface and a missing one",
+    async () => {
+      const { dir, composition } = await scaffold("title-3d");
+      const manager = binaries();
+      const adapter = createHyperframesAdapter({ projectDir: dir });
+      await expect(adapter.render({ ...clip, props: { text: "Hi 日" } }, ctx(dir, manager))).rejects.toThrow(/no glyph for .* \(U\+65E5\)/);
+      await expect(adapter.render({ ...clip, props: { text: "a\nb\nc\nd" } }, ctx(dir, manager))).rejects.toThrow(/at most 3 lines/);
+      await expect(adapter.render({ ...clip, props: { text: "Supercalifragilisticexpialidocious" } }, ctx(dir, manager))).rejects.toThrow(/"Supercalifragilisticexpialidocious" does not fit the format's width even at 40 % size/);
+      const typeface = join(composition, "frameshell-title.typeface.json");
+      writeFileSync(typeface, "{ not json");
+      await expect(adapter.render({ ...clip, props: { text: "Hi" } }, ctx(dir, manager))).rejects.toThrow(/frameshell-title\.typeface\.json is not valid JSON/);
+      rmSync(typeface);
+      await expect(adapter.render({ ...clip, props: { text: "Hi" } }, ctx(dir, manager))).rejects.toThrow(/frameshell-title\.typeface\.json/);
     },
     600_000,
   );

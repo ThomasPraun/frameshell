@@ -1,0 +1,135 @@
+// Converts the outlines of Archivo Black (SIL OFL 1.1, the face of ADR 0006) into a three.js typeface JSON with
+// opentype.js (MIT, a devDependency of this plugin that only this script imports) and writes it, as a string, to
+// src/title-typeface.ts: the plugin ships it inside its own files and `hyperframes new --template title-3d` copies it next
+// to the composition (ADR 0042 decision 7). The three.js bundle never sees opentype.js (build-three.mjs refuses it).
+// `--check` writes nothing and exits 1 when the committed file differs.
+import { readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import opentype from "opentype.js";
+
+const plugin = fileURLToPath(new URL("..", import.meta.url));
+const target = join(plugin, "src", "title-typeface.ts");
+const require = createRequire(join(plugin, "package.json"));
+const fontPackage = join(require.resolve("@expo-google-fonts/archivo-black/package.json"), "..");
+const fontPath = join(fontPackage, "400Regular", "ArchivoBlack_400Regular.ttf");
+const fontLicence = readFileSync(join(fontPackage, "LICENSE_FONT"), "utf8").replace(/\r\n/g, "\n");
+const version = JSON.parse(readFileSync(join(fontPackage, "package.json"), "utf8")).version;
+
+// Bump when the glyph set or the conversion changes: `hyperframes update` refreshes older copies by it.
+const TYPEFACE_VERSION = "1.0.0";
+
+// The OFL's Reserved Font Name clause only binds a font whose copyright line declares one; refuse to ship if it does.
+const copyright = /^Copyright .*$/m.exec(fontLicence)?.[0] ?? "";
+if (/reserved font name/i.test(copyright)) throw new Error(`Archivo Black now declares a Reserved Font Name (${copyright}): a converted copy needs another name or permission`);
+
+const RESOLUTION = 1000;
+// ASCII, Latin-1 and the punctuation of everyday titles. A character the font lacks is left out, and the page refuses it by name.
+const RANGES = [
+  [0x20, 0x7e],
+  [0xa0, 0xff],
+  [0x2013, 0x2014],
+  [0x2018, 0x201a],
+  [0x201c, 0x201e],
+  [0x2022, 0x2022],
+  [0x2026, 0x2026],
+  [0x20ac, 0x20ac],
+  [0x2122, 0x2122],
+];
+// The soft hyphen draws nothing; the no-break space is added below as a copy of the space.
+const SKIP = new Set([0xad, 0xa0]);
+
+const buffer = readFileSync(fontPath);
+const font = opentype.parse(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+const k = RESOLUTION / font.unitsPerEm;
+const round = (value) => Math.round(value * k);
+
+const glyphs = {};
+const missing = [];
+let [xMin, yMin, xMax, yMax] = [Infinity, Infinity, -Infinity, -Infinity];
+for (const [from, to] of RANGES) {
+  for (let code = from; code <= to; code++) {
+    if (SKIP.has(code)) continue;
+    const char = String.fromCodePoint(code);
+    const index = font.charToGlyphIndex(char);
+    if (index === 0) {
+      missing.push(code);
+      continue;
+    }
+    const glyph = font.glyphs.get(index);
+    // Font units, y up: three.js draws the outline as given.
+    const path = [];
+    for (const command of glyph.path.commands) {
+      if (command.type === "M") path.push("m", round(command.x), round(command.y));
+      else if (command.type === "L") path.push("l", round(command.x), round(command.y));
+      // three.js reads the end point first, then the control points.
+      else if (command.type === "Q") path.push("q", round(command.x), round(command.y), round(command.x1), round(command.y1));
+      else if (command.type === "C") path.push("b", round(command.x), round(command.y), round(command.x1), round(command.y1), round(command.x2), round(command.y2));
+      // Z needs no token: the shape builder closes every subpath.
+    }
+    const box = glyph.getBoundingBox();
+    const entry = { ha: round(glyph.advanceWidth), x_min: round(box.x1), x_max: round(box.x2) };
+    if (path.length > 0) {
+      entry.o = path.join(" ");
+      xMin = Math.min(xMin, entry.x_min);
+      xMax = Math.max(xMax, entry.x_max);
+      yMin = Math.min(yMin, round(box.y1));
+      yMax = Math.max(yMax, round(box.y2));
+    }
+    glyphs[char] = entry;
+  }
+}
+// No-break space draws and advances like a space.
+glyphs[" "] = { ha: glyphs[" "].ha, x_min: 0, x_max: 0 };
+
+const typeface = {
+  frameshellTypeface: TYPEFACE_VERSION,
+  glyphs,
+  familyName: "Archivo Black",
+  ascender: round(font.ascender),
+  descender: round(font.descender),
+  underlinePosition: round(font.tables.post?.underlinePosition ?? -100),
+  underlineThickness: round(font.tables.post?.underlineThickness ?? 50),
+  boundingBox: { yMin, xMin, yMax, xMax },
+  resolution: RESOLUTION,
+  original_font_information: { copyright, license: fontLicence.trim(), source: `@expo-google-fonts/archivo-black ${version}` },
+};
+// ASCII only: the generated file and the composition copy never depend on an encoding.
+const json = JSON.stringify(typeface).replace(/[\u007f-￿]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
+const file = `// Generated by \`pnpm gen:typeface\` from the Archivo Black outlines of @expo-google-fonts/archivo-black ${version}. Do not edit.
+//
+// Converted outlines of Archivo Black, Copyright 2017 The Archivo Black Project Authors (https://github.com/Omnibus-Type/ArchivoBlack),
+// licensed under the SIL Open Font License 1.1 (https://openfontlicense.org). The font declares no Reserved Font Name.
+// The converted glyphs (printable Latin: ASCII, Latin-1 and common punctuation) are in the three.js typeface format and
+// are distributed under the same licence (ADR 0042).
+
+/** File name of the title typeface inside a \`title-3d\` composition directory. */
+export const TITLE_TYPEFACE_FILE = "frameshell-title.typeface.json";
+
+/** Version of the bundled title typeface; a copy names it in its first key. */
+export const TITLE_TYPEFACE_VERSION = ${JSON.stringify(TYPEFACE_VERSION)};
+
+/** Start of a Frameshell title typeface of any version, capturing that version. */
+export const TITLE_TYPEFACE_HEADER = /^\\{"frameshellTypeface":"(\\d+)\\.(\\d+)\\.(\\d+)"/;
+
+/** The title typeface: three.js typeface JSON (\`Font\` data, resolution ${RESOLUTION}) of printable Latin in Archivo Black. */
+export const TITLE_TYPEFACE = ${JSON.stringify(json)};
+`;
+
+if (process.argv.includes("--check")) {
+  let current = "";
+  try {
+    current = readFileSync(target, "utf8").replace(/\r\n/g, "\n");
+  } catch {
+    // Missing counts as drift.
+  }
+  if (current !== file) {
+    console.error("plugins/hyperframes/src/title-typeface.ts is out of date: run `pnpm gen:typeface` and commit it.");
+    process.exit(1);
+  }
+} else {
+  writeFileSync(target, file);
+  console.log(`${Object.keys(glyphs).length} glyphs, ${(json.length / 1024).toFixed(0)} KB${missing.length ? `; not in the font: ${missing.map((c) => c.toString(16)).join(" ")}` : ""}`);
+}

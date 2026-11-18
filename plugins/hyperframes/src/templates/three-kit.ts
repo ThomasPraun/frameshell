@@ -1,10 +1,20 @@
 import { THREE_RUNTIME_FILE } from "../three-runtime.js";
 import { type Template, type TemplateInput, type TemplateVariable, pageHead } from "./kit.js";
 
+/** A file a 3D template needs beside its page, frozen per composition like the bundles (`hyperframes update` refreshes it). */
+export interface ThreeAsset {
+  /** Name at the composition root, never under `node_modules` (the cache key skips that directory). */
+  readonly file: string;
+  /** Contents; its first bytes name a Frameshell version so `update` can tell an older copy from an edited one. */
+  readonly text: string;
+}
+
 /** A template whose page paints a three.js scene: scaffolding copies the three.js bundle next to it (ADR 0042). */
 export interface ThreeTemplate extends Template {
   /** Marks the template as 3D. */
   readonly three: true;
+  /** Files besides the bundle that scaffolding copies next to the page, e.g. the typeface of `title-3d`. */
+  readonly assets?: readonly ThreeAsset[];
 }
 
 /** True when scaffolding `template` must copy {@link THREE_RUNTIME_FILE} next to the composition. */
@@ -94,12 +104,12 @@ export const FINISH_PRESETS = `{
       }`;
 
 /** The `finish` prop of a 3D template: one of {@link FINISH_PRESETS}; `label` says what the surface belongs to. */
-export function finishVariable(label: string): TemplateVariable {
+export function finishVariable(label: string, initial: "satin" | "gloss" | "chrome" | "matte" = "satin"): TemplateVariable {
   return {
     id: "finish",
     type: "enum",
     label,
-    default: "satin",
+    default: initial,
     options: [
       { value: "satin", label: "Satin ceramic" },
       { value: "gloss", label: "Gloss with clearcoat" },

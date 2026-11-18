@@ -15,7 +15,8 @@
     "gen:json-schema": "tsc -b && node packages/schema/scripts/generate-json-schema.mjs",
     "gen:skill": "node packages/core/scripts/generate-core-skill.mjs",
     "gen:motion": "tsc -b packages/motion && node packages/motion/scripts/build-runtime.mjs",
-    "gen:three": "node plugins/hyperframes/scripts/build-three.mjs"
+    "gen:three": "node plugins/hyperframes/scripts/build-three.mjs",
+    "gen:typeface": "node plugins/hyperframes/scripts/build-typeface.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
