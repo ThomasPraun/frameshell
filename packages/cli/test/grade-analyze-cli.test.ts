@@ -10,6 +10,7 @@ const result: GradeAnalyzeResult = {
   timeline: "main",
   clip: "c_talk",
   asset: "assets/talk.mp4",
+  kind: "media",
   mode: "range",
   from: 0,
   to: 4,
@@ -74,6 +75,11 @@ describe("grade analyze", () => {
     expect(none).toContain("on main · at 1.500 s");
     expect(none).toContain("No correction suggested:");
     expect(none).not.toContain("Apply:");
+  });
+
+  it("names a generated clip's render by its kind, as it has no source file", () => {
+    const text = formatGradeAnalyze({ ...result, asset: null, kind: "generated" });
+    expect(text).toContain("Grade analysis of c_talk (generated clip) on main");
   });
 
   it("gives --json the daemon's result as it is", async () => {

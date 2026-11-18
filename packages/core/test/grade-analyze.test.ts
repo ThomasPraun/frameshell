@@ -1,11 +1,13 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, RpcError, connectToDaemon, methods } from "@frameshell/protocol";
 import { type Grade, type Timeline, applyGradeTable, gradeTable, normalizeGrade } from "@frameshell/schema";
-import { type Daemon, GRADE_SUGGEST, type FrameLevels, correctionFlags, meanLevels, parseSignalstats, startDaemon, suggestGrade } from "../src/index.js";
+import { type Daemon, GRADE_SUGGEST, GradeAnalyzer, type GradeAnalyzerOptions, type FrameLevels, correctionFlags, meanLevels, parseSignalstats, startDaemon, suggestGrade } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
+import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
 // `grade.analyze` (#384, ADR 0031): the pure numbers (parse, mean, suggestion), then the method through a real daemon and the
 // managed ffmpeg on synthetic ramps whose levels are known.
@@ -225,7 +227,7 @@ describe("grade.analyze", () => {
       const clip = await addClip("assets/neutral.mp4", 0);
       const result = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip });
       expect(methods["grade.analyze"].result.safeParse(result).success).toBe(true);
-      expect(result).toMatchObject({ clip, asset: "assets/neutral.mp4", mode: "range", from: 0, to: 4, frames: 8, current: null, flags: "", view: "current" });
+      expect(result).toMatchObject({ clip, asset: "assets/neutral.mp4", kind: "media", mode: "range", from: 0, to: 4, frames: 8, current: null, flags: "", view: "current" });
       expect(result.levels.luma.mean).toBeCloseTo(0.45, 1);
       expect(Math.abs(result.levels.warmth)).toBeLessThan(0.01);
       expect(result.levels.saturation).toBeLessThan(0.01);
@@ -369,6 +371,152 @@ describe("grade.analyze", () => {
       // A clip on an audio track is not a picture.
       const sound = await addClip("assets/neutral.mp4", 60, {}, audioTrack).catch(() => null);
       if (sound) expect((await fail({ clip: sound })).code).toBe(ErrorCode.ClipNotFound);
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("GradeAnalyzer on clips that are not footage", () => {
+  const clip = (extra: Record<string, unknown>) => ({ id: "c_x", start: 0, ...extra });
+  const timelineOf = (clips: unknown[]) => ({ schemaVersion: 1, id: "main", revision: 1, tracks: [{ id: "t_v", kind: "video", clips }] }) as unknown as Timeline;
+  const request = { timeline: "main", fps: 30, clip: "c_x", samples: 4 };
+  const never = async (): Promise<never> => {
+    throw new Error("must not be called");
+  };
+  const analyzer = (ensure: GradeAnalyzerOptions["clips"]["ensure"] = never) => new GradeAnalyzer({ ffmpeg: never, probe: never, clips: { ensure } });
+  const refused = (promise: Promise<unknown>) => promise.then(() => null, (error: RpcError) => error);
+
+  it("refuses a nested timeline pointing at the clips inside and at grade.compare, before it renders or probes anything", async () => {
+    const error = await refused(analyzer().analyze("/p", timelineOf([clip({ type: "timeline", source: "timelines/inner.json", duration: 2 })]), request));
+    expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "nested", field: "clip" } });
+    expect(error!.message).toMatch(/timelines\/inner\.json.*grade\.compare/);
+  });
+
+  it("refuses a multicam shot", async () => {
+    const error = await refused(analyzer().analyze("/p", timelineOf([clip({ type: "shot", group: "g", in: 0, out: 2 })]), request));
+    expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "not-gradable" } });
+  });
+
+  it("asks the render cache for the clip alone, as a draft: the other generated clips are left out, the media and nested clips and the other tracks stay", async () => {
+    let seen: Timeline | undefined;
+    let options: unknown;
+    const timeline = timelineOf([
+      clip({ type: "card", source: "a.json", duration: 2 }),
+      { id: "c_other", type: "card", source: "b.json", start: 2, duration: 2 },
+      { id: "c_media", type: "media", asset: "assets/a.png", start: 4, in: 0, out: 1 },
+      { id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 5, duration: 1 },
+    ]);
+    timeline.tracks.push({ id: "t_a", kind: "audio", clips: [{ id: "c_music", asset: "assets/m.wav", start: 0, in: 0, out: 2 }] } as never);
+    const error = await refused(
+      analyzer(async (_root, shown, given) => {
+        [seen, options] = [shown, given];
+        throw new Error("stop here");
+      }).analyze("/p", timeline, request),
+    );
+    expect(error!.message).toBe("stop here");
+    expect(options).toMatchObject({ tier: "draft" });
+    expect((seen!.tracks[0] as { clips: { id: string }[] }).clips.map((entry) => entry.id)).toEqual(["c_x", "c_media", "c_nest"]);
+    expect(seen!.tracks[1]).toBe(timeline.tracks[1]);
+  });
+
+  it("refuses a render with transparency, naming grade.compare, and a frame outside the clip", async () => {
+    const render = { path: "/p/render.webm", file: ".frameshell/cache/clips/k/card.webm", hasAlpha: true, width: 64, height: 36, duration: 2 };
+    const timeline = timelineOf([clip({ type: "card", source: "a.json", duration: 2 })]);
+    const alpha = await refused(analyzer(async () => new Map([["c_x", render]])).analyze("/p", timeline, request));
+    expect(alpha).toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "has-alpha" } });
+    expect(alpha!.message).toMatch(/grade\.compare/);
+    const outside = await refused(analyzer(async () => new Map([["c_x", render]])).analyze("/p", timeline, { ...request, at: 5 }));
+    expect(outside).toMatchObject({ data: { reason: "outside-clip", valid: { from: 0, to: 2 } } });
+  });
+});
+
+describe("grade.analyze on a generated clip", () => {
+  let daemon: Daemon;
+  let conn: DaemonConnection;
+  let project: string;
+  let track: string;
+  const timelineFile = () => readFile(join(project, "timelines", "main.json"), "utf8");
+  const writeCard = (name: string, card: Record<string, unknown>) => writeFileSync(join(project, "compositions", "cards", `${name}.json`), JSON.stringify(card));
+  const addCard = async (name: string, start: number): Promise<string> =>
+    (await conn.request("clip.add", { cwd: project, track, type: "card", source: `compositions/cards/${name}.json`, start, duration: 2 })).changes.added[0]!;
+
+  beforeAll(async () => {
+    daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() }, binaries: testBinaryManager(), idleTimeoutMs: Infinity });
+    conn = await connectToDaemon(daemon.socketPath, { client: "test" });
+    project = tempDir();
+    await conn.request("project.init", { dir: project });
+    const configPath = join(project, "frameshell.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
+    installLocalPlugin(project, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: project, decision: "trust" });
+    mkdirSync(join(project, "compositions", "cards"), { recursive: true });
+    writeCard("grey", { color: "0x787878", seconds: 2, opaque: true });
+    writeCard("dark", { color: "0x303030", seconds: 2, opaque: true });
+    writeCard("clear", { color: "red", seconds: 2 });
+    track = (await conn.request("track.add", { cwd: project, kind: "video" })).changes.added[0]!;
+  }, MEDIA_TIMEOUT);
+
+  afterAll(async () => {
+    conn.close();
+    await daemon.close();
+  });
+
+  it(
+    "measures the draft render of an opaque card, which has no source file, and writes nothing",
+    async () => {
+      const grey = await addCard("grey", 0);
+      const dark = await addCard("dark", 10);
+      const before = await timelineFile();
+      const result = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip: grey, samples: 3 });
+      expect(methods["grade.analyze"].result.safeParse(result).success).toBe(true);
+      expect(result).toMatchObject({ clip: grey, asset: null, kind: "generated", mode: "range", from: 0, to: 2, frames: 3, current: null });
+      // Grey 120 at video levels: (119 - 16) / 219, give or take the codec.
+      expect(result.levels.luma.mean).toBeCloseTo(0.47, 1);
+      expect(result.levels.saturation).toBeLessThan(0.02);
+      const darker = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip: dark, at: 10.5 });
+      expect(darker).toMatchObject({ kind: "generated", mode: "frame", frames: 1 });
+      expect(darker.levels.luma.mean).toBeCloseTo(0.19, 1);
+      // One flat colour has no range to judge a correction by.
+      expect(darker.reasons[0]).toMatch(/no range/);
+      expect(await timelineFile()).toBe(before);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "reads the picture before the clip's own grade, and says so",
+    async () => {
+      const grey = await addCard("grey", 20);
+      const plain = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip: grey, samples: 2 });
+      await conn.request("clip.set", { cwd: project, clip: grey, grade: { exposure: 1 } });
+      const graded = await conn.request("grade.analyze", { cwd: project, timeline: "main", clip: grey, samples: 2 });
+      expect(graded.levels).toEqual(plain.levels);
+      expect(graded.current).toEqual({ exposure: 1 });
+      expect(graded.warnings.join(" ")).toMatch(/already has a grade.*of its render/);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "refuses a render with transparency and a nested timeline, naming where to look instead",
+    async () => {
+      const clear = await addCard("clear", 30);
+      await expect(conn.request("grade.analyze", { cwd: project, timeline: "main", clip: clear })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        data: { reason: "has-alpha" },
+        message: expect.stringMatching(/grade\.compare/),
+      });
+      const inner = { schemaVersion: 1, id: "inner", revision: 0, tracks: [{ id: "t_in", kind: "video", clips: [] as unknown[] }] };
+      await conn.request("file.write", { path: join(project, "timelines", "inner.json"), content: JSON.stringify(inner) });
+      const main = JSON.parse(await timelineFile()) as { tracks: { id: string; clips: unknown[] }[] };
+      main.tracks.find((entry) => entry.id === track)!.clips.push({ id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 40, duration: 2 });
+      await conn.request("file.write", { path: join(project, "timelines", "main.json"), content: JSON.stringify(main) });
+      await expect(conn.request("grade.analyze", { cwd: project, timeline: "main", clip: "c_nest" })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        data: { reason: "nested" },
+        message: expect.stringMatching(/timelines\/inner\.json/),
+      });
     },
     MEDIA_TIMEOUT,
   );

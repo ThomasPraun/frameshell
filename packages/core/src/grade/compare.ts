@@ -2,16 +2,19 @@ import { randomBytes } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ErrorCode, type GradeCompareResultShape, type GradeLook, RpcError } from "@frameshell/protocol";
-import { GRADE_LIMITS, type Grade, type MediaClip, type Timeline, findLook, gradeOf, lookNames } from "@frameshell/schema";
+import { type AdapterClip, GRADE_LIMITS, type Grade, type MediaClip, type Timeline, type TimelineClip, findLook, gradeOf, lookNames } from "@frameshell/schema";
 import { readLut } from "../export/grade.js";
 import { type ExportService, type LoadedTimeline, pool } from "../export/service.js";
 import { captureParallelism } from "../review/source.js";
 import { type SheetTile, writeSheet } from "../review/sheet.js";
+import { FrameGrid } from "../timeline/grid.js";
+import { NestedTimelineError, clipEnd, nestedClipError } from "../timeline/timing.js";
 import { round } from "./levels.js";
 import { correctionFlags } from "./suggest.js";
 
 // `grade.compare` (#384, ADR 0031): one frame of a clip under several grades, each rendered by the `frame` export path
 // on a copy of the loaded timeline whose clip carries that grade, tiled into one labelled sheet. Never edits the timeline.
+// Footage, photos, generated clips and nested timelines take a grade; the frame path draws each as it exports (slice 11).
 
 /** Where compare sheets go by default, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
 export const GRADE_COMPARE_DIR = [".frameshell", "grade"] as const;
@@ -21,6 +24,8 @@ export interface GradeComparerOptions {
   exports: Pick<ExportService, "frame">;
   /** Absolute path of the managed ffmpeg. */
   ffmpeg(root: string): Promise<string>;
+  /** Length in seconds of the nested timeline file `source` (project-relative), for a nested clip that sets no `duration`. */
+  nestedDuration(root: string, timeline: string, fps: number): (source: string) => Promise<number>;
 }
 
 /** One `grade.compare` call, params validated. */
@@ -47,7 +52,7 @@ export class GradeComparer {
     this.#options = options;
   }
 
-  /** The sheet of `request` for clip `request.clip` of `loaded` (top level, on a video track). Throws `ClipNotFound`, `InvalidOperation` or `InvalidParams`. */
+  /** The sheet of `request` for clip `request.clip` of `loaded` (top level, on a video track; media, generated or nested). Throws `ClipNotFound`, `InvalidOperation` or `InvalidParams`. */
   async compare(root: string, loaded: LoadedTimeline, request: GradeCompareRequest): Promise<GradeCompareResultShape> {
     const { timeline, fps } = loaded;
     const found = timeline.tracks.flatMap((track) => (track.kind === "video" ? track.clips.map((clip) => ({ track, clip })) : [])).find((entry) => entry.clip.id === request.clip);
@@ -55,21 +60,25 @@ export class GradeComparer {
       throw new RpcError(ErrorCode.ClipNotFound, `grade.compare: no clip "${request.clip}" on a video track of timeline ${timeline.id}. List clip ids with "frameshell timeline show".`, { clip: request.clip });
     }
     const { track, clip } = found;
-    if (clip.type !== "media") throw invalid("not-media", `clip ${clip.id} is not a media clip: only footage and photos take a grade.`, "clip");
-    const media = clip as MediaClip;
-    const frame = frameOf(media, fps, request.at);
+    if (clip.type === "shot") throw invalid("not-gradable", `clip ${clip.id} is a multicam shot: only media, generated and nested timeline clips take a grade.`, "clip");
+    // A nested clip with no `duration` plays the rest of its timeline, which only the nested file knows.
+    const end = await clipEnd(clip as GradableClip, new FrameGrid(fps), this.#options.nestedDuration(root, timeline.id, fps)).catch((error: unknown) => {
+      if (error instanceof NestedTimelineError) throw nestedClipError(error, { timeline: timeline.id, track: track.id, clip, op: "grade.compare" });
+      throw error;
+    });
+    const frame = compareFrame(clip.id, clip.start, end, fps, request.at, "grade.compare");
 
     const warnings: string[] = [];
     if (track.hidden) warnings.push(`Track ${track.id} is hidden: the frame does not show clip ${clip.id}, so every tile looks the same.`);
     const looks = resolveLooks(request.looks);
     await checkLuts(root, looks);
-    const current = media.grade && gradeOf(media) ? media.grade : null;
+    const current = clip.grade && gradeOf(clip) ? clip.grade : null;
     const tiles: Tile[] = [{ label: "", kind: "neutral", grade: null, flags: "--clear-grade" }];
     if (current) tiles.push({ label: "", kind: "current", grade: current, flags: "" });
     const names: string[] = ["neutral", ...(current ? ["current"] : [])];
     for (const [i, { name, ...grade }] of looks.entries()) {
       const label = name ?? `look ${i + 1}`;
-      if (!gradeOf({ type: "media", grade })) warnings.push(`Look "${label}" changes nothing: its tile is the neutral picture.`);
+      if (!gradeOf({ type: clip.type, grade })) warnings.push(`Look "${label}" changes nothing: its tile is the neutral picture.`);
       tiles.push({ label: "", kind: "look", grade, flags: lookFlags(grade, current) });
       names.push(label);
     }
@@ -79,12 +88,16 @@ export class GradeComparer {
     const scratch = join(root, ".frameshell", "cache", "grade-compare", randomBytes(6).toString("hex"));
     try {
       const paths = tiles.map((_, i) => join(scratch, `tile-${i}.png`));
-      const render = (i: number) =>
-        this.#options.exports.frame(
+      const render = async (i: number) => {
+        const shot = await this.#options.exports.frame(
           root,
           { timeline: timeline.id, at: frame / fps, out: paths[i]!, projectFormat: request.projectFormat },
           { ...loaded, timeline: withGrade(timeline, clip.id, tiles[i]!.grade) },
         );
+        // What a generated clip's render says (a draft standing in for a final, a setting the adapter changed): once.
+        for (const warning of shot.warnings) if (!warnings.includes(warning)) warnings.push(warning);
+        return shot;
+      };
       // The first frame alone: it makes the generated renders and mattes the others then find cached.
       const first = await render(0);
       await pool(tiles.slice(1), captureParallelism(), async (_, i) => void (await render(i + 1)));
@@ -98,7 +111,8 @@ export class GradeComparer {
       return {
         timeline: timeline.id,
         clip: clip.id,
-        asset: media.asset,
+        asset: "asset" in clip ? clip.asset : null,
+        kind: clip.type === "media" ? "media" : clip.type === "timeline" ? "timeline" : "generated",
         frame,
         at: round(frame / fps, 3),
         path: out,
@@ -118,10 +132,8 @@ export class GradeComparer {
 const invalid = (reason: string, message: string, field: string, valid?: { from: number; to: number }, op = "grade.compare") =>
   new RpcError(ErrorCode.InvalidOperation, `${op}: ${message}`, { op, reason, field, ...(valid ? { valid } : {}) });
 
-/** Timeline frame of `clip` to render: the one holding `at` (half a frame of slack at the ends, as `timeline show` rounds), else its middle frame. */
-function frameOf(clip: MediaClip, fps: number, at: number | undefined): number {
-  return compareFrame(clip.id, clip.start, clip.start + (clip.out - clip.in) / (clip.speed ?? 1), fps, at, "grade.compare");
-}
+/** A clip that takes a grade: footage or a photo, a generated clip, a nested timeline. */
+type GradableClip = MediaClip | TimelineClip | AdapterClip;
 
 /**
  * Timeline frame of the clip `id` playing from `start` to `end` (seconds) that `at` asks for, else its middle one: the
@@ -177,7 +189,7 @@ async function checkLuts(root: string, looks: readonly ResolvedLook[]): Promise<
   }
 }
 
-/** `timeline` with clip `id`'s grade replaced by `grade` (removed for null); the rest shared, never mutated. */
+/** `timeline` with clip `id`'s grade replaced by `grade` (removed for null; any clip but a multicam shot); the rest shared, never mutated. */
 export function withGrade(timeline: Timeline, id: string, grade: Grade | null): Timeline {
   return {
     ...timeline,
@@ -187,8 +199,8 @@ export function withGrade(timeline: Timeline, id: string, grade: Grade | null): 
         : {
             ...track,
             clips: track.clips.map((clip) => {
-              if (clip.id !== id || clip.type !== "media") return clip;
-              const { grade: _old, ...rest } = clip as MediaClip;
+              if (clip.id !== id || clip.type === "shot") return clip;
+              const { grade: _old, ...rest } = clip as GradableClip;
               return (grade ? { ...rest, grade } : rest) as typeof clip;
             }),
           },

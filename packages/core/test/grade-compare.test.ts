@@ -4,13 +4,22 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon, methods } from "@frameshell/protocol";
 import { type Timeline, lookGrade, lookNames } from "@frameshell/schema";
-import { type Daemon, SHEET_GAP, columnsFor, lookFlags, resolveLooks, startDaemon, withGrade } from "../src/index.js";
+import { type Daemon, GradeComparer, NestedTimelineError, SHEET_GAP, columnsFor, lookFlags, resolveLooks, startDaemon, withGrade } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
+import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
 // `grade.compare` (#384, ADR 0031): the pure parts (flags that keep a look, layout, the grade swap), then the method
 // through a real daemon and the managed ffmpeg on a flat grey still, reading back the centre pixel of every tile.
 const MEDIA_TIMEOUT = 240_000;
+
+/** Colour near the lower middle of tile `index` of a sheet laid out `columns` wide with tiles `tile` px. */
+async function readTile(ffmpeg: string, path: string, index: number, columns: number, tile: { width: number; height: number }): Promise<number[]> {
+  const x = SHEET_GAP + (index % columns) * (tile.width + SHEET_GAP) + tile.width / 2;
+  const y = SHEET_GAP + Math.floor(index / columns) * (tile.height + SHEET_GAP) + tile.height * 0.75;
+  const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", path, "-vf", `crop=1:1:${x}:${Math.round(y)}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+  return [...raw];
+}
 
 describe("lookFlags", () => {
   it("gives a look's fields, and with no grade on the clip nothing more", () => {
@@ -88,13 +97,7 @@ describe("grade.compare", () => {
 
   const timelineFile = () => readFile(join(project, "timelines", "main.json"), "utf8");
 
-  /** Centre pixel of tile `index` of a sheet laid out `columns` wide with tiles `tile` px. */
-  async function tileColour(path: string, index: number, columns: number, tile: { width: number; height: number }): Promise<number[]> {
-    const x = SHEET_GAP + (index % columns) * (tile.width + SHEET_GAP) + tile.width / 2;
-    const y = SHEET_GAP + Math.floor(index / columns) * (tile.height + SHEET_GAP) + tile.height * 0.75;
-    const raw = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", path, "-vf", `crop=1:1:${x}:${Math.round(y)}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
-    return [...raw];
-  }
+  const tileColour = (path: string, index: number, columns: number, tile: { width: number; height: number }) => readTile(ffmpeg, path, index, columns, tile);
 
   beforeAll(async () => {
     ({ ffmpeg } = await mediaTools());
@@ -134,7 +137,7 @@ describe("grade.compare", () => {
         looks: [{ name: "bright", exposure: 1 }, { name: "warm", temperature: 1 }, { lut: "luts/red.cube" }, {}],
       });
       expect(methods["grade.compare"].result.safeParse(result).success).toBe(true);
-      expect(result).toMatchObject({ clip: still, asset: "assets/grey.png", frame: 30, at: 1, columns: 3, rows: 2, view: "current" });
+      expect(result).toMatchObject({ clip: still, asset: "assets/grey.png", kind: "media", frame: 30, at: 1, columns: 3, rows: 2, view: "current" });
       expect(result.path).toBe(join(project, ".frameshell", "grade", `compare-${still}-30.png`));
       expect(result.tiles.map((tile) => tile.label)).toEqual(["1 neutral", "2 bright", "3 warm", "4 look 3", "5 look 4"]);
       expect(result.tiles.map((tile) => tile.flags)).toEqual(["--clear-grade", "--grade-exposure 1", "--grade-temperature 1", "--grade-lut luts/red.cube", ""]);
@@ -222,6 +225,176 @@ describe("grade.compare", () => {
       await expect(conn.request("grade.compare", { cwd: project, timeline: "main", clip: still, looks: [{ lut: "../outside.cube" }] })).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
       await expect(conn.request("grade.compare", { cwd: project, timeline: "main", clip: still, looks: Array.from({ length: 17 }, () => ({})) })).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
       await expect(conn.request("grade.compare", { cwd: project, timeline: "main", clip: still, out: "sheet.jpg", looks: [{}] })).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("grade swap on generated and nested clips", () => {
+  const timeline = {
+    version: 1,
+    id: "main",
+    revision: 1,
+    tracks: [
+      {
+        id: "v1",
+        kind: "video",
+        clips: [
+          { id: "g", type: "card", source: "a.json", start: 0, duration: 2, grade: { exposure: 1 } },
+          { id: "n", type: "timeline", source: "timelines/inner.json", start: 2, duration: 2 },
+          { id: "s", type: "shot", start: 4, in: 0, out: 1 },
+        ],
+      },
+    ],
+  } as unknown as Timeline;
+  const clips = (t: Timeline) => (t.tracks[0] as { clips: { id: string; grade?: unknown }[] }).clips;
+
+  it("swaps the grade of a generated clip and of a nested one, leaves a multicam shot as it is, and never mutates", () => {
+    const before = structuredClone(timeline);
+    expect(clips(withGrade(timeline, "g", { contrast: 1.2 }))[0]!.grade).toEqual({ contrast: 1.2 });
+    expect("grade" in clips(withGrade(timeline, "g", null))[0]!).toBe(false);
+    expect(clips(withGrade(timeline, "n", { exposure: -1 }))[1]!.grade).toEqual({ exposure: -1 });
+    expect(clips(withGrade(timeline, "s", { exposure: -1 }))[2]).toBe(clips(timeline)[2]);
+    expect(timeline).toEqual(before);
+  });
+
+  it("refuses a multicam shot before it renders anything", async () => {
+    const never = async (): Promise<never> => {
+      throw new Error("must not be called");
+    };
+    const comparer = new GradeComparer({ exports: { frame: never }, ffmpeg: never, nestedDuration: () => never });
+    await expect(comparer.compare("/p", { timeline, fps: 30 }, { clip: "s", looks: [{ exposure: 1 }], tileWidth: 160 })).rejects.toMatchObject({
+      code: ErrorCode.InvalidOperation,
+      data: { reason: "not-gradable", field: "clip" },
+    });
+  });
+});
+
+describe("grade.compare on a nested clip whose length is unknown", () => {
+  it("answers NestedTimelineUnavailable naming the clip and the broken file, not an internal error", async () => {
+    const nestedTimeline = {
+      version: 1,
+      id: "main",
+      revision: 1,
+      tracks: [{ id: "v1", kind: "video", clips: [{ id: "n", type: "timeline", source: "timelines/gone.json", start: 0 }] }],
+    } as unknown as Timeline;
+    const never = async (): Promise<never> => {
+      throw new Error("must not be called");
+    };
+    const comparer = new GradeComparer({
+      exports: { frame: never },
+      ffmpeg: never,
+      nestedDuration: () => async (source) => {
+        throw new NestedTimelineError("missing", [source], "");
+      },
+    });
+    await expect(comparer.compare("/p", { timeline: nestedTimeline, fps: 30 }, { clip: "n", looks: [{ exposure: 1 }], tileWidth: 160 })).rejects.toMatchObject({
+      code: ErrorCode.NestedTimelineUnavailable,
+      data: { clip: "n", track: "v1", broken: "timelines/gone.json", reason: "missing" },
+    });
+  });
+});
+
+describe("grade.compare on generated and nested clips", () => {
+  let daemon: Daemon;
+  let conn: DaemonConnection;
+  let project: string;
+  let ffmpeg: string;
+  let card: string;
+  let nested: string;
+  let open: string;
+  const W = 64;
+  const H = 36;
+  const tile = { width: 160, height: 90 };
+
+  const timelineFile = () => readFile(join(project, "timelines", "main.json"), "utf8");
+  const tileColour = (path: string, index: number, columns: number) => readTile(ffmpeg, path, index, columns, tile);
+
+  beforeAll(async () => {
+    ({ ffmpeg } = await mediaTools());
+    daemon = await startDaemon({ socketPath: uniqueSocketPath(), dirs: { dataDir: tempDir(), configDir: tempDir() }, binaries: testBinaryManager(), idleTimeoutMs: Infinity });
+    conn = await connectToDaemon(daemon.socketPath, { client: "test" });
+    project = tempDir();
+    await conn.request("project.init", { dir: project });
+    const configPath = join(project, "frameshell.json");
+    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    await writeFile(configPath, JSON.stringify({ ...config, resolution: { width: W, height: H } }));
+    installLocalPlugin(project, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: project, decision: "trust" });
+    mkdirSync(join(project, "compositions", "cards"), { recursive: true });
+    writeFileSync(join(project, "compositions", "cards", "grey.json"), JSON.stringify({ color: "0x787878", seconds: 2 }));
+    const footage = tempDir();
+    await run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", `color=c=0x787878:s=${W}x${H},format=rgb24`, "-frames:v", "1", join(footage, "grey.png")]);
+    await conn.request("asset.import", { cwd: project, files: [join(footage, "grey.png")] });
+    // The nested timeline plays a grey still for 2 s; the clip that shows it sets no `duration` once, and 1 s once.
+    const inner = { schemaVersion: 1, id: "inner", revision: 0, tracks: [{ id: "t_in", kind: "video", clips: [{ id: "c_in", type: "media", asset: "assets/grey.png", start: 0, in: 0, out: 2 }] }] };
+    await conn.request("file.write", { path: join(project, "timelines", "inner.json"), content: JSON.stringify(inner) });
+    const track = (await conn.request("track.add", { cwd: project, kind: "video" })).changes.added[0]!;
+    card = (await conn.request("clip.add", { cwd: project, track, type: "card", source: "compositions/cards/grey.json", start: 0, duration: 2 })).changes.added[0]!;
+    const main = JSON.parse(await timelineFile()) as { tracks: { id: string; clips: unknown[] }[] };
+    main.tracks.find((entry) => entry.id === track)!.clips.push(
+      { id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 10, duration: 2 },
+      { id: "c_open", type: "timeline", source: "timelines/inner.json", start: 20, in: 0.5 },
+    );
+    await conn.request("file.write", { path: join(project, "timelines", "main.json"), content: JSON.stringify(main) });
+    [nested, open] = ["c_nest", "c_open"];
+  }, MEDIA_TIMEOUT);
+
+  afterAll(async () => {
+    conn.close();
+    await daemon.close();
+  });
+
+  it(
+    "draws a generated clip's frame under each grade, from its render, and changes nothing",
+    async () => {
+      const before = await timelineFile();
+      const result = await conn.request("grade.compare", { cwd: project, timeline: "main", clip: card, tileWidth: 160, looks: [{ name: "bright", exposure: 1 }, { name: "warm", temperature: 1 }] });
+      expect(methods["grade.compare"].result.safeParse(result).success).toBe(true);
+      expect(result).toMatchObject({ clip: card, asset: null, kind: "generated", frame: 30, at: 1, columns: 3, rows: 1 });
+      expect(result.tiles.map((entry) => entry.label)).toEqual(["1 neutral", "2 bright", "3 warm"]);
+      const [neutral, bright, warm] = await Promise.all([0, 1, 2].map((i) => tileColour(result.path, i, 3)));
+      for (const channel of neutral!) expect(Math.abs(channel - 120)).toBeLessThanOrEqual(4);
+      expect(Math.min(...bright!)).toBeGreaterThan(140);
+      expect(warm![0]! - warm![2]!).toBeGreaterThan(10);
+      expect(await timelineFile()).toBe(before);
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "adds the generated clip's own grade as the current tile",
+    async () => {
+      await conn.request("clip.set", { cwd: project, clip: card, grade: { exposure: -1 } });
+      const result = await conn.request("grade.compare", { cwd: project, timeline: "main", clip: card, at: 0.5, tileWidth: 160, looks: [{ name: "warm", temperature: 0.5 }] });
+      expect(result.tiles.map(({ label, kind, grade }) => ({ label, kind, grade }))).toEqual([
+        { label: "1 neutral", kind: "neutral", grade: null },
+        { label: "2 current", kind: "current", grade: { exposure: -1 } },
+        { label: "3 warm", kind: "look", grade: { temperature: 0.5 } },
+      ]);
+      const [neutral, current] = await Promise.all([0, 1].map((i) => tileColour(result.path, i, 3)));
+      expect(current![1]).toBeLessThan(neutral![1]! - 20);
+      await conn.request("clip.set", { cwd: project, clip: card, grade: null });
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "draws a nested timeline clip under each grade, its frame found from the nested file when the clip sets no duration",
+    async () => {
+      const before = await timelineFile();
+      const result = await conn.request("grade.compare", { cwd: project, timeline: "main", clip: nested, tileWidth: 160, looks: [{ name: "bright", exposure: 1 }] });
+      expect(result).toMatchObject({ clip: nested, asset: null, kind: "timeline", frame: 330, at: 11, columns: 2 });
+      const [neutral, bright] = await Promise.all([0, 1].map((i) => tileColour(result.path, i, 2)));
+      for (const channel of neutral!) expect(Math.abs(channel - 120)).toBeLessThanOrEqual(4);
+      expect(Math.min(...bright!)).toBeGreaterThan(140);
+      // 2 s of nested timeline after `in` 0.5: it plays 1.5 s, from 20 s.
+      const rest = await conn.request("grade.compare", { cwd: project, timeline: "main", clip: open, tileWidth: 160, looks: [{ exposure: 1 }] });
+      expect(rest).toMatchObject({ kind: "timeline", frame: 622, at: 20.733 });
+      await expect(conn.request("grade.compare", { cwd: project, timeline: "main", clip: open, at: 21.6, looks: [{}] })).rejects.toMatchObject({
+        data: { reason: "outside-clip", valid: { from: 20, to: 21.5 } },
+      });
+      expect(await timelineFile()).toBe(before);
     },
     MEDIA_TIMEOUT,
   );

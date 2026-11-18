@@ -948,10 +948,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const gradeAnalyzer = new GradeAnalyzer({
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
     probe: (dir, asset) => media.probe(dir, asset),
+    // `clips` is built below: the closure runs on a call, after it exists.
+    clips: { ensure: (dir, timeline, options) => clips.ensure(clipRoot(dir), timeline, options) },
   });
   const gradeComparer = new GradeComparer({
     exports,
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+    nestedDuration: (dir, timeline, fps) => timelines.nestedDuration(dir, timeline, fps),
   });
   const clipComparer = new ClipComparer({
     exports,
