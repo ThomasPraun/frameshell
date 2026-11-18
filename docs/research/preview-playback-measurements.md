@@ -117,3 +117,13 @@ Each program-track angle slot is one decoder (ADR 0016). `EngineStats` from `e2e
 | 4 angles: grid | 4 | 360 | 90 | 0 | 12 | 0 |
 
 No frame starved with 3 or 4 decoders under this load. These are synthetic sources, far cheaper to decode than camera footage, so they bound the decoder count, not the decode cost of real 4-angle footage.
+
+## Drops at cuts re-counted from draws (#573, 2026-11-18)
+
+Until #573 the harness took "dropped program frames at cuts" from the page's rAF probes: the frames between the last source frame the page read in a segment and the segment's last frame, plus the same at the start of the next. The engine worker draws without the page's main thread (ADR 0001), so a page frame that ran late missed frames that did reach the screen. The threshold 1 failure of run a above (1 frame at 1 cut, with a 32.9 ms freeze there) and the 44 drops at cuts of the "before #105" quick runs were counts of that kind, not proof of a frame the engine skipped, except where the engine's own counters agreed (the 168 never drawn).
+
+`analyze` now counts the undrawn run at each cut from `drawn` (`cutEdgeDrops`, `e2e/draw-log.ts`), split starved / cadence with the engine's `dropped` stats like interior drops. Threshold 1 fails on stray frames or starved drops at cuts; cadence drops are reported in its detail (ADR 0001 amendment #567). Stray frames, freeze and A/V offset still come from the probes: they are about what the page sampled.
+
+Quick run (2 min source, 22 cuts), Windows 11, Electron from the repo lockfile, machine shared with other agents' jobs (not quiet): dropped at cuts starved 0, cadence 0; interior 0 starved, 1 cadence (frame 2305) of 2449; the engine counted 2,494 drawn, 18 starved display ticks, `dropped` starved 0 and cadence 1, so the harness and the engine agree. Thresholds 1 to 4 passed, 0 of 3,992,000 samples deviated. Thresholds 5 (A/V p95 30.3 ms) and 6 (wall 0.36 %) failed on this Windows machine: the numbers above are macOS only, and Windows was never measured, so this run is not a regression signal for them.
+
+Not done here: the full 30 min, 200-cut run on a quiet machine. It stays an owner task after #573 merges (`FRAMESHELL_PREVIEW_MEASURE=1 pnpm --filter @frameshell/desktop exec playwright test preview-thresholds`), to replace the "dropped at cuts" and "dropped frames inside segments" rows of the results table with draw-based counts.
