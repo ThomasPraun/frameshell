@@ -1,0 +1,123 @@
+{
+  "tag": "es-int8-dora-stops",
+  "maker": "kokoro int8 ef_dora --no-allophones",
+  "lang": "es",
+  "model": "large-v3-turbo-q5_0",
+  "wer": 0.0396,
+  "edits": 4,
+  "words": 101,
+  "clean": 6,
+  "doubtful": 4,
+  "misread": 0,
+  "checkSeconds": 875,
+  "lines": [
+    {
+      "id": "es-01",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Hoy te muestro cómo editar un video en tres minutos.",
+      "misreads": [],
+      "audioS": 3.3,
+      "ms": 46243,
+      "cpuMs": 31110
+    },
+    {
+      "id": "es-02",
+      "status": "doubtful",
+      "wer": 0.1,
+      "heard": "El perro de Ramón corre por la carretera del Cero.",
+      "misreads": [
+        "changed: \"cerro.\" -> \"Cero.\""
+      ],
+      "audioS": 3.02,
+      "ms": 39770,
+      "cpuMs": 27452
+    },
+    {
+      "id": "es-03",
+      "status": "clean",
+      "wer": 0,
+      "heard": "La niña pequeña soñaba con una montaña y un año en España.",
+      "misreads": [],
+      "audioS": 3.73,
+      "ms": 60591,
+      "cpuMs": 33812
+    },
+    {
+      "id": "es-04",
+      "status": "clean",
+      "wer": 0,
+      "heard": "¿Cuánto cuesta? Solo 25 dólares o 1,500 pesos mexicanos.",
+      "misreads": [],
+      "audioS": 4.58,
+      "ms": 61224,
+      "cpuMs": 42110
+    },
+    {
+      "id": "es-05",
+      "status": "doubtful",
+      "wer": 0.1,
+      "heard": "Guillermo y Simena llegaron a Oaxaca el 12 de octubre.",
+      "misreads": [
+        "changed: \"Ximena\" -> \"Simena\""
+      ],
+      "audioS": 3.48,
+      "ms": 48885,
+      "cpuMs": 32454
+    },
+    {
+      "id": "es-06",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Abre WhatsApp, entra a Instagram y comparte el link en YouTube.",
+      "misreads": [],
+      "audioS": 3.65,
+      "ms": 49487,
+      "cpuMs": 34093
+    },
+    {
+      "id": "es-07",
+      "status": "clean",
+      "wer": 0,
+      "heard": "El murciélago hindú comía feliz cardillo y kiwi.",
+      "misreads": [],
+      "audioS": 3.3,
+      "ms": 46836,
+      "cpuMs": 30954
+    },
+    {
+      "id": "es-08",
+      "status": "doubtful",
+      "wer": 0.111,
+      "heard": "Guerra, pingüino, agüita y guitarra, la G suena distinta.",
+      "misreads": [
+        "changed: \"ge\" -> \"G\""
+      ],
+      "audioS": 3.8,
+      "ms": 51883,
+      "cpuMs": 34999
+    },
+    {
+      "id": "es-09",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Si quieres resultados, practica todos los días durante 15 minutos.",
+      "misreads": [],
+      "audioS": 4.33,
+      "ms": 51547,
+      "cpuMs": 40375
+    },
+    {
+      "id": "es-10",
+      "status": "doubtful",
+      "wer": 0.091,
+      "heard": "Framessey edita el video mientras el agente trabaja en la terminal.",
+      "misreads": [
+        "changed: \"Frameshell\" -> \"Framessey\""
+      ],
+      "audioS": 4.03,
+      "ms": 52226,
+      "cpuMs": 37453
+    }
+  ]
+}

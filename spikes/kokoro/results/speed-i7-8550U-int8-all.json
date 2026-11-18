@@ -1,0 +1,88 @@
+{
+  "machine": {
+    "cpu": "Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz",
+    "logicalCpus": 8,
+    "memGb": 20,
+    "os": "win32 10.0.26300",
+    "node": "v26.13.1"
+  },
+  "runs": [
+    {
+      "variant": "int8",
+      "mode": "main",
+      "voice": "ef_dora",
+      "totalMs": 321178,
+      "peakRssMb": 712,
+      "loadMs": 1952,
+      "loadCpuMs": 1812,
+      "firstRunMs": 4565,
+      "io": {
+        "inputs": [
+          "input_ids",
+          "style",
+          "speed"
+        ],
+        "outputs": [
+          "waveform"
+        ]
+      },
+      "lines": [
+        {
+          "id": "s-03s",
+          "tokens": 37,
+          "chunks": 1,
+          "audioS": 2.4,
+          "ms": 11933,
+          "rtf": 4.972,
+          "cpuMs": 11390,
+          "cpuRtf": 4.746,
+          "g2pMs": 1.09
+        },
+        {
+          "id": "s-08s",
+          "tokens": 111,
+          "chunks": 1,
+          "audioS": 6.13,
+          "ms": 31662,
+          "rtf": 5.169,
+          "cpuMs": 30610,
+          "cpuRtf": 4.998,
+          "g2pMs": 0.94
+        },
+        {
+          "id": "s-20s",
+          "tokens": 271,
+          "chunks": 1,
+          "audioS": 15.13,
+          "ms": 77140,
+          "rtf": 5.1,
+          "cpuMs": 74172,
+          "cpuRtf": 4.904,
+          "g2pMs": 1.49
+        },
+        {
+          "id": "s-08s-en",
+          "tokens": 89,
+          "chunks": 1,
+          "audioS": 5.75,
+          "ms": 30943,
+          "rtf": 5.381,
+          "cpuMs": 29375,
+          "cpuRtf": 5.109,
+          "g2pMs": 50.52
+        },
+        {
+          "id": "s-long",
+          "tokens": 687,
+          "chunks": 2,
+          "audioS": 33.98,
+          "ms": 162759,
+          "rtf": 4.791,
+          "cpuMs": 160876,
+          "cpuRtf": 4.735,
+          "g2pMs": 1.33
+        }
+      ]
+    }
+  ]
+}
