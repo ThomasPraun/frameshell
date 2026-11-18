@@ -159,11 +159,15 @@ export interface ClipAdapter {
   /**
    * Optional (ADR 0035 slice 5). Clean up what the adapter keeps in the project outside the render cache, which the
    * host's `gc` does not know: marker files that feed {@link inputs}, listings, probes. The host calls it from `gc`
-   * after keying every generated clip, with the union of the paths {@link inputs} returned for the adapter's clips,
-   * and never when a clip's key is unknown or a render or export job runs. Delete only entries the adapter itself
-   * made, recognised by name, that are not in {@link AdapterGcContext.inputs} and are older than
-   * {@link AdapterGcContext.keepNewerThan}; return what was deleted (or, with `dryRun`, what would be). Throwing
-   * leaves the rest as it is and `gc` reports why.
+   * (also a dry run) once it has keyed every generated clip of every timeline of the project, at every format size.
+   * It is called once per clip type the adapter is registered for, never in one call for all of them, with the paths
+   * {@link inputs} returned for the clips of that type only. It is called even when no clip of that type is left
+   * (`inputs` is then empty and all its files are unused), but never when the project has no generated clip at all
+   * (plugins are not even loaded), nor when a clip's key is unknown (invalid timeline, plugin missing or untrusted,
+   * adapter error), nor while a render or export job of the project runs; `gc` reports why it was skipped. Delete only
+   * entries the adapter itself made, recognised by name, that are not in {@link AdapterGcContext.inputs} and are older
+   * than {@link AdapterGcContext.keepNewerThan}; return what was deleted (or, with `dryRun`, what would be). Throwing
+   * leaves the rest as it is, the other adapters still run, and `gc` reports why.
    */
   gc?(context: AdapterGcContext): Promise<readonly AdapterGcEntry[]>;
 }
@@ -173,14 +177,15 @@ export interface AdapterGcContext {
   readonly projectDir: string;
   /**
    * Union of the project-relative, `/`-separated paths {@link ClipAdapter.inputs} returned for every current clip of
-   * this adapter's clip `type`, in every timeline and at every format size. Anything named here is in use.
+   * the one clip `type` this call is for (not the adapter's other types), in every timeline, nested ones included, and
+   * at every format size. Anything named here is in use.
    */
   readonly inputs: ReadonlySet<string>;
   /** Only report what would be deleted. */
   readonly dryRun: boolean;
   /**
-   * Milliseconds since the epoch: entries modified at or after it are kept, so a file a key check writes while `gc`
-   * runs is never lost. Files in use are protected by {@link inputs}, not by age.
+   * Milliseconds since the epoch, a minute before `gc` began: entries modified at or after it are kept, so a file a
+   * key check writes while `gc` runs is never lost. Files in use are protected by {@link inputs}, not by age.
    */
   readonly keepNewerThan: number;
   /** Aborted when the host stops. */

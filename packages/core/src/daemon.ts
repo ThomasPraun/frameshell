@@ -1671,13 +1671,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }
       const dir = await root(cwd);
       const reviewView = await viewOf(dir, caller, view);
-      // A marker or beat names a time of the timeline, also when its exported file is reviewed. Seconds need no
+      // A marker, beat, bar or word names a time of the timeline, also when its exported file is reviewed. Seconds need no
       // timeline, so a file review with no timeline in the project still takes them.
       let pop: number | undefined;
       if (typeof popRef === "string") {
         const loaded = await timelines.viewTimeline(dir, timeline, reviewView);
         pop = await resolveTimeRefArg("review", "pop", popRef, loaded.timeline, gridLoaderFor(dir)(loaded));
-      } else if (popRef !== undefined) pop = await resolveTimeRefArg("review", "pop", popRef, { id: "" });
+      } else pop = popRef;
       // A proposal's version of requirements.json is judged when the run looks at the proposal.
       const shownRequirements = reviewView === "proposal" ? await timelines.viewConfig(dir, "requirements", reviewView) : null;
       const proposed = shownRequirements?.proposal ? requirementsFromState(shownRequirements.state) : null;

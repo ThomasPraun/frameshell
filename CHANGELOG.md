@@ -1567,6 +1567,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Small fixes, slice SF2 of #451 (no wire change): the `ui.seek` description and the batch `VariantContext.resolve`
+  TSDoc named only markers, beats and bars; they now point to the `TimeRef` forms, `word:` included. `review --pop`
+  with a number is taken as seconds straight, with no stub timeline; a marker, beat or word still resolves against the
+  timeline. The plugin API TSDoc of `ClipAdapter.gc` states the real contract of the host's `gc`: one call per clip
+  type, which inputs it gets, and when it is not called. Not changed: the stale temp-root sweep for e2e (PR #640 is not
+  on main yet) and `grade.analyze`/`grade.compare` for generated clips (they need a clip render and a nullable `asset`
+  in the result, a wire change).
+
 - Small fixes, slice SF of #471 (epic #451, parts of #470 and #482; no wire change): a `voiceover.generate` call now
   stops when its connection closes (Ctrl+C in the CLI, a dropped MCP connection, the app quitting), through the same
   stop as `voiceover.cancel` (takes finished before stay written, other clients' calls untouched, a waiting client no
