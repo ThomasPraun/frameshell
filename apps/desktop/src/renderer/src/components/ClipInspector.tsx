@@ -41,7 +41,9 @@ import { ShotInspector } from "./ShotInspector.js";
  * shot's layout and angles in {@link ShotInspector}. Each
  * change is one `clip.set` by `ui`, saved at once and undoable from the
  * timeline; values shown are the saved ones, from the shared timeline feed.
- * A media clip's voice chain (ADR 0031) is edited in {@link VoiceControl}; the colour grade of a media, generated or nested clip on a video track in {@link ColourControl}; the vignette and grain of a media or generated clip (ADR 0043) in {@link FinishControl}.
+ * A media clip's voice chain (ADR 0031) is edited in {@link VoiceControl}; the colour grade of a
+ * media, generated or nested clip on a video track in {@link ColourControl}; its vignette and grain
+ * (ADR 0043, media and generated clips) in {@link FinishControl}.
  * Video projects add the clip's edge transitions and keyframes (ADR 0018):
  * a keyed property shows its value at the playhead, and editing it keys it there.
  * A generated clip lists its element adjustments (ADR 0021) while it has any

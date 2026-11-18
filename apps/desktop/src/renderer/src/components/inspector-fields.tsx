@@ -220,7 +220,12 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
     setInvalid(false);
     setText(String(round(value, spec.decimals)));
     sent.current = next;
-    if (next !== stored) commitOrRestore(onCommit, next, latest, setText);
+    if (next !== stored) {
+      commitOrRestore(onCommit, next, latest, (restored) => {
+        sent.current = null;
+        setText(restored);
+      });
+    }
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -275,7 +280,7 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKeyDown}
         onBlur={() => {
-          if (text !== String(shown) && spec.store(Number(text)) !== sent.current) commit(Number(text));
+          if (text !== String(shown) && (sent.current === null || spec.store(Number(text)) !== sent.current)) commit(Number(text));
         }}
         onPointerDown={(event) => event.stopPropagation()}
       />
