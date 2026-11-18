@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voiceover captions in the display form, slice 6 of #470 (ADR 0034 decision 23, epic #451; protocol 175): `frameshell
+  voiceover captions <script> [--lines] [--track] [--dry-run]` (MCP `voiceover_captions`) captions the placed takes with
+  the line as written (digits, names as spelled), never the respelled or spelled-out words the voice read. Each take is
+  transcribed by the project's transcription provider (the misread check's round trip) and the display words are lined
+  up with the heard words by the transcript aligner: a number covers every word it was said as, a respelled name the
+  heard words in its slot, a word the voice dropped is listed in `missing` and timed between its neighbours; digits the
+  transcription wrote meet the spelled number. When the project cannot transcribe (untrusted, no plugin), or a line was
+  heard as other words, the words are spread over the take's phrases by length, with a warning (a take whose transcript
+  already holds heard words keeps that timing). The words become the take's transcript (ids and hand edits kept, edits
+  of words not found again dropped with a warning; written outside the history, so `revert` leaves it and `transcribe`
+  puts the heard words back), and one transaction gives a subtitle track that follows the voice track (made when absent) one hand-chunked phrase per phrase
+  of the take, split at words within the style's limits; `captions set` re-chunks or marks a keyword afterwards. The
+  shoot session's transcript writer and the new command share one builder (`transcriptFromWords`). `voiceover.place`'s
+  `at` description now points to the TimeRef description, which includes word references.
+
 - Built-in looks, slice 10 of #384 (ADR 0031 decision 8, epic #451; protocol 174; closes #384): six colour looks,
   `warm`, `cool`, `filmic`, `punchy`, `faded` and `mono`, as plain grade numbers (exposure, temperature, tint,
   contrast, saturation) in one table in the schema package: no `.cube` file is generated or bundled, so no licence

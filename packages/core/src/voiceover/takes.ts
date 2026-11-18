@@ -5,7 +5,10 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { SpeechOptions } from "@frameshell/plugin-api";
-import { type Pcm16, pcmWavBytes, wavChunk } from "../transcripts/window.js";
+import { ErrorCode, RpcError } from "@frameshell/protocol";
+import { type VoiceoverLine, shootSlug } from "@frameshell/schema";
+import { type Pcm16, pcmOfWav, pcmWavBytes, wavChunk } from "../transcripts/window.js";
+import { type Phrase, splitPhrases } from "./split.js";
 
 /** Project-relative folder of every voiceover script's takes: `assets/voiceover/<script slug>/<line id>.wav`. */
 export const VOICEOVER_DIR = "assets/voiceover";
@@ -85,4 +88,45 @@ export async function readTakes(dir: string): Promise<Map<string, TakeFile>> {
     takes.set(entry.name, { name: entry.name, bytes, mark: takeMarkOf(bytes) });
   }
   return takes;
+}
+
+/** The take of one script line, read for placing or captioning it. */
+export interface LineTake {
+  line: VoiceoverLine;
+  /** Project-relative take: `assets/voiceover/<script slug>/<line id>.wav`. */
+  file: string;
+  pcm: Pcm16;
+  /** Seconds. */
+  duration: number;
+  /** The take cut at its silences ({@link splitPhrases}), derived on every read. */
+  phrases: Phrase[];
+}
+
+/**
+ * The takes `voiceover.generate` wrote for `lines` of the script at project-relative `script`, with their phrases, for
+ * `op` (`voiceover.place`, `voiceover.captions`). Warns about a take said from older text than its line has now.
+ * Throws `InvalidOperation` naming the lines that have no take, or a take that is not a mono 16-bit PCM WAV.
+ */
+export async function readLineTakes(root: string, script: string, lines: readonly VoiceoverLine[], op: string): Promise<{ takes: LineTake[]; warnings: string[] }> {
+  const dir = `${VOICEOVER_DIR}/${shootSlug(script)}`;
+  const takes = await readTakes(join(root, ...dir.split("/")));
+  const byName = new Map([...takes.values()].map((take) => [take.name.toLowerCase(), take] as const));
+  const invalid = (message: string, extra: Record<string, unknown>) =>
+    new RpcError(ErrorCode.InvalidOperation, `${op}: lines: ${message}`, { op, reason: message, field: "lines", ...extra });
+  const missing = lines.filter((line) => !byName.has(`${line.id}.wav`)).map((line) => line.id);
+  if (missing.length > 0) {
+    throw invalid(`no take for ${missing.join(", ")} in ${dir}/: run \`voiceover.generate\` first.`, { missing, dir, hint: "Generate the lines first." });
+  }
+  const warnings: string[] = [];
+  const read = lines.map((line) => {
+    const take = byName.get(`${line.id}.wav`)!;
+    const file = `${dir}/${take.name}`;
+    const pcm = pcmOfWav(take.bytes);
+    if (!pcm) throw invalid(`${file} is not a mono 16-bit PCM WAV.`, { file });
+    if (take.mark && take.mark.text !== line.spoken) {
+      warnings.push(`Line ${line.id}: its take was said from older text (${JSON.stringify(take.mark.text)}); run \`voiceover.generate\` to say the line as it is now.`);
+    }
+    return { line, file, pcm, duration: pcm.samples.length / pcm.sampleRate, phrases: splitPhrases(pcm) };
+  });
+  return { takes: read, warnings };
 }

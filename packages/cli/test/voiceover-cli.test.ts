@@ -201,3 +201,24 @@ describe("frameshell voiceover place", () => {
     expect(frameshell(["voiceover", "place"]).code).toBe(2);
   });
 });
+
+describe("frameshell voiceover captions", () => {
+  it("plans a dry run, then captions the placed takes on a new subtitle track and prints the cues of each line", () => {
+    const dry = JSON.parse(frameshell(["voiceover", "captions", "scripts/vo.md", "--dry-run", "--json"]).stdout) as { dryRun: boolean; tx: unknown; track: { id: unknown }; lines: { chunks: string[] }[] };
+    expect(dry).toMatchObject({ dryRun: true, tx: null, track: { id: null } });
+    expect(dry.lines.map((line) => line.chunks.join(" "))).toEqual(["Stop scrolling.", "Because 3 reasons."]);
+
+    const result = frameshell(["voiceover", "captions", "scripts/vo.md"]);
+    expect(result.code).toBe(0);
+    const rows = result.stdout.trimEnd().split("\n");
+    // No transcription plugin in this project: the words are spread over the phrases.
+    expect(rows[0]).toMatch(/^Captioned 2 lines of scripts\/vo\.md on t_\w+ \(Voiceover captions, new\), spread over the phrases$/);
+    expect(rows).toContainEqual(expect.stringMatching(/^ {2}why-1 {2}proportional {2}\[Because.*\]$/));
+    expect(rows.at(-1)).toMatch(/^ {2}transaction tx_/);
+  }, 30_000);
+
+  it("rejects a flag it does not take, or --track twice", () => {
+    expect(frameshell(["voiceover", "captions", "scripts/vo.md", "--at", "hook-1=1"]).code).toBe(2);
+    expect(frameshell(["voiceover", "captions", "scripts/vo.md", "--track", "t_1", "--track", "t_2"]).stderr).toContain("`voiceover captions` takes one");
+  });
+});
