@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
 import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
+import { coverBox, coverPixels, countFrames, decode } from "./cover-fixtures.js";
 import { ffprobeJson, makeClip } from "./media-fixtures.js";
 import { mediaTools, runBuffer, testBinaryManager } from "./media-tools.js";
 
@@ -206,6 +207,36 @@ describe("formats of a project", () => {
       const vertical = await conn.request("render", { cwd: project, preset: "vertical-1080x1920", formats: ["9x16"] });
       expect(vertical.renders[0]).toMatchObject({ output: join(project, "exports", "main-vertical-1080x1920-9x16.mp4"), width: 1080, height: 1920 });
       expect((await finished(vertical.job.id)).state).toBe("done");
+    },
+    MEDIA_TIMEOUT,
+  );
+
+  it(
+    "puts the cover on frame 0 of every format's render, sized to that frame (ADR 0027), without changing the length",
+    async () => {
+      const result = await conn.request("render", { cwd: project, formats: ["16x9", "9x16"], cover: { text: "hola", at: 0.5 } });
+      expect(result.warnings).toEqual([]);
+      expect(result.renders.map((render) => render.format)).toEqual(["16x9", "9x16"]);
+      const sizes: Record<string, [number, number]> = { "16x9": [1920, 1080], "9x16": [1080, 1920] };
+      const boxes = new Map<string, { width: number; height: number }>();
+      for (const render of result.renders) {
+        expect((await finished(render.job.id)).state).toBe("done");
+        const { streams } = (await ffprobeJson(render.output, ["-select_streams", "v:0", "-show_entries", "stream=width,height"])) as { streams: { width: number; height: number }[] };
+        expect([streams[0]!.width, streams[0]!.height]).toEqual(sizes[render.format]);
+        expect(await countFrames(render.output)).toBe(30);
+        const first = await decode(render.output, "select=eq(n\\,0)");
+        const later = await decode(render.output, "select=eq(n\\,15)");
+        expect(coverPixels(first)).toBeGreaterThan(coverPixels(later) + 20_000);
+        boxes.set(render.format, coverBox(first, render.width, later)!);
+      }
+      const wide = boxes.get("16x9")!;
+      const tall = boxes.get("9x16")!;
+      // Frame 15 is the same picture as the cover frame without the word (`at: 0.5`).
+      // The word is sized by the width of a 9:16 frame and by the height cap of a 16:9 one.
+      expect(tall.width / 1080).toBeGreaterThan(0.7);
+      expect(wide.width / 1920).toBeLessThan(0.6);
+      expect(tall.width / 1080).toBeGreaterThan(wide.width / 1920);
+      expect(wide.height / 1080).toBeGreaterThan(tall.height / 1920);
     },
     MEDIA_TIMEOUT,
   );

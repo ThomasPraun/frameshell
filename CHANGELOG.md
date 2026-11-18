@@ -1656,6 +1656,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Review switch (ADR 0019, test hardening #515, #516, #533): the "Review agent changes before applying" checkbox keeps
+  the click until the review state agrees with it (or the call fails), instead of jumping back when the daemon's reply
+  arrives before its event; this was the cause of the flaky checkbox in the review and config-proposal e2e specs.
 - ADR 0001 harness counts frames dropped at cuts from the engine's draws, slice PB of #573 (epic #451; e2e harness
   only, no src or wire change): `analyze` took the dropped frames at a cut from the page's rAF probes, so a main
   thread that read a frame late counted as a drop although the engine had drawn it. New `cutEdgeDrops` in
