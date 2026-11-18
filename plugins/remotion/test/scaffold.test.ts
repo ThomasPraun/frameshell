@@ -46,6 +46,8 @@ describe("frameshell remotion new", () => {
     const hook = read("src/frameshell-timing.ts");
     expect(hook).toContain("export function useFrameshellTiming(): FrameshellTiming | null");
     expect(hook).toContain('["frameshellTiming"]');
+    expect(hook).toContain('import { getInputProps, useVideoConfig } from "remotion";');
+    expect(hook).toContain('fromProps ?? ((getInputProps() as Record<string, unknown>)["frameshellTiming"]');
     expect(hook).toBe(TIMING_HELPER_SOURCE);
     writeFileSync(join(project, "compositions", "remotion", "src", "frameshell-timing.ts"), "// mine");
     const second = (await run("outro")) as { output: string };

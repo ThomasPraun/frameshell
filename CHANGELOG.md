@@ -214,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gc` cleans `.frameshell/blender/`, slice 5 of #482 (ADR 0035, epic #451, #509; no wire change, the entries are kind
   `clip`): the listing folders of `.blend` versions no clip has now, the length markers (`range/<ms>ms.json`) and
   version markers of lengths and Blenders no clip uses, each only if no current clip, in any timeline or format, names it
-  as an input and nothing wrote it in the last minute; `finals.json`, unknown names and symlinks stay. It is a new
+  as an input and nothing wrote it in the last minute; unknown names and symlinks stay (`finals.json` is not deleted, and
+  is pruned of unused `.blend` rates since SF4, see Fixed). It is a new
   optional plugin-API hook, `ClipAdapter.gc(context)` with `AdapterGcContext { projectDir, inputs, dryRun,
   keepNewerThan, signal }`, so core never learns the plugin's layout: `ClipRenderer.gc` gathers the paths each adapter's
   `inputs()` returned while it keys every clip (the rule that keeps the clip renders), and skips the hooks with the
@@ -1655,6 +1656,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Small fixes, slice SF4 of #451 (no wire change): (1) the preview sizes a clip's grain cells from the clip's unkeyed
+  placement, as export does (ADR 0043 "Units"), so a zoom key no longer changes the grain size from frame to frame in
+  the preview only. (2) `gc` prunes `.frameshell/blender/finals.json` of the `.blend` files no clip uses (the file stays,
+  with its `last` rate; a file written in the last minute is left; reported as one `gc` entry with the bytes saved;
+  ADR 0035). (3) The Remotion `useFrameshellTiming()` hook falls back to `getInputProps().frameshellTiming` when a
+  composition's `calculateMetadata` returned props without it; projects that already have `src/frameshell-timing.ts`
+  keep their copy (never overwritten) and can add the fallback by hand. Not in this slice: the `ui.seek` view while a
+  proposal is open (needs the app to report which view it shows: a wire change), `music.fit` bar-ending re-snap, held
+  edge frames in `frame` stills.
 - Small fixes, slice SF2 of #451 (no wire change): the `ui.seek` description and the batch `VariantContext.resolve`
   TSDoc named only markers, beats and bars; they now point to the `TimeRef` forms, `word:` included. `review --pop`
   with a number is taken as seconds straight, with no stub timeline; a marker, beat or word still resolves against the
