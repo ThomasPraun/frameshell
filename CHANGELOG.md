@@ -1656,6 +1656,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ADR 0001 harness counts frames dropped at cuts from the engine's draws, slice PB of #573 (epic #451; e2e harness
+  only, no src or wire change): `analyze` took the dropped frames at a cut from the page's rAF probes, so a main
+  thread that read a frame late counted as a drop although the engine had drawn it. New `cutEdgeDrops` in
+  `e2e/draw-log.ts` takes the undrawn run at the end of the segment before a cut and at the start of the one after,
+  and classifies it with the same `classifyDrops` as interior drops. Threshold 1 now fails on stray frames or starved
+  drops at cuts; cadence drops are reported in its detail (ADR 0001 amendment #567, owner decision 2026-11-18). The
+  stray frames, freeze and A/V numbers still come from the probes. The full 30 min re-measure stays with the owner.
 - Small fixes, slice SF4 of #451 (no wire change): (1) the preview sizes a clip's grain cells from the clip's unkeyed
   placement, as export does (ADR 0043 "Units"), so a zoom key no longer changes the grain size from frame to frame in
   the preview only. (2) `gc` prunes `.frameshell/blender/finals.json` of the `.blend` files no clip uses (the file stays,
