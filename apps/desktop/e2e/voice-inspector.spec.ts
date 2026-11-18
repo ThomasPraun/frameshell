@@ -118,6 +118,16 @@ test("a number is edited in place; one outside the effect's range is refused in 
   await expect(cutoff).toHaveValue("85");
 });
 
+test("an out-of-range number left with Tab is marked invalid and not saved", async () => {
+  const cutoff = effect("highpass").getByRole("textbox", { name: "Cutoff (Hz)" });
+  await cutoff.fill("5000");
+  await cutoff.press("Tab");
+  await expect(effect("highpass").locator(".clip-field.is-invalid")).toHaveCount(1);
+  expect((saved() as { frequency: number }[])[0]!.frequency).toBe(85);
+  await cutoff.press("Escape");
+  await expect(cutoff).toHaveValue("85");
+});
+
 test("an effect is removed, added back at the end and moved earlier", async () => {
   await effect("denoise").getByRole("button", { name: "Remove Denoise from the chain" }).click();
   await expect.poll(() => (saved() as { kind: string }[]).map((entry) => entry.kind)).toEqual(["highpass", "compressor"]);

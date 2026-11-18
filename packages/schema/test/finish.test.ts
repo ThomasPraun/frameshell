@@ -9,6 +9,7 @@ import {
   grainSpread,
   letterboxBars,
   letterboxPicture,
+  parseAspect,
   parseTimeline,
   vignetteGain,
   vignetteLevel,
@@ -93,6 +94,17 @@ describe("letterbox bars (ADR 0043)", () => {
     expect(letterboxBars({ width: 1920, height: 1080 }, 1.7778)).toEqual([]);
     const [top, bottom] = letterboxBars({ width: 100, height: 100 }, 1e6);
     expect(top!.height + bottom!.height).toBe(99);
+  });
+});
+
+describe("parseAspect", () => {
+  it("reads a decimal, a ratio with a colon or a slash, and nothing else", () => {
+    expect(parseAspect("2.39")).toBe(2.39);
+    expect(parseAspect(" 2.39:1 ")).toBe(2.39);
+    expect(parseAspect("4:3")).toBeCloseTo(4 / 3, 12);
+    expect(parseAspect("16/9")).toBeCloseTo(16 / 9, 12);
+    expect(parseAspect(".5")).toBe(0.5);
+    for (const raw of ["", "0", "0:1", "4:0", "wide", "2,39", "-2", "1:2:3"]) expect(parseAspect(raw), raw).toBeNull();
   });
 });
 

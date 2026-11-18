@@ -52,6 +52,7 @@ const BATCH_VERBS: Record<(typeof TIMELINE_EDIT_OPS)[number], string> = {
   "marker.add": "Add",
   "marker.set": "Change",
   "marker.remove": "Delete",
+  "letterbox.set": "Change",
 };
 
 /** What the ops of an edit call change, for its label; mixed calls name clips. */
@@ -62,6 +63,7 @@ function editNoun(edits: readonly TimelineEdit[]): string {
     ["transition.", "transition"],
     ["multicam.", "angle"],
     ["marker.", "marker"],
+    ["letterbox.", "letterbox"],
   ];
   if (edits.every((edit) => edit.op === "clip.key")) return "keyframe";
   return prefixes.find(([prefix]) => edits.every((edit) => edit.op.startsWith(prefix)))?.[1] ?? "clip";

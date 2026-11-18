@@ -178,7 +178,7 @@ export type AssetChange = { path: string; asset: AssetInfo | null } | { path: nu
  * ripple delete from the timeline panel; the transcript view restores words
  * (rippled trim or insert); clip settings (transform, gain, mute) from the
  * clip inspector and the preview's handles; subtitle tracks added from the
- * timeline and styled from their inspector; shots and multicam angles from
+ * timeline and styled from their inspector; the letterbox bars from the preview's menu (ADR 0043); shots and multicam angles from
  * the shot inspector, who speaks painted on the timeline's turn lanes; transitions from a clip edge's menu and
  * the clip inspector, which also keys properties; markers from the ruler's menu.
  */
@@ -204,6 +204,7 @@ export const TIMELINE_EDIT_OPS = [
   "marker.add",
   "marker.set",
   "marker.remove",
+  "letterbox.set",
 ] as const;
 
 /** One of {@link TIMELINE_EDIT_OPS}. */
