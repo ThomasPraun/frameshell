@@ -89,8 +89,9 @@ const SKIPPED_DIRS = new Set(["node_modules"]);
  * out for the project frame renders at a format's size when the format has
  * another aspect (ADR 0027), with the project style's tokens (ADR 0028) as its first
  * stylesheet. A composition whose entry carries
- * `<meta name="frameshell-timing" content="beats markers">` gets the timeline's
- * beats and markers inside the clip as `window.frameshellTiming` (ADR 0029
+ * `<meta name="frameshell-timing" content="beats markers words">`, or whose
+ * props set `onBeats` to true (beats only), gets the timeline's beats, markers
+ * and words inside the clip as `window.frameshellTiming` (ADR 0029
  * decision 8). Live preview (ADR 0010) serves the composition
  * directory as it is, with the clip's variables, that timing and the
  * HyperFrames runtime in `head`.
@@ -113,10 +114,10 @@ export function createHyperframesAdapter(options: HyperframesAdapterOptions): Cl
     },
     // The entry is an input, so editing its meta tag re-keys the clip anyway; a missing entry asks for nothing.
     async timing(clip) {
-      const { id, source } = clip as HyperframesClip;
+      const { id, source, props } = clip as HyperframesClip;
       if (!source || extname(source).toLowerCase() !== ".html") return [];
       const dir = await compositionDir(projectDir, { id, source });
-      return timingKinds(await readFile(join(dir.path, posix.basename(source)), "utf8").catch(() => ""));
+      return timingKinds(await readFile(join(dir.path, posix.basename(source)), "utf8").catch(() => ""), props);
     },
     async declaredProps(clip) {
       const { id, source } = clip as HyperframesClip;

@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ClipRenderInfo, type DaemonConnection, ErrorCode, type JobInfo, connectToDaemon } from "@frameshell/protocol";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
-import { ffprobeJson } from "./media-fixtures.js";
+import { ffprobeJson, makeBurstClip } from "./media-fixtures.js";
 import { mediaTools, runBuffer, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
@@ -912,6 +913,70 @@ describe("timing in generated clips", () => {
       expect(retimed.get(plain)!.key).toBe(before.get(plain)!.key);
       // The render got the timing it was keyed with: the card refuses any other, so the new timing fails it.
       expect(await settled(timed)).toMatchObject({ state: "failed", error: expect.stringContaining('"bpm":100') });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "gives a clip that asks for words the transcript words it plays over, re-keying it when the transcript is corrected",
+    async () => {
+      const at = await cardProject();
+      const footage = join(tempDir(), "talk.mp4");
+      await makeBurstClip(footage, { durationS: 4, bursts: [[0.5, 0.4, 300], [1.2, 0.3, 340], [2.5, 0.4, 380]] });
+      const asset = (await conn.request("asset.import", { cwd: at, files: [footage] })).imported[0]!.asset;
+      const transcriptFile = join(at, "transcripts", "talk.words.json");
+      const transcript = (edits: Record<string, { text: string }>) =>
+        JSON.stringify({
+          schemaVersion: 1,
+          asset,
+          assetHash: `sha256:${createHash("sha256").update(readFileSync(join(at, asset))).digest("hex")}`,
+          provider: "test",
+          model: "test",
+          language: "en",
+          words: [
+            { id: "w_000001", text: "so", start: 0.5, end: 0.9 },
+            { id: "w_000002", text: "here", start: 1.2, end: 1.5 },
+            { id: "w_000003", text: "hook", start: 2.5, end: 2.9 },
+          ],
+          edits,
+        });
+      mkdirSync(join(at, "transcripts"), { recursive: true });
+      writeFileSync(transcriptFile, transcript({}));
+      const talkTrack = (await conn.request("track.add", { cwd: at, kind: "video" })).changes.added[0]!;
+      await conn.request("clip.add", { cwd: at, track: talkTrack, asset, start: 0 });
+      const cards = (await conn.request("track.add", { cwd: at, kind: "video" })).changes.added[0]!;
+      // The card plays timeline 1..3 s from composition 0: "here" and "hook" start inside it.
+      const asking = {
+        color: "blue",
+        seconds: 2,
+        timing: ["words"],
+        requireTiming: { words: [{ at: 0.2, end: 0.5, text: "here", id: "w_000002" }, { at: 1.5, end: 1.9, text: "hook", id: "w_000003" }] },
+      };
+      writeFileSync(join(at, "compositions", "cards", "words.json"), JSON.stringify(asking));
+      writeFileSync(join(at, "compositions", "cards", "plain.json"), JSON.stringify({ color: "blue", seconds: 2 }));
+      const add = async (type: string, name: string, start = 1) =>
+        (await conn.request("clip.add", { cwd: at, track: cards, type, source: `compositions/cards/${name}.json`, start, duration: 2 })).changes.added[0]!;
+      const timed = await add("beat-card", "words");
+      const plain = await add("card", "plain", 3);
+      const shown = async () => new Map((await conn.request("clip.renders", { cwd: at, timeline: "main" })).clips.map((clip) => [clip.clip, clip]));
+      const settle = async (id: string) => {
+        for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+          const info = (await shown()).get(id)!;
+          if (info.state === "ready" || info.state === "failed") return info;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error(`clip ${id} never settled`);
+      };
+      expect(await settle(timed)).toMatchObject({ state: "ready", error: null });
+      const before = await shown();
+
+      // The person corrects "hook": only the clip that asked gets a new key. Its render gets the corrected text, which
+      // the card (still requiring "hook") refuses, naming what it got.
+      writeFileSync(transcriptFile, transcript({ w_000003: { text: "Hook!" } }));
+      const after = await shown();
+      expect(after.get(timed)!.key).not.toBe(before.get(timed)!.key);
+      expect(after.get(plain)!.key).toBe(before.get(plain)!.key);
+      expect(await settle(timed)).toMatchObject({ state: "failed", error: expect.stringContaining('"text":"Hook!"') });
     },
     TIMEOUT,
   );

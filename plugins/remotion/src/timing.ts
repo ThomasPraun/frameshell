@@ -7,9 +7,11 @@ export const TIMING_PROP = "timing";
 export const TIMING_INPUT = "frameshellTiming";
 
 /** Kinds `props.timing` may list, as `RenderTimingKind`. */
-export const TIMING_KINDS: readonly RenderTimingKind[] = ["beats", "markers"];
+export const TIMING_KINDS: readonly RenderTimingKind[] = ["beats", "markers", "words"];
 
 const KINDS_EXAMPLE = '["beats", "markers"]';
+
+const KINDS_LIST = `${TIMING_KINDS.slice(0, -1).map((k) => `"${k}"`).join(", ")} and/or "${TIMING_KINDS.at(-1)}"`;
 
 /**
  * Issues with `props.timing` and the reserved input prop; empty when both are fine. `timing` must be a list of
@@ -25,7 +27,7 @@ export function timingIssues(timing: unknown, inputProps: unknown): { message: s
   }
   for (const kind of timing) {
     if (!TIMING_KINDS.includes(kind as RenderTimingKind)) {
-      issues.push({ message: `unknown timing ${JSON.stringify(kind)}: use ${TIMING_KINDS.map((k) => `"${k}"`).join(" and/or ")}, e.g. ${KINDS_EXAMPLE}`, path: [TIMING_PROP] });
+      issues.push({ message: `unknown timing ${JSON.stringify(kind)}: use ${KINDS_LIST}, e.g. ${KINDS_EXAMPLE}`, path: [TIMING_PROP] });
     }
   }
   if (timing.length > 0 && typeof inputProps === "object" && inputProps !== null && TIMING_INPUT in inputProps) {
@@ -73,6 +75,16 @@ export interface FrameshellMarker {
   color?: string;
 }
 
+export interface FrameshellWord {
+  /** Composition seconds the word starts and ends. */
+  at: number;
+  end: number;
+  /** As corrected in the transcript, else as transcribed. */
+  text: string;
+  /** Transcript word id, as \`word:w_000012\` names it. */
+  id: string;
+}
+
 export interface FrameshellTiming {
   /** Present when the clip asked for "beats"; empty when there is no usable grid (see beatsProblem). */
   beats?: FrameshellBeat[];
@@ -81,6 +93,10 @@ export interface FrameshellTiming {
   beatsProblem?: string;
   /** Present when the clip asked for "markers". */
   markers?: FrameshellMarker[];
+  /** Present when the clip asked for "words": transcript words that start inside the clip; empty, see wordsProblem. */
+  words?: FrameshellWord[];
+  /** Why words is empty: no-transcript or stale-transcript. */
+  wordsProblem?: string;
 }
 
 /**

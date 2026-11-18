@@ -982,6 +982,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     ensureBinary: async (dir, name) => binaries.ensure(name, await projectBinaries(dir)),
     beatsOf,
+    wordsOf,
   });
   /** One spelling per project for the clip renderer, whatever spelling the caller used: its jobs and cache state are keyed by it. */
   const clipRoot = (dir: string): string => {
