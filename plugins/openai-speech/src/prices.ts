@@ -2,7 +2,7 @@
 export interface ModelPrice {
   /** US dollars per character of input text. */
   usdPerCharacter: number;
-  /** True when the model is billed by tokens, so the per-character figure is a rounded-up estimate, not the bill. */
+  /** True when the model is billed by tokens, so the per-character figure is an estimate, not the bill. */
   approximate: boolean;
 }
 
@@ -20,10 +20,10 @@ export const PRICES_CHECKED = "2026-11-18";
  * - `gpt-4o-mini-tts` is billed in tokens ($0.60 per 1M text input tokens, $12 per 1M audio output tokens), and the
  *   page does not say how many audio tokens a second of speech is. The figure assumes 1250 audio tokens a minute
  *   (about $0.015 a minute) and a voice that says 12 characters a second (a slow reading, so the estimate errs
- *   high), plus the text tokens at 3 characters each: 0.015 / 720 + 0.6e-6 / 3, rounded up. Approximate.
+ *   high), plus the text tokens at 3 characters each: 0.015 / 720 + 0.6e-6 / 3 = 0.0000210333, rounded up to 0.0000211. Approximate.
  */
 export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = {
-  "gpt-4o-mini-tts": { usdPerCharacter: 0.000021, approximate: true },
+  "gpt-4o-mini-tts": { usdPerCharacter: 0.0000211, approximate: true },
   "tts-1": { usdPerCharacter: 15 / 1_000_000, approximate: false },
   "tts-1-hd": { usdPerCharacter: 30 / 1_000_000, approximate: false },
 };

@@ -14,7 +14,7 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 - Each line of the script is **sent to OpenAI** to be spoken. Nothing else is: no project files, no names.
 - Frameshell refuses to generate until you confirm the estimated cost (`--yes` on the CLI, the cost box in the app). Lines already generated never ask and never cost.
-- The default model, `gpt-4o-mini-tts`, is billed by tokens, so the cost shown is an **approximate** price per character, rounded up. `tts-1` and `tts-1-hd` are billed per character and are exact. The table is `MODEL_PRICES` in [`src/prices.ts`](src/prices.ts), with its source ([OpenAI pricing](https://developers.openai.com/api/docs/pricing)) and the date it was checked; your OpenAI usage page has the real bill. A model missing from the table has no price, and nothing is generated for it.
+- The default model, `gpt-4o-mini-tts`, is billed by tokens, so the cost shown is an **approximate** price per character. `tts-1` and `tts-1-hd` are billed per character and are exact. The table is `MODEL_PRICES` in [`src/prices.ts`](https://github.com/ThomasPraun/frameshell/blob/main/plugins/openai-speech/src/prices.ts), with its source ([OpenAI pricing](https://developers.openai.com/api/docs/pricing)) and the date it was checked; your OpenAI usage page has the real bill. A model missing from the table has no price, and nothing is generated for it.
 
 ## The key
 
@@ -36,6 +36,6 @@ Typing the key on a command line leaves it in your shell history: prefer the sys
 | `FRAMESHELL_OPENAI_SPEECH_MODEL` | Model id. Default `gpt-4o-mini-tts`. Part of every take's cache key: another model says the lines again. |
 | `FRAMESHELL_OPENAI_SPEECH_BASE_URL` | Another server speaking the same API (a proxy). Default `https://api.openai.com`; the request goes to `<base>/v1/audio/speech`. Your key goes to that server. |
 
-Voices: `alloy` (default), `ash`, `ballad`, `cedar`, `coral`, `echo`, `fable`, `marin`, `nova`, `onyx`, `sage`, `shimmer`, `verse`. The OpenAI API has no language parameter, so the script's `language` is not sent: the voice speaks the language of the text. The voices are optimised for English, so listen to a Spanish take before using it. There is no instructions or style setting in this version.
+Voices: `alloy` (default), `ash`, `ballad`, `cedar`, `coral`, `echo`, `fable`, `marin`, `nova`, `onyx`, `sage`, `shimmer`, `verse`. The OpenAI API has no language parameter, so the script's `language` is not sent: the voice speaks the language of the text. The voices are optimised for English, so listen to a Spanish take before using it. There is no instructions or style setting in this version. `tts-1` and `tts-1-hd` (set with `FRAMESHELL_OPENAI_SPEECH_MODEL`) do not have `ballad`, `cedar`, `marin` and `verse`: with those models use one of the other nine voices, or every line fails with HTTP 400 after the cost was confirmed.
 
 Licence: Apache-2.0.

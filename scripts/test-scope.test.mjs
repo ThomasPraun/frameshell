@@ -37,6 +37,7 @@ describe("testScope", () => {
         "apps/desktop/test/whisper-default-model.test.ts",
         "packages/cli/test/skill-docs.test.ts",
         "packages/core/test/official-plugin-packages.test.ts",
+        "packages/core/test/openai-speech.test.ts",
         "plugins/remotion/test",
       ],
       e2e: true,
@@ -48,6 +49,7 @@ describe("testScope", () => {
       "apps/desktop/test",
       "packages/cli/test/skill-docs.test.ts",
       "packages/core/test/official-plugin-packages.test.ts",
+      "packages/core/test/openai-speech.test.ts",
       "plugins/blender/test",
     ]);
   });

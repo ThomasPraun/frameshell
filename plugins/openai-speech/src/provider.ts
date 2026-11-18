@@ -96,6 +96,7 @@ export function createOpenAiSpeechProvider(options: OpenAiSpeechOptions = {}): S
       try {
         wav = checkWav(Buffer.from(await response.arrayBuffer()));
       } catch (error) {
+        if (context.signal.aborted) throw error;
         // No `cause` on purpose, here and below: only scrubbed text may leave this provider.
         // eslint-disable-next-line preserve-caught-error
         throw new Error(`OpenAI answered, but ${scrub((error as Error).message, key)}`);
