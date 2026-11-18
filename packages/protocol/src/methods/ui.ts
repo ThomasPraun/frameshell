@@ -22,7 +22,7 @@ export const uiMethods = {
   "ui.seek": {
     description:
       "Move the app's playhead to timeline time `at` so the preview shows that frame (snapped to the frame, clamped " +
-      "to the timeline; playback continues from there if it was playing). `at` is seconds or a TimeRef (a marker, `beat:N`, `bar:N`), " +
+      "to the timeline; playback continues from there if it was playing). `at` is seconds or a TimeRef (a marker, a beat or bar, a spoken word; the `at` parameter lists the forms), " +
       "read on the timeline the app shows. Example: `{ at: 12.5 }`, `{ at: \"hook\" }`. Returns `ui.state` " +
       "after the move. Fails with UiNotConnected when no app window shows the project, InvalidOperation for a name it cannot resolve.",
     params: z.strictObject({
