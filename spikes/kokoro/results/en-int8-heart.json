@@ -1,0 +1,70 @@
+{
+  "tag": "en-int8-heart",
+  "maker": "kokoro int8 af_heart",
+  "lang": "en",
+  "model": "large-v3-turbo-q5_0",
+  "wer": 0.0517,
+  "edits": 3,
+  "words": 58,
+  "clean": 3,
+  "doubtful": 1,
+  "misread": 1,
+  "checkSeconds": 892,
+  "lines": [
+    {
+      "id": "en-01",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Today I will show you how to edit a video in three minutes.",
+      "misreads": [],
+      "audioS": 3.75,
+      "ms": 41314,
+      "cpuMs": 32938
+    },
+    {
+      "id": "en-02",
+      "status": "clean",
+      "wer": 0,
+      "heard": "The agent trims the pauses, and you correct the timeline.",
+      "misreads": [],
+      "audioS": 3.8,
+      "ms": 43113,
+      "cpuMs": 33766
+    },
+    {
+      "id": "en-03",
+      "status": "clean",
+      "wer": 0,
+      "heard": "Download the model once, then everything runs offline on your laptop.",
+      "misreads": [],
+      "audioS": 4.7,
+      "ms": 51657,
+      "cpuMs": 41751
+    },
+    {
+      "id": "en-04",
+      "status": "misread",
+      "wer": 0.143,
+      "heard": "It costs $25 a month, or $240 a year.",
+      "misreads": [
+        "missing: \"dollars\" -> \"\"",
+        "missing: \"dollars\" -> \"\""
+      ],
+      "audioS": 4.72,
+      "ms": 47378,
+      "cpuMs": 42452
+    },
+    {
+      "id": "en-05",
+      "status": "doubtful",
+      "wer": 0.1,
+      "heard": "Framichelle keeps every change in a journal you can undo.",
+      "misreads": [
+        "changed: \"Frameshell\" -> \"Framichelle\""
+      ],
+      "audioS": 3.9,
+      "ms": 38546,
+      "cpuMs": 33532
+    }
+  ]
+}

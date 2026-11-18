@@ -1,0 +1,17 @@
+{
+  "name": "spike-kokoro",
+  "private": true,
+  "version": "0.0.0",
+  "description": "PROTOTYPE, throwaway: Kokoro-82M on ONNX Runtime Web with an own TypeScript G2P, no GPL (#677).",
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "fetch": "node src/fetch.ts",
+    "g2p": "node src/g2p-show.ts",
+    "bench": "node src/bench.ts",
+    "quality": "node src/quality.ts",
+    "clean": "node src/clean.ts"
+  }
+}
