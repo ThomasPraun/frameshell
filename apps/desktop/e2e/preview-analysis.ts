@@ -1,7 +1,7 @@
 // ADR 0001 measurement analysis for the real preview, ported from spikes/gapless-preview/scripts (analyze.mjs,
 // audio-residual.mjs, repeated-quanta.mjs, check-thresholds.mjs). Pure: raw logs in, metrics and verdicts out.
 import type { PlayDrops } from "../src/renderer/src/preview/drop-log.js";
-import { type Drops, classifyDrops, cutEdgeDrops, cutEdgeMissing, describeDrops } from "./draw-log.js";
+import { type Drops, classifyDrops, cutEdgeDrops, describeDrops } from "./draw-log.js";
 
 /** Kept segment of the cut list: source frames `[inF, outF)` play from program frame `pF`. */
 export interface Segment {
@@ -54,7 +54,7 @@ export interface Summary {
   video: {
     strayFramesTotal: number;
     cutsWithStrayFrames: number;
-    /** Program frames never drawn at the measured cuts, from the engine's draws (#573); threshold 1 fails on the starved ones. */
+    /** Program frames never drawn at the cuts, from the engine's draws; threshold 1 fails on the starved ones. */
     droppedFramesTotal: number;
     droppedStarved: number;
     droppedCadence: number;
@@ -95,7 +95,7 @@ export function analyze(run: RunLog): Summary {
     av.push(cut.videoCutT - ctxToPerf(run, spliceCtx));
   }
   const measured = video.cuts.filter((c) => !c.missing);
-  const cutDrops: Drops = { starved: measured.flatMap((c) => c.dropped.starved), cadence: measured.flatMap((c) => c.dropped.cadence) };
+  const cutDrops = video.cutDrops;
   const freezes = measured.map((c) => c.freezeMs);
   return {
     cuts: run.segments.length - 1,
@@ -135,7 +135,7 @@ export function analyze(run: RunLog): Summary {
 
 type VideoCut =
   | { k: number; missing: true }
-  | { k: number; missing?: false; dropped: Drops; strayFrames: number; freezeMs: number; dup: number; videoCutT: number };
+  | { k: number; missing?: false; strayFrames: number; freezeMs: number; dup: number; videoCutT: number };
 
 function analyzeVideo(run: RunLog) {
   const FDms = 1000 / run.fps;
@@ -158,7 +158,8 @@ function analyzeVideo(run: RunLog) {
       lastIdx.set(x.seg, i);
     }
   });
-  // Drops at cuts and inside segments both come from the engine's draws, never from the page's probes (#573).
+  // Drops at cuts and inside segments both come from the engine's draws, never from the page's probes. Draws need no
+  // probe, so every cut counts, `missing` ones too: a stall that hid a segment from the probes is the case to catch.
   const drawn = new Set(run.drawn);
   const cuts: VideoCut[] = [];
   for (let k = 0; k + 1 < run.segments.length; k++) {
@@ -172,16 +173,26 @@ function analyzeVideo(run: RunLog) {
     const freeze = d[b]!.t0 - d[a]!.t0 - FDms + (d[b]!.t1 - d[b]!.t0 - FDms);
     cuts.push({
       k,
-      dropped: cutEdgeDrops(drawn, run.dropped, run.segments, k),
       strayFrames: strays.length,
       freezeMs: freeze,
       dup: Math.max(0, Math.round(freeze / FDms)),
       videoCutT: d[b]!.t0,
     });
   }
-  // A run of undrawn frames at a cut can reach past the segment's first or last frame: it counts at the cut only.
+  // A run of undrawn frames at a cut can reach past the segment's first or last frame: it counts at the cut only. A
+  // segment never drawn is the head run of one cut and the tail run of the next: each frame counts once.
   const atCuts = new Set<number>();
-  for (let k = 0; k + 1 < run.segments.length; k++) for (const frame of cutEdgeMissing(drawn, run.segments, k)) atCuts.add(frame);
+  const cutDrops: Drops = { starved: [], cadence: [] };
+  for (let k = 0; k + 1 < run.segments.length; k++) {
+    const edge = cutEdgeDrops(drawn, run.dropped, run.segments, k);
+    for (const kind of ["starved", "cadence"] as const) {
+      for (const frame of edge[kind]) {
+        if (atCuts.has(frame)) continue;
+        atCuts.add(frame);
+        cutDrops[kind].push(frame);
+      }
+    }
+  }
   let interiorFrames = 0;
   const missing: number[] = [];
   for (const s of run.segments) {
@@ -210,7 +221,7 @@ function analyzeVideo(run: RunLog) {
       wallS = (end - start) / 1000;
     }
   }
-  return { cuts, invalid, interior, interiorFrames, rafDt, wallS };
+  return { cuts, cutDrops, invalid, interior, interiorFrames, rafDt, wallS };
 }
 
 function analyzeAudio(run: RunLog) {

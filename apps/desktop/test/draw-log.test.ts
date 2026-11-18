@@ -162,4 +162,32 @@ describe("ADR 0001 analysis, drops at cuts", () => {
     const video = analyze(run(drawn, lateProbes, engine([4, 5], []))).video;
     expect(video).toMatchObject({ droppedStarved: 2, interiorDrops: 0 });
   });
+
+  describe("a cut the probes never saw", () => {
+    // Three segments of 20 frames; the engine draws none of the middle one and the probes see the outer two only.
+    const three = [0, 1, 2].map((k) => ({ inF: 100 * k, outF: 100 * k + 20, pF: 20 * k }));
+    const probes = [0, 2].flatMap((k): [number, number][] => Array.from({ length: 20 }, (_, i) => [(k * 25 + i) * 34, three[k]!.inF + i]));
+    const stalled = (dropped: RunLog["dropped"]): RunLog => ({
+      ...run(
+        Array.from({ length: 60 }, (_, p) => p).filter((p) => p < 20 || p >= 40),
+        probes,
+        dropped,
+      ),
+      segments: three,
+    });
+
+    it("still counts the undrawn frames, once, at the cuts", () => {
+      const summary = analyze(stalled(null));
+      expect(summary.cutsMeasured).toBe(0);
+      expect(summary.video).toMatchObject({ droppedFramesTotal: 20, droppedStarved: 20, interiorDrops: 0 });
+      expect(threshold1(summary).pass).toBe(false);
+    });
+
+    it("reports them as cadence when the engine says so", () => {
+      const cadence = Array.from({ length: 20 }, (_, i) => 20 + i);
+      const summary = analyze(stalled(engine([], cadence)));
+      expect(summary.video).toMatchObject({ droppedFramesTotal: 20, droppedStarved: 0, droppedCadence: 20, interiorDrops: 0 });
+      expect(threshold1(summary).pass).toBe(true);
+    });
+  });
 });
