@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 172;
+export const PROTOCOL_VERSION = 173;
 
 export {
   type MethodSpec,
@@ -347,6 +347,8 @@ export type ScriptCheckResult = MethodResult<"script.check">;
 export type VoiceoverGenerateResult = MethodResult<"voiceover.generate">;
 /** Result of `voiceover.place`. */
 export type VoiceoverPlaceResult = MethodResult<"voiceover.place">;
+/** Result of `voiceover.captions`. */
+export type VoiceoverCaptionsResult = MethodResult<"voiceover.captions">;
 /** Result of `brand.capture`. */
 export type BrandCaptureResult = MethodResult<"brand.capture">;
 /** Result of `sound.sfx`. */

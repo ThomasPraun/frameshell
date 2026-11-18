@@ -1,16 +1,14 @@
 // `voiceover.place` (ADR 0034 decision 19): the takes of a voiceover script → phrases (`splitPhrases`) → whole frames →
 // one phrase clip each on an audio track. Planning is separate from the transaction so the daemon opens it only once
 // there is something to write. Times come from the shared TimeRef resolver (`deps.resolve`); nothing here parses a ref.
-import { join } from "node:path";
 import { ErrorCode, RpcError, type ValidatedParams, type VoiceoverPlaceResult } from "@frameshell/protocol";
-import { type Timeline, type Track, VOICEOVER_TEMPO_RANGE, clipLength, shootSlug } from "@frameshell/schema";
+import { type Timeline, type Track, VOICEOVER_TEMPO_RANGE, clipLength } from "@frameshell/schema";
 import type { StepResult } from "../sound/place.js";
 import { FrameGrid } from "../timeline/grid.js";
 import { TimeRefError } from "../timeline/time-ref.js";
-import { pcmOfWav } from "../transcripts/window.js";
 import { invalidParam, pickLines, readVoiceoverScript } from "./script.js";
-import { PHRASE_FADE_S, splitPhrases } from "./split.js";
-import { VOICEOVER_DIR, readTakes } from "./takes.js";
+import { PHRASE_FADE_S } from "./split.js";
+import { readLineTakes } from "./takes.js";
 
 /** Params of `voiceover.place`. */
 export type VoiceoverPlaceParams = ValidatedParams<"voiceover.place">;
@@ -33,7 +31,10 @@ export interface LoadedTimeline {
 export interface PlaceDeps {
   root: string;
   load(): Promise<LoadedTimeline>;
-  /** Seconds a TimeRef names on `loaded`'s timeline (markers, `beat:`, `bar:`); throws `TimeRefError`. */
+  /**
+   * Seconds a time reference names on `loaded`'s timeline, in any form the protocol's `TimeRef` describes (seconds,
+   * markers, beats, bars, words the timeline plays); throws `TimeRefError`.
+   */
   resolve(ref: number | string, loaded: LoadedTimeline): Promise<number>;
 }
 
@@ -146,24 +147,7 @@ export function phraseEnd(grid: FrameGrid, start: number, inFrame: number, outFr
 export async function planVoiceoverPlacement(params: VoiceoverPlaceParams, deps: PlaceDeps): Promise<VoiceoverPlan> {
   const read = await readVoiceoverScript(deps.root, params.cwd, params.script, "voiceover.place");
   const lines = pickLines(read.lines, params.lines);
-  const dir = `${VOICEOVER_DIR}/${shootSlug(read.path)}`;
-  const takes = await readTakes(join(deps.root, ...dir.split("/")));
-  const byName = new Map([...takes.values()].map((take) => [take.name.toLowerCase(), take] as const));
-
-  const missing = lines.filter((line) => !byName.has(`${line.id}.wav`)).map((line) => line.id);
-  if (missing.length > 0) {
-    throw invalid("lines", `no take for ${missing.join(", ")} in ${dir}/: run \`voiceover.generate\` first.`, { missing, dir, hint: "Generate the lines, then place them." });
-  }
-  const warnings: string[] = [];
-  const spoken = lines.map((line) => {
-    const take = byName.get(`${line.id}.wav`)!;
-    const pcm = pcmOfWav(take.bytes);
-    if (!pcm) throw invalid("lines", `${dir}/${take.name} is not a mono 16-bit PCM WAV.`, { file: `${dir}/${take.name}` });
-    if (take.mark && take.mark.text !== line.spoken) {
-      warnings.push(`Line ${line.id}: its take was said from older text (${JSON.stringify(take.mark.text)}); run \`voiceover.generate\` to say the line as it is now.`);
-    }
-    return { line, file: `${dir}/${take.name}`, duration: pcm.samples.length / pcm.sampleRate, phrases: splitPhrases(pcm) };
-  });
+  const { takes: spoken, warnings } = await readLineTakes(deps.root, read.path, lines, "voiceover.place");
   const phraseCounts = new Map(spoken.map((entry) => [entry.line.id, entry.phrases.length] as const));
   const anchors = params.at ? phraseKeys("at", params.at, lines, phraseCounts) : new Map<string, Map<number, number | string>>();
   for (const [key, value] of Object.entries(params.tempo ?? {})) {

@@ -308,8 +308,8 @@ export const scriptSoundMethods = {
       "phrases (the ranges `voiceover.generate` reports) and every phrase becomes a media clip of the take (`in`/`out` on " +
       "whole frames, `scriptRef` `<script>#<scene>`) on an audio track: `track`, else the one named `Voiceover`, made when absent. " +
       "The phrases of a line keep the spacing the take has. Where a line goes: `at` maps a line id (`hook-1`) or one phrase of it " +
-      "(`hook-1.2`, counting from 1) to a time, given as seconds, a marker id or label (`hook`, `hook+0.5`) or a beat or bar of the timeline's " +
-      "grid (`beat:9`, `bar:3`), resolved by the same TimeRef rules as every time argument; the clip starts on the frame nearest it, " +
+      "(`hook-1.2`, counting from 1) to a time in any form a time argument takes (the TimeRef forms each `at` value describes: " +
+      "seconds, markers, beats and bars, words the timeline plays), resolved by the same rules; the clip starts on the frame nearest it, " +
       "so the first sound follows by 20 ms of air kept in the phrase. A line (or phrase) with no `at` follows the one before it by " +
       `\`gap\` seconds (default ${VOICEOVER_LINE_GAP_S}); the first one starts at \`start\`, else right after the track's last clip, else 0. ` +
       "Voice never overlaps itself: a phrase that would start before the previous one ends, or on a clip already on the track, fails " +
@@ -400,6 +400,91 @@ export const scriptSoundMethods = {
         .describe("The phrase clips, in time order."),
       replaced: z.array(z.string()).describe("Ids of the clips removed by `replace`."),
       warnings: z.array(z.string()).describe("Takes older than their line, phrases shorter than a frame that were left out, and the engine's own warnings."),
+    }),
+  },
+  "voiceover.captions": {
+    mutating: true,
+    description:
+      "Caption the placed takes of a voiceover script (ADR 0034) in the display form: the line as written (digits, names as " +
+      "spelled), never the respelled or spelled-out words the voice read. Run `voiceover.generate` and `voiceover.place` first. " +
+      "Each line's take is transcribed by the project's transcription provider and the line's display words are lined up " +
+      "with the words heard in order, a number or respelling covering every heard word it was said as (`23` over " +
+      "`veintitrés`, `Frameshell` over `freim shel`). A display word the voice did not say is listed in `missing` and timed " +
+      "between its neighbours; a line too little of which was heard (`unaligned`), and every line when the transcription " +
+      "cannot run (an untrusted project, no transcription plugin, a failed run: `timing.reason` says which), has its words " +
+      "spread over its phrases by length instead. The words become the take's transcript (`transcripts/…words.json`, " +
+      "word ids and hand edits kept where a word is found again), so a subtitle track that follows the voice track shows " +
+      "them; then, in one transaction `Voiceover captions: …`, the subtitle track (`track`, else the first one that " +
+      "follows the voice track, else a new one named `Voiceover captions`) gets one hand-chunked phrase per phrase of each " +
+      "take, split at words so no cue holds more words or characters than the track's style allows, replacing the " +
+      "phrases it had on these takes. Mark a keyword or re-chunk afterwards with `captions.set`, matching the display words. " +
+      "The voice track is the one `track` follows, else the audio track that plays most of these takes (`Voiceover` first). " +
+      "`dryRun` reports the words and chunks without writing. Never speaks and never costs. Fails with ScriptNotFound, " +
+      "InvalidParams (unknown line id), InvalidOperation (not a voiceover script, a line with no take, no take on the " +
+      "timeline, a `track` that is not a subtitle track or follows no track playing the takes) or TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      script: z
+        .string()
+        .min(1)
+        .describe("Voiceover script inside the project, absolute or relative to `cwd` (then the project root), e.g. `scripts/launch-vo.md`."),
+      lines: z
+        .array(z.string().min(1))
+        .min(1)
+        .optional()
+        .describe("Line ids to caption (`hook-1`), default every line of the script."),
+      track: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Subtitle track for the captions, from `track.list`; it must follow the track that plays the takes. Default: the first subtitle track that does, made when absent."),
+      dryRun: z.boolean().default(false).describe("Plan and report without writing transcripts or changing the timeline."),
+    }),
+    result: z.object({
+      timeline: z.string().describe("Timeline id."),
+      revision: z.int().describe("Revision after the change; the one before the call when nothing was written."),
+      dryRun: z.boolean().describe("Nothing was written."),
+      tx: z.string().nullable().describe("Transaction holding the change (`revert` with it); null on a dry run."),
+      script: z.string().describe("Script file, project-relative."),
+      track: z
+        .object({
+          id: z.string().nullable().describe("Null for a track a dry run would make."),
+          name: z.string().nullable(),
+          created: z.boolean().describe("This call made the track (a dry run: would make)."),
+          follows: z.string().describe("The voice track it follows."),
+        })
+        .describe("The subtitle track the captions went on."),
+      timing: z
+        .object({
+          status: z
+            .enum(["heard", "proportional"])
+            .describe("`heard`: the takes were transcribed and the words timed by what was heard. `proportional`: the transcription did not run; `reason` says why."),
+          provider: z.string().nullable().describe("Transcription provider asked; null when not asked."),
+          model: z.string().nullable().describe("Model it used, when known."),
+          reason: z.string().nullable().describe("Why the takes were not transcribed; null when they were."),
+        })
+        .describe("How the words were timed."),
+      lines: z
+        .array(
+          z.object({
+            id: z.string().describe("Line id."),
+            timing: z
+              .enum(["heard", "unaligned", "proportional"])
+              .describe(
+                "`heard`: timed by the words heard. `unaligned`: heard, but too little of it matched the line, so spread over the phrases. `proportional`: not transcribed, spread over the phrases.",
+              ),
+            words: z.int().describe("Display words captioned."),
+            chunks: z.array(z.string()).describe("Text of each cue, in order: one or more per phrase of the take."),
+            missing: z
+              .array(z.string())
+              .describe("Display words not heard in the take, timed between their neighbours; empty when every word was found or the line was not heard."),
+            placed: z.boolean().describe("A clip of the voice track plays the take. False: the captions show once the take is placed there."),
+          }),
+        )
+        .describe("The lines captioned, in script order."),
+      transcripts: z.array(z.string()).describe("Transcript files written (a dry run: that would be written), project-relative."),
+      warnings: z.array(z.string()).describe("Takes older than their line, lines not placed, a skipped transcription, and the engine's own warnings."),
     }),
   },
   "sound.sfx": {

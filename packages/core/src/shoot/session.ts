@@ -5,12 +5,11 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TranscriptWord, TranscriptionProvider, TranscribeContext } from "@frameshell/plugin-api";
-import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type ShootScript, type ShootTake, type TakeSession, type Transcript, parseTranscript } from "@frameshell/schema";
+import type { ShootScript, ShootTake, TakeSession } from "@frameshell/schema";
 import { exists, writeJsonAtomic } from "../fs-util.js";
 import { TRANSCRIPTION_SAMPLE_RATE } from "../transcripts/audio.js";
-import { assignWordIds } from "../transcripts/ids.js";
-import { readPrevious, resolveTranscript } from "../transcripts/transcriber.js";
 import { readPcmWav } from "../transcripts/window.js";
+import { transcriptFromWords } from "../transcripts/words-transcript.js";
 import type { HeardWord } from "./compare.js";
 
 /** Project-relative folder of each recorded take's PCM and words, kept while its session's files are being written. */
@@ -215,26 +214,10 @@ export async function writeSessionTranscripts(root: string, takes: readonly Sess
   const written: string[] = [];
   for (const [asset, entry] of perAsset) {
     if (!(await exists(join(root, ...asset.split("/"))))) continue;
-    const { rel, path } = await resolveTranscript(root, asset);
-    const previous = await readPrevious(path);
-    const words = entry.words.sort((a, b) => a.start - b.start).map((word) => ({ ...word, end: Math.max(word.start, word.end) }));
-    const assigned = assignWordIds(words, previous);
-    const transcript: Transcript = {
-      $schema: TRANSCRIPT_SCHEMA_URL,
-      schemaVersion: SCHEMA_VERSION,
-      asset,
-      assetHash: await deps.hash(asset),
-      provider: entry.provider,
-      model: entry.model,
-      ...(entry.language ? { language: entry.language } : {}),
-      words: assigned.words,
-      edits: assigned.edits,
-      nextWordId: assigned.nextWordId,
-    };
-    const checked = parseTranscript(transcript);
-    if (!checked.ok) throw new Error(`the words of ${asset} do not make a valid transcript:\n${checked.error}`);
-    await writeJsonAtomic(path, transcript);
-    written.push(rel);
+    const words = entry.words.sort((a, b) => a.start - b.start);
+    const built = await transcriptFromWords(root, asset, words, { assetHash: await deps.hash(asset), provider: entry.provider, model: entry.model, language: entry.language });
+    await writeJsonAtomic(built.path, built.transcript);
+    written.push(built.rel);
   }
   return written;
 }

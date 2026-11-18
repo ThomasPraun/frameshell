@@ -1,4 +1,4 @@
-import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverGenerateResult, type VoiceoverPlaceResult, timeRefOf } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverCaptionsResult, type VoiceoverGenerateResult, type VoiceoverPlaceResult, timeRefOf } from "@frameshell/protocol";
 import { VOICEOVER_LINE_GAP_S, VOICEOVER_TEMPO_RANGE } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
@@ -16,19 +16,25 @@ export const VOICEOVER_USAGE = `  voiceover generate <script> [--lines id,id] [-
                                Put the takes of a voiceover script on the timeline as phrase clips (one per phrase of each
                                take, cut at its silences) on the audio track Voiceover, in one transaction. Run
                                \`voiceover generate\` first. --at anchors a line (hook-1) or one phrase of it (hook-1.2) at a
-                               time: seconds, a marker (hook, hook+0.5) or a beat or bar of the grid (beat:9, bar:3; commas
-                               separate the entries, so a label with a comma needs its marker id). A line with no --at follows
+                               time: seconds, a marker (hook, hook+0.5), a beat or bar of the grid (beat:9, bar:3) or a word
+                               (word:over; commas separate the entries, so a label with a comma needs its marker id). A line with no --at follows
                                the one before it by --gap seconds (default ${VOICEOVER_LINE_GAP_S}); the first starts at --start, else after the
                                track's last clip. --tempo sets the speed of single phrases (line.N, or a line id = its phrase 1 only:
                                ${VOICEOVER_TEMPO_RANGE.min} to ${VOICEOVER_TEMPO_RANGE.max}, 1 = as spoken, pitch kept): the clip plays at that speed and the effective length is
                                reported. Fails when voice would overlap, or when clips already play the takes
                                (--replace removes them first: use it after the takes changed)
+  voiceover captions <script> [--lines id,id] [--track id] [--dry-run] [--timeline id]
+                               Caption the placed takes in the display form (digits, names as written), timed by the words
+                               the project's transcription hears in each take (spread over the phrases when it cannot run):
+                               the words become each take's transcript and a subtitle track following the voice track gets
+                               one phrase per phrase of the take, in one transaction. Run \`voiceover place\` first
 `;
 
 /** Flags each `voiceover` command takes besides the global ones. */
 export const VOICEOVER_FLAGS: Record<string, readonly string[]> = {
   "voiceover generate": ["lines", "provider", "voice", "yes", "confirmation", "no-verify"],
   "voiceover place": ["lines", "at", "tempo", "start", "gap", "track", "replace", "dry-run", "timeline"],
+  "voiceover captions": ["lines", "track", "dry-run", "timeline"],
 };
 
 /** A parsed `voiceover` command. */
@@ -56,6 +62,14 @@ export type VoiceoverInvocation =
       track?: string;
       replace: boolean;
       dryRun: boolean;
+    }
+  | {
+      kind: "voiceover.captions";
+      script: string;
+      timeline: string;
+      lines?: string[];
+      track?: string;
+      dryRun: boolean;
     };
 
 /** Parse `voiceover <sub> …`; null when the shape is wrong. Throws `UsageError` for a bad flag value. */
@@ -79,13 +93,24 @@ export function parseVoiceover(
   },
 ): VoiceoverInvocation | null {
   const [sub, ...args] = rest;
-  if ((sub !== "generate" && sub !== "place") || args.length !== 1) return null;
+  if ((sub !== "generate" && sub !== "place" && sub !== "captions") || args.length !== 1) return null;
   let lines: string[] | undefined;
   if (options.lines !== undefined) {
     lines = options.lines.split(",").map((id) => id.trim()).filter((id) => id !== "");
     if (lines.length === 0) throw new UsageError("--lines: expected line ids separated by commas, e.g. --lines hook-1,problem-2.");
   }
   if (sub === "place") return parsePlace(args[0]!, lines, options);
+  if (sub === "captions") {
+    const track = single(options.track, "track", sub);
+    return {
+      kind: "voiceover.captions",
+      script: args[0]!,
+      timeline: options.timeline ?? "main",
+      ...(lines ? { lines } : {}),
+      ...(track !== undefined ? { track } : {}),
+      dryRun: options["dry-run"] === true,
+    };
+  }
   const confirmation = options.confirmation?.trim();
   if (options.confirmation !== undefined && confirmation === "") throw new UsageError("--confirmation: expected the token the ConfirmationRequired refusal printed.");
   if (confirmation !== undefined && options.yes !== true) throw new UsageError("--confirmation goes with --yes: it binds the confirmation to the ask the person saw.");
@@ -132,19 +157,21 @@ function tempos(raw: string): Record<string, number> {
   return found;
 }
 
+/** The one value of a flag that may only be given once. */
+function single(value: string | string[] | undefined, flag: string, sub: string): string | undefined {
+  if (value === undefined) return undefined;
+  const given = ([] as string[]).concat(value);
+  if (given.length > 1) throw new UsageError(`--${flag} was given several times; \`voiceover ${sub}\` takes one.`);
+  return given[0];
+}
+
 function parsePlace(script: string, lines: string[] | undefined, options: Parameters<typeof parseVoiceover>[1]): VoiceoverInvocation {
-  const single = (value: string | string[] | undefined, flag: string): string | undefined => {
-    if (value === undefined) return undefined;
-    const given = ([] as string[]).concat(value);
-    if (given.length > 1) throw new UsageError(`--${flag} was given several times; \`voiceover place\` takes one.`);
-    return given[0];
-  };
-  const gapRaw = single(options.gap, "gap");
+  const gapRaw = single(options.gap, "gap", "place");
   const gap = gapRaw === undefined ? undefined : Number(gapRaw);
   if (gap !== undefined && (gapRaw!.trim() === "" || !Number.isFinite(gap) || gap < 0 || gap > 30)) throw new UsageError(`--gap: expected seconds from 0 to 30, got "${gapRaw}".`);
   const start = options.start?.trim();
   if (options.start !== undefined && start === "") throw new UsageError(`--start: expected seconds, a marker id or label, or beat:N / bar:N, got "${options.start}".`);
-  const track = single(options.track, "track");
+  const track = single(options.track, "track", "place");
   return {
     kind: "voiceover.place",
     script,
@@ -168,6 +195,11 @@ export async function executeVoiceover(
   json: boolean,
   progress: ((update: Progress) => void) | undefined,
 ): Promise<string> {
+  if (inv.kind === "voiceover.captions") {
+    const { kind: _captions, ...params } = inv;
+    const captioned = await conn.request("voiceover.captions", { cwd, ...params }, progress ? { onProgress: progress } : {});
+    return json ? `${JSON.stringify(captioned, null, 2)}\n` : formatCaptions(captioned);
+  }
   if (inv.kind === "voiceover.place") {
     const { kind: _place, ...params } = inv;
     const placed = await conn.request("voiceover.place", { cwd, ...params });
@@ -244,6 +276,22 @@ function formatPlace(result: VoiceoverPlaceResult): string {
   const made = result.track.created ? (result.dryRun ? ", to be made" : ", new") : "";
   lines.unshift(`${verb} ${phrases} phrase${phrases === 1 ? "" : "s"} of ${result.lines.length} line${result.lines.length === 1 ? "" : "s"} of ${result.script} on ${result.track.id ?? "a new track"} (${result.track.name})${made}`);
   if (result.replaced.length > 0) lines.push(`  ${result.dryRun ? "would remove" : "removed"} ${result.replaced.join(", ")}`);
+  for (const warning of result.warnings) lines.push(`  warning: ${warning}`);
+  if (result.tx) lines.push(`  transaction ${result.tx}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatCaptions(result: VoiceoverCaptionsResult): string {
+  const verb = result.dryRun ? "Would caption" : "Captioned";
+  const made = result.track.created ? (result.dryRun ? ", to be made" : ", new") : "";
+  const how = result.timing.status === "heard" ? `timed by ${result.timing.provider}` : "spread over the phrases";
+  const lines = [`${verb} ${result.lines.length} line${result.lines.length === 1 ? "" : "s"} of ${result.script} on ${result.track.id ?? "a new track"} (${result.track.name}${made}), ${how}`];
+  for (const line of result.lines) {
+    const timing = line.timing === "heard" ? "" : `  ${line.timing}`;
+    lines.push(`  ${line.id}${timing}  ${line.chunks.map((chunk) => `[${chunk}]`).join(" ")}`);
+    if (line.missing.length > 0) lines.push(`      not heard: ${line.missing.join(", ")}`);
+  }
+  if (result.timing.reason) lines.push(`  ${result.timing.reason}`);
   for (const warning of result.warnings) lines.push(`  warning: ${warning}`);
   if (result.tx) lines.push(`  transaction ${result.tx}`);
   return `${lines.join("\n")}\n`;

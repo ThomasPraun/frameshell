@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Voiceover captions in the display form, slice 6 of #470 (ADR 0034 decision 23, epic #451; protocol 173): `frameshell
+  voiceover captions <script> [--lines] [--track] [--dry-run]` (MCP `voiceover_captions`) captions the placed takes with
+  the line as written (digits, names as spelled), never the respelled or spelled-out words the voice read. Each take is
+  transcribed by the project's transcription provider (the misread check's round trip) and the display words are lined
+  up with the heard words by the transcript aligner: a number covers every word it was said as, a respelled name the
+  heard words in its slot, a word the voice dropped is listed in `missing` and timed between its neighbours. When the
+  project cannot transcribe (untrusted, no plugin), or a line was heard as other words, the words are spread over the
+  take's phrases by length, with a warning. The words become the take's transcript (ids and hand edits kept), and one
+  transaction gives a subtitle track that follows the voice track (made when absent) one hand-chunked phrase per phrase
+  of the take, split at words within the style's limits; `captions set` re-chunks or marks a keyword afterwards. The
+  shoot session's transcript writer and the new command share one builder (`transcriptFromWords`). `voiceover.place`'s
+  `at` description now says that anchors take word references too.
+
 - Motion templates, slice TP5 of #466 (ADR 0033, epic #451; plugin only, no protocol change; closes #466):
   `frameshell hyperframes new <name> --template` takes two more. `select-resize` has a cursor press a card, so its
   selection ring, its handles (4 corner squares or 8 dots) and the click ripple start on the same frame; it then drags
