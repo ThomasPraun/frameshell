@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Still finals for look-dev, slice 7 of #482 (ADR 0035, epic #451; protocol 176): `frameshell frame --final [--yes]`
+  and `frameshell clip compare --final [--yes]` (MCP `frame_capture` / `clip_compare` with `final`) draw a Blender clip
+  shown at that frame from a Cycles final of that one frame instead of its EEVEE draft, unless its whole final is
+  cached, so a look is confirmed on a final before a whole final. The host renders a copy of the clip narrowed to the
+  frame (`in` = frame / fps, `duration` = 1 / fps), keyed apart from the draft and the whole final (`still` in the key),
+  which the Blender adapter renders as one frame after a transparent head (slice 6), waited for and estimated as one
+  frame; over 5 minutes in all (a look sheet adds its tiles up, each named in `look`) it fails with
+  `ConfirmationRequired` until `yes`. A still that fails is `ClipRenderFailed`, never the draft; `warnings` say what
+  each clip was drawn from. Stills are listed by no `clip.renders` and removed by `gc`. `review` stays on drafts (owner
+  decision 2026-11-18). Plugin API: additive `finals.windowed` (`PLUGIN_API_VERSION` stays `"1"`), set by the Blender
+  adapter; an adapter without it keeps its draft in a still, with a warning. Not verified with a real Blender (none on
+  the machine that built it); the stub-Blender test runs on POSIX CI.
 - `title-3d` template, slice 3b of #473 (ADR 0042, epic #451; plugin only, no protocol change; closes #473):
   `frameshell hyperframes new title --template title-3d` extrudes a short title of Archivo Black letters
   (`THREE.TextGeometry`) in the `product-shot` studio, laid out in at most three lines that wrap and shrink to the

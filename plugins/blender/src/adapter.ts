@@ -87,6 +87,8 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
     type: CLIP_TYPE,
     propsSchema,
     finals: {
+      // `renderWindow` draws only [in, in + duration) and the range marker in `inputs` keys it: a still final is one frame of it.
+      windowed: true,
       estimate: (clip, ctx) => times.estimate(sourceOf(clip as BlenderClip), renderWindow(clip as BlenderClip, ctx.fps).frames, ctx.width, ctx.height),
     },
     async inputs(clip, context?: InputsContext) {

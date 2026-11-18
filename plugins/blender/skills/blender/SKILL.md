@@ -5,7 +5,7 @@ description: Place a Blender scene on the Frameshell timeline as a `blender` cli
 
 # Blender clips
 
-A `blender` clip is a frame range of a `.blend` file in the project, rendered in the background by the person's own Blender (never downloaded by Frameshell) and layered like any generated clip. Frameshell only renders: edit the `.blend` yourself (through your own Blender tooling), save it, and the clip re-renders. Every clip has two renders, both with a transparent background: a draft (EEVEE, or Workbench) made in the background for the preview, and a final (Cycles) made only when a final export needs it.
+A `blender` clip is a frame range of a `.blend` file in the project, rendered in the background by the person's own Blender (never downloaded by Frameshell) and layered like any generated clip. Frameshell only renders: edit the `.blend` yourself (through your own Blender tooling), save it, and the clip re-renders. Every clip has two renders, both with a transparent background: a draft (EEVEE, or Workbench) made in the background for the preview, and a final (Cycles) made only when a final export needs it. A still can ask for a final of its one frame (`frame --final`, `clip compare --final`).
 
 ## Which route
 
@@ -47,7 +47,7 @@ Real metres and a 50 mm lens at f/3 to f/5 with the camera 0.5 to 0.9 m from the
 
 `frameshell clip add <track> --type blender --source scenes/intro.blend --start <s> --duration <s>`, optionally `--props '{"scene":"Dusk","camera":"Close"}'`. `source` is the `.blend`, inside the project. `props` takes `scene` and `camera` and nothing else (no `quality`: draft or final is the export's choice).
 
-Wait for the draft: `clip.renders` (MCP `clip_renders`) until the clip's `state` is `ready`. Then look: `frameshell frame --at <s> --out look.png` shows the draft (with a warning) until a final exists. `final.state` stays `waiting` until an export asks for the final.
+Wait for the draft: `clip.renders` (MCP `clip_renders`) until the clip's `state` is `ready`. Then look: `frameshell frame --at <s> --out look.png` shows the draft (with a warning) until a final exists. `final.state` stays `waiting` until an export asks for the final. `frameshell frame --at <s> --out look.png --final` (MCP `frame_capture` with `final: true`) renders a Cycles final of that one frame and shows it: seconds to a minute, not the whole clip.
 
 ## Compare looks on one frame
 
@@ -58,14 +58,15 @@ Pick the light by eye before spending a final. Give the `.blend` one scene per l
 (MCP `clip_compare`.) It writes one labelled image, `.frameshell/looks/compare-<clip>-<frame>.png`: tile 1 is the clip as it is, then each look in order, every tile the whole composed frame as `frame` renders it (layers above, captions). Open the image. A look is `key=value` props merged over the clip's own (`camera=Close`, `scene=Dusk,camera=Close`; `camera=null` drops a key) and may also take `source=scenes/hero-b.blend` for a copy of the file. The command prints, per tile, the `clip set --props` command that keeps it; nothing is changed until you run one.
 
 - Each look is drawn from its own render. A look not rendered before makes its draft first, one render at a time, so the first sheet takes as long as its drafts; the next call on the same looks is quick. Rendering covers the clip's part, from its `in` point to its end: compare on a short clip.
-- A sheet shows drafts (EEVEE) unless a final is cached; a frame never starts a final. EEVEE and Cycles light differ in bounce, soft shadow and glass: use the sheet to choose between setups, then confirm the winner on a final.
+- A sheet shows drafts (EEVEE) unless a final is cached. EEVEE and Cycles light differ in bounce, soft shadow and glass: use the sheet to choose between setups, then confirm the winner on one final still before a whole final: `clip compare ... --final` (each tile a Cycles final of that frame) or `frame --at <s> --final` with the winning props set.
 - What to check on the sheet, at thumbnail size: exposure (a washed, pastel picture is too bright); contact (feet and objects touch the ground, shadows connect); the eyes and the subject read; lead room in the direction of movement; bokeh visible where intended.
-- To see Cycles before the delivery without rendering the whole film, put the winning look on a short test clip alone in a separate timeline, and render that with `frameshell render --timeline <id> --quality final` after the person agrees to the wait.
+- A final still costs one frame (Blender start-up included): it is estimated like a final, and over 5 minutes in all (a sheet of many looks on a slow scene) it fails with `ConfirmationRequired` until `--yes`, which you pass only after the person agrees. A still final that fails is an error, never the draft. Stills stay in the cache until the next `gc`; once the clip's whole final exists, stills read it instead.
+- To see Cycles in motion before the delivery without rendering the whole film, put the winning look on a short test clip alone in a separate timeline, and render that with `frameshell render --timeline <id> --quality final` after the person agrees to the wait.
 
 ## Draft, review and delivery
 
-1. **Drafts while you work.** Edit, save, look at `frame` or `review` stills. `frameshell render --quality draft` exports the drafts, with a warning per Blender clip. Never deliver that file as the finished film.
-2. **Judge light, materials and noise on a final.** A draft is not final art.
+1. **Drafts while you work.** Edit, save, look at `frame` or `review` stills (`review` always shows drafts). `frameshell render --quality draft` exports the drafts, with a warning per Blender clip. Never deliver that file as the finished film.
+2. **Judge light, materials and noise on a final.** A draft is not final art. Confirm the setup on one final still (`frame --final`) before a whole final.
 3. **Delivery:** `frameshell render --quality final` (or no `--quality`) renders each Cycles final first (80 samples, denoised, the GPU when Blender finds one) and waits for it. Finals take minutes to an hour: about 6 to 7 s a frame at 1600x900 on a fast laptop. When the finals still to render are estimated over 5 minutes in all, the export fails with `ConfirmationRequired` (`error.data.finals` has each clip's estimate in seconds, `seconds` the total) and nothing is queued. Tell the person the estimate, and re-run with `--yes` (MCP `render` with `yes: true`) only after they agree to wait. Cached finals never ask again; editing the `.blend` makes a new final due. `frameshell batch` asks the same over all its rows.
 4. **Rules of the queue.** One render runs at a time: a long final holds back other generated clips and exports until it ends. `frameshell job list` shows the queue, `frameshell job cancel <id>` stops a render. The first Cycles final on a Mac also compiles Blender's Metal kernels, which can take many minutes once per Blender version; the estimate does not count it.
 5. **Estimates** start at 5 s per frame and megapixel; after each final they use the rate that `.blend` took on this machine (its frames after the first).
@@ -100,4 +101,4 @@ A failed render shows in `clip.renders` (`state` `failed`) with its message; the
 - The clip plays the scene from its first frame: composition time 0 is the scene's start frame. `in` and `duration` select the part shown.
 - Drafts are not final art: do not present them as the finished look.
 - Changing `in` or `duration` renders again (the start and end of the part rendered are in the render key, and only that part is rendered); moving the clip on the timeline does not.
-- Everything you see in `frame`, `review` and the preview of a Blender clip is the draft until a final is cached.
+- Everything you see in `frame`, `review` and the preview of a Blender clip is the draft until a final is cached; `frame --final` and `clip compare --final` are the exceptions you ask for.

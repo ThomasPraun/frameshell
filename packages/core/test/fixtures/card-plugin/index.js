@@ -131,6 +131,55 @@ export function activate(api) {
       },
     },
   });
+  // `window-card` renders windowed finals as Blender does (ADR 0035 slice 7): only frames floor(in * fps) up to the clip's
+  // end are painted (blue draft, the card's { finalColor } final), the head transparent; `inputs` name that part; the
+  // estimate is the window's frames times the card's { secondsPerFrame } (default 1); { failFinal } fails every final.
+  // Each render appends { tier, in, duration } to `.frameshell/window-renders.jsonl`.
+  const windowOf = (clip, fps) => {
+    const start = Math.max(0, Math.floor((clip.in ?? 0) * fps + 1e-3));
+    return { start, end: Math.max(start + 1, Math.ceil(((clip.in ?? 0) + clip.duration) * fps - 1e-3)) };
+  };
+  api.registerClipType({
+    ...card,
+    type: "window-card",
+    finals: {
+      windowed: true,
+      async estimate(clip, ctx) {
+        const { start, end } = windowOf(clip, ctx.fps);
+        return (end - start) * ((await readCard(clip)).secondsPerFrame ?? 1);
+      },
+    },
+    async inputs(clip) {
+      const ms = (seconds) => Math.round(seconds * 1000);
+      return [clip.source, `.frameshell/window-card/${ms(clip.in ?? 0)}-${ms((clip.in ?? 0) + clip.duration)}ms.json`];
+    },
+    async render(clip, ctx) {
+      const card = await readCard(clip);
+      const final = ctx.tier === "final";
+      await mkdir(join(project, ".frameshell"), { recursive: true });
+      await appendFile(join(project, ".frameshell", "window-renders.jsonl"), `${JSON.stringify({ tier: ctx.tier ?? null, in: clip.in ?? 0, duration: clip.duration })}\n`);
+      if (final && card.failFinal) throw new Error(`card ${clip.source} asks its finals to fail`);
+      const { start, end } = windowOf(clip, ctx.fps);
+      const ffmpeg = await ctx.ensureBinary("ffmpeg");
+      const file = join(ctx.outDir, "card.webm");
+      const size = `${ctx.width}x${ctx.height}`;
+      const color = final ? (card.finalColor ?? "red") : (card.color ?? "blue");
+      await new Promise((resolve, reject) =>
+        execFile(
+          ffmpeg,
+          [
+            ...["-hide_banner", "-loglevel", "error", "-y"],
+            ...["-f", "lavfi", "-i", `color=c=black@0.0:s=${size}:r=${ctx.fps},format=yuva420p`],
+            ...["-f", "lavfi", "-i", `color=c=${color}:s=${size}:r=${ctx.fps},format=yuva420p`],
+            ...["-filter_complex", `[0][1]overlay=format=auto:enable='gte(n,${start})',format=yuva420p`, "-frames:v", String(end)],
+            ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0", "-crf", "30", "-b:v", "0", "-deadline", "realtime", file],
+          ],
+          (error, _stdout, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve()),
+        ),
+      );
+      return { file, hasAlpha: true };
+    },
+  });
   const stateDir = ".frameshell/card-state";
   api.registerClipType({
     ...card,

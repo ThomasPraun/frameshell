@@ -104,6 +104,15 @@ describe("frameshell render and frame", () => {
     expect(readFileSync(join(project, "shot.png")).subarray(1, 4).toString("latin1")).toBe("PNG");
   });
 
+  it("takes --final (a project without generated clips draws the same frame), --yes only with it, and no other command takes them", () => {
+    const result = frameshell(["frame", "--at", "0.5", "--out", "final.png", "--final", "--yes"]);
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/^Wrote .*final\.png \(frame 15 at 0\.5 s, c_[0-9a-f]{6}, 1920x1080\)\n$/);
+    expect(frameshell(["frame", "--at", "0", "--out", "x.png", "--yes"]).stderr).toMatch(/takes --yes only with --final/);
+    expect(frameshell(["cover", "--final"]).stderr).toMatch(/does not take --final/);
+    expect(frameshell(["clip", "set", "c_000000", "--x", "1", "--yes"]).stderr).toMatch(/does not take --yes/);
+  });
+
   it("writes a frame as JPEG with --format and --quality, and refuses unknown values", () => {
     const result = frameshell(["frame", "--at", "0.5", "--out", "shot.img", "--format", "jpg", "--quality", "40"]);
     expect(result.code, result.stderr).toBe(0);

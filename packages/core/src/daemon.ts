@@ -835,7 +835,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     clips: {
       check: (dir, timeline) => clips.check(clipRoot(dir), timeline),
       ensure: (dir, timeline, options) => clips.ensure(clipRoot(dir), timeline, options),
-      finals: (dir, timeline, size) => clips.finals(clipRoot(dir), timeline, size),
+      finals: (dir, timeline, size, stillAt) => clips.finals(clipRoot(dir), timeline, size, stillAt),
     },
     audioFx,
     mattes: {
@@ -1736,11 +1736,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "batch.cancel": async ({ cwd, file, out }) => batches.cancel(await root(cwd), cwd, { file, out }),
     "batch.render": async ({ cwd, file, out, formats: ids, rows, failed, force, review, dryRun, yes }) =>
       batches.render(await root(cwd), cwd, { file, out, formats: ids, rows, failed, force, review, dryRun, yes }),
-    frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, view }, caller) => {
+    frame: async ({ cwd, timeline, at, out, preset, projectFormat, format, quality, final, yes, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
-      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality }, { ...loaded, ...formats })) };
+      return { view: shown, proposal, ...(await exports.frame(dir, { timeline, at, out, preset, projectFormat, format, quality, final, yes }, { ...loaded, ...formats })) };
     },
     review: async ({ cwd, timeline, file, from, to, sheets, platform, every, projectFormat, preset, loop, cropAt, pop: popRef, onion, speed, view }, caller) => {
       if (preset !== undefined && file === undefined) {
@@ -2028,11 +2028,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat };
       return { view: shown, proposal, ...(await gradeComparer.compare(dir, { ...loaded, ...formats }, request)) };
     },
-    "clip.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, view }, caller) => {
+    "clip.compare": async ({ cwd, timeline, clip, looks, at, out, tileWidth, projectFormat, final, yes, view }, caller) => {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       const formats = projectFormat !== undefined ? await viewFormats(dir, shown) : {};
-      const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat };
+      const request = { clip, looks, at, out: out === undefined ? undefined : resolve(cwd, out), tileWidth, projectFormat, final, yes };
       return { view: shown, proposal, ...(await clipComparer.compare(dir, { ...loaded, ...formats }, request)) };
     },
     "audio.bakes": async ({ cwd, timeline, view }, caller) => {

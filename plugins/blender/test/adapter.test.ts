@@ -540,6 +540,27 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(measured.sources[SOURCE]).toBeCloseTo(2 / ((64 * 36) / 1e6), 2);
     });
 
+    it("render a still final as the host narrows it, frame k alone after k transparent frames, keyed by its own range, estimated as one frame", async () => {
+      // The host's copy of a clip for the final of composition frame 7 at 10 fps (ADR 0035 slice 7).
+      const still = clip({ in: 7 / 10, duration: 1 / 10 });
+      const format = { projectDir: project, fps: 10, width: 1000, height: 1000 };
+      expect(await adapter().finals!.estimate(still, format)).toBe(10 + 1 * 5);
+      const inputs = await adapter().inputs!(still, inputsContext(project, stub.path));
+      expect(inputs[2]).toBe(".frameshell/blender/range/700-800ms.json");
+      const { ctx } = renderContext(project, stub.path, { tier: "final" });
+      await adapter().render(still, ctx);
+      expect(JSON.parse(stub.runs("render.py").at(-1)![9]!)).toMatchObject({ quality: "final", startFrame: 7, frames: 1 });
+      expect(stub.sceneFrames()).toEqual([8]);
+      const size = { width: 64, height: 36 };
+      const rgba = await decodeRgba(join(ctx.outDir, "render.webm"));
+      expect(rgba.length / (size.width * size.height * 4)).toBe(8);
+      for (let frame = 0; frame < 8; frame++) {
+        const panel = alphaAt(rgba, size, frame, 24, 18);
+        if (frame < 7) expect(panel, `panel of frame ${frame}`).toBe(0);
+        else expect(panel, `panel of frame ${frame}`).toBeGreaterThanOrEqual(149);
+      }
+    });
+
     it("do not record a final of one frame, whose time is mostly start-up", async () => {
       await adapter().render(clip({ duration: 0.1 }), renderContext(project, stub.path, { tier: "final" }).ctx);
       expect(existsSync(join(project, ".frameshell", "blender", "finals.json"))).toBe(false);

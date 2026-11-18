@@ -112,6 +112,14 @@ describe("source and range", () => {
     expect(renderWindow({ id: "c", in: 1, duration: 0 }, 30)).toEqual({ startFrame: 30, frames: 1 });
   });
 
+  it("renderWindow of a clip the host narrowed to one frame for a still final (in k / fps, duration 1 / fps) is frame k alone", () => {
+    for (const fps of [24, 25, 30, 50, 60, 120, 24000 / 1001, 30000 / 1001, 60000 / 1001]) {
+      for (let k = 0; k <= 20_000; k += 7) {
+        expect(renderWindow({ id: "c", in: k / fps, duration: 1 / fps }, fps), `frame ${k} at ${fps} fps`).toEqual({ startFrame: k, frames: 1 });
+      }
+    }
+  });
+
   it("frameRate sends NTSC rates as exact fractions and the rest as they are", () => {
     expect(frameRate(30000 / 1001)).toBe("30000/1001");
     expect(frameRate(29.97)).toBe("30000/1001");
@@ -218,6 +226,8 @@ describe("the plugin package", () => {
     activate({ project: { dir: "/p" }, registerClipType: (adapter: ClipAdapter) => registered.push(adapter) } as unknown as PluginApi);
     expect(registered.map((adapter) => adapter.type)).toEqual(["blender"]);
     expect(registered[0]!.propsSchema).toBe(propsSchema);
+    // Windowed finals: the host may ask for a final of one frame (ADR 0035 slice 7).
+    expect(registered[0]!.finals?.windowed).toBe(true);
   });
 });
 

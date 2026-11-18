@@ -980,3 +980,169 @@ describe("timing in generated clips", () => {
     TIMEOUT,
   );
 });
+
+// Still finals (ADR 0035 slice 7): a `window-card` renders windowed finals as Blender does, so `frame` and `clip.compare`
+// with `final` draw it from a final of the one frame shown, keyed apart from its draft and its whole final. At 30 fps a
+// clip at 1 s with `in` 0.2 shows composition frame 6 + (timeline frame - 30).
+describe("still finals of generated clips", () => {
+  let dir = "";
+  let windowTrack = "";
+  const cache = () => join(dir, ".frameshell", "cache", "clips");
+  const entries = () => new Set(readdirSync(cache()).filter((name) => /^[0-9a-f]{32}\.json$/.test(name)).map((name) => name.slice(0, 32)));
+  const log = (): { tier: string | null; in: number; duration: number }[] => {
+    const file = join(dir, ".frameshell", "window-renders.jsonl");
+    return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { tier: string | null; in: number; duration: number }) : [];
+  };
+  const finalsLogged = () => log().filter((entry) => entry.tier === "final");
+  const pixel = async (file: string) => {
+    const { ffmpeg } = await mediaTools();
+    const rgb = await runBuffer(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", file, "-frames:v", "1", "-vf", "crop=1:1:32:18,format=rgb24", "-f", "rawvideo", "-"]);
+    return { red: rgb[0]!, blue: rgb[2]! };
+  };
+  const isRed = ({ red, blue }: { red: number; blue: number }) => red > 150 && blue < 60;
+  const card = (name: string, value: Record<string, unknown>) => writeFileSync(join(dir, "compositions", "cards", `${name}.json`), JSON.stringify(value));
+  const add = async (type: string, name: string, start: number, extra: Record<string, unknown> = {}) =>
+    (await conn.request("clip.add", { cwd: dir, track: windowTrack, type, source: `compositions/cards/${name}.json`, start, duration: 1, ...extra })).changes.added[0]!;
+  const frame = (at: number, extra: { final?: boolean; yes?: boolean } = {}) => conn.request("frame", { cwd: dir, timeline: "main", at, out: join(tempDir(), "still.png"), ...extra });
+  const refusal = (promise: Promise<unknown>) =>
+    promise.then(
+      () => null,
+      (caught: unknown) => caught as { code: number; message: string; data: Record<string, unknown> },
+    );
+  const ready = async (id: string) => {
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline; ) {
+      const info = (await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips.find((clip) => clip.clip === id);
+      if (info?.state === "ready") return info;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    throw new Error(`clip ${id} never got its draft`);
+  };
+
+  beforeAll(async () => {
+    dir = tempDir();
+    await conn.request("project.init", { dir });
+    const configPath = join(dir, "frameshell.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(configPath, JSON.stringify({ ...config, resolution: { width: 64, height: 36 } }));
+    installLocalPlugin(dir, CARD_PLUGIN, "card-plugin");
+    await conn.request("project.trust", { cwd: dir, decision: "trust" });
+    mkdirSync(join(dir, "compositions", "cards"), { recursive: true });
+    card("window", { seconds: 2, secondsPerFrame: 20 });
+    windowTrack = (await conn.request("track.add", { cwd: dir, kind: "video" })).changes.added[0]!;
+  }, TIMEOUT);
+
+  it(
+    "draws the frame from a final of that frame alone, keyed apart from the draft and the whole final, at the first, a middle and the last frame",
+    async () => {
+      const id = await add("window-card", "window", 1, { in: 0.2 });
+      const info = await ready(id);
+      const without = await frame(1.5);
+      expect(without.warnings).toEqual([expect.stringMatching(new RegExp(`^Clip ${id} \\(window-card\\) is drawn from its draft render: .*\`frame\` or \`clip.compare\` with \`final\``))]);
+      expect(isRed(await pixel(without.path))).toBe(false);
+      expect(finalsLogged()).toEqual([]);
+
+      // The whole final is estimated at 30 x 20 s, the frame at 20 s: no confirmation.
+      for (const [at, composition] of [[1.5, 21], [1, 6], [1.967, 35]] as const) {
+        const shot = await frame(at, { final: true });
+        expect(isRed(await pixel(shot.path)), `frame at ${at}`).toBe(true);
+        expect(shot.warnings).toEqual([expect.stringContaining(`is drawn from a final render of this frame alone (composition frame ${composition})`)]);
+        expect(finalsLogged().at(-1)!.in).toBeCloseTo(composition / 30, 9);
+        expect(finalsLogged().at(-1)!.duration).toBeCloseTo(1 / 30, 9);
+      }
+      expect(finalsLogged()).toHaveLength(3);
+      const stills = [...entries()].filter((key) => key !== info.key);
+      expect(stills).toHaveLength(3);
+      expect(stills).not.toContain(info.final!.key);
+      // A still is no render of the timeline: the preview lists the draft and the whole final, still waiting.
+      const listed = (await conn.request("clip.renders", { cwd: dir, timeline: "main" })).clips;
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toMatchObject({ key: info.key, final: { key: info.final!.key, state: "waiting" } });
+
+      // Cached: the same frame again renders nothing.
+      expect(isRed(await pixel((await frame(1.5, { final: true })).path))).toBe(true);
+      expect(finalsLogged()).toHaveLength(3);
+
+      // gc removes the stills, which no timeline uses, and keeps the clip's own renders.
+      const keyOf = (path: string) => path.split("/").at(-1)!.split(".")[0]!;
+      const removed = (await conn.request("gc", { cwd: dir, dryRun: true })).removed.map((entry) => keyOf(entry.path));
+      for (const key of stills) expect(removed).toContain(key);
+      expect(removed).not.toContain(info.key);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "asks for a confirmation over 5 minutes, counting the frame only, and prefers a cached whole final",
+    async () => {
+      card("slow", { seconds: 2, secondsPerFrame: 400 });
+      const id = await add("window-card", "slow", 3);
+      await ready(id);
+      const refused = await refusal(frame(3.5, { final: true }));
+      expect(refused?.code).toBe(ErrorCode.ConfirmationRequired);
+      expect(refused!.data).toMatchObject({ seconds: 400, limit: 300, finals: [{ clip: id, seconds: 400 }] });
+      expect(refused!.message).toMatch(/^This frame renders .*call `frame` without `final`/);
+      const before = finalsLogged().length;
+      expect(isRed(await pixel((await frame(3.5, { final: true, yes: true })).path))).toBe(true);
+      expect(finalsLogged()).toHaveLength(before + 1);
+
+      // A final export makes the whole finals; a still then reads them and renders nothing.
+      const { job } = await conn.request("render", { cwd: dir, timeline: "main", out: join(tempDir(), "whole.mp4"), yes: true });
+      for (const deadline = Date.now() + 120_000; ; ) {
+        const found = (await conn.request("job.list", { cwd: dir })).jobs.find((one) => one.id === job.id)!;
+        if (found.state === "done") break;
+        if (found.state === "failed" || Date.now() > deadline) throw new Error(`render ${job.id} ended ${found.state}`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const wholes = finalsLogged().length;
+      const shot = await frame(3.25, { final: true });
+      expect(isRed(await pixel(shot.path))).toBe(true);
+      expect(shot.warnings).toEqual([]);
+      expect(finalsLogged()).toHaveLength(wholes);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "fails a still whose final fails instead of showing the draft, and leaves a plugin with only whole finals on its draft",
+    async () => {
+      card("broken", { seconds: 2, failFinal: true });
+      const broken = await add("window-card", "broken", 5);
+      await ready(broken);
+      const failed = await refusal(frame(5.5, { final: true }));
+      expect(failed?.code).toBe(ErrorCode.ClipRenderFailed);
+      expect(failed!.message).toContain("asks its finals to fail");
+      await conn.request("clip.remove", { cwd: dir, clip: broken });
+
+      card("whole", { color: "blue", finalColor: "red", seconds: 2, estimateSeconds: 1 });
+      const whole = await add("final-card", "whole", 5);
+      await ready(whole);
+      const shot = await frame(5.5, { final: true });
+      expect(shot.warnings).toEqual([expect.stringMatching(new RegExp(`^Clip ${whole} \\(final-card\\) is drawn from its draft render: card-plugin renders finals only of the whole clip`))]);
+      expect(isRed(await pixel(shot.path))).toBe(false);
+      await conn.request("clip.remove", { cwd: dir, clip: whole });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "draws every tile of clip.compare from its own still final, asking once for the whole sheet",
+    async () => {
+      card("look", { seconds: 2, secondsPerFrame: 120 });
+      const id = await add("window-card", "look", 7);
+      await ready(id);
+      const looks = [{ name: "a", props: { label: "a" } }, { name: "b", props: { label: "b" } }];
+      const refused = await refusal(conn.request("clip.compare", { cwd: dir, timeline: "main", clip: id, looks, final: true }));
+      expect(refused?.code).toBe(ErrorCode.ConfirmationRequired);
+      expect(refused!.data).toMatchObject({ seconds: 360, finals: [{ clip: id, look: "1 current" }, { clip: id, look: "2 a" }, { clip: id, look: "3 b" }] });
+      const before = finalsLogged().length;
+      const sheet = await conn.request("clip.compare", { cwd: dir, timeline: "main", clip: id, looks, final: true, yes: true });
+      expect(finalsLogged()).toHaveLength(before + 3);
+      expect(sheet.warnings).toEqual([expect.stringContaining(`Clip ${id} (window-card) is drawn from a final render of this frame alone`)]);
+      // Without `final` the tiles are drafts, as before.
+      const drafts = await conn.request("clip.compare", { cwd: dir, timeline: "main", clip: id, looks });
+      expect(drafts.warnings).toEqual([expect.stringContaining("is drawn from its draft render")]);
+      expect(finalsLogged()).toHaveLength(before + 3);
+    },
+    TIMEOUT,
+  );
+});

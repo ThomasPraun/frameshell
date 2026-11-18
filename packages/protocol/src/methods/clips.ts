@@ -165,15 +165,18 @@ export const clipMethods = {
       "`{ props: { scene: \"Dusk\" } }` draws another scene of the same `.blend` (one scene per lighting setup), `{ props: { camera: \"Close\" } }` another camera, " +
       "`{ source: \"scenes/hero-b.blend\" }` a copy of the file. Tile 1 is the clip as it is (`current`), then the looks in order. Every tile is the whole composed " +
       "frame as `frame` renders it (layers above, captions), from each variant's own render: a draft (EEVEE/Workbench for a Blender clip), or the final when " +
-      "it is cached; a frame never starts a final. Each variant not rendered before is rendered first (a clip render job, one at a time: seconds for a draft, " +
-      "and the whole clip up to the frame is rendered, so compare on a short clip). A variant's render stays in the clip cache until the next `gc`, " +
+      "it is cached. `final: true` draws every tile of a Blender clip from a final instead (Cycles), as `frame` with `final` does: a final of that one frame per " +
+      "variant, unless its whole final is cached; choose the setup on drafts, then confirm it on finals. Each variant not rendered before is rendered first (a clip " +
+      "render job, one at a time: seconds for a draft, the clip's whole part for a Blender draft, so compare on a short clip; one frame for a final). " +
+      "When the final stills are estimated over 5 minutes in all, or a plugin cannot say, nothing renders: it fails with ConfirmationRequired as `render` does " +
+      "(`data.finals` entries name their tile in `look`) until the person agrees (`yes: true`). A variant's render stays in the clip cache until the next `gc`, " +
         "which removes it while no timeline uses it: `clip.set` with a look soon after reuses it, later it renders again. Never changes the timeline: keep a look with " +
       "`clip.set` `props` (each tile's `flags`). `at` (timeline seconds inside the clip) picks the frame, default the clip's middle; `out` the PNG (default " +
       "`.frameshell/looks/compare-<clip>-<frame>.png`, replaced by the next call on that frame); `tileWidth` the width of one tile. " +
       'Example: `{ timeline: "main", clip: "c_1a2b3c", looks: [{ name: "dusk", props: { scene: "Dusk" } }, { name: "rim", props: { scene: "Rim light" } }] }`. ' +
       "Fails with ClipNotFound (no such adapter clip on a video track), InvalidOperation (not an adapter clip, `at` outside the clip, a look that sets nothing, " +
       "a `source` outside the project), ClipRenderFailed (a variant whose render fails: the message names the look), FormatNotFound, TimelineNotFound, " +
-      "or the Binary* errors when ffmpeg cannot be fetched.",
+      "ConfirmationRequired, or the Binary* errors when ffmpeg cannot be fetched.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
@@ -198,6 +201,17 @@ export const clipMethods = {
           `Width of one tile, px, ${CLIP_COMPARE_MIN_TILE_WIDTH} to ${CLIP_COMPARE_MAX_TILE_WIDTH}; its height follows the frame. Default ${CLIP_COMPARE_DEFAULT_TILE_WIDTH}.`,
         ),
       projectFormat: FormatIdSchema.optional().describe("Format of the project to lay the frame out in (`format.list`), e.g. `9x16`. Default: the primary format."),
+      final: z
+        .boolean()
+        .optional()
+        .describe("Draw the tiles from finals (a Blender clip: Cycles), each its whole final when cached, else a final of this frame alone. Default false: drafts."),
+      yes: z
+        .boolean()
+        .optional()
+        .describe(
+          "With `final`: the person agreed to wait for the final stills when they are estimated over 5 minutes in all. Never set it without their " +
+            "explicit agreement. Default false.",
+        ),
       view: ViewParam,
     }),
     result: z.object({ ...ViewedShape, ...ClipCompareResultSchema.shape }),

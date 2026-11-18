@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
 import { type ClipCompareResultShape, type ClipLook, ErrorCode, RpcError } from "@frameshell/protocol";
 import type { AdapterClip, Timeline } from "@frameshell/schema";
-import { type ExportService, type LoadedTimeline, pool } from "../export/service.js";
+import { type DueFinal, type ExportService, type LoadedTimeline, confirmFinals, pool } from "../export/service.js";
 import { columnsFor, compareFrame, evenHeight } from "../grade/compare.js";
 import { round } from "../grade/levels.js";
 import { captureParallelism } from "../review/source.js";
@@ -18,7 +18,7 @@ export const CLIP_COMPARE_DIR = [".frameshell", "looks"] as const;
 
 /** What {@link ClipComparer} needs from the daemon. */
 export interface ClipComparerOptions {
-  exports: Pick<ExportService, "frame">;
+  exports: Pick<ExportService, "frame" | "stillFinals">;
   /** Absolute path of the managed ffmpeg. */
   ffmpeg(root: string): Promise<string>;
 }
@@ -33,6 +33,10 @@ export interface ClipCompareRequest {
   out?: string | undefined;
   tileWidth: number;
   projectFormat?: string | undefined;
+  /** Draw every tile from finals, as `frame` with `final` does (ADR 0035 slice 7). */
+  final?: boolean | undefined;
+  /** The person agreed to wait for those finals when they are estimated over 5 minutes in all, or unknown. */
+  yes?: boolean | undefined;
 }
 
 type Tile = ClipCompareResultShape["tiles"][number];
@@ -85,6 +89,19 @@ export class ClipComparer {
     }
     for (const [i, tile] of tiles.entries()) tile.label = `${i + 1} ${names[i]}`;
 
+    const at = frame / fps;
+    const timelines = variants.map((variant) => withVariant(timeline, clip.id, variant));
+    if (request.final === true && request.yes !== true) {
+      // One question for the whole sheet: the stills of every tile, other clips' only once (they are the same in each).
+      const due: DueFinal[] = [];
+      for (const [i, shown] of timelines.entries()) {
+        for (const still of await this.#options.exports.stillFinals(root, { timeline: timeline.id, at, projectFormat: request.projectFormat }, { ...loaded, timeline: shown })) {
+          if (still.clip === clip.id) due.push({ ...still, look: tiles[i]!.label });
+          else if (!due.some((other) => other.clip === still.clip)) due.push(still);
+        }
+      }
+      confirmFinals(due, { subject: "This look sheet", draft: "call `clip.compare` without `final` (CLI: no --final)" });
+    }
     const out = request.out ?? join(root, ...CLIP_COMPARE_DIR, `compare-${clip.id}-${frame}.png`);
     const scratch = join(root, ".frameshell", "cache", "clip-compare", randomBytes(6).toString("hex"));
     try {
@@ -93,8 +110,8 @@ export class ClipComparer {
         try {
           const shot = await this.#options.exports.frame(
             root,
-            { timeline: timeline.id, at: frame / fps, out: paths[i]!, projectFormat: request.projectFormat },
-            { ...loaded, timeline: withVariant(timeline, clip.id, variants[i]!) },
+            { timeline: timeline.id, at, out: paths[i]!, projectFormat: request.projectFormat, ...(request.final === true ? { final: true, yes: true } : {}) },
+            { ...loaded, timeline: timelines[i]! },
           );
           for (const warning of shot.warnings) if (!warnings.includes(warning)) warnings.push(warning);
           return shot;
@@ -117,7 +134,7 @@ export class ClipComparer {
         clip: clip.id,
         type: generated.type,
         frame,
-        at: round(frame / fps, 3),
+        at: round(at, 3),
         path: out,
         width: size.width,
         height: size.height,
