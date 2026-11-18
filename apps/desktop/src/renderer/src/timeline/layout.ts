@@ -12,6 +12,7 @@ import {
 import { audioEffectsOf, normalizeAudioEffects, type NormalizedAudioEffect } from "@frameshell/schema/effects";
 import { type NormalizedGrade, normalizeGrade } from "@frameshell/schema/grade";
 import type { TransitionContext } from "@frameshell/schema/transitions";
+import { type ShownGrain, type ShownVignette, shownGrain, shownVignette } from "../finish/model.js";
 import { t } from "../i18n.js";
 import { type KeyBox, type KeyProp, type TransitionMark, keyBoxes, transitionMarks } from "./transitions.js";
 import { type GroupTurn, type LaneMarks, type PaintedMark, TURN_LANE_HEIGHT, laneMarks, shotSpans } from "./turn-lanes.js";
@@ -101,6 +102,10 @@ export interface ClipBox {
   backdrop: Backdrop | null;
   /** Stored `grade` of a media, generated or nested timeline clip (ADR 0031) with every number filled; null without one and for shots. */
   grade: NormalizedGrade | null;
+  /** Stored `vignette` of a media or generated clip (ADR 0043) with every number filled; null without one, for shots and nested timeline clips. */
+  vignette: ShownVignette | null;
+  /** Stored `grain` of a media or generated clip (ADR 0043) with every number filled, `seed` null while it follows the clip id; null without one, for shots and nested timeline clips. */
+  grain: ShownGrain | null;
   /** Ids of the formats the clip has a stored override in (ADR 0027 `formats`), sorted; empty without any. */
   formats: string[];
 }
@@ -403,6 +408,8 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     elements: elementsOf(fields["elements"]),
     backdrop: kind === "generated" && typeof fields["backdrop"] === "object" && fields["backdrop"] !== null ? (fields["backdrop"] as Backdrop) : null,
     grade: kind !== "shot" && typeof fields["grade"] === "object" && fields["grade"] !== null ? normalizeGrade(fields["grade"] as Grade) : null,
+    vignette: kind === "media" || kind === "generated" ? shownVignette(fields["vignette"]) : null,
+    grain: kind === "media" || kind === "generated" ? shownGrain(fields["grain"]) : null,
     formats: typeof fields["formats"] === "object" && fields["formats"] !== null ? Object.keys(fields["formats"]).sort() : [],
   };
 }

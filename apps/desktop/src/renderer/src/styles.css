@@ -3353,6 +3353,26 @@ button.track-head:focus-visible {
   border-color: var(--accent);
 }
 
+/* Letterbox menu (ADR 0043) beside the format switcher: lit while the shown format has bars. */
+.preview-letterbox-menu {
+  max-width: 110px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-letterbox-menu.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.preview-letterbox-custom {
+  width: 52px;
+}
+
+.preview-letterbox-custom.is-invalid {
+  border-color: var(--danger);
+}
+
 .region-toggle.on {
   color: var(--accent);
   background: var(--accent-soft);

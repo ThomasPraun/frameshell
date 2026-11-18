@@ -45,6 +45,16 @@ export function letterboxBars(frame: FrameSize, aspect: number): LetterboxBar[] 
 }
 
 /**
+ * A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height. Null when it is not one or not above 0.
+ * The CLI's `letterbox set` and the app's letterbox menu both read it.
+ */
+export function parseAspect(raw: string): number | null {
+  const match = /^\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:[:/]\s*(\d+(?:\.\d+)?|\.\d+)\s*)?$/.exec(raw);
+  const aspect = match ? Number(match[1]) / (match[2] === undefined ? 1 : Number(match[2])) : Number.NaN;
+  return Number.isFinite(aspect) && aspect > 0 ? aspect : null;
+}
+
+/**
  * The picture rectangle the bars of {@link letterboxBars} leave: the frame minus its bars, frame pixels. Null when
  * there are no bars (no letterbox, or an aspect equal to the frame's to the pixel): the picture is the whole frame.
  */

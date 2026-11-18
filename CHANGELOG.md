@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Finish section and letterbox menu in the app, slice 4b of #500 (ADR 0043, epic #451; desktop only, no protocol
+  change; closes #500): the clip inspector of a media or generated clip on a video track gains a Finish section after
+  Colour, with a Vignette group (strength, radius, softness) and a Grain group (amount, size, seed), each with a
+  switch that turns it on with the defaults or removes it and one Reset for both. A slider release is one `clip.set`
+  of that number only, so a drag is one undo step; the grain note says footage only, never screen recordings, UI or
+  text; while a format other than the primary is shown the section says the numbers are shared by every format. The
+  preview's transport bar gains a letterbox menu beside the format switcher (no bars, 2.39, 2.35, 1.85, 4:3 or a
+  typed aspect), one `letterbox.set` per choice, reading and writing the bars of the format shown. Image projects stay
+  out of scope (recorded in ADR 0043). `parseAspect` moves to `@frameshell/schema/finish`, shared by the CLI's
+  `letterbox set` and the menu, and a number field no longer sends its value twice when Enter is followed by leaving it.
 - `title-3d` template, slice 3b of #473 (ADR 0042, epic #451; plugin only, no protocol change; closes #473):
   `frameshell hyperframes new title --template title-3d` extrudes a short title of Archivo Black letters
   (`THREE.TextGeometry`) in the `product-shot` studio, laid out in at most three lines that wrap and shrink to the
