@@ -1,10 +1,11 @@
 import type { LogHint } from "@frameshell/schema";
 import { GRADE_LIMITS, type NormalizedGrade, logFootageHint } from "@frameshell/schema/grade";
 import { GRADE_LOOKS } from "@frameshell/schema/grade-looks";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
 import { cubeFiles } from "../grade/luts.js";
 import { t } from "../i18n.js";
+import { ReleaseSlider } from "./ReleaseSlider.js";
 
 /** The correction numbers, in the order the grade applies them (ADR 0031: correct first, then style). */
 const SLIDERS = [
@@ -130,48 +131,22 @@ export function ColourControl({
   );
 }
 
-/**
- * One slider: dragging moves a local value, and the browser's `change` (the release, or a key press) saves it through
- * `onCommit`. The value stays until the saved one changes, so the thumb does not jump back while the edit travels.
- */
+/** One grade number as a {@link ReleaseSlider} with its label, tooltip and the schema's range. */
 function GradeSlider({ name, step, stored, onCommit }: { name: SliderName; step: number; stored: number; onCommit: (value: number) => void }) {
   const { label, title, unit } = LABELS[name]();
   const limit = GRADE_LIMITS[name];
-  const [draft, setDraft] = useState<number | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  const latest = useRef({ stored, onCommit });
-  latest.current = { stored, onCommit };
-
-  useEffect(() => setDraft(null), [stored]);
-  useEffect(() => {
-    const element = input.current;
-    if (!element) return;
-    const released = () => {
-      const value = Number(element.value);
-      if (value !== latest.current.stored) latest.current.onCommit(value);
-      else setDraft(null);
-    };
-    element.addEventListener("change", released);
-    return () => element.removeEventListener("change", released);
-  }, []);
-
-  const value = draft ?? stored;
   return (
-    <label className="clip-field colour-slider" data-tip={title} data-grade={name}>
-      <span className="clip-field-label is-static">{label}</span>
-      <input
-        ref={input}
-        type="range"
-        className="colour-slider-input"
-        aria-label={unit ? `${label} (${unit})` : label}
-        min={limit.min}
-        max={limit.max}
-        step={step}
-        value={value}
-        onChange={(event) => setDraft(Number(event.target.value))}
-      />
-      <output className="colour-slider-value">{value.toFixed(2)}</output>
-    </label>
+    <ReleaseSlider
+      label={label}
+      title={title}
+      ariaLabel={unit ? `${label} (${unit})` : label}
+      min={limit.min}
+      max={limit.max}
+      step={step}
+      stored={stored}
+      data={{ grade: name }}
+      onCommit={onCommit}
+    />
   );
 }
 

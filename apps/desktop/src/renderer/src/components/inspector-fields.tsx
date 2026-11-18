@@ -1,6 +1,7 @@
 // Fields the inspectors share: numeric settings, text, and a segmented single choice.
 import { AUDIO_EFFECT_LIMITS, BACKDROP_LIMITS } from "@frameshell/schema/effects";
 import { SHAPE_COUNT_RANGE } from "@frameshell/schema";
+import { GRAIN_LIMITS } from "@frameshell/schema/finish";
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 import { t } from "../i18n.js";
 
@@ -157,6 +158,15 @@ const FIELDS = {
   makeup: effect(t.inspector.fieldMakeup, t.inspector.fieldMakeupTitle, "dB", AUDIO_EFFECT_LIMITS.compressor.makeup, 0.5, 1),
   startHz: effect(t.inspector.fieldStartHz, t.inspector.fieldStartHzTitle, "Hz", AUDIO_EFFECT_LIMITS.highpassSweep.startHz, 5, 0),
   endHz: effect(t.inspector.fieldEndHz, t.inspector.fieldEndHzTitle, "Hz", AUDIO_EFFECT_LIMITS.highpassSweep.endHz, 5, 0),
+  seed: {
+    label: t.inspector.fieldSeed,
+    title: t.inspector.fieldSeedTitle,
+    unit: "",
+    show: (v) => v,
+    store: (v) => (Number.isInteger(v) && v >= GRAIN_LIMITS.seed.min && v <= GRAIN_LIMITS.seed.max ? v : null),
+    step: 1,
+    decimals: 0,
+  },
   reframeX: point(t.inspector.fieldReframeX, t.inspector.fieldReframeXTitle),
   reframeY: point(t.inspector.fieldReframeY, t.inspector.fieldReframeYTitle),
 } satisfies Record<string, FieldSpec>;
@@ -191,11 +201,14 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
   const scrub = useRef<{ pointer: number; x: number; from: number } | null>(null);
   const latest = useRef(String(shown));
   latest.current = String(shown);
+  /** What the last entry sent while its saved value is still on its way: leaving the field after Enter must not send it again. */
+  const sent = useRef<number | null>(null);
 
   // A new saved value (this edit, the agent's, an undo) replaces what the field shows.
   useEffect(() => {
     setText(String(shown));
     setInvalid(false);
+    sent.current = null;
   }, [shown]);
 
   const commit = (value: number) => {
@@ -206,7 +219,13 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
     }
     setInvalid(false);
     setText(String(round(value, spec.decimals)));
-    if (next !== stored) commitOrRestore(onCommit, next, latest, setText);
+    sent.current = next;
+    if (next !== stored) {
+      commitOrRestore(onCommit, next, latest, (restored) => {
+        sent.current = null;
+        setText(restored);
+      });
+    }
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -261,7 +280,7 @@ export function NumberField({ name, stored, disabled, onCommit }: { name: FieldN
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKeyDown}
         onBlur={() => {
-          if (text !== String(shown)) commit(Number(text));
+          if (text !== String(shown) && (sent.current === null || spec.store(Number(text)) !== sent.current)) commit(Number(text));
         }}
         onPointerDown={(event) => event.stopPropagation()}
       />

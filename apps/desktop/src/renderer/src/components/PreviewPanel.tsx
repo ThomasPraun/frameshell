@@ -25,6 +25,7 @@ import { forgetLivePages } from "../preview/live-pages.js";
 import { ClipInspector } from "./ClipInspector.js";
 import { DetachButton } from "./DetachControls.js";
 import { ElementLayer } from "./ElementLayer.js";
+import { LetterboxControl } from "./LetterboxControl.js";
 import { LivePreview, type LiveShown } from "./LivePreview.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { RenderSlates } from "./RenderSlates.js";
@@ -334,6 +335,7 @@ export function PreviewPanel({
           setPickTool(false);
           setFormatId(id);
         }}
+        onNotice={setNotice}
       />
     </div>
   );
@@ -637,6 +639,7 @@ function TransportBar({
   formats,
   format,
   onFormat,
+  onNotice,
 }: {
   /** An image project: the tools stay, the playback buttons go. */
   still: boolean;
@@ -650,6 +653,8 @@ function TransportBar({
   /** Id of the format shown. */
   format: string;
   onFormat: (id: string) => void;
+  /** Show a refusal or a result in the bar. */
+  onNotice: (notice: string) => void;
 }) {
   const primary = formats[0]?.id === format || formats.length === 0;
   return (
@@ -684,6 +689,7 @@ function TransportBar({
             ))}
           </select>
         )}
+        {!still && <LetterboxControl format={primary ? null : format} onError={onNotice} />}
       </div>
       {!still && (
         <div className="preview-transport-buttons">

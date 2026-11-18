@@ -18,6 +18,8 @@ The plugin does not depend on Remotion. It loads `@remotion/bundler` and `@remot
 
 The project's `remotion.config.ts` (or `.js`) applies as with Remotion's CLI: its webpack override (e.g. Tailwind via `@remotion/tailwind-v4`) and OpenGL renderer. Output settings in it are ignored, since clips are always VP9 with alpha. Reading it needs `@remotion/cli` in the Remotion project; Remotion has no public API for this, so the plugin uses the CLI's own config loader.
 
+A clip can ask for the timeline's beats and markers with `props.timing` (`["beats", "markers"]`, ADR 0029): they arrive in the composition as the reserved input prop `frameshellTiming`, in renders and live preview alike. `frameshell remotion new` writes `src/frameshell-timing.ts` with the types and a `useFrameshellTiming()` hook. Clips that do not ask are unchanged.
+
 Renders use the headless Chrome Frameshell manages, never a browser Remotion would download.
 
 While a clip renders, the Frameshell desktop preview plays its bundle live at the playhead (ADR 0010); export always uses the render. Live preview drives the bundle page through Remotion's internal globals (`remotion_setBundleMode`, `remotion_setFrame`), as `@remotion/renderer` does. A Remotion release without them leaves the preview on its progress slate, and renders still work. Your licence covers live preview as it covers rendering. When the user picks an element of a clip with the Pick tool (ADR 0011), the live page names the React components rendering it, read from React's fiber on the DOM node.

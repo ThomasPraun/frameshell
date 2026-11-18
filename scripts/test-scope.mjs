@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 /** Tests that read plugin files (skills, package manifests, a twin constant) from outside `plugins/`. */
 const PLUGIN_READERS = [
   "packages/core/test/official-plugin-packages.test.ts",
+  "packages/core/test/openai-speech.test.ts",
   "packages/cli/test/skill-docs.test.ts",
   "apps/desktop/test/whisper-default-model.test.ts",
 ];

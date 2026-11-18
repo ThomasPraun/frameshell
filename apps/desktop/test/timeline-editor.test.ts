@@ -579,6 +579,7 @@ describe("TimelineEditor.revert (History panel)", () => {
 describe("editLabel", () => {
   it("names shots and angles by what the multicam ops change", () => {
     expect(editLabel([{ op: "shot.set", args: { clip: "c_s", shot: "solo" } }])).toBe("Change shot");
+    expect(editLabel([{ op: "letterbox.set", args: { aspect: 2.39 } }])).toBe("Change letterbox");
     expect(editLabel([{ op: "multicam.angle", args: { group: "g_1", angle: "ana", gain: -3 } }])).toBe("Change angle");
     expect(editLabel([{ op: "multicam.offset", args: { group: "g_1", angle: "ana", offset: 1 } }])).toBe("Sync angle");
     expect(

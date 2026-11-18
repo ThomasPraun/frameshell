@@ -339,6 +339,7 @@ export {
   VIGNETTE_LIMITS,
   letterboxBars,
   letterboxPicture,
+  parseAspect,
   vignetteGain,
   vignetteLevel,
   vignetteOf,

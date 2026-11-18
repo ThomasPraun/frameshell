@@ -31,7 +31,7 @@ import type {
   TrackSummary,
 } from "@frameshell/protocol";
 import { timeRefOf } from "@frameshell/protocol";
-import { findLook, glassOf, lookGrade, lookNames, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
+import { findLook, glassOf, lookGrade, lookNames, parseAspect, resolveStyle, resolveSubtitleStyle, voiceChainOf } from "@frameshell/schema";
 
 /** Usage text of the timeline commands, appended to the CLI help. */
 export const TIMELINE_USAGE = `Timeline (all accept --timeline <id>, default main; times in seconds, snapped to the frame grid;
@@ -902,9 +902,8 @@ function jsonOrText(text: string): unknown {
 
 /** A picture aspect as typed: `2.39`, `2.39:1`, `4:3` or `4/3`; width / height, greater than 0. */
 function aspectOf(raw: string): number {
-  const match = /^\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:[:/]\s*(\d+(?:\.\d+)?|\.\d+)\s*)?$/.exec(raw);
-  const aspect = match ? Number(match[1]) / (match[2] === undefined ? 1 : Number(match[2])) : Number.NaN;
-  if (!Number.isFinite(aspect) || aspect <= 0) throw new UsageError(`letterbox set: expected an aspect such as 2.39, 1.85 or 4:3, got "${raw}".`);
+  const aspect = parseAspect(raw);
+  if (aspect === null) throw new UsageError(`letterbox set: expected an aspect such as 2.39, 1.85 or 4:3, got "${raw}".`);
   return aspect;
 }
 

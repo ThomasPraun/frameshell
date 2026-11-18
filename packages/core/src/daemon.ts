@@ -909,12 +909,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     // The proxy-size matte as `matte.status` finds it, never queued: review measures what export would draw now.
     readyMatte: async (dir, asset) => {
-      const info = (await media.list(dir)).find((one) => one.path === asset);
-      if (info?.kind !== "media" || info.state === "failed") return { missing: "which is not an ingested video" };
-      if (info.media?.video?.still === true) return { missing: "a still picture, which has no matte" };
-      if (info.state !== "ready" || info.hash === null || info.proxy === null) return { missing: "whose proxy is not made yet" };
-      const key = matteKey(info.hash, matteModel, (await readEnclosingProject(dir))?.config.fps ?? 30);
-      const made = await readMatteInfo(dir, key, info.hash);
+      const found = await matteLookup(dir, asset);
+      if ("missing" in found) return found;
+      const { info: made, key } = found;
       if (!made) return { missing: `whose matte is not made yet (\`frameshell matte ${asset}\`; review never starts one)` };
       return { path: join(dir, ...mattePaths(key).video.split("/")), width: made.width, height: made.height, fps: made.fps, frames: made.frames };
     },
@@ -1391,6 +1388,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         awaitedJobs.delete(info.id);
       }
     }
+  };
+  /**
+   * Where the proxy-size matte of project-relative `asset` stands: `missing` says why it cannot be made yet (not an
+   * ingested video, a still, a proxy not made yet), else its cache `key`, the `hash` and `proxy` of the ingest, and
+   * the matte's `info` when it is made (null when it is not). `readyMatte` (review) and `matte.status` both read it,
+   * so they judge the ingest the same way. `known` carries what the caller has read: the asset's listing and the fps.
+   */
+  const matteLookup = async (
+    dir: string,
+    asset: string,
+    known: { listed?: Awaited<ReturnType<MediaService["list"]>>[number] | undefined; fps?: number | undefined } = {},
+  ): Promise<{ missing: string } | { info: MatteInfo | null; key: string; hash: string; proxy: string }> => {
+    const listed = known.listed ?? (await media.list(dir)).find((one) => one.path === asset);
+    if (listed?.kind !== "media" || listed.state === "failed") return { missing: "which is not an ingested video" };
+    if (listed.media?.video?.still === true) return { missing: "a still picture, which has no matte" };
+    if (listed.state !== "ready" || listed.hash === null || listed.proxy === null) return { missing: "whose proxy is not made yet" };
+    const key = matteKey(listed.hash, matteModel, known.fps ?? (await readEnclosingProject(dir))?.config.fps ?? 30);
+    return { info: await readMatteInfo(dir, key, listed.hash), key, hash: listed.hash, proxy: listed.proxy };
   };
   /** Mattes being made, by canonical root and cache key, with whether they were found made already. */
   const matting = new Map<string, Promise<{ info: MatteInfo; full: MatteInfo | null; cached: boolean }>>();
@@ -2325,52 +2340,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       if (plan.sounds.length === 0) {
         return { timeline, revision: plan.revision, tx: null, tracks: [], placed: [], skipped: plan.skipped, generated: plan.generated, warnings: plan.warnings };
       }
-      const key = authorOf(caller);
-      const next = transactions.next(key, { standalone: true });
-      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: plan.label };
-      await transactions.touching(key, tx, { root: dir, timeline });
-      const author = journalAuthorOf(caller);
-      try {
-        // Each step checks the revision its predecessor left: a person's edit in between fails the step instead of putting a clip on lanes fitted for an older timeline.
-        let expected = plan.revision;
-        const written = await runPlan(plan, async (step) => {
-          const request = step as OperationRequest;
-          const result = await timelines.apply({
-            root: dir,
-            cwd,
-            timeline,
-            request,
-            author,
-            tx,
-            prepare: async (current) => {
-              if (current.revision !== expected) {
-                throw new RpcError(ErrorCode.StaleRevision, `sound.place: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the sounds were placed. Check it with timeline show.`, {
-                  op: "sound.place",
-                  timeline,
-                  revision: expected,
-                  current: current.revision,
-                });
-              }
-              return request;
-            },
-          });
-          expected = result.revision;
-          await transactions.applied(key, tx);
-          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
-        });
-        return {
-          timeline,
-          revision: written.revision,
-          tx: tx.id,
-          tracks: written.tracks,
-          placed: written.placed,
-          skipped: plan.skipped,
-          generated: plan.generated,
-          warnings: allWarnings(plan, written.warnings),
-        };
-      } finally {
-        await settle(key, tx);
-      }
+      const written = await inOneTransaction("sound.place", { dir, cwd, timeline, caller, revision: plan.revision, label: plan.label }, (apply) => runPlan(plan, apply));
+      return {
+        timeline,
+        revision: written.revision,
+        tx: written.tx,
+        tracks: written.tracks,
+        placed: written.placed,
+        skipped: plan.skipped,
+        generated: plan.generated,
+        warnings: allWarnings(plan, written.warnings),
+      };
     },
     "sound.music": async (params, caller) => {
       const { cwd, timeline } = params;
@@ -2405,54 +2385,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         credited: take.credited,
       };
       if (!placement) return { ...facts, timeline: null, revision: null, tx: null, track: null, clip: null, start: null, gain: null, tempo: null, warnings: plan.warnings };
-      const key = authorOf(caller);
-      const next = transactions.next(key, { standalone: true });
-      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: placement.label };
-      await transactions.touching(key, tx, { root: dir, timeline });
-      const author = journalAuthorOf(caller);
-      try {
-        // Each step checks the revision its predecessor left: a person's edit in between fails the step.
-        let expected = placement.revision;
-        const written = await runMusicPlacement(placement, take.file, async (step) => {
-          const request = step as OperationRequest;
-          const result = await timelines.apply({
-            root: dir,
-            cwd,
-            timeline,
-            request,
-            author,
-            tx,
-            prepare: async (current) => {
-              if (current.revision !== expected) {
-                throw new RpcError(ErrorCode.StaleRevision, `sound.music: timeline ${timeline} changed from revision ${expected} to ${current.revision} while the track was placed. Check it with timeline show.`, {
-                  op: "sound.music",
-                  timeline,
-                  revision: expected,
-                  current: current.revision,
-                });
-              }
-              return request;
-            },
-          });
-          expected = result.revision;
-          await transactions.applied(key, tx);
-          return { revision: result.revision, warnings: result.warnings, added: result.changes.added };
-        });
-        return {
-          ...facts,
-          timeline,
-          revision: written.revision,
-          tx: tx.id,
-          track: written.track,
-          clip: written.clip,
-          start: placement.start,
-          gain: placement.gain,
-          tempo: placement.tempo,
-          warnings: [...new Set([...plan.warnings, ...written.warnings])],
-        };
-      } finally {
-        await settle(key, tx);
-      }
+      const written = await inOneTransaction("sound.music", { dir, cwd, timeline, caller, revision: placement.revision, label: placement.label }, (apply) => runMusicPlacement(placement, take.file, apply));
+      return {
+        ...facts,
+        timeline,
+        revision: written.revision,
+        tx: written.tx,
+        track: written.track,
+        clip: written.clip,
+        start: placement.start,
+        gain: placement.gain,
+        tempo: placement.tempo,
+        warnings: [...new Set([...plan.warnings, ...written.warnings])],
+      };
     },
     "timeline.show": async ({ cwd, timeline, view, grid }, caller) => {
       const dir = await root(cwd);
@@ -3512,16 +3457,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const canonical = canonicalPathSync(dir);
       const mattes: MatteStateInfo[] = [];
       for (const asset of assets) {
-        const info = listed.get(asset)!;
         const base = { asset, matte: null, progress: 0, job: null, error: null };
-        if (info.state !== "ready" || info.hash === null || info.proxy === null) {
+        const found = await matteLookup(dir, asset, { listed: listed.get(asset)!, fps });
+        // Only moving assets get here, so the one thing a lookup can miss is the proxy.
+        if ("missing" in found) {
           mattes.push({ ...base, state: "waiting" });
           continue;
         }
         // The preview draws the proxy-size matte only; export makes the full-size one when it needs it.
-        const ready = { hash: info.hash, proxy: info.proxy, full: null };
-        const key = matteKey(ready.hash, matteModel, fps);
-        if (await readMatteInfo(dir, key, ready.hash)) {
+        const { key } = found;
+        const ready = { hash: found.hash, proxy: found.proxy, full: null };
+        if (found.info) {
           mattes.push({ ...base, state: "ready", matte: mattePaths(key).video, progress: 1 });
           continue;
         }
