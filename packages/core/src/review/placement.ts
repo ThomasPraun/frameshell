@@ -4,9 +4,11 @@ import { type AdapterClip, type FormatLayout, type LayerRect, type Size, type Ti
 import { generatedClips } from "../clips/renderer.js";
 import type { GeneratedSource } from "../export/compiler.js";
 import { runTool } from "../media/ffmpeg.js";
+import { readRawFrames } from "../media/raw-frames.js";
 import type { ScannedAsset } from "../people/face-clusters.js";
 import { tileHeight } from "./plan.js";
 import { GRAPHIC_ALPHA, GRAPHIC_HZ, GRAPHIC_SAMPLES, GRAPHIC_WIDTH } from "./thresholds.js";
+import type { Mask } from "./behind.js";
 import type { Box } from "./safe.js";
 import type { HeroSample } from "./speed.js";
 
@@ -75,6 +77,13 @@ export function clipPointInFilm(picture: ClipPicture, at: number, point: { x: nu
   }
   const rect = layerRect(source, film, project, placementAt(clip, at));
   return { x: rect.left + point.x * rect.width, y: rect.top + point.y * rect.height };
+}
+
+/** The whole picture of a clip at timeline second `at` ({@link clipPointInFilm} of its corners), film pixels. */
+export function clipRectInFilm(picture: ClipPicture, at: number, film: Size, project: Size, layout?: FormatLayout): LayerRect {
+  const a = clipPointInFilm(picture, at, { x: 0, y: 0 }, film, project, layout);
+  const b = clipPointInFilm(picture, at, { x: 1, y: 1 }, film, project, layout);
+  return { left: a.x, top: a.y, width: b.x - a.x, height: b.y - a.y };
 }
 
 /** Times larger the film is laid out for {@link clipHero} and `alphaHero`, then scaled back: layouts round to whole pixels, and a ±1 px step would hide an ease. */
@@ -201,6 +210,28 @@ async function readAlpha(ffmpeg: string, render: GeneratedSource, from: number, 
   } finally {
     await rm(work, { recursive: true, force: true });
   }
+}
+
+/** The alpha of `render` (made at `fps`) at its own second `at` (the frame shown then), read `width` wide; null when the render has no frame there. */
+export async function alphaMask(input: { ffmpeg: string; render: GeneratedSource; fps: number; work: string; signal?: AbortSignal | undefined }, at: number, width: number): Promise<Mask | null> {
+  const { fps } = input;
+  // A quarter frame early, so the seek keeps that frame (as `alphaHero`).
+  const read = await readAlpha(input.ffmpeg, input.render, Math.max(0, at - 0.25 / fps), 2 / fps, input.work, { hz: fps, samples: 1, width }, input.signal);
+  const data = read.pictures[0];
+  return data ? { data, width: read.width, height: read.height } : null;
+}
+
+/**
+ * Frame `frame` of a subject matte (ADR 0032: H.264 at `fps`, CFR from 0, its luma the matte, full range), as a grey
+ * picture at its own size; null past its last frame.
+ */
+export async function matteFrame(ffmpeg: string, matte: { path: string; width: number; height: number; fps: number }, frame: number): Promise<Mask | null> {
+  const from = Math.max(0, (frame - 0.25) / matte.fps);
+  // `extractplanes` keeps the luma bytes as stored: no range conversion, as export's `alphamerge` reads them.
+  for await (const data of readRawFrames(ffmpeg, matte.path, "extractplanes=y,format=gray", matte.width * matte.height, { from, to: from + 1 / matte.fps })) {
+    return { data, width: matte.width, height: matte.height };
+  }
+  return null;
 }
 
 /** The alpha of `render` over `span` seconds of it from `from`, at up to {@link GRAPHIC_SAMPLES} evenly spaced frames: their boxes (null for an empty frame) and the seconds between them. */

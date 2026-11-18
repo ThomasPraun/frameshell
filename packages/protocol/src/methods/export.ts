@@ -377,6 +377,9 @@ export const exportMethods = {
       "`metrics.seam` is the grey jump between the last frame and the first (a hard cut reads 40 to 80, under 10 is continuous); with `loop` a duplicate or a jump is a warning. " +
       "With `file` and `preset`, `metrics.delivery` checks the file against the export plan. The `safe` sheet and `safeZones` also flag graphics (generated clips with an alpha render: titles included) and faces (footage with a cached `people scan`) that reach into a zone, " +
       "and each is a `safe-zone` craft warning. " +
+      "A timeline with a track `behind` a plate (ADR 0032) gets `metrics.behind`: per generated clip on that track, the share of its alpha the person's matte covers at the first, middle and last frame of its time under the person " +
+      "(30 to 55 % reads best; under 15 % or over 65 % is a `behind` craft warning, between them a note) and whether it meets a face of the plate clip (a cached `people scan`); " +
+      "the matte must be made already (`matte.prepare`): review never starts one, and lists the word as `unplaced` with the reason instead. " +
       "A project's `requirements.json` (set with `review.require` and `review.waive`) is judged on every run with metrics: `metrics.requirements` lists each expectation it states (film length, longest still stretch, a held end card, loudness of a `file`, " +
       "smallest caption size, per clip `appearsBy`, `before`, `keepsMoving` and `staysInFrame`: what the clip draws, its alpha or the faces of a cached `people scan`, never leaves the frame of the format reviewed, with the `spans` that do) as pass, fail or skipped, with what was measured. " +
       "With `view: \"proposal\"` the proposal's version of the file is judged. Craft warnings stay warnings (`severity` `warn`) unless the file lists their check in `fail`; " +
@@ -497,13 +500,13 @@ export const exportMethods = {
     mutating: true,
     description:
       "Accept the craft warnings of one check in `requirements.json` (#457), with the reason the person accepts them: `review` then lists them in `metrics.waived` with that reason " +
-      "instead of `craft`, never drops them, and a check listed in `fail` no longer fails for them. With `clip`, only the warnings whose time overlaps that clip; without, every warning of the check. " +
+      "instead of `craft`, never drops them, and a check listed in `fail` no longer fails for them. With `clip`, only the warnings whose time overlaps that clip (a `behind` warning only when it is about that clip, the word); without, every warning of the check. " +
       "`reason: null` removes the waiver. Journaled, revertable and held by review mode like `review.require`. Waive only with a reason the person would accept. " +
       "Fails with InvalidOperation, InvalidProjectFile, ProposalPending, ProposalState, ProjectNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       check: z.enum(CRAFT_CHECKS).describe("The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."),
-      clip: z.string().min(1).optional().describe("Waive only the warnings that overlap this clip id. Absent: every warning of the check."),
+      clip: z.string().min(1).optional().describe("Waive only the warnings that overlap this clip id (`behind`: the warnings about this word). Absent: every warning of the check."),
       reason: z.string().trim().min(1).nullable().describe("Why the warnings are accepted, shown beside them; null removes the waiver."),
     }),
     result: RequirementsChangeSchema,
