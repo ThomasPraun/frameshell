@@ -1,11 +1,12 @@
 import { rm, stat } from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import { join, posix, resolve, win32 } from "node:path";
-import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext } from "@frameshell/plugin-api";
+import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext, RenderTimingKind } from "@frameshell/plugin-api";
 import { patchedBundle } from "./elements.js";
 import { type Bundle, BundleCache } from "./bundles.js";
 import { checkLiveInternals, liveHead } from "./live.js";
 import { type RemotionComposition, type RemotionLoader, type RemotionRenderer, findRemotionRoot, loadProjectRemotion } from "./remotion.js";
+import { timingIssues, timingKinds, withTiming } from "./timing.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "remotion";
@@ -26,6 +27,12 @@ export interface RemotionProps {
   composition: string;
   /** Input props of the composition, merged by Remotion over its `defaultProps`. */
   inputProps?: Record<string, unknown>;
+  /**
+   * Timing of the timeline the composition reads (ADR 0029 decision 8): `beats` and/or `markers`. Frameshell then
+   * passes it as the reserved input prop `frameshellTiming`; absent, the clip gets none and its key does not
+   * follow the music or the markers.
+   */
+  timing?: RenderTimingKind[];
 }
 
 /** Timeline clip fields the adapter reads. */
@@ -39,8 +46,9 @@ interface RemotionClip {
 const COMPOSITION_ID = /^[a-zA-Z0-9぀-ヿ一-鿿-]+$/;
 
 /**
- * `props` = `{ composition, inputProps? }`: which composition of the entry
- * to render, and its input props (plain JSON, merged over its `defaultProps`).
+ * `props` = `{ composition, inputProps?, timing? }`: which composition of the entry
+ * to render, its input props (plain JSON, merged over its `defaultProps`) and the
+ * timeline timing it reads (`["beats", "markers"]`, in `inputProps.frameshellTiming`).
  */
 export const propsSchema: PropsSchema = {
   "~standard": {
@@ -51,7 +59,7 @@ export const propsSchema: PropsSchema = {
       if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return { issues: [{ message: `props must be an object naming the composition, e.g. ${example}` }] };
       }
-      const { composition, inputProps, ...rest } = value as Record<string, unknown>;
+      const { composition, inputProps, timing, ...rest } = value as Record<string, unknown>;
       const issues: { message: string; path?: string[] }[] = [];
       if (typeof composition !== "string" || !COMPOSITION_ID.test(composition)) {
         issues.push({ message: `composition must be the id of a <Composition> in the entry, e.g. ${example}`, path: ["composition"] });
@@ -59,6 +67,7 @@ export const propsSchema: PropsSchema = {
       if (inputProps !== undefined && (typeof inputProps !== "object" || inputProps === null || Array.isArray(inputProps) || !isPlainJson(inputProps))) {
         issues.push({ message: "inputProps must be a plain JSON object (strings, numbers, booleans, null, arrays, objects)", path: ["inputProps"] });
       }
+      issues.push(...timingIssues(timing, inputProps));
       for (const key of Object.keys(rest)) {
         issues.push({ message: `unknown prop ${key}: composition props go inside inputProps, e.g. ${example}`, path: [key] });
       }
@@ -76,7 +85,9 @@ export const propsSchema: PropsSchema = {
  * the project's own `@remotion/renderer`, the managed headless Chrome, at
  * the project's fps and resolution, to VP9 WebM with alpha. Live preview
  * (ADR 0010) serves that same bundle, driven through Remotion's internal
- * page globals as @remotion/renderer drives it.
+ * page globals as @remotion/renderer drives it. A clip with `props.timing`
+ * gets the timeline's beats and markers inside the clip as
+ * `inputProps.frameshellTiming`, in renders and the live page alike (ADR 0029).
  */
 export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdapter & { close(): void } {
   const { projectDir } = options;
@@ -90,6 +101,8 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
     type: CLIP_TYPE,
     propsSchema,
     elementStyles: true,
+    // Only the kinds the clip lists, so a clip without `props.timing` keeps the key it had.
+    timing: (clip) => timingKinds((clip as RemotionClip).props),
     async inputs(clip) {
       const entry = await entryOf(projectDir, clip as RemotionClip);
       return [(await bundles.get(entry)).marker];
@@ -103,11 +116,11 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
       // The bundle `inputs` keyed: unchanged unless code changed since, and then the next refresh renders again.
       const bundle = await bundles.get(entry, (fraction) => ctx.progress({ fraction: fraction * 0.05, message: "Bundling" }));
       const { renderer } = bundle.remotion;
-      const inputProps = props.inputProps ?? {};
+      const inputProps = withTiming(props.inputProps ?? {}, ctx.timing);
       const chromiumOptions = bundle.remotion.config.gl ? { gl: bundle.remotion.config.gl } : {};
       const browser = { browserExecutable: chrome, chromeMode: "headless-shell" as const, chromiumOptions, logLevel: "error" as const };
       ctx.progress({ fraction: 0.05, message: "Starting headless Chrome" });
-      const selected = await select(bundle, id, props, chrome);
+      const selected = await select(bundle, id, props.composition, inputProps, chrome);
       const { composition, scale } = fitToProject(selected, ctx);
       const { cancelSignal, cancel } = renderer.makeCancelSignal();
       if (ctx.signal.aborted) cancel();
@@ -148,9 +161,10 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
       const chrome = await ctx.ensureBinary("chrome-headless-shell");
       const bundle = await bundles.get(entry);
       await checkLiveInternals(bundle.dir, bundle.remotion.version);
-      const selected = await select(bundle, id, props, chrome);
+      const inputProps = withTiming(props.inputProps ?? {}, ctx.timing);
+      const selected = await select(bundle, id, props.composition, inputProps, chrome);
       const { composition, scale } = fitToProject(selected, ctx);
-      const head = liveHead({ composition, scale, inputProps: props.inputProps ?? {}, props: (selected["props"] as Record<string, unknown> | undefined) ?? {} });
+      const head = liveHead({ composition, scale, inputProps, props: (selected["props"] as Record<string, unknown> | undefined) ?? {} });
       return { root: posix.dirname(bundle.marker), entry: bundle.marker, head };
     },
     close: () => bundles.close(),
@@ -164,13 +178,12 @@ function requireProps(clip: RemotionClip): RemotionProps {
 }
 
 /** `selectComposition` of the clip's composition in `bundle`, naming the entry's compositions when it has no such one. */
-async function select(bundle: Bundle, clip: string, props: RemotionProps, chrome: string): Promise<RemotionComposition> {
+async function select(bundle: Bundle, clip: string, compositionId: string, inputProps: Record<string, unknown>, chrome: string): Promise<RemotionComposition> {
   const { renderer, config } = bundle.remotion;
-  const inputProps = props.inputProps ?? {};
   const chromiumOptions = config.gl ? { gl: config.gl } : {};
-  const options = { serveUrl: bundle.dir, id: props.composition, inputProps, browserExecutable: chrome, chromeMode: "headless-shell" as const, chromiumOptions };
+  const options = { serveUrl: bundle.dir, id: compositionId, inputProps, browserExecutable: chrome, chromeMode: "headless-shell" as const, chromiumOptions };
   return renderer.selectComposition({ ...options, logLevel: "error" }).catch(async (error: unknown) => {
-    throw await unknownComposition(error, renderer, { serveUrl: bundle.dir, id: props.composition, inputProps, browserExecutable: chrome, chromiumOptions }, clip);
+    throw await unknownComposition(error, renderer, { serveUrl: bundle.dir, id: compositionId, inputProps, browserExecutable: chrome, chromiumOptions }, clip);
   });
 }
 

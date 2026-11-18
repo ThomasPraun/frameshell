@@ -26,6 +26,7 @@ export {
   findRemotionRoot,
   loadProjectRemotion,
 } from "./remotion.js";
+export { TIMING_HELPER_SOURCE, TIMING_INPUT, TIMING_KINDS, TIMING_PROP, timingKinds, withTiming } from "./timing.js";
 export { PROJECT_DIR, REACT_VERSION, REMOTION_VERSION, newComposition } from "./scaffold.js";
 
 /** Plugin entry point: registers the `remotion` clip type and `frameshell remotion new`. */

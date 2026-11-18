@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Remotion timing binding, slice RB of #458 (ADR 0029 decision 8, owner decision Q6, epic #451; plugin only, no protocol
+  change): a `remotion` clip asks for the timeline's beats and markers with `props.timing` (`["beats", "markers"]`;
+  unknown words are refused with the allowed ones) and its composition finds them in the reserved input prop
+  `frameshellTiming` (`RenderTiming` as is: `beats`, `tempo`, `beatsProblem`, `markers`, composition seconds), in
+  `selectComposition`, the render and the live page alike. Clips without the prop keep their render keys and input
+  props; a clip that asks may not set `inputProps.frameshellTiming` itself (refused). `frameshell remotion new` also
+  writes `src/frameshell-timing.ts` (types and `useFrameshellTiming()`) when missing. The plugin skill and ADR 0029
+  ("Remotion binding as built") describe it. Word times in the timing and a shared `beatAt` stay for later.
 - `title-3d` template, slice 3b of #473 (ADR 0042, epic #451; plugin only, no protocol change; closes #473):
   `frameshell hyperframes new title --template title-3d` extrudes a short title of Archivo Black letters
   (`THREE.TextGeometry`) in the `product-shot` studio, laid out in at most three lines that wrap and shrink to the
