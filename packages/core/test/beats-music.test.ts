@@ -32,22 +32,25 @@ function expectOnTheBeats(beats: number[], truth: number[]): void {
   expect(Math.abs(quantile(signed.slice(-third), 0.5) - quantile(signed.slice(0, third), 0.5))).toBeLessThan(0.01);
 }
 
+// Synthesis takes most of each test, about 8 s here: room for a slow CI runner.
+const SLOW = 90_000;
+
 describe("detectBeats on generated music", () => {
   it("puts the beats of a synthwave take with a sub-bass kick on the kicks, not a cycle late", () => {
     const { found, truth } = measure("synthwave", 118);
     expect(found.bpm).toBeCloseTo(118, 0);
     expectOnTheBeats(found.beats, truth);
-  });
+  }, SLOW);
 
   it("does not drift on a swung lofi take with vinyl clicks", () => {
     const { found, truth } = measure("lofi", 85);
     expect(Math.abs(found.bpm / 85 - 1)).toBeLessThan(0.002);
     expectOnTheBeats(found.beats, truth);
-  });
+  }, SLOW);
 
   it("reads a minimal take at its tempo, not the dotted-quarter pulse 2/3 of it", () => {
     const { found, truth } = measure("minimal", 150, 16);
     expect(Math.abs(found.bpm / 150 - 1)).toBeLessThan(0.01);
     expectOnTheBeats(found.beats, truth);
-  });
+  }, SLOW);
 });

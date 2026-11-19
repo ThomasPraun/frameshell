@@ -16,12 +16,12 @@ import { fft } from "../fft.js";
  * 3. tempo by autocorrelation of the envelope with interpolated lags, seeded with a hint, folded to the
  *    octave of the hint (or 70-170 BPM); period (within 1%) and phase by the comb that collects most hit
  *    energy over the middle minute; one straight period fitted by least squares over the hits, widening
- *    window by window, then refitted over the whole audio as the match tolerance narrows to 15 ms; a 3:2 or
- *    4:3 tempo whose beats carry clearly more hit energy replaces the measured one;
+ *    window by window, then refitted over the whole audio as the match tolerance narrows to 15 ms; with no
+ *    hint, a 3:2 or 4:3 tempo whose beats carry clearly more hit energy replaces the measured one;
  * 4. each beat snaps to a hit within {@link SNAP_S}; the bar starts at the phase with most 20-150 Hz energy;
  * 5. confidence from how many beats found a hit and how many of those sit within 15 ms; a grid whose half
- *    holds every other beat with twice the energy (calm music gets a bogus double-time grid) or with a near
- *    3:2 rival stays low, with the other tempi offered. One octave off is not told apart: both grids hold.
+ *    holds every other beat with twice the energy (calm music gets a bogus double-time grid) or, with no hint,
+ *    a near 3:2 rival stays low, with the other tempi offered. One octave off is not told apart: both grids hold.
  */
 
 /** Detector id written to the beats file; bump the number when a result can change for the same audio. */
@@ -51,13 +51,13 @@ const PERIOD_SEARCH = 0.01;
 const PERIOD_STEP = 0.00025;
 /** Stretch of audio the grid search scores: at {@link PERIOD_STEP} the grid walks at most 7.5 ms over it. */
 const GRID_SEARCH_S = 60;
+/** Fewest hits in that stretch the search is scored on. */
+const GRID_SEARCH_MIN_HITS = 8;
 /** A hit this close to a beat is on it: counts toward beat energy and the grid's precision (seconds). */
 const TIGHT_S = 0.015;
 /**
- * A 3:2 or 4:3 rival replaces the measured tempo when its beat energy is at least this many times the
- * incumbent's and at least {@link RIVAL_MIN_ENERGY}; from {@link RIVAL_DOUBT} the confidence stays under LOW.
- * Measured on the #689 corpus (docs/research/beats-real-music.md): right tempi had rivals up to 1.12x,
- * dotted-quarter misreads 1.34x and up (two at 1.10x and 1.19x stay); wandering real tracks' rivals: 0.12.
+ * A 3:2 or 4:3 rival with at least {@link RIVAL_MIN_ENERGY} replaces the measured tempo from this many times its
+ * beat energy; from {@link RIVAL_DOUBT} the confidence is capped. Values: docs/research/beats-real-music.md.
  */
 const RIVAL_GAIN = 1.25;
 const RIVAL_DOUBT = 1.15;
@@ -66,10 +66,7 @@ const RIVAL_CAP = 0.45;
 /** Fewest beats of the measured grid that may switch to a rival: half-time grids of 8-bar takes switched wrongly. */
 const RIVAL_MIN_BEATS = 24;
 /**
- * Confidence knobs ({@link confidenceOf}), from the same corpus: share of beats with a hit that counts as a
- * complete grid; share of matched hits within {@link TIGHT_S} that gives no confidence, and full confidence
- * (wandering real tracks: 0.61-0.68; straight grids 0.74 and up); a half grid that holds this share of its
- * beats with this many times the energy per beat reads as half time.
+ * Confidence knobs of {@link confidenceOf}, read there; measured values in docs/research/beats-real-music.md.
  */
 const FULL_SHARE = 0.75;
 const TIGHT_FLOOR = 0.5;
@@ -500,7 +497,9 @@ interface Grid {
  */
 function searchGrid(hits: Hit[], period: number, duration: number): Grid {
   const from = Math.max(0, (duration - GRID_SEARCH_S) / 2);
-  const window = hits.filter((hit) => hit.time >= from && hit.time <= from + GRID_SEARCH_S);
+  const middle = hits.filter((hit) => hit.time >= from && hit.time <= from + GRID_SEARCH_S);
+  // A quiet middle (an ambient break) holds nothing to place a grid by: all the hits then.
+  const window = middle.length >= GRID_SEARCH_MIN_HITS ? middle : hits;
   const steps = Math.round(PERIOD_SEARCH / PERIOD_STEP);
   let best = { period, ...findPhase(window, period) };
   for (let k = -steps; k <= steps; k++) {
@@ -717,7 +716,8 @@ function rivalGrid(fitAt: (bpm: number) => FittedGrid, tempo: Tempo, grid: Fitte
   const rival = strongestRival(fitAt, grid);
   if (rival.ratio < RIVAL_GAIN) return grid;
   const choices = [...new Set(rival.family.map((ratio) => tempo.fold(tempo.bpm * ratio)))];
-  return fitAt(choices.reduce((pick, choice) => (tempo.score(choice) > tempo.score(pick) ? choice : pick)));
+  const picked = fitAt(choices.reduce((pick, choice) => (tempo.score(choice) > tempo.score(pick) ? choice : pick)));
+  return picked.share > 0 ? picked : grid;
 }
 
 /**
@@ -725,14 +725,15 @@ function rivalGrid(fitAt: (bpm: number) => FittedGrid, tempo: Tempo, grid: Fitte
  * them is complete; sparse parts are music, not doubt) times how many of those hits sit within
  * {@link TIGHT_S} (a straight grid over wandering music finds them 15-30 ms off). Two rivals cap it: a half
  * grid that holds its beats with about twice the energy per beat (every other beat empty: half time) keeps
- * the stricter `share ** 1.5`, and a 3:2 rival short of a switch ({@link RIVAL_DOUBT}) keeps it under LOW.
+ * the stricter `share ** 1.5`, and, when `rivals` (no stated tempo), a 3:2 rival short of a switch
+ * ({@link RIVAL_DOUBT}) keeps it under LOW.
  */
-function confidenceOf(fitAt: (bpm: number) => FittedGrid, grid: FittedGrid): number {
+function confidenceOf(fitAt: (bpm: number) => FittedGrid, grid: FittedGrid, rivals: boolean): number {
   const precision = Math.min(1, Math.max(0, (grid.tight - TIGHT_FLOOR) / (TIGHT_FULL - TIGHT_FLOOR)));
   let confidence = Math.min(1, grid.share / FULL_SHARE) * precision;
   const half = fitAt(grid.bpm / 2);
   if (half.share >= HALF_SHARE && half.energy >= HALF_ENERGY * grid.energy) confidence = Math.min(confidence, grid.share ** 1.5);
-  if (strongestRival(fitAt, grid).ratio >= RIVAL_DOUBT) confidence = Math.min(confidence, RIVAL_CAP);
+  if (rivals && strongestRival(fitAt, grid).ratio >= RIVAL_DOUBT) confidence = Math.min(confidence, RIVAL_CAP);
   return confidence;
 }
 
@@ -752,7 +753,9 @@ export function detectBeats(signal: Signal, envelope: Float32Array, options: Bea
     if (!grid) fitted.set(bpm, (grid = gridAt(hits, bpm, duration)));
     return grid;
   };
-  const grid = rivalGrid(fitAt, tempo, fitAt(tempo.bpm));
+  // A stated tempo is only moved by octaves (beats.measure `bpm`): no 3:2 rival replaces or doubts it.
+  const hinted = options.hint !== undefined;
+  const grid = hinted ? fitAt(tempo.bpm) : rivalGrid(fitAt, tempo, fitAt(tempo.bpm));
   const { period, times: all, share, residual } = grid;
   if (share === 0) throw new NoBeatsError("no hit falls on the beat grid");
   // The grid stands where there is rhythm: beats before the first and after the last hit would be guesses.
@@ -764,7 +767,7 @@ export function detectBeats(signal: Signal, envelope: Float32Array, options: Bea
   });
   const meter = 4;
   const downbeat = findDownbeat(signal, beats, meter);
-  let confidence = confidenceOf(fitAt, grid);
+  let confidence = confidenceOf(fitAt, grid, !hinted);
   if ((options.sourceRate ?? signal.rate) < FULL_RATE) confidence = Math.min(confidence, LOW_RATE_CONFIDENCE);
   const bpm = round(60 / period, 2);
   const alternatives: BeatAnalysis["alternatives"] = [];
