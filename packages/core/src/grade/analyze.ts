@@ -19,6 +19,17 @@ const END_GUARD_S = 0.001;
 /** Source frame rate assumed when the probe has none. */
 const FALLBACK_FPS = 30;
 
+/** Most clip ids a nested-timeline refusal lists; the rest are counted. */
+const LISTED_INSIDE = 8;
+
+/** A clip on a video track of a nested timeline file, as {@link GradeAnalyzerOptions.nestedClips} lists it. */
+export interface NestedClipRef {
+  id: string;
+  /** `media`, `shot`, `timeline` or the type of a generated clip. */
+  type: string;
+  track?: string | undefined;
+}
+
 /** What {@link GradeAnalyzer} needs from the daemon. */
 export interface GradeAnalyzerOptions {
   /** Absolute path of the managed ffmpeg. */
@@ -27,6 +38,12 @@ export interface GradeAnalyzerOptions {
   probe(root: string, asset: string): Promise<MediaProbe>;
   /** The clip render cache: a generated clip is measured from its draft render, made (queued, cached) when missing. */
   clips: Pick<ClipRenderer, "ensure">;
+  /**
+   * Clips on the video tracks of the nested timeline file `source` (project-relative), for the refusal of a nested
+   * clip to name where to look. Default, or an empty answer, a file that is missing or invalid, or a throw: the
+   * refusal without ids.
+   */
+  nestedClips?(root: string, source: string): Promise<readonly NestedClipRef[]>;
 }
 
 /** What to measure of one clip. */
@@ -44,8 +61,8 @@ export interface GradeAnalyzeRequest {
   samples: number;
 }
 
-const invalid = (reason: string, message: string, field: string, valid?: { from: number; to: number }) =>
-  new RpcError(ErrorCode.InvalidOperation, `grade.analyze: ${message}`, { op: "grade.analyze", reason, field, ...(valid ? { valid } : {}) });
+const invalid = (reason: string, message: string, field: string, valid?: { from: number; to: number }, extra?: Record<string, unknown>) =>
+  new RpcError(ErrorCode.InvalidOperation, `grade.analyze: ${message}`, { op: "grade.analyze", reason, field, ...(valid ? { valid } : {}), ...extra });
 
 /** The `signalstats` text of one frame of `file` at source second `at`, read after area-averaging to {@link MEASURE_WIDTH}. */
 async function statsAt(ffmpeg: string, file: string, at: number | null, signal: AbortSignal | undefined): Promise<string> {
@@ -66,6 +83,18 @@ export class GradeAnalyzer {
     this.#options = options;
   }
 
+  /** Ids of the media and generated clips of nested timeline file `source` (the ones this can measure); none when it cannot be read. */
+  async #analyzableInside(root: string, source: string | undefined): Promise<string[]> {
+    if (!source || !this.#options.nestedClips) return [];
+    try {
+      const clips = await this.#options.nestedClips(root, source);
+      return clips.filter((inner) => inner.type !== "timeline" && inner.type !== "shot").map((inner) => inner.id);
+    } catch {
+      // The refusal stands without ids: an unreadable nested file must not replace it.
+      return [];
+    }
+  }
+
   /** Levels and suggestion for clip `request.clip` of `timeline` (top level, on a video track). Throws `ClipNotFound` or `InvalidOperation`. */
   async analyze(root: string, timeline: Timeline, request: GradeAnalyzeRequest, signal?: AbortSignal): Promise<GradeAnalyzeResultShape> {
     const clip = timeline.tracks.flatMap((track) => (track.kind === "video" ? track.clips : [])).find((candidate) => candidate.id === request.clip);
@@ -73,10 +102,16 @@ export class GradeAnalyzer {
       throw new RpcError(ErrorCode.ClipNotFound, `grade.analyze: no clip "${request.clip}" on a video track of timeline ${timeline.id}. List clip ids with "frameshell timeline show".`, { clip: request.clip });
     }
     if (clip.type === "timeline") {
+      const inside = await this.#analyzableInside(root, clip.source);
+      const listed = inside.slice(0, LISTED_INSIDE).join(", ") + (inside.length > LISTED_INSIDE ? ` and ${inside.length - LISTED_INSIDE} more` : "");
       throw invalid(
         "nested",
-        `clip ${clip.id} is a nested timeline: it has no single picture to measure. Analyze a clip inside it (${clip.source}), or see its colour with \`grade.compare\`.`,
+        `clip ${clip.id} is a nested timeline: it has no single picture to measure. ` +
+          (inside.length > 0 ? `Analyze one of them: ${listed} (in ${clip.source})` : `Analyze a clip inside it (${clip.source})`) +
+          ", or see its colour with `grade.compare`.",
         "clip",
+        undefined,
+        inside.length > 0 ? { inside } : undefined,
       );
     }
     if (clip.type === "shot") throw invalid("not-gradable", `clip ${clip.id} is a multicam shot: it takes no grade, so there is nothing to measure for one.`, "clip");

@@ -1,9 +1,7 @@
-import type { RenderBeat, RenderBeatsProblem, RenderMarker, RenderTiming, RenderTimingKind, RenderWord, RenderWordsProblem } from "@frameshell/plugin-api";
+import { RENDER_TIMING_KINDS, type RenderBeat, type RenderBeatsProblem, type RenderMarker, type RenderTiming, type RenderTimingKind, type RenderWord, type RenderWordsProblem } from "@frameshell/plugin-api";
 import type { AdapterClip, BeatsFile, Timeline } from "@frameshell/schema";
 import { tempoGrid } from "../timeline/tempo.js";
 import { type TimelineWords, unusableGrid } from "../timeline/time-ref.js";
-
-const KINDS: readonly RenderTimingKind[] = ["beats", "markers", "words"];
 
 /** Input of {@link clipTiming}. */
 export interface ClipTimingInput {
@@ -34,7 +32,7 @@ export interface ClipTimingInput {
  * transcribed word at all, gives no words and the code in `wordsProblem`.
  */
 export async function clipTiming(input: ClipTimingInput): Promise<RenderTiming | undefined> {
-  const kinds = new Set(input.kinds.filter((kind): kind is RenderTimingKind => (KINDS as readonly string[]).includes(kind)));
+  const kinds = new Set(input.kinds.filter((kind): kind is RenderTimingKind => (RENDER_TIMING_KINDS as readonly string[]).includes(kind)));
   if (kinds.size === 0) return undefined;
   const { clip, timeline, fps } = input;
   const start = clip.start;

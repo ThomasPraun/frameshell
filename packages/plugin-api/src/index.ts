@@ -236,6 +236,9 @@ export type RenderTier = "draft" | "final";
 /** What a clip can ask of the timeline's timing through {@link ClipAdapter.timing}. */
 export type RenderTimingKind = "beats" | "markers" | "words";
 
+/** Every {@link RenderTimingKind}, in the order the timing lists them; the host and the official adapters read their kinds from it. */
+export const RENDER_TIMING_KINDS: readonly RenderTimingKind[] = ["beats", "markers", "words"];
+
 /**
  * The timeline's timing inside one clip (ADR 0029 decision 8), in composition seconds (file time of the render: the
  * clip shows composition second `in + t` at `t` seconds after its start). Only what falls inside the clip's part of

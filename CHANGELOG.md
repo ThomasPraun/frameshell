@@ -1540,6 +1540,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Small fixes, wave 24 (slice SF5, part of #451; no protocol change, plugin API `apiVersion` stays "1"):
+  `RENDER_TIMING_KINDS` in `@frameshell/plugin-api` is the one list of timing kinds the host reads (`clipTiming`); the
+  `hyperframes` and `remotion` adapters keep a type-only copy, since an installed plugin carries no plugin-api
+  (ADR 0021), and a test in each holds it equal to the list. `work-cards` and `notification-stack` with `onBeats` on
+  hold beat-placed starts to the room before the exit on a short clip (order kept, at least 0.08 s between steps);
+  with `onBeats` off, or on a clip long enough, the times and the render keys are unchanged. `checklist` is left as it
+  is: its ticks follow `tickStart` and `tickGap` with no room pulled in, so there is none to clamp to. Clips
+  scaffolded earlier keep their copy of the template until `frameshell hyperframes update`. `grade.analyze` on a
+  nested timeline clip lists the first eight media and generated clips inside it (all of them in the error's
+  `data.inside`), still naming `grade.compare`; a nested file that is missing, empty or unreadable gives the old
+  message.
+- Docs: the timing bullet of SPEC §6.5 and `motion-films.md` read as one sentence each, and the `hyperframes` skill says
+  `onBeats` is asked only from the clip's own props (never a `<meta>`, a template default or a nested clip's host).
 - `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
   from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
   so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.
@@ -1676,6 +1689,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Generated clips: a pass over a timeline (`clip.renders`, `ensure`, `finals`, `check`, `gc`, the background refresh)
+  reads the transcript once for all the clips that ask for `words`, instead of once per clip; a transcript changed
+  between two calls still re-keys, and render keys are unchanged.
 - Review switch (ADR 0019, test hardening #515, #516, #533): the "Review agent changes before applying" checkbox keeps
   the click until the review state agrees with it (or the call fails), instead of jumping back when the daemon's reply
   arrives before its event; this was the cause of the flaky checkbox in the review and config-proposal e2e specs.
