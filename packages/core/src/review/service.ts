@@ -107,13 +107,17 @@ type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
 /**
  * The clips of the flattened timeline's video and audio tracks that sit inside a nested clip (id `<nested clip id>/<inner id>`),
  * as spans on the timeline's clock; `known` are the top-level ids, which stay as the timeline lists them.
+ * Shots of program tracks inside a nested clip are left out.
  */
 function nestedClipSpans(flat: Timeline, fps: number, known: ReadonlySet<string>): ClipSpan[] {
   const found: ClipSpan[] = [];
+  const seen = new Set<string>();
   for (const track of flat.tracks) {
     if (track.kind !== "video" && track.kind !== "audio") continue;
     for (const clip of track.clips) {
-      if (!clip.id.includes("/") || known.has(clip.id)) continue;
+      // A `behind` plate is copied onto a subject track under its own id: one span per id.
+      if (!clip.id.includes("/") || known.has(clip.id) || seen.has(clip.id)) continue;
+      seen.add(clip.id);
       const length = clipLength(clip, { fps });
       found.push({ id: clip.id, start: clip.start, end: Number.isFinite(length) ? clip.start + length : null });
     }
@@ -453,10 +457,13 @@ export class ReviewService {
         const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
         if (requirements) {
           const inFrame = loaded !== null && requirements.clips.some((clip) => clip.staysInFrame !== undefined);
-          // Clips inside nested timelines are named `<nested clip id>/<inner id>`: read from the flattened timeline, and only when the file asks about clips.
+          // Clips inside nested timelines are named `<nested clip id>/<inner id>`: read from the flattened timeline, and only when the file asks about clips (a check or a clip waiver).
           let judgedClips = clips;
-          if (clips !== null && requirements.clips.length > 0) {
-            const resolved = await flat().catch(() => null);
+          if (clips !== null && (requirements.clips.length > 0 || requirements.waivers.some((waiver) => waiver.clip !== undefined))) {
+            const resolved = await flat().catch((error: unknown) => {
+              warnings.push(`requirements: the flattened timeline cannot be read (${(error as Error).message.split("\n")[0]}), so clips inside nested timelines cannot be judged.`);
+              return null;
+            });
             if (resolved) judgedClips = [...clips, ...nestedClipSpans(resolved.timeline, source.fps, new Set(clips.map((clip) => clip.id)))];
           }
           let placement: FramePlacement | null = null;

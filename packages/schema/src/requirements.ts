@@ -37,7 +37,7 @@ export type CraftCheck = (typeof CRAFT_CHECKS)[number];
 
 const CraftCheckSchema = z.enum(CRAFT_CHECKS);
 const Seconds = (what: string) => z.number().positive().describe(`${what} Seconds.`);
-const ClipId = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`. A clip inside a nested timeline is `<nested clip id>/<its clip id>`, the way the flattened film names it.");
+const ClipId = z.string().min(1).describe("Clip id from `timeline.show`, e.g. `c_1a2b3c`. A clip inside a nested timeline is `<nested clip id>/<its clip id>`, the way the flattened film names it (not a shot of a program track).");
 
 /** What the whole film must be. Every field is optional: only what is written is checked. */
 export const FilmRequirementsSchema = z.strictObject({

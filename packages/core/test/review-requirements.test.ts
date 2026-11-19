@@ -179,7 +179,7 @@ describe("requirements: craft warnings and waivers", () => {
     expect(checkOf(asked, "clip.appearsBy", "c_in")).toMatchObject({ status: "fail", message: "clip c_in is inside a nested timeline: name it as c_nest/c_in, c_other/c_in (<nested clip id>/<clip id>)." });
     expect(checkOf(asked, "clip.before", "c_a").message).toContain("name it as c_nest/c_in");
     const waived = judge(file({ waivers: [{ check: "static", clip: "c_in", reason: "x" }] }), { series: still, clips: nested });
-    expect(waived.notes).toEqual([expect.stringContaining("covers nothing: clip c_in is inside a nested timeline: name it as c_nest/c_in")]);
+    expect(waived.notes).toEqual([expect.stringContaining("the waiver of static names clip c_in, which is inside a nested timeline: name it as c_nest/c_in")]);
   });
 
   it("judges a clip inside a nested timeline by its flattened id", () => {

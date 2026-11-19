@@ -511,7 +511,7 @@ export const exportMethods = {
     params: z.strictObject({
       cwd: CwdParam,
       path: z.string().min(1).describe("What to set: `film.maxSeconds`, `captions.minSize`, `fail`...; with `clip`: `appearsBy`, `before`, `keepsMoving` or `staysInFrame`."),
-      clip: z.string().min(1).optional().describe("Clip id the expectation is about, e.g. `c_1a2b3c`; a clip inside a nested timeline is `<nested clip id>/<its clip id>`, a bare inner id fails its check with that hint. Absent: the whole film."),
+      clip: z.string().min(1).optional().describe("Clip id the expectation is about, e.g. `c_1a2b3c`; a clip inside a nested timeline is `<nested clip id>/<its clip id>` (not a shot of a program track), a bare inner id fails its check with that hint. Absent: the whole film."),
       value: z.unknown().describe("New value as `requirements.json` holds it (number, object, list, `true`); null removes it."),
     }),
     result: RequirementsChangeSchema,
@@ -526,7 +526,7 @@ export const exportMethods = {
     params: z.strictObject({
       cwd: CwdParam,
       check: z.enum(CRAFT_CHECKS).describe("The craft check to waive, as `metrics.craft` names it (`static`, `reading`, `safe-zone`...)."),
-      clip: z.string().min(1).optional().describe("Waive only the warnings that overlap this clip id (`behind`: the warnings about this word); a clip inside a nested timeline is `<nested clip id>/<its clip id>`. Absent: every warning of the check."),
+      clip: z.string().min(1).optional().describe("Waive only the warnings that overlap this clip id (`behind`: the warnings about this word); a clip inside a nested timeline is `<nested clip id>/<its clip id>` (not a shot of a program track). Absent: every warning of the check."),
       reason: z.string().trim().min(1).nullable().describe("Why the warnings are accepted, shown beside them; null removes the waiver."),
     }),
     result: RequirementsChangeSchema,

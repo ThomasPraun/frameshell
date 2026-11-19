@@ -51,15 +51,19 @@ export interface JudgeInput {
 
 /** Ids of `clips` that are clip `id` inside a nested clip (`<nested clip id>/<id>`). */
 function nestedPaths(id: string, clips: readonly ClipSpan[] | null): string[] {
-  return (clips ?? []).filter((clip) => clip.id.endsWith(`/${id}`)).map((clip) => clip.id);
+  return [...new Set((clips ?? []).filter((clip) => clip.id.endsWith(`/${id}`)).map((clip) => clip.id))];
+}
+
+/** The paths clip `id` can be named by inside nested clips, as the end of a sentence. */
+function nestedHint(id: string, clips: readonly ClipSpan[] | null): string {
+  const paths = nestedPaths(id, clips);
+  return `${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ", ..." : ""} (<nested clip id>/<clip id>).`;
 }
 
 /** Why clip `id` is not in `clips`: the way to name it when it is inside nested clips, else just that it is absent. */
 function missingClip(id: string, clips: readonly ClipSpan[] | null): string {
-  const paths = nestedPaths(id, clips);
-  if (paths.length === 0) return `clip ${id} is not on the timeline.`;
-  const shown = paths.slice(0, 3).join(", ");
-  return `clip ${id} is inside a nested timeline: name it as ${shown}${paths.length > 3 ? ", ..." : ""} (<nested clip id>/<clip id>).`;
+  if (nestedPaths(id, clips).length === 0) return `clip ${id} is not on the timeline.`;
+  return `clip ${id} is inside a nested timeline: name it as ${nestedHint(id, clips)}`;
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;
@@ -123,7 +127,7 @@ export function judgeRequirements(input: JudgeInput): { metrics: ReviewMetrics; 
       input.clips === null
         ? `requirements: the waiver of ${waiver.check} names clip ${waiver.clip}, and a file has no clips: it covers nothing here (review the timeline).`
         : nestedPaths(waiver.clip, input.clips).length > 0
-          ? `requirements: the waiver of ${waiver.check} covers nothing: ${missingClip(waiver.clip, input.clips)}`
+          ? `requirements: the waiver of ${waiver.check} names clip ${waiver.clip}, which is inside a nested timeline: name it as ${nestedHint(waiver.clip, input.clips)}`
           : `requirements: the waiver of ${waiver.check} names clip ${waiver.clip}, which is not on the timeline: it covers nothing.`,
     );
   }

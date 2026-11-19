@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<nested clip id>/<its clip id>`, and is judged on that clip's span; `staysInFrame` reads its boxes from the same
   flattened timeline. A bare inner id fails with a message naming the path or paths to use instead of judging every
   placement; a waiver on it says so in the run's warnings. The flattened timeline is read only when the file has clip
-  requirements. This closes the "not yet" of the sixth slice of #457 below for nested clips.
+  requirements or a clip waiver (a flatten failure is a warning), and shots of program tracks inside a nested clip
+  cannot be named. This closes the "not yet" of the sixth slice of #457 below for nested clips.
 - Premiere XML export, slice 2 of #701 (ADR 0047; no protocol change, `PROTOCOL_VERSION` stays): File > Export
   Premiere XML… in the app (video projects; en + es), sharing one hand-off path with File > Export OpenTimelineIO…: main
   asks where to save, the daemon writes, a notice counts what the file leaves out and names the CLI command that lists
@@ -430,7 +431,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lists them, `revert` and `tx abort` undo them and review mode holds them in the proposal; a `file.write` of the file
   and a hand edit are journaled like `style.json`'s, and `review` with `view: proposal` judges the proposal's version.
   Older files load unchanged; waivers stay in `requirements.json` keyed by clip id (no field on timeline clips). Not
-  yet: requirement lines in the app's proposal bar, `staysInFrame` for clips inside a nested timeline.
+  yet: requirement lines in the app's proposal bar, `staysInFrame` for clips inside a nested timeline (built in wave 28, see above).
 
 - Blender clips, slice 4 of #482 (ADR 0035, epic #451; protocol 161): a scene at another frame rate than the project is
   time-remapped with seconds kept (project frame k shows scene frame `start + k × scene fps / project fps` through a
