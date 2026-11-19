@@ -1,5 +1,6 @@
 // What the transcription model picker (#427) offers, from `model.list`; pure, so it is tested without the app.
 import type { ModelListResult } from "@frameshell/protocol";
+import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 
 /** Option value of "Default": the project names no model. */
 export const DEFAULT_CHOICE = "";
@@ -38,7 +39,7 @@ export interface ModelChoices {
 
 /** {@link ModelChoices} of a `model.list` result for a project. */
 export function modelChoices(list: ModelListResult): ModelChoices {
-  const provider = list.project?.provider ?? "whisper-cpp";
+  const provider = list.project?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER;
   const own = list.providers.find((candidate) => candidate.id === provider) ?? null;
   const formats = own?.userModels?.formats ?? null;
   const pinned: ModelOption[] = (own?.models ?? []).map(({ id, size, downloaded }) => ({ id, kind: "pinned", size, downloaded, file: null, state: null }));
@@ -76,15 +77,12 @@ export function modelIdFromFile(path: string): string {
   return id || "model";
 }
 
-/** Provider the CLI and setup run and size without asking (twin of `APP_TRANSCRIPTION_PROVIDER` in `main/voiceover.ts`). */
-const LOCAL_PROVIDER = "whisper-cpp";
-
 /**
  * True when the transcript view offers a Transcribe button for the project's `provider`: any provider but whisper.cpp.
  * whisper.cpp runs from the terminal or the project setup, so the button never starts its unasked download (ADR 0034 decision 18).
  */
 export function offersTranscribe(provider: string | null): provider is string {
-  return provider !== null && provider !== LOCAL_PROVIDER;
+  return provider !== null && provider !== DEFAULT_TRANSCRIPTION_PROVIDER;
 }
 
 /** File name of an absolute path, for compact labels. */

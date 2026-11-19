@@ -90,7 +90,7 @@ const fills = (timing: RenderTiming | undefined, given: Record<string, unknown>,
 
 /** Seconds at which each of the first `count` rows starts to show its mark, to 10 ms, found by scanning the clip. */
 function stepTimes(template: Template, mark: Mark, count: number, timing: RenderTiming | undefined, given: Record<string, unknown>): number[] {
-  const steps = Array.from({ length: 400 }, (_, i) => i / 100);
+  const steps = Array.from({ length: 500 }, (_, i) => i / 100);
   const seen = opacities(template, mark, timing, given, ...steps);
   return Array.from({ length: count }, (_, item) => steps[seen.findIndex((row) => row[item]! > 0)]! - 0.01);
 }
@@ -162,12 +162,26 @@ describe("other templates with steps on the music's beats", () => {
       expect(ascending(times)).toBe(true);
     });
 
-    it("leaves the fixed schedule alone: no onBeats, or no grid, is as asked even past the room", () => {
-      expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, BEATS, {}))).toEqual(near([0.4, 1.3, 2.2]));
-      expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, undefined, { onBeats: false }))).toEqual(near([0.4, 1.3, 2.2]));
+    it("holds the fixed schedule to the same room: no onBeats, or no grid, keeps the order and the gaps", () => {
+      // The steps 0.4, 1.3, 2.2 would run past the room of 1.2 s: the last two come in, the first stays.
+      const held = near([0.4, 1.12, 1.2]);
+      expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, BEATS, {}))).toEqual(held);
+      expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, undefined, { onBeats: false }))).toEqual(held);
       for (const timing of [undefined, { beats: [], beatsProblem: "no-beats" as const }, { ...BEATS, beatsProblem: "low-confidence" as const }]) {
-        expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, timing, { onBeats: true }))).toEqual(near([0.4, 1.3, 2.2]));
+        expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, timing, { onBeats: true }))).toEqual(held);
       }
+    });
+
+    it("keeps six default notification cards before 4.5 s and in order on the default length", () => {
+      const times = onClipOf(notificationStack.defaultDuration, () => stepTimes(notificationStack, card, 6, undefined, { items: "A: one|B: two|C: three|D: four|E: five|F: six" }));
+      expect(Math.max(...times)).toBeLessThanOrEqual(4.5);
+      expect(ascending(times)).toBe(true);
+      expect(times.slice(0, 4)).toEqual(near([0.4, 1.3, 2.2, 3.1]));
+    });
+
+    it("leaves a fixed schedule that already fits as asked", () => {
+      expect(onClipOf(notificationStack.defaultDuration, () => stepTimes(notificationStack, card, 3, BEATS, {}))).toEqual(near([0.4, 1.3, 2.2]));
+      expect(onClipOf(SHORT, () => stepTimes(workCards, card, 3, BEATS, {}))).toEqual(near([0.3, 0.51, 0.72]));
     });
 
     it("holds every work card's start to the room the pull-in computed", () => {

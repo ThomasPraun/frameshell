@@ -206,7 +206,7 @@ export const BeatsSummarySchema = z.object({
   asset: z.string().describe("Project-relative asset path."),
   file: z.string().describe("Project-relative beats file, e.g. `beats/theme.beats.json`."),
   hash: z.string().describe("`sha256:<hex>` of the asset's content the grid was measured from."),
-  detector: z.string().describe("`onset-flux@1`, or `exact` for a grid a generator wrote."),
+  detector: z.string().describe("`onset-flux@2` (older files keep `onset-flux@1`), or `exact` for a grid a generator wrote."),
   bpm: z.number().describe("Beats per minute, `edits.tempo` applied."),
   meter: z.int().describe("Beats per bar."),
   confidence: z.number().min(0).max(1).describe("0..1; under 0.5 the grid may be wrong."),

@@ -12,6 +12,7 @@ import {
   type ShootTake,
   type Timeline,
   type Transcript,
+  DEFAULT_TRANSCRIPTION_PROVIDER,
   createShootFile,
   parsePeopleFile,
   parseShootFile,
@@ -112,7 +113,7 @@ export class ShootService {
     this.#timeline = options.timeline ?? (async () => null);
     this.#analyzing = options.analyzing ?? (() => false);
     this.#failure = options.failure ?? (() => null);
-    this.#transcription = options.transcription ?? (async () => ({ provider: "whisper-cpp", ready: true, problem: null }));
+    this.#transcription = options.transcription ?? (async () => ({ provider: DEFAULT_TRANSCRIPTION_PROVIDER, ready: true, problem: null }));
   }
 
   /** `shoot.status`. Throws `ScriptNotFound`, `OutsideProject` or `InvalidProjectFile`. */

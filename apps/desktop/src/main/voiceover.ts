@@ -1,15 +1,13 @@
-// The app's voiceover run (ADR 0034 decisions 12 and 20): the daemon refuses a paid generation with `ConfirmationRequired`
-// and the cost it found; the app asks the person and sends `yes` with that ask's `confirmation` token only after they
-// confirm, so a run whose lines or cost changed meanwhile (`ConfirmationStale`) asks again. No dialog code here, so it is testable.
-// Also the pure parts of the rest of the app's voiceover: progress, Cancel, the misread check's plan, where placing starts.
+// The pure parts of the app's voiceover (ADR 0034 decisions 12, 18 and 20), testable with no dialog code: the cost ask
+// of a paid generation (`costAsk`, run through the shared confirm loop in `confirmation.ts`), progress, Cancel, the
+// misread check's plan and where placing starts.
 import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult, timeRefOf } from "@frameshell/protocol";
+import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import type { VoiceoverProgress, VoiceoverVerifyPlan } from "../shared/api.js";
 import { type Confirmed, formatCost, isAsk, runConfirmed } from "./confirmation.js";
 
-export { type Confirmed, formatCost };
-
 /** Transcription provider the app can set up and size a download for (`transcriptionDownload` in `main/index.ts`). */
-export const APP_TRANSCRIPTION_PROVIDER = "whisper-cpp";
+export const APP_TRANSCRIPTION_PROVIDER = DEFAULT_TRANSCRIPTION_PROVIDER;
 
 /**
  * How the misread check can run in a project (ADR 0034 decision 18): the daemon downloads the transcription tools and
