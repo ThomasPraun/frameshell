@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { RenderBeat, RenderMarker, RenderTiming, RenderWord } from "@frameshell/plugin-api";
-import { TIMING_HELPER_SOURCE } from "../src/index.js";
+import { RENDER_TIMING_KINDS, type RenderBeat, type RenderMarker, type RenderTiming, type RenderWord } from "@frameshell/plugin-api";
+import { TIMING_HELPER_SOURCE, TIMING_KINDS } from "../src/index.js";
 
 // `src/frameshell-timing.ts` of a Remotion project is a hand copy of the plugin API's timing types (ADR 0029). Each
 // table below must name exactly the keys of its plugin API type (`pnpm typecheck` refuses a missing or extra key), and
@@ -45,5 +45,11 @@ describe("Remotion timing helper types", () => {
     expect(helper.get("FrameshellMarker")).toEqual(MARKER);
     expect(helper.get("FrameshellWord")).toEqual(WORD);
     expect([...helper.keys()].sort()).toEqual(["FrameshellBeat", "FrameshellMarker", "FrameshellTiming", "FrameshellWord"]);
+  });
+});
+
+describe("timing kinds", () => {
+  it("are the plugin API list (the plugin keeps a copy: installed plugins carry no plugin-api)", () => {
+    expect([...TIMING_KINDS]).toEqual([...RENDER_TIMING_KINDS]);
   });
 });
