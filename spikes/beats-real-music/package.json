@@ -1,0 +1,10 @@
+{
+  "name": "beats-real-music-spike",
+  "private": true,
+  "type": "module",
+  "description": "Real-music check of the DSP beat detector (#689). Outside the pnpm workspace; needs `pnpm build` of packages/core first.",
+  "scripts": {
+    "corpus": "node make-corpus.mjs",
+    "run": "node run.mjs"
+  }
+}

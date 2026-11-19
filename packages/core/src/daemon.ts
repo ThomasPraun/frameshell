@@ -179,7 +179,7 @@ import { UiBroker } from "./ui/broker.js";
 import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
-import { resolveNested } from "./timeline/nested.js";
+import { readNestedFile, resolveNested } from "./timeline/nested.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { type VerifyServices, canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
@@ -959,6 +959,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     probe: (dir, asset) => media.probe(dir, asset),
     // `clips` is built below: the closure runs on a call, after it exists.
     clips: { ensure: (dir, timeline, options) => clips.ensure(clipRoot(dir), timeline, options) },
+    nestedClips: async (dir, source) => {
+      const nested = await readNestedFile(dir, source);
+      return (nested?.tracks ?? []).flatMap((track) => (track.kind === "video" ? track.clips.map((inner) => ({ id: inner.id, type: inner.type, track: track.id })) : []));
+    },
   });
   const gradeComparer = new GradeComparer({
     exports,
