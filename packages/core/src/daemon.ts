@@ -173,6 +173,7 @@ import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
 import { ModelRegistry, notRegistered } from "./transcripts/model-registry.js";
 import { type TranscriberTools, providerContext, resolveAsset, resolveTranscript, transcribeAsset } from "./transcripts/transcriber.js";
+import { requireLocalTranscription } from "./transcripts/consent.js";
 import { sourceTranscripts, verifyExport } from "./transcripts/verify.js";
 import { UiBroker } from "./ui/broker.js";
 import { AgentTargets } from "./targets/inbox.js";
@@ -337,6 +338,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     if (!provider?.models || provider.models.some((pinned) => pinned.id === model) || provider.defaultModel === model) return;
     throw notRegistered(model, "unknown");
   };
+  /**
+   * The project's transcription provider for every caller but `transcribe`: refused unless it is local and free, so
+   * nothing but a confirmed `transcribe` run ever uploads audio or costs money (ADR 0046 decision 8).
+   */
+  const localTranscription = async (dir: string, providerId: string, asset: string | null = null) =>
+    requireLocalTranscription(await plugins.transcriptionProvider(dir, providerId), providerId, asset);
   const events = new EventHub();
   // Hub key of each root as jobs and media name it (the caller's spelling). `events.subscribe` keys by
   // `canonicalPath`: publishing under the raw root misses subscribers of another spelling (Windows 8.3
@@ -639,7 +646,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     transcription: async (dir) => {
       if (options.shootStandIn) return { provider: "stand-in", ready: true, problem: null };
       const provider = (await readEnclosingProject(dir))?.config.transcription?.provider ?? "whisper-cpp";
-      return plugins.transcriptionProvider(dir, provider).then(
+      return localTranscription(dir, provider).then(
         () => ({ provider, ready: true, problem: null }),
         (error: unknown) => ({ provider, ready: false, problem: (error as Error).message }),
       );
@@ -706,7 +713,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const providerId = config.transcription?.provider ?? "whisper-cpp";
     return {
       providerId,
-      provider: () => plugins.transcriptionProvider(dir, providerId),
+      provider: () => localTranscription(dir, providerId),
       model: config.transcription?.model ?? (await models.defaultFor(providerId)),
       language: config.transcription?.language ?? null,
       tools: transcriberTools({ dir, binaries: config.binaries }),
@@ -931,7 +938,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     transcribe: async (dir, wav) => {
       const { config } = (await readEnclosingProject(dir))!;
       const providerId = config.transcription?.provider ?? "whisper-cpp";
-      const provider = await plugins.transcriptionProvider(dir, providerId);
+      const provider = await localTranscription(dir, providerId);
       const model = await configuredModel(config, providerId);
       const language = config.transcription?.language;
       const heard = await provider.transcribe(wav, { ...(model ? { model } : {}), ...(language ? { language } : {}) }, providerContext(transcriberTools({ dir, binaries: config.binaries }), () => {}).context);
@@ -1054,7 +1061,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           const providerId = options.shootStandIn ? "stand-in" : (config.transcription?.provider ?? "whisper-cpp");
           const provider = options.shootStandIn
             ? standInProvider(standInWords(await shoots.script(dir, script), take.scene))
-            : await plugins.transcriptionProvider(dir, providerId);
+            : await localTranscription(dir, providerId, take.asset);
           ctx.update({ step: "transcribe", progress: 0.1 });
           await transcribeTake({
             root: dir,
@@ -1886,7 +1893,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.otio(dir, { timeline, ...choice }, loaded)) };
     },
-    transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
+    transcribe: async ({ cwd, asset, provider, model, language, yes, confirmation }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
       const { dir, config } = (await readEnclosingProject(cwd))!;
       const providerId = provider ?? config.transcription?.provider ?? "whisper-cpp";
@@ -1903,6 +1910,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
         progress: request.progress,
+        yes,
+        confirmation,
       }));
     },
     "transcribe.speakers": async ({ cwd, asset, speakers }, _caller, request) => {
@@ -1931,7 +1940,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         timelineId: timeline,
         timeline: (await timelines.load(dir, timeline)).timeline,
         providerId,
-        provider: () => plugins.transcriptionProvider(dir, providerId),
+        provider: () => localTranscription(dir, providerId, file),
         model: model ?? config.transcription?.model,
         defaultModel: await models.defaultFor(providerId),
         language: language ?? config.transcription?.language,

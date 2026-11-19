@@ -12,6 +12,7 @@
     { "path": "plugins/hyperframes" },
     { "path": "plugins/remotion" },
     { "path": "plugins/blender" },
-    { "path": "plugins/openai-speech" }
+    { "path": "plugins/openai-speech" },
+    { "path": "plugins/openai-transcription" }
   ]
 }

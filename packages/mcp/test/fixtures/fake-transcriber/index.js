@@ -2,6 +2,7 @@
 export function activate(api) {
   api.registerTranscriptionProvider({
     id: "fake",
+    free: true,
     async transcribe(_audio, options, context) {
       context.progress({ message: "Transcribing (fake)", fraction: 1 });
       return {

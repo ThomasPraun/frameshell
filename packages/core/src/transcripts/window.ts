@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TranscriptWord } from "@frameshell/plugin-api";
 import type { GcClass } from "../gc.js";
@@ -41,6 +41,33 @@ export async function readPcmWav(path: string): Promise<Pcm16 | null> {
     return null;
   }
   return pcmOfWav(bytes);
+}
+
+/**
+ * Length in seconds of the mono 16-bit PCM WAV at `path`, from its header and file size only (a transcription WAV
+ * of an hour is over 100 MB); null when it is anything else.
+ */
+export async function pcmWavSeconds(path: string): Promise<number | null> {
+  const file = await open(path, "r");
+  try {
+    const { size: fileSize } = await file.stat();
+    const head = Buffer.alloc(Math.min(fileSize, 64 * 1024));
+    await file.read(head, 0, head.length, 0);
+    let sampleRate = 0;
+    for (const { id, body, size } of riffChunks(head)) {
+      if (id === "fmt ") {
+        if (body + 16 > head.length) return null;
+        const pcm = head.readUInt16LE(body) === 1 && head.readUInt16LE(body + 2) === 1 && head.readUInt16LE(body + 14) === 16;
+        if (!pcm) return null;
+        sampleRate = head.readUInt32LE(body + 4);
+      } else if (id === "data") {
+        return sampleRate === 0 ? null : Math.floor(Math.min(size, fileSize - body) / 2) / sampleRate;
+      }
+    }
+    return null;
+  } finally {
+    await file.close();
+  }
 }
 
 /** {@link readPcmWav} on bytes already read. */

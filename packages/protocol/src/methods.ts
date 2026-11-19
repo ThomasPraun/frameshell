@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 179;
+export const PROTOCOL_VERSION = 180;
 
 export {
   type MethodSpec,
@@ -655,7 +655,10 @@ export const ErrorCode = {
   AssetNotFound: -32019,
   /** data: `{ provider, available: string[] }` */
   TranscriptionProviderNotFound: -32020,
-  /** data: `{ provider, asset, details }` */
+  /**
+   * data: `{ provider, asset, details }`; `asset` null when the call had none. Also a check other than `transcribe`
+   * refusing a provider that is not local and free (ADR 0046).
+   */
   TranscriptionFailed: -32021,
   /** data: `{ asset, transcripts: { path, asset }[] }`: every transcript name for the asset belongs to another asset */
   TranscriptNameTaken: -32022,
@@ -740,11 +743,14 @@ export const ErrorCode = {
    * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`, a paid generation
    * (pass the `confirmation` token too). `render` data: `{ finals: { clip, type, format, seconds }[], seconds, limit, hint }`,
    * final renders of generated clips estimated over `limit` seconds in all (`seconds` null when a plugin could not say).
+   * `transcribe` data: `{ provider, model, asset, seconds, cost: { amount, currency } | null, remote, confirmation }`: a
+   * cloud or paid transcription (ADR 0046) that would upload the asset's audio; pass the `confirmation` token too.
    */
   ConfirmationRequired: -32048,
   /**
    * data: same as `ConfirmationRequired` (the current ask, with its new `confirmation`) plus `hint`: the call carried the
-   * `confirmation` of an earlier ask, but the lines to say or their cost changed since, so nothing was generated.
+   * `confirmation` of an earlier ask, but the lines to say (`transcribe`: the asset, its audio) or their cost changed
+   * since, so nothing was generated or sent.
    */
   ConfirmationStale: -32049,
 } as const;
