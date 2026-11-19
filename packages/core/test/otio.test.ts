@@ -172,7 +172,7 @@ describe("timelineToOtio", () => {
       "clip c_lost (nested timelines/gone.json) has no known length: skipped.",
       "program track t_p1 (multicam shots) not exported: 1 shot skipped.",
       "subtitle track t_s1 not exported.",
-      "transitions (dissolves, fades) on 2 clips not exported (c_a, c_b).",
+      "dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it) on 2 clips not exported (c_a, c_b).",
       "transform and keys on 1 clip not exported (c_a).",
       "colour grade on 1 clip not exported (c_a).",
       "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 1 clip not exported (c_a).",
@@ -191,9 +191,102 @@ describe("timelineToOtio", () => {
     expect(warnings).toEqual([
       "video track t_v2 sits behind the person on track t_v1 (subject matte): exported as a plain track.",
       "muted sound of a video clip on 2 clips not exported (c_a, c_b).",
-      "transitions (dissolves, fades) on 1 clip not exported (c_b).",
+      "transition shape (no dissolve carries it) on 1 clip not exported (c_b).",
       "per-format overrides on 1 clip not exported (c_b).",
     ]);
+  });
+
+  describe("dissolves", () => {
+    const muted = { audio: { muted: true } };
+    /** The warnings about transitions only: the muted sound of the clips is not what these tests are about. */
+    const aboutTransitions = (warnings: string[]) => warnings.filter((warning) => /^(dips and fades|transition shape)/.test(warning));
+    const butted = (fps: number, dissolve: number, extra: Record<string, unknown> = {}) =>
+      timelineToOtio(timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 4, muted), media("c_b", 2, 5, 7, { ...muted, dissolve, ...extra })] }]), { fps, assetUrl, sourceDuration: () => 100 });
+
+    it("a dissolve between butted clips is one Transition.1 of half frames each side, with no Gap.1 around it", () => {
+      const { otio, warnings } = butted(30, 1);
+      const children = onlyTrack(otio).children;
+      expect(children.map((child) => child["OTIO_SCHEMA"])).toEqual(["Clip.2", "Transition.1", "Clip.2"]);
+      expect(children[1]).toEqual({
+        OTIO_SCHEMA: "Transition.1",
+        name: "",
+        transition_type: "SMPTE_Dissolve",
+        in_offset: time(15, 30),
+        out_offset: time(15, 30),
+        metadata: { frameshell: { clipId: "c_b", dissolve: 1, half: 0.5 } },
+      });
+      // The clips keep their lengths: a transition has none of its own.
+      expect(children[0]!["source_range"]).toEqual(range(60, 60, 30));
+      expect(children[2]!["source_range"]).toEqual(range(150, 60, 30));
+      expect(aboutTransitions(warnings)).toEqual([]);
+      expect(otioProblems(otio)).toEqual([]);
+    });
+
+    it("keeps whole frames at a fractional rate", () => {
+      const fps = 30000 / 1001;
+      const frame = (index: number) => Math.round((index / fps) * 1000) / 1000;
+      const timeline = timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 2 + frame(48), { audio: { muted: true } }), media("c_b", frame(48), 5, 6, { audio: { muted: true }, dissolve: frame(10) })] }]);
+      const { otio } = timelineToOtio(timeline, { fps, assetUrl, sourceDuration: () => 100 });
+      const transition = onlyTrack(otio).children[1]!;
+      expect(transition["OTIO_SCHEMA"]).toBe("Transition.1");
+      expect(transition["in_offset"]).toEqual(time(5, fps));
+      expect(transition["out_offset"]).toEqual(time(5, fps));
+      expect(otioProblems(otio)).toEqual([]);
+    });
+
+    it("takes the effective half from edgeTransitions: cut to the handle the clips share", () => {
+      // c_a ends at source 4 of a 4.2 s asset: 0.2 s of handle after, so a requested 1 s dissolve is 0.2 s a side.
+      const { otio } = timelineToOtio(timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 4, muted), media("c_b", 2, 5, 7, { ...muted, dissolve: 1 })] }]), {
+        fps: 30,
+        assetUrl,
+        sourceDuration: () => 4.2,
+      });
+      expect(onlyTrack(otio).children[1]).toMatchObject({ in_offset: time(6, 30), out_offset: time(6, 30) });
+    });
+
+    it("a dissolve with no handle plays as a dip, one with no clip before it as a fade in: no Transition.1, one warning", () => {
+      const noHandle = timelineToOtio(timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 4, muted), media("c_b", 2, 0, 2, { ...muted, dissolve: 1 })] }]), {
+        fps: 30,
+        assetUrl,
+        sourceDuration: () => 4,
+      });
+      expect(onlyTrack(noHandle.otio).children.map((child) => child["OTIO_SCHEMA"])).toEqual(["Clip.2", "Clip.2"]);
+      expect(aboutTransitions(noHandle.warnings)).toEqual(["dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it) on 1 clip not exported (c_b)."]);
+      const apart = timelineToOtio(timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 4, muted), media("c_b", 3, 5, 7, { ...muted, dissolve: 1 })] }]), { fps: 30, assetUrl });
+      expect(onlyTrack(apart.otio).children.map((child) => child["OTIO_SCHEMA"])).toEqual(["Clip.2", "Gap.1", "Clip.2"]);
+      expect(aboutTransitions(apart.warnings)).toHaveLength(1);
+    });
+
+    it("a shaped dissolve is a plain SMPTE_Dissolve with the shape in the metadata, and a warning", () => {
+      const { otio, warnings } = butted(30, 1, { shape: { kind: "wipe" } });
+      const transition = onlyTrack(otio).children[1]!;
+      expect(transition["transition_type"]).toBe("SMPTE_Dissolve");
+      expect(transition["metadata"]).toEqual({ frameshell: { clipId: "c_b", dissolve: 1, half: 0.5, shape: { kind: "wipe" } } });
+      expect(aboutTransitions(warnings)).toEqual(["transition shape (its dissolve is written as a plain one) on 1 clip not exported (c_b)."]);
+    });
+
+    it("a generated clip dissolves too, and a fade next to a dissolve is still named", () => {
+      const tracks = [
+        {
+          id: "t_v1",
+          kind: "video",
+          clips: [
+            { id: "c_gen", type: "hyperframes", start: 0, duration: 2, source: "compositions/hyperframes/intro/index.html" },
+            media("c_b", 2, 5, 7, { ...muted, dissolve: 0.6, fadeOut: 0.2 }),
+          ],
+        },
+      ];
+      const { otio, warnings } = timelineToOtio(timelineOf(tracks), { fps: 30, assetUrl });
+      expect(onlyTrack(otio).children.map((child) => child["OTIO_SCHEMA"])).toEqual(["Clip.2", "Transition.1", "Clip.2"]);
+      expect(onlyTrack(otio).children[1]).toMatchObject({ in_offset: time(9, 30), out_offset: time(9, 30) });
+      expect(warnings.some((warning) => warning.startsWith("dips and fades") && warning.includes("(c_b)"))).toBe(true);
+    });
+
+    it("lists the first five clips of a warning and an ellipsis for the rest", () => {
+      const clips = Array.from({ length: 7 }, (_, index) => media(`c_${index}`, index * 3, 0, 1, { ...muted, fadeIn: 0.1 }));
+      const { warnings } = timelineToOtio(timelineOf([{ id: "t_v1", kind: "video", clips }]), { fps: 30, assetUrl });
+      expect(aboutTransitions(warnings)).toEqual(["dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it) on 7 clips not exported (c_0, c_1, c_2, c_3, c_4, …)."]);
+    });
   });
 
   it("matches the golden document of a small edit", () => {

@@ -81,6 +81,7 @@ const api: FrameshellApi = {
     addLayers: (timeline, assets) => invokeOutcome(Channel.timelineAddLayers, timeline, assets),
     cutOut: (timeline, clip, mask) => invokeOutcome(Channel.timelineCutOut, timeline, clip, mask),
     exportImage: (timeline) => invokeOutcome(Channel.timelineExportImage, timeline),
+    exportOtio: (timeline) => invokeOutcome(Channel.timelineExportOtio, timeline),
     settle: () => invokeOutcome(Channel.timelineSettle),
     undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
     redo: (timeline) => invokeOutcome(Channel.timelineRedo, timeline),

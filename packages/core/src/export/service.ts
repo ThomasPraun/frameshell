@@ -687,6 +687,7 @@ export class ExportService {
 
   /**
    * Write `timeline` as an OpenTimelineIO file (see the `export.otio` method, ADR 0045): derived, read-only, atomic.
+   * Refuses an image project with `InvalidOperation`.
    * `loaded`: see {@link ExportService.frame}.
    */
   async otio(
@@ -702,17 +703,32 @@ export class ExportService {
         { op: "export.otio", field: "out" },
       );
     }
+    if ((await readEnclosingProject(root))?.config.kind === "image") {
+      throw new RpcError(ErrorCode.InvalidOperation, "export.otio: image projects have no cut to hand to an editor; use render or the image export.", {
+        op: "export.otio",
+        reason: "image project",
+      });
+    }
     const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
     const nested = this.#options.nestedDuration?.(root, timeline.id, fps);
     const totals = new Map<string, number>();
+    const assets = new Map<string, number | undefined>();
     for (const track of timeline.tracks) {
-      if (track.kind === "subtitles" || !nested) continue;
+      if (track.kind === "subtitles" || track.kind === "program") continue;
+      const dissolves = track.clips.some((clip) => clip.dissolve !== undefined);
       for (const clip of track.clips) {
-        if (clip.type !== "timeline" || !("source" in clip) || !clip.source) continue;
-        try {
-          totals.set(clip.id, await nested(clip.source));
-        } catch {
-          // An unreadable nested file leaves the clip without a length: the converter skips it with a warning.
+        if ("asset" in clip) {
+          // The handles a dissolve may use (`edgeTransitions`) come from the length of the source: only tracks with a dissolve ask.
+          if (!dissolves) continue;
+          if (!assets.has(clip.asset)) assets.set(clip.asset, await this.#sourceSeconds(root, clip.asset));
+          const seconds = assets.get(clip.asset);
+          if (seconds !== undefined) totals.set(clip.id, seconds);
+        } else if (nested && clip.type === "timeline" && "source" in clip && clip.source) {
+          try {
+            totals.set(clip.id, await nested(clip.source));
+          } catch {
+            // An unreadable nested file leaves the clip without a length: the converter skips it with a warning.
+          }
         }
       }
     }
@@ -926,6 +942,16 @@ export class ExportService {
       }
     }
     return found;
+  }
+
+  /** Seconds of `asset` as `edgeTransitions` counts its handles: a still has no end; undefined when it cannot be probed (a missing file). */
+  async #sourceSeconds(root: string, asset: string): Promise<number | undefined> {
+    try {
+      const probe = await this.#options.probe(root, asset);
+      return probe.video?.still ? Number.POSITIVE_INFINITY : (probe.duration ?? undefined);
+    } catch {
+      return undefined;
+    }
   }
 
   /** Probe every asset the timeline's media clips use. Throws AssetNotFound for a missing one. */

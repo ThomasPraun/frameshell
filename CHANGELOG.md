@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning. Multicam program tracks, subtitle tracks, transitions, transforms and keys, grades, film finish, audio
   effects and the sound of media clips on video tracks are not exported and are named in `warnings`. `target_url` is relative to the file, `--absolute-paths` writes
   `file://` URLs. No new dependency and no Python; dissolves and an app menu come in later slices.
+- OpenTimelineIO export, slice 2 of #383 (ADR 0045): a dissolve between two clips that end and start at the same frame
+  is a `Transition.1` (`SMPTE_Dissolve`, centred on the cut, the half length `edgeTransitions` gives, in whole frames
+  each side, so the handles of the files decide, as in a render). A wipe, push or iris dissolve is written as a plain one,
+  its shape only in the metadata, with a warning; dips, fades and a dissolve with no handle or no clip before it stay
+  warnings, named as such. File > Export OpenTimelineIO… in the app (video projects; it asks where to save, the daemon
+  writes, a notice counts what the file leaves out). Gated real-library test `FRAMESHELL_TEST_OTIO=1 pnpm test
+  packages/core/test/otio` (needs `pip install opentimelineio`).
 - `frameshell people tune` (`people.tune`, MCP `people_tune`; protocol 178): a read-only tuning report for the voice
   and face suggestion thresholds (ADR 0020 decision 15). It replays matching on the people the owner confirmed (linked
   speakers with cached voice prints, face tracks a face anchor names): same-person and different-person score spreads,
@@ -1582,6 +1589,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `export.otio` (`frameshell export otio`, MCP `export_otio`) refuses an image project with `InvalidOperation`: it has
+  stills as layers and no cut to hand to an editor (ADR 0045). The warning about dissolves and fades is split: dips
+  and fades stay left out, dissolves between butted clips are exported.
 - The Remotion adapter warns (`RenderContext.warn`) when a clip asks for `words` and the project's own
   `src/frameshell-timing.ts` predates them, and `frameshell remotion new` says so too; the file is never changed.
 - `scripts/test-scope.mjs` runs no tests for anything under `spikes/`.
