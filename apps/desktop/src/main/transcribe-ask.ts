@@ -49,6 +49,15 @@ export function transcribeAsk(error: unknown): TranscribeAsk | null {
 }
 
 /**
+ * Which price text the box shows: `free` first (an estimate of 0, or a provider that declares itself free without an
+ * estimate: `cost` is null there too), then `unknown` (no estimate, not declared free), else `known`.
+ */
+export function transcribePrice(ask: Pick<TranscribeAsk, "cost" | "costFree">): "free" | "unknown" | "known" {
+  if (ask.costFree) return "free";
+  return ask.cost === null ? "unknown" : "known";
+}
+
+/**
  * Run `request` unconfirmed; when the daemon asks (a cloud or paid provider), `confirm` decides and a yes runs it
  * again with `yes` and the ask's token. A run that changed since (a new ask) asks again. Resolves null when the person
  * declined, nothing having been sent. Other errors reach the caller. No consent is kept: the next run asks again.

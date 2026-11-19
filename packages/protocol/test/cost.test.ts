@@ -14,6 +14,7 @@ describe("formatCost", () => {
     expect(usd(0.0126)).toBe("0.0126 USD");
     expect(usd(0.5)).toBe("0.5000 USD");
     expect(usd(1)).toBe("1.00 USD");
+    expect(usd(0.99996)).toBe("1.00 USD");
     expect(formatCost({ amount: 1.5, currency: "EUR" })).toBe("1.50 EUR");
   });
 });

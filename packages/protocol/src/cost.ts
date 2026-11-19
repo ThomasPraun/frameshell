@@ -1,6 +1,8 @@
 /** A price as a number and its currency, as providers estimate it and refusals carry it. */
 export interface Cost {
+  /** Price in units of `currency`, never negative. */
   amount: number;
+  /** Currency code as the provider states it (`USD`). */
   currency: string;
 }
 
@@ -13,5 +15,6 @@ export function formatCost(cost: Cost): string {
   const { amount, currency } = cost;
   if (amount > 0 && amount < 0.00005) return `< 0.0001 ${currency}`;
   if (amount === 0) return `0 ${currency}`;
-  return `${amount.toFixed(amount < 1 ? 4 : 2)} ${currency}`;
+  const small = amount.toFixed(4);
+  return `${(amount < 1 && small !== "1.0000" ? small : amount.toFixed(2))} ${currency}`;
 }

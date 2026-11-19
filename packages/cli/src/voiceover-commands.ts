@@ -1,4 +1,4 @@
-import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, type VoiceoverCaptionsResult, type VoiceoverGenerateResult, type VoiceoverPlaceResult, timeRefOf } from "@frameshell/protocol";
+import { type DaemonConnection, ErrorCode, type Progress, RpcError, SECONDS_TEXT, formatCost, type VoiceoverCaptionsResult, type VoiceoverGenerateResult, type VoiceoverPlaceResult, timeRefOf } from "@frameshell/protocol";
 import { VOICEOVER_LINE_GAP_S, VOICEOVER_TEMPO_RANGE } from "@frameshell/schema";
 import { UsageError } from "./timeline-commands.js";
 
@@ -302,7 +302,7 @@ function formatGenerate(result: VoiceoverGenerateResult): string {
     .map((state) => [state, result.lines.filter((line) => line.state === state).length] as const)
     .filter(([, count]) => count > 0)
     .map(([state, count]) => `${count} ${state}`);
-  const cost = result.cost ? ` · about ${result.cost.amount} ${result.cost.currency}` : "";
+  const cost = result.cost ? ` · about ${formatCost(result.cost)}` : "";
   const lines = [`Voiceover ${result.script} -> ${result.dir}/ (${result.provider}, voice ${result.voice}): ${counts.join(", ")}${cost}`];
   for (const line of result.lines) {
     const phrases = line.phrases.length === 1 ? "" : `  ${line.phrases.length} phrases`;
