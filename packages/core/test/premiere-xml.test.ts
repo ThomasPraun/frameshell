@@ -298,11 +298,65 @@ describe("timelineToPremiereXml", () => {
       "transform and keys on 2 clips not exported (c_a, c_b).",
       "colour grade on 1 clip not exported (c_a).",
       "sound fades (audio.fadeInMs, audio.fadeOutMs) on 1 clip not exported (c_a).",
-      "clip gain (audio.gain) on 2 clips not exported (c_a, c_m).",
       "film finish and effects on 1 clip not exported (c_b).",
       "per-format overrides on 1 clip not exported (c_b).",
       "audio effects on 1 clip not exported (c_m).",
     ]);
+  });
+
+  describe("audio.gain as an Audio Levels filter", () => {
+    const levelOf = (item: XNode): number[] =>
+      within(item, "effect")
+        .filter((effect) => textOf(effect, "name") === "Audio Levels")
+        .map((effect) => Number(textOf(one(effect, "parameter"), "value")));
+
+    it("is on the audio clip item of a picture and on an audio track clip, linear, and not on the picture", () => {
+      const timeline = timelineOf([
+        { id: "t_v1", kind: "video", clips: [media("c_a", 0, 0, 2, { audio: { gain: -6 } }), media("c_b", 2, 0, 1)] },
+        { id: "t_a1", kind: "audio", clips: [media("c_m", 0, 0, 1, { audio: { gain: 6 } })] },
+      ]);
+      const { doc, warnings, xml } = convert(timeline);
+      expect(warnings).toEqual([]);
+      const [picture, none] = clipitems(tracksOf(doc, "video")[0]!);
+      expect(levelOf(picture!)).toEqual([]);
+      const audio = tracksOf(doc, "audio");
+      const [real, mirror] = [audio[0]!, audio[1]!];
+      expect(levelOf(clipitems(real)[0]!)).toEqual([Number((10 ** (6 / 20)).toFixed(6))]);
+      const [mirrored, plain] = clipitems(mirror);
+      expect(levelOf(mirrored!)).toEqual([Number((10 ** (-6 / 20)).toFixed(6))]);
+      expect(levelOf(plain!)).toEqual([]);
+      expect(none).toBeDefined();
+      const effect = within(mirrored!, "effect")[0]!;
+      expect(["effectid", "effectcategory", "effecttype", "mediatype"].map((name) => textOf(effect, name))).toEqual(["audiolevels", "audiolevels", "audiolevels", "audio"]);
+      const parameter = one(effect, "parameter");
+      expect([textOf(parameter, "parameterid"), textOf(parameter, "valuemin"), textOf(parameter, "valuemax")]).toEqual(["level", "0", "3.98109"]);
+      expect(premiereProblems(xml)).toEqual([]);
+    });
+
+    it("a gain over +12 dB is written as +12 dB, with a warning", () => {
+      const timeline = timelineOf([{ id: "t_a1", kind: "audio", clips: [media("c_m", 0, 0, 1, { audio: { gain: 18 } })] }]);
+      const { doc, warnings } = convert(timeline);
+      expect(levelOf(clipitems(tracksOf(doc, "audio")[0]!)[0]!)).toEqual([3.981072]);
+      expect(warnings).toEqual(["clip gain above +12 dB (audio.gain) on 1 clip written as +12 dB, the most an Audio Levels filter holds (c_m)."]);
+    });
+
+    it("a muted clip over +12 dB gets no clamp warning, like a muted clip with any other gain", () => {
+      const timeline = timelineOf([{ id: "t_a1", kind: "audio", clips: [media("c_m", 0, 0, 1, { audio: { gain: 18, muted: true } })] }]);
+      expect(convert(timeline).warnings).toEqual([]);
+    });
+
+    it("a clip with no sound has nothing to level: the gain is named as not exported", () => {
+      const timeline = timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 0, 2, { audio: { gain: -6 } })] }]);
+      const { doc, warnings } = convert(timeline, 30, { assetInfo: () => ({ silent: true, seconds: Infinity, width: 100, height: 100 }) });
+      expect(warnings).toEqual(["clip gain (audio.gain) on 1 clip not exported (c_a)."]);
+      expect(tracksOf(doc, "audio")).toHaveLength(0);
+    });
+
+    it("no gain, or a gain of 0, writes no filter", () => {
+      const timeline = timelineOf([{ id: "t_a1", kind: "audio", clips: [media("c_m", 0, 0, 1, { audio: { gain: 0 } }), media("c_n", 1, 0, 1)] }]);
+      const { doc } = convert(timeline);
+      expect(clipitems(tracksOf(doc, "audio")[0]!).map(levelOf)).toEqual([[], []]);
+    });
   });
 
   it("escapes & < > \" ' in names and paths, and the text comes back whole", () => {
@@ -329,9 +383,9 @@ describe("timelineToPremiereXml", () => {
         {
           id: "t_v1",
           kind: "video",
-          clips: [media("c_a", 0, 2, 4), media("c_b", 5, 10, 14, { speed: 2 }), { id: "c_gen", type: "hyperframes", start: 7, duration: 2, source: "compositions/hyperframes/title/index.html" }],
+          clips: [media("c_a", 0, 2, 4), media("c_b", 5, 10, 14, { speed: 2, audio: { gain: -6 } }), { id: "c_gen", type: "hyperframes", start: 7, duration: 2, source: "compositions/hyperframes/title/index.html" }],
         },
-        { id: "t_a1", kind: "audio", name: "Music", muted: true, clips: [{ id: "c_m", type: "media", asset: "assets/music/theme.wav", start: 0, in: 0, out: 9 }] },
+        { id: "t_a1", kind: "audio", name: "Music", muted: true, clips: [{ id: "c_m", type: "media", asset: "assets/music/theme.wav", start: 0, in: 0, out: 9, audio: { gain: 3 } }] },
       ],
       { markers: [{ id: "m_1", at: 5, label: "hook", color: "orange" }] },
     );
@@ -344,6 +398,10 @@ describe("timelineToPremiereXml", () => {
 describe("premiereAssetUrl", () => {
   it("is always absolute, in Premiere's spelling, with each segment percent-encoded", () => {
     expect(premiereAssetUrl({ root: "/Users/me/video one", flavour: "posix" }, "assets/clip #1.mp4")).toBe("file://localhost/Users/me/video%20one/assets/clip%20%231.mp4");
+  });
+
+  it("writes a UNC share as file://localhost//server/share/..., unverified against Premiere (ADR 0047)", () => {
+    expect(premiereAssetUrl({ root: "\\\\nas\\share\\my video", flavour: "win32" }, "assets/take 2.mp4")).toBe("file://localhost//nas/share/my%20video/assets/take%202.mp4");
   });
 
   it("writes a Windows drive as C%3a, whatever the machine's separator", () => {

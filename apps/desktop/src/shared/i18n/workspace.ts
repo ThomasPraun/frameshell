@@ -1,15 +1,22 @@
 // Project window shell: layout, status bar, sidebar, detached panels, drops, Chat about this, agent navigation notices
 // (Workspace, StatusBar, Sidebar, DetachControls, file-drop, ask/ask-agent, ui-link).
 
+import type { HandoffKind } from "../api.js";
+
+/** The CLI command that writes the file of `kind` and lists what it leaves out; `placeholder` is the language's word for "file". */
+function handoffCommand(kind: HandoffKind, placeholder = "file"): string {
+  return kind === "otio" ? `frameshell export otio --out <${placeholder}>.otio` : `frameshell export premiere --out <${placeholder}>.xml`;
+}
+
 const en = {
   imported: (names: string) => `Imported ${names} into assets/.`,
   notMedia: (names: string) => `Not media: ${names}.`,
   /** An image project made from a frame opened in its own window (ADR 0017). */
   frameImageOpened: (name: string) => `Opened ${name} in a new window.`,
-  /** The timeline saved as an OpenTimelineIO file (ADR 0045), and how many things the file leaves out. */
-  otioExported: (name: string) => `Exported ${name}.`,
-  otioExportedWith: (name: string, count: number) =>
-    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the file: run frameshell export otio --out <file>.otio in a terminal to list ${count === 1 ? "it" : "them"}.`,
+  /** The timeline saved as an editor hand-off file (ADR 0045, 0047), and how many things the file leaves out. */
+  handoffExported: (name: string) => `Exported ${name}.`,
+  handoffExportedWith: (name: string, count: number, kind: HandoffKind) =>
+    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the file: run ${handoffCommand(kind)} in a terminal to list ${count === 1 ? "it" : "them"}.`,
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
@@ -87,9 +94,9 @@ const es: typeof en = {
   imported: (names) => `Se importó ${names} a assets/.`,
   notMedia: (names) => `No es audio, video ni imagen: ${names}.`,
   frameImageOpened: (name) => `${name} se abrió en una ventana nueva.`,
-  otioExported: (name) => `Se exportó ${name}.`,
-  otioExportedWith: (name, count) =>
-    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo: ejecuta frameshell export otio --out <archivo>.otio en una terminal para ${count === 1 ? "verla" : "verlas"}.`,
+  handoffExported: (name) => `Se exportó ${name}.`,
+  handoffExportedWith: (name, count, kind) =>
+    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo: ejecuta ${handoffCommand(kind, "archivo")} en una terminal para ${count === 1 ? "verla" : "verlas"}.`,
   dropToImport: "Suelta para importar a assets/",
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,

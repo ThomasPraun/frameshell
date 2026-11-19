@@ -33,7 +33,7 @@ export interface PremiereAssetInfo {
   seconds?: number | undefined;
   /** True for a still image, an SVG or a font: no sound to mirror. */
   silent?: boolean | undefined;
-  /** Picture size; absent for an audio file or an unread one. */
+  /** Picture size in pixels; absent for an audio file or an unread one. */
   width?: number | undefined;
   height?: number | undefined;
   /** First audio stream; absent when silent or unread. */
@@ -62,9 +62,11 @@ export interface PremiereXmlExport {
   xml: string;
   /** One line per thing the file does not carry. */
   warnings: string[];
-  /** Counts of what was written: tracks (the sound mirror tracks included), picture clips (offline ones included) and markers. */
+  /** Video and audio tracks written, the sound mirror tracks included. */
   tracks: number;
+  /** Clip items on the video and audio tracks of the timeline, offline ones included; the sound-mirror items are not counted. */
   clips: number;
+  /** Markers written. */
   markers: number;
 }
 
@@ -160,9 +162,10 @@ interface BuiltTrack {
  * nested clips as clipitems with an offline `<file>` of their length, markers on the sequence, dissolves between butted
  * clips as Cross Dissolve `<transitionitem>`s (`edgeTransitions` decides which, never recomputed here). Every time is a
  * whole frame. The sound of the media clips of each video track is a linked audio clipitem on an extra Audio track after
- * all the real ones (xmeml links a picture and its sound natively): disabled where the clip or the track is muted.
- * `clips` counts the pictures, not their sound. Program tracks, subtitle tracks, dips and fades, transition shapes,
- * transforms, keys, grades, film finish, audio effects, sound fades and clip gain are left out and named in `warnings`.
+ * all the real ones (xmeml links a picture and its sound natively): disabled where the clip or the track is muted. A
+ * clip's `audio.gain` is an Audio Levels filter on its audio clipitem.
+ * `clips` counts the items of the timeline's tracks, not the sound-mirror ones. Program tracks, subtitle tracks, dips and fades, transition shapes,
+ * transforms, keys, grades, film finish, audio effects and sound fades are left out and named in `warnings`.
  */
 export function timelineToPremiereXml(timeline: Timeline, options: PremiereXmlOptions): PremiereXmlExport {
   const { fps } = options;
@@ -199,7 +202,11 @@ export function timelineToPremiereXml(timeline: Timeline, options: PremiereXmlOp
       items.push(item);
       cursor = Math.max(cursor, place.endFrames);
       if (!sound) {
-        leftOut(clip, dropped, joined, "not exported");
+        // The level goes on the audio clip item of a clip with sound; a clip with none has nothing to level.
+        leftOut(clip, dropped, joined, "asset" in clip && !hasSound(clip.asset) ? "not exported" : undefined);
+        if ("asset" in clip && hasSound(clip.asset) && clip.audio?.muted !== true && (staticGain(clip) ?? 0) > MAX_GAIN_DB) {
+          dropped.add(`clip gain above +${MAX_GAIN_DB} dB (audio.gain)`, clip.id, `written as +${MAX_GAIN_DB} dB, the most an Audio Levels filter holds`);
+        }
         if (!("asset" in clip)) warnings.push(missingMedia(clip).warning);
         clipCount += 1;
       }
@@ -344,6 +351,7 @@ export function timelineToPremiereXml(timeline: Timeline, options: PremiereXmlOp
         el("out", source.out),
         fileOf(item),
         speed === 1 ? undefined : timeRemap(speed, audio ? "audio" : "video"),
+        audio && media && staticGain(clip) !== undefined && staticGain(clip) !== 0 ? audioLevels(staticGain(clip)!) : undefined,
         audio ? el("sourcetrack", [el("mediatype", "audio"), el("trackindex", 1)]) : undefined,
         ...links.map((link) =>
           el("link", [el("linkclipref", link.id), el("mediatype", link.mediaType), el("trackindex", link.trackIndex), el("clipindex", link.clipIndex)]),
@@ -414,6 +422,32 @@ export function timelineToPremiereXml(timeline: Timeline, options: PremiereXmlOp
 function sourceFrames(clip: AssetClip, place: Placement, fps: number): { in: number; out: number } {
   const start = Math.round(clip.in * fps);
   return { in: start, out: start + Math.round(place.lengthFrames * (clip.speed ?? 1)) };
+}
+
+/** `audio.gain` of a clip, dB; undefined when unset or when gain keys replace it (the keys are named as not exported). */
+function staticGain(clip: AssetClip): number | undefined {
+  return clip.keys?.gain === undefined ? clip.audio?.gain : undefined;
+}
+
+/** Most an Audio Levels `level` holds: 3.98109 linear, +12 dB. */
+const MAX_GAIN_DB = 12;
+
+/**
+ * The Audio Levels filter of `audio.gain` (dB), `level` linear as Premiere writes it (10^(dB/20), `1` = unchanged), at
+ * most +12 dB. Unverified against a real Premiere import (ADR 0047).
+ */
+function audioLevels(gainDb: number): Node {
+  const level = 10 ** (Math.min(gainDb, MAX_GAIN_DB) / 20);
+  return el("filter", [
+    el("effect", [
+      el("name", "Audio Levels"),
+      el("effectid", "audiolevels"),
+      el("effectcategory", "audiolevels"),
+      el("effecttype", "audiolevels"),
+      el("mediatype", "audio"),
+      el("parameter", [el("parameterid", "level"), el("name", "Level"), el("valuemin", 0), el("valuemax", 3.98109), el("value", Number(level.toFixed(6)))]),
+    ]),
+  ]);
 }
 
 function timecodeNode(fps: number): Node {

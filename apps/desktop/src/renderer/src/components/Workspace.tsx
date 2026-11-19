@@ -17,7 +17,7 @@ import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
-import { otioNotice } from "../otio-notice.js";
+import { handoffKindOf, handoffNotice } from "../handoff-notice.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
@@ -361,17 +361,18 @@ export function Workspace({ project }: { project: ProjectView }) {
     };
   }, [image]);
 
-  // File > Export OpenTimelineIO (ADR 0045): main asks where, the daemon writes the file; a video project's only.
+  // File > Export OpenTimelineIO / Export Premiere XML (ADR 0045, 0047): main asks where, the daemon writes the file; a video project's only.
   useEffect(() => {
     if (image) return;
     let running = false;
     return window.frameshell.menu.onCommand((command) => {
-      if (command !== "exportOtio" || running) return;
+      const kind = handoffKindOf(command);
+      if (kind === undefined || running) return;
       running = true;
       window.frameshell.timeline
-        .exportOtio(SELECTION_TIMELINE)
+        .exportHandoff(kind, SELECTION_TIMELINE)
         .then(
-          (result) => result && setNotice(otioNotice(result, t.workspace)),
+          (result) => result && setNotice(handoffNotice(result, kind, t.workspace)),
           (error: Error) => setNotice(error.message),
         )
         .finally(() => {

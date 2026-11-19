@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Premiere XML export, slice 2 of #701 (ADR 0047; no protocol change, `PROTOCOL_VERSION` stays): File > Export
+  Premiere XML… in the app (video projects; en + es), sharing one hand-off path with File > Export OpenTimelineIO…: main
+  asks where to save, the daemon writes, a notice counts what the file leaves out and names the CLI command that lists
+  it (the OTIO menu and its wording are as before; the IPC channel is now one `timeline:export-handoff` with the kind).
+  Clip gain (`audio.gain`) is written as an Audio Levels filter on the audio clip (linear 10^(dB/20), at most +12 dB with
+  a warning when clamped; a clip with no sound to level is still named in `warnings`); the OTIO file is byte-identical.
+  Opt-in reader test `FRAMESHELL_TEST_OTIO=1 pnpm test packages/core/test/premiere-real` reads the file with the
+  OpenTimelineIO `fcp_xml` adapter (`otio-fcp-adapter`) and runs in CI next to the OTIO real-library test. ADR 0047's
+  wording on dissolves is corrected (explicit `start`/`end`, accepted by FCP7-family readers; Premiere's own spelling is
+  unverified), the UNC path spelling is pinned by a test and noted as unverified, and the review leftovers are closed
+  (TSDoc, the CLI help comment, one project read per export). Neither the Audio Levels filter nor the dissolves have
+  been opened in Premiere Pro yet.
 - Small fixes, wave 27 (slice SF8, parts of #382 and #689; protocol 182):
   the `ConfirmationRequired` and `ConfirmationStale` data of `transcribe` carries `costUnknown` (true when the provider
   gives no usable estimate and does not declare itself free; not in the confirmation token, so tokens are unchanged).

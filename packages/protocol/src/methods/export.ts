@@ -720,7 +720,8 @@ export const exportMethods = {
       "transition centred on the cut, the effective half length each side (a wipe, push or iris dissolve is written as a plain one, with a warning; " +
       "a mirrored sound gets a Cross Fade). " +
       "NOT exported, each named in `warnings`: multicam program tracks, subtitle tracks, dips and fades (`fadeIn`, `fadeOut`, a dissolve with no handle or no clip before it), " +
-      "transition shapes, transforms and keys, colour grades, film finish, audio effects, sound fades (`audio.fadeInMs`, `audio.fadeOutMs`), clip gain (`audio.gain`). " +
+      "transition shapes, transforms and keys, colour grades, film finish, audio effects, sound fades (`audio.fadeInMs`, `audio.fadeOutMs`). " +
+      "Clip gain (`audio.gain`) is an Audio Levels filter on the audio clip item (linear, at most +12 dB, a warning when it is clamped); a clip with no sound to level is named in `warnings`. " +
       "Media paths are always absolute `file://localhost/` URLs, as Premiere writes them, so the file only opens on the machine and at the project location it was written for: it is not portable. " +
       "Fails with InvalidOperation (`out` is not a `.xml` file; an image project, which has no cut to hand to an editor), TimelineNotFound.",
     params: z.strictObject({
@@ -737,7 +738,7 @@ export const exportMethods = {
       timeline: z.string(),
       fps: z.number().describe("Rate of every time in the file: the project frame rate."),
       tracks: z.int().describe("Video and audio tracks written, the sound tracks included."),
-      clips: z.int().describe("Picture clip items written on the tracks of the timeline, those with an offline file included; the linked sound clip items are not counted."),
+      clips: z.int().describe("Clip items written on the video and audio tracks of the timeline, those with an offline file included; the linked sound-mirror items are not counted."),
       markers: z.int().describe("Markers written."),
       warnings: z.array(z.string()).describe("What the file does not carry or carries differently; empty when nothing."),
     }),

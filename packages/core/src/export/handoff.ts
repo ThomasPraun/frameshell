@@ -19,6 +19,7 @@ export class Dropped {
     this.#kinds.set(kind, entry);
   }
 
+  /** One warning line per kind, in the order the kinds were first added. */
   warnings(): string[] {
     return [...this.#kinds].map(([kind, { ids, outcome }]) => {
       const shown = ids.slice(0, LISTED_IDS).join(", ");
@@ -29,9 +30,10 @@ export class Dropped {
 
 /**
  * Features of a clip no hand-off file carries, by the words the warning uses. `dissolved`: its dissolve is written as a
- * transition item. `gainOutcome`: what the file does with `audio.gain`, which OTIO keeps as metadata and xmeml drops.
+ * transition item. `gainOutcome`: what the file does with `audio.gain` when it does not carry it as a level (OTIO keeps
+ * it as metadata, xmeml drops it on a clip with no sound to level); undefined when the file carries it, so no warning.
  */
-export function leftOut(clip: Clip, dropped: Dropped, dissolved: boolean, gainOutcome: string): void {
+export function leftOut(clip: Clip, dropped: Dropped, dissolved: boolean, gainOutcome: string | undefined): void {
   if (clip.fadeIn !== undefined || clip.fadeOut !== undefined || (clip.dissolve !== undefined && !dissolved)) {
     dropped.add("dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it)", clip.id);
   }
@@ -51,7 +53,7 @@ export function leftOut(clip: Clip, dropped: Dropped, dissolved: boolean, gainOu
   if ("asset" in clip && clip.audio !== undefined && (clip.audio.fadeInMs !== undefined || clip.audio.fadeOutMs !== undefined)) {
     dropped.add("sound fades (audio.fadeInMs, audio.fadeOutMs)", clip.id);
   }
-  if ("asset" in clip && clip.audio?.muted !== true && clip.audio?.gain !== undefined && clip.audio.gain !== 0) {
+  if (gainOutcome !== undefined && "asset" in clip && clip.audio?.muted !== true && clip.audio?.gain !== undefined && clip.audio.gain !== 0) {
     dropped.add("clip gain (audio.gain)", clip.id, gainOutcome);
   }
 }

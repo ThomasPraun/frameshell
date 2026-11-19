@@ -211,6 +211,22 @@
                 </audio>
               </media>
             </file>
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <value>1.412538</value>
+                </parameter>
+              </effect>
+            </filter>
             <sourcetrack>
               <mediatype>audio</mediatype>
               <trackindex>1</trackindex>
@@ -288,6 +304,22 @@
                 <parameter>
                   <parameterid>frameblending</parameterid>
                   <value>FALSE</value>
+                </parameter>
+              </effect>
+            </filter>
+            <filter>
+              <effect>
+                <name>Audio Levels</name>
+                <effectid>audiolevels</effectid>
+                <effectcategory>audiolevels</effectcategory>
+                <effecttype>audiolevels</effecttype>
+                <mediatype>audio</mediatype>
+                <parameter>
+                  <parameterid>level</parameterid>
+                  <name>Level</name>
+                  <valuemin>0</valuemin>
+                  <valuemax>3.98109</valuemax>
+                  <value>0.501187</value>
                 </parameter>
               </effect>
             </filter>

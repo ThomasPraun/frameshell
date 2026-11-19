@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { DaemonConnection } from "@frameshell/protocol";
 
-/** Help text of `export otio` (ADR 0045), in `frameshell --help`. */
+/** Help text of `export otio` and `export premiere` (ADR 0045, 0047), in `frameshell --help`. */
 export const EXPORT_USAGE = `  export otio [--timeline id] [--out file.otio] [--absolute-paths]
                                Write the timeline as an OpenTimelineIO file for an editor: media clips with
                                source ranges and speed, gaps, dissolves between butted clips, track mute and
@@ -15,12 +15,12 @@ export const EXPORT_USAGE = `  export otio [--timeline id] [--out file.otio] [--
                                Write the timeline as a Premiere Pro XML file (xmeml, ADR 0047) for Premiere's
                                File > Import: media clips with source ranges and speed, dissolves between
                                butted clips as Cross Dissolve, track mute and hide, markers, the sound of
-                               video-track clips as linked audio clips. Generated and nested clips keep their
-                               slot and length as offline media. Left out and listed as warnings: program
-                               tracks, subtitles, dips and fades, transition shapes, transforms, keys, grades,
-                               audio effects, sound fades, clip gain. Media paths are always absolute
-                               file://localhost/ URLs: the file is not portable. Default file:
-                               exports/<timeline>.xml. Never edits the timeline
+                               video-track clips as linked audio clips, clip gain as an Audio Levels filter.
+                               Generated and nested clips keep their slot and length as offline media. Left
+                               out and listed as warnings: program tracks, subtitles, dips and fades,
+                               transition shapes, transforms, keys, grades, audio effects, sound fades. Media
+                               paths are always absolute file://localhost/ URLs: the file is not portable.
+                               Default file: exports/<timeline>.xml. Never edits the timeline
 `;
 
 /** Flags each `export` command takes besides the global ones. */
