@@ -19,7 +19,7 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 ## Word timing
 
-Only `whisper-1` gives word timestamps, so it is the only model this plugin uses (no other model can be chosen). Its word times are coarser than whisper.cpp's alignment; every result says so in its warnings. OpenAI's guide marks `whisper-1` as deprecated, with a shutdown on 2027-02-26.
+Only `whisper-1` gives word timestamps, so it is the only model this plugin uses (no other model can be chosen). Its word times are coarser than whisper.cpp's alignment; every result says so in its warnings. OpenAI's guide marks `whisper-1` as deprecated, with a shutdown on 2027-02-26. When OpenAI stops serving it (a 404 or 400 with `model_not_found`), the error says so and names the way out: update this plugin or use `--provider whisper-cpp`; nothing is retried.
 
 ## The key
 

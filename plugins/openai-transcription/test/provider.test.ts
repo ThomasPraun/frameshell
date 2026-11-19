@@ -228,6 +228,36 @@ describe("transcribe", () => {
     }
   });
 
+  it("says a retired model is gone (404 or 400 with model_not_found), names the way out, and does not retry", async () => {
+    for (const code of [404, 400]) {
+      seen = [];
+      replies = [status(code, { error: { message: `The model whisper-1 has been deprecated; key ${KEY} sk-live-abcdef`, type: "invalid_request_error", code: "model_not_found" } })];
+      const message = await failure(provider());
+      expect(message).toContain('no longer serves the model "whisper-1"');
+      expect(message).toContain(`HTTP ${code}`);
+      expect(message).toContain("Update @frameshell/openai-transcription or use `--provider whisper-cpp`");
+      expect(message).toContain("[key]");
+      expect(message).not.toMatch(/sk-live/);
+      expect(seen).toHaveLength(1);
+    }
+  });
+
+  it("recognises a retired model by the words of a 404 without the code, but not of another 400", async () => {
+    replies = [status(404, { error: { message: "The model does not exist" } })];
+    expect(await failure(provider())).toContain("no longer serves the model");
+    replies = [status(400, { error: { message: "The model name is too long" } })];
+    expect(await failure(provider())).toBe("OpenAI refused the request (HTTP 400): The model name is too long");
+  });
+
+  it("points a plain 404 at the server address, with no model claim, and does not retry", async () => {
+    seen = [];
+    replies = [status(404, { error: { message: "Invalid URL (POST /v1/audio/transcriptions)" } })];
+    const message = await failure(provider());
+    expect(message).toMatch(/^OpenAI answered not found \(HTTP 404\): check FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL/);
+    expect(message).not.toContain("no longer serves");
+    expect(seen).toHaveLength(1);
+  });
+
   it("names a connection that failed, scrubbed", async () => {
     const closed = createOpenAiTranscriptionProvider({ baseUrl: "http://127.0.0.1:1", env: { OPENAI_API_KEY: KEY } });
     expect(await failure(closed)).toMatch(/^could not reach OpenAI/);

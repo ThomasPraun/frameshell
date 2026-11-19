@@ -105,7 +105,7 @@ export function createOpenAiTranscriptionProvider(options: OpenAiTranscriptionOp
         if (asked) form.append("language", asked);
         const lead = before.trim().slice(-PROMPT_CHARACTERS);
         if (lead) form.append("prompt", lead);
-        const response = await request(http(), url, form, key, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+        const response = await request(http(), url, form, key, model, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
         const answer = await readAnswer(response, key);
         const offset = range.from / pcm.sampleRate;
         words.push(...timedWords(answer.words, answer.text, offset));
@@ -181,7 +181,7 @@ function normalize(text: string): string {
 }
 
 /** POST once, and once more after a pause when OpenAI says to wait (429) or fails (5xx). Throws a scrubbed error otherwise. */
-async function request(send: typeof fetch, url: string, body: FormData, key: string, retryDelayMs: number, timeoutMs: number): Promise<Response> {
+async function request(send: typeof fetch, url: string, body: FormData, key: string, model: string, retryDelayMs: number, timeoutMs: number): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     let response: Response;
     try {
@@ -193,37 +193,50 @@ async function request(send: typeof fetch, url: string, body: FormData, key: str
     }
     if (response.ok) return response;
     const retryable = response.status === 429 || response.status >= 500;
-    if (!retryable || attempt > 0) throw await failure(response, key);
+    if (!retryable || attempt > 0) throw await failure(response, key, model);
     await response.body?.cancel().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
   }
 }
 
-/** The error for a refused request, in words that name what the person can do and never repeat the key. */
-async function failure(response: Response, key: string): Promise<Error> {
+/**
+ * The error for a refused request, in words that name what the person can do and never repeat the key. `model` is the
+ * one the call asked for.
+ */
+async function failure(response: Response, key: string, model: string): Promise<Error> {
   const { status } = response;
   if (status === 401 || status === 403) {
     await response.body?.cancel().catch(() => {});
     return new Error(`OpenAI rejected the key from ${KEY_VARIABLE} (HTTP ${status}): check that it is valid and may use transcription`);
   }
-  const detail = scrub(await upstreamMessage(response), key);
+  const upstream = await upstreamError(response);
+  const detail = scrub(upstream.message, key);
   const suffix = detail ? `: ${detail}` : "";
+  if ((status === 404 || status === 400) && (upstream.code === "model_not_found" || (status === 404 && RETIRED_MODEL.test(upstream.message)))) {
+    return new Error(
+      `OpenAI no longer serves the model "${scrub(model, key)}" (retired or removed, HTTP ${status}); this provider only uses ${DEFAULT_MODEL}. Update @frameshell/openai-transcription or use \`--provider whisper-cpp\`${suffix}`,
+    );
+  }
+  if (status === 404) return new Error(`OpenAI answered not found (HTTP 404): check ${BASE_URL_VARIABLE}${suffix}`);
   if (status === 413) return new Error(`OpenAI refused the audio as too large (HTTP 413)${suffix}`);
   if (status === 429) return new Error(`OpenAI rate limit or quota reached (HTTP 429): wait and try again, or check the plan and credit of the account${suffix}`);
   if (status >= 500) return new Error(`OpenAI had a server error (HTTP ${status}); it is usually temporary, so try again${suffix}`);
   return new Error(`OpenAI refused the request (HTTP ${status})${suffix}`);
 }
 
-/** The message OpenAI gave for an error, or the start of the body; empty when there is none. */
-async function upstreamMessage(response: Response): Promise<string> {
+/** What OpenAI's message says of a model that is gone, when the 404 carries no `model_not_found` code. */
+const RETIRED_MODEL = /model\b.*\b(does not exist|not found|deprecated|retired|decommissioned|no longer)/i;
+
+/** The message and code OpenAI gave for an error (the start of the body when it is not JSON); empty when there is none. */
+async function upstreamError(response: Response): Promise<{ message: string; code: string | null }> {
   const text = await response.text().catch(() => "");
   try {
-    const message = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message;
-    if (typeof message === "string") return message.trim();
+    const error = (JSON.parse(text) as { error?: { message?: unknown; code?: unknown } }).error;
+    if (typeof error?.message === "string") return { message: error.message.trim(), code: typeof error.code === "string" ? error.code : null };
   } catch {
     // Not JSON: the raw start of the body says enough.
   }
-  return text.trim();
+  return { message: text.trim(), code: null };
 }
 
 /**

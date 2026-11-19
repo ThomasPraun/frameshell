@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Small fixes, wave 26 (slice SF7, parts of #451, #382, #689 and #702; no protocol change, `PROTOCOL_VERSION` stays):
+  `notification-stack`'s fixed schedule (`onBeats` off or no usable grid) is held to the same room before the exit as
+  its beat-placed one, through the one `stepTimes` formula (latest start minus `minGap` per later card, never before
+  `startAt`), so six cards on the default 5 s clip stay before the exit and in order; default durations, a schedule
+  that already fits, `work-cards` and `checklist` give the same times as before, and the beat path is untouched
+  (ADR 0029 decision 8 amended). Clips scaffolded earlier keep their template copy: scaffold again to get it.
+  `DEFAULT_TRANSCRIPTION_PROVIDER` in `@frameshell/schema` is the one `whisper-cpp` provider id the daemon, the consent
+  gate, the shoot service and the app read (the plugin keeps its own id); `APP_TRANSCRIPTION_PROVIDER` is an alias of
+  it. The app's transcription ask says "charges nothing, but the audio still leaves this machine" for an estimate of
+  exactly 0 instead of "0 USD" (a free remote provider with no estimate is a later wire change). The header of
+  `main/voiceover.ts` is as it is now, and its `Confirmed`/`formatCost` re-export is gone (import them from
+  `confirmation.ts`). The beats wire text for `detector` (model-facing description only) and the beats schema comment name `onset-flux@2`. The
+  `openai` transcription provider says plainly when OpenAI no longer serves `whisper-1` (404 or 400 with
+  `model_not_found`, or a 404 whose message says the model is gone): update the plugin or use `--provider whisper-cpp`;
+  a plain 404 points at `FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL`; nothing is retried, every text is scrubbed.
 - Motion runtime 0.6.0 (ADR 0029 decision 8, ADR 0033, small fixes 6 of #451; no protocol change): `M.words()` lists the
   transcript words the timeline plays inside the clip, `{ at, end, text, id }` in composition seconds, as the page's
   `frameshellTiming.words` has them, or `[]` with no `words` timing or when `wordsProblem` is set (no nominal fallback,

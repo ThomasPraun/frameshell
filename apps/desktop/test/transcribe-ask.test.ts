@@ -28,6 +28,7 @@ describe("transcribeAsk", () => {
       asset: "assets/a.mp4",
       seconds: 125.2,
       cost: "0.0126 USD",
+      costFree: false,
       remote: true,
       changed: false,
       confirmation: TOKEN,
@@ -36,6 +37,12 @@ describe("transcribeAsk", () => {
 
   it("keeps an unknown cost unknown and a local provider not remote", () => {
     expect(transcribeAsk(refusal({ cost: null, remote: false, model: null }))).toMatchObject({ cost: null, remote: false, model: null });
+  });
+
+  it("marks an estimate of exactly 0 as free, and any other amount or no estimate as not", () => {
+    expect(transcribeAsk(refusal({ cost: { amount: 0, currency: "USD" } }))).toMatchObject({ cost: "0 USD", costFree: true });
+    expect(transcribeAsk(refusal({ cost: { amount: 0.00004, currency: "USD" } }))).toMatchObject({ costFree: false });
+    expect(transcribeAsk(refusal({ cost: null }))).toMatchObject({ cost: null, costFree: false });
   });
 
   it("marks the ask that replaces a confirmed one", () => {
@@ -133,6 +140,7 @@ describe("the dialog strings", () => {
       expect(said.transcribeAskCostKnown("0.0126 USD", "openai")).toContain("0.0126 USD");
       expect(said.transcribeAskTitle("openai", "assets/a.mp4", "2:06")).toContain("2:06");
       expect(said.transcribeAskChanged.length).toBeGreaterThan(10);
+      expect(said.transcribeAskCostFree).not.toContain("0 ");
     }
   });
 });

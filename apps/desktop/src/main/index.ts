@@ -888,7 +888,7 @@ function reportSetup(dir: string, setup: ProjectSetup): void {
 async function confirmTranscription(parent: BrowserWindow | null | undefined, ask: TranscribeAsk): Promise<boolean> {
   const said = text.app.dialogs;
   const sent = ask.remote ? said.transcribeAskUploads(ask.provider) : said.transcribeAskMayLeave(ask.provider);
-  const price = ask.cost === null ? said.transcribeAskCostUnknown : said.transcribeAskCostKnown(ask.cost, ask.provider);
+  const price = ask.cost === null ? said.transcribeAskCostUnknown : ask.costFree ? said.transcribeAskCostFree : said.transcribeAskCostKnown(ask.cost, ask.provider);
   const options: Electron.MessageBoxOptions = {
     type: "warning",
     message: said.transcribeAskTitle(ask.provider, ask.asset, formatLength(ask.seconds)),

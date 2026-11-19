@@ -218,10 +218,10 @@ export function onBeatsVariable(steps: string, from: string): TemplateVariable {
  * Page-script `stepTimes(start, gap, count, onBeats, latest, minGap)`: the times of `count` steps from `start`, `gap`
  * apart, or with `onBeats` the clip's beats from the first one at or after `start` (motion runtime 0.5.0, ADR 0029
  * decision 8). Without a usable grid the beats fall back to those same steps (the nominal grid), so `onBeats` never
- * changes a clip that has none. With `latest` (a template that pulls a short clip's schedule in) and a grid, the
- * beat-placed times keep their order and step `i` of `count` is held to `latest - (count - 1 - i) * minGap` (default
- * 0.08 s), so the last never passes `latest`; steps left unclamped may sit closer than `minGap`. Without `onBeats`,
- * or without a grid, the steps are never moved. Needs `M`.
+ * changes a clip that has none. With `latest` (a template that pulls a short clip's schedule in; a negative one is
+ * ignored) the times, beat-placed or fixed, keep their order and step `i` of `count` is held to
+ * `latest - (count - 1 - i) * minGap` (default 0.08 s) and never before `start`, so the last never passes `latest`;
+ * steps left unclamped may sit closer than `minGap`. Without `latest` the steps are never moved. Needs `M`.
  */
 export const STEP_TIMES = String.raw`
       function stepTimes(start, gap, count, onBeats, latest, minGap) {
@@ -233,7 +233,7 @@ export const STEP_TIMES = String.raw`
         var times = [];
         for (var i = 0; i < count; i++) {
           var time = onBeats ? M.beatTime(first + i, steps) : start + i * gap;
-          times.push(beatPlaced && latest !== undefined ? Math.min(time, latest - (count - 1 - i) * floor) : time);
+          times.push(latest !== undefined && latest >= 0 ? Math.max(start, Math.min(time, latest - (count - 1 - i) * floor)) : time);
         }
         return times;
       }`;

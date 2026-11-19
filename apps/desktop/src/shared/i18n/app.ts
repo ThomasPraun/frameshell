@@ -111,6 +111,7 @@ const en = {
     transcribeAskMayLeave: (provider: string) => `${provider} may send the audio of this file off this machine.`,
     transcribeAskCostKnown: (cost: string, provider: string) =>
       `Estimated cost: ${cost}, plus short re-checks of over-long words. ${provider} bills this to your own account.`,
+    transcribeAskCostFree: "This provider charges nothing, but the audio still leaves this machine.",
     transcribeAskCostUnknown: "This provider does not say what it costs and does not declare itself free, so it may charge you.",
     transcribeAskNoConsent: "Nothing is remembered: the next run asks again.",
     transcribeAskChanged: "The file or the price changed since you confirmed, so nothing was sent.",
@@ -285,6 +286,7 @@ const es: typeof en = {
     transcribeAskMayLeave: (provider) => `${provider} puede enviar el audio de este archivo fuera de este equipo.`,
     transcribeAskCostKnown: (cost, provider) =>
       `Costo estimado: ${cost}, más pequeñas revisiones de las palabras demasiado largas. ${provider} lo cobra a tu propia cuenta.`,
+    transcribeAskCostFree: "Este proveedor no cobra nada, pero el audio igualmente sale de este equipo.",
     transcribeAskCostUnknown: "Este proveedor no indica cuánto cuesta ni declara ser gratuito, así que puede cobrarte.",
     transcribeAskNoConsent: "No se recuerda nada: la próxima vez se vuelve a preguntar.",
     transcribeAskChanged: "El archivo o el precio cambiaron desde que confirmaste, así que no se envió nada.",

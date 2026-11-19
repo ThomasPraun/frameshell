@@ -159,7 +159,7 @@ export const notificationStack: Template = {
       var D = S.duration;
       var OUT = 0.3;
       ${STEP_TIMES}
-      // The fixed schedule is as asked; beats are held to the room before the exit so a short clip still shows every card.
+      // Beat-placed or fixed, the starts are held to the room before the exit so a short clip still shows every card.
       var arrive = stepTimes(P.startAt, P.gap, n, P.onBeats, D - OUT - 0.5, 0.08);
       var step = CARD * STEP * fs;
 
