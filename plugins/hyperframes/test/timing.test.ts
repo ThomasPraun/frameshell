@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { LiveContext, RenderContext, RenderTiming } from "@frameshell/plugin-api";
+import { RENDER_TIMING_KINDS, type LiveContext, type RenderContext, type RenderTiming } from "@frameshell/plugin-api";
 import { type Producer, createHyperframesAdapter } from "../src/index.js";
 import { MOTION_RUNTIME } from "../src/motion-runtime.js";
 import { timingKinds } from "../src/timing.js";
@@ -63,6 +63,11 @@ function run(scripts: string[]): Record<string, unknown> {
 }
 
 describe("timing kinds a composition asks for", () => {
+  it("knows every kind the plugin API lists (the plugin keeps a copy: installed plugins carry no plugin-api)", () => {
+    const meta = `<meta name="frameshell-timing" content="${RENDER_TIMING_KINDS.join(" ")}">`;
+    expect(timingKinds(meta)).toEqual([...RENDER_TIMING_KINDS].sort());
+  });
+
   it("reads the meta tag in any quoting, case and separator, ignoring unknown words", () => {
     expect(timingKinds(ASKING)).toEqual(["beats", "markers"]);
     expect(timingKinds("<META content='Markers' NAME='frameshell-timing'>")).toEqual(["markers"]);
@@ -123,7 +128,7 @@ describe("timing in renders and live pages", () => {
   });
 });
 
-describe("the motion runtime reads window.frameshellTiming (runtime 0.5.0)", () => {
+describe("the motion runtime reads window.frameshellTiming (runtime 0.6.0)", () => {
   /** The shipped runtime in one page, after the given scripts (a render copy's head script, or none). */
   function motion(...before: string[]): Record<string, (...args: unknown[]) => unknown> {
     const page: Record<string, unknown> = {};
@@ -154,6 +159,13 @@ describe("the motion runtime reads window.frameshellTiming (runtime 0.5.0)", () 
       expect(M["sinceBeat"]!(2.5, 1)).toBe(1.5);
       expect(M["beats"]!({ ...nominal, duration: 1.5 })).toHaveLength(3);
       expect(M["markers"]!()).toEqual([]);
+      expect(M["words"]!()).toEqual([]);
     }
+  });
+
+  it("lists the words the host wrote, and none without them", () => {
+    const words = [{ at: 0.5, end: 0.9, text: "Hello", id: "w_000001" }];
+    expect(motion(`window.frameshellTiming = ${JSON.stringify({ words })};`)["words"]!()).toEqual(words);
+    expect(motion('window.frameshellTiming = { words: [], wordsProblem: "no-transcript" };')["words"]!()).toEqual([]);
   });
 });

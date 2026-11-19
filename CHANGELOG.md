@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion runtime 0.6.0 (ADR 0029 decision 8, ADR 0033, small fixes 6 of #451; no protocol change): `M.words()` lists the
+  transcript words the timeline plays inside the clip, `{ at, end, text, id }` in composition seconds, as the page's
+  `frameshellTiming.words` has them, or `[]` with no `words` timing or when `wordsProblem` is set (no nominal fallback,
+  so a composition keeps its text as a prop). Nothing 0.5.0 exports changes: a clip keeps its frozen copy until
+  `frameshell hyperframes update`, which now reports 0.6.0.
 - OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
   `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
   default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden
@@ -32,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FACE_PERSON_MARGIN` tried, correct and wrong suggestions, precision, recall, cluster purity and splits. Nothing is
   scanned, downloaded or changed, and no threshold changes. Results go in `docs/research/people-acceptance-run.md`.
 
+- App confirmation for paid or remote transcription, slice 2 of #382 (ADR 0046 decision 10, epic #451; no protocol
+  change): when `transcribe` refuses with `ConfirmationRequired`, the app asks in a native box that names the provider,
+  the file and its length, says the audio is uploaded and the estimated cost, and sends `yes` with the token only after
+  "Upload and transcribe". A changed file or price asks again; no consent is stored. It covers the project setup
+  transcription and the Shoot speaker search, and the transcript view gains a Transcribe button on a not-transcribed
+  asset when the project's provider is not whisper.cpp. The confirm loop of the voiceover cost dialog moved to one
+  shared `runConfirmed` (`apps/desktop/src/main/confirmation.ts`), unchanged in behaviour.
 - OpenAI transcription provider, first slice of #382 (ADR 0046, epic #451; protocol 180):
   `frameshell plugin install @frameshell/openai-transcription` adds the paid cloud provider `openai`
   (`whisper-1`, word timestamps as the service gives them, a note in `warnings`) for
@@ -1580,6 +1592,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `export.otio` (`frameshell export otio`, MCP `export_otio`) refuses an image project with `InvalidOperation`: it has
   stills as layers and no cut to hand to an editor (ADR 0045). The warning about dissolves and fades is split: dips
   and fades stay left out, dissolves between butted clips are exported.
+- The Remotion adapter warns (`RenderContext.warn`) when a clip asks for `words` and the project's own
+  `src/frameshell-timing.ts` predates them, and `frameshell remotion new` says so too; the file is never changed.
+- `scripts/test-scope.mjs` runs no tests for anything under `spikes/`.
+- Small fixes, wave 24 (slice SF5, part of #451; no protocol change, plugin API `apiVersion` stays "1"):
+  `RENDER_TIMING_KINDS` in `@frameshell/plugin-api` is the one list of timing kinds the host reads (`clipTiming`); the
+  `hyperframes` and `remotion` adapters keep a type-only copy, since an installed plugin carries no plugin-api
+  (ADR 0021), and a test in each holds it equal to the list. `work-cards` and `notification-stack` with `onBeats` on
+  hold beat-placed starts to the room before the exit on a short clip (order kept, held 0.08 s apart at the end);
+  with `onBeats` off, with no usable grid, or on a clip long enough, the times and the render keys are unchanged. `checklist` is left as it
+  is: its ticks follow `tickStart` and `tickGap` with no room pulled in, so there is none to clamp to. Clips
+  scaffolded earlier keep their copy of the template (`hyperframes update` refreshes only the runtime files, never a
+  composition's HTML); scaffold again with `hyperframes new --template` to get the clamp. `grade.analyze` on a
+  nested timeline clip lists the first eight media and generated clips inside it (all of them in the error's
+  `data.inside`), still naming `grade.compare`; a nested file that is missing, empty or unreadable gives the old
+  message.
+- Docs: the timing bullet of SPEC §6.5 and `motion-films.md` read as one sentence each, and the `hyperframes` skill says
+  `onBeats` is asked only from the clip's own props (never a `<meta>`, a template default or a nested clip's host).
 - `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
   from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
   so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.
@@ -1716,6 +1745,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Closing a terminal tab whose shell had already exited, with the exit event not yet delivered, no longer calls
+  `pty.kill()` on it (it throws or logs on Windows); the close waits for the exit event instead (small fixes 6 of #451).
+- Generated clips: a pass over a timeline (`clip.renders`, `ensure`, `finals`, `check`, `gc`, the background refresh)
+  reads the transcript once for all the clips that ask for `words`, instead of once per clip; a transcript changed
+  between two calls still re-keys, and render keys are unchanged.
 - Review switch (ADR 0019, test hardening #515, #516, #533): the "Review agent changes before applying" checkbox keeps
   the click until the review state agrees with it (or the call fails), instead of jumping back when the daemon's reply
   arrives before its event; this was the cause of the flaky checkbox in the review and config-proposal e2e specs.

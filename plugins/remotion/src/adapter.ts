@@ -1,12 +1,12 @@
-import { rm, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { availableParallelism } from "node:os";
-import { join, posix, resolve, win32 } from "node:path";
+import { dirname, join, posix, relative, resolve, win32 } from "node:path";
 import type { ClipAdapter, LiveContext, LivePage, PropsSchema, PropsValidation, RenderContext, RenderTimingKind } from "@frameshell/plugin-api";
 import { patchedBundle } from "./elements.js";
 import { type Bundle, BundleCache } from "./bundles.js";
 import { checkLiveInternals, liveHead } from "./live.js";
 import { type RemotionComposition, type RemotionLoader, type RemotionRenderer, findRemotionRoot, loadProjectRemotion } from "./remotion.js";
-import { timingIssues, timingKinds, withTiming } from "./timing.js";
+import { TIMING_HELPER_FILE, outdatedTimingHelper, outdatedTimingHelperAdvice, timingIssues, timingKinds, withTiming } from "./timing.js";
 
 /** Clip type this adapter registers. */
 export const CLIP_TYPE = "remotion";
@@ -111,6 +111,10 @@ export function createRemotionAdapter(options: RemotionAdapterOptions): ClipAdap
       const { id } = clip as RemotionClip;
       const props = requireProps(clip as RemotionClip);
       const entry = await entryOf(projectDir, clip as RemotionClip);
+      if (ctx.warn && timingKinds(props).includes("words")) {
+        const helper = join(dirname(entry), TIMING_HELPER_FILE);
+        if (outdatedTimingHelper(await readFile(helper, "utf8").catch(() => ""))) ctx.warn(`Clip ${(clip as RemotionClip).id}: ${outdatedTimingHelperAdvice(relative(projectDir, helper).replaceAll("\\", "/"))}`);
+      }
       const chrome = await ctx.ensureBinary("chrome-headless-shell");
       ctx.progress({ fraction: 0, message: "Bundling" });
       // The bundle `inputs` keyed: unchanged unless code changed since, and then the next refresh renders again.

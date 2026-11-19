@@ -10,9 +10,9 @@ export type ModelStatus = (text: string, tone: "info" | "error" | "warning") => 
  * Transcription model picker of the transcript toolbar (#427): the project's `transcription.model` (Default = this
  * machine's default, else the provider's), the provider's own models with their size, the model files registered on
  * this computer, and "Custom file…", which registers a file under a name and selects it. Re-reads the list when its
- * window gets focus, so a change made in the terminal shows.
+ * window gets focus, so a change made in the terminal shows. `onProvider` hears the project's transcription provider id.
  */
-export function ModelPicker({ onStatus }: { onStatus: ModelStatus }) {
+export function ModelPicker({ onStatus, onProvider }: { onStatus: ModelStatus; onProvider?: (provider: string | null) => void }) {
   const [list, setList] = useState<ModelListResult | null>(null);
   const [busy, setBusy] = useState(false);
   /** A file being registered: its path, the name typed for it, and its provider settings. */
@@ -34,6 +34,9 @@ export function ModelPicker({ onStatus }: { onStatus: ModelStatus }) {
     view?.addEventListener("focus", onFocus);
     return () => view?.removeEventListener("focus", onFocus);
   }, [reload]);
+
+  const provider = list ? (list.project?.provider ?? null) : null;
+  useEffect(() => onProvider?.(provider), [onProvider, provider]);
 
   const choices = list ? modelChoices(list) : null;
 

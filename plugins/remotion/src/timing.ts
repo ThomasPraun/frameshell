@@ -6,7 +6,10 @@ export const TIMING_PROP = "timing";
 /** Reserved `inputProps` key the timing arrives under, in renders and the live page alike. */
 export const TIMING_INPUT = "frameshellTiming";
 
-/** Kinds `props.timing` may list, as `RenderTimingKind`. */
+/** File in the Remotion project's `src/` that reads the timeline timing; `remotion new` writes it once. */
+export const TIMING_HELPER_FILE = "frameshell-timing.ts";
+
+/** Kinds `props.timing` may list, as `RenderTimingKind`. A copy of `RENDER_TIMING_KINDS` (a type-only import: installed plugins carry no plugin-api, ADR 0021); `timing-parity.test.ts` holds the two equal. */
 export const TIMING_KINDS: readonly RenderTimingKind[] = ["beats", "markers", "words"];
 
 const KINDS_EXAMPLE = '["beats", "markers"]';
@@ -48,6 +51,20 @@ export function timingKinds(props: { timing?: unknown } | undefined): RenderTimi
 /** `inputProps` with the timeline's timing under {@link TIMING_INPUT}; the same object when there is none. */
 export function withTiming(inputProps: Record<string, unknown>, timing: RenderTiming | undefined): Record<string, unknown> {
   return timing ? { ...inputProps, [TIMING_INPUT]: timing } : inputProps;
+}
+
+/**
+ * Whether `source` is a Frameshell timing helper written before the `words` kind: it declares `FrameshellTiming`
+ * but not `wordsProblem`. A file of the person's own (no such interface) is never outdated. Remotion projects are
+ * not updated by Frameshell, so this only feeds a warning; the fields are added by hand.
+ */
+export function outdatedTimingHelper(source: string): boolean {
+  return source.includes("export interface FrameshellTiming") && !source.includes("wordsProblem");
+}
+
+/** What to do about an {@link outdatedTimingHelper}, named for the project-relative `file`. */
+export function outdatedTimingHelperAdvice(file: string): string {
+  return `${file} predates transcript words: add FrameshellWord ({ at, end, text, id }) and \`words?\` and \`wordsProblem?\` to FrameshellTiming by hand, as the Remotion skill shows, before a composition reads them.`;
 }
 
 /**

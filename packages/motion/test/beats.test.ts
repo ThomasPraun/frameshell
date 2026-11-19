@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { spring } from "@frameshell/schema/motion";
-import { beatAt, beatTime, beats, frameshellTiming, hasBeats, markers, sinceBeat, springOnBeat } from "../src/index.js";
+import { beatAt, beatTime, beats, frameshellTiming, hasBeats, markers, sinceBeat, springOnBeat, words } from "../src/index.js";
 
 const page = globalThis as Record<string, unknown>;
 
@@ -147,5 +147,28 @@ describe("markers", () => {
     expect(markers()).toEqual([]);
     withTiming({ beats: TIMING.beats });
     expect(markers("Hook")).toEqual([]);
+  });
+});
+
+describe("words", () => {
+  const WORDS = [
+    { at: 0.5, end: 0.9, text: "Hello", id: "w_000001" },
+    { at: 1, end: 1.4, text: "world", id: "w_000002" },
+  ];
+
+  it("lists the words the host wrote, as given", () => {
+    withTiming({ words: WORDS });
+    expect(words()).toEqual(WORDS);
+  });
+
+  it("is empty with no page timing, no words timing, or words the host could not read (no nominal fallback)", () => {
+    expect(words()).toEqual([]);
+    withTiming({ beats: TIMING.beats });
+    expect(words()).toEqual([]);
+    withTiming({ words: [], wordsProblem: "no-transcript" });
+    expect(words()).toEqual([]);
+    expect(frameshellTiming()?.wordsProblem).toBe("no-transcript");
+    withTiming({ words: "nope" });
+    expect(words()).toEqual([]);
   });
 });

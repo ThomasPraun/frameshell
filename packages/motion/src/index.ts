@@ -24,17 +24,19 @@ export {
   markers,
   sinceBeat,
   springOnBeat,
+  words,
   type BeatPosition,
   type FrameshellTiming,
   type ListedBeat,
   type NominalBeats,
   type TimingBeat,
   type TimingMarker,
+  type TimingWord,
 } from "./beats.js";
 import { type ListedBeat, type NominalBeats, hasBeats, listBeats } from "./beats.js";
 
 /** Version of this runtime; a composition's copy names it in its first line. */
-export const version = "0.5.0";
+export const version = "0.6.0";
 
 /** Paints the whole composition at `t` seconds; must depend on nothing but `t`. */
 export type Paint = (t: number) => void;

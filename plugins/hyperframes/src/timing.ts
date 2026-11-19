@@ -13,6 +13,7 @@ export const TIMING_GLOBAL = "frameshellTiming";
  */
 export const ON_BEATS_PROP = "onBeats";
 
+// Copy of `RENDER_TIMING_KINDS` (type-only import here: installed plugins carry no plugin-api, ADR 0021); `timing.test.ts` holds the two equal.
 const KINDS: readonly RenderTimingKind[] = ["beats", "markers", "words"];
 
 const META_TAG = /<meta\b[^>]*>/gi;

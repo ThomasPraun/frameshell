@@ -81,6 +81,7 @@ Found while looking for why motion-blurred renders were not repeatable (owner de
 - **Version.** 0.3.0 moves elements by at most 1/64 px and 0.01° from where 0.2.0 put them; a scaffolded clip keeps its frozen 0.2.0 copy until `update`. The near-1 scale snap stays a cursor-kit function.
 - **0.4.0 (ADR 0041).** Adds `cuts(seconds[], fps?)`, a time guard for compositions that cut between scenes inside themselves, so motion blur never mixes two scenes; it reads the frame rate from `<meta name="frameshell-fps">`, which only a blurred render carries, and passes frame times unchanged. No pixel of an existing composition changes.
 - **0.5.0 (ADR 0029 decision 8, owner decision 2026-11-17).** Adds the beat helpers `beats`, `beatAt`, `beatTime`, `sinceBeat`, `springOnBeat`, `markers`, `hasBeats` and `frameshellTiming`: pure functions of `t` over `window.frameshellTiming`, with a nominal-BPM (or clip-seconds) fallback when the page has no usable grid. Nothing that 0.4.0 exports changes, so a frozen 0.4.0 copy renders as it did and keeps its cache key; `hyperframes update` lists the move to 0.5.0 like any other, and only a clip that is refreshed and whose composition calls the helpers (today the `checklist` `onBeats` prop, with the timing meta tag added by hand) can look different.
+- **0.6.0 (ADR 0029 decision 8, owner decision 2026-11-19).** Adds `words()`: the page's `frameshellTiming.words` list or `[]`, nothing remembered, no nominal fallback. Nothing 0.5.0 exports changes, so a frozen copy renders as it did and keeps its cache key.
 
 ### Slices
 
