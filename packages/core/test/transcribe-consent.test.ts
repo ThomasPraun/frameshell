@@ -96,6 +96,25 @@ describe("transcribe consent", () => {
     expect(calls).toEqual([]);
   });
 
+  it("keeps the token when the cost moves by less than a cent between the ask and the confirmed call", async () => {
+    const dir = project();
+    const costs = [0.00904, 0.00896];
+    const { provider, calls } = counted({ remote: true, estimate: () => ({ cost: costs.shift() ?? 0, currency: "USD" }) });
+    const token = ((await refusal(run(dir, provider))).data as { confirmation: string }).confirmation;
+    await run(dir, provider, { yes: true, confirmation: token });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("treats an estimate that is not a finite number as an unknown cost", async () => {
+    const { provider, calls } = counted({ remote: true, estimate: () => ({ cost: Number.NaN, currency: "USD" }) });
+    const error = await refusal(run(project(), provider));
+    expect(error.code).toBe(ErrorCode.ConfirmationRequired);
+    expect(error.message).toMatch(/to that service and may cost money: it gives no usable estimate/);
+    expect(error.message).not.toContain("NaN");
+    expect(error.data).toMatchObject({ cost: null });
+    expect(calls).toEqual([]);
+  });
+
   it("treats a provider without estimate or `free: true` as paid at an unknown cost", async () => {
     const dir = project();
     const { provider, calls } = counted({});

@@ -62,15 +62,17 @@ export async function confirmTranscription(run: TranscriptionRun): Promise<void>
   if (length === null) throw new Error(`${run.audio} is not a mono 16-bit PCM WAV`);
   const seconds = Math.round(length * 1000) / 1000;
   const priced = provider.estimate ? await provider.estimate({ seconds }, run.options) : null;
-  const cost = priced ? { amount: Math.max(0, priced.cost), currency: priced.currency } : null;
+  // An estimate that is not a finite number is no estimate: the run is paid at an unknown cost.
+  const cost = priced && Number.isFinite(priced.cost) ? { amount: Math.max(0, priced.cost), currency: priced.currency } : null;
   const remote = provider.remote === true;
-  const unknownCost = !provider.estimate && provider.free !== true;
+  const unknownCost = provider.estimate ? cost === null : provider.free !== true;
   if (!remote && !unknownCost && (cost === null || cost.amount === 0)) return;
 
-  // What the person saw: the asset's content and the cost as printed. Not the audio source or exact length, which
-  // change when an ingest finishes between the ask and the confirmed call (sidecar instead of the asset).
+  // What the person saw: the asset's content and the cost in whole cents. Not the audio source, exact length or
+  // printed cost: an ingest that finishes between the ask and the confirmed call swaps in audio a few ms off.
+  const cents = cost ? `${Math.round(cost.amount * 100)} ${cost.currency}` : null;
   const confirmation = createHash("sha256")
-    .update(JSON.stringify([providerId, run.model, run.assetHash, cost ? formatCost(cost) : null]))
+    .update(JSON.stringify([providerId, run.model, run.assetHash, cents]))
     .digest("hex")
     .slice(0, 32);
   const ask = { provider: providerId, model: run.model, asset: run.asset, seconds, cost, remote, confirmation };
@@ -83,7 +85,7 @@ export async function confirmTranscription(run: TranscriptionRun): Promise<void>
     cost !== null && cost.amount > 0
       ? ` and costs about ${formatCost(cost)}, plus short re-checks of over-long words. `
       : unknownCost
-        ? " and may cost money: it gives no estimate and does not declare itself free. "
+        ? " and may cost money: it gives no usable estimate and does not declare itself free. "
         : ". ";
   const message = sent + price;
   if (!run.yes) {

@@ -39,6 +39,7 @@ describe("testScope", () => {
         "packages/core/test/official-plugin-packages.test.ts",
         "packages/core/test/openai-speech.test.ts",
         "packages/core/test/openai-transcription.test.ts",
+        "plugins/openai-transcription/test",
         "plugins/remotion/test",
       ],
       e2e: true,
@@ -53,6 +54,11 @@ describe("testScope", () => {
       "packages/core/test/openai-speech.test.ts",
       "packages/core/test/openai-transcription.test.ts",
       "plugins/blender/test",
+      "plugins/openai-transcription/test",
     ]);
+  });
+
+  it("runs the openai-transcription scrub parity test when openai-speech changes", () => {
+    expect(testScope(["plugins/openai-speech/src/provider.ts"]).filter).toContain("plugins/openai-transcription/test");
   });
 });

@@ -19,7 +19,7 @@ export const TIMING_NOTE =
   "Word times come from OpenAI as the service gives them, coarser than whisper.cpp's alignment: check cuts by ear or with `transcribe --verify`.";
 /**
  * Longest piece sent in one request. OpenAI takes at most 25 MB; 10 minutes of the host's 16 kHz mono 16-bit WAV is
- * 19.2 MB, leaving room for a higher sample rate from a provider-agnostic host.
+ * 19.2 MB.
  */
 const PIECE_SECONDS = 600;
 /** How far before a piece's limit its cut may move to find a pause. */
