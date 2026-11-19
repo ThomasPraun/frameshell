@@ -6,8 +6,14 @@ Each plugin = own npm package; `files` whitelist (`node scripts/plugins-npm.mjs 
 |---|---|
 | whisper-cpp (local transcription) | `packages/core/src/transcripts/CLAUDE.md` |
 | remotion (bundle as cache input, outside-project code, `refreshRenders`; ADR 0009) | `remotion/src/`; element sheet bundle copy `remotion/src/elements.ts` |
-| `@frameshell/openai-speech` (ADR 0034 decision 24) | `openai-speech/src/` (`provider.ts`, `prices.ts`, `wav.ts`); test `openai-speech/test/provider.test.ts`; host load `packages/core/test/openai-speech.test.ts`; install hint `SPEECH` in `packages/core/src/plugins/host.ts` |
+| `@frameshell/openai-speech` (ADR 0034 decision 24) | `openai-speech/src/` (`provider.ts`, `prices.ts`, `wav.ts`); test `openai-speech/test/provider.test.ts`; host load `packages/core/test/openai-speech.test.ts`; install hint from the official table (below) |
 | `@frameshell/openai-transcription` (ADR 0046) | `openai-transcription/src/` (long audio cut at pauses `pieces.ts`); test `openai-transcription/test/provider.test.ts`; consent: `packages/core/src/transcripts/CLAUDE.md` |
+
+## Official plugin table
+
+- ONE list of official plugins: `OFFICIAL_PLUGINS` in `packages/protocol/src/official-plugins.ts` (package, kind, provided ids, purpose, need, paid/cloud, managed downloads). Read by host install hints (`providerHint` in `packages/core/src/plugins/host.ts`), `plugin.catalog` (`plugins/catalog.ts`), app `TRANSCRIPTION_PLUGIN`. Never a second list.
+- Add, rename or change plugin: edit table in same change. `packages/core/test/official-plugins.test.ts` checks it vs `plugins/*` manifests + binary manifest.
+- Only official plugins in catalog. Third-party stay terminal-only.
 
 ## Cloud providers (next cloud provider = same shape, own plugin)
 

@@ -28,7 +28,7 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
-import { ErrorCode, RpcError, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
+import { ErrorCode, RpcError, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
@@ -852,7 +852,7 @@ async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
 }
 
 /** Official transcription plugin a project made from videos gets. */
-const TRANSCRIPTION_PLUGIN = "@frameshell/whisper-cpp";
+const TRANSCRIPTION_PLUGIN = officialPluginProviding("transcription-provider", APP_TRANSCRIPTION_PROVIDER)!.name;
 /** Model whisper-cpp uses when nobody names one; twin of `DEFAULT_MODEL` in `plugins/whisper-cpp/src/provider.ts`. */
 const WHISPER_DEFAULT_MODEL = "large-v3-turbo-q5_0";
 

@@ -251,6 +251,60 @@ export const connectionMethods = {
       plugins: z.array(PluginInfoSchema),
     }),
   },
+  "plugin.catalog": {
+    description:
+      "The official Frameshell plugins, each with what it is for, what it needs from the person (their own Blender, " +
+      "their own OpenAI API key, a Remotion project), whether it is paid or sends data off the machine, and what it " +
+      "downloads on first use with the size for this machine and whether that is already on disk. Also whether the " +
+      "enclosing project has it installed, its load status as `plugin.list` reports it (untrusted plugin code is never " +
+      "run to answer) and the project's trust state. Nothing is installed, downloaded or loaded for it, and no key is " +
+      "ever returned: only whether one is set. These are options, not obligations: offer the ones that fit what the " +
+      "person is making, with what they need, what they cost and how much they download, and install nothing " +
+      "(`plugin.install`) without the person's yes. Only official plugins are listed; others are installed from the terminal. " +
+      "Fails with ProjectNotFound.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      platform: z.string().describe("`<os>-<arch>` the download sizes are for, e.g. `darwin-arm64`."),
+      trust: TrustStateSchema,
+      plugins: z.array(
+        z.object({
+          name: z.string().describe("npm package name; `plugin.install` takes it as `spec`."),
+          kind: z.enum(["clip-adapter", "transcription-provider", "speech-provider"]),
+          provides: z.array(z.string()).describe("Clip type (`clip-adapter`) or provider id it contributes, e.g. `hyperframes`, `openai`."),
+          purpose: z.string().describe("One sentence for a person."),
+          need: z.object({
+            kind: z.enum(["none", "blender", "openai-key", "remotion-project"]),
+            text: z.string().describe("What the person must have or do, in words."),
+            met: z
+              .boolean()
+              .nullable()
+              .describe(
+                "True when nothing is needed or it was found (Blender as `doctor` finds it, `OPENAI_API_KEY` set in the daemon's environment); " +
+                  "false when it was not; null when it cannot be told cheaply (a Remotion project).",
+              ),
+          }),
+          paid: z.boolean().describe("The provider charges per use."),
+          cloud: z.boolean().describe("Audio or text leaves the machine."),
+          downloads: z.array(
+            z.object({
+              kind: z.enum(["binary", "model"]),
+              id: z.string().describe("Binary package or model id as `doctor` and `model.list` name them."),
+              what: z.string(),
+              bytes: z.int().nullable().describe("Download size for this machine's platform; null when no build is pinned for it."),
+              onDisk: z.boolean().describe("Already downloaded: using the plugin will not download it again."),
+            }),
+          ),
+          downloadBytes: z.int().describe("Sum of `bytes` of the downloads not yet on disk: what installing and first use would fetch."),
+          installed: z.boolean().describe("The project pins it in `frameshell.json`."),
+          pin: z.string().nullable().describe("Pinned spec; null when not installed."),
+          status: z.enum(["loaded", "error", "untrusted"]).nullable().describe("As `plugin.list`; null when not installed."),
+          version: z.string().nullable().describe("Manifest version; null unless read (installed and loaded)."),
+          error: z.string().nullable().describe("Why it did not load; null otherwise."),
+        }),
+      ),
+    }),
+  },
   "plugin.install": {
     mutating: true,
     description:

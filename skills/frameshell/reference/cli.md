@@ -170,6 +170,7 @@ Accepting and rejecting a proposal is the person's, in the app: there is no comm
 | `frameshell plugin install <spec>` | `github:<user>/<repo>[#ref]`, `git+<url>[#ref]`, an npm name, or a local tarball from `npm pack` (`./name-1.0.0.tgz`; one from outside the project is copied to `vendor/`; pinned with its sha256: a changed file is never installed). Pins it in `frameshell.json` and links the skills it ships into `.claude/skills/`. |
 | `frameshell plugin remove <name>` | Unpin, uninstall, unlink its skills. |
 | `frameshell plugin list` | Plugins with status and what they contribute (commands, clip types, providers, presets, skills). |
+| `frameshell plugin catalog [--json]` | The official plugins as options, not obligations: what each is for, what it needs from the person (their own Blender, their own OpenAI key, a Remotion project), whether it is paid or sends data off the machine, what it downloads on first use (size for this machine, already on disk or not), and whether this project has it. Reads only. Offer the ones that fit what the person is making, with what they need, cost and download, and run `plugin install` only after their yes. MCP: `plugin_catalog`. |
 | `frameshell <plugin> <command> …` | A plugin command, e.g. `frameshell hyperframes new intro --duration 8`. |
 
 A project that declares plugins loads them only once trusted: commands needing them fail with `ProjectNotTrusted` until the user agrees and you re-run with `--trust`.
