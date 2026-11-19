@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
+  `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
+  default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden
+  video track and a muted audio track disabled), media clips as `Clip.2` from their source `in`, lasting their timeline length, with a
+  `LinearTimeWarp` for `speed`, gaps, markers as `Marker.2`, every time a whole frame at the project rate. Generated
+  and nested timeline clips keep their slot, name and timeline length as `Clip.2` with a `MissingReference.1` and a
+  warning. Multicam program tracks, subtitle tracks, transitions, transforms and keys, grades, film finish, audio
+  effects and the sound of media clips on video tracks are not exported and are named in `warnings`. `target_url` is relative to the file, `--absolute-paths` writes
+  `file://` URLs. No new dependency and no Python; dissolves and an app menu come in later slices.
+- `frameshell people tune` (`people.tune`, MCP `people_tune`; protocol 178): a read-only tuning report for the voice
+  and face suggestion thresholds (ADR 0020 decision 15). It replays matching on the people the owner confirmed (linked
+  speakers with cached voice prints, face tracks a face anchor names): same-person and different-person score spreads,
+  and for each `SPEAKER_MATCH` and `SPEAKER_MARGIN`, `FACE_CLUSTER_MATCH` and `FACE_PERSON_MATCH` and
+  `FACE_PERSON_MARGIN` tried, correct and wrong suggestions, precision, recall, cluster purity and splits. Nothing is
+  scanned, downloaded or changed, and no threshold changes. Results go in `docs/research/people-acceptance-run.md`.
+
+- OpenAI transcription provider, first slice of #382 (ADR 0046, epic #451; protocol 180):
+  `frameshell plugin install @frameshell/openai-transcription` adds the paid cloud provider `openai`
+  (`whisper-1`, word timestamps as the service gives them, a note in `warnings`) for
+  `frameshell transcribe <asset> --provider openai`. whisper.cpp stays the default. Every run is refused with
+  `ConfirmationRequired` (the asset's audio is uploaded, its length, the estimated cost at $0.006 a minute from a
+  price table with source and date) until `transcribe --yes [--confirmation token]`; the token fails as
+  `ConfirmationStale` when the asset or cost changed. No consent is stored. Long audio is cut at pauses into
+  10-minute pieces under the 25 MB upload limit. The key comes from `OPENAI_API_KEY` only and never reaches a
+  project file, the history, progress or an error (texts scrubbed, a parity test with `openai-speech`). The plugin
+  API gains optional `free`, `remote` and `estimate` on `TranscriptionProvider`; a provider with neither `estimate`
+  nor `free: true` counts as paid, except `whisper-cpp` of any version (`@frameshell/whisper-cpp` 0.3.1 declares
+  `free: true`). `transcribe.verify`, shoot takes, the voiceover misread check and captions, and `analyze` speech
+  use only a local free provider: with any other they refuse (`TranscriptionFailed`) or skip. Wire: `transcribe`
+  gains `yes` and `confirmation`. Tests run a stub HTTP server with a fake key, never the real API.
 - `grade.analyze` and `grade.compare` on generated and nested clips, slice 11 of #384 (ADR 0031, epic #451;
   protocol 177): `grade compare` (MCP `grade_compare`) draws one frame of a generated clip or a nested timeline clip
   under candidate grades through the export frame path, as it did footage (a multicam shot is refused with reason

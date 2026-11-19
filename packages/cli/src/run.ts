@@ -38,10 +38,11 @@ import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoo
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
 import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeats } from "./beats-commands.js";
 import { BRAND_FLAGS, BRAND_USAGE, type BrandInvocation, executeBrand, parseBrand } from "./brand-commands.js";
-import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
+import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover, shellWord } from "./voiceover-commands.js";
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
 import { JOB_FLAGS, JOB_USAGE, type JobInvocation, executeJob, formatJob, parseJob } from "./job-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
+import { EXPORT_FLAGS, EXPORT_USAGE, type ExportInvocation, executeExport, parseExport } from "./export-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { BATCH_FLAGS, BATCH_USAGE, type BatchCancelInvocation, type BatchInvocation, batchOutcome, batchLabel, canceledLine, canceledRows, describeBatch, describeCancel, onInterrupt, parseBatch, waitReviews, watchCanceled } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
@@ -97,9 +98,11 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
-             [--provider p] [--model m] [--language l]
+             [--provider p] [--model m] [--language l] [--yes [--confirmation token]]
                                First run downloads the engine and model (minutes, once). --model: one the
-                               provider ships or one registered with \`model add\` (see \`model list\`)
+                               provider ships or one registered with \`model add\` (see \`model list\`).
+                               A cloud or paid provider (openai) is refused until --yes, which you pass
+                               only once the person agreed to upload the asset's audio at the cost shown
   transcribe --verify <export> [--timeline id] [--provider p] [--model m] [--language l]
                                Re-transcribe an export and list the source words lost at cuts,
                                with timeline position and clip; exit 1 if any was lost
@@ -107,7 +110,7 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop] [--yes]
+${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}${EXPORT_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop] [--yes]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.<container>).
                                --quality draft: 30 fps at most, fast encode for review rounds; final:
@@ -185,13 +188,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "job", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "brand", "skill", "model", "format", "batch", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "job", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "brand", "skill", "model", "format", "batch", "export", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "pop", "onion", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "no-faces", "from-analysis", "only"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "pop", "onion", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "no-faces", "from-analysis", "only", "absolute-paths"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -205,7 +208,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
-  transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
+  transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language", "yes", "confirmation"],
   render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "yes"],
   frame: ["at", "out", "timeline", "preset", "format", "quality", "final", "yes"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
@@ -227,6 +230,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   matte: [],
   ...STYLE_FLAGS,
   ...FORMAT_FLAGS,
+  ...EXPORT_FLAGS,
   ...BATCH_FLAGS,
   "skill update": ["force"],
   ask: ASK_FLAGS,
@@ -266,7 +270,7 @@ type Invocation =
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
-  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
+  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string; yes?: true; confirmation?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
   | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string }; loop?: true; yes?: true }
@@ -294,6 +298,7 @@ type Invocation =
   | BrandInvocation
   | { kind: "matte"; asset: string }
   | FormatInvocation
+  | ExportInvocation
   | BatchInvocation
   | BatchCancelInvocation
   | { kind: "skill.update"; force: boolean }
@@ -409,6 +414,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           color: { type: "string" },
           "cover-frame": { type: "boolean", default: false },
           loop: { type: "boolean", default: false },
+          "absolute-paths": { type: "boolean", default: false },
           "cover-text": { type: "string" },
           "cover-at": { type: "string" },
           "cover-color": { type: "string" },
@@ -493,7 +499,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" || (command === "review" && (sub === "require" || sub === "waive")) ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" || command === "export" || (command === "review" && (sub === "require" || sub === "waive")) ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -615,6 +621,7 @@ function parseBuiltin(
     text?: string | undefined;
     color?: string | undefined;
     "cover-frame"?: boolean | undefined;
+    "absolute-paths"?: boolean | undefined;
     loop?: boolean | undefined;
     "cover-text"?: string | undefined;
     "cover-at"?: string | undefined;
@@ -648,6 +655,7 @@ function parseBuiltin(
   if (command === "job") return parseJob(rest, options);
   if (command === "brand") return parseBrand(rest, options);
   if (command === "format") return parseFormat(rest, options);
+  if (command === "export") return parseExport(rest, options);
   if (command === "batch") return parseBatch(rest, options);
   if (command === "review") return parseReview(rest, options);
   if (command === "analyze") return parseAnalyze(rest, options);
@@ -750,6 +758,12 @@ function parseBuiltin(
   }
   if (command === "transcribe") {
     const { provider, model, language } = options;
+    const confirmation = options.confirmation?.trim();
+    if (options.confirmation !== undefined && confirmation === "") throw new UsageError("--confirmation: expected the token the ConfirmationRequired refusal printed.");
+    if (confirmation !== undefined && !options.yes) throw new UsageError("--confirmation goes with --yes: it binds the confirmation to the ask the person saw.");
+    if (options.yes && (options.speakers !== undefined || options.verify !== undefined)) {
+      throw new UsageError("--yes goes with `frameshell transcribe <asset>`: only a transcription of an asset may upload audio.");
+    }
     if (options.speakers !== undefined) {
       if (rest.length > 0) throw new UsageError("`frameshell transcribe --speakers <asset>` takes the asset as the flag's value, nothing else.");
       if (options.verify !== undefined || provider || model || language || options.timeline) {
@@ -780,6 +794,8 @@ function parseBuiltin(
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
       ...(language ? { language } : {}),
+      ...(options.yes ? { yes: true as const } : {}),
+      ...(confirmation !== undefined ? { confirmation } : {}),
     };
   }
   if (command === "proposal") {
@@ -905,11 +921,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "transcribe": {
       await settleTrust(conn, flags, io);
       const { kind: _kind, ...params } = inv;
-      const result = await conn.request(
-        "transcribe",
-        { cwd, ...params },
-        flags.json ? {} : { onProgress: progressPrinter(io) },
-      );
+      const result = await conn
+        .request("transcribe", { cwd, ...params }, flags.json ? {} : { onProgress: progressPrinter(io) })
+        .catch((error: unknown) => {
+          throw withTranscribeConfirmation(error, inv);
+        });
       return flags.json ? json(result) : formatTranscribe(result);
     }
     case "matte": {
@@ -972,6 +988,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "format.add":
     case "format.remove":
       return executeFormat(conn, inv, cwd, flags.json);
+    case "export.otio":
+      return executeExport(conn, inv, cwd, flags.json);
     case "model.list":
     case "model.add":
     case "model.remove":
@@ -1008,6 +1026,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return `${skillLine(result) ?? `Agent skill ${result.dir} is current.`}\n`;
     }
     case "people.ranges":
+    case "people.tune":
       return executePeople(conn, inv, cwd, flags.json);
     case "people.suggest":
     case "people.confirm":
@@ -1346,6 +1365,41 @@ function progressPrinter(io: CliIo): (progress: Progress) => void {
     lastMessage = message;
     lastDecile = decile;
   };
+}
+
+/**
+ * A `ConfirmationRequired` or `ConfirmationStale` refusal of `transcribe` with the command that confirms it: the same
+ * asset, provider, model and language plus `--yes --confirmation <token>` (JSON keeps the token in `data`).
+ */
+function withTranscribeConfirmation(error: unknown, inv: Extract<Invocation, { kind: "transcribe" }>): unknown {
+  if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return error;
+  const token = (error.data as { confirmation?: unknown } | undefined)?.confirmation;
+  if (typeof token !== "string") return error;
+  const command = transcribeConfirmCommand(inv, token);
+  return command === null ? error : new RpcError(error.code, `${error.message}\nOnce the person confirmed: ${command}`, error.data);
+}
+
+/** The `transcribe` command of `inv` confirmed with `token`; null when a word cannot be quoted alike in sh and PowerShell. */
+function transcribeConfirmCommand(
+  inv: Extract<Invocation, { kind: "transcribe" }>,
+  token: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const parts = ["frameshell", "transcribe"];
+  const flags: [string | null, string | undefined][] = [
+    [null, inv.asset],
+    ["--provider", inv.provider],
+    ["--model", inv.model],
+    ["--language", inv.language],
+  ];
+  for (const [flag, text] of flags) {
+    if (text === undefined) continue;
+    const word = shellWord(text, platform);
+    if (word === null) return null;
+    parts.push(...(flag === null ? [word] : [flag, word]));
+  }
+  parts.push("--yes", "--confirmation", token);
+  return parts.join(" ");
 }
 
 function formatTranscribe(result: TranscribeResult): string {

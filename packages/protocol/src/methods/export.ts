@@ -666,6 +666,41 @@ export const exportMethods = {
       warnings: z.array(z.string()).describe("Things to fix: the word is not spoken anywhere, or too small to read in a grid; empty when none."),
     }),
   },
+  "export.otio": {
+    description:
+      "Write a timeline as an OpenTimelineIO file (`.otio`, ADR 0045) for an editor that reads it (Resolve, Premiere through an adapter, " +
+      "Final Cut through an adapter). Export only, read-only: the file is derived, regenerated on every call and never read back; the " +
+      "timeline is never edited. Every time is a whole frame at the project rate. Mapped: video and audio tracks (bottom first; a hidden " +
+      "video track and a muted audio track are disabled), media clips as `Clip.2` from the source `in` for the timeline length, `LinearTimeWarp` for a `speed` " +
+      "other than 1 and the clip id, start and timeline length in `metadata.frameshell`, a gap for every hole, markers (label, colour, frame). " +
+      "Generated clips (`hyperframes`, `remotion`, `blender`) and nested timeline clips keep their slot, name and timeline length as a clip " +
+      "with a missing media reference, plus a warning: render the clip and relink it in the editor. NOT exported, each named in `warnings`: " +
+      "multicam program tracks, subtitle tracks, dissolves and fades, transforms and keys, colour grades, film finish, audio effects, the sound of media clips on video tracks (OTIO keeps sound on audio tracks). " +
+      "Media paths (`target_url`) are relative to the `.otio` file by default, so the folder can move with the project; " +
+      "`absolutePaths: true` writes `file://` URLs. Fails with InvalidOperation (`out` is not a `.otio` file), TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      out: AbsolutePath.optional().describe(
+        "Absolute path of the `.otio` file to write; its folder is created and it must end in `.otio`. Default `<project>/exports/<timeline>.otio`.",
+      ),
+      absolutePaths: z
+        .boolean()
+        .optional()
+        .describe("true: media `target_url`s are absolute `file://` URLs. Default false: relative to the folder of the `.otio` file."),
+      view: ViewParam,
+    }),
+    result: z.object({
+      ...ViewedShape,
+      path: z.string().describe("Absolute path of the `.otio` file written."),
+      timeline: z.string(),
+      fps: z.number().describe("Rate of every time in the file: the project frame rate."),
+      tracks: z.int().describe("Video and audio tracks written."),
+      clips: z.int().describe("`Clip.2` items written, those with missing media included."),
+      markers: z.int().describe("Markers written."),
+      warnings: z.array(z.string()).describe("What the file does not carry or carries differently; empty when nothing."),
+    }),
+  },
   "inspect.point": {
     description:
       "What a point of the frame shows at timeline time `at` (ADR 0011): every clip whose picture covers it, topmost " +

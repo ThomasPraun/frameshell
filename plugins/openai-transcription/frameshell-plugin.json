@@ -1,0 +1,12 @@
+{
+  "$schema": "https://frameshell.dev/schema/v1/plugin.json",
+  "name": "@frameshell/openai-transcription",
+  "version": "0.1.0",
+  "apiVersion": "1",
+  "main": "dist/index.js",
+  "description": "Paid cloud transcription provider: OpenAI whisper-1 with your own API key from OPENAI_API_KEY, asked before every upload (ADR 0046).",
+  "contributes": {
+    "transcriptionProviders": ["openai"],
+    "skills": ["skills/openai-transcription/SKILL.md"]
+  }
+}

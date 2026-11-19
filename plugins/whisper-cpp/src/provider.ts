@@ -65,6 +65,7 @@ export function createWhisperProvider(options: WhisperProviderOptions = {}): Tra
     models: Object.keys(MODELS).map((id) => ({ id, managedModel: `ggml-${id}` })),
     defaultModel: DEFAULT_MODEL,
     userModels: { formats: ["ggml"], options: [{ key: "dtw", values: DTW_PRESETS }] },
+    free: true,
     async transcribe(audio, { language, model = DEFAULT_MODEL, prompt }, context): Promise<TranscriptionResult> {
       const pinned = MODELS[model];
       if (!pinned && !context.userModel) {

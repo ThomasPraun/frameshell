@@ -1,0 +1,45 @@
+{
+  "name": "@frameshell/openai-transcription",
+  "version": "0.1.0",
+  "description": "Official Frameshell transcription provider: OpenAI whisper-1 with your own API key, word timestamps from the service.",
+  "license": "Apache-2.0",
+  "author": "Frameshell contributors",
+  "homepage": "https://github.com/ThomasPraun/frameshell/tree/main/plugins/openai-transcription#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThomasPraun/frameshell.git",
+    "directory": "plugins/openai-transcription"
+  },
+  "bugs": {
+    "url": "https://github.com/ThomasPraun/frameshell/issues"
+  },
+  "keywords": [
+    "frameshell",
+    "frameshell-plugin",
+    "openai",
+    "transcription"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "frameshell-plugin.json",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@frameshell/plugin-api": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

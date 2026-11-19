@@ -255,6 +255,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-api
 
+  plugins/openai-transcription:
+    devDependencies:
+      '@frameshell/plugin-api':
+        specifier: workspace:*
+        version: link:../../packages/plugin-api
+
   plugins/remotion:
     devDependencies:
       '@frameshell/core':

@@ -4,6 +4,8 @@
 
 Manual run by the owner with real recordings, in the built app (not `pnpm dev`). About 45 minutes plus scan time. Note each friction as an issue; write results to `docs/research/people-acceptance-run.md` (date, version, machine, timings, scores the suggestions showed).
 
+After the run, `frameshell people tune` (read-only; needs the voice prints `people suggest` cached and the face scans) replays the thresholds on the people and links you confirmed and prints correct and wrong suggestions per threshold; paste its `--json` scores and timings into the results file. Recordings never go in the repo, only scores and the constants you choose.
+
 ## Material
 
 - `ep1.mp4`, `ep2.mp4`: two interviews, one camera each, same host (Juan), different guests (Ana in `ep2`), 10+ minutes each.

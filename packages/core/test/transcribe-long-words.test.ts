@@ -48,6 +48,7 @@ function fakeProvider(full: TranscriptWord[], window: TranscriptWord[], windowFr
   const calls: { audio: string; seconds: number; prompt: string | undefined }[] = [];
   const provider: TranscriptionProvider = {
     id: "fake",
+    free: true,
     async transcribe(audio, options) {
       const seconds = (readFileSync(audio).length - 44) / 2 / 16_000;
       calls.push({ audio, seconds, prompt: options.prompt });
