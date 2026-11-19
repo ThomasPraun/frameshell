@@ -640,6 +640,16 @@ export interface FrameshellApi {
      */
     place(path: string, start: string, replace: boolean): Promise<VoiceoverPlaceResult>;
   };
+  transcript: {
+    /**
+     * Transcribe a project-relative asset (daemon `transcribe`, ADR 0046). A cloud or paid provider asks the person in a
+     * native box first (main sends `yes` only after they confirm); resolves `declined` when they chose not to upload,
+     * nothing having been sent. Progress arrives through `onProgress`. Rejects with the daemon's message.
+     */
+    run(asset: string): Promise<TranscribeRun>;
+    /** Called with each step of a run started by {@link run}. Returns an unsubscribe function. */
+    onProgress(listener: (progress: TranscribeProgress) => void): () => void;
+  };
   models: {
     /** `model.list` for the window's project (#427): provider models, files registered on this machine, the project's choice. */
     list(): Promise<MethodResult<"model.list">>;
@@ -899,6 +909,16 @@ export type VoiceoverRun =
   | { status: "declined" }
   | { status: "canceled"; kept: number };
 
+/** What {@link FrameshellApi.transcript}`.run` did: transcribed, or the person declined the upload. */
+export type TranscribeRun = { status: "done" } | { status: "declined" };
+
+/** One step of a run of {@link FrameshellApi.transcript}`.run`, in the user's language; `fraction` 0..1 or null. */
+export interface TranscribeProgress {
+  asset: string;
+  message: string;
+  fraction: number | null;
+}
+
 /**
  * One step of a running generation. `confirm`: waiting for the person to confirm a cost; `speak`: saying `line`;
  * `verify`: checking `line` against the script; `download`: fetching the transcription tools. `fraction` is of the whole
@@ -1056,6 +1076,8 @@ export const Channel = {
   clipsLive: "clips:live",
   scriptsOutline: "scripts:outline",
   multicamTurns: "multicam:turns",
+  transcribeRun: "transcribe:run",
+  transcribeProgress: "transcribe:progress",
   modelsList: "models:list",
   modelsUse: "models:use",
   modelsPickFile: "models:pick-file",

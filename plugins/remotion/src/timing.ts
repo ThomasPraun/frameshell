@@ -9,7 +9,7 @@ export const TIMING_INPUT = "frameshellTiming";
 /** File in the Remotion project's `src/` that reads the timeline timing; `remotion new` writes it once. */
 export const TIMING_HELPER_FILE = "frameshell-timing.ts";
 
-/** Kinds `props.timing` may list, as `RenderTimingKind`. */
+/** Kinds `props.timing` may list, as `RenderTimingKind`. A copy of `RENDER_TIMING_KINDS` (a type-only import: installed plugins carry no plugin-api, ADR 0021); `timing-parity.test.ts` holds the two equal. */
 export const TIMING_KINDS: readonly RenderTimingKind[] = ["beats", "markers", "words"];
 
 const KINDS_EXAMPLE = '["beats", "markers"]';

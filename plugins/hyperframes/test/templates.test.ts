@@ -225,7 +225,7 @@ describe("templates that put their steps on beats (onBeats)", () => {
       const html = read(id);
       expect(declared(html).find((v) => v.id === "onBeats")).toMatchObject({ type: "boolean", default: false });
       expect(html.match(/function stepTimes\(/g)).toHaveLength(1);
-      expect(html).toMatch(/P.onBeats[,)]/);
+      expect(html).toMatch(/stepTimes\([^)]*P\.onBeats/);
       // Asked through the prop, never a scaffolded meta tag: a plain clip keeps its key when the music moves.
       expect(html).not.toContain("frameshell-timing");
     }

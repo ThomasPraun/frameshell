@@ -1,9 +1,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { RENDER_BEATS_PROBLEMS, RENDER_WORDS_PROBLEMS } from "@frameshell/plugin-api";
+import { RENDER_BEATS_PROBLEMS, RENDER_TIMING_KINDS, RENDER_WORDS_PROBLEMS, type RenderTimingKind } from "@frameshell/plugin-api";
 import { type AdapterClip, type BeatsFile, type Timeline, type Transcript, flattenTimeline } from "@frameshell/schema";
-import { type ClipKeyInput, type ClipTimingInput, clipCacheKey, clipTiming } from "../src/index.js";
+import type { ClipAdapter } from "@frameshell/plugin-api";
+import { type ClipKeyInput, ClipRenderer, type ClipTimingInput, clipCacheKey, clipTiming } from "../src/index.js";
+import type { JobQueue } from "../src/jobs/queue.js";
 import { readTimelineWords } from "../src/transcripts/timeline-words.js";
 import { tempDir } from "./helpers.js";
 
@@ -52,6 +54,15 @@ const input = (over: Partial<ClipTimingInput> = {}): ClipTimingInput => ({
   kinds: ["beats"],
   beatsOf: async () => beatsFile(),
   ...over,
+});
+
+describe("RENDER_TIMING_KINDS", () => {
+  it("lists every RenderTimingKind once, in the order the timing names them", () => {
+    // A new kind in the type fails the typecheck of this table until the list has it too.
+    const known: Record<RenderTimingKind, true> = { beats: true, markers: true, words: true };
+    expect([...RENDER_TIMING_KINDS]).toEqual(["beats", "markers", "words"]);
+    expect([...RENDER_TIMING_KINDS].sort()).toEqual(Object.keys(known).sort());
+  });
 });
 
 describe("clipTiming", () => {
@@ -324,5 +335,41 @@ describe("render keys with words", () => {
     expect(await keyFor(["words"], words([["is", 4], ["much later", 9.5]]))).toBe(asked);
     expect(await keyFor(["words"], words([["was", 4], ["later", 9]]))).not.toBe(asked);
     expect(await keyFor(["words"], words([["is", 4.1], ["later", 9]]))).not.toBe(asked);
+  });
+});
+
+describe("ClipRenderer words reads", () => {
+  /** A renderer over a timeline of `clips` generated clips that each ask for words, counting every `wordsOf` read. */
+  function renderer(clips: number) {
+    const reads = { count: 0 };
+    const asking: AdapterClip[] = Array.from({ length: clips }, (_, index) => ({ ...card, id: `c_card_${index}`, start: index * 3 }));
+    const timelineOf = { schemaVersion: 1, id: "main", revision: 1, tracks: [{ id: "t_v", kind: "video", clips: asking }] } as Timeline;
+    const adapter = { type: "hyperframes", timing: () => ["words"] } as unknown as ClipAdapter;
+    const renderer = new ClipRenderer({
+      jobs: { watch: () => () => undefined } as unknown as JobQueue,
+      adapters: async () => new Map([["hyperframes", { adapter, plugin: { name: "@frameshell/hyperframes", version: "0.1.0" } }]]),
+      timelines: async () => ["main"],
+      load: async () => ({ timeline: timelineOf }),
+      peek: async () => timelineOf,
+      format: async () => ({ fps: FPS, width: 64, height: 36 }),
+      probe: async () => ({ width: 64, height: 36, duration: 1 }),
+      ensureBinary: async () => "ffmpeg",
+      wordsOf: async () => {
+        reads.count++;
+        return { words: [], unchecked: [] };
+      },
+      watch: false,
+    });
+    return { renderer, timelineOf, reads };
+  }
+
+  it("reads the transcript once per pass however many clips ask, and again on the next pass", async () => {
+    const { renderer: clips, timelineOf, reads } = renderer(3);
+    const root = tempDir();
+    await clips.check(root, timelineOf);
+    expect(reads.count).toBe(1);
+    await clips.check(root, timelineOf);
+    expect(reads.count).toBe(2);
+    await clips.close();
   });
 });

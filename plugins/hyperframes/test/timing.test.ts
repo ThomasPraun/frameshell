@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { LiveContext, RenderContext, RenderTiming } from "@frameshell/plugin-api";
+import { RENDER_TIMING_KINDS, type LiveContext, type RenderContext, type RenderTiming } from "@frameshell/plugin-api";
 import { type Producer, createHyperframesAdapter } from "../src/index.js";
 import { MOTION_RUNTIME } from "../src/motion-runtime.js";
 import { timingKinds } from "../src/timing.js";
@@ -63,6 +63,11 @@ function run(scripts: string[]): Record<string, unknown> {
 }
 
 describe("timing kinds a composition asks for", () => {
+  it("knows every kind the plugin API lists (the plugin keeps a copy: installed plugins carry no plugin-api)", () => {
+    const meta = `<meta name="frameshell-timing" content="${RENDER_TIMING_KINDS.join(" ")}">`;
+    expect(timingKinds(meta)).toEqual([...RENDER_TIMING_KINDS].sort());
+  });
+
   it("reads the meta tag in any quoting, case and separator, ignoring unknown words", () => {
     expect(timingKinds(ASKING)).toEqual(["beats", "markers"]);
     expect(timingKinds("<META content='Markers' NAME='frameshell-timing'>")).toEqual(["markers"]);

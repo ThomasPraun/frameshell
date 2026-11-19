@@ -159,8 +159,8 @@ export const workCards: Template = {
       var progTime = Math.min(P.progressTime, Math.max(0.4, D - OUT - 0.2 - progAt));
       var LEAD = 0.25; // seconds from a card landing to its start (the pulse and the bar joining)
       ${STEP_TIMES}
-      // The starts are the steps, or the beats: a card lands LEAD before its beat and pulses on it.
-      var starts = stepTimes(start + LEAD, gap, n, P.onBeats, D - OUT - 0.2);
+      // The starts are the steps, or the beats: a card lands LEAD before its beat and pulses on it. On a short clip the beats are held to the room too.
+      var starts = stepTimes(start + LEAD, gap, n, P.onBeats, room - LEAD, 0.08);
 
       M.bind("${id}", function (t) {
         var out = M.ease("exit", (t - (D - OUT)) / OUT);

@@ -112,7 +112,7 @@ export interface ClipRendererOptions {
   beatsOf?(root: string, asset: string): Promise<BeatsFile | null>;
   /**
    * Transcript words `timeline` plays, as `word:` references read them (`readTimelineWords`). Feeds
-   * `RenderContext.timing` of clips that ask for words; read for such clips only, once per pass over a timeline. Default: none, so
+   * `RenderContext.timing` of clips that ask for words; read on each key check of such a clip only. Default: none, so
    * such clips get `wordsProblem` `no-transcript`.
    */
   wordsOf?(root: string, timeline: Timeline, fps: number): Promise<TimelineWords>;
@@ -341,9 +341,9 @@ export class ClipRenderer {
     const project = await this.#options.format(root);
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const clips: ClipRenderInfo[] = [];
-    const words = this.#wordsForPass(root, flat, format.fps);
+    const words = this.#wordsPass(root, format.fps);
     for (const { clip, track } of placed) {
-      const keyed = await this.#keyOf(root, clip, adapters, format, flat, undefined, words);
+      const keyed = await this.#keyOf(root, clip, adapters, format, flat, undefined, words(flat));
       const about = { clip: clip.id, track, type: clip.type, source: clip.source ?? null };
       if (keyed.key === null) {
         clips.push({ ...about, ...UNRENDERED, state: "unavailable", error: keyed.error });
@@ -425,7 +425,7 @@ export class ClipRenderer {
         details,
       });
     const format = await this.#options.format(root);
-    const keyed = await this.#keyOf(root, clip, await this.#options.adapters(root), format, flat);
+    const keyed = await this.#keyOf(root, clip, await this.#options.adapters(root), format, flat, undefined, this.#wordsPass(root, format.fps)(flat));
     if (keyed.key === null) throw unavailable(keyed.error);
     const { adapter, plugin } = keyed.registered;
     if (!adapter.livePreview) throw unavailable(`the ${plugin.name} ${plugin.version} adapter has no live preview.`);
@@ -477,7 +477,7 @@ export class ClipRenderer {
       onWarning?.(`Clip ${clip.id} is used without motion blur, from its sharp render: ${refusal}`);
       return this.#obtain(root, draft, clip, format);
     };
-    const words = this.#wordsForPass(root, timeline, format.fps);
+    const words = this.#wordsPass(root, format.fps)(timeline);
     for (const { clip } of placed) {
       const keyed = await this.#keyOf(root, clip, adapters, format, timeline, undefined, words);
       if (keyed.key === null) throw renderFailed(timeline.id, clip, keyed.error);
@@ -489,7 +489,7 @@ export class ClipRenderer {
       if (!final || tier === "draft") got = await this.#obtain(root, keyed, clip, format, backgroundFinal(final));
       else if (cachedFinal) got = { ready: cachedFinal };
       else if (still !== null) {
-        const stillKeyed = await this.#keyOf(root, clip, adapters, format, timeline, still);
+        const stillKeyed = await this.#keyOf(root, clip, adapters, format, timeline, still, words);
         if (stillKeyed.key === null || !stillKeyed.final) throw renderFailed(timeline.id, clip, stillKeyed.key === null ? stillKeyed.error : "its adapter keyed no final");
         onWarning?.(
           `Clip ${clip.id} (${clip.type}) is drawn from a final render of this frame alone (composition frame ${still}); ` +
@@ -562,10 +562,11 @@ export class ClipRenderer {
     const project = await this.#options.format(root);
     const format = size ? { fps: project.fps, width: size.width, height: size.height } : project;
     const states: FinalRenderState[] = [];
+    const words = this.#wordsPass(root, format.fps)(timeline);
     for (const { clip } of placed) {
       const finals = adapters.get(clip.type)?.adapter.finals;
       if (!finals) continue;
-      const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
+      const keyed = await this.#keyOf(root, clip, adapters, format, timeline, undefined, words);
       if (keyed.key === null || !keyed.final) continue;
       const about = { clip: clip.id, type: clip.type };
       if (await this.#ready(root, keyed.final.key)) {
@@ -577,7 +578,7 @@ export class ClipRenderer {
       if (stillAt !== undefined) {
         const still = stillFrame(keyed, clip, stillAt, format.fps);
         if (still === null) continue;
-        const stillKeyed = await this.#keyOf(root, clip, adapters, format, timeline, still);
+        const stillKeyed = await this.#keyOf(root, clip, adapters, format, timeline, still, words);
         if (stillKeyed.key === null || !stillKeyed.final) continue;
         due = stillKeyed.final;
         sized = stillClip(clip, still, format.fps);
@@ -603,8 +604,9 @@ export class ClipRenderer {
     if (placed.length === 0) return;
     const adapters = await this.#options.adapters(root);
     const format = await this.#options.format(root);
+    const words = this.#wordsPass(root, format.fps)(timeline);
     for (const { clip } of placed) {
-      const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
+      const keyed = await this.#keyOf(root, clip, adapters, format, timeline, undefined, words);
       if (keyed.key === null) throw renderFailed(timeline.id, clip, keyed.error);
     }
   }
@@ -690,9 +692,10 @@ export class ClipRenderer {
     const project = await this.#options.format(root);
     const sizes = (await this.#options.formatSizes?.(root)) ?? [];
     const formats = [{ id: undefined, ...project }, ...sizes.map((size) => ({ id: size.id, fps: project.fps, width: size.width, height: size.height }))];
+    const wordsFor = this.#wordsPass(root, project.fps);
     for (const { clip, timeline } of placed) {
       for (const { id, ...format } of formats) {
-        const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format, timeline);
+        const keyed = await this.#keyOf(root, id === undefined ? clip : clipInFormat(clip, id), adapters, format, timeline, undefined, wordsFor(timeline));
         if (keyed.key === null) return `clip ${clip.id} has no cache key: ${keyed.error}`;
         keys.add(keyed.key);
         if (keyed.final) keys.add(keyed.final.key);
@@ -755,9 +758,10 @@ export class ClipRenderer {
     if (placed.length === 0) return;
     const adapters = await this.#options.adapters(root);
     const format = await this.#options.format(root);
+    const wordsFor = this.#wordsPass(root, format.fps);
     for (const { clip, timeline, hosted: isHosted } of placed) {
       if (this.#closed) return;
-      const keyed = await this.#keyOf(root, clip, adapters, format, timeline);
+      const keyed = await this.#keyOf(root, clip, adapters, format, timeline, undefined, wordsFor(timeline));
       if (keyed.key === null || this.#failed.has(entryId(root, keyed.key))) continue;
       if (isHosted && keyed.timing) continue;
       const { final } = keyed;
@@ -773,19 +777,27 @@ export class ClipRenderer {
   }
 
   /**
-   * The words `timeline` plays, read at most once however many clips of one pass (a status or an ensure) ask for
-   * them: each would otherwise read every transcript and hash its footage again. A pass is short, so a transcript
-   * edited during it is seen by the next one. Undefined when the host reads no words.
+   * The words reader of one pass (one call of a public method) over its timelines: for each timeline the first clip
+   * that asks for `words` reads them and the rest share that read, so a pass reads the transcript once per timeline
+   * however many clips ask. Never kept past the pass, so a transcript change between two calls re-keys. Absent when
+   * `wordsOf` is not configured: such clips get `wordsProblem` `no-transcript`.
    */
-  #wordsForPass(root: string, timeline: Timeline, fps: number): WordLoader | undefined {
+  #wordsPass(root: string, fps: number): (timeline: Timeline) => WordLoader | undefined {
     const { wordsOf } = this.#options;
-    return wordsOf ? onceWords(() => wordsOf(root, timeline, fps)) : undefined;
+    const loaders = new Map<Timeline, WordLoader>();
+    return (timeline) => {
+      if (!wordsOf) return undefined;
+      let loader = loaders.get(timeline);
+      if (!loader) loaders.set(timeline, (loader = onceWords(() => wordsOf(root, timeline, fps))));
+      return loader;
+    };
   }
 
   /**
    * Keys of `clip`, placed on `timeline` (whose beats and markers a clip that asks for timing reads). With `still`, its
    * `final` is the final of that one composition frame (slice 7): the adapter's inputs are those of {@link stillClip},
-   * its timing still the whole clip's, as the frame shows it in the whole final.
+   * its timing still the whole clip's, as the frame shows it in the whole final. `words` is the pass's memoised read of
+   * `timeline`'s words ({@link #wordsPass}); without it, a clip that asks for words reads them itself.
    */
   async #keyOf(
     root: string,
@@ -813,15 +825,14 @@ export class ClipRenderer {
     try {
       const kinds = registered.adapter.timing ? await registered.adapter.timing(structuredClone(clip), context) : [];
       if (!Array.isArray(kinds)) throw new Error('timing() must return an array such as ["beats", "markers"]');
-      const { beatsOf } = this.#options;
-      const wordsOf = words ?? this.#wordsForPass(root, timeline, format.fps);
+      const { beatsOf, wordsOf } = this.#options;
       timing = await clipTiming({
         clip,
         timeline,
         fps: format.fps,
         kinds,
         beatsOf: async (asset) => (beatsOf ? beatsOf(root, asset) : null),
-        ...(wordsOf ? { wordsOf } : {}),
+        ...(wordsOf ? { wordsOf: words ?? (() => wordsOf(root, timeline, format.fps)) } : {}),
       });
     } catch (error) {
       return { key: null, error: `${registered.plugin.name} could not say which timing ${clip.id} reads: ${(error as Error)?.message ?? error}` };

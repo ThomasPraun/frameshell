@@ -392,6 +392,36 @@ describe("GradeAnalyzer on clips that are not footage", () => {
     expect(error!.message).toMatch(/timelines\/inner\.json.*grade\.compare/);
   });
 
+  describe("a nested timeline's refusal", () => {
+    const nested = clip({ type: "timeline", source: "timelines/inner.json", duration: 2 });
+    const refusal = (nestedClips: GradeAnalyzerOptions["nestedClips"]) =>
+      refused(new GradeAnalyzer({ ffmpeg: never, probe: never, clips: { ensure: never }, ...(nestedClips ? { nestedClips } : {}) }).analyze("/p", timelineOf([nested]), request));
+    const refs = (...ids: string[]) => ids.map((id) => ({ id, type: "media", track: "t_in" }));
+
+    it("lists the clips it could analyze inside, still naming the file and grade.compare", async () => {
+      const error = await refusal(async () => [...refs("c_a", "c_b"), { id: "c_deeper", type: "timeline" }, { id: "c_shot", type: "shot" }, { id: "c_card", type: "card" }]);
+      expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "nested", field: "clip", inside: ["c_a", "c_b", "c_card"] } });
+      expect(error!.message).toContain("Analyze one of them: c_a, c_b, c_card (in timelines/inner.json)");
+      expect(error!.message).toMatch(/grade\.compare/);
+    });
+
+    it("lists the first eight and counts the rest", async () => {
+      const error = await refusal(async () => refs(...Array.from({ length: 11 }, (_, i) => `c_${i}`)));
+      expect(error!.message).toContain("c_0, c_1, c_2, c_3, c_4, c_5, c_6, c_7 and 3 more (in timelines/inner.json)");
+      expect((error!.data as { inside: string[] }).inside).toHaveLength(11);
+    });
+
+    it("falls back to the plain refusal when the file has no clip to analyze, cannot be read, or the option is absent", async () => {
+      for (const nestedClips of [undefined, async () => [], async () => [{ id: "c_shot", type: "shot" }], async (): Promise<never> => { throw new Error("disk gone"); }]) {
+        const error = await refusal(nestedClips);
+        expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "nested", field: "clip" } });
+        expect(error!.data).not.toHaveProperty("inside");
+        expect(error!.message).toMatch(/Analyze a clip inside it \(timelines\/inner\.json\).*grade\.compare/);
+        expect(error!.message).not.toContain("disk gone");
+      }
+    });
+  });
+
   it("refuses a multicam shot", async () => {
     const error = await refused(analyzer().analyze("/p", timelineOf([clip({ type: "shot", group: "g", in: 0, out: 2 })]), request));
     expect(error).toMatchObject({ code: ErrorCode.InvalidOperation, data: { reason: "not-gradable" } });
@@ -507,7 +537,12 @@ describe("grade.analyze on a generated clip", () => {
         data: { reason: "has-alpha" },
         message: expect.stringMatching(/grade\.compare/),
       });
-      const inner = { schemaVersion: 1, id: "inner", revision: 0, tracks: [{ id: "t_in", kind: "video", clips: [] as unknown[] }] };
+      const inner = {
+        schemaVersion: 1,
+        id: "inner",
+        revision: 0,
+        tracks: [{ id: "t_in", kind: "video", clips: [{ id: "c_inside", type: "media", asset: "assets/neutral.mp4", start: 0, in: 0, out: 1 }] as unknown[] }],
+      };
       await conn.request("file.write", { path: join(project, "timelines", "inner.json"), content: JSON.stringify(inner) });
       const main = JSON.parse(await timelineFile()) as { tracks: { id: string; clips: unknown[] }[] };
       main.tracks.find((entry) => entry.id === track)!.clips.push({ id: "c_nest", type: "timeline", source: "timelines/inner.json", start: 40, duration: 2 });
@@ -515,7 +550,7 @@ describe("grade.analyze on a generated clip", () => {
       await expect(conn.request("grade.analyze", { cwd: project, timeline: "main", clip: "c_nest" })).rejects.toMatchObject({
         code: ErrorCode.InvalidOperation,
         data: { reason: "nested" },
-        message: expect.stringMatching(/timelines\/inner\.json/),
+        message: expect.stringContaining("Analyze one of them: c_inside (in timelines/inner.json)"),
       });
     },
     MEDIA_TIMEOUT,
