@@ -273,11 +273,63 @@ describe("faces", () => {
     expect((await cli.request("people.suggest", { cwd: dir })).suggestions.filter((suggestion) => suggestion.kind !== "speaker")).toEqual([]);
   });
 
+  it("people.tune uses the tracks a face anchor names as the labels, and reads the scan only", async () => {
+    const { dir, cli } = await scanned();
+    const [juan, nobody] = (await cli.request("people.suggest", { cwd: dir })).suggestions.filter((suggestion) => suggestion.kind === "face-speaker");
+    await cli.request("people.confirm", { cwd: dir, suggestions: [juan!.id] });
+    await cli.request("people.confirm", { cwd: dir, suggestions: [nobody!.id], person: "Ben" });
+    const result = await cli.request("people.tune", { cwd: dir });
+    expect(methods["people.tune"].result.parse(result)).toEqual(result);
+    expect(result.faces).toMatchObject({ tracks: 2, people: 2, clusterCurrent: 0.45, person: { current: { match: 0.4, margin: 0.1 } } });
+    expect(result.faces!.clusterRows.length).toBeGreaterThan(5);
+    // Two tracks of two people far apart (faceTrack prints): at the current cut each is its own cluster, with a person to match only elsewhere.
+    expect(result.faces!.clusterRows.find((row) => row.match === 0.45)).toMatchObject({ clusters: 2, mixed: 0, splits: 0, purity: 1 });
+    expect(result.faces!.person.clusters).toBe(2);
+    expect(result.hints.join("\n")).not.toContain("No video has a face scan");
+  });
+
   it("dismisses a suggestion that names nobody", async () => {
     const { dir, cli, read } = await scanned();
     const nobody = (await cli.request("people.suggest", { cwd: dir })).suggestions.find((suggestion) => !suggestion.person)!;
     expect((await cli.request("people.confirm", { cwd: dir, suggestions: [nobody.id], reject: true })).dismissed).toEqual([nobody.id]);
     expect(read("people.json").dismissed).toEqual([nobody.id]);
+  });
+});
+
+describe("people.tune", () => {
+  it("is read-only: voice prints that are not cached are left out with a hint, nothing is embedded", async () => {
+    const { dir, cli, asked, read } = await setup();
+    const before = JSON.stringify(read("people.json"));
+    const result = await cli.request("people.tune", { cwd: dir });
+    expect(methods["people.tune"].result.parse(result)).toEqual(result);
+    expect(result).toMatchObject({ dir, voice: null, faces: null });
+    expect(result.hints).toContainEqual(`s1 of ${EP1} has no cached voice print: it is left out. Make voice prints with \`frameshell people suggest\`.`);
+    expect(asked).toEqual([]);
+    expect(JSON.stringify(read("people.json"))).toBe(before);
+  });
+
+  it("replays the voice matching on the linked speakers' cached prints, and says why faces are not tuned", async () => {
+    const { dir, cli, asked } = await setup();
+    // `people.suggest` makes and caches the prints of every speaker; Juan has ep1 s1, Ben ep1 s2, and Juan ep2 s1 as well.
+    await cli.request("people.suggest", { cwd: dir });
+    await cli.request("people.add", { cwd: dir, name: "Ben" });
+    await cli.request("people.link", { cwd: dir, person: "Ben", speaker: { transcript: EP1, speaker: "s2" } });
+    await cli.request("people.link", { cwd: dir, person: "Juan", speaker: { transcript: EP2, speaker: "s1" } });
+    const embedded = asked.length;
+    const result = await cli.request("people.tune", { cwd: dir });
+    expect(methods["people.tune"].result.parse(result)).toEqual(result);
+    expect(asked).toHaveLength(embedded);
+    expect(result.voice).toMatchObject({ speakers: 3, people: 2, usable: 2, current: { match: 0.7, margin: 0.1 }, wrong: [] });
+    // Juan's two prints are 0.92 apart; Ben's voice is orthogonal to both.
+    expect(result.voice!.same).toMatchObject({ count: 1, min: 0.92 });
+    expect(result.voice!.different).toMatchObject({ count: 2, max: 0 });
+    expect(result.voice!.gap).toBeCloseTo(0.92, 2);
+    const at = (match: number, margin: number) => result.voice!.rows.find((row) => row.match === match && row.margin === margin)!;
+    expect(at(0.7, 0.1)).toMatchObject({ suggested: 2, correct: 2, wrong: 0, precision: 1, recall: 1 });
+    expect(at(0.95, 0.1)).toMatchObject({ suggested: 0, correct: 0, recall: 0 });
+    expect(result.faces).toBeNull();
+    expect(result.hints.join("\n")).toContain("No video has a face scan: frameshell people scan");
+    expect(result.timings.sweepMs).toBeGreaterThanOrEqual(0);
   });
 });
 

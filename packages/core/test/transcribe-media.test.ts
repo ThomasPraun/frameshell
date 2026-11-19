@@ -47,6 +47,7 @@ function onsetProbe() {
   const seen: { sampleRate: number; onset: number }[] = [];
   const provider: TranscriptionProvider = {
     id: "probe",
+    free: true,
     async transcribe(audio) {
       const { sampleRate, samples } = readWav(readFileSync(audio));
       seen.push({ sampleRate, onset: samples.findIndex((s) => Math.abs(s) > 3000) / sampleRate });

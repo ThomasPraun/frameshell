@@ -109,7 +109,8 @@ export {
   voiceStretches,
 } from "./people/voices.js";
 export { type PersonVoice, SPEAKER_MARGIN, SPEAKER_MATCH, type SpeakerVoice, speakerSuggestions, suggestionId } from "./people/suggest.js";
-export { averageLinkage, cosine } from "./people/vector.js";
+export { averageLinkage, clearMatch, cosine, cutLinkage, linkageMerges } from "./people/vector.js";
+export { DEFAULT_TUNE_GRID, type FaceTuneSample, type TuneGrid, type TuneWho, type VoiceTuneSample, distribution, tuneFaces, tuneVoices } from "./people/tuning.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {
@@ -206,6 +207,7 @@ export {
   transcriptPathsFor,
   providerContext,
 } from "./transcripts/transcriber.js";
+export { type TranscriptionRun, confirmTranscription, isLocalFreeTranscription, requireLocalTranscription } from "./transcripts/consent.js";
 export { MODEL_REGISTRY_FILE, ModelRegistry, detectModelFormat } from "./transcripts/model-registry.js";
 export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
 export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";
@@ -301,6 +303,7 @@ export {
   gifSizeWarning,
   loudnessTarget,
 } from "./export/presets.js";
+export { type OtioExport, type OtioObject, type OtioOptions, type OtioUrlBase, otioAssetUrl, timelineToOtio } from "./export/otio.js";
 export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,

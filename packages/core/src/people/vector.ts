@@ -41,22 +41,25 @@ export function meanDirection(vectors: readonly ArrayLike<number>[], weights?: r
   return unit(sum);
 }
 
+/** One merge of {@link linkageMerges}: groups `a` and `b` (a vector index of each) joined at average similarity `score`. */
+export interface LinkageMerge {
+  a: number;
+  b: number;
+  score: number;
+}
+
 /**
- * Average-linkage (UPGMA) clustering of vectors by cosine similarity, keeping
- * merges at `cut.threshold` or above, or the best merges that leave
- * `cut.count` groups (every vector alone when there are fewer). The nearest-neighbour
- * chain finds the same merges as greedy best-pair merging in O(n²) time; average
- * linkage is reducible, so either cut keeps the merges above a line.
- * Returns groups of indexes, each sorted, in order of their first index.
+ * Every merge of average-linkage (UPGMA) clustering of vectors by cosine similarity, in the order the
+ * nearest-neighbour chain finds them: O(n²) time, so one run serves a cut at any line ({@link cutLinkage}).
  */
-export function averageLinkage(vectors: readonly ArrayLike<number>[], cut: { threshold: number } | { count: number }): number[][] {
+export function linkageMerges(vectors: readonly ArrayLike<number>[]): LinkageMerge[] {
   const n = vectors.length;
   if (n === 0) return [];
   const sim = new Float32Array(n * n);
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) sim[i * n + j] = sim[j * n + i] = cosine(vectors[i]!, vectors[j]!);
   const size = new Array<number>(n).fill(1);
   const active = new Array<boolean>(n).fill(true);
-  const merges: { a: number; b: number; score: number }[] = [];
+  const merges: LinkageMerge[] = [];
   const chain: number[] = [];
   let left = n;
   while (left > 1) {
@@ -89,6 +92,16 @@ export function averageLinkage(vectors: readonly ArrayLike<number>[], cut: { thr
     active[top] = false;
     left--;
   }
+  return merges;
+}
+
+/**
+ * The groups of `n` vectors after keeping the `merges` of {@link linkageMerges} at `cut.threshold` or above, or the
+ * best merges that leave `cut.count` groups (every vector alone when there are fewer). Average linkage is
+ * reducible, so either cut keeps the merges above a line. Groups of indexes, each sorted, in order of their first index.
+ */
+export function cutLinkage(n: number, merges: readonly LinkageMerge[], cut: { threshold: number } | { count: number }): number[][] {
+  if (n === 0) return [];
   const kept =
     "count" in cut ? [...merges].sort((a, b) => b.score - a.score).slice(0, Math.max(0, n - cut.count)) : merges.filter((merge) => merge.score >= cut.threshold);
   const parent = Array.from({ length: n }, (_, i) => i);
@@ -97,4 +110,22 @@ export function averageLinkage(vectors: readonly ArrayLike<number>[], cut: { thr
   const groups = new Map<number, number[]>();
   for (let i = 0; i < n; i++) groups.set(find(i), [...(groups.get(find(i)) ?? []), i]);
   return [...groups.values()].sort((a, b) => a[0]! - b[0]!);
+}
+
+/**
+ * Average-linkage (UPGMA) clustering of vectors by cosine similarity, keeping
+ * merges at `cut.threshold` or above, or the best merges that leave
+ * `cut.count` groups ({@link linkageMerges} then {@link cutLinkage}).
+ * Returns groups of indexes, each sorted, in order of their first index.
+ */
+export function averageLinkage(vectors: readonly ArrayLike<number>[], cut: { threshold: number } | { count: number }): number[][] {
+  return cutLinkage(vectors.length, linkageMerges(vectors), cut);
+}
+
+/**
+ * Whether the best of a ranked pair of similarities is a clear match: at least `match`, and ahead of the second
+ * best (when there is one) by `margin`. The one rule of voice and face suggestions.
+ */
+export function clearMatch(best: number | undefined, second: number | undefined, match: number, margin: number): boolean {
+  return best !== undefined && best >= match && (second === undefined || best - second >= margin);
 }

@@ -159,4 +159,19 @@ describe("frameshell people", () => {
     expect(confirm.code).toBe(1);
     expect(confirm.stderr).toContain("no current suggestion sg_00000000");
   });
+
+  it("tunes nothing without prints or scans, says what is missing, and changes nothing", () => {
+    const before = readFileSync(join(project, "people.json"), "utf8");
+    const tune = frameshell(["people", "tune"]);
+    expect(tune.code).toBe(0);
+    expect(tune.stdout).toContain("Nothing to tune yet.");
+    expect(tune.stdout).toContain("hint: Voice tuning needs two or more people");
+    expect(tune.stdout).toContain("hint: No video has a face scan: frameshell people scan");
+    expect(tune.stdout).toContain("Nothing was changed.");
+    const json = JSON.parse(frameshell(["people", "tune", "--json"]).stdout) as { voice: unknown; faces: unknown; timings: { sweepMs: number }; hints: string[] };
+    expect(json).toMatchObject({ voice: null, faces: null });
+    expect(json.timings.sweepMs).toBeGreaterThanOrEqual(0);
+    expect(readFileSync(join(project, "people.json"), "utf8")).toBe(before);
+    for (const args of [["people", "tune", "extra"], ["people", "tune", "--reject"]]) expect(frameshell(args).code, args.join(" ")).toBe(2);
+  });
 });

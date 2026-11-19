@@ -505,6 +505,24 @@ export interface TranscriptionProvider {
   /** How the provider reads model files users register (see {@link TranscribeContext.userModel}); absent: it reads none. */
   readonly userModels?: UserModelSupport;
   /**
+   * Set to `true` by a provider that never charges and has no {@link estimate}. Without `estimate` and without
+   * `free: true` the cost is unknown, which counts as paid: `transcribe` refuses until the person confirms (CLI
+   * `--yes`), and checks that transcribe in the background (shoot takes, voiceover checks, `transcribe --verify`,
+   * `analyze`) never use the provider. Ignored when `estimate` exists (ADR 0046).
+   */
+  readonly free?: boolean;
+  /**
+   * `true` when the audio leaves this machine (a cloud service). `transcribe` then asks the person first even at no
+   * cost, and the background checks never use the provider.
+   */
+  readonly remote?: boolean;
+  /**
+   * Optional. What transcribing `audio` with `options` would cost. A total above 0 makes the provider paid: the
+   * host refuses to transcribe until the person confirms the cost, also when an agent asks. Throw when the cost
+   * cannot be known (a model with no price): the run then fails before any audio is sent.
+   */
+  estimate?(audio: TranscriptionAudio, options: TranscribeOptions): TranscriptionEstimate | Promise<TranscriptionEstimate>;
+  /**
    * Transcribe `audio`: a 16 kHz mono 16-bit PCM WAV the host extracted from
    * the asset (from its PCM sidecar when ingested). Seconds in this file are
    * source-asset seconds. Throw to fail; the message reaches the user.
@@ -525,6 +543,22 @@ export interface TranscribeOptions {
    * without such a feature ignore it.
    */
   prompt?: string;
+}
+
+/** The audio a {@link TranscriptionProvider.estimate} prices. */
+export interface TranscriptionAudio {
+  /** Length of the WAV `transcribe` would get, in seconds. */
+  seconds: number;
+}
+
+/** Cost of one transcription, from {@link TranscriptionProvider.estimate}. */
+export interface TranscriptionEstimate {
+  /** Amount in {@link currency}; 0 = free. */
+  cost: number;
+  /** ISO 4217 code, e.g. `USD`. */
+  currency: string;
+  /** Minutes the provider bills, when it bills by time. */
+  minutes?: number;
 }
 
 /** Host services for one transcription. Valid only until `transcribe` settles. */

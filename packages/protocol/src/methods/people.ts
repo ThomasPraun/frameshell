@@ -6,6 +6,7 @@ import {
   PersonInfoSchema,
   PersonTargetParams,
 } from "../people.js";
+import { PeopleTuneResultSchema } from "../people-tune.js";
 import { TimelineIdSchema } from "../timeline.js";
 import { type MethodSpec, CwdParam } from "./shared.js";
 
@@ -208,6 +209,23 @@ export const peopleMethods = {
         .optional()
         .describe("Only with `download: false`: voices were left out because the voice model is not downloaded yet."),
     }),
+  },
+  "people.tune": {
+    description:
+      "Tuning report for the suggestion thresholds (ADR 0020 decision 15), read-only: it replays voice and face matching " +
+      "on what people confirmed and says how each threshold would have done. Truth is `people.json`: every linked " +
+      "speaker with a cached voice print, and every face track a face anchor names. Voices: each linked speaker is " +
+      "matched, as `people.suggest` does, against each person's voice made of their other prints; the result has the " +
+      "same-person and different-person score spreads, and for every `SPEAKER_MATCH` and `SPEAKER_MARGIN` tried the " +
+      "suggestions made, how many were correct or wrong, precision and recall. Faces: the clusters at every " +
+      "`FACE_CLUSTER_MATCH` tried (purity, clusters mixing two people, people split in pieces), and each cluster at the " +
+      "current cut matched to a person for every `FACE_PERSON_MATCH` and `FACE_PERSON_MARGIN`. `timings` are in ms. " +
+      "Nothing is changed, scanned, queued or downloaded: voice prints not cached (`people.suggest` makes them) and videos " +
+      "without a face scan (`people.scan`) are left out and named in `hints`. `voice` or `faces` is null when fewer than " +
+      "two people can be compared. Results are scores only: no recording leaves the project. Fails with " +
+      "InvalidProjectFile when `people.json` is invalid.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: PeopleTuneResultSchema,
   },
   "people.confirm": {
     mutating: true,

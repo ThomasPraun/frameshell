@@ -9,16 +9,21 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** Tests that read plugin files (skills, package manifests, a twin constant) from outside `plugins/`. */
+/**
+ * Tests that read plugin files (skills, package manifests, a twin constant) from outside their own plugin; the
+ * openai-transcription tests hold the parity check of the `scrub` twin in `plugins/openai-speech`.
+ */
 const PLUGIN_READERS = [
   "packages/core/test/official-plugin-packages.test.ts",
   "packages/core/test/openai-speech.test.ts",
+  "packages/core/test/openai-transcription.test.ts",
   "packages/cli/test/skill-docs.test.ts",
   "apps/desktop/test/whisper-default-model.test.ts",
+  "plugins/openai-transcription/test",
 ];
 
 /** Paths no test, build or packaged app reads. */
-const NO_TESTS = [/^docs\//, /^website\//, /^evals\//, /^\.claude\//, /^[^/]+\.md$/, /^LICENSE$/, /^NOTICE$/];
+const NO_TESTS = [/^docs\//, /^website\//, /^evals\//, /^\.claude\//, /^spikes\/beats-real-music\//, /^[^/]+\.md$/, /^LICENSE$/, /^NOTICE$/];
 
 /**
  * Scope for changed repo-relative paths: `unit` is "all", "none" or "some" (then `filter` lists vitest path

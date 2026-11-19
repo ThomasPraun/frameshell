@@ -7,6 +7,7 @@ import { assetFileNames } from "../asset-names.js";
 import { exists, readJsonIfExists, renameRetrying, sha256File, writeJsonAtomic } from "../fs-util.js";
 import type { GcClass } from "../gc.js";
 import { type AudioExtractor, type AudioInput, extractAudioWithFfmpeg } from "./audio.js";
+import { confirmTranscription } from "./consent.js";
 import { assignWordIds } from "./ids.js";
 import { recoverLongWords } from "./long-words.js";
 import { notRegistered } from "./model-registry.js";
@@ -113,6 +114,10 @@ export interface TranscribeAssetOptions {
   /** Defaults to ffmpeg via `tools`. */
   extractAudio?: AudioExtractor | undefined;
   progress?: ((progress: Progress) => void) | undefined;
+  /** The person confirmed the upload and cost of a paid or remote provider (ADR 0046). */
+  yes?: boolean | undefined;
+  /** Token of the `ConfirmationRequired` the person confirmed; absent, `yes` confirms whatever the run costs. */
+  confirmation?: string | undefined;
 }
 
 /**
@@ -132,7 +137,10 @@ export interface TranscribeAssetOptions {
  * speakers were diarized, each word takes the speaker of the old words it
  * overlaps ({@link carrySpeakers}).
  *
- * Throws `AssetNotFound`, `OutsideProject`, `TranscriptNameTaken`,
+ * A paid, unknown-cost or remote provider gets no audio until the call carries `yes` ({@link confirmTranscription},
+ * after extraction, which needs the audio's length); the long-word windows run inside that one confirmed run.
+ *
+ * Throws `ConfirmationRequired`, `ConfirmationStale`, `AssetNotFound`, `OutsideProject`, `TranscriptNameTaken`,
  * `InvalidProjectFile`, `TranscriptionFailed` (provider or extraction error),
  * or the binary manager's errors unchanged.
  */
@@ -166,6 +174,21 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
   }
 
   const transcribeOptions = { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) };
+  try {
+    await confirmTranscription({
+      provider,
+      providerId,
+      model: options.model ?? null,
+      asset: assetRel,
+      assetHash: `sha256:${hash}`,
+      audio,
+      options: transcribeOptions,
+      yes: options.yes === true,
+      confirmation: options.confirmation,
+    });
+  } catch (error) {
+    return failed(error);
+  }
   const { context, used, warnings } = providerContext(tools, progress);
   let result: TranscriptionResult;
   try {

@@ -9,6 +9,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 export function activate(api) {
   api.registerTranscriptionProvider({
     id: "fake-heard",
+    free: true,
     defaultModel: "fake-model",
     async transcribe(audio, options) {
       const rate = readFileSync(audio).readUInt32LE(24);

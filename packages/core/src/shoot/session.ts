@@ -163,6 +163,7 @@ async function extractRecorded(extract: RangeExtractor, final: string, from: num
 export function standInProvider(words: readonly string[]): TranscriptionProvider {
   return {
     id: "stand-in",
+    free: true,
     async transcribe(audio) {
       const pcm = await readPcmWav(audio);
       const seconds = pcm ? pcm.samples.length / pcm.sampleRate : 0;

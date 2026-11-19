@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { testScope } from "./test-scope.mjs";
 
 describe("testScope", () => {
-  it("runs nothing for docs, website, evals and root markdown", () => {
-    expect(testScope(["docs/adr/0040-batch.md", "website/src/index.astro", "CHANGELOG.md", "evals/x/README.md"])).toEqual(
+  it("runs nothing for docs, website, evals, root markdown and the beats spike", () => {
+    expect(testScope(["docs/adr/0040-batch.md", "website/src/index.astro", "CHANGELOG.md", "evals/x/README.md", "spikes/beats-real-music/run.mjs"])).toEqual(
       { unit: "none", filter: [], e2e: false },
     );
   });
@@ -38,6 +38,8 @@ describe("testScope", () => {
         "packages/cli/test/skill-docs.test.ts",
         "packages/core/test/official-plugin-packages.test.ts",
         "packages/core/test/openai-speech.test.ts",
+        "packages/core/test/openai-transcription.test.ts",
+        "plugins/openai-transcription/test",
         "plugins/remotion/test",
       ],
       e2e: true,
@@ -50,7 +52,13 @@ describe("testScope", () => {
       "packages/cli/test/skill-docs.test.ts",
       "packages/core/test/official-plugin-packages.test.ts",
       "packages/core/test/openai-speech.test.ts",
+      "packages/core/test/openai-transcription.test.ts",
       "plugins/blender/test",
+      "plugins/openai-transcription/test",
     ]);
+  });
+
+  it("runs the openai-transcription scrub parity test when openai-speech changes", () => {
+    expect(testScope(["plugins/openai-speech/src/provider.ts"]).filter).toContain("plugins/openai-transcription/test");
   });
 });
