@@ -179,12 +179,12 @@ describe("frameshell render and frame", () => {
   it("writes the timeline as an OpenTimelineIO file, relative or absolute, and refuses a non-.otio file", () => {
     const result = frameshell(["export", "otio"]);
     expect(result.code, result.stderr).toBe(0);
-    expect(result.stdout).toBe(`Wrote ${join(project, "exports", "main.otio")} (1 track, 1 clip, 0 markers, 30 fps)\n`);
+    expect(result.stdout).toMatch(/^Wrote .*main\.otio \(1 track, 1 clip, 0 markers, 30 fps\)\nwarning: sound of media clips on a video track .* on 1 clip not exported \(c_\w+\)\.\n$/);
     const clip = JSON.parse(readFileSync(join(project, "exports", "main.otio"), "utf8")).tracks.children[0].children[0];
     expect(clip).toMatchObject({ OTIO_SCHEMA: "Clip.2", media_references: { DEFAULT_MEDIA: { target_url: "../assets/take.mp4" } } });
     const absolute = frameshell(["export", "otio", "--absolute-paths", "--out", "out/abs.otio", "--json"]);
     expect(absolute.code, absolute.stderr).toBe(0);
-    expect(JSON.parse(absolute.stdout)).toMatchObject({ path: join(project, "out", "abs.otio"), warnings: [] });
+    expect(JSON.parse(absolute.stdout)).toMatchObject({ path: join(project, "out", "abs.otio"), warnings: [expect.stringContaining("sound of media clips on a video track")] });
     expect(JSON.parse(readFileSync(join(project, "out", "abs.otio"), "utf8")).tracks.children[0].children[0].media_references.DEFAULT_MEDIA.target_url).toMatch(/^file:\/\/\/.*assets\/take\.mp4$/);
     expect(frameshell(["export", "otio", "--out", "timelines/main.json"]).stderr).toMatch(/must end in \.otio/);
     expect(frameshell(["export", "video"]).code).toBe(2);

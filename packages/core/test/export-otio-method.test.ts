@@ -60,6 +60,7 @@ describe("export.otio", () => {
     expect(result.warnings).toEqual([
       "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand.",
       "nested timeline clip c_inner (inner) exported as missing media of its length: export that timeline on its own and relink it.",
+      "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 1 clip not exported (c_a).",
     ]);
     const otio = JSON.parse(readFileSync(path, "utf8"));
     expect(otio.OTIO_SCHEMA).toBe("Timeline.1");
@@ -104,6 +105,9 @@ describe("export.otio", () => {
     mkdirSync(dirname(path), { recursive: true });
     const script = "import sys, opentimelineio as otio; t = otio.adapters.read_from_file(sys.argv[1]); print(len(t.tracks), t.duration().value)";
     const out = execFileSync("python", ["-I", "-c", script, path], { encoding: "utf8" }).trim();
-    expect(out.startsWith("1 ")).toBe(true);
+    // 2 s clip, 2 s gap, 2 s generated, 1.5 s nested at 30 fps: the track and the timeline are 225 frames long.
+    const [trackCount, duration] = out.split(" ");
+    expect(trackCount).toBe("1");
+    expect(Number(duration)).toBe(225);
   });
 });

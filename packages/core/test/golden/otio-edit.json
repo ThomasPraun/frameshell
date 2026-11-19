@@ -127,7 +127,7 @@
                 "duration": {
                   "OTIO_SCHEMA": "RationalTime.1",
                   "rate": 30,
-                  "value": 120
+                  "value": 60
                 },
                 "start_time": {
                   "OTIO_SCHEMA": "RationalTime.1",
@@ -263,8 +263,8 @@
     }
   },
   "warnings": [
-    "clip c_b plays at 2x: its source_range is 120 frames of source, its timeline length 60 frames (metadata.frameshell.length); an editor that lays items out by source duration moves what follows.",
-    "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand."
+    "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand.",
+    "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 2 clips not exported (c_a, c_b)."
   ],
   "tracks": 2,
   "clips": 4,

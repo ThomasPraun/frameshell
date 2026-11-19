@@ -47,7 +47,7 @@ describe("timelineToOtio", () => {
   it.each([30, 24])("two media clips with a hole: Clip.2, Gap.1, Clip.2 with exact frames at %i fps", (fps) => {
     const timeline = timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 4), media("c_b", 5, 10, 11.5)] }]);
     const { otio, warnings, tracks, clips, markers } = timelineToOtio(timeline, { fps, assetUrl });
-    expect(warnings).toEqual([]);
+    expect(warnings).toEqual(["sound of media clips on a video track (OTIO keeps sound on audio tracks) on 2 clips not exported (c_a, c_b)."]);
     expect([tracks, clips, markers]).toEqual([1, 2, 0]);
     expect(otio).toMatchObject({ OTIO_SCHEMA: "Timeline.1", name: "main", global_start_time: time(0, fps), metadata: { frameshell: { timelineId: "main", revision: 4, schemaVersion: 1 } } });
     const track = onlyTrack(otio);
@@ -72,16 +72,16 @@ describe("timelineToOtio", () => {
     expect(kinds).toEqual(["Gap.1", "Clip.2", "Clip.2"]);
   });
 
-  it("speed 2: source range is source time, LinearTimeWarp carries the rate, the gap counts timeline time", () => {
+  it("speed 2: source_range lasts the timeline length (OTIO lays items out by it), LinearTimeWarp carries the rate", () => {
     const timeline = timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_fast", 0, 10, 14, { speed: 2 }), media("c_next", 5, 0, 1)] }]);
     const { otio, warnings } = timelineToOtio(timeline, { fps: 30, assetUrl });
     const [fast, gap] = onlyTrack(otio).children;
-    expect(fast!["source_range"]).toEqual(range(300, 120, 30));
+    expect(fast!["source_range"]).toEqual(range(300, 60, 30));
     expect(fast!["effects"]).toEqual([{ OTIO_SCHEMA: "LinearTimeWarp.1", name: "", effect_name: "LinearTimeWarp", time_scalar: 2, metadata: {} }]);
     expect(fast!["metadata"]).toEqual({ frameshell: { clipId: "c_fast", start: 0, length: 2, speed: 2 } });
     // The clip is 2 s on the timeline (frames 0-60): the hole before c_next at 5 s is 3 s.
     expect(gap!["source_range"]).toEqual(range(0, 90, 30));
-    expect(warnings).toEqual([expect.stringContaining("c_fast plays at 2x")]);
+    expect(warnings).toEqual(["sound of media clips on a video track (OTIO keeps sound on audio tracks) on 2 clips not exported (c_fast, c_next)."]);
     expect(otioProblems(otio)).toEqual([]);
   });
 
@@ -133,7 +133,7 @@ describe("timelineToOtio", () => {
       ["A2", "Audio", true],
     ]);
     expect(children[3]!["children"][0]).toMatchObject({ enabled: false, metadata: { frameshell: { gain: -6 } } });
-    expect(warnings).toEqual([expect.stringContaining("video track t_v2 is muted")]);
+    expect(warnings).toEqual([expect.stringContaining("video track t_v2 is muted"), "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 1 clip not exported (c_a)."]);
   });
 
   it("keeps the slot of generated and nested clips as missing media, and names what it leaves out", () => {
@@ -175,10 +175,25 @@ describe("timelineToOtio", () => {
       "transitions (dissolves, fades) on 2 clips not exported (c_a, c_b).",
       "transform and keys on 1 clip not exported (c_a).",
       "colour grade on 1 clip not exported (c_a).",
+      "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 1 clip not exported (c_a).",
       "muted sound of a video clip on 1 clip not exported (c_b).",
       "audio effects on 1 clip not exported (c_snd).",
     ]);
     expect(otioProblems(otio)).toEqual([]);
+  });
+
+  it("names a transition shape, a per-format override and a track behind the person", () => {
+    const tracks = [
+      { id: "t_v1", kind: "video", clips: [media("c_a", 0, 0, 2, { audio: { muted: true } })] },
+      { id: "t_v2", kind: "video", behind: "t_v1", clips: [media("c_b", 0, 0, 2, { audio: { muted: true }, shape: { kind: "wipe" }, formats: { vertical: { hidden: true } } })] },
+    ];
+    const { warnings } = timelineToOtio(timelineOf(tracks), { fps: 30, assetUrl });
+    expect(warnings).toEqual([
+      "video track t_v2 sits behind the person on track t_v1 (subject matte): exported as a plain track.",
+      "muted sound of a video clip on 2 clips not exported (c_a, c_b).",
+      "transitions (dissolves, fades) on 1 clip not exported (c_b).",
+      "per-format overrides on 1 clip not exported (c_b).",
+    ]);
   });
 
   it("matches the golden document of a small edit", () => {

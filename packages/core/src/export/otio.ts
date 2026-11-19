@@ -104,19 +104,29 @@ class Dropped {
 }
 
 /** Features of a clip the file does not carry, by the words the warning uses. */
-function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean): void {
-  const known = clip as unknown as Record<string, unknown>;
-  if (clip.dissolve !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined) dropped.add("transitions (dissolves, fades)", clip.id);
+function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean, trackMuted: boolean): void {
+  if (clip.dissolve !== undefined || clip.shape !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined) dropped.add("transitions (dissolves, fades)", clip.id);
   if (clip.transform !== undefined || clip.keys !== undefined) dropped.add("transform and keys", clip.id);
-  if (known.grade !== undefined) dropped.add("colour grade", clip.id);
-  if (known.vignette !== undefined || known.grain !== undefined || known.backdrop !== undefined || known.motionBlur !== undefined) dropped.add("film finish and effects", clip.id);
+  if ("grade" in clip && clip.grade !== undefined) dropped.add("colour grade", clip.id);
+  if (
+    ("vignette" in clip && clip.vignette !== undefined) ||
+    ("grain" in clip && clip.grain !== undefined) ||
+    ("backdrop" in clip && clip.backdrop !== undefined) ||
+    ("motionBlur" in clip && clip.motionBlur !== undefined)
+  ) {
+    dropped.add("film finish and effects", clip.id);
+  }
+  if (clip.formats !== undefined) dropped.add("per-format overrides", clip.id);
   if ("asset" in clip && clip.audio?.effects !== undefined && clip.audio.effects.length > 0) dropped.add("audio effects", clip.id);
   if (clip.audio?.muted === true && !audioTrack) dropped.add("muted sound of a video clip", clip.id);
+  // OTIO keeps sound on Audio tracks, and a video-track clip is written on a Video track only.
+  if ("asset" in clip && !audioTrack && !trackMuted && clip.audio?.muted !== true) dropped.add("sound of media clips on a video track (OTIO keeps sound on audio tracks)", clip.id);
 }
 
 /**
  * The OTIO document of `timeline` (ADR 0045): video and audio tracks bottom first, a `Gap.1` for each hole, media clips
- * as `Clip.2` with an `ExternalReference.1` (`LinearTimeWarp.1` when `speed` is not 1), generated and nested clips as
+ * as `Clip.2` with an `ExternalReference.1` (`source_range` from `in`, lasting the timeline length, since OTIO lays items
+ * out by it; `LinearTimeWarp.1` when `speed` is not 1), generated and nested clips as
  * `Clip.2` with a `MissingReference.1` of their length, markers on the stack. Every time is a whole frame at `fps`.
  * Program tracks, subtitle tracks, transitions, transforms, keys, grades and audio effects are left out and named in
  * `warnings`.
@@ -193,14 +203,16 @@ function trackObject(track: ClipTrack, ordinal: number, shared: Shared): { track
       continue;
     }
     const startFrames = frames(clip.start);
-    const lengthFrames = Math.max(1, frames(length));
+    const endFrames = Math.max(startFrames + 1, frames(clip.start + length));
+    const lengthFrames = endFrames - startFrames;
     if (startFrames > cursor) out.push({ OTIO_SCHEMA: "Gap.1", ...item("", range(0, startFrames - cursor, fps)) });
-    cursor = Math.max(cursor, startFrames + lengthFrames);
-    out.push(clipOf(clip, startFrames, lengthFrames, track.kind === "audio", shared));
-    leftOut(clip, dropped, track.kind === "audio");
+    cursor = Math.max(cursor, endFrames);
+    out.push(clipOf(clip, lengthFrames, track.kind === "audio", shared));
+    leftOut(clip, dropped, track.kind === "audio", track.muted === true);
     clips += 1;
   }
 
+  if (track.kind === "video" && track.behind !== undefined) warnings.push(`video track ${track.id} sits behind the person on track ${track.behind} (subject matte): exported as a plain track.`);
   const hidden = track.kind === "video" && track.hidden === true;
   const muted = track.muted === true;
   // A muted video track still shows its picture, and OTIO has no switch for the sound alone.
@@ -215,24 +227,17 @@ function trackObject(track: ClipTrack, ordinal: number, shared: Shared): { track
 }
 
 /** The `Clip.2` of one clip: media with an external reference, anything Frameshell renders as a missing one. */
-function clipOf(clip: Clip, startFrames: number, lengthFrames: number, audioTrack: boolean, shared: Shared): OtioObject {
+function clipOf(clip: Clip, lengthFrames: number, audioTrack: boolean, shared: Shared): OtioObject {
   const { frames, fps, options, warnings } = shared;
   const own = { clipId: clip.id, start: clip.start, length: lengthFrames / fps };
   const enabled = !(audioTrack && clip.audio?.muted === true);
   if ("asset" in clip) {
     const speed = clip.speed ?? 1;
     const effects: OtioObject[] = speed === 1 ? [] : [{ OTIO_SCHEMA: "LinearTimeWarp.1", name: "", effect_name: "LinearTimeWarp", time_scalar: speed, metadata: {} }];
-    const sourceFrames = Math.max(1, frames(clip.out - clip.in));
-    if (speed !== 1) {
-      warnings.push(
-        `clip ${clip.id} plays at ${speed}x: its source_range is ${sourceFrames} frames of source, its timeline length ${lengthFrames} frames (metadata.frameshell.length); ` +
-          "an editor that lays items out by source duration moves what follows.",
-      );
-    }
     const gain = clip.audio?.gain;
     return clipObject(
       baseName(clip.asset),
-      range(frames(clip.in), sourceFrames, fps),
+      range(frames(clip.in), lengthFrames, fps),
       { OTIO_SCHEMA: "ExternalReference.1", name: "", available_range: null, metadata: {}, target_url: options.assetUrl(clip.asset) },
       effects,
       { frameshell: { ...own, ...(gain !== undefined && gain !== 0 ? { gain } : {}), ...(speed !== 1 ? { speed } : {}) } },
