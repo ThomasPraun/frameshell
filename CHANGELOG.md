@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAI transcription provider, first slice of #382 (ADR 0046, epic #451; protocol 178):
+  `frameshell plugin install @frameshell/openai-transcription` adds the paid cloud provider `openai`
+  (`whisper-1`, word timestamps as the service gives them, a note in `warnings`) for
+  `frameshell transcribe <asset> --provider openai`. whisper.cpp stays the default. Every run is refused with
+  `ConfirmationRequired` (the asset's audio is uploaded, its length, the estimated cost at $0.006 a minute from a
+  price table with source and date) until `transcribe --yes [--confirmation token]`; the token fails as
+  `ConfirmationStale` when the asset or cost changed. No consent is stored. Long audio is cut at pauses into
+  10-minute pieces under the 25 MB upload limit. The key comes from `OPENAI_API_KEY` only and never reaches a
+  project file, the history, progress or an error (texts scrubbed, a parity test with `openai-speech`). The plugin
+  API gains optional `free`, `remote` and `estimate` on `TranscriptionProvider`; a provider with neither `estimate`
+  nor `free: true` counts as paid, except `whisper-cpp` of any version (`@frameshell/whisper-cpp` 0.3.1 declares
+  `free: true`). `transcribe.verify`, shoot takes, the voiceover misread check and captions, and `analyze` speech
+  use only a local free provider: with any other they refuse (`TranscriptionFailed`) or skip. Wire: `transcribe`
+  gains `yes` and `confirmation`. Tests run a stub HTTP server with a fake key, never the real API.
 - `grade.analyze` and `grade.compare` on generated and nested clips, slice 11 of #384 (ADR 0031, epic #451;
   protocol 177): `grade compare` (MCP `grade_compare`) draws one frame of a generated clip or a nested timeline clip
   under candidate grades through the export frame path, as it did footage (a multicam shot is refused with reason

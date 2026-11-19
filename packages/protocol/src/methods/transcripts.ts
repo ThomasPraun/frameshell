@@ -19,7 +19,11 @@ export const transcriptMethods = {
       "The first run downloads the engine and model (whisper.cpp default: 574 MB) and may take minutes; progress " +
       "arrives as `progress` notifications. Fails with ProjectNotTrusted when the project's plugins are not trusted, " +
       "TranscriptionProviderNotFound when no loaded plugin provides the provider, TranscriptionFailed when the engine fails, " +
-      "TranscriptNameTaken when both transcript names belong to other assets.",
+      "TranscriptNameTaken when both transcript names belong to other assets. A cloud or paid provider (e.g. `openai` from " +
+      "`@frameshell/openai-transcription`, ADR 0046) gets no audio until the person confirms: the call fails with " +
+      "ConfirmationRequired (data: provider, model, asset, seconds, cost or null when unknown, remote, confirmation) saying " +
+      "that the asset's audio is uploaded and what it costs; call again with `yes` and that `confirmation` only after the " +
+      "person agreed. Every run asks again. whisper.cpp never asks.",
     params: z.strictObject({
       cwd: CwdParam,
       asset: z
@@ -45,6 +49,21 @@ export const transcriptMethods = {
         .min(1)
         .optional()
         .describe("Spoken language code, e.g. `es`. Default: `transcription.language`, else auto-detect."),
+      yes: z
+        .boolean()
+        .default(false)
+        .describe(
+          "The person confirmed that a cloud or paid provider may receive the asset's audio at the cost the refusal showed. " +
+            "Never set it without their explicit confirmation of that run.",
+        ),
+      confirmation: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "The `confirmation` token of the ConfirmationRequired the person saw. A run whose asset, audio or cost no longer " +
+            "matches it fails with ConfirmationStale and sends nothing. Without it `yes` confirms whatever the run costs.",
+        ),
     }),
     result: z.object({
       transcript: z.string().describe("Written transcript file, project-relative, e.g. `transcripts/raw-01.words.json`."),

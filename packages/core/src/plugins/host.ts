@@ -384,7 +384,12 @@ const TRANSCRIPTION: ProviderKind<TranscriptionProvider> = {
   registered: (plugin) => plugin.transcriptionProviders,
   declared: (manifest) => manifest.contributes.transcriptionProviders,
   notFound: ErrorCode.TranscriptionProviderNotFound,
-  hint: (id) => (id === "whisper-cpp" ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`." : INSTALL_HINT),
+  hint: (id) =>
+    id === "whisper-cpp"
+      ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`."
+      : id === "openai"
+        ? " Install the OpenAI provider with `frameshell plugin install @frameshell/openai-transcription`."
+        : INSTALL_HINT,
 };
 
 const SPEECH: ProviderKind<SpeechProvider> = {

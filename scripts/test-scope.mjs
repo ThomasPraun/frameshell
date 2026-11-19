@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 const PLUGIN_READERS = [
   "packages/core/test/official-plugin-packages.test.ts",
   "packages/core/test/openai-speech.test.ts",
+  "packages/core/test/openai-transcription.test.ts",
   "packages/cli/test/skill-docs.test.ts",
   "apps/desktop/test/whisper-default-model.test.ts",
 ];

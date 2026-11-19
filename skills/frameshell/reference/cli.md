@@ -134,7 +134,7 @@ Accepting and rejecting a proposal is the person's, in the app: there is no comm
 
 | Command | Use |
 |---|---|
-| `frameshell transcribe <asset> [--language l] [--model m] [--provider p]` | Word-level transcript to `transcripts/`. Word ids stay stable across re-runs; human `edits` are kept, and so are speakers once found. |
+| `frameshell transcribe <asset> [--language l] [--model m] [--provider p] [--yes [--confirmation token]]` | Word-level transcript to `transcripts/`. Word ids stay stable across re-runs; human `edits` are kept, and so are speakers once found. A cloud or paid provider (`openai`, plugin `@frameshell/openai-transcription`) fails with `ConfirmationRequired` (the asset's audio would be uploaded, at the cost it states) until the person agrees and you re-run with the `--yes --confirmation <token>` the refusal prints. Every run asks again. |
 | `frameshell transcribe --speakers <asset> [--people n]` | Who says each word (local speaker diarization): `speaker` (`s1`, `s2`…) on the transcript's words and a `speakers` list with names (`Speaker 1`… until someone renames them in the file). Needs a current transcript. `--people` when you know how many talk: more reliable than guessing. Re-running keeps each voice's id and name where it matches, and speaker corrections in `edits` win. First run downloads about 95 MB. |
 | `frameshell transcribe --verify <export> [--timeline id]` | Re-transcribe an export and report words lost at cuts; exit 1 when any was. |
 | `frameshell model list` | Transcription models: the provider's own (size, downloaded), files registered on this machine (`state`: `ok`, `missing`, `changed`), this machine's defaults, the model this project uses (`project.effective`). |

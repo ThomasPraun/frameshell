@@ -38,6 +38,7 @@ describe("testScope", () => {
         "packages/cli/test/skill-docs.test.ts",
         "packages/core/test/official-plugin-packages.test.ts",
         "packages/core/test/openai-speech.test.ts",
+        "packages/core/test/openai-transcription.test.ts",
         "plugins/remotion/test",
       ],
       e2e: true,
@@ -50,6 +51,7 @@ describe("testScope", () => {
       "packages/cli/test/skill-docs.test.ts",
       "packages/core/test/official-plugin-packages.test.ts",
       "packages/core/test/openai-speech.test.ts",
+      "packages/core/test/openai-transcription.test.ts",
       "plugins/blender/test",
     ]);
   });

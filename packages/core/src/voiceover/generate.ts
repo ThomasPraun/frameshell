@@ -8,6 +8,7 @@ import { isAbsolute, join, relative } from "node:path";
 import type { SpeechOptions, SpeechProvider } from "@frameshell/plugin-api";
 import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
 import { type VoiceoverLine, shootSlug } from "@frameshell/schema";
+import { formatCost } from "../cost.js";
 import { writeTextAtomic } from "../fs-util.js";
 import type { MediaImportResult } from "../media/service.js";
 import { type Pcm16, pcmOfWav, readPcmWav } from "../transcripts/window.js";
@@ -370,10 +371,6 @@ function pcmOf(bytes: Buffer) {
 function lineFields(plan: Plan): Omit<PartialLine, "duration" | "trimmed"> {
   const { id, scene, line, display, spoken } = plan.line;
   return { id, scene, line, display, spoken, file: plan.file, state: plan.state };
-}
-
-function formatCost(cost: { amount: number; currency: string }): string {
-  return `${cost.amount.toFixed(cost.amount < 1 ? 4 : 2)} ${cost.currency}`;
 }
 
 function round(seconds: number): number {

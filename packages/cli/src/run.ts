@@ -38,7 +38,7 @@ import { SHOOT_FLAGS, SHOOT_USAGE, type ShootInvocation, executeShoot, parseShoo
 import { MODEL_FLAGS, MODEL_USAGE, type ModelInvocation, executeModel, parseModel } from "./model-commands.js";
 import { BEATS_FLAGS, BEATS_USAGE, type BeatsInvocation, executeBeats, parseBeats } from "./beats-commands.js";
 import { BRAND_FLAGS, BRAND_USAGE, type BrandInvocation, executeBrand, parseBrand } from "./brand-commands.js";
-import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover } from "./voiceover-commands.js";
+import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoiceover, parseVoiceover, shellWord } from "./voiceover-commands.js";
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
 import { JOB_FLAGS, JOB_USAGE, type JobInvocation, executeJob, formatJob, parseJob } from "./job-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
@@ -97,9 +97,11 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
-             [--provider p] [--model m] [--language l]
+             [--provider p] [--model m] [--language l] [--yes [--confirmation token]]
                                First run downloads the engine and model (minutes, once). --model: one the
-                               provider ships or one registered with \`model add\` (see \`model list\`)
+                               provider ships or one registered with \`model add\` (see \`model list\`).
+                               A cloud or paid provider (openai) is refused until --yes, which you pass
+                               only once the person agreed to upload the asset's audio at the cost shown
   transcribe --verify <export> [--timeline id] [--provider p] [--model m] [--language l]
                                Re-transcribe an export and list the source words lost at cuts,
                                with timeline position and clip; exit 1 if any was lost
@@ -205,7 +207,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
-  transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language"],
+  transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language", "yes", "confirmation"],
   render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "yes"],
   frame: ["at", "out", "timeline", "preset", "format", "quality", "final", "yes"],
   cover: ["text", "at", "color", "out", "timeline", "preset", "format", "quality"],
@@ -266,7 +268,7 @@ type Invocation =
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
-  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string }
+  | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string; yes?: true; confirmation?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
   | { kind: "transcribe.speakers"; asset: string; speakers?: number }
   | { kind: "render"; timeline?: string; preset?: string; quality?: "draft" | "final"; formats?: string[]; out?: string; cover?: { text?: string; at?: number; color?: string }; loop?: true; yes?: true }
@@ -750,6 +752,12 @@ function parseBuiltin(
   }
   if (command === "transcribe") {
     const { provider, model, language } = options;
+    const confirmation = options.confirmation?.trim();
+    if (options.confirmation !== undefined && confirmation === "") throw new UsageError("--confirmation: expected the token the ConfirmationRequired refusal printed.");
+    if (confirmation !== undefined && !options.yes) throw new UsageError("--confirmation goes with --yes: it binds the confirmation to the ask the person saw.");
+    if (options.yes && (options.speakers !== undefined || options.verify !== undefined)) {
+      throw new UsageError("--yes goes with `frameshell transcribe <asset>`: only a transcription of an asset may upload audio.");
+    }
     if (options.speakers !== undefined) {
       if (rest.length > 0) throw new UsageError("`frameshell transcribe --speakers <asset>` takes the asset as the flag's value, nothing else.");
       if (options.verify !== undefined || provider || model || language || options.timeline) {
@@ -780,6 +788,8 @@ function parseBuiltin(
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
       ...(language ? { language } : {}),
+      ...(options.yes ? { yes: true as const } : {}),
+      ...(confirmation !== undefined ? { confirmation } : {}),
     };
   }
   if (command === "proposal") {
@@ -905,11 +915,11 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "transcribe": {
       await settleTrust(conn, flags, io);
       const { kind: _kind, ...params } = inv;
-      const result = await conn.request(
-        "transcribe",
-        { cwd, ...params },
-        flags.json ? {} : { onProgress: progressPrinter(io) },
-      );
+      const result = await conn
+        .request("transcribe", { cwd, ...params }, flags.json ? {} : { onProgress: progressPrinter(io) })
+        .catch((error: unknown) => {
+          throw withTranscribeConfirmation(error, inv);
+        });
       return flags.json ? json(result) : formatTranscribe(result);
     }
     case "matte": {
@@ -1346,6 +1356,41 @@ function progressPrinter(io: CliIo): (progress: Progress) => void {
     lastMessage = message;
     lastDecile = decile;
   };
+}
+
+/**
+ * A `ConfirmationRequired` or `ConfirmationStale` refusal of `transcribe` with the command that confirms it: the same
+ * asset, provider, model and language plus `--yes --confirmation <token>` (JSON keeps the token in `data`).
+ */
+function withTranscribeConfirmation(error: unknown, inv: Extract<Invocation, { kind: "transcribe" }>): unknown {
+  if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return error;
+  const token = (error.data as { confirmation?: unknown } | undefined)?.confirmation;
+  if (typeof token !== "string") return error;
+  const command = transcribeConfirmCommand(inv, token);
+  return command === null ? error : new RpcError(error.code, `${error.message}\nOnce the person confirmed: ${command}`, error.data);
+}
+
+/** The `transcribe` command of `inv` confirmed with `token`; null when a word cannot be quoted alike in sh and PowerShell. */
+function transcribeConfirmCommand(
+  inv: Extract<Invocation, { kind: "transcribe" }>,
+  token: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const parts = ["frameshell", "transcribe"];
+  const flags: [string | null, string | undefined][] = [
+    [null, inv.asset],
+    ["--provider", inv.provider],
+    ["--model", inv.model],
+    ["--language", inv.language],
+  ];
+  for (const [flag, text] of flags) {
+    if (text === undefined) continue;
+    const word = shellWord(text, platform);
+    if (word === null) return null;
+    parts.push(...(flag === null ? [word] : [flag, word]));
+  }
+  parts.push("--yes", "--confirmation", token);
+  return parts.join(" ");
 }
 
 function formatTranscribe(result: TranscribeResult): string {

@@ -206,6 +206,7 @@ export {
   transcriptPathsFor,
   providerContext,
 } from "./transcripts/transcriber.js";
+export { type TranscriptionRun, confirmTranscription, isLocalFreeTranscription, requireLocalTranscription } from "./transcripts/consent.js";
 export { MODEL_REGISTRY_FILE, ModelRegistry, detectModelFormat } from "./transcripts/model-registry.js";
 export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
 export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";

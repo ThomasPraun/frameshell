@@ -23,6 +23,7 @@ function fakeProvider(words: TranscriptWord[], extra: { device?: string } = {}) 
   const calls: { audio: string; audioBytes: string; options: unknown }[] = [];
   const provider: TranscriptionProvider = {
     id: "fake",
+    free: true,
     async transcribe(audio, options, context) {
       calls.push({ audio, audioBytes: readFileSync(audio, "utf8"), options });
       context.progress({ message: "Transcribing", fraction: 0.5 });
@@ -275,6 +276,7 @@ describe("transcribeAsset", () => {
     };
     const provider: TranscriptionProvider = {
       id: "fake",
+      free: true,
       async transcribe(_audio, options, context) {
         expect(options).toEqual({ model: "big", language: "en" });
         expect(await context.ensureBinary("whisper-cli")).toBe("/bin/whisper-cli");
@@ -299,6 +301,7 @@ describe("transcribeAsset", () => {
     };
     const provider: TranscriptionProvider = {
       id: "fake",
+      free: true,
       async transcribe(_audio, options, context) {
         const model = await context.userModel!(options.model!, ["ggml"]);
         return { model: model.id, words: words(["Hola", 0.5, 0.8]), notes: ["no DTW"] };
@@ -319,7 +322,7 @@ describe("transcribeAsset", () => {
     expect(result).toMatchObject({ modelHash: null, warnings: [] });
     expect(readTranscript(dir).modelHash).toBeUndefined();
 
-    const asking: TranscriptionProvider = { id: "fake", transcribe: async (_audio, _options, context) => (await context.userModel!("nope", ["ggml"]), { model: "x", words: [] }) };
+    const asking: TranscriptionProvider = { id: "fake", free: true, transcribe: async (_audio, _options, context) => (await context.userModel!("nope", ["ggml"]), { model: "x", words: [] }) };
     await expect(run(dir, asking)).rejects.toMatchObject({ code: ErrorCode.ModelNotRegistered, data: { id: "nope" } });
   });
 
@@ -327,6 +330,7 @@ describe("transcribeAsset", () => {
     const dir = project();
     const failing = (error: Error): TranscriptionProvider => ({
       id: "fake",
+      free: true,
       transcribe: async () => {
         throw error;
       },
@@ -405,6 +409,7 @@ describe("transcribeAsset", () => {
     const dir = project();
     const intruder: TranscriptionProvider = {
       id: "fake",
+      free: true,
       async transcribe() {
         await run(dir, fakeProvider(words(["other", 0, 1])).provider, { asset: join(dir, "assets", "raw-01.wav") });
         return { model: "m", words: words(["hola", 0.5, 0.8]) };
