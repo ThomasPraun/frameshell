@@ -1,5 +1,6 @@
 // File > Export OpenTimelineIO / Export Premiere XML (ADR 0045, 0047): the notice shown once the daemon has written the file.
-import type { HandoffKind, MenuCommand } from "../../shared/api.js";
+import type { MenuCommand } from "../../shared/api.js";
+import { HANDOFF_KINDS, HANDOFFS, type HandoffKind } from "../../shared/handoff.js";
 
 /** The wording {@link handoffNotice} picks from (`t.workspace`). */
 export interface HandoffNoticeText {
@@ -9,9 +10,7 @@ export interface HandoffNoticeText {
 
 /** The hand-off file a menu command writes; undefined for any other command. */
 export function handoffKindOf(command: MenuCommand): HandoffKind | undefined {
-  if (command === "exportOtio") return "otio";
-  if (command === "exportPremiere") return "premiere";
-  return undefined;
+  return HANDOFF_KINDS.find((kind) => HANDOFFS[kind].command === command);
 }
 
 /** What the notice says of an export: the file's name, and how many things the file leaves out when there are any. */

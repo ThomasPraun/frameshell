@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where they read `0.04 USD` and `1.5 EUR`, and `voiceover generate` prints its cost through it too (`about 0.0500 USD`, no raw float). The app's price text is chosen by `transcribePrice` (free before unknown), so a free remote provider without an estimate shows the free text, not "may charge you". Docs only: SPEC 5.9's example beats file says `onset-flux@2`, ADR 0029
   decision 10 says octave errors became more confident (12 of 12 synthetic, 4 of 5 CC0) and that octave and downbeat
   are the only reasons left for the learned spike (#689 stays open for the owner's go/no-go), and the research note
-  has its final verdict at the top. No detector change. Left for later: the Premiere XML app menu, `people tune` on
+  has its final verdict at the top. No detector change. Left for later: `people tune` on
   real recordings (#700), the learned beat spike (#689), the `whisper-1` replacement (#702).
 - Small fixes, wave 26 (slice SF7, parts of #451, #382, #689 and #702; no protocol change, `PROTOCOL_VERSION` stays):
   `notification-stack`'s fixed schedule (`onBeats` off or no usable grid) is held to the same room before the exit as
@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transforms, keys, grades, finish, audio effects, sound fades and clip gain are named in `warnings`. Media paths are
   always absolute `file://localhost/` URLs, so the file is not portable. The pieces both editor hand-off writers share
   (what is left out, warning texts, clip placement, path encoding) moved to `export/handoff.ts`; the OTIO file is
-  byte-identical. Not yet opened in Premiere Pro; the app menu is a later slice. Closes the open point of #383.
+  byte-identical. Not yet opened in Premiere Pro; the app menu came in slice 2. Closes the open point of #383.
 - OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
   `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
   default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden
@@ -76,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and nested timeline clips keep their slot, name and timeline length as `Clip.2` with a `MissingReference.1` and a
   warning. Multicam program tracks, subtitle tracks, transitions, transforms and keys, grades, film finish, audio
   effects and (until slice 3) the sound of media clips on video tracks are not exported and are named in `warnings`. `target_url` is relative to the file, `--absolute-paths` writes
-  `file://` URLs. No new dependency and no Python; dissolves and an app menu come in later slices.
+  `file://` URLs. No new dependency and no Python; dissolves and the app menu came in slice 2.
 - OpenTimelineIO export, slice 2 of #383 (ADR 0045): a dissolve between two clips that end and start at the same frame
   is a `Transition.1` (`SMPTE_Dissolve`, centred on the cut, the half length `edgeTransitions` gives, in whole frames
   each side, so the handles of the files decide, as in a render). A wipe, push or iris dissolve is written as a plain one,
@@ -1652,6 +1652,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Small fixes, wave 28 (SF9, epic #451): the app's editor hand-off kinds (OpenTimelineIO, Premiere XML) are one table in
+  `apps/desktop/src/shared/handoff.ts` (command, menu item id, extension, daemon method, CLI name) that the File menu,
+  save dialog, IPC check, notice and its CLI hint read, instead of the same two-way branch in five places. No visible
+  change. CLAUDE.md doc map: one row per area, no path lost.
 - Beat detector `onset-flux@2` (#689, ADR 0029; DSP only, same envelope cache, beats file and protocol): hits of a
   low kick are placed on its first cycle, not a later louder one (median bias on generated music 12.7 → 0.8 ms); the
   period is searched within 1 % by the comb and refitted over the whole audio as the match tolerance narrows, so a
