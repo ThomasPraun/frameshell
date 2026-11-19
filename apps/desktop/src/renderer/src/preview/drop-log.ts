@@ -1,4 +1,4 @@
-// Dropped program frames of a play, by why they were dropped (ADR 0001 amendment, #567). Runs in the engine worker.
+// Dropped program frames of a play, by why they were dropped (ADR 0001 amendment). Runs in the engine worker.
 
 /** Frame numbers of one kind posted at most: a long bad play would otherwise post thousands every second. */
 export const DROP_SAMPLE = 50;

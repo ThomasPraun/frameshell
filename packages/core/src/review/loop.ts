@@ -3,7 +3,7 @@ import { duplicateSeam, meanAbsDiff, seamPictureSize } from "../export/seam.js";
 import { readRawFrames } from "../media/raw-frames.js";
 import { SEAM_CONTINUOUS } from "./thresholds.js";
 
-// The seam of a loop as a number (#457, ADR 0039 slice 3). The duplicate test is the render's loop check
+// The seam of a loop as a number (ADR 0039). The duplicate test is the render's loop check
 // itself (`duplicateSeam` in `export/seam.ts`); this adds the jump between the last and the first frame.
 
 /** The verdict on a jump of `jump` grey levels; `duplicate`: the last frame repeats the first while the picture moves ({@link duplicateSeam}). */

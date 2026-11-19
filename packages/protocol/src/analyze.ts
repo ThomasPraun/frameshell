@@ -2,7 +2,7 @@ import { z } from "zod";
 import { StyleSuggestionSchema } from "./brand.js";
 import { type ReviewSheet, ReviewTileSchema } from "./review.js";
 
-// `analyze` (#471, epic #451): measure a reference video's grammar (rhythm, colour, look, events, loudness, tempo) so an agent makes "like this" from numbers.
+// `analyze`: measure a reference video's grammar (rhythm, colour, look, events, loudness, tempo) so an agent makes "like this" from numbers.
 
 /** Folder of analyses, project-relative: regenerable, gitignored with the rest of `.frameshell/`. One subfolder per analysed video. */
 export const ANALYSIS_DIR = ".frameshell/analysis";

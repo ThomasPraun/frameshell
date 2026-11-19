@@ -121,7 +121,7 @@ describe("resolveTimeRefs", () => {
   });
 });
 
-// ---------- beat:N and bar:N (ADR 0029 slice 4): the same grid `--snap-to` reads ----------
+// ---------- beat:N and bar:N (ADR 0029): the same grid `--snap-to` reads ----------
 
 const FPS = 30;
 

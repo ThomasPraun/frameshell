@@ -6,7 +6,7 @@ import { formatBeatsFile } from "../src/media/beats-store.js";
 import { tempDir } from "./helpers.js";
 
 // Seam under test: BeatsWatcher reports a beats file written, hand-edited, broken or deleted once its write settled
-// (ADR 0029 slice 3), so the app's grid follows a hand edit live. Real files, real chokidar.
+// (ADR 0029), so the app's grid follows a hand edit live. Real files, real chokidar.
 
 const FILE = {
   schemaVersion: 1 as const,

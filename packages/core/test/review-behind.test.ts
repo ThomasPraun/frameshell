@@ -6,7 +6,7 @@ import { reviewMetrics } from "../src/review/metrics.js";
 import { type ClipSpan, judgeRequirements } from "../src/review/requirements.js";
 import type { MotionSeries } from "../src/review/source.js";
 
-// A word behind the person (ADR 0032, #461): the covered share on synthetic masks, the verdict bands, the matte frame
+// A word behind the person (ADR 0032): the covered share on synthetic masks, the verdict bands, the matte frame
 // export draws, and the warnings through `requirements.json`.
 
 /** A `width` x `height` mask whose pixel is `value(x, y)`. */

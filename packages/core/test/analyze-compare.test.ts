@@ -7,7 +7,7 @@ import { CELLS, type PictureSeries } from "../src/analyze/events.js";
 import { INK_MIN_FRAMES, inkOf } from "../src/analyze/ink.js";
 import { boxAt, longestTrack, mouthPixels, mouthViewSize, syncOffset, syncResult, voiceLevel } from "../src/analyze/lip.js";
 
-// The pure parts of `analyze` slice 3 (#471): curve, ink, mouth sync, and the alignment and SSIM of `analyze.diff`.
+// The pure parts of `analyze`: curve, ink, mouth sync, and the alignment and SSIM of `analyze.diff`.
 
 /** `frames` frames of the speed profile `speed(t)` (t in 0 to 1) scaled to `peak`, after `lead` still frames and before `tail` more. */
 function profile(speed: (t: number) => number, frames: number, peak: number, lead = 5, tail = 5): number[] {

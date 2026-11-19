@@ -10,7 +10,7 @@ import {
 } from "./kit.js";
 
 /**
- * Before / after wipe (#466): two pictures in one rounded card, the "before"
+ * Before / after wipe: two pictures in one rounded card, the "before"
  * showing; after a beat a divider with a handle sweeps across and the "after"
  * appears behind it, labels trading places. Each picture is an image of the
  * composition directory or, when empty, a plain app skeleton (rough for the

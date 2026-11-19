@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Cursor marquee select (#466, UI demo): a cursor presses on empty space beside a
+ * Cursor marquee select (UI demo): a cursor presses on empty space beside a
  * grid of tiles and drags a rectangle across it; each tile lights up on the frame
  * the rectangle reaches it, and on release a count badge springs in. Transparent
  * unless `backdrop` is raised.

@@ -29,8 +29,8 @@ interface TierSettings {
 }
 
 /**
- * Master and preview numbers are the ones measured for ticket #475. Draft has none of its own: x264 is the
- * ticket's CRF 22 veryfast, NVENC and VideoToolbox sit between preview and master (review rounds read the
+ * Master and preview numbers are the measured ones. Draft has none of its own: x264 is the
+ * CRF 22 veryfast, NVENC and VideoToolbox sit between preview and master (review rounds read the
  * picture, not the grain). Final is the master quality with the slowest x264 preset.
  */
 const SETTINGS: Readonly<Record<QualityTier, TierSettings>> = {

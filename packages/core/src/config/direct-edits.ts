@@ -8,7 +8,7 @@ import { type ConfigJournal, readConfigHead, readConfigJournal, writeConfigHead 
 import { configHash } from "./patch.js";
 
 /**
- * Hand edits of config documents (ADR 0036 slice 5): `frameshell.json` formats, `style.json` and `requirements.json`
+ * Hand edits of config documents (ADR 0036): `frameshell.json` formats, `style.json` and `requirements.json`
  * edited outside the daemon while it runs, or while it did not. The watcher reports the files; {@link DirectConfigEdits}
  * diffs the file's keyed state against the head snapshot the journal last wrote and turns a difference into a config
  * operation.

@@ -9,7 +9,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
-// `grade.compare` (#384, ADR 0031): the pure parts (flags that keep a look, layout, the grade swap), then the method
+// `grade.compare` (ADR 0031): the pure parts (flags that keep a look, layout, the grade swap), then the method
 // through a real daemon and the managed ffmpeg on a flat grey still, reading back the centre pixel of every tile.
 const MEDIA_TIMEOUT = 240_000;
 

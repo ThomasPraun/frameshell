@@ -6,7 +6,7 @@ import { type ElectronApplication, type Page, expect, test } from "@playwright/t
 import { laidOutBox, launch, sandbox } from "./harness.js";
 import { addBarcodeAsset, installFrameReader, readShownFrame, waitForIngest } from "./preview-probe.js";
 
-// Preview player (#15, ADR 0001): media clips play from their proxies at the shared playhead. The source clip carries
+// Preview player (ADR 0001): media clips play from their proxies at the shared playhead. The source clip carries
 // its frame index as a barcode, so every check reads what the preview canvas really shows.
 const box = sandbox("preview");
 const mainFile = join(box.projectDir, "timelines", "main.json");

@@ -24,7 +24,7 @@ export interface ClipKeyInput {
   /** True for the final render of an adapter with finals (ADR 0035); absent for its draft and for other adapters. */
   final?: true;
   /**
-   * Composition frame (project fps) of a final of that one frame (ADR 0035 slice 7), made for a still; absent for every
+   * Composition frame (project fps) of a final of that one frame (ADR 0035), made for a still; absent for every
    * other render. Keyed by the host, so a still never shares an entry with the clip's whole final.
    */
   still?: number;

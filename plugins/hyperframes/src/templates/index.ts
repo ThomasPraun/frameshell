@@ -50,7 +50,7 @@ export { type BrandComponent, type ComponentPick, pickComponents, placeFrame, re
 export { type ThreeTemplate, usesThree } from "./three-kit.js";
 export { type BrandTokens, type FontToken, readTokens } from "./tokens.js";
 
-/** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them (#466). */
+/** The templates `frameshell hyperframes new --template <id>` scaffolds, in the order the docs list them. */
 export const TEMPLATES: readonly Template[] = [kineticHeadline, endCard, lowerThird, logoLockup, checklist, comparison, counter, bigWord, cursorClick, cursorDragDrop, cursorMarquee, cursorTextSelect, appWindow, typingField, commentBox, terminal, chatBubble, notificationStack, deviceFrame, sceneBackground, promptBar, glassCard, productShot, emphasisMarker, beforeAfter, pullBackReveal, logo3d, title3d, codeTyping, codeDiff, codeMorph, slotRoll, numberWheel, tabIndicator, freezeCut, logoSting, pipCard, workCards, lightLeak, orbit, lockedOn, spotlight, phoneFan, leanIn, selectResize];
 
 /** The template with id `id`, if any. */

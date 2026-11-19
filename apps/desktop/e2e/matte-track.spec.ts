@@ -7,7 +7,7 @@ import { launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { addBarcodeAsset, waitForIngest } from "./preview-probe.js";
 
-// Track header menu and matte status of a track behind a person (ADR 0032 slice 4): "Put behind the person on V1" sets
+// Track header menu and matte status of a track behind a person (ADR 0032): "Put behind the person on V1" sets
 // `behind`, the header shows the matte's state until the stand-in matte (FRAMESHELL_MATTE_STAND_IN) is ready, and
 // "Stop going behind the person" clears it. Real daemon, real ingest.
 const box = sandbox("overlays");

@@ -12,7 +12,7 @@ import {
 import { UI_HELPERS, WINDOW_DOTS_CSS, WINDOW_DOTS_HTML } from "./ui-parts.js";
 
 /**
- * Terminal (#466): a window where a command types out, then tasks run one
+ * Terminal: a window where a command types out, then tasks run one
  * after another (a ring spins, then a check ticks) and a last line lands.
  * Tasks are one `|`-separated prop. The window keeps its final size from the
  * first frame, and the whole run shrinks to fit a short clip. Transparent

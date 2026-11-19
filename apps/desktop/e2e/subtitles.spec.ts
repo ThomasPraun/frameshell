@@ -8,7 +8,7 @@ import { launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Subtitle tracks (#22): the words of the followed clips, drawn over the preview exactly where and when export burns
+// Subtitle tracks: the words of the followed clips, drawn over the preview exactly where and when export burns
 // them, updated by cuts with no extra edit, created and styled from the app as `ui` operations.
 const box = sandbox("subtitles");
 const mainFile = join(box.projectDir, "timelines", "main.json");

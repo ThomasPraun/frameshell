@@ -228,7 +228,7 @@ export interface DueFinal {
   seconds: number | null;
   /** Batch row (ADR 0040) whose render makes it; absent for a plain `render`. */
   row?: string;
-  /** Look-sheet tile (`clip.compare`) whose still makes it (ADR 0035 slice 7); absent otherwise. */
+  /** Look-sheet tile (`clip.compare`) whose still makes it (ADR 0035); absent otherwise. */
   look?: string;
 }
 
@@ -309,7 +309,7 @@ export interface ExportServiceOptions {
     ensure(root: string, timeline: Timeline, options?: ClipEnsureOptions): Promise<ReadonlyMap<string, GeneratedSource>>;
     /**
      * Final renders of the clips whose plugin renders finals (ADR 0035), at `size` (absent: the project resolution);
-     * with `stillAt`, the finals a still at that time would draw (slice 7); see `ClipRenderer.finals`. Absent: no clip has one.
+     * with `stillAt`, the finals a still at that time would draw; see `ClipRenderer.finals`. Absent: no clip has one.
      */
     finals?(root: string, timeline: Timeline, size?: { width: number; height: number }, stillAt?: number): Promise<FinalRenderState[]>;
   };
@@ -547,7 +547,7 @@ export class ExportService {
   /**
    * Capture one composited frame as an image, written atomically to `out`; the format defaults from its extension.
    * `loaded`: the timeline to capture instead of the file (a review-mode proposal's version). `final`: generated clips
-   * with windowed finals shown at `at` are drawn from a final (ADR 0035 slice 7): their whole final when cached, else a
+   * with windowed finals shown at `at` are drawn from a final (ADR 0035): their whole final when cached, else a
    * final of that frame alone, which waits for the person's confirmation (`yes`) when estimated over
    * {@link FINAL_CONFIRM_SECONDS} or unknown.
    */
@@ -574,7 +574,7 @@ export class ExportService {
   }
 
   /**
-   * The final renders `frame` with `final` at `params.at` would make and wait for (ADR 0035 slice 7), with their
+   * The final renders `frame` with `final` at `params.at` would make and wait for (ADR 0035), with their
    * estimates; empty when every clip it would draw from a final has one cached. Never renders.
    */
   async stillFinals(root: string, params: { timeline: string; at: number; projectFormat?: string | undefined }, loaded?: LoadedTimeline): Promise<DueFinal[]> {

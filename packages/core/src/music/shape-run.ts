@@ -59,7 +59,7 @@ const MIN_FADE_S = 0.05;
 const MAX_FADE_S = 15;
 
 /**
- * The shaping of music clip `request.clip` of `timeline` (ADR 0037 slice 4): hits and ending resolved by the shared
+ * The shaping of music clip `request.clip` of `timeline` (ADR 0037): hits and ending resolved by the shared
  * TimeRef resolver, the dip curve ({@link shapeCurve}) over the clip, and the duck that goes again after it when the clip
  * carries duck keys. `loadWords` reads the words the timeline plays for `word:` references. Reads only. Throws
  * ClipNotFound or InvalidOperation.

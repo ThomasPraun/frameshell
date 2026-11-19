@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { connectToDaemon } from "@frameshell/protocol";
 import { launch, sandbox } from "./harness.js";
 
-// #112: the daemon the app starts must not hold the app's stdio. On Windows a child spawned from Electron's main
+// The daemon the app starts must not hold the app's stdio. On Windows a child spawned from Electron's main
 // process inherited its stdout/stderr pipes, so whoever read the app's output (Playwright here) saw them open until
 // the daemon idled out. The daemon here idles out after a minute; the app's stdout must close with the app.
 const box = sandbox("demo");

@@ -206,4 +206,5 @@ const es: typeof en = {
   },
 };
 
+/** English and Spanish strings of the Shoot view recorder. */
 export const shoot = { en, es };

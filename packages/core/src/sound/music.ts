@@ -1,4 +1,4 @@
-// Music synthesized from nothing (ADR 0038 slice 3): a seeded 16-step sequencer writes a score (drums, bass, chords,
+// Music synthesized from nothing (ADR 0038): a seeded 16-step sequencer writes a score (drums, bass, chords,
 // a melody from the minor pentatonic of the key, a build's motif and riser, accents), then each note is rendered into
 // a stereo mix with a reverb send, the bass ducked by the kick. The mix is brought to -14 LUFS under a -1 dBFS peak.
 // Beats are known, not measured: beat i of the take is at 60 i / bpm seconds, and the last bar ends on a final hit.

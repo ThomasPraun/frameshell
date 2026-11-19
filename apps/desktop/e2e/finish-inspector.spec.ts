@@ -7,7 +7,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// The Finish section of the clip inspector and the letterbox menu of the preview (ADR 0043 slice 4b): vignette and
+// The Finish section of the clip inspector and the letterbox menu of the preview (ADR 0043): vignette and
 // grain sliders, each release one `ui` clip.set that merges its number into the clip's field (a drag is one step),
 // switches that turn each on with the defaults or remove it, one Reset for both; the menu beside the format switcher
 // sets and clears the timeline's letterbox, or a format's own once that format is shown.

@@ -38,7 +38,7 @@ function setup(options?: TerminalManagerOptions) {
   return { manager, output, exits, agents, launch, projectDir };
 }
 
-// A Windows shell can take tens of seconds to print its first prompt on a loaded runner (#533); input written
+// A Windows shell can take tens of seconds to print its first prompt on a loaded runner; input written
 // before that is lost to the profile scripts.
 const POLL_MS = process.platform === "win32" ? 60_000 : 15_000;
 
@@ -115,20 +115,20 @@ describe("TerminalManager", () => {
   });
 
   // The app quits once this settles. On Windows a shell killed before its first output is only killed later by
-  // node-pty; quitting before that left Electron hung at exit with the pseudoconsole open (#109).
+  // node-pty; quitting before that left Electron hung at exit with the pseudoconsole open.
   it("killAll settles once every shell has exited, even one killed right after it started", async () => {
     const { manager, output, exits, launch } = setup();
     const started = manager.create(launch("term-started"), { cols: 80, rows: 24 });
     await waitForPrompt(output, started.id);
     manager.write(started.id, echoSession);
-    // Created after the wait so this shell is still killed right after it starts (#109).
+    // Created after the wait so this shell is still killed right after it starts.
     const fresh = manager.create(launch("term-fresh"), { cols: 80, rows: 24 });
     await manager.killAll();
     expect(exits.has(fresh.id)).toBe(true);
     expect(exits.has(started.id)).toBe(true);
   });
 
-  // #120: the agent runs the daemon's ffmpeg by hand. The variable survives login profiles that reorder PATH.
+  // The agent runs the daemon's ffmpeg by hand. The variable survives login profiles that reorder PATH.
   it.skipIf(process.platform === "win32")("runs the managed tools the launch names", async () => {
     const { manager, output, projectDir } = setup();
     const tool = join(projectDir, "tools", "ffmpeg");

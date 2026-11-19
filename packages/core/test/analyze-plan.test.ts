@@ -4,7 +4,7 @@ import { PaletteBuilder } from "../src/analyze/palette.js";
 import { analysisName } from "../src/analyze/service.js";
 import { MIN_CUT_GAP_FRAMES, detectCuts, frameAt, frameStart, parseSceneScores, shotLengthsRead, shotMiddle, shotStats, shotsOf } from "../src/analyze/shots.js";
 
-// The pure parts of `analyze` (#471): cuts, shots, palette, loudness text, names.
+// The pure parts of `analyze`: cuts, shots, palette, loudness text, names.
 
 describe("frameStart and frameAt", () => {
   it("write a frame's time as frame / fps rounded down to the millisecond", () => {

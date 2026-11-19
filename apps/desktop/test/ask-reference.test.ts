@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { agentInput, framePending, referenceLines, referenceTime } from "../src/renderer/src/ask/reference.js";
 import type { Selection, SelectedWord } from "../src/renderer/src/selection.js";
 
-// Seam under test: "Chat about this" (#49) reference text, SPEC §10 format. Selection and timeline view in, the
+// Seam under test: "Chat about this" reference text, SPEC §10 format. Selection and timeline view in, the
 // lines typed into the agent terminal out; then the exact keystrokes for a terminal with or without bracketed paste.
 
 const ASSET = "assets/take.mp4";

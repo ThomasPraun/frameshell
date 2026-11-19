@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Slot-machine roll (#466): a reel of words or numbers spins upward past a
+ * Slot-machine roll: a reel of words or numbers spins upward past a
  * highlighted band, slows, and lands on one value, which flashes in the
  * accent colour and settles with a small pulse. The reel is one `|`-separated
  * prop and the landing value another (appended to the reel when it is not in

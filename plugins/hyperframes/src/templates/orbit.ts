@@ -15,7 +15,7 @@ import {
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Orbit (#466 TP4): labels circling a logo or a word in the middle. They fly
+ * Orbit: labels circling a logo or a word in the middle. They fly
  * out of the centre onto an ellipse, circle it and slow to a stop with the
  * long tail of the enter ease, so the clip ends on a still, evenly spaced ring
  * (the held frame is the one a viewer reads). The phase the circling starts

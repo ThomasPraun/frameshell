@@ -157,7 +157,7 @@ export interface ClipAdapter {
    */
   declaredProps?(clip: unknown): readonly string[] | null | Promise<readonly string[] | null>;
   /**
-   * Optional (ADR 0035 slice 5). Clean up what the adapter keeps in the project outside the render cache, which the
+   * Optional (ADR 0035). Clean up what the adapter keeps in the project outside the render cache, which the
    * host's `gc` does not know: marker files that feed {@link inputs}, listings, probes. The host calls it from `gc`
    * (also a dry run) once it has keyed every generated clip of every timeline of the project, at every format size.
    * It is called once per clip type the adapter is registered for, never in one call for all of them, with the paths
@@ -213,7 +213,7 @@ export interface FinalRenders {
    * Optional. True when {@link ClipAdapter.render} draws only the clip's part `[in, in + duration)` of its composition,
    * with the frames before `in` transparent (file time t is still composition time t), and {@link ClipAdapter.inputs}
    * names that part, so a narrower clip keys apart. The host then makes a final of one frame for a still (`frame` and
-   * `clip.compare` with `final`, ADR 0035 slice 7): it hands `render` (with `tier` "final") and {@link estimate} a copy of
+   * `clip.compare` with `final`, ADR 0035): it hands `render` (with `tier` "final") and {@link estimate} a copy of
    * the clip narrowed to that frame, `in` = frame / fps and `duration` = 1 / fps. Absent: stills of the clip use its
    * whole final when cached, else its draft. Hosts older than this never ask for one.
    */

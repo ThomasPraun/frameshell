@@ -14,7 +14,7 @@ import {
 } from "../src/renderer/src/teleprompter/model.js";
 import { teleprompter } from "../src/renderer/src/teleprompter/store.js";
 
-// Seam under test: the teleprompter's script stream, its moves and the focus-line scroll (#392, ADR 0024).
+// Seam under test: the teleprompter's script stream, its moves and the focus-line scroll (ADR 0024).
 
 const SCRIPT = `---
 shoot: true

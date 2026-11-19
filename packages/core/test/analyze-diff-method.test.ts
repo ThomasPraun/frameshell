@@ -6,7 +6,7 @@ import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `analyze.diff` (#471 slice 3), with real ffmpeg on 320x180 films at 30 fps: a white box slides right with an out ease and back
+// `analyze.diff`, with real ffmpeg on 320x180 films at 30 fps: a white box slides right with an out ease and back
 // with an in ease; the same film again a second later; the same motion in negative; and a vertical one.
 const MEDIA_TIMEOUT = 240_000;
 const FILM = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", "300"];

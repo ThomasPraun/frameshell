@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyChange, framingSize } from "../src/analyze/framing.js";
 
-// The pure part of the cut classification of `analyze` (#471): two grey frames in, what the change is out.
+// The pure part of the cut classification of `analyze`: two grey frames in, what the change is out.
 
 const W = 96;
 const H = 54;

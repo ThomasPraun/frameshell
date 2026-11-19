@@ -1,7 +1,7 @@
 import type { ReviewSheetKind, TimelineView } from "@frameshell/protocol";
 import { STILL_LEVEL } from "../analyze/rhythm.js";
 
-// Which frames `review` shows and how sheets are laid out. Pure: the frame sampling that #471 `analyze` reuses.
+// Which frames `review` shows and how sheets are laid out. Pure: the frame sampling that `analyze` reuses.
 // Everything counts in frame indexes of the film (the timeline's or the file's frame rate).
 
 /** Why a frame is on a sheet; see `ReviewTileSchema`. */

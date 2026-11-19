@@ -4,7 +4,7 @@ import { LANE_HEIGHT, RULER_HEIGHT, type TurnLaneInput, clipAt, layoutTimeline }
 import { DEFAULT_THEME, type Paint2D, paintTimeline } from "../src/renderer/src/timeline/paint.js";
 import { TURN_LANE_HEIGHT, clearEdit, laneAt, laneMarks, paintEdits, shotSpans, toGroup, toTimeline, unpaintEdits, within } from "../src/renderer/src/timeline/turn-lanes.js";
 
-// Seam under test: the program track's turn lanes (#247): group-clock turns on the timeline clock, painting back the other way.
+// Seam under test: the program track's turn lanes: group-clock turns on the timeline clock, painting back the other way.
 
 // A cut took group 4..10 out: the program plays group 0..4 from timeline 0, then group 10..14 from timeline 4.
 const shots = [

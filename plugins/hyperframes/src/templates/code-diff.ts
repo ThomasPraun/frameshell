@@ -12,7 +12,7 @@ import {
 } from "./kit.js";
 
 /**
- * Code diff (#466): one window shows the change between two snippets as a
+ * Code diff: one window shows the change between two snippets as a
  * unified diff. The unchanged and the removed lines come in; then each change is
  * lit in turn, a removed line on a red wash with a line struck through it, an
  * added line sliding in on a green one. Lines are matched by exact text, a

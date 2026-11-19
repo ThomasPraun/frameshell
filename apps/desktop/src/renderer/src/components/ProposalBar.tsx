@@ -85,7 +85,7 @@ function StyleList({ lines }: { lines: StyleLine[] }) {
   );
 }
 
-/** The `requirements.json` values the proposal changes (#457, ADR 0036), as text. */
+/** The `requirements.json` values the proposal changes (ADR 0036), as text. */
 function RequirementList({ lines }: { lines: StyleLine[] }) {
   if (lines.length === 0) return null;
   const text = lines.map((line) => t.review.requirementChanged(line.path, line.from ?? t.review.styleNone, line.to ?? t.review.styleNone));

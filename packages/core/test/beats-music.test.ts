@@ -4,7 +4,7 @@ import { detectBeats, onsetEnvelope, prepareSignal } from "../src/media/beats.js
 import { defaultSections, musicGrid, synthesizeMusic } from "../src/sound/music.js";
 
 // Seam under test: detectBeats on `sound.music` takes, whose beats are known exactly. A small in-process slice of
-// the #689 corpus (spikes/beats-real-music): each case failed on onset-flux@1 (late kick refinement, drift with
+// the real-music corpus (spikes/beats-real-music): each case failed on onset-flux@1 (late kick refinement, drift with
 // vinyl clicks and swing, a dotted-quarter tempo). Takes of 8 bars hold too few beats to tell some of these apart.
 
 function measure(preset: MusicPreset, bpm: number, bars = 12) {

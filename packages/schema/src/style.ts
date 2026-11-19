@@ -252,10 +252,10 @@ export const StyleFileSchema = z.strictObject({
 /** See {@link StyleFileSchema}. */
 export type StyleFile = z.output<typeof StyleFileSchema>;
 
-// Duration ranges and premium's quick/standard/slow palette are LottieFiles' motion-design numbers (#468);
+// Duration ranges and premium's quick/standard/slow palette are LottieFiles' motion-design numbers;
 // the other palettes take their range's low end, middle and high end. Overshoot ceilings come from the same
-// source (playful: the 20 % of #465's playful spring). Eases, springs and staggers are picked from #465's
-// curves, spring presets and stagger budgets: starting points, tuned per project in `style.json`.
+// source (playful: the 20 % of the playful spring). Eases, springs and staggers are starting points
+// (curves, spring presets, stagger budgets), tuned per project in `style.json`.
 /** Motion values of every personality. */
 export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMotionValues>> = {
   /** 150-300 ms, a visible bounce. */
@@ -311,8 +311,8 @@ export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMot
   },
 };
 
-// Type sizes are the floors seen in every source of #468 at 1080p; sound levels are #456 (music, ducking as
-// `duck` does), #463 (effects) and #464 (voice chain).
+// Type sizes are the floors seen in every source at 1080p; sound levels cover music (ducking as
+// `duck` does), effects and the voice chain.
 /** Values that apply where neither `style.json` nor the personality sets one. Null: not decided. */
 export const STYLE_DEFAULTS: Readonly<Omit<StyleValues, "motion">> = {
   brand: { product: null, url: null, promise: null, hook: null, cta: null, audience: null, reference: null, mustShow: [], mustAvoid: [] },

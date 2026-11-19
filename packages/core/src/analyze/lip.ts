@@ -3,9 +3,9 @@ import { frameDifference } from "../multicam/motion.js";
 import { bestLag } from "./correlate.js";
 import type { FaceTrack, TrackBox } from "../people/scan.js";
 
-// Mouth against voice (#471): how far the picture of a talking face lags the sound. The mouth is read as the motion of
+// Mouth against voice: how far the picture of a talking face lags the sound. The mouth is read as the motion of
 // the lower part of the face box a `people scan` cached (boxes only, twice a second: no landmarks are kept), the voice as the
-// level of the sound; the offset is where the two correlate best. After HyperFrames' `measure` sync (Apache-2.0), ported per #478.
+// level of the sound; the offset is where the two correlate best. After HyperFrames' `measure` sync (Apache-2.0).
 
 /** Most the mouth may be from the voice either way, seconds: a lip-sync error the eye accepts is far under it. */
 export const SYNC_MAX_LAG_S = 0.5;

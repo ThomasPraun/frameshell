@@ -1,7 +1,7 @@
 import { ANALYZE_GRID, type AnalyzeLook } from "@frameshell/protocol";
 
 // Look of a film's pictures: brightness, contrast, saturation, warmth and a coarse colour grid. Pure: `picture.ts` feeds it RGB frames.
-// After HyperFrames' `measure` (Apache-2.0), ported per #478.
+// After HyperFrames' `measure` (Apache-2.0).
 
 /** Columns of the colour grid, whatever the shape of the picture. */
 export const LOOK_COLUMNS = ANALYZE_GRID.columns;

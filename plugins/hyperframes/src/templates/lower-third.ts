@@ -1,7 +1,7 @@
 import { COLOR_HELPERS, PLACEHOLDER, type Template, type TemplateInput, type TemplateVariable, fontSetup, pageHead } from "./kit.js";
 
 /**
- * Lower third (#466): a card with an accent bar wipes in from its edge, the
+ * Lower third: a card with an accent bar wipes in from its edge, the
  * name and the role rise through a mask, a slow slide while it holds, a short
  * exit. Transparent around the card, so it works over footage.
  */

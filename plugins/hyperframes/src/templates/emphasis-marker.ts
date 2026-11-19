@@ -18,7 +18,7 @@ const DEFAULT_TEXT = "Make the one thing that matters impossible to miss.";
 const DEFAULT_MARK = "impossible to miss";
 
 /**
- * Emphasis marker (#466): a sentence rises in, then a hand-drawn mark is drawn
+ * Emphasis marker: a sentence rises in, then a hand-drawn mark is drawn
  * on a phrase of it: highlight, circle, underline, strike-through, box or
  * bracket (the rough-notation family). The marks are SVG strokes whose dash
  * offset is a function of the time, with seeded wobble, so every seek paints

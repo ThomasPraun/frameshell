@@ -155,7 +155,7 @@ test("Dock back returns the preview to its slot; closing the window does too", a
     .toBe(640);
   await child.getByRole("button", { name: "Dock preview back" }).click();
   await closed;
-  // A placement change still waiting for its delayed save is written when the window closes (#533).
+  // A placement change still waiting for its delayed save is written when the window closes.
   await expect.poll(() => readFileSync(join(box.configDir, "panel-windows.json"), "utf8")).toContain('"width": 640');
   await expect(page.getByTestId("panel-docked-elsewhere")).toHaveCount(0);
   await expect(page.locator(".preview-canvas")).toBeVisible();

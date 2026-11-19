@@ -47,7 +47,7 @@ export interface EnergyStoreOptions {
 }
 
 /**
- * Per-asset energy envelopes for cut snapping (#12), cached by content hash
+ * Per-asset energy envelopes for cut snapping, cached by content hash
  * in `.frameshell/energy/`. Source: the ingest PCM sidecar when present,
  * else the asset decoded by ffmpeg on the same clock, so snapping never
  * waits for ingest.

@@ -1,7 +1,7 @@
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Right-click menus on editor and terminal tabs (#419): close one, the others or all; rename, detach, add or close a
+// Right-click menus on editor and terminal tabs: close one, the others or all; rename, detach, add or close a
 // terminal.
 const box = sandbox("demo");
 

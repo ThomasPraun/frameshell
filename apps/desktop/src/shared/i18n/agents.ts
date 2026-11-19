@@ -1,5 +1,5 @@
-// Agent guide above the terminals (#190, renderer/src/components/AgentGuide.tsx) and the Claude Desktop connection
-// dialogs (#191, main/index.ts).
+// Agent guide above the terminals (renderer/src/components/AgentGuide.tsx) and the Claude Desktop connection
+// dialogs (main/index.ts).
 
 const en = {
   title: "Talk to an agent",
@@ -14,7 +14,7 @@ const en = {
   checkAgain: "Check again",
   unattended: "Runs commands without asking first",
   howTo: "How to connect each agent",
-  /** Page of the website in this language (#196). */
+  /** Page of the website in this language. */
   howToUrl: "https://frameshell.dev/agents",
   hide: "Hide",
   show: "Agent help",
@@ -28,7 +28,7 @@ const en = {
     "Add my logo in a corner",
   ],
   suggestionTitle: "Types it into the agent's prompt; press Enter to send",
-  /** The brief of a video made from an idea (#472), offered above the terminals until used or hidden. */
+  /** The brief of a video made from an idea, offered above the terminals until used or hidden. */
   idea: {
     chip: "Make my film",
     ready: "Your project is ready, with its formats. Start an agent, then use the suggested prompt for your film.",
@@ -146,4 +146,5 @@ const es: typeof en = {
   },
 };
 
+/** English and Spanish strings of the agent guide and Claude Desktop dialogs. */
 export const agents = { en, es };

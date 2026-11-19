@@ -15,7 +15,7 @@ import {
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Notification stack (#466): cards drop in from the top one after another,
+ * Notification stack: cards drop in from the top one after another,
  * each new one pushing the older ones down, smaller and fainter, until they
  * fade out. `notification` shows OS-style cards, `chat` message bubbles with
  * an avatar. Items are one `|`-separated prop of `Sender: message`. Transparent

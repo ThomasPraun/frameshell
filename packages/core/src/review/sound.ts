@@ -52,7 +52,7 @@ import {
   VOICE_WINDOW_S,
 } from "./thresholds.js";
 
-// The sound review list of `review` (#457). Pure: clips and envelopes in, `metrics.sound` out. A timeline is never mixed:
+// The sound review list of `review`. Pure: clips and envelopes in, `metrics.sound` out. A timeline is never mixed:
 // each clip is heard from its asset's 10 ms envelope (`EnergyStore`) with its gain and fades, and the clips are summed in
 // power by role (voice, music, effects, the rest). A file is its decoded mix, so only the ending, clicks and harshness can be told there.
 

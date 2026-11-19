@@ -11,7 +11,7 @@ import {
 import { WINDOW_DOTS_CSS, WINDOW_DOTS_HTML } from "./ui-parts.js";
 
 /**
- * Camera pull-back reveal (#466): the clip opens tight on one detail of a
+ * Camera pull-back reveal: the clip opens tight on one detail of a
  * picture (a button, a number, a corner of the screen), holds it for a beat
  * and pulls back to show the whole screen, then a title rises under it. The
  * camera is one scale about the detail plus the shift that centres it, both

@@ -213,7 +213,7 @@ test("the bridge applies the clip's element sheet, swaps it without a reload and
     (window as unknown as { marker: string }).marker = "same page";
   });
 
-  // Swap from the renderer as the drag will (#334): no reload, and the answer counts each selector.
+  // Swap from the renderer as the drag will: no reload, and the answer counts each selector.
   const counts = await page.evaluate(
     (css) =>
       new Promise<Record<string, number>>((resolve) => {

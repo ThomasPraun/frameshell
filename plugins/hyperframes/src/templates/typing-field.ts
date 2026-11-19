@@ -14,7 +14,7 @@ import {
 import { TYPING_MATH } from "./typing-kit.js";
 
 /**
- * Typing field (#466, UI demo): a prompt bar that types a line (an uneven,
+ * Typing field (UI demo): a prompt bar that types a line (an uneven,
  * seeded rhythm, a caret that blinks when it rests), then a cursor presses its
  * Run button; on that same frame the button presses, a progress line fills and
  * the result appears when it ends. With the cursor off the press happens by

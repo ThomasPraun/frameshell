@@ -1,4 +1,4 @@
-// How the plugin store runs npm (#204): under a system Node, or inside the packaged app, which ships npm and has no
+// How the plugin store runs npm: under a system Node, or inside the packaged app, which ships npm and has no
 // Node of its own: the daemon there is the app's executable run as Node (ELECTRON_RUN_AS_NODE).
 import { createHash } from "node:crypto";
 import { chmod, mkdir, writeFile } from "node:fs/promises";

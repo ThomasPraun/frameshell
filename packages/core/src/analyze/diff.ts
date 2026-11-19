@@ -31,9 +31,9 @@ import {
 import { MAX_PICTURE_S } from "./picture.js";
 import { frameAt, frameStart } from "./shots.js";
 
-// `analyze.diff` (#471): our film against a reference. Lined up by activity-curve alignment, then compared at matched times by
+// `analyze.diff`: our film against a reference. Lined up by activity-curve alignment, then compared at matched times by
 // SSIM (ffmpeg's `ssim`), with the energy of each and a side-by-side sheet. A distance to read, not a pass or fail. After
-// HyperFrames' `measure` diff and energy (Apache-2.0), ported per #478; the sheet is `review`'s (`review/sheet.ts`).
+// HyperFrames' `measure` diff and energy (Apache-2.0); the sheet is `review`'s (`review/sheet.ts`).
 
 /** Default seconds between SSIM readings. */
 export const DEFAULT_DIFF_EVERY_S = 0.5;

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Transitions and keyframes in the UI (ADR 0018 decision 12, #304): a right-click on a clip edge adds or removes a
+// Transitions and keyframes in the UI (ADR 0018 decision 12): a right-click on a clip edge adds or removes a
 // transition, the inspector edits it and keys properties at the playhead. Every edit is a `ui` operation saved at once.
 const box = sandbox("transitions-ui");
 const mainFile = join(box.projectDir, "timelines", "main.json");
@@ -116,7 +116,7 @@ test("the inspector picks a wipe and its direction, an iris, and a dip cut at a 
   await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "iris" });
   await expect(direction).toHaveCount(0);
 
-  // Zoom has no direction or count; slats take both, a grid only a count (ADR 0030 slice 4).
+  // Zoom has no direction or count; slats take both, a grid only a count (ADR 0030).
   await kind.selectOption("zoom");
   await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "zoom" });
   await expect(direction).toHaveCount(0);

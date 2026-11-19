@@ -65,7 +65,7 @@ const SEGMENTING_SHARE = 0.7;
  * segments (pyannote segmentation), then CAM++ embeds each segment on ONNX
  * Runtime Web and {@link clusterVoices} groups them into voices. sherpa-onnx's
  * own voice labels are not used: its native ONNX Runtime gives CAM++
- * embeddings that jump with the segment length (issue #359,
+ * embeddings that jump with the segment length (see
  * docs/research/diarization-embeddings.md).
  */
 export const sherpaDiarizer: Diarizer = async (request) => {

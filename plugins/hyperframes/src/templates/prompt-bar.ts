@@ -13,7 +13,7 @@ import {
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Prompt bar (#466): an input bar whose placeholder gives way to a prompt
+ * Prompt bar: an input bar whose placeholder gives way to a prompt
  * that types out, then a Run button is pressed (it dips to 0.84 in 0.1 s and
  * springs back, a ring leaves it and an accent halo lights the bar on the same
  * frame) and a spinner takes the label. The text's room is reserved from the

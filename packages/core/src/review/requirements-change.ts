@@ -14,7 +14,7 @@ export interface RequirementsServiceOptions {
 }
 
 /**
- * `review.require` and `review.waive` (#457): `requirements.json` changed only through the config journal
+ * `review.require` and `review.waive`: `requirements.json` changed only through the config journal
  * (ADR 0036), in the caller's transaction, held by review mode like a timeline change.
  */
 export class RequirementsService {

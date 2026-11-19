@@ -13,7 +13,7 @@ import {
   SYNC_NEAR_S,
 } from "./thresholds.js";
 
-// Sounds against the picture events they belong to (#457). Pure: onsets and events in, the verdicts and a chance baseline out.
+// Sounds against the picture events they belong to. Pure: onsets and events in, the verdicts and a chance baseline out.
 // A sound landing on every cut proves nothing, so the hit rate is set beside what the same sounds score moved by fixed
 // offsets, and what is left over is listed: cuts with no sound, sounds with no picture event.
 

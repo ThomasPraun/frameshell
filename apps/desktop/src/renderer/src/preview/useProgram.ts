@@ -9,7 +9,7 @@ import { useClipRenders } from "./useClipRenders.js";
 import { useGradeTables } from "./useGradeTables.js";
 import { useSubjectMattes } from "./useSubjectMattes.js";
 
-/** Poll `asset.list` this often while an asset is still ingesting (until daemon asset events, #69). */
+/** Poll `asset.list` this often while an asset is still ingesting (until daemon asset events). */
 const INGEST_POLL_MS = 2_000;
 
 /** Nested clip sources the preview can follow: `timelines/<id>.json`, the files `timeline.show` reads by id. */

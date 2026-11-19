@@ -2,7 +2,7 @@ import { readRawFrames } from "../media/raw-frames.js";
 
 // Which kind of cut a big change of the picture is, from the frame before it and the frame after: a new scene, the same
 // framing with time skipped (a jump cut), the same shot punched in or out (a crop and scale of it), or no cut at all (a
-// flash, a caption). Pure but for `readBoundaryFrames`. After HyperFrames' `measure` (Apache-2.0), ported per #478.
+// flash, a caption). Pure but for `readBoundaryFrames`. After HyperFrames' `measure` (Apache-2.0).
 
 /** Longest side of the grey frames cuts are classified on, px: enough to tell a 1.05x scale from none, small enough to search many scales. */
 export const FRAMING_LONG_SIDE = 96;

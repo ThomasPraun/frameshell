@@ -6,7 +6,7 @@ import { FONTS_DIR } from "../export/compiler.js";
 import { writeFonts } from "../export/fonts.js";
 import { runTool } from "../media/ffmpeg.js";
 
-// Tile frames into one labelled sheet with the managed ffmpeg. Shared by `review` and #471 `analyze`.
+// Tile frames into one labelled sheet with the managed ffmpeg. Shared by `review` and `analyze`.
 
 /** Pixels between tiles and around the sheet. */
 export const SHEET_GAP = 2;

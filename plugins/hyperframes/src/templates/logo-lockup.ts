@@ -12,7 +12,7 @@ import {
 } from "./kit.js";
 
 /**
- * Logo lockup (#466): the logo springs in, the name and the tagline rise
+ * Logo lockup: the logo springs in, the name and the tagline rise
  * through a mask and an accent rule draws between them. Side by side on wide
  * frames, stacked on square and tall ones. Transparent unless `backdrop` is
  * raised.

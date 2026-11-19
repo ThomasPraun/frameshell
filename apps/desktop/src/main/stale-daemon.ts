@@ -1,4 +1,4 @@
-// A daemon left running by the previous app version (#193): the new app would keep talking to the old code, and the
+// A daemon left running by the previous app version: the new app would keep talking to the old code, and the
 // old daemon never idles out while the new app is connected. Checked once, at the first start of a new version.
 import { readFile } from "node:fs/promises";
 import { type DaemonConnection, ErrorCode, RpcError, connectToDaemon, isDaemonUnavailable } from "@frameshell/protocol";

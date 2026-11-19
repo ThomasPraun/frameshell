@@ -6,7 +6,7 @@ import { MediaStore, RECIPE_VERSION } from "@frameshell/core";
 import { connectToDaemon } from "@frameshell/protocol";
 import { launch, sandbox } from "./harness.js";
 
-// Asset events (#69): an imported file shows its waveform on the timeline from the daemon's
+// Asset events: an imported file shows its waveform on the timeline from the daemon's
 // `asset.changed`, with no polling and no timeline change. The e2e machines have no ffmpeg, so the ingest
 // is a cache hit: the derived media for these exact bytes is already in the project's media cache.
 const box = sandbox("media");
@@ -60,7 +60,7 @@ test("a waveform appears when its asset finishes ingest, without polling or a ti
     cli.close();
   }
 
-  // Before #69 the panel re-read assets only on a timeline revision or while one was ingesting: never here.
+  // Without asset events the panel re-reads assets only on a timeline revision or while one was ingesting: never here.
   await expect(lanes()).toHaveAttribute("data-media-drawn", "1");
   await expect(lanes()).toHaveAttribute("data-revision", "0");
 });

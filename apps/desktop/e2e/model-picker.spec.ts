@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Transcription model picker (#427) in the transcript toolbar: a model file registered on this machine through the
+// Transcription model picker in the transcript toolbar: a model file registered on this machine through the
 // app and chosen for the project. Nothing is transcribed; the model files are tiny stand-ins with the ggml magic.
 const box = sandbox("transcript");
 const configFile = join(box.projectDir, "frameshell.json");

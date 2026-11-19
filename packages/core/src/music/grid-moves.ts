@@ -11,7 +11,7 @@ import { type MusicFitPlan, planDuckAgain } from "./run.js";
 import { shapeCurve } from "./shape.js";
 
 /**
- * Grid moves of `music.grid` (#485 slice 5, ADR 0037): picture cuts moved onto the timeline's beat grid by ripple trims of
+ * Grid moves of `music.grid` (ADR 0037): picture cuts moved onto the timeline's beat grid by ripple trims of
  * the clip before each cut (or, with `trim: "head"` and for program tracks, by roll edits: the tail before the cut and the
  * head after it). Entries of clips alone on upper video tracks move whole. Every cut gets an absolute target (its beat, or
  * where it is), so a move followed by a cut that stays changes only the shots between them, like a roll. Each operation is tried on the engine in memory first
@@ -90,7 +90,7 @@ const ms = (seconds: number) => Math.round(seconds * 1000);
 const isClipTrack = (track: Timeline["tracks"][number]): track is AnyClipTrack => track.kind !== "subtitles";
 
 /**
- * The grid moves for `timeline` (ADR 0037 slice 5): its picture cuts, the nearest beat of each, and the clip trims that
+ * The grid moves for `timeline` (ADR 0037): its picture cuts, the nearest beat of each, and the clip trims that
  * land the moves, each tried in memory. Reads only. Throws InvalidOperation for a timeline with no usable grid or a `skip`
  * id that is no move.
  */

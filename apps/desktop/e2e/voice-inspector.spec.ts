@@ -9,7 +9,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// The Voice section of the clip inspector (#464, ADR 0031): the voice chain of a media clip is switched on from the
+// The Voice section of the clip inspector (ADR 0031): the voice chain of a media clip is switched on from the
 // style, edited number by number, reordered, bypassed and brought back, every change one `ui` clip.set that undo
 // reverts; the preview then asks for the bake of the chain, which lands in `.frameshell/audio-fx/`.
 const box = sandbox("voice-inspector");

@@ -74,7 +74,7 @@ export class PluginStore {
    * absolute by now). A tarball outside the project is first copied to
    * `<root>/vendor/`, so the pin works in every clone that carries it. A
    * tarball replaces the pin of its package (read from its `package.json`):
-   * that pin's file may be gone or changed (#125).
+   * that pin's file may be gone or changed.
    * Does not mark the result synced; callers do after validating the package.
    */
   async add(pins: PluginPins, spec: PluginSpec): Promise<{ name: string; pin: string }> {

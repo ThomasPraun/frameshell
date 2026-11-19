@@ -17,7 +17,7 @@ const DRIFT_MAX = 0.3;
 const SEEK_EPSILON = 0.015;
 
 /**
- * Multicam viewer (#243, ADR 0016 decision 5): every angle of the program track's group in a grid, at the
+ * Multicam viewer (ADR 0016 decision 5): every angle of the program track's group in a grid, at the
  * playhead. The angles the current shot shows are outlined, the angles speaking now are marked; a click cuts to
  * the angle as its number key does, Shift+click adds it to the shot. Each angle plays its low-res proxy in a muted
  * `<video>` kept on the playhead (one decoder per angle, only while the viewer is shown), so it works in a

@@ -26,7 +26,7 @@ const invalid = (message: string, data: Record<string, unknown>) =>
   new RpcError(ErrorCode.InvalidOperation, `cleanup: ${message}`, { op: "cleanup", ...data });
 
 /**
- * The cuts `cleanup` proposes for `timeline` (#455): pauses and retakes of the words its media clips keep, edges placed
+ * The cuts `cleanup` proposes for `timeline`: pauses and retakes of the words its media clips keep, edges placed
  * by the audio. Reads only; applying is the caller's, last cut first. Throws InvalidOperation for options that cannot
  * work, a `skip` id that is no candidate, or a timeline with no transcribed speech.
  */

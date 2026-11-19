@@ -5,7 +5,7 @@ import { type AppDirs, type DaemonConnection, type EventParams, connectToDaemon 
 import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// Project-config changes in review mode (ADR 0036 slice 2): an agent's format change waits in its transaction's
+// Project-config changes in review mode (ADR 0036): an agent's format change waits in its transaction's
 // proposal like a timeline change; `desktop/…` connections are the person (`ui`).
 
 let daemon: Daemon | undefined;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// `clip.compare` (#482 slice 3, ADR 0035): one frame of a generated clip under several prop or source variants, as one image.
+// `clip.compare` (ADR 0035): one frame of a generated clip under several prop or source variants, as one image.
 
 /** Most variants one `clip.compare` renders next to the clip as it is. */
 export const CLIP_COMPARE_MAX_LOOKS = 11;

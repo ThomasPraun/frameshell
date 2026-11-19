@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 
-// Live timeline (#14): the panel follows the daemon while the CLI edits the project from the integrated terminal.
+// Live timeline: the panel follows the daemon while the CLI edits the project from the integrated terminal.
 const box = sandbox("timeline");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 
-/** CLI change on disk to timeline on screen, SPEC acceptance for #14. */
+/** CLI change on disk to timeline on screen, SPEC acceptance. */
 const LIVE_BUDGET_MS = 200;
 /** Paint of one frame, p95; half a 60 Hz frame leaves room for compositing. */
 const PAINT_BUDGET_MS = 8;

@@ -228,10 +228,10 @@ export interface ReviewRequest {
 export const REVIEW_DIR = [".frameshell", "review"] as const;
 
 /**
- * `review` (#457): contact sheet, phone sheet, fast-motion strips, loop seam, cut strips, the per-clip kit (pop pair,
+ * `review`: contact sheet, phone sheet, fast-motion strips, loop seam, cut strips, the per-clip kit (pop pair,
  * onion skin, speed graph) and `metrics.json` of a timeline or an
  * exported file, written to `.frameshell/review/<n>/`. Frames come from the `frame` method (timeline) or ffmpeg (file); sampling
- * is in `plan.ts` and tiling in `sheet.ts`, which #471 `analyze` shares.
+ * is in `plan.ts` and tiling in `sheet.ts`, which `analyze` shares.
  */
 export class ReviewService {
   readonly #options: ReviewServiceOptions;

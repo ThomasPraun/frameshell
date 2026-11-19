@@ -6,7 +6,7 @@ import { blockMean, previewPixels } from "./frames.js";
 import { ffmpegRun, testFfmpeg, useTestBinaries } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Transitions and keys in the preview (ADR 0018, #302): a bottom-track dissolve mixes the two clips by the shared
+// Transitions and keys in the preview (ADR 0018): a bottom-track dissolve mixes the two clips by the shared
 // weights, and a keyed overlay moves frame by frame. Solid colours make the expected pixels exact.
 const box = sandbox("transitions");
 const mainFile = join(box.projectDir, "timelines", "main.json");

@@ -141,7 +141,7 @@ export async function probeSource(ffprobe: string, path: string, signal?: AbortS
   const avg = rate(video?.avg_frame_rate);
   const real = rate(video?.r_frame_rate);
   // Phones store portrait video as landscape frames plus a rotation, which ffmpeg applies when it decodes: report
-  // the size every proxy, frame and export sees (#207).
+  // the size every proxy, frame and export sees.
   const turned = video ? quarterTurned(video) : false;
   const alpha = video ? alphaOf(video) : null;
   // Palettized stills (PNG/GIF with tRNS) report `pal8`: transparency is possible, so treat them as alpha. Opaque ones are fitted whole too.

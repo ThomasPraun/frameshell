@@ -139,4 +139,5 @@ const es: typeof en = {
   showOnTimeline: (id) => `Mostrar ${id} en la línea de tiempo`,
 };
 
+/** English and Spanish strings of the History panel. */
 export const history = { en, es };

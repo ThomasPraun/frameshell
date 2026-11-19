@@ -4,7 +4,7 @@ import { isBinaryError } from "../binaries/errors.js";
 
 /**
  * The arithmetic that turns per-asset EBU R128 readings (`LoudnessStore`) into clip gains: `duck --level` and
- * `music.candidates` (ADR 0037 slice 3). Pure but for the reading callback. Readings are over the part of the file a
+ * `music.candidates` (ADR 0037). Pure but for the reading callback. Readings are over the part of the file a
  * clip plays ({@link playedRange}), not the whole file.
  */
 

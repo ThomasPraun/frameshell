@@ -8,7 +8,7 @@ import { useTestBinaries } from "./media.js";
 // before anything is generated; the result opens in the voiceover dialog (decision 22). The daemon runs with
 // `FRAMESHELL_SPEECH_STAND_IN=paid`: `stand-in-paid` says each word as a tone and charges 0.01 USD a word, so no cloud
 // account is involved. The message boxes are stubbed in main. The menu items appear only on scripts with `voiceover: true`;
-// the run is bound to the cost the person saw (#586).
+// the run is bound to the cost the person saw.
 const box = sandbox("demo");
 const SCRIPT = "scripts/vo.md";
 const FREE_SCRIPT = "scripts/free-vo.md";

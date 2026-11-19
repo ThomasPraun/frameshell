@@ -10,7 +10,7 @@ import {
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Scene background (#466): a full-screen backdrop for the clips above it.
+ * Scene background: a full-screen backdrop for the clips above it.
  * Soft gradient orbs drift on closed loops, a grid (120 px at 1080 p) fades
  * out toward the edges under a radial mask and slides one cell over the clip,
  * a vignette darkens the corners and film grain flickers on. Radial gradients

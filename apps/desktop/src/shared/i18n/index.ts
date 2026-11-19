@@ -1,4 +1,4 @@
-// UI strings of the desktop app (#189), shared by main (menus, dialogs) and the renderer. One file per area holds
+// UI strings of the desktop app, shared by main (menus, dialogs) and the renderer. One file per area holds
 // both languages: English is the source, the Spanish object is typed by it, so a missing key fails typecheck.
 import { agents } from "./agents.js";
 import { angles } from "./angles.js";

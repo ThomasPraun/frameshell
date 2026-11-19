@@ -3,7 +3,7 @@ import type { Clip, SfxKind, Timeline, Track } from "@frameshell/schema";
 import type { EnergyProfile } from "../src/media/energy.js";
 import { fileSound, findClicks, heardClips, soundListWarnings, timelineSound } from "../src/review/sound.js";
 
-// The sound review list of `review` (#457): roles, voice over bed, repeats, cut-off tails, the ending and clicks, on
+// The sound review list of `review`: roles, voice over bed, repeats, cut-off tails, the ending and clicks, on
 // envelopes made up per test (one dBFS value per 10 ms).
 
 const FPS = 30;

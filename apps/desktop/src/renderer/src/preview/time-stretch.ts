@@ -1,4 +1,4 @@
-// Pitch-keeping time stretch of a program audio span at clip speed ≠ 1 (#499), the preview's twin of export `atempo`.
+// Pitch-keeping time stretch of a program audio span at clip speed ≠ 1, the preview's twin of export `atempo`.
 // WSOLA: Hann frames every HOP program samples counted from the span's start, each read from the source where the
 // speed puts its centre, moved by up to SEARCH samples so it lines up with the frame before it. That alignment is a
 // chain: a StretchChain carries it from one read of a span to the next, so a play hears one chain from where it

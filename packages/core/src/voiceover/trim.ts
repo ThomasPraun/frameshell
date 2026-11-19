@@ -2,13 +2,13 @@ import { ENERGY_HOP_S, energyEnvelope } from "../media/energy.js";
 import type { Pcm16 } from "../transcripts/window.js";
 
 /**
- * Quiet = this far below the take's loudest 10 ms (#470: -38 dB relative to peak). A synthetic voice has no
+ * Quiet = this far below the take's loudest 10 ms (-38 dB relative to peak). A synthetic voice has no
  * room noise, so its peak is a steady reference; ADR 0003's percentile threshold is tuned for recordings.
  */
 export const TRIM_RANGE_DB = 38;
-/** Air kept before the first sound (#470: 20 ms lead). */
+/** Air kept before the first sound (20 ms lead). */
 export const TRIM_LEAD_S = 0.02;
-/** Air kept after the last sound (#470: 30 ms tail). */
+/** Air kept after the last sound (30 ms tail). */
 export const TRIM_TAIL_S = 0.03;
 /** A take whose loudest 10 ms stays under this (dBFS) holds no speech. */
 const SILENT_DB = -60;

@@ -7,9 +7,9 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// The Colour section of the clip inspector (#384, ADR 0031): sliders for the correction, a project LUT with its mix and a
+// The Colour section of the clip inspector (ADR 0031): sliders for the correction, a project LUT with its mix and a
 // reset, each change one `ui` clip.set that merges its number into the clip's grade (a drag is one step); footage tagged
-// HLG shows the LOG note, plain footage does not. A nested timeline clip gets the same section without the note (slice 9).
+// HLG shows the LOG note, plain footage does not. A nested timeline clip gets the same section without the note.
 const box = sandbox("colour-inspector");
 const mainFile = join(box.projectDir, "timelines", "main.json");
 const journal = join(box.projectDir, ".frameshell", "history", "main.jsonl");

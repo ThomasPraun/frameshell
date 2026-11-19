@@ -72,4 +72,5 @@ const es: typeof en = {
   takeDifferences: (number, count) => `Toma ${number}: ${count} ${count === 1 ? "diferencia" : "diferencias"}, revísalas en la vista Rodaje`,
 };
 
+/** English and Spanish strings of the teleprompter panel. */
 export const teleprompter = { en, es };

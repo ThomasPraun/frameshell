@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DecodeStep } from "../src/renderer/src/preview/decode-plan.js";
 import { readAhead, readBlocks } from "../src/renderer/src/preview/read-ahead.js";
 
-// Seam under test: how far the engine reads encoded pictures ahead of its decoder (#105: a slow ranged read must not
+// Seam under test: how far the engine reads encoded pictures ahead of its decoder (a slow ranged read must not
 // wait until the decoder needs its first picture).
 
 /** A read the test settles by hand; `started` lists jobs in the order their reads began. */

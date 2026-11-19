@@ -6,7 +6,7 @@ import { type ElectronApplication, type Page, expect, test } from "@playwright/t
 import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 import { ffmpegRun, testFfmpeg, useTestBinaries } from "./media.js";
 
-// Pick inside photos (ADR 0022, #362, #363): a real daemon whose segmentation answers with nested squares
+// Pick inside photos (ADR 0022): a real daemon whose segmentation answers with nested squares
 // (FRAMESHELL_SEGMENT_STAND_IN) instead of downloading MobileSAM, and the stand-in agent TUI of the Ask spec.
 const FAKE_AGENT = join(import.meta.dirname, "fake-agent.mjs");
 const MOD = process.platform === "darwin" ? "Meta" : "Control";

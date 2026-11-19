@@ -265,7 +265,7 @@ const DECLARATION_ATTR = /\sdata-composition-variables\s*=\s*(?:'([^']*)'|"([^"]
  * `data-composition-variables` as a JSON object (`{"title":"Title"}`).
  * HyperFrames reads only an array of `{id, type, label, default}`
  * declarations and silently ignores anything else, so the defaults would
- * never reach `getVariables()` (#116). The error carries the array to use.
+ * never reach `getVariables()`. The error carries the array to use.
  * Unparsable values are left to the producer.
  */
 async function refuseObjectDeclarations(id: string, dir: { path: string; rel: string }): Promise<void> {

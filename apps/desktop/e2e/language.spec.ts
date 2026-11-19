@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// UI language (#189): the OS language picks it; View > Language overrides it, saved in configDir, and reloads windows.
+// UI language: the OS language picks it; View > Language overrides it, saved in configDir, and reloads windows.
 const box = sandbox("demo");
 const home = join(dirname(box.projectDir), "desktop");
 mkdirSync(home, { recursive: true });

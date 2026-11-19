@@ -3,7 +3,7 @@
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, panelWindow, sandbox } from "./harness.js";
 
-// The teleprompter (#392, ADR 0024): a shoot script on a fixed focus line, moved by keys in its own window.
+// The teleprompter (ADR 0024): a shoot script on a fixed focus line, moved by keys in its own window.
 const box = sandbox("teleprompter");
 
 let app: ElectronApplication;

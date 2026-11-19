@@ -49,16 +49,12 @@ import { AGENT_LABEL_PATTERN } from "./agents.js";
 /**
  * Timeline operations (SPEC §6.1): the args of every mutating timeline verb,
  * the patch that expresses any inverse, and the operation record the daemon
- * returns (and #10's history journals). Method params in `methods.ts` wrap
+ * returns and the history journals keep. Method params in `methods.ts` wrap
  * these args with `cwd` and `timeline`.
  */
 
 const Seconds = (what: string) => z.number().nonnegative().describe(`${what} Seconds; snapped to the project frame grid, 3 decimals.`);
 
-/**
- * A time on the timeline clock the daemon resolves before the operation runs: seconds, or a name from the timeline
- * (ADR 0029 decision 7, ADR 0037). Fields that take one are listed in {@link TIME_REF_FIELDS}.
- */
 /** Text that is plain decimal seconds (`12`, `2.5`, `.5`, `-1`); `0x10`, `1e2` are not, so they can only be names. */
 export const SECONDS_TEXT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
 
@@ -68,6 +64,10 @@ export function timeRefOf(text: string): number | string {
   return SECONDS_TEXT.test(trimmed) ? Number(trimmed) : trimmed;
 }
 
+/**
+ * A time on the timeline clock the daemon resolves before the operation runs: seconds, or a name from the timeline
+ * (ADR 0029 decision 7, ADR 0037). Fields that take one are listed in {@link TIME_REF_FIELDS}.
+ */
 export const TimeRef = (what: string) =>
   z
     .union([z.number().nonnegative(), z.string().min(1)])

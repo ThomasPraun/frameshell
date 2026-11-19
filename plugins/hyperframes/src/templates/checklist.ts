@@ -14,7 +14,7 @@ import {
 } from "./kit.js";
 
 /**
- * Checklist (#466): the items spring in one after another, then tick one by
+ * Checklist: the items spring in one after another, then tick one by
  * one on a steady beat (a filled box with a check, the text settling back).
  * Up to eight items, separated by `|` in one prop so a revision is one
  * `clip set`. Transparent unless `backdrop` is raised. With `onBeats` the ticks

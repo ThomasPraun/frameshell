@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { launch, sandbox } from "./harness.js";
 
-// App launch (#103): the window loads before the daemon answers. A cold daemon on a loaded machine can take longer
+// App launch: the window loads before the daemon answers. A cold daemon on a loaded machine can take longer
 // than any fixed wait; the window must not hang on it, and must not fall back to the welcome screen either.
 const box = sandbox("demo");
 

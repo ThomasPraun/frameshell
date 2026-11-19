@@ -1,4 +1,4 @@
-// What the transcription model picker (#427) offers, from `model.list`; pure, so it is tested without the app.
+// What the transcription model picker offers, from `model.list`; pure, so it is tested without the app.
 import type { ModelListResult } from "@frameshell/protocol";
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 

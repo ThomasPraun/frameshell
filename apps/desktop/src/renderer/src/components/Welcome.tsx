@@ -22,7 +22,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
     void window.frameshell.project.recent().then(setRecent);
   }, []);
 
-  // Videos opened from the OS (Open with, #184): shown for confirmation like chosen ones.
+  // Videos opened from the OS (Open with): shown for confirmation like chosen ones.
   useEffect(() => {
     const take = () =>
       void window.frameshell.project.takeOffered().then((offered) => {

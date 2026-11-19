@@ -14,12 +14,12 @@ const WINDOW_MARGIN_S = 0.3;
 /**
  * Long words this close (seconds between one's end and the next's start)
  * share one window, gap included: a swallowed phrase can run across the gap
- * (#117: `incluido.` then `La`).
+ * (for example `incluido.` then `La`).
  */
 const MERGE_GAP_S = 2;
 /** A window word this close to the next engine word's onset, same text, is that word heard early (ADR 0003: DTW onset worst ~1 s). */
 const NEXT_ONSET_LAG_S = 1;
-/** Words before a window passed as its prompt (#123); whisper keeps only the prompt's last ~224 tokens anyway. */
+/** Words before a window passed as its prompt; whisper keeps only the prompt's last ~224 tokens anyway. */
 const PROMPT_WORDS = 40;
 
 /** Outcome of {@link recoverLongWords}. */
@@ -49,11 +49,11 @@ export interface RecoverLongWordsOptions {
 }
 
 /**
- * Recover words whisper swallowed into one long word (#117: a repeated
+ * Recover words whisper swallowed into one long word (for example, a repeated
  * phrase came back as `incluido.` spanning 5 s). A word longer than
  * {@link LONG_WORD_S} whose energy shows speech after its first second is
  * re-transcribed alone, prompted with the text before it so case and
- * punctuation carry over (#123); such words close together share one window
+ * punctuation carry over; such words close together share one window
  * spanning the gap between them. When the window finds more words starting inside
  * that span than it replaces, they replace it, timed inside the span. Window
  * words that repeat a neighbour (the previous word's tail heard in the

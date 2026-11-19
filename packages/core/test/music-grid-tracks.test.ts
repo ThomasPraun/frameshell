@@ -9,7 +9,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeBurstClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// `music.grid` on program tracks and upper tracks (ADR 0037, after slice 5), through a real daemon. Two synthetic cameras
+// `music.grid` on program tracks and upper tracks (ADR 0037), through a real daemon. Two synthetic cameras
 // that share tone bursts make a multicam group; its one shot is split at 3.3 s (a beat is at 3.5 s). A clip alone on an upper
 // video track starts at 5.3 s (beat at 5.5 s). The music is a silent WAV with a hand-written `exact` beats file: a beat every
 // 0.5 s from 0.5 s.

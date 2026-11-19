@@ -1,4 +1,4 @@
-// Update check (#193), pure parts: version order, update mode per build, GitHub release parsing, opt-out store.
+// Update check, pure parts: version order, update mode per build, GitHub release parsing, opt-out store.
 // Electron wiring: updater.ts.
 import { readFile } from "node:fs/promises";
 import { writeJsonAtomic } from "@frameshell/core/fs-util";
@@ -11,6 +11,7 @@ export const LATEST_RELEASE_API = `https://api.github.com/repos/${RELEASES_REPO.
 export const DOWNLOAD_PAGE = `https://github.com/${RELEASES_REPO.owner}/${RELEASES_REPO.repo}/releases/latest`;
 /** First automatic check after start: late enough not to compete with the daemon's cold start. */
 export const FIRST_CHECK_DELAY_MS = 10_000;
+/** Time between automatic checks after the first. */
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**

@@ -65,7 +65,7 @@ const MAX_AHEAD = 12;
 const READ_SAMPLES = 30;
 /**
  * Encoded pictures read ahead of the decoder per layer (~3 s; ~0.4 MB of the ADR 0001 fixture's proxy). Covers a
- * ranged read the main process answers late on a loaded machine, also across a cut (#105).
+ * ranged read the main process answers late on a loaded machine, also across a cut.
  */
 const READ_AHEAD = 90;
 /** Audio scheduled this far ahead of what is heard. */
@@ -552,7 +552,7 @@ class Engine implements LayerHost {
   /** Audio requested from here on fades in here (play start, live cut) unless its clip starts later. */
   #audioFadeFloor = 0;
   readonly #audioJobs = new Set<AudioJob>();
-  /** Time stretch of each sped-up span this play reads (#499), by {@link stretchKey}: its reads render in order. */
+  /** Time stretch of each sped-up span this play reads, by {@link stretchKey}: its reads render in order. */
   #stretches = new Map<string, { chain: StretchChain; tail: Promise<void> }>();
 
   readonly #drops = new DropLog();
@@ -854,7 +854,7 @@ class Engine implements LayerHost {
   }
 
   /**
-   * The frame a subject span drawn from its plate (`sharesLayer`, ADR 0032 slice MX2) takes from that layer at `want`:
+   * The frame a subject span drawn from its plate (`sharesLayer`, ADR 0032) takes from that layer at `want`:
    * the plate's decoded frame, never its grade's output, so each layer grades, shapes, masks and fades it itself (ADR
    * 0031 order, as export). Null while the plate is still decoding it; `failed` when the plate cannot be read.
    */

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { isWindows, launch, sandbox } from "./harness.js";
 
-// A project inside a synced folder (#187): Dropbox's info.json under a fake home says the sandbox is Dropbox. Windows
+// A project inside a synced folder: Dropbox's info.json under a fake home says the sandbox is Dropbox. Windows
 // reads it from APPDATA, which the app needs for itself: detection there is covered by core's unit tests.
 const box = sandbox("demo");
 const home = join(dirname(box.projectDir), "home");

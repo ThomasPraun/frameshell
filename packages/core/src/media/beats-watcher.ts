@@ -29,7 +29,7 @@ export interface BeatsWatcherOptions {
 const RESCAN_AFTER_READY_MS = 1_000;
 
 /**
- * Watches `beats/**` of attached projects (ADR 0029 decision 3, slice 3). The beats file is read on every use, so
+ * Watches `beats/**` of attached projects (ADR 0029 decision 3). The beats file is read on every use, so
  * there is no state to reconcile; what a hand edit needs is for the app and agents to learn the grid changed, and to
  * hear when the file no longer validates (the grid is then unavailable instead of silently stale). Each report is
  * the file's state after the write settled: validated with the schema `file.write` and `beats.measure` share.

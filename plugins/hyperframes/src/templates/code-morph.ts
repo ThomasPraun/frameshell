@@ -12,7 +12,7 @@ import {
 } from "./kit.js";
 
 /**
- * Code morph (#466): one snippet turns into another inside the same window.
+ * Code morph: one snippet turns into another inside the same window.
  * Tokens (never spaces) of both snippets are matched in order by kind and text;
  * a matched token travels from its place in the first snippet to its place in
  * the second, a token only the first has fades out, one only the second has

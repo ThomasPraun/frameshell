@@ -8,7 +8,7 @@ import { t } from "../i18n.js";
 const UNKNOWN = "";
 
 /**
- * Brief of a video made from an idea, with no footage (#472): name, formats, rough length and an optional web page.
+ * Brief of a video made from an idea, with no footage: name, formats, rough length and an optional web page.
  * The folder is planned by main (the videos folder unless changed); the project is created by the caller.
  */
 export function NewFromIdea({

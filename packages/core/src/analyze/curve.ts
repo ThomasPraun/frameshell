@@ -4,7 +4,7 @@ import { frameStart } from "./shots.js";
 
 // How much the picture changes over time, and the steady moves in it. Pure: `picture.ts` measures `activity`.
 // The ease fit compares a move's speed profile with the standard ease curves (cubic), after HyperFrames' `measure` curve
-// (Apache-2.0), ported per #478. The change between frames has no sign, so a move's direction and any overshoot are not found.
+// (Apache-2.0). The change between frames has no sign, so a move's direction and any overshoot are not found.
 
 /** Most values the curve holds: a longer film gets a longer step. */
 export const CURVE_MAX_VALUES = 1200;

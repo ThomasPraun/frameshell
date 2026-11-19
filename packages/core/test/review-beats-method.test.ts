@@ -5,7 +5,7 @@ import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `review` (#457) beats sheet and `cropAt` on a 2 s project (one black-then-white clip on a 1920x1080 film), real ffmpeg.
+// `review` beats sheet and `cropAt` on a 2 s project (one black-then-white clip on a 1920x1080 film), real ffmpeg.
 const MEDIA_TIMEOUT = 180_000;
 
 let daemon: Daemon;

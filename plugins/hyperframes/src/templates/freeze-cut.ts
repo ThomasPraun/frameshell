@@ -10,7 +10,7 @@ import {
 } from "./kit.js";
 
 /**
- * Beat freeze cut (#466, owner decision 2026-11-16): a template over a still
+ * Beat freeze cut (owner decision): a template over a still
  * picture, not a freeze-frame operation on the timeline. The picture drifts
  * and sways as if it were footage, then on the beat it freezes: a hard punch-in
  * toward a focus point, a white flash that falls away, and an optional label

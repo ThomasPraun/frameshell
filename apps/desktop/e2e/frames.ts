@@ -7,7 +7,7 @@ import { connectToDaemon } from "@frameshell/protocol";
 import type { Sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 
-// Preview vs export frame comparison (#17): the preview canvas and a `frameshell frame` capture, both as RGB bytes of
+// Preview vs export frame comparison: the preview canvas and a `frameshell frame` capture, both as RGB bytes of
 // the same size (the project resolution must equal the preview canvas: 540 px short side).
 
 /** Frame size, px. */

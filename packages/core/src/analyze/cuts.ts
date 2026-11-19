@@ -4,7 +4,7 @@ import { type Cut, MIN_CUT_GAP_FRAMES, frameStart } from "./shots.js";
 
 // Tells the big changes of the picture apart: new scene, jump cut, punch in or out, or no cut. The scene score of
 // `shots.ts` only sees the first; this reads the frames either side of every big change (`rhythm.ts`) to find the rest.
-// After HyperFrames' `measure` (Apache-2.0), ported per #478.
+// After HyperFrames' `measure` (Apache-2.0).
 
 /** What {@link classifyCuts} reads. */
 export interface CutsRequest {

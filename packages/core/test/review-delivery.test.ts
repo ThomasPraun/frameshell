@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { deliveryChecks, deliveryWarnings, rational } from "../src/review/delivery.js";
 import { judgeSeam, seamVerdict } from "../src/review/loop.js";
 
-// The delivery check against the export plan, and the verdicts on a loop's seam (#457).
+// The delivery check against the export plan, and the verdicts on a loop's seam.
 
 const plan = { width: 1920, height: 1080, fps: "30/1", duration: 10, loudness: -17 };
 const preset = { video: { codec: "h264" as const, width: 1920, height: 1080 }, audio: { codec: "aac" as const } };

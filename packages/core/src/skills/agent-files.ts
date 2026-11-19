@@ -1,4 +1,4 @@
-// Files `project.init` writes beside the core skill so every agent CLI finds its way in (#186). Never overwritten.
+// Files `project.init` writes beside the core skill so every agent CLI finds its way in. Never overwritten.
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { exists } from "../fs-util.js";

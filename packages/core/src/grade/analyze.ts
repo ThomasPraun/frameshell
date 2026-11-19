@@ -7,8 +7,8 @@ import { runTool } from "../media/ffmpeg.js";
 import { type FrameLevels, meanLevels, parseSignalstats, round } from "./levels.js";
 import { correctionFlags, suggestGrade } from "./suggest.js";
 
-// `grade.analyze` (#384, ADR 0031): levels of a clip's source frames by ffmpeg `signalstats` and a suggestion from them. Reads only.
-// A generated clip's source is its cached draft render (ADR 0031 slice 11): the picture before its own grade, as a media file is.
+// `grade.analyze` (ADR 0031): levels of a clip's source frames by ffmpeg `signalstats` and a suggestion from them. Reads only.
+// A generated clip's source is its cached draft render (ADR 0031): the picture before its own grade, as a media file is.
 
 /** Width the frames are measured at, px: area-averaged, so the figures do not depend on the source's size. */
 const MEASURE_WIDTH = 480;

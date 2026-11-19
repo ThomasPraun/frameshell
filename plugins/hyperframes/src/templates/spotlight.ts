@@ -10,7 +10,7 @@ import {
 } from "./kit.js";
 
 /**
- * Spotlight (#466 TP4): the whole frame dims except a soft round pool of light
+ * Spotlight: the whole frame dims except a soft round pool of light
  * on a target, which travels to a second target and lands there. The dim is one
  * layer of plain alpha (a radial gradient, clear in the middle, rewritten from the
  * time on every frame; no blend mode, which once rendered a whole film white), so

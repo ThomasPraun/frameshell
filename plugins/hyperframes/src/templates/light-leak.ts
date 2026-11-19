@@ -9,7 +9,7 @@ import {
 } from "./kit.js";
 
 /**
- * Light leak (#466, owner decision 2026-11-16): a warm glow that swells in from
+ * Light leak (owner decision): a warm glow that swells in from
  * a corner of the frame and falls away, laid over a cut on a track above. It is
  * an overlay clip, never a timeline operation, so the cut underneath keeps its
  * length. Three soft radial gradients (no blend mode: one once rendered a whole

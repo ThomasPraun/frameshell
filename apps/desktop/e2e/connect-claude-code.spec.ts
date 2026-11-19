@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Connect Claude Code (#430, ADR 0025 decision 7): the agent guide offers it where Claude Code's settings exist.
+// Connect Claude Code (ADR 0025 decision 7): the agent guide offers it where Claude Code's settings exist.
 // The connect dialog is a native message box and the file edits are unit-tested (packages/cli claude-code-setup),
 // so this pins that the link follows the settings folder of the (sandboxed) home.
 const box = sandbox("demo");

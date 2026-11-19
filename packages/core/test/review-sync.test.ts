@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type Onset, type SyncInput, syncMetrics, syncWarnings } from "../src/review/sync.js";
 
-// Sync of sounds to picture events (#457): offsets, early and late limits, the chance baseline, and what is left over.
+// Sync of sounds to picture events: offsets, early and late limits, the chance baseline, and what is left over.
 
 function input(sounds: Onset[], events: number[], extra: Partial<SyncInput> = {}): SyncInput {
   return { source: "takes", sounds, events, cuts: [], range: { from: 0, to: 20 }, spacing: 0, ...extra };

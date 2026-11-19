@@ -6,7 +6,7 @@ import { takes, useTakes } from "../shoot/takes.js";
 const INSTALL_COMMAND = "frameshell plugin install @frameshell/whisper-cpp";
 
 /**
- * Shown in the Shoot view while the project's transcription provider does not load (#411): takes cut then are never
+ * Shown in the Shoot view while the project's transcription provider does not load: takes cut then are never
  * compared. Offers the default provider in one click; the daemon transcribes the takes that failed once it is in.
  */
 export function TranscriptionNotice() {

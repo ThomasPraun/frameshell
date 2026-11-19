@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { FONT_SIZES, type PromptPosition, fontSize } from "./model.js";
 
-/** Who moved the teleprompter: the person's keys, or a driver such as live following (#393) or the session's takes (#391). */
+/** Who moved the teleprompter: the person's keys, or a driver such as live following or the session's takes. */
 export type PromptSource = "keys" | "follow";
 
 /** The teleprompter's position: the one copy the renderer keeps, read and set by the Shoot view and the panel. */

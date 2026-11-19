@@ -1,5 +1,5 @@
 // WebM demux for the engine worker's WebCodecs decoders: cached clip renders (ADR 0002), small (about 1 MB per 8 s at
-// 1440p), parsed whole in memory; and VP9-alpha media proxies (#90), which can be long, indexed by their Cues and read
+// 1440p), parsed whole in memory; and VP9-alpha media proxies, which can be long, indexed by their Cues and read
 // by byte ranges like the MP4 proxies (ADR 0001).
 import { type SyncTable, syncTable } from "./decode-plan.js";
 
@@ -368,7 +368,7 @@ const WEBM_HEAD_BYTES = 64 << 10;
 const MAX_HEADER = 12;
 
 /**
- * Index a CFR WebM proxy (#90: VP9 with alpha) without reading its frames
+ * Index a CFR WebM proxy (VP9 with alpha) without reading its frames
  * beyond the first: the head gives track, frame duration and Segment
  * duration; the Cues (found through the SeekHead when not in the head) give
  * every keyframe's Cluster. Frame index = time / frame duration, so the proxy

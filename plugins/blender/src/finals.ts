@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { STATE_DIR } from "./deps.js";
 
 /**
- * Cycles seconds per frame and megapixel before any final has run on this machine. The #482 measurement (80 samples,
+ * Cycles seconds per frame and megapixel before any final has run on this machine. The measurement (80 samples,
  * 1600x900, M4 Pro) is 6-7 s per frame, about 4.5 s per megapixel; rounded up because most machines are slower.
  */
 export const DEFAULT_SECONDS_PER_MEGAPIXEL = 5;

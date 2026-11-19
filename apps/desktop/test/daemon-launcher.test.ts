@@ -14,7 +14,7 @@ import {
 } from "../src/main/daemon-launcher.js";
 import { DaemonLink } from "../src/main/daemon-link.js";
 
-// Seam under test: the app's daemon launcher (#112). `utilityProcess` exists only in Electron, so the helper runs
+// Seam under test: the app's daemon launcher. `utilityProcess` exists only in Electron, so the helper runs
 // in-process behind an in-memory channel; the e2e `daemon-stdio` spec covers the real utility process.
 
 const socketPath = () =>

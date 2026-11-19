@@ -12,7 +12,7 @@ import type { Mask } from "./behind.js";
 import type { Box } from "./safe.js";
 import type { HeroSample } from "./speed.js";
 
-// Where graphics and faces are in the film, for the platform safe zones and the speed graph (#457). Pure but for the alpha read: a box of the
+// Where graphics and faces are in the film, for the platform safe zones and the speed graph. Pure but for the alpha read: a box of the
 // film's pixels over a stretch of timeline seconds, from a generated clip's alpha or a footage clip's cached face scan.
 
 /** A box a subject holds over `[from, to)` timeline seconds. */

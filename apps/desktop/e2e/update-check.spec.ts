@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, runInTerminal, sandbox } from "./harness.js";
 
-// Update check (#193): checking and installing need a packaged release and a real GitHub release (docs/release.md);
+// Update check: checking and installing need a packaged release and a real GitHub release (docs/release.md);
 // this covers the opt-out, a user decision kept in configDir.
 const box = sandbox("demo");
 

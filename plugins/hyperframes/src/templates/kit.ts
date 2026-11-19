@@ -24,7 +24,7 @@ export interface TemplateInput {
   components?: Readonly<Record<string, string>>;
 }
 
-/** A scaffoldable motion composition (ADR 0033, #466). */
+/** A scaffoldable motion composition (ADR 0033). */
 export interface Template {
   id: string;
   description: string;

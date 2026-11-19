@@ -9,7 +9,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, runBuffer, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
-// `clip.compare` (#482 slice 3, ADR 0035): the pure parts (props merge, flags, the clip swap), then the method through
+// `clip.compare` (ADR 0035): the pure parts (props merge, flags, the clip swap), then the method through
 // a real daemon with the `card` fixture adapter standing in for Blender: cards of known colours, read back per tile.
 const MEDIA_TIMEOUT = 240_000;
 

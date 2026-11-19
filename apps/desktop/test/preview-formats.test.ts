@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { type Program, compileProgram, flattenView, programAt } from "../src/renderer/src/preview/program.js";
 import { viewsInFormat } from "../src/renderer/src/preview/useProgram.js";
 
-// Seam under test: the preview's format switcher (ADR 0027 slice 2) lays a timeline out in each project format with
+// Seam under test: the preview's format switcher (ADR 0027) lays a timeline out in each project format with
 // the helpers export uses (`formatOf`, `formatCrop`, `scaledCaptions`): the same source pixels cover the frame, the
 // same clips stay fitted, captions get the same size.
 

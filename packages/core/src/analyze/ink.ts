@@ -4,7 +4,7 @@ import { LOOK_COLUMNS, LOOK_ROWS } from "./look.js";
 import { frameStart } from "./shots.js";
 
 // How much of the picture graphics and text cover. Pure: `picture.ts` measures the per-cell detail. After HyperFrames'
-// `measure` ink (Apache-2.0), ported per #478, but on the 8 x 6 grid of the picture pass, not a pixel box: what it finds
+// `measure` ink (Apache-2.0), but on the 8 x 6 grid of the picture pass, not a pixel box: what it finds
 // is the share of grid cells and the box of cells, not the size of a letter.
 
 /** Detail (sum of the grey steps to the pixel on the right and below, mean per pixel) a cell must gain over its quiet level to hold ink. */

@@ -3,20 +3,20 @@ import { useSyncExternalStore } from "react";
 
 /**
  * What the user has selected, app-wide (SPEC §10). The one selection store
- * of the renderer: the canvas timeline (#14) marks and sets selected clips,
+ * of the renderer: the canvas timeline marks and sets selected clips,
  * the script editor highlights their scenes and selects a scene's clips, the
- * transcript view (#21) selects words and with them a timeline range, the
+ * transcript view selects words and with them a timeline range, the
  * timeline a bare time range, the explorer files, the preview a region.
  *
  * Why here and not in the timeline: the canvas keeps only view state
  * (scroll, zoom, hover) and has no selection of its own, while selection is
- * read and set by panels that do not draw clips. The History panel (#18)
+ * read and set by panels that do not draw clips. The History panel
  * selects a transaction or operation here: its clips are selected and the
- * timeline highlights what it changed. A subtitle track (#22) is selected
+ * timeline highlights what it changed. A subtitle track is selected
  * from its lane (alone, or with the words of a cue); the inspector edits its
- * style. Timeline editing (#16)
- * acts on it, `ui_state` and `ui_select` (#33) read and set it, "Chat about this"
- * (#49) quotes it, and the player (#15) may follow it. Those extend
+ * style. Timeline editing
+ * acts on it, `ui_state` and `ui_select` read and set it, "Chat about this"
+ * quotes it, and the player may follow it. Those extend
  * {@link Selection} here; never keep a second store.
  *
  * Clip ids and ranges are those of {@link SELECTION_TIMELINE}.
@@ -155,6 +155,7 @@ export type RevealRequest =
   /** Timeline range of selected words when they were selected. */
   | { readonly range: TimeRange; readonly clip?: undefined; readonly place?: undefined };
 
+/** What is selected in the project window, shared by the timeline, transcript and other panels. */
 export interface Selection {
   /** Selected clip ids, in selection order; empty when nothing or words are selected. */
   readonly clips: readonly string[];

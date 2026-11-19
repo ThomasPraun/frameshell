@@ -3,7 +3,7 @@ import { delimiter, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, sandbox, terminalText } from "./harness.js";
 
-// Agent guide (#190): the agents found get Start, which runs the one found in the terminal; with it running, a
+// Agent guide: the agents found get Start, which runs the one found in the terminal; with it running, a
 // suggestion lands at its prompt unsent. The stand-in agent (fake-agent.mjs) is installed as `gemini` on PATH, and
 // FRAMESHELL_AGENT_COMMANDS labels its node process as that agent.
 const box = sandbox("demo");

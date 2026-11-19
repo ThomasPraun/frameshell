@@ -7,7 +7,7 @@ import { CORE_SKILL_FILES, SHIPPED_SKILL_HASHES } from "./core-skill.js";
 import { CORE_SKILL_NAME } from "./install.js";
 
 /**
- * Keeping a project's copy of the core skill current (#396). The copy is the project's (it may be
+ * Keeping a project's copy of the core skill current. The copy is the project's (it may be
  * committed and tuned), so only a copy whose every Frameshell file is a version Frameshell shipped
  * is replaced; an edited one is reported and left alone unless forced. Files the person added
  * (names Frameshell never shipped) always stay.

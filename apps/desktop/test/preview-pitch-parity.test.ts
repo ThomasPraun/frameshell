@@ -12,7 +12,7 @@ import { StretchChain } from "../src/renderer/src/preview/time-stretch.js";
 import { dominantHz, envelope, onset, swingLag } from "./audio-measure.js";
 
 // Seam under test: a clip at speed ≠ 1 sounds the same in the preview (its WSOLA stretch) as in the export mix
-// (`atempo`), #499: same pitch, the tone where the speed puts it, its fades. The export mix runs on the real managed
+// (`atempo`): same pitch, the tone where the speed puts it, its fades. The export mix runs on the real managed
 // ffmpeg.
 
 const RATE = 48_000;
@@ -37,7 +37,7 @@ const assets = new Map([[asset.path, asset]]);
 /** The source: a 440 Hz tone from 0.5 s to 2.5 s, silence around it, its level swinging at `swing` Hz. */
 const TONE = { from: 0.5, to: 2.5, hz: 440, swing: 2 };
 
-// Each clip hears the tone start and stop, except `f`, inside the tone, whose 20 ms sample-accurate fades (#585) ramp it.
+// Each clip hears the tone start and stop, except `f`, inside the tone, whose 20 ms sample-accurate fades ramp it.
 const clips = [
   { id: "s075", type: "media", asset: asset.path, start: 0, in: 0.2, out: 2.75, speed: 0.75, end: 3.4 },
   { id: "s125", type: "media", asset: asset.path, start: 4, in: 0.2, out: 2.7, speed: 1.25, end: 6 },
