@@ -1660,6 +1660,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Agent docs split (DOC1, epic #451; docs and tooling only, no protocol change): the root `CLAUDE.md`, loaded on every
+  turn, shrinks from about 15k to about 2.6k tokens. It keeps a short doc map that routes each area to a nested
+  `CLAUDE.md`, a "Shared truths" table (concepts with one owner file shared by export, preview, engine or CLI, with
+  their parity tests) and the rules that span packages. Area detail moves to 25 nested files under `packages/*/src/`,
+  `packages/core/test/`, `apps/desktop/` and `plugins/`, none in a directory that ships to users. New
+  `scripts/claude-md-check.mjs` (with a test) refuses a `CLAUDE.md` in a shipped directory and a backticked repo path
+  that does not exist; CI's scope job runs it on every change. With `--split <rev>` it also checks that every token and
+  rule clause of an older root file survives in some `CLAUDE.md`. `scripts/test-scope.mjs` runs no tests for a
+  `CLAUDE.md` change at any depth.
 - Small fixes, wave 28 (SF9, epic #451): the app's editor hand-off kinds (OpenTimelineIO, Premiere XML) are one table in
   `apps/desktop/src/shared/handoff.ts` (command, menu item id, extension, daemon method, CLI name) that the File menu,
   save dialog, IPC check, notice and its CLI hint read, instead of the same two-way branch in five places. No visible

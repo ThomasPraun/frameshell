@@ -22,8 +22,21 @@ const PLUGIN_READERS = [
   "plugins/openai-transcription/test",
 ];
 
-/** Paths no test, build or packaged app reads (`spikes/*` is out of the workspace: own lockfiles, never built). */
-const NO_TESTS = [/^docs\//, /^website\//, /^evals\//, /^spikes\//, /^\.claude\//, /^[^/]+\.md$/, /^LICENSE$/, /^NOTICE$/];
+/**
+ * Paths no test, build or packaged app reads (`spikes/*` is out of the workspace: own lockfiles, never built). Agent
+ * docs (`CLAUDE.md` at any depth) are checked by `scripts/claude-md-check.mjs` in CI's scope job instead.
+ */
+const NO_TESTS = [
+  /^docs\//,
+  /^website\//,
+  /^evals\//,
+  /^spikes\//,
+  /^\.claude\//,
+  /^[^/]+\.md$/,
+  /(^|\/)CLAUDE\.md$/,
+  /^LICENSE$/,
+  /^NOTICE$/,
+];
 
 /**
  * Scope for changed repo-relative paths: `unit` is "all", "none" or "some" (then `filter` lists vitest path

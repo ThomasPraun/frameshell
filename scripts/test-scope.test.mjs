@@ -15,11 +15,23 @@ describe("testScope", () => {
       "scripts/plugins-npm.mjs",
       "pnpm-lock.yaml",
       ".github/workflows/ci.yml",
-      "packages/core/CLAUDE.md",
+      "packages/core/src/notes.md",
       ".gitignore",
     ]) {
       expect(testScope(["apps/desktop/src/main/index.ts", path]), path).toEqual({ unit: "all", filter: [], e2e: true });
     }
+  });
+
+  it("runs nothing for agent docs at any depth", () => {
+    expect(
+      testScope([
+        "CLAUDE.md",
+        "packages/core/src/CLAUDE.md",
+        "packages/core/src/export/CLAUDE.md",
+        "apps/desktop/CLAUDE.md",
+        "plugins/hyperframes/CLAUDE.md",
+      ]),
+    ).toEqual({ unit: "none", filter: [], e2e: false });
   });
 
   it("runs the desktop tests and e2e for an app change", () => {

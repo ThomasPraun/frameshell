@@ -22,6 +22,9 @@ jobs:
         with:
           # A pull_request checkout is the merge commit; its first parent is the base tip.
           fetch-depth: 2
+      # Agent docs: no CLAUDE.md in a dir that ships, every backticked repo path exists. Runs on every change, since
+      # CLAUDE.md edits alone run no unit tests.
+      - run: node scripts/claude-md-check.mjs
       - id: scope
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
