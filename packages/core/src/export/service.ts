@@ -7,6 +7,7 @@ import {
   ErrorCode,
   type EncoderName,
   type ExportOtioResult,
+  type ExportPremiereXmlResult,
   type ExportPresetInfo,
   type FrameFormat,
   type FrameResult,
@@ -80,6 +81,7 @@ import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
 import { renameRetrying, writeTextAtomic } from "../fs-util.js";
 import { otioAssetUrl, timelineToOtio } from "./otio.js";
+import { premiereAssetUrl, timelineToPremiereXml } from "./premiere-xml.js";
 import { loopSeamWarning } from "./seam.js";
 
 /** Options for {@link executeRender}. */
@@ -697,30 +699,82 @@ export class ExportService {
     loaded?: { timeline: Timeline; fps: number },
   ): Promise<Omit<ExportOtioResult, "view" | "proposal">> {
     const out = params.out ?? join(root, "exports", `${params.timeline}.otio`);
-    if (extname(out).toLowerCase() !== ".otio") {
+    await this.#handoffGuard(root, out, ".otio", "OTIO", "export.otio");
+    const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
+    const { totals, facts } = await this.#handoffFacts(root, timeline, fps, false);
+    const base = { root, outDir: dirname(out), absolute: params.absolutePaths === true };
+    const result = timelineToOtio(timeline, {
+      fps,
+      assetUrl: (asset) => otioAssetUrl(base, asset),
+      sourceDuration: (clip) => totals.get(clip.id),
+      assetHasSound: (asset) => facts.get(asset)?.silent !== true,
+    });
+    await writeTextAtomic(out, `${JSON.stringify(result.otio, null, 2)}\n`);
+    return { path: out, timeline: timeline.id, fps, tracks: result.tracks, clips: result.clips, markers: result.markers, warnings: result.warnings };
+  }
+
+  /**
+   * Write `timeline` as a Premiere XML (xmeml) file (see the `export.premiereXml` method, ADR 0047): derived, read-only,
+   * atomic. Refuses an image project with `InvalidOperation`.
+   * `loaded`: see {@link ExportService.frame}.
+   */
+  async premiereXml(
+    root: string,
+    params: { timeline: string; out?: string | undefined },
+    loaded?: { timeline: Timeline; fps: number },
+  ): Promise<Omit<ExportPremiereXmlResult, "view" | "proposal">> {
+    const out = params.out ?? join(root, "exports", `${params.timeline}.xml`);
+    await this.#handoffGuard(root, out, ".xml", "Premiere XML", "export.premiereXml");
+    const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
+    const { totals, facts } = await this.#handoffFacts(root, timeline, fps, true);
+    const size = (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION;
+    const result = timelineToPremiereXml(timeline, {
+      fps,
+      size,
+      assetUrl: (asset) => premiereAssetUrl({ root }, asset),
+      sourceDuration: (clip) => totals.get(clip.id),
+      assetInfo: (asset) => facts.get(asset),
+    });
+    await writeTextAtomic(out, result.xml);
+    return { path: out, timeline: timeline.id, fps, tracks: result.tracks, clips: result.clips, markers: result.markers, warnings: result.warnings };
+  }
+
+  /**
+   * The refusals of every editor hand-off file: `out` must end in `ext` (a timeline or project file is never overwritten),
+   * and an image project has no cut to hand over. `kind`: the file as the message names it; `op`: the method.
+   */
+  async #handoffGuard(root: string, out: string, ext: string, kind: string, op: string): Promise<void> {
+    if (extname(out).toLowerCase() !== ext) {
       throw new RpcError(
         ErrorCode.InvalidOperation,
-        `The OTIO file must end in .otio, got ${basename(out)}: a timeline or project file is never overwritten.`,
-        { op: "export.otio", field: "out" },
+        `The ${kind} file must end in ${ext}, got ${basename(out)}: a timeline or project file is never overwritten.`,
+        { op, field: "out" },
       );
     }
     if ((await readEnclosingProject(root))?.config.kind === "image") {
-      throw new RpcError(ErrorCode.InvalidOperation, "export.otio: image projects have no cut to hand to an editor; use render or the image export.", {
-        op: "export.otio",
+      throw new RpcError(ErrorCode.InvalidOperation, `${op}: image projects have no cut to hand to an editor; use render or the image export.`, {
+        op,
         reason: "image project",
       });
     }
-    const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
+  }
+
+  /**
+   * What an editor hand-off needs of the timeline's sources: `totals`, the seconds a clip draws from (the handles of a
+   * dissolve; a nested timeline's length), and `facts` of each media asset. `wide`: every media asset, not only those
+   * of video tracks and tracks with a dissolve.
+   */
+  async #handoffFacts(root: string, timeline: Timeline, fps: number, wide: boolean): Promise<{ totals: Map<string, number>; facts: Map<string, AssetFacts> }> {
     const nested = this.#options.nestedDuration?.(root, timeline.id, fps);
     const totals = new Map<string, number>();
-    const facts = new Map<string, { seconds: number | undefined; silent: boolean }>();
+    const facts = new Map<string, AssetFacts>();
     for (const track of timeline.tracks) {
       if (track.kind === "subtitles" || track.kind === "program") continue;
       const dissolves = track.clips.some((clip) => clip.dissolve !== undefined);
       for (const clip of track.clips) {
         if ("asset" in clip) {
           // The handles a dissolve may use (`edgeTransitions`) come from the length of the source; the sound mirror of a video track needs to know a still has none.
-          if (!dissolves && track.kind !== "video") continue;
+          if (!dissolves && track.kind !== "video" && !wide) continue;
           if (!facts.has(clip.asset)) facts.set(clip.asset, await this.#assetFacts(root, clip.asset));
           const seconds = facts.get(clip.asset)?.seconds;
           if (dissolves && seconds !== undefined) totals.set(clip.id, seconds);
@@ -733,15 +787,7 @@ export class ExportService {
         }
       }
     }
-    const base = { root, outDir: dirname(out), absolute: params.absolutePaths === true };
-    const result = timelineToOtio(timeline, {
-      fps,
-      assetUrl: (asset) => otioAssetUrl(base, asset),
-      sourceDuration: (clip) => totals.get(clip.id),
-      assetHasSound: (asset) => facts.get(asset)?.silent !== true,
-    });
-    await writeTextAtomic(out, `${JSON.stringify(result.otio, null, 2)}\n`);
-    return { path: out, timeline: timeline.id, fps, tracks: result.tracks, clips: result.clips, markers: result.markers, warnings: result.warnings };
+    return { totals, facts };
   }
 
   /**
@@ -955,11 +1001,16 @@ export class ExportService {
    * when it cannot be probed, a missing file) and whether it is silent by kind (a still image, an SVG or font file).
    * A file that cannot be probed is taken to have sound: the editor finds out when it relinks.
    */
-  async #assetFacts(root: string, asset: string): Promise<{ seconds: number | undefined; silent: boolean }> {
+  async #assetFacts(root: string, asset: string): Promise<AssetFacts> {
     try {
       const probe = await this.#options.probe(root, asset);
       const still = probe.video?.still === true;
-      return { seconds: still ? Number.POSITIVE_INFINITY : (probe.duration ?? undefined), silent: still };
+      return {
+        seconds: still ? Number.POSITIVE_INFINITY : (probe.duration ?? undefined),
+        silent: still,
+        ...(probe.video ? { width: probe.video.width, height: probe.video.height } : {}),
+        ...(probe.audio ? { audio: { channels: probe.audio.channels, sampleRate: probe.audio.sampleRate } } : {}),
+      };
     } catch {
       return { seconds: undefined, silent: assetKindOf(asset) !== "media" };
     }
@@ -993,6 +1044,15 @@ export class ExportService {
     }
     return sources;
   }
+}
+
+/** What an editor hand-off knows of an asset (`PremiereAssetInfo` is this shape). */
+interface AssetFacts {
+  seconds: number | undefined;
+  silent: boolean;
+  width?: number;
+  height?: number;
+  audio?: { channels: number; sampleRate: number };
 }
 
 /** The warning of a draft export for a clip whose plugin renders finals (ADR 0035 decision 4). */

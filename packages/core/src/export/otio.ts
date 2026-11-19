@@ -1,5 +1,6 @@
 import { posix, win32 } from "node:path";
-import { type Clip, type ClipTrack, type MarkerColor, type Timeline, type TransitionContext, clipLength, edgeTransitions } from "@frameshell/schema";
+import { type Clip, type ClipTrack, type MarkerColor, type Timeline, type TransitionContext, edgeTransitions } from "@frameshell/schema";
+import { Dropped, LETTERBOX_NOTICE, baseName, behindNotice, encodePath, leftOut, missingMedia, noLengthNotice, placeClip, skippedTrackNotice } from "./handoff.js";
 
 /**
  * OpenTimelineIO export (ADR 0045): a Frameshell timeline as the JSON of an `.otio` file, for editors that read it.
@@ -35,6 +36,9 @@ export interface OtioExport {
 /** Any OTIO object: every one carries its `OTIO_SCHEMA`. */
 export type OtioObject = { OTIO_SCHEMA: string } & Record<string, unknown>;
 
+/** What the file does with `audio.gain`: it has no level change to carry it. */
+const GAIN_OUTCOME = "kept as metadata only, with no level change in the file";
+
 /** OTIO `MarkerColor` of each Frameshell marker colour; markers without one are green. */
 const MARKER_COLOR_NAMES: Record<MarkerColor, string> = {
   red: "RED",
@@ -44,9 +48,6 @@ const MARKER_COLOR_NAMES: Record<MarkerColor, string> = {
   blue: "BLUE",
   purple: "PURPLE",
 };
-
-/** Clip ids listed in a warning before "…". */
-const LISTED_IDS = 5;
 
 /** A time in whole frames at `rate`. */
 function time(frames: number, rate: number): OtioObject {
@@ -74,38 +75,6 @@ function clipObject(name: string, sourceRange: OtioObject, reference: OtioObject
   };
 }
 
-/** Last path segment of a `/`-separated project path. */
-function baseName(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
-/** A composition or nested timeline file by name: `compositions/hyperframes/intro/index.html` is `intro`, `timelines/inner.json` is `inner`. */
-function sourceName(source: string): string {
-  const parts = source.split("/");
-  const file = parts.pop() ?? source;
-  const stem = file.replace(/\.[^.]+$/, "");
-  return stem === "index" && parts.length > 0 ? parts[parts.length - 1]! : stem;
-}
-
-/** Collects the ids of clips that carry something the file leaves out or only half carries, one warning per kind. */
-class Dropped {
-  readonly #kinds = new Map<string, { ids: string[]; outcome: string }>();
-
-  /** `outcome`: what the file does with it, as the warning words it. */
-  add(kind: string, clip: string, outcome = "not exported"): void {
-    const entry = this.#kinds.get(kind) ?? { ids: [], outcome };
-    entry.ids.push(clip);
-    this.#kinds.set(kind, entry);
-  }
-
-  warnings(): string[] {
-    return [...this.#kinds].map(([kind, { ids, outcome }]) => {
-      const shown = ids.slice(0, LISTED_IDS).join(", ");
-      return `${kind} on ${ids.length} clip${ids.length === 1 ? "" : "s"} ${outcome} (${shown}${ids.length > LISTED_IDS ? ", …" : ""}).`;
-    });
-  }
-}
-
 /**
  * Whether `clip` has sound a sound-mirror Audio track carries (ADR 0045 decision 5): a media clip whose asset is not a
  * still image. Decided by kind, never by probing the file for an audio stream.
@@ -117,32 +86,6 @@ export function mirrorsSound(clip: Clip, assetHasSound?: (asset: string) => bool
 /** Name of the Audio track that mirrors the sound of the video track named `videoName`. */
 export function soundMirrorName(videoName: string): string {
   return `${videoName} sound`;
-}
-
-/** Features of a clip the file does not carry, by the words the warning uses. `dissolved`: its dissolve is written as a `Transition.1`. */
-function leftOut(clip: Clip, dropped: Dropped, dissolved: boolean): void {
-  if (clip.fadeIn !== undefined || clip.fadeOut !== undefined || (clip.dissolve !== undefined && !dissolved)) {
-    dropped.add("dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it)", clip.id);
-  }
-  if (clip.shape !== undefined) dropped.add(dissolved ? "transition shape (its dissolve is written as a plain one)" : "transition shape (no dissolve carries it)", clip.id);
-  if (clip.transform !== undefined || clip.keys !== undefined) dropped.add("transform and keys", clip.id);
-  if ("grade" in clip && clip.grade !== undefined) dropped.add("colour grade", clip.id);
-  if (
-    ("vignette" in clip && clip.vignette !== undefined) ||
-    ("grain" in clip && clip.grain !== undefined) ||
-    ("backdrop" in clip && clip.backdrop !== undefined) ||
-    ("motionBlur" in clip && clip.motionBlur !== undefined)
-  ) {
-    dropped.add("film finish and effects", clip.id);
-  }
-  if (clip.formats !== undefined) dropped.add("per-format overrides", clip.id);
-  if ("asset" in clip && clip.audio?.effects !== undefined && clip.audio.effects.length > 0) dropped.add("audio effects", clip.id);
-  if ("asset" in clip && clip.audio !== undefined && (clip.audio.fadeInMs !== undefined || clip.audio.fadeOutMs !== undefined)) {
-    dropped.add("sound fades (audio.fadeInMs, audio.fadeOutMs)", clip.id);
-  }
-  if ("asset" in clip && clip.audio?.muted !== true && clip.audio?.gain !== undefined && clip.audio.gain !== 0) {
-    dropped.add("clip gain (audio.gain)", clip.id, "kept as metadata only, with no level change in the file");
-  }
 }
 
 /**
@@ -186,14 +129,12 @@ export function timelineToOtio(timeline: Timeline, options: OtioOptions): OtioEx
   let clipCount = 0;
 
   for (const track of timeline.tracks) {
-    if (track.kind === "program") {
-      warnings.push(`program track ${track.id} (multicam shots) not exported: ${track.clips.length} shot${track.clips.length === 1 ? "" : "s"} skipped.`);
+    const skipped = skippedTrackNotice(track);
+    if (skipped !== undefined) {
+      warnings.push(skipped);
       continue;
     }
-    if (track.kind === "subtitles") {
-      warnings.push(`subtitle track ${track.id} not exported.`);
-      continue;
-    }
+    if (track.kind === "program" || track.kind === "subtitles") continue;
     counts[track.kind] += 1;
     const name = track.name ?? `${track.kind === "video" ? "V" : "A"}${counts[track.kind]}`;
     const built = trackObject(track, name, "picture", shared);
@@ -207,7 +148,7 @@ export function timelineToOtio(timeline: Timeline, options: OtioOptions): OtioEx
     if (mirror.clips > 0) children.push(mirror.track);
   }
 
-  if (timeline.letterbox !== undefined) warnings.push("letterbox bars not exported.");
+  if (timeline.letterbox !== undefined) warnings.push(LETTERBOX_NOTICE);
 
   const markers = [...(timeline.markers ?? [])]
     .sort((a, b) => a.at - b.at)
@@ -258,14 +199,12 @@ function trackObject(track: ClipTrack, name: string, mode: TrackMode, shared: Sh
   let clips = 0;
   for (const clip of [...track.clips].sort((a, b) => a.start - b.start)) {
     if (sound && !mirrorsSound(clip, shared.options.assetHasSound)) continue;
-    const length = clipLength(clip, context);
-    if (!Number.isFinite(length)) {
-      warnings.push(`clip ${clip.id} (nested ${"source" in clip ? clip.source : "timeline"}) has no known length: skipped.`);
+    const placed = placeClip(clip, context, fps);
+    if (placed === undefined) {
+      warnings.push(noLengthNotice(clip));
       continue;
     }
-    const startFrames = frames(clip.start);
-    const endFrames = Math.max(startFrames + 1, frames(clip.start + length));
-    const lengthFrames = endFrames - startFrames;
+    const { startFrames, endFrames, lengthFrames } = placed;
     const edge = edges.get(clip.id);
     // A Transition.1 sits between two Clip.2: the frame positions must agree with the butted clips the dissolve was cut for.
     const joined = edge?.mode === "dissolve" && edge.dissolve > 0 && startFrames <= cursor && out[out.length - 1]?.["OTIO_SCHEMA"] === "Clip.2";
@@ -273,13 +212,12 @@ function trackObject(track: ClipTrack, name: string, mode: TrackMode, shared: Sh
     if (startFrames > cursor) out.push({ OTIO_SCHEMA: "Gap.1", ...item("", range(0, startFrames - cursor, fps)) });
     cursor = Math.max(cursor, endFrames);
     out.push(clipOf(clip, lengthFrames, mode, track.kind === "audio", shared));
-    if (!sound) leftOut(clip, dropped, joined);
+    if (!sound) leftOut(clip, dropped, joined, GAIN_OUTCOME);
     clips += 1;
   }
 
-  if (!sound && track.kind === "video" && track.behind !== undefined) {
-    warnings.push(`video track ${track.id} sits behind the person on track ${track.behind} (subject matte): exported as a plain track.`);
-  }
+  const behind = sound ? undefined : behindNotice(track);
+  if (behind !== undefined) warnings.push(behind);
   const hidden = !sound && track.kind === "video" && track.hidden === true;
   const muted = track.muted === true;
   // A muted video track keeps its picture enabled: its sound is on the mirror track, which is the one disabled.
@@ -317,15 +255,10 @@ function clipOf(clip: Clip, lengthFrames: number, mode: TrackMode, audioTrack: b
       enabled,
     );
   }
-  const nested = clip.type === "timeline";
-  const label = "source" in clip && clip.source ? sourceName(clip.source) : clip.id;
-  warnings.push(
-    nested
-      ? `nested timeline clip ${clip.id} (${label}) exported as missing media of its length: export that timeline on its own and relink it.`
-      : `generated clip ${clip.id} (${clip.type}) exported as missing media of its length: render it and relink the file by hand.`,
-  );
+  const missing = missingMedia(clip);
+  warnings.push(missing.warning);
   return clipObject(
-    nested ? `timeline ${label}` : `${clip.type} ${label}`,
+    missing.name,
     range(0, lengthFrames, fps),
     { OTIO_SCHEMA: "MissingReference.1", name: "", available_range: null, metadata: {} },
     [],
@@ -344,14 +277,6 @@ export interface OtioUrlBase {
   absolute: boolean;
   /** Path rules of the machine that owns `root`. Default: this machine's. */
   flavour?: "posix" | "win32";
-}
-
-/** Percent-encodes each segment of a `/`-separated path, leaving `/`, `..` and a drive letter (`C:`) alone. */
-function encodePath(path: string): string {
-  return path
-    .split("/")
-    .map((segment) => (segment === ".." || /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
-    .join("/");
 }
 
 /**

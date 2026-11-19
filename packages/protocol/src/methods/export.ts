@@ -706,6 +706,42 @@ export const exportMethods = {
       warnings: z.array(z.string()).describe("What the file does not carry or carries differently; empty when nothing."),
     }),
   },
+  "export.premiereXml": {
+    description:
+      "Write a timeline as a Premiere Pro XML file (`.xml`, the Final Cut Pro 7 `xmeml` format, ADR 0047) for Premiere Pro, which reads it with File > Import. " +
+      "Export only, read-only: the file is derived, regenerated on every call and never read back; the timeline is never edited. " +
+      "Every time is a whole frame at the project rate (a rate xmeml cannot name is written at the nearest whole one, with a warning). " +
+      "Mapped: video and audio tracks (bottom first; a hidden video track and a muted audio track are disabled), media clips as clip items " +
+      "from the source `in` to `out` placed at their timeline `start` and `end`, a Time Remap filter for a `speed` other than 1, markers (name, frame; the colour is not carried). " +
+      "The sound of the media clips of each video track (not still images) is a linked audio clip item on an extra audio track after all the real ones, " +
+      "linked to its picture the way Premiere links them (a muted clip or track is disabled there). " +
+      "Generated clips (`hyperframes`, `remotion`, `blender`) and nested timeline clips keep their slot, name and timeline length as a clip item with an offline file, " +
+      "plus a warning: render the clip and relink it in Premiere. A dissolve between two clips that end and start at the same frame is a Cross Dissolve " +
+      "transition centred on the cut, the effective half length each side (a wipe, push or iris dissolve is written as a plain one, with a warning; " +
+      "a mirrored sound gets a Cross Fade). " +
+      "NOT exported, each named in `warnings`: multicam program tracks, subtitle tracks, dips and fades (`fadeIn`, `fadeOut`, a dissolve with no handle or no clip before it), " +
+      "transition shapes, transforms and keys, colour grades, film finish, audio effects, sound fades (`audio.fadeInMs`, `audio.fadeOutMs`), clip gain (`audio.gain`). " +
+      "Media paths are always absolute `file://localhost/` URLs, as Premiere writes them, so the file only opens on the machine and at the project location it was written for: it is not portable. " +
+      "Fails with InvalidOperation (`out` is not a `.xml` file; an image project, which has no cut to hand to an editor), TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      out: AbsolutePath.optional().describe(
+        "Absolute path of the `.xml` file to write; its folder is created and it must end in `.xml`. Default `<project>/exports/<timeline>.xml`.",
+      ),
+      view: ViewParam,
+    }),
+    result: z.object({
+      ...ViewedShape,
+      path: z.string().describe("Absolute path of the `.xml` file written."),
+      timeline: z.string(),
+      fps: z.number().describe("Rate of every time in the file: the project frame rate."),
+      tracks: z.int().describe("Video and audio tracks written, the sound tracks included."),
+      clips: z.int().describe("Picture clip items written on the tracks of the timeline, those with an offline file included; the linked sound clip items are not counted."),
+      markers: z.int().describe("Markers written."),
+      warnings: z.array(z.string()).describe("What the file does not carry or carries differently; empty when nothing."),
+    }),
+  },
   "inspect.point": {
     description:
       "What a point of the frame shows at timeline time `at` (ADR 0011): every clip whose picture covers it, topmost " +

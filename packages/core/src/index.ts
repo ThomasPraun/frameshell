@@ -304,6 +304,15 @@ export {
   loudnessTarget,
 } from "./export/presets.js";
 export { type OtioExport, type OtioObject, type OtioOptions, type OtioUrlBase, mirrorsSound, otioAssetUrl, soundMirrorName, timelineToOtio } from "./export/otio.js";
+export {
+  type PremiereAssetInfo,
+  type PremiereUrlBase,
+  type PremiereXmlExport,
+  type PremiereXmlOptions,
+  XMEML_VERSION,
+  premiereAssetUrl,
+  timelineToPremiereXml,
+} from "./export/premiere-xml.js";
 export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,

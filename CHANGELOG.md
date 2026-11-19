@@ -32,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `frameshellTiming.words` has them, or `[]` with no `words` timing or when `wordsProblem` is set (no nominal fallback,
   so a composition keeps its text as a prop). Nothing 0.5.0 exports changes: a clip keeps its frozen copy until
   `frameshell hyperframes update`, which now reports 0.6.0.
+- Premiere XML export, slice 1 of #701 (ADR 0047; protocol 181): `frameshell export premiere` (MCP `export_premiere_xml`,
+  method `export.premiereXml`) writes the timeline as a derived xmeml version 4 file, `exports/<timeline>.xml` by
+  default, for Premiere Pro's File > Import. Export only, read-only, written by hand with no dependency. Carried: video and
+  audio tracks (a hidden video track and a muted audio track disabled), media clips with source range and timeline
+  position in whole frames, `speed` as a Time Remap filter, markers, dissolves between butted clips as Cross Dissolve
+  (`edgeTransitions`, never recomputed), and the sound of video-track clips as linked audio clips. Generated and nested
+  clips keep their slot and length as offline media. Program and subtitle tracks, dips and fades, transition shapes,
+  transforms, keys, grades, finish, audio effects, sound fades and clip gain are named in `warnings`. Media paths are
+  always absolute `file://localhost/` URLs, so the file is not portable. The pieces both editor hand-off writers share
+  (what is left out, warning texts, clip placement, path encoding) moved to `export/handoff.ts`; the OTIO file is
+  byte-identical. Not yet opened in Premiere Pro; the app menu is a later slice. Closes the open point of #383.
 - OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
   `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
   default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden

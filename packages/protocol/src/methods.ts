@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 180;
+export const PROTOCOL_VERSION = 181;
 
 export {
   type MethodSpec,
@@ -444,6 +444,10 @@ export type CoverResult = MethodResult<"cover">;
 export type ExportOtioParams = MethodParams<"export.otio">;
 /** Result of `export.otio`. */
 export type ExportOtioResult = MethodResult<"export.otio">;
+/** `export.premiereXml` params. */
+export type ExportPremiereXmlParams = MethodParams<"export.premiereXml">;
+/** Result of `export.premiereXml`. */
+export type ExportPremiereXmlResult = MethodResult<"export.premiereXml">;
 /** `analyze` params. */
 export type AnalyzeParams = MethodParams<"analyze">;
 /** Result of `analyze`. */
