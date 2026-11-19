@@ -1898,6 +1898,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.otio(dir, { timeline, ...choice }, loaded)) };
     },
+    "export.premiereXml": async ({ cwd, timeline, view, ...choice }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.premiereXml(dir, { timeline, ...choice }, loaded)) };
+    },
     transcribe: async ({ cwd, asset, provider, model, language, yes, confirmation }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
       const { dir, config } = (await readEnclosingProject(cwd))!;

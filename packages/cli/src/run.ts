@@ -989,6 +989,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "format.remove":
       return executeFormat(conn, inv, cwd, flags.json);
     case "export.otio":
+    case "export.premiereXml":
       return executeExport(conn, inv, cwd, flags.json);
     case "model.list":
     case "model.add":
