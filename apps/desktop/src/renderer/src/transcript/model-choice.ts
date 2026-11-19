@@ -76,6 +76,17 @@ export function modelIdFromFile(path: string): string {
   return id || "model";
 }
 
+/** Provider the CLI and setup run and size without asking (twin of `APP_TRANSCRIPTION_PROVIDER` in `main/voiceover.ts`). */
+const LOCAL_PROVIDER = "whisper-cpp";
+
+/**
+ * True when the transcript view offers a Transcribe button for the project's `provider`: any provider but whisper.cpp.
+ * whisper.cpp runs from the terminal or the project setup, so the button never starts its unasked download (ADR 0034 decision 18).
+ */
+export function offersTranscribe(provider: string | null): provider is string {
+  return provider !== null && provider !== LOCAL_PROVIDER;
+}
+
 /** File name of an absolute path, for compact labels. */
 export function fileName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;

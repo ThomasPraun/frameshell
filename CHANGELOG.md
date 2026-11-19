@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FACE_PERSON_MARGIN` tried, correct and wrong suggestions, precision, recall, cluster purity and splits. Nothing is
   scanned, downloaded or changed, and no threshold changes. Results go in `docs/research/people-acceptance-run.md`.
 
+- App confirmation for paid or remote transcription, slice 2 of #382 (ADR 0046 decision 10, epic #451; no protocol
+  change): when `transcribe` refuses with `ConfirmationRequired`, the app asks in a native box that names the provider,
+  the file and its length, says the audio is uploaded and the estimated cost, and sends `yes` with the token only after
+  "Upload and transcribe". A changed file or price asks again; no consent is stored. It covers the project setup
+  transcription and the Shoot speaker search, and the transcript view gains a Transcribe button on a not-transcribed
+  asset when the project's provider is not whisper.cpp. The confirm loop of the voiceover cost dialog moved to one
+  shared `runConfirmed` (`apps/desktop/src/main/confirmation.ts`), unchanged in behaviour.
 - OpenAI transcription provider, first slice of #382 (ADR 0046, epic #451; protocol 180):
   `frameshell plugin install @frameshell/openai-transcription` adds the paid cloud provider `openai`
   (`whisper-1`, word timestamps as the service gives them, a note in `warnings`) for

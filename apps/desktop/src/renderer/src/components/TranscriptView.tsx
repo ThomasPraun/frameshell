@@ -25,6 +25,7 @@ import {
   withWordText,
   wordAt,
 } from "../transcript/model.js";
+import { offersTranscribe } from "../transcript/model-choice.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import type { MenuItem } from "./ContextMenu.js";
 import { ModelPicker, type ModelStatus } from "./ModelPicker.js";
@@ -96,6 +97,10 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   const selected = useMemo(() => new Set(selectedWords.map((word) => `${word.transcript}#${word.word}`)), [selectedWords]);
   const [status, setStatus] = useState<{ text: string; tone: "info" | "error" | "warning" } | null>(null);
   const modelStatus = useCallback<ModelStatus>((text, tone) => setStatus({ text, tone }), []);
+  /** The project's transcription provider (from the model picker's list); null until read. */
+  const [provider, setProvider] = useState<string | null>(null);
+  /** Assets a Transcribe button started and that have not finished (the native ask counts). */
+  const [transcribing, setTranscribing] = useState<ReadonlySet<string>>(new Set());
   const [restoring, setRestoring] = useState<ReadonlySet<string>>(new Set());
   const [marked, setMarked] = useState<Marked | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -114,6 +119,29 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     const timer = setTimeout(() => setStatus(null), status.tone === "warning" ? WARNING_MS : STATUS_MS);
     return () => clearTimeout(timer);
   }, [status]);
+
+  useEffect(
+    () => window.frameshell.transcript.onProgress((progress) => setStatus({ tone: "info", text: `${progress.asset}: ${progress.message}` })),
+    [],
+  );
+
+  /** A cloud or paid provider's run: main asks in a native box before anything is uploaded or paid for. */
+  const transcribe = async (asset: string) => {
+    setTranscribing((current) => new Set(current).add(asset));
+    setStatus({ tone: "info", text: t.transcript.transcribingAsset(asset) });
+    try {
+      const run = await window.frameshell.transcript.run(asset);
+      setStatus({ tone: "info", text: run.status === "done" ? t.transcript.transcribedAsset(asset) : t.transcript.transcribeDeclined(asset) });
+    } catch (failure) {
+      setStatus({ tone: "error", text: t.transcript.transcribeFailed(asset, (failure as Error).message) });
+    } finally {
+      setTranscribing((current) => {
+        const next = new Set(current);
+        next.delete(asset);
+        return next;
+      });
+    }
+  };
 
   // Another panel took the selection: the drag range here no longer means anything.
   useEffect(() => {
@@ -393,6 +421,16 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
             <p className="hint">
               {rich(t.transcript.notTranscribed, { command: <code>frameshell transcribe {asset}</code> })}
             </p>
+            {offersTranscribe(provider) && (
+              <button
+                className="link transcript-transcribe"
+                disabled={transcribing.has(asset)}
+                data-tip={t.transcript.transcribeTip(provider)}
+                onClick={() => void transcribe(asset)}
+              >
+                {t.transcript.transcribe}
+              </button>
+            )}
           </section>
         ))}
         {broken.map(({ path, message }) => (
@@ -423,7 +461,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
             onPick={(speaker) => void saveSpeaker(pickerAssets[0]!.path, speakerTargets(pickerAssets[0]!), speaker)}
           />
         )}
-        <ModelPicker onStatus={modelStatus} />
+        <ModelPicker onStatus={modelStatus} onProvider={setProvider} />
         <span
           className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : status?.tone === "warning" ? " timeline-status-warning" : ""}`}
           role="status"

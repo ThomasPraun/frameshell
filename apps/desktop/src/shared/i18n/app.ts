@@ -103,6 +103,16 @@ const en = {
       "This provider does not say what it costs and does not declare itself free, so it may charge you. A finished take is kept in assets/voiceover/ so it is never paid for twice.",
     voiceoverCostChanged: "The script or the price changed since you confirmed, so nothing was generated.",
     voiceoverGenerate: "Generate",
+    transcribeAskTitle: (provider: string, asset: string, length: string) => `Transcribe ${asset} (${length}) with ${provider}?`,
+    transcribeAskUploads: (provider: string) => `The audio of this file is uploaded to ${provider}.`,
+    transcribeAskMayLeave: (provider: string) => `${provider} may send the audio of this file off this machine.`,
+    transcribeAskCostKnown: (cost: string, provider: string) =>
+      `Estimated cost: ${cost}, plus short re-checks of over-long words. ${provider} bills this to your own account.`,
+    transcribeAskCostUnknown: "This provider does not say what it costs and does not declare itself free, so it may charge you.",
+    transcribeAskNoConsent: "Nothing is remembered: the next run asks again.",
+    transcribeAskChanged: "The file or the price changed since you confirmed, so nothing was sent.",
+    transcribeUpload: "Upload and transcribe",
+    transcribeNotStarted: "Transcription was not started.",
     ok: "OK",
   },
   setup: {
@@ -112,6 +122,8 @@ const en = {
     transcribeFailed: (name: string) => `Could not transcribe ${name}. Ask the agent to transcribe it.`,
     transcribing: (name: string) => `Transcribing ${name}…`,
     transcribed: (names: string) => `Transcribed ${names}.`,
+    waitingForAnswer: (name: string) => `Waiting for your answer to transcribe ${name}…`,
+    transcribeDeclined: (name: string) => `${name} was not transcribed: you chose not to send it. Ask the agent to transcribe it when you want.`,
     addingBackground: "Adding the background and subtitles…",
     backgroundFailed: "Transcribed, but could not add the background and subtitles. Add a subtitle track from the timeline.",
     // Daemon `progress` stages (packages/protocol `notifications.progress`); the daemon's English `message` covers unknown codes.
@@ -262,6 +274,16 @@ const es: typeof en = {
       "Este proveedor no indica cuánto cuesta ni declara ser gratuito, así que puede cobrarte. Una toma terminada se guarda en assets/voiceover/ para no pagarla dos veces.",
     voiceoverCostChanged: "El guion o el precio cambiaron desde que confirmaste, así que no se generó nada.",
     voiceoverGenerate: "Generar",
+    transcribeAskTitle: (provider, asset, length) => `¿Transcribir ${asset} (${length}) con ${provider}?`,
+    transcribeAskUploads: (provider) => `El audio de este archivo se sube a ${provider}.`,
+    transcribeAskMayLeave: (provider) => `${provider} puede enviar el audio de este archivo fuera de este equipo.`,
+    transcribeAskCostKnown: (cost, provider) =>
+      `Costo estimado: ${cost}, más pequeñas revisiones de las palabras demasiado largas. ${provider} lo cobra a tu propia cuenta.`,
+    transcribeAskCostUnknown: "Este proveedor no indica cuánto cuesta ni declara ser gratuito, así que puede cobrarte.",
+    transcribeAskNoConsent: "No se recuerda nada: la próxima vez se vuelve a preguntar.",
+    transcribeAskChanged: "El archivo o el precio cambiaron desde que confirmaste, así que no se envió nada.",
+    transcribeUpload: "Subir y transcribir",
+    transcribeNotStarted: "No se inició la transcripción.",
     ok: "Aceptar",
   },
   setup: {
@@ -271,6 +293,8 @@ const es: typeof en = {
     transcribeFailed: (name) => `No se pudo transcribir ${name}. Pídele al agente que lo transcriba.`,
     transcribing: (name) => `Transcribiendo ${name}…`,
     transcribed: (names) => `Se transcribió ${names}.`,
+    waitingForAnswer: (name) => `Esperando tu respuesta para transcribir ${name}…`,
+    transcribeDeclined: (name) => `No se transcribió ${name}: elegiste no enviarlo. Pídele al agente que lo transcriba cuando quieras.`,
     addingBackground: "Agregando el fondo y los subtítulos…",
     backgroundFailed: "Se transcribió, pero no se pudo agregar el fondo ni los subtítulos. Agrega una pista de subtítulos desde la línea de tiempo.",
     progress: {
