@@ -64,7 +64,7 @@ export interface PremiereXmlExport {
   warnings: string[];
   /** Video and audio tracks written, the sound mirror tracks included. */
   tracks: number;
-  /** Picture clips written, offline ones included; their sound is not counted. */
+  /** Clip items on the video and audio tracks of the timeline, offline ones included; the sound-mirror items are not counted. */
   clips: number;
   /** Markers written. */
   markers: number;
@@ -164,7 +164,7 @@ interface BuiltTrack {
  * whole frame. The sound of the media clips of each video track is a linked audio clipitem on an extra Audio track after
  * all the real ones (xmeml links a picture and its sound natively): disabled where the clip or the track is muted. A
  * clip's `audio.gain` is an Audio Levels filter on its audio clipitem.
- * `clips` counts the pictures, not their sound. Program tracks, subtitle tracks, dips and fades, transition shapes,
+ * `clips` counts the items of the timeline's tracks, not the sound-mirror ones. Program tracks, subtitle tracks, dips and fades, transition shapes,
  * transforms, keys, grades, film finish, audio effects and sound fades are left out and named in `warnings`.
  */
 export function timelineToPremiereXml(timeline: Timeline, options: PremiereXmlOptions): PremiereXmlExport {
@@ -204,7 +204,7 @@ export function timelineToPremiereXml(timeline: Timeline, options: PremiereXmlOp
       if (!sound) {
         // The level goes on the audio clip item of a clip with sound; a clip with none has nothing to level.
         leftOut(clip, dropped, joined, "asset" in clip && !hasSound(clip.asset) ? "not exported" : undefined);
-        if ("asset" in clip && hasSound(clip.asset) && (staticGain(clip) ?? 0) > MAX_GAIN_DB) {
+        if ("asset" in clip && hasSound(clip.asset) && clip.audio?.muted !== true && (staticGain(clip) ?? 0) > MAX_GAIN_DB) {
           dropped.add(`clip gain above +${MAX_GAIN_DB} dB (audio.gain)`, clip.id, `written as +${MAX_GAIN_DB} dB, the most an Audio Levels filter holds`);
         }
         if (!("asset" in clip)) warnings.push(missingMedia(clip).warning);

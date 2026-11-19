@@ -340,6 +340,11 @@ describe("timelineToPremiereXml", () => {
       expect(warnings).toEqual(["clip gain above +12 dB (audio.gain) on 1 clip written as +12 dB, the most an Audio Levels filter holds (c_m)."]);
     });
 
+    it("a muted clip over +12 dB gets no clamp warning, like a muted clip with any other gain", () => {
+      const timeline = timelineOf([{ id: "t_a1", kind: "audio", clips: [media("c_m", 0, 0, 1, { audio: { gain: 18, muted: true } })] }]);
+      expect(convert(timeline).warnings).toEqual([]);
+    });
+
     it("a clip with no sound has nothing to level: the gain is named as not exported", () => {
       const timeline = timelineOf([{ id: "t_v1", kind: "video", clips: [media("c_a", 0, 0, 2, { audio: { gain: -6 } })] }]);
       const { doc, warnings } = convert(timeline, 30, { assetInfo: () => ({ silent: true, seconds: Infinity, width: 100, height: 100 }) });

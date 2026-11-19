@@ -738,7 +738,7 @@ export const exportMethods = {
       timeline: z.string(),
       fps: z.number().describe("Rate of every time in the file: the project frame rate."),
       tracks: z.int().describe("Video and audio tracks written, the sound tracks included."),
-      clips: z.int().describe("Clip items written on the video tracks of the timeline, those with an offline file included; the linked sound clip items on the audio tracks are not counted."),
+      clips: z.int().describe("Clip items written on the video and audio tracks of the timeline, those with an offline file included; the linked sound-mirror items are not counted."),
       markers: z.int().describe("Markers written."),
       warnings: z.array(z.string()).describe("What the file does not carry or carries differently; empty when nothing."),
     }),
