@@ -25,6 +25,7 @@ import type {
   VoiceoverPlaceResult,
 } from "@frameshell/protocol";
 import type { DetachablePanel, Layout } from "./layout.js";
+import type { HandoffKind } from "./handoff.js";
 
 /** One explorer entry. `path` is project-relative and `/`-separated. */
 export type FileNode =
@@ -276,8 +277,7 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  */
 export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportOtio" | "exportPremiere" | "toggleReview" | "toggleTerminal";
 
-/** An editor hand-off file the File menu writes: `otio` (OpenTimelineIO, ADR 0045) or `premiere` (Premiere Pro XML, ADR 0047). */
-export type HandoffKind = "otio" | "premiere";
+export type { HandoffKind };
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by

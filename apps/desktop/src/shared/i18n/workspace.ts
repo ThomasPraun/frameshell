@@ -1,11 +1,13 @@
 // Project window shell: layout, status bar, sidebar, detached panels, drops, Chat about this, agent navigation notices
 // (Workspace, StatusBar, Sidebar, DetachControls, file-drop, ask/ask-agent, ui-link).
 
-import type { HandoffKind } from "../api.js";
+import { HANDOFFS, type HandoffKind } from "../handoff.js";
 
 /** The CLI command that writes the file of `kind` and lists what it leaves out; `placeholder` is the language's word for "file". */
 function handoffCommand(kind: HandoffKind, placeholder = "file"): string {
-  return kind === "otio" ? `frameshell export otio --out <${placeholder}>.otio` : `frameshell export premiere --out <${placeholder}>.xml`;
+  // The dictionary parity test calls this with a sample string, not a kind.
+  const { cli, extension } = HANDOFFS[kind] ?? HANDOFFS.otio;
+  return `frameshell export ${cli} --out <${placeholder}>.${extension}`;
 }
 
 const en = {
