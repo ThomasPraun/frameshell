@@ -1,6 +1,6 @@
 import { ErrorCode, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { type Confirmed, formatCost } from "../src/main/confirmation.js";
+import type { Confirmed } from "../src/main/confirmation.js";
 import { type CostAsk, canceledRun, costAsk, progressOf, runVoiceover, startOf, verifyPlanOf } from "../src/main/voiceover.js";
 import { strings } from "../src/shared/i18n/index.js";
 
@@ -15,7 +15,7 @@ describe("costAsk", () => {
     expect(costAsk(refusal({ provider: "cloud", lines: ["hook-1", "fix-1"], cost: { amount: 0.04, currency: "USD" }, confirmation: TOKEN }))).toEqual({
       provider: "cloud",
       lines: 2,
-      cost: "0.04 USD",
+      cost: "0.0400 USD",
       changed: false,
       confirmation: TOKEN,
     });
@@ -33,14 +33,6 @@ describe("costAsk", () => {
     expect(costAsk(new RpcError(ErrorCode.SpeechFailed, "failed", {}))).toBeNull();
     expect(costAsk(new Error("boom"))).toBeNull();
     expect(costAsk(refusal({ provider: "cloud", lines: [], cost: null }))).toBeNull();
-  });
-});
-
-describe("formatCost", () => {
-  it("shows up to four decimals without trailing zeros", () => {
-    expect(formatCost({ amount: 0.04, currency: "USD" })).toBe("0.04 USD");
-    expect(formatCost({ amount: 1.5, currency: "EUR" })).toBe("1.5 EUR");
-    expect(formatCost({ amount: 0.00004, currency: "USD" })).toBe("0 USD");
   });
 });
 
@@ -62,7 +54,7 @@ describe("runVoiceover", () => {
     });
     const confirm = vi.fn(async () => true);
     expect(await runVoiceover(request, confirm)).toBe(result);
-    expect(confirm).toHaveBeenCalledWith({ provider: "cloud", lines: 1, cost: "0.01 USD", changed: false, confirmation: TOKEN });
+    expect(confirm).toHaveBeenCalledWith({ provider: "cloud", lines: 1, cost: "0.0100 USD", changed: false, confirmation: TOKEN });
     expect(request.mock.calls).toEqual([[null], [{ yes: true, confirmation: TOKEN }]]);
   });
 
@@ -74,7 +66,7 @@ describe("runVoiceover", () => {
     });
     const confirm = vi.fn(async (_ask: CostAsk) => true);
     expect(await runVoiceover(request, confirm)).toBe(result);
-    expect(confirm.mock.calls.map(([ask]) => [ask.cost, ask.changed])).toEqual([["0.01 USD", false], ["0.02 USD", true]]);
+    expect(confirm.mock.calls.map(([ask]) => [ask.cost, ask.changed])).toEqual([["0.0100 USD", false], ["0.0200 USD", true]]);
     expect(request.mock.calls).toEqual([[null], [{ yes: true, confirmation: TOKEN }], [{ yes: true, confirmation: "second" }]]);
   });
 
@@ -101,7 +93,7 @@ describe("the dialog strings", () => {
     for (const language of ["en", "es"] as const) {
       const said = strings(language).app.dialogs;
       expect(said.voiceoverCostTitle("cloud", 3)).toContain("3");
-      expect(said.voiceoverCostKnown("0.04 USD")).toContain("0.04 USD");
+      expect(said.voiceoverCostKnown("0.0400 USD")).toContain("0.0400 USD");
       expect(said.voiceoverCostChanged.length).toBeGreaterThan(10);
     }
   });

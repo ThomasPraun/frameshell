@@ -1,10 +1,10 @@
 // The pure parts of the app's voiceover (ADR 0034 decisions 12, 18 and 20), testable with no dialog code: the cost ask
 // of a paid generation (`costAsk`, run through the shared confirm loop in `confirmation.ts`), progress, Cancel, the
 // misread check's plan and where placing starts.
-import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult, timeRefOf } from "@frameshell/protocol";
+import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult, formatCost, timeRefOf } from "@frameshell/protocol";
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import type { VoiceoverProgress, VoiceoverVerifyPlan } from "../shared/api.js";
-import { type Confirmed, formatCost, isAsk, runConfirmed } from "./confirmation.js";
+import { type Confirmed, isAsk, runConfirmed } from "./confirmation.js";
 
 /** Transcription provider the app can set up and size a download for (`transcriptionDownload` in `main/index.ts`). */
 export const APP_TRANSCRIPTION_PROVIDER = DEFAULT_TRANSCRIPTION_PROVIDER;

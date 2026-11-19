@@ -93,7 +93,7 @@ test("a paid provider names its cost first, and nothing is generated until the p
     {
       type: "warning",
       message: "Generate 2 lines with stand-in-paid?",
-      detail: "0.05 USD (estimated). The provider bills this to you as each line is generated, and a finished take is kept in assets/voiceover/ so it is never paid for twice.",
+      detail: "0.0500 USD (estimated). The provider bills this to you as each line is generated, and a finished take is kept in assets/voiceover/ so it is never paid for twice.",
       buttons: ["Generate", "Cancel"],
     },
   ]);
@@ -136,7 +136,7 @@ test("a script edited while the cost box is open is not generated on the old con
   await answerBoxes([0, 0], true);
   await generateFrom(EDITED_SCRIPT);
   await expect.poll(async () => (await asked()).length).toBe(1);
-  expect((await asked())[0]).toMatchObject({ message: "Generate 2 lines with stand-in-paid?", detail: expect.stringContaining("0.05 USD") });
+  expect((await asked())[0]).toMatchObject({ message: "Generate 2 lines with stand-in-paid?", detail: expect.stringContaining("0.0500 USD") });
   // The dialog behind the box says it waits for the cost.
   await expect(page.getByTestId("voiceover-progress")).toContainText("Waiting for you to confirm the cost");
   writeFileSync(join(box.projectDir, EDITED_SCRIPT), `${script("stand-in-paid")}\n## More\nOne more line.\n`);

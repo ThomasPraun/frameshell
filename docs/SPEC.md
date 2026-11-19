@@ -496,7 +496,7 @@ Optional (ADR 0029). One file per music asset, named like transcripts (`beats/<p
   "schemaVersion": 1,
   "asset": "assets/music/theme.mp3",
   "assetHash": "sha256:…",
-  "detector": "onset-flux@1",
+  "detector": "onset-flux@2",
   "sampleRate": 48000,
   "bpm": 120,
   "meter": 4,
