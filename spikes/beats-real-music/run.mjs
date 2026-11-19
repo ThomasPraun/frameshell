@@ -187,7 +187,17 @@ for (const row of counted) {
   entry[row.outcome] = (entry[row.outcome] ?? 0) + 1;
   if (row.low) entry.low = (entry.low ?? 0) + 1;
 }
+// Confusion of tempo against LOW: right = exact tempo; wrong = octave off or not (a counted track with a grid).
+const graded = counted.filter((row) => row.tempo && row.tempo !== "n/a");
+const confusion = {};
+for (const row of graded) {
+  const entry = (confusion[row.tempo === "exact" ? "right" : row.tempo === "wrong" ? "wrong" : "octave"] ??= { low: 0, confident: 0 });
+  entry[row.low ? "low" : "confident"]++;
+}
+const rightWithTruth = graded.filter((row) => row.tempo === "exact" && row.p95Ms !== undefined);
 const summary = {
+  confusion,
+  rightTempoWithinBudget: `${rightWithTruth.filter((row) => row.p95Ms <= GRID_BUDGET_MS).length} of ${rightWithTruth.length}`,
   byGroup,
   tracks: rows.length,
   counted: counted.length,

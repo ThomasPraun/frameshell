@@ -13,6 +13,8 @@ export interface ClickTrack {
   skip?: (index: number) => boolean;
   /** Seconds of a quiet bed of noise under everything (amplitude 0.002). */
   bed?: boolean;
+  /** Gain of the clicks (not the bed). Default 1. */
+  level?: number;
 }
 
 /** Time of beat `index` of a track, seconds. */
@@ -45,7 +47,7 @@ export function clickTrack(track: ClickTrack): Float32Array {
       const t = k / rate;
       const burst = Math.exp(-t / 0.008) * Math.sin(2 * Math.PI * 1_400 * t) * (loud ? 0.8 : 0.5);
       const boom = loud ? Math.exp(-t / 0.08) * Math.sin(2 * Math.PI * 60 * t) * 0.6 : 0;
-      out[start + k] = (out[start + k] ?? 0) + burst + boom;
+      out[start + k] = (out[start + k] ?? 0) + (burst + boom) * (track.level ?? 1);
     }
   }
   return out;

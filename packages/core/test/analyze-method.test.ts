@@ -130,7 +130,7 @@ describe("analyze method", () => {
     expect(result.loudness!.integrated).toBeLessThan(-5);
     expect(result.loudness!.integrated).toBeGreaterThan(-60);
     expect(result.loudness!.truePeak).toBeLessThan(0);
-    expect(result.tempo).toMatchObject({ meter: 4, low: false, detector: "onset-flux@1" });
+    expect(result.tempo).toMatchObject({ meter: 4, low: false, detector: "onset-flux@2" });
     expect(result.tempo!.bpm).toBeGreaterThan(119);
     expect(result.tempo!.bpm).toBeLessThan(121);
     expect(result.tempo!.beatCount).toBeGreaterThanOrEqual(22);

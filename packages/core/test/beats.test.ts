@@ -90,6 +90,27 @@ describe("detectBeats", () => {
     expect(folded.bpm).toBeCloseTo(90, 0);
   });
 
+  it("keeps the beats on the clicks of a long track whose middle minute is silent", () => {
+    const track = { bpm: 120, seconds: 100, offset: 0.2, skip: (index: number) => index >= 36 && index <= 163 };
+    const found = measure(track);
+    expect(found.bpm).toBeCloseTo(120, 0);
+    const played = found.beats.filter((time) => time < 18 || time > 82);
+    expect(worstError(track, played)).toBeLessThan(0.015);
+  });
+
+  it("keeps a stated tempo over louder dotted-quarter hits, with full confidence", () => {
+    const track = { bpm: 120, seconds: 30, offset: 0.2, level: 0.2 };
+    const quarters = clickTrack(track);
+    const dotted = clickTrack({ bpm: 80, seconds: 30, offset: 0.2, meter: 1 });
+    const signal = prepareSignal(quarters.map((value, i) => value + dotted[i]!), 48_000);
+    const envelope = onsetEnvelope(signal);
+    expect(detectBeats(signal, envelope, { sourceRate: 48_000 }).bpm).toBeCloseTo(80, 0);
+    const stated = detectBeats(signal, envelope, { hint: 120, sourceRate: 48_000 });
+    expect(stated.bpm).toBeCloseTo(120, 0);
+    expect(worstError(track, stated.beats)).toBeLessThan(0.015);
+    expect(stated.confidence).toBeGreaterThan(0.5);
+  });
+
   it("caps the confidence of audio decoded at 16 kHz", () => {
     const track = { bpm: 110, seconds: 20, offset: 0.1, rate: 16_000 };
     const found = measure(track);

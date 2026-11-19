@@ -4,6 +4,8 @@ Check for [#689](https://github.com/ThomasPraun/frameshell/issues/689), the foll
 
 ## Result
 
+The tables below are the baseline of `onset-flux@1`. The four DSP fixes the owner approved (2026-11-19, Q3) are measured in [After the DSP fixes](#after-the-dsp-fixes-onset-flux2); that section carries the updated go/no-go.
+
 **Go for the learned-detector spike, with a licence verdict of "usable", and a cheaper DSP fix list to try first.** The threshold was fixed before the run: go only if the DSP grid is wrong (not just octave-correctable with `edits.tempo`) on more than about 20 % of the real/CC0 set, or misses 15 ms on synthetic music.
 
 | Criterion | Measured | Verdict |
@@ -80,7 +82,69 @@ Nothing was downloaded or pinned; sizes come from an HTTP HEAD.
 
 ## If the detector changes
 
-Not done here (owner approves any detector change; the follow-up issue for these fixes is proposed, not opened). Findings that look cheap, each to be measured with this harness on the same corpus first: refit the period over all hits with a final pass at finer resolution (drift); add the 3:2 and 4:3 neighbours to the alternatives and to the LOW rule (non-octave); a constant latency compensation of the refinement for slow-attack low-frequency onsets (bias); calibrate confidence so a correct-but-sparse result is not LOW. Any change bumps `onset-flux@N` in `BEAT_DETECTOR`, the cache key of the onset envelope (`b1`) if the envelope changes, and re-runs `pnpm test packages/core/test/beats`.
+Done as `onset-flux@2`, below. At the time of the first check: not done (owner approves any detector change). Findings that look cheap, each to be measured with this harness on the same corpus first: refit the period over all hits with a final pass at finer resolution (drift); add the 3:2 and 4:3 neighbours to the alternatives and to the LOW rule (non-octave); a constant latency compensation of the refinement for slow-attack low-frequency onsets (bias); calibrate confidence so a correct-but-sparse result is not LOW. Any change bumps `onset-flux@N` in `BEAT_DETECTOR`, the cache key of the onset envelope (`b1`) if the envelope changes, and re-runs `pnpm test packages/core/test/beats`.
+
+## After the DSP fixes (onset-flux@2)
+
+Owner decision 2026-11-19 (Q3 of #689): change the detector to `onset-flux@2`, DSP only, same envelope, beats file and wire (`alternatives` and `edits.tempo` stay `double`/`half`). Targets set before the run: p95 residual of 15 ms or less on at least 90 % of the synthetic tracks whose tempo is right, median bias 10 ms or less, no CC0 tempo that is not an octave off, at most 2 correct CC0 tracks wrongly LOW. Same corpus as above (51 synthetic tracks rebuilt with `make-corpus.mjs`, the 17 CC0 items fetched again with `fetch-cc0.mjs`, both in temp directories outside the repo, deleted afterwards). The baseline was re-run first and reproduced the tables above exactly.
+
+### Before and after
+
+| | `onset-flux@1` | `onset-flux@2` |
+|---|---|---|
+| Synthetic, counted (48): exact tempo / octave off / other tempo | 28 / 11 / 9 | 34 / 12 / 2 |
+| Synthetic, right tempo with p95 within 15 ms | 7 of 28 (25 %) | **32 of 34 (94 %)** |
+| Synthetic, all counted tracks with p95 within 15 ms (any octave) | 10 of 48 | 41 of 48 |
+| Synthetic, median signed bias of right-tempo tracks | +12.7 ms | **+0.8 ms** |
+| CC0 (17): exact / octave off / other tempo | 10 / 4 / 3 | 12 / 5 / **0** |
+| Synthetic confusion: right tempo LOW / confident | 15 / 13 | 7 / 27 (3 of the 7 are the 16 kHz decode, capped at 0.45 by design) |
+| Synthetic confusion: wrong (octave or other) LOW / confident | 6 / 14 | 1 / 13 |
+| CC0 confusion: right tempo LOW / confident | 7 / 3 | **3** / 9 |
+| CC0 confusion: wrong (octave or other) LOW / confident | 6 / 1 | 1 / 4 |
+
+Drift (signed median of the last third minus the first third, ms) and median error on the tracks the fix was aimed at:
+
+| Track | @1 tempo, drift, median | @2 tempo, drift, median |
+|---|---|---|
+| lofi-85 (swing 0.16, vinyl clicks) | 84.61, +146, 56.0 | 85.01, -2.3, 2.1 |
+| lofi-100 | 100.27, -71, 60.3 | 100.01, -2.7, 2.4 |
+| lofi-118 | 117.45, +106, 39.3 | 117.96, +7.4, 2.9 |
+| synthwave-100 | 100.70, -142, 196.2 | 100.01, -0.8, 0.9 |
+| minimal-100 | 100.19, -34, 16.1 | 100.00, 0.0, 0.6 |
+| lofi-85, 16 kHz decode | 85.12, -38, 24.3 | 85.01, -2.5, 3.3 |
+| CC0 `UkeJoint100Bpm` (no beat truth) | 99.24, LOW 0.17 | 100.00, 0.94 |
+| CC0 `FRESH-Hip-Hop-Beat` (no beat truth) | 93.97, LOW 0.17 | 95.00, 1.00 |
+
+Every lofi variant (low-pass, high-pass, compressed, mp3, noise bed) went the same way: p95 5.6 to 11.6 ms, drift under 4 ms.
+
+### What each fix did
+
+Measured one at a time with the fast loop of the harness (decoded signals and envelopes cached, the detector staged from source), in the order bias, drift, 3:2, confidence.
+
+1. **Latency bias: the cause was the detector, shown before fixing.** Against the exact `musicGrid` beat of synthwave-118, the attack envelope (0.5 ms average of the 30 Hz high-passed signal) rises at 0.0 ms: the generated kick starts on the beat, so the generator is not late. But |y| of a 100-150 Hz kick returns to near zero every 4-5 ms, and the loudest point the refinement started from was the kick's third or fourth cycle (median +13.9 ms); the walk back to the floor stopped at the zero crossing just before it (median +11.3 ms), so the onset landed at +12.2 ms. The 20 % rise level, the smoothing width and the high-pass phase lag were not the cause. Fix: the floor and the walk back read a 10 ms running maximum of the attack (one rise per kick instead of one per half cycle), and the onset is the first sample reaching 20 % of the way from the floor without a 10 ms gap under that level; the floor is the lowest point in the 50 ms before the loudest one. No constant is subtracted. Hit onsets moved from +12.2 to +0.8 ms on synthwave-118, from +7.5 to +0.9 ms on minimal-85, from +4.2 to +0.3 ms on the click-like patterns. Alone this took right-tempo p95 passes from 7 of 28 to 18 of 28.
+2. **Drift: the cause was the starting grid, not the 3 % clamp.** The autocorrelation period was 0.2-0.7 % off and the phase was found with that period over the whole track (102 ms off on lofi-85), so the first fit window matched wrong hits, among them the lofi preset's vinyl clicks (strong, broadband, random). Fix: the period within 1 % of the autocorrelation's, in steps of 0.025 %, and its phase, are chosen together by the comb over the middle minute of hits (all hits when that minute holds fewer than 8, a silent or ambient middle); after the widening fit, three refits over the whole audio match against the last fit with tolerances 30, 20 and 15 ms. The straight-line model stays. With fix 1 this took right-tempo p95 passes to 26 of 28 and turned 4 correct CC0 results from LOW to confident.
+3. **3:2 and 4:3 inside detection.** For the measured tempo, its double, and the four rivals (x3/2, x3/4, x2/3, x4/3), a grid is fitted and its beat energy taken (mean strength of the hit within 15 ms of each beat). A rival replaces the measured tempo when its energy is at least 1.25 times the larger of the measured tempo's and its double's (the double holds every measured beat too, so a rival must beat both), at least 0.15 in absolute terms (wandering real tracks have rivals at 0.09-0.12 that would otherwise win), and the measured grid spans at least 24 beats; of the rival's two octaves the tempo prior picks, as for the first pick. On the corpus, right tempi had rivals up to 1.12 times, dotted-quarter misreads 1.34 times and up, except two (minimal-150 high-passed 1.10, compressed 1.19) that stay wrong. This fixed 7 of 9 synthetic and all 3 CC0 non-octave errors (`Dreamt` now reads 160, an octave of its label; `SnazzyBitch` 95; `CodeBreaker` 130). Nothing was added to `alternatives` or `edits.tempo`. With a `hint` (a stated tempo) the rival check and its confidence cap are skipped, so the stated tempo is only moved by octaves, as `beats.measure` promises; the corpus runs above are unhinted, so their numbers stand.
+4. **Confidence.** The old `periodic` term was saturated at 1 on every track of the corpus, so confidence was `share^1.5` alone and penalised sparse but correct grids (a song whose second beat has no hit has `share` 0.64). New: `min(1, share / 0.75)` times precision, the share of matched beats whose hit is within 15 ms mapped 0.5 → 0 and 0.8 → 1 (wandering CC0 tracks: 0.61-0.68; straight grids 0.74 and up). Two caps: when the half grid holds 90 % of its beats with 1.8 times the energy per beat (the calm-music double-time case the unit test pins), the old `share^1.5`; when a 3:2 rival reaches 1.15 times without switching, 0.45 (LOW). `LOW_BEAT_CONFIDENCE` stays 0.5. Effect on top of fixes 1-3: CC0 right-tempo LOW 4 → 3 (`CodeBreaker` 0.39 → 0.63), `FromTheTop` (octave) became LOW, the compressed 3:2 misread stays LOW, synthwave-85 (octave) became confident.
+
+### Against the targets
+
+| Target | Result |
+|---|---|
+| p95 within 15 ms on at least 90 % of right-tempo synthetic tracks | **met**: 32 of 34. The two misses: lofi-130 puts 2 s of beats into the take's ringing tail, where the vinyl clicks go on after the final hit; the soft-pluck stress track (30 ms attacks, no drums) keeps its phase 139 ms off |
+| Median bias 10 ms or less | **met**: +0.8 ms |
+| No CC0 tempo that is not an octave off | **met**: 0 of 17 (was 3) |
+| At most 2 correct CC0 tracks wrongly LOW | **missed by one**: 3 (`SlowSpeedChase110Bpm` 0.38, `Broke120Bpm` 0.27, `EverybodyGetShot130Bpm` 0.17). In all three the straight grid walks 30-60 ms off the hits for stretches of the track (a section at another tempo, or played loosely); LOW is what the grid is worth there, as for the rubato ramps. Raising them would need a non-straight grid, which ADR 0029 rules out |
+| Wrong but confident drops, few correct turn LOW | non-octave errors: 6 confident of 9 → 1 of 2 synthetic, 0 CC0. Octave errors became more confident (synthetic 8 of 11 → 12 of 12, CC0 1 of 4 → 4 of 5), because their grids now hold their beats as well as the right tempo's would: a grid at 150 on a 75 BPM hip-hop track finds a hit on every beat. No measure tried (energy of the double and half grids, their shares) told them apart on this corpus |
+
+Short takes, outside the corpus: on 8-bar `sound.music` takes (21, 15-27 s) `@2` holds the right tempo within 15 ms on 5 against 2 for `@1`, but reads two dotted-quarter tempi that `@1` read right (synthwave-130 as 97.6, lofi-100 as 133; both LOW), and synthwave-118 locks 210 ms off the beat on mis-refined hat hits (confidence 0.70). Takes this short hold too few beats for the 3:2 check; the 24-beat floor stops the worst of it. Generated takes get an `exact` beats file anyway.
+
+Speed: detection (after the cached envelope) takes about 0.7 s per corpus track against 0.25 s (up to 8 grid fits instead of 1); the envelope, still most of the cost, is unchanged.
+
+Existing beats files keep `onset-flux@1` and their grid; nothing migrates. `frameshell beats measure` writes `@2`. The envelope cache key stays `b1`.
+
+### Go/no-go for the learned spike, updated
+
+The DSP fixes meet three of the four targets and miss the fourth by one track whose LOW is honest. What is left is the octave ambiguity, which no grid evidence measured here resolves and the prior decides (`edits.tempo` and `hint` fix it; the alternatives are only listed when LOW), the two 3:2 misreads on processed variants, and short takes. A learned detector would mainly address octave and downbeat, which DSP does not; it is no longer needed for drift, bias or the 3:2 errors of this corpus. Whether to run the spike for octave and downbeat alone is the owner's decision (separate ticket, ADR 0029 decision 10; licence verdict above unchanged).
 
 ## What the spike should settle if it runs
 

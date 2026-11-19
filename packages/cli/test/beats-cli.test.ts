@@ -62,7 +62,7 @@ describe("frameshell beats", () => {
     expect(result.stdout).toMatch(/^beats\/theme\.beats\.json {2}120 BPM, 32 beats, confidence 1\.00, within [0-9.]+ ms of the hits\n/);
     expect(result.stdout).not.toContain("LOW");
     const file = JSON.parse(readFileSync(join(project, "beats", "theme.beats.json"), "utf8")) as { detector: string; beats: number[] };
-    expect(file.detector).toBe("onset-flux@1");
+    expect(file.detector).toBe("onset-flux@2");
     expect(file.beats[0]).toBeCloseTo(0.2, 1);
   });
 
