@@ -18,7 +18,7 @@ const PLUGIN_READERS = [
 ];
 
 /** Paths no test, build or packaged app reads. */
-const NO_TESTS = [/^docs\//, /^website\//, /^evals\//, /^\.claude\//, /^[^/]+\.md$/, /^LICENSE$/, /^NOTICE$/];
+const NO_TESTS = [/^docs\//, /^website\//, /^evals\//, /^\.claude\//, /^spikes\/beats-real-music\//, /^[^/]+\.md$/, /^LICENSE$/, /^NOTICE$/];
 
 /**
  * Scope for changed repo-relative paths: `unit` is "all", "none" or "some" (then `filter` lists vitest path

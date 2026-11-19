@@ -29,6 +29,7 @@ Films are timed in beats and reels in words (#458, epic #451). Frameshell had wo
 8. **Generated clips get beat and marker times** through an opt-in `RenderContext` timing field that is part of the cache key: only clips that ask re-render when the music moves.
 9. **One FFT.** The radix-2 FFT of `multicam/sync.ts` moves to one shared module used by sync and beats.
 10. **Learned detector only on failure.** If the DSP detector misses a grid residual under 15 ms on synthetic click tracks or fails on real music, run the learned-detector spike (Beat This! or similar on ONNX Runtime Web) after a licence check of its weights (madmom's are non-commercial). Owner decision 2026-11-18 (Q1 of #458): the real-music check and this spike moved to #689.
+   *Checked 2026-11-18 (#689, `docs/research/beats-real-music.md`):* click-like patterns hold 15 ms, but dense generated music misses it on 38 of 48 tracks, and 3 of 17 CC0 tracks get a tempo that is not an octave off (18 %). The learned spike is warranted; the weights are MIT (training-data caveat); nothing is pinned yet.
 
 From the review: the detector resamples the 48 kHz sidecar to its analysis rate; a result from the 16 kHz ffmpeg fallback is marked low confidence.
 
