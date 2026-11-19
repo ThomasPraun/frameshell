@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PeopleSuggestion } from "@frameshell/protocol";
-import { cosine } from "./vector.js";
+import { clearMatch, cosine } from "./vector.js";
 
 /**
  * Lowest voice similarity (cosine of CAM++ prints) suggested as the same
@@ -45,7 +45,7 @@ export function speakerSuggestions(people: readonly PersonVoice[], speakers: rea
   for (const speaker of speakers) {
     const ranked = people.map((person) => ({ person, score: cosine(person.print, speaker.print) })).sort((a, b) => b.score - a.score);
     const [best, second] = ranked;
-    if (!best || best.score < SPEAKER_MATCH || (second && best.score - second.score < SPEAKER_MARGIN)) continue;
+    if (!best || !clearMatch(best.score, second?.score, SPEAKER_MATCH, SPEAKER_MARGIN)) continue;
     const score = Math.round(best.score * 100) / 100;
     suggestions.push({
       id: suggestionId("speaker", [best.person.id, speaker.transcript, speaker.speaker]),

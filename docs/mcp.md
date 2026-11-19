@@ -148,6 +148,7 @@ Optional `people.json`: who is who across transcripts, multicam angles and faces
 | `people_suggest(download?)` | Suggested links with `sg_…` ids (`speaker`, `face-speaker`, `face`, `angle`) and `hints`. Computes voice prints (CAM++, local) only when a person already has a linked speaker, downloading CAM++ and ONNX Runtime Web (~60 MB) once; faces come from cached scans only. `download: false` (what the app sends until the person asks) leaves voices out instead and returns `voiceDownload.bytes`. |
 | `people_confirm(suggestions, reject?, person?)` | Apply or dismiss suggestions. Confirm only what the person agreed to or what is certain. |
 | `people_ranges(person, kind?, timeline?)` | Timeline spans where the person speaks or is on screen; cut from the last span to the first. |
+| `people_tune()` | Read-only tuning report for the voice and face suggestion thresholds, replayed on the linked speakers (cached voice prints) and face anchors people confirmed: score spreads and per threshold correct and wrong suggestions. Scans, downloads and changes nothing; `hints` name missing prints and scans. |
 
 People changes are not timeline operations: review mode does not hold them, `history` does not list them. A link an agent makes (`people_link`, `people_confirm`) carries `by` and shows as "Confirmed by agent" in the People panel, where the person can unlink it or undo it with Cmd/Ctrl+Z. Nothing leaves the machine: prints stay in `.frameshell/people/`, never in `people.json`.
 

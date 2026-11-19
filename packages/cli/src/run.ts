@@ -1016,6 +1016,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return `${skillLine(result) ?? `Agent skill ${result.dir} is current.`}\n`;
     }
     case "people.ranges":
+    case "people.tune":
       return executePeople(conn, inv, cwd, flags.json);
     case "people.suggest":
     case "people.confirm":
