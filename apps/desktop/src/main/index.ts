@@ -44,6 +44,8 @@ import {
   type Outcome,
   type ProjectView,
   type ModelProgress,
+  type TranscribeProgress,
+  type TranscribeRun,
   type VoiceoverProgress,
   type VoiceoverRun,
   type PeopleChange,
@@ -125,6 +127,7 @@ import {
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
+import { type TranscribeAsk, formatLength, runTranscribe } from "./transcribe-ask.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
@@ -669,6 +672,13 @@ async function pickImageExport(window: BrowserWindow, defaultPath: string): Prom
   return result.canceled ? undefined : result.filePath;
 }
 
+/** Where to save an OpenTimelineIO export, starting at `defaultPath`; the daemon refuses any name that does not end in `.otio`. */
+async function pickOtioExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+  const said = text.app.dialogs;
+  const result = await dialog.showSaveDialog(window, { title: said.exportOtio, defaultPath, filters: [{ name: said.otioFile, extensions: ["otio"] }] });
+  return result.canceled ? undefined : result.filePath;
+}
+
 async function pickVideos(window: BrowserWindow): Promise<string[]> {
   const result = await dialog.showOpenDialog(window, {
     title: text.app.dialogs.chooseVideos,
@@ -751,7 +761,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame"];
+const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", "export-otio"];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -871,6 +881,46 @@ function reportSetup(dir: string, setup: ProjectSetup): void {
 }
 
 /**
+ * Ask in a native box before `transcribe` sends audio to a cloud or paid provider (ADR 0046 decision 10): the ask is the
+ * daemon's own. The box says the audio is uploaded, not only the cost, since that is also what the person agrees to.
+ * True when the person chose to upload; nothing is remembered, so the next run asks again.
+ */
+async function confirmTranscription(parent: BrowserWindow | null | undefined, ask: TranscribeAsk): Promise<boolean> {
+  const said = text.app.dialogs;
+  const sent = ask.remote ? said.transcribeAskUploads(ask.provider) : said.transcribeAskMayLeave(ask.provider);
+  const price = ask.cost === null ? said.transcribeAskCostUnknown : said.transcribeAskCostKnown(ask.cost, ask.provider);
+  const options: Electron.MessageBoxOptions = {
+    type: "warning",
+    message: said.transcribeAskTitle(ask.provider, ask.asset, formatLength(ask.seconds)),
+    detail: `${ask.changed ? `${said.transcribeAskChanged}\n\n` : ""}${sent} ${price}\n\n${said.transcribeAskNoConsent}`,
+    buttons: [said.transcribeUpload, said.cancel],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  return response === 0;
+}
+
+/** `transcribe` of `asset` in project `cwd`, asking the person first when the provider is cloud or paid; null when they declined. */
+function transcribeConfirmed(
+  cwd: string,
+  asset: string,
+  parent: BrowserWindow | null | undefined,
+  onProgress: (update: Progress) => void,
+  onAsk?: () => void,
+): Promise<MethodResult<"transcribe"> | null> {
+  return runTranscribe(
+    (confirmed) =>
+      daemon.request("transcribe", { cwd, asset, yes: confirmed !== null, ...(confirmed ? { confirmation: confirmed.confirmation } : {}) }, { onProgress }),
+    (ask) => {
+      onAsk?.();
+      return confirmTranscription(parent, ask);
+    },
+  );
+}
+
+/**
  * Install the transcription plugin into the new project at `dir` and
  * transcribe `assets`, in the background, reporting each step (#188). The
  * user created the project, so the plugin is trusted as `plugin.install`
@@ -891,11 +941,19 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
     for (const asset of assets) {
       failure = said.transcribeFailed(name(asset));
       running(said.transcribing(name(asset)));
-      await daemon.request(
-        "transcribe",
-        { cwd: dir, asset },
-        { onProgress: (update) => running(`${name(asset)}: ${describeProgress(update, said.progress)}`, update.fraction ?? null) },
+      const parent = [...windows.values()].find((state) => state.project?.dir === dir)?.window;
+      const done = await transcribeConfirmed(
+        dir,
+        asset,
+        parent,
+        (update) => running(`${name(asset)}: ${describeProgress(update, said.progress)}`, update.fraction ?? null),
+        () => running(said.waitingForAnswer(name(asset))),
       );
+      if (!done) {
+        // The person said no to the upload: a soft stop, not a failure. The rest (more assets, the background) waits for them.
+        reportSetup(dir, { message: said.transcribeDeclined(name(asset)), detail: null, fraction: null, state: "done" });
+        return;
+      }
     }
     if (background) {
       failure = said.backgroundFailed;
@@ -1080,6 +1138,16 @@ function registerVoiceoverIpc(): void {
 function registerModelIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
   ipcMain.handle(Channel.modelsList, (event) => outcome(async () => daemon.request("model.list", { cwd: await dirOf(event.sender) })));
+  // The transcript view's Transcribe button (only for a provider other than whisper.cpp): asks in a native box first.
+  ipcMain.handle(Channel.transcribeRun, (event, asset: string) =>
+    outcome(async (): Promise<TranscribeRun> => {
+      const cwd = await dirOf(event.sender);
+      const done = await transcribeConfirmed(cwd, asset, BrowserWindow.fromWebContents(event.sender), (update) =>
+        send(event.sender, Channel.transcribeProgress, { asset, message: describeProgress(update, text.app.setup.progress), fraction: update.fraction ?? null } satisfies TranscribeProgress),
+      );
+      return done ? { status: "done" } : { status: "declined" };
+    }),
+  );
   ipcMain.handle(Channel.modelsUse, (event, model: string | null) =>
     outcome(async () => daemon.request("transcription.set", { cwd: await dirOf(event.sender), model })),
   );
@@ -1434,7 +1502,8 @@ function registerShootIpc(): void {
         // No transcript yet (a session without takes) or a stale one: transcribe, then find the speakers.
         const reason = error instanceof RpcError && error.code === ErrorCode.InvalidOperation ? (error.data as { reason?: string } | undefined)?.reason : undefined;
         if (reason !== "no transcript" && reason !== "stale transcript") throw error;
-        await daemon.request("transcribe", { cwd, asset });
+        const done = await transcribeConfirmed(cwd, asset, BrowserWindow.fromWebContents(event.sender), () => undefined);
+        if (!done) throw new Error(text.app.dialogs.transcribeNotStarted, { cause: error });
         return daemon.request("transcribe.speakers", { cwd, asset });
       }
     }),
@@ -1685,6 +1754,18 @@ function registerIpc(): void {
       return (await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out })).path;
     }),
   );
+  ipcMain.handle(Channel.timelineExportOtio, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const name = String(timeline);
+      const out = await pickOtioExport(state.window, join(project.dir, "exports", `${name}.otio`));
+      if (!out) return null;
+      // The daemon writes the file: the app never writes project files, and its relative media paths start from the folder picked.
+      const { path, warnings } = await daemon.request("export.otio", { cwd: project.dir, timeline: name, out });
+      return { path, warnings };
+    }),
+  );
   ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
     outcome(async () => {
       const state = stateOf(event.sender);
@@ -1912,6 +1993,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+Shift+S",
           click: (_item, focused) => command("imageFromFrame", focused),
         },
+        { id: "export-otio", label: said.exportOtio, click: (_item, focused) => command("exportOtio", focused) },
         { id: "review-mode", label: said.reviewMode, type: "checkbox", checked: false, click: (_item, focused) => command("toggleReview", focused) },
         { type: "separator" },
         { label: said.installCli, click: () => void cliCommand(installCli) },

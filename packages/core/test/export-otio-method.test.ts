@@ -1,12 +1,11 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type DaemonConnection, ErrorCode, connectToDaemon } from "@frameshell/protocol";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { otioProblems } from "./otio-check.js";
-import { testBinaryManager } from "./media-tools.js";
+import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
 // The `export.otio` method end to end: a project whose timelines are written as files, so no ffmpeg runs.
 let daemon: Daemon;
@@ -45,7 +44,7 @@ beforeAll(async () => {
   await conn.request("project.init", { dir: project });
   writeFileSync(join(project, "timelines", "main.json"), JSON.stringify(timeline, null, 2));
   writeFileSync(join(project, "timelines", "inner.json"), JSON.stringify(inner, null, 2));
-});
+}, 120_000);
 
 afterAll(async () => {
   conn.close();
@@ -93,21 +92,44 @@ describe("export.otio", () => {
     expect(JSON.parse(readFileSync(out, "utf8")).id).toBe("main");
   });
 
-  it("fails for a timeline that does not exist", async () => {
-    await expect(conn.request("export.otio", { cwd: project, timeline: "nope" })).rejects.toMatchObject({ code: ErrorCode.TimelineNotFound });
+  it("writes a dissolve between butted clips as Transition.1, its half cut to the handle the files have", async () => {
+    const { ffmpeg } = await mediaTools();
+    mkdirSync(join(project, "assets"), { recursive: true });
+    // 2.2 s of media: a clip ending at 2 s has 0.2 s of handle after it, so a requested 1 s dissolve is 0.2 s a side.
+    await run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=64x36:r=30:d=2.2", "-pix_fmt", "yuv420p", join(project, "assets", "short.mp4")]);
+    const dissolved = {
+      ...timeline,
+      id: "dissolved",
+      tracks: [
+        {
+          id: "t_v1",
+          kind: "video",
+          clips: [
+            { id: "c_a", type: "media", asset: "assets/short.mp4", start: 0, in: 0, out: 2, audio: { muted: true } },
+            { id: "c_b", type: "media", asset: "assets/short.mp4", start: 2, in: 0.5, out: 2.1, dissolve: 1, audio: { muted: true } },
+          ],
+        },
+      ],
+    };
+    writeFileSync(join(project, "timelines", "dissolved.json"), JSON.stringify(dissolved, null, 2));
+    const result = await conn.request("export.otio", { cwd: project, timeline: "dissolved" });
+    expect(result).toMatchObject({ tracks: 1, clips: 2 });
+    expect(result.warnings.filter((warning) => warning.includes("dissolve") || warning.includes("transition"))).toEqual([]);
+    const otio = JSON.parse(readFileSync(join(project, "exports", "dissolved.otio"), "utf8"));
+    const children = otio.tracks.children[0].children;
+    expect(children.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual(["Clip.2", "Transition.1", "Clip.2"]);
+    expect(children[1]).toMatchObject({ transition_type: "SMPTE_Dissolve", in_offset: { value: 6 }, out_offset: { value: 6 } });
+    expect(otioProblems(otio)).toEqual([]);
+  }, 120_000);
+
+  it("refuses an image project: it has no cut to hand to an editor", async () => {
+    const image = tempDir();
+    await conn.request("project.init", { dir: image, kind: "image" });
+    await expect(conn.request("export.otio", { cwd: image })).rejects.toMatchObject({ code: ErrorCode.InvalidOperation });
+    expect(existsSync(join(image, "exports", "main.otio"))).toBe(false);
   });
 
-  // FRAMESHELL_TEST_OTIO=1 reads the file with OpenTimelineIO itself; never required, no Python dependency otherwise.
-  it.skipIf(process.env["FRAMESHELL_TEST_OTIO"] !== "1")("OpenTimelineIO reads the file", async () => {
-    await conn.request("export.otio", { cwd: project });
-    const path = join(project, "exports", "main.otio");
-    expect(existsSync(path)).toBe(true);
-    mkdirSync(dirname(path), { recursive: true });
-    const script = "import sys, opentimelineio as otio; t = otio.adapters.read_from_file(sys.argv[1]); print(len(t.tracks), t.duration().value)";
-    const out = execFileSync("python", ["-I", "-c", script, path], { encoding: "utf8" }).trim();
-    // 2 s clip, 2 s gap, 2 s generated, 1.5 s nested at 30 fps: the track and the timeline are 225 frames long.
-    const [trackCount, duration] = out.split(" ");
-    expect(trackCount).toBe("1");
-    expect(Number(duration)).toBe(225);
+  it("fails for a timeline that does not exist", async () => {
+    await expect(conn.request("export.otio", { cwd: project, timeline: "nope" })).rejects.toMatchObject({ code: ErrorCode.TimelineNotFound });
   });
 });

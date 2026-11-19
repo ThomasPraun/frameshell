@@ -34,12 +34,25 @@ function element(): Record<string, unknown> {
 type Mark = (row: Record<string, unknown>) => { style: { opacity: string } };
 const boxFill: Mark = (row) => (row["firstChild"] as Record<string, unknown>)["firstChild"] as { style: { opacity: string } };
 
+/** Clip length the next pages are rendered with, instead of the template's default; set by {@link onClipOf}. */
+let clipLength: number | undefined;
+
+/** Runs `run` with every page rendered for a clip of `seconds`. */
+function onClipOf<T>(seconds: number, run: () => T): T {
+  clipLength = seconds;
+  try {
+    return run();
+  } finally {
+    clipLength = undefined;
+  }
+}
+
 /**
  * Opacity (0 to 1) of each created row's `mark` at clip second `t`, for `template`'s page with `timing` and the clip
  * props `given`.
  */
 function opacities(template: Template, mark: Mark, timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]): number[][] {
-  const duration = template.defaultDuration;
+  const duration = clipLength ?? template.defaultDuration;
   const html = template.render({ id: "list", width: 1920, height: 1080, duration, tokens: TOKENS });
   const attribute = /data-composition-variables='([^']*)'/.exec(html)![1]!.replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]!).at(-1)!;
@@ -135,5 +148,41 @@ describe("other templates with steps on the music's beats", () => {
     expect(stepTimes(workCards, card, 3, { beats: [], beatsProblem: "no-beats" }, { onBeats: true })).toEqual(near([0.3, 0.8, 1.3]));
     // The first beat at or after 0.55 s is 0.75 s, then 1.25 and 1.75: the cards land 0.25 s before each.
     expect(stepTimes(workCards, card, 3, BEATS, { onBeats: true })).toEqual(near([0.5, 1, 1.5]));
+  });
+
+  describe("on a short clip the beats are held to the room before the exit", () => {
+    // Two seconds: the room is 2 - 0.3 - 0.5 = 1.2 s. Beats at 0.25 + 0.5 k would put the third card at 1.75 s.
+    const SHORT = 2;
+    const ascending = (times: number[]) => times.every((time, i) => i === 0 || time - times[i - 1]! >= 0.07);
+
+    it("keeps every notification card before the room and in order, 0.08 s apart at least", () => {
+      const times = onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, BEATS, { onBeats: true }));
+      expect(times).toEqual(near([0.75, 1.12, 1.2]));
+      expect(Math.max(...times)).toBeLessThanOrEqual(1.2 + 0.015);
+      expect(ascending(times)).toBe(true);
+    });
+
+    it("leaves the fixed schedule alone: no onBeats, or no grid, is as asked even past the room", () => {
+      expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, BEATS, {}))).toEqual(near([0.4, 1.3, 2.2]));
+      expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, undefined, { onBeats: false }))).toEqual(near([0.4, 1.3, 2.2]));
+      for (const timing of [undefined, { beats: [], beatsProblem: "no-beats" as const }, { ...BEATS, beatsProblem: "low-confidence" as const }]) {
+        expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, timing, { onBeats: true }))).toEqual(near([0.4, 1.3, 2.2]));
+      }
+    });
+
+    it("holds every work card's start to the room the pull-in computed", () => {
+      // The pull-in puts the starts at 0.55, 0.76, 0.97; beats would say 0.75, 1.25, 1.75; a card shows 0.25 s before its start.
+      const lands = onClipOf(SHORT, () => stepTimes(workCards, card, 3, BEATS, { onBeats: true }));
+      expect(lands).toEqual(near([0.5, 0.62, 0.7]));
+      expect(Math.max(...lands) + 0.25).toBeLessThanOrEqual(1.2 - 0.25 + 0.015);
+      expect(ascending(lands)).toBe(true);
+      expect(onClipOf(SHORT, () => stepTimes(workCards, card, 3, BEATS, {}))).toEqual(near([0.3, 0.51, 0.72]));
+    });
+
+    it("gives a clip that is long enough the same times as before", () => {
+      const long = (template: Template) => stepTimes(template, card, 3, BEATS, { onBeats: true });
+      expect(onClipOf(workCards.defaultDuration, () => long(workCards))).toEqual(near([0.5, 1, 1.5]));
+      expect(onClipOf(notificationStack.defaultDuration, () => long(notificationStack))).toEqual(near([0.75, 1.25, 1.75]));
+    });
   });
 });

@@ -55,6 +55,20 @@ describe("frameshell remotion new", () => {
     expect(read("src/frameshell-timing.ts")).toBe("// mine");
   });
 
+  it("warns, without touching it, when the timing hook there predates transcript words", async () => {
+    await run("intro");
+    const file = join(project, "compositions", "remotion", "src", "frameshell-timing.ts");
+    const old = TIMING_HELPER_SOURCE.replaceAll("wordsProblem", "wordsWhy");
+    expect(old).not.toContain("wordsProblem");
+    writeFileSync(file, old);
+    const second = (await run("outro")) as { output: string };
+    expect(second.output).toContain("Warning: compositions/remotion/src/frameshell-timing.ts predates transcript words");
+    expect(read("src/frameshell-timing.ts")).toBe(old);
+    // The current hook gets none.
+    writeFileSync(file, TIMING_HELPER_SOURCE);
+    expect(((await run("third")) as { output: string }).output).not.toContain("Warning");
+  });
+
   it("adds later compositions without touching the project files, printing the registration", async () => {
     await run("intro");
     const root = read("src/Root.tsx");

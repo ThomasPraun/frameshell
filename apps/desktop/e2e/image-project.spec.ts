@@ -9,9 +9,9 @@ import { ffmpegRun, makeSource, testFfmpeg, useTestBinaries } from "./media.js";
 // Image projects (ADR 0017): pictures start a project without a timeline. Each picture is a layer, the preview hides
 // time, and the picture exports as PNG, JPEG or WebP. The native file dialogs are replaced in main.
 
-/** Whether the video-only menu items (View > Transcript, File > New Image from Frame) are enabled now. */
+/** Whether the video-only menu items (View > Transcript, File > New Image from Frame, File > Export OpenTimelineIO) are enabled now. */
 async function videoMenu(app: ElectronApplication): Promise<boolean[]> {
-  return app.evaluate(({ Menu }) => ["view-transcript", "image-from-frame"].map((id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? false));
+  return app.evaluate(({ Menu }) => ["view-transcript", "image-from-frame", "export-otio"].map((id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? false));
 }
 
 /** Focus the window showing `title`, as a click on it would. */
@@ -67,7 +67,7 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await expect(page.getByRole("button", { name: "Transcript", exact: true })).toHaveCount(0);
     await expect(page.locator(".editor-empty")).toContainText("Open a script or JSON file from the explorer.");
     await focusWindow(app, "poster");
-    await expect.poll(() => videoMenu(app)).toEqual([false, false]);
+    await expect.poll(() => videoMenu(app)).toEqual([false, false, false]);
 
     // Move the logo under the poster, then undo: one history step each. Row buttons show on the selected row.
     await layers.locator(".layers-row", { hasText: "logo" }).click();
@@ -154,9 +154,9 @@ test("Mod+Shift+S makes an image project from the frame at the playhead, beside 
     await expect(page.locator(".statusbar")).toContainText("Opened interview frame 00-00 in a new window.");
     // The video-only menu items follow the focused window's kind (#289).
     await focusWindow(app, "interview frame 00-00");
-    await expect.poll(() => videoMenu(app)).toEqual([false, false]);
+    await expect.poll(() => videoMenu(app)).toEqual([false, false, false]);
     await focusWindow(app, "interview");
-    await expect.poll(() => videoMenu(app)).toEqual([true, true]);
+    await expect.poll(() => videoMenu(app)).toEqual([true, true, true]);
   } finally {
     await app.close();
   }

@@ -1,9 +1,10 @@
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { terminalLaunch } from "../src/main/terminal-launch.js";
-import { TerminalManager, type TerminalManagerOptions } from "../src/main/terminals.js";
+import { TerminalManager, type TerminalManagerOptions, processExists } from "../src/main/terminals.js";
 
 // Real ptys running the user's real login shell: the same path the app takes.
 // vitest.config.ts turns every known agent off for the CLI's parent-process walk; detection here needs them on.
@@ -200,5 +201,24 @@ describe("TerminalManager", () => {
       ["term-gone", "codex"],
       ["term-gone", null],
     ]);
+  });
+});
+
+describe("killing a shell that already exited", () => {
+  it("knows a running process from a finished one", async () => {
+    expect(processExists(process.pid)).toBe(true);
+    const child = spawn(process.execPath, ["-e", "0"], { stdio: "ignore" });
+    await new Promise((resolve) => child.once("exit", resolve));
+    expect(processExists(child.pid!)).toBe(false);
+  });
+
+  it("settles when kill is sent while the shell is exiting", async () => {
+    const { manager, output, exits, launch } = setup();
+    const { id } = manager.create(launch("term-exited"), { cols: 80, rows: 24 });
+    await waitForPrompt(output, id);
+    manager.write(id, "exit\r");
+    manager.kill(id);
+    await manager.killAll();
+    await expect.poll(() => exits.has(id), { timeout: POLL_MS }).toBe(true);
   });
 });

@@ -674,10 +674,12 @@ export const exportMethods = {
       "video track and a muted audio track are disabled), media clips as `Clip.2` from the source `in` for the timeline length, `LinearTimeWarp` for a `speed` " +
       "other than 1 and the clip id, start and timeline length in `metadata.frameshell`, a gap for every hole, markers (label, colour, frame). " +
       "Generated clips (`hyperframes`, `remotion`, `blender`) and nested timeline clips keep their slot, name and timeline length as a clip " +
-      "with a missing media reference, plus a warning: render the clip and relink it in the editor. NOT exported, each named in `warnings`: " +
-      "multicam program tracks, subtitle tracks, dissolves and fades, transforms and keys, colour grades, film finish, audio effects, the sound of media clips on video tracks (OTIO keeps sound on audio tracks). " +
+      "with a missing media reference, plus a warning: render the clip and relink it in the editor. A dissolve between two clips that end and start at " +
+      "the same frame is a `Transition.1` (`SMPTE_Dissolve`, centred on the cut, the effective half length in frames each side; a wipe, push or iris dissolve is written as a plain one, its shape only in the metadata, with a warning). " +
+      "NOT exported, each named in `warnings`: " +
+      "multicam program tracks, subtitle tracks, dips and fades (`fadeIn`, `fadeOut`, a dissolve with no handle or no clip before it), transition shapes, transforms and keys, colour grades, film finish, audio effects, the sound of media clips on video tracks (OTIO keeps sound on audio tracks). " +
       "Media paths (`target_url`) are relative to the `.otio` file by default, so the folder can move with the project; " +
-      "`absolutePaths: true` writes `file://` URLs. Fails with InvalidOperation (`out` is not a `.otio` file), TimelineNotFound.",
+      "`absolutePaths: true` writes `file://` URLs. Fails with InvalidOperation (`out` is not a `.otio` file; an image project, which has no cut to hand to an editor), TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,

@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CommandContext, CommandResult, PluginCommand } from "@frameshell/plugin-api";
-import { TIMING_HELPER_SOURCE } from "./timing.js";
+import { TIMING_HELPER_FILE, TIMING_HELPER_SOURCE, outdatedTimingHelper, outdatedTimingHelperAdvice } from "./timing.js";
 
 /** Composition name: becomes the composition id and, in PascalCase, the component. */
 const NAME = /^[a-z][a-z0-9-]*$/;
@@ -13,9 +13,6 @@ export const REACT_VERSION = "19.1.0";
 
 /** Project-relative directory of the scaffolded Remotion project. */
 export const PROJECT_DIR = "compositions/remotion";
-
-/** File in the Remotion project's `src/` that reads the timeline timing; `remotion new` writes it once. */
-const TIMING_HELPER_FILE = "frameshell-timing.ts";
 
 const USAGE = "usage: frameshell remotion new <name> [--duration <seconds>]; <name> is lowercase letters, digits and dashes, e.g. `intro`";
 
@@ -47,7 +44,8 @@ function parseArgs(args: readonly string[]): NewArgs {
  * project first (package.json pinning Remotion, entry, root) when missing.
  * The composition has the project's size and fps, no background, and timing
  * derived from `useVideoConfig()`. Adds `src/frameshell-timing.ts` (the hook for clips that ask for the
- * timeline's timing) when missing. Never overwrites, never installs packages.
+ * timeline's timing) when missing, and warns when the one there predates the `words` kind. Never overwrites, never installs
+ * packages.
  */
 export const newComposition: PluginCommand = {
   description: "Add a composition to compositions/remotion/ (creates the Remotion project when missing)",
@@ -77,7 +75,9 @@ export const newComposition: PluginCommand = {
       await writeFile(join(root, "src", "index.ts"), INDEX, { flag: "wx" });
       await writeFile(join(root, "src", "Root.tsx"), rootTemplate(component, registration), { flag: "wx" });
     }
-    const helper = await writeIfMissing(join(root, "src", TIMING_HELPER_FILE), TIMING_HELPER_SOURCE);
+    const helperPath = join(root, "src", TIMING_HELPER_FILE);
+    const helper = await writeIfMissing(helperPath, TIMING_HELPER_SOURCE);
+    const outdated = !helper && outdatedTimingHelper(await readFile(helperPath, "utf8"));
     const source = `${PROJECT_DIR}/src/index.ts`;
     const props = JSON.stringify({ composition: name, inputProps: { title: "Title" } });
     const add = `frameshell clip add <video track> --type remotion --source ${source} --start <s> --duration ${duration} --props '${props}'`;
@@ -87,6 +87,7 @@ export const newComposition: PluginCommand = {
         ? [`Created the Remotion project ${PROJECT_DIR}/ (Remotion ${REMOTION_VERSION}). Install it once: cd ${PROJECT_DIR} && npm install`]
         : [`Register it in ${PROJECT_DIR}/src/Root.tsx (import { ${component} } from "./${component}"):\n  ${registration}`]),
       ...(helper ? [`Created ${PROJECT_DIR}/src/${TIMING_HELPER_FILE}: useFrameshellTiming() reads the beats and markers of a clip added with "timing":["beats","markers"] in --props.`] : []),
+      ...(outdated ? [`Warning: ${outdatedTimingHelperAdvice(`${PROJECT_DIR}/src/${TIMING_HELPER_FILE}`)}`] : []),
       `Add it to the timeline:\n  ${add}`,
     ];
     return { output: steps.join("\n"), data: { file, source, composition: name, createdProject: fresh, ...format, duration } };

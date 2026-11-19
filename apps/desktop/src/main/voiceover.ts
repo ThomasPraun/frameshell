@@ -4,6 +4,9 @@
 // Also the pure parts of the rest of the app's voiceover: progress, Cancel, the misread check's plan, where placing starts.
 import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult, timeRefOf } from "@frameshell/protocol";
 import type { VoiceoverProgress, VoiceoverVerifyPlan } from "../shared/api.js";
+import { type Confirmed, formatCost, isAsk, runConfirmed } from "./confirmation.js";
+
+export { type Confirmed, formatCost };
 
 /** Transcription provider the app can set up and size a download for (`transcriptionDownload` in `main/index.ts`). */
 export const APP_TRANSCRIPTION_PROVIDER = "whisper-cpp";
@@ -56,20 +59,9 @@ export interface CostAsk {
   confirmation: string;
 }
 
-/** What a confirmed run sends: `yes` and the token of the ask the person confirmed. */
-export interface Confirmed {
-  yes: true;
-  confirmation: string;
-}
-
-/** `0.04 USD`: the amount to at most 4 decimals, then its currency. */
-export function formatCost(cost: { amount: number; currency: string }): string {
-  return `${Number(cost.amount.toFixed(4))} ${cost.currency}`;
-}
-
 /** The ask inside a `ConfirmationRequired` or `ConfirmationStale` error of `voiceover.generate`; null for any other error. */
 export function costAsk(error: unknown): CostAsk | null {
-  if (!(error instanceof RpcError) || (error.code !== ErrorCode.ConfirmationRequired && error.code !== ErrorCode.ConfirmationStale)) return null;
+  if (!isAsk(error)) return null;
   const data = error.data as { provider?: string; lines?: string[]; cost?: { amount: number; currency: string } | null; confirmation?: string } | undefined;
   if (!data?.confirmation) return null;
   return { provider: data.provider ?? "", lines: data.lines?.length ?? 0, cost: data.cost ? formatCost(data.cost) : null, changed: error.code === ErrorCode.ConfirmationStale, confirmation: data.confirmation };
@@ -77,22 +69,11 @@ export function costAsk(error: unknown): CostAsk | null {
 
 /**
  * Run `request` unconfirmed; when the daemon asks for the cost to be confirmed, `confirm` decides and a yes runs it again
- * with `yes` and the ask's token. When the run changed since (a new ask), the person is asked again with the new cost.
- * Resolves null when the person declined, nothing having been generated. Other errors reach the caller.
+ * (`runConfirmed`). Resolves null when the person declined, nothing having been generated. Other errors reach the caller.
  */
-export async function runVoiceover(
+export function runVoiceover(
   request: (confirmed: Confirmed | null) => Promise<VoiceoverGenerateResult>,
   confirm: (ask: CostAsk) => Promise<boolean>,
 ): Promise<VoiceoverGenerateResult | null> {
-  let confirmed: Confirmed | null = null;
-  for (;;) {
-    try {
-      return await request(confirmed);
-    } catch (error) {
-      const ask = costAsk(error);
-      if (!ask) throw error;
-      if (!(await confirm(ask))) return null;
-      confirmed = { yes: true, confirmation: ask.confirmation };
-    }
-  }
+  return runConfirmed(request, costAsk, confirm);
 }

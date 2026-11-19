@@ -225,7 +225,7 @@ describe("templates that put their steps on beats (onBeats)", () => {
       const html = read(id);
       expect(declared(html).find((v) => v.id === "onBeats")).toMatchObject({ type: "boolean", default: false });
       expect(html.match(/function stepTimes\(/g)).toHaveLength(1);
-      expect(html).toContain("P.onBeats)");
+      expect(html).toMatch(/stepTimes\([^)]*P\.onBeats/);
       // Asked through the prop, never a scaffolded meta tag: a plain clip keeps its key when the music moves.
       expect(html).not.toContain("frameshell-timing");
     }
@@ -654,7 +654,7 @@ describe("frameshell hyperframes update", () => {
   });
 
   it("lists the runtime that is bundled and leaves a frozen 0.4.0 copy as it is until asked (no pixel change for existing clips)", async () => {
-    expect(MOTION_RUNTIME_VERSION).toBe("0.5.0");
+    expect(MOTION_RUNTIME_VERSION).toBe("0.6.0");
     await scaffold(["frozen", "--template", "checklist"]);
     const frozen = MOTION_RUNTIME.replace(`runtime ${MOTION_RUNTIME_VERSION}`, "runtime 0.4.0");
     writeFileSync(runtimeOf("frozen"), frozen);
@@ -662,9 +662,9 @@ describe("frameshell hyperframes update", () => {
     await scaffold(["next", "--template", "checklist"]);
     await checkCompositions.run({ args: ["frozen"], cwd: project, project: { dir: project } });
     const preview = await update(["--dry-run"]);
-    expect(preview.report.runtime).toBe("0.5.0");
+    expect(preview.report.runtime).toBe("0.6.0");
     expect(preview.report.compositions.find((c) => c.file.includes("/frozen/"))).toMatchObject({ status: "updated", from: "0.4.0" });
-    expect(preview.output).toContain("runtime 0.4.0 -> 0.5.0");
+    expect(preview.output).toContain("runtime 0.4.0 -> 0.6.0");
     expect(readFileSync(runtimeOf("frozen"), "utf8")).toBe(frozen);
     expect(read("frozen")).toBe(html);
     await update();
