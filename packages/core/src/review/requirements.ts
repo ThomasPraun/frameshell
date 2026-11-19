@@ -49,6 +49,19 @@ export interface JudgeInput {
   placement?: FramePlacement | null | undefined;
 }
 
+/** Ids of `clips` that are clip `id` inside a nested clip (`<nested clip id>/<id>`). */
+function nestedPaths(id: string, clips: readonly ClipSpan[] | null): string[] {
+  return (clips ?? []).filter((clip) => clip.id.endsWith(`/${id}`)).map((clip) => clip.id);
+}
+
+/** Why clip `id` is not in `clips`: the way to name it when it is inside nested clips, else just that it is absent. */
+function missingClip(id: string, clips: readonly ClipSpan[] | null): string {
+  const paths = nestedPaths(id, clips);
+  if (paths.length === 0) return `clip ${id} is not on the timeline.`;
+  const shown = paths.slice(0, 3).join(", ");
+  return `clip ${id} is inside a nested timeline: name it as ${shown}${paths.length > 3 ? ", ..." : ""} (<nested clip id>/<clip id>).`;
+}
+
 const round = (value: number) => Math.round(value * 1000) / 1000;
 
 const seconds = (value: number) => `${round(value)} s`;
@@ -109,7 +122,9 @@ export function judgeRequirements(input: JudgeInput): { metrics: ReviewMetrics; 
     notes.push(
       input.clips === null
         ? `requirements: the waiver of ${waiver.check} names clip ${waiver.clip}, and a file has no clips: it covers nothing here (review the timeline).`
-        : `requirements: the waiver of ${waiver.check} names clip ${waiver.clip}, which is not on the timeline: it covers nothing.`,
+        : nestedPaths(waiver.clip, input.clips).length > 0
+          ? `requirements: the waiver of ${waiver.check} covers nothing: ${missingClip(waiver.clip, input.clips)}`
+          : `requirements: the waiver of ${waiver.check} names clip ${waiver.clip}, which is not on the timeline: it covers nothing.`,
     );
   }
 
@@ -227,7 +242,7 @@ function clipChecks({ requirements, series, filmSeconds, range, fps, timeline, c
         continue;
       }
       if (!clip) {
-        found.push(item(check, "fail", expected, null, `clip ${id} is not on the timeline.`, id));
+        found.push(item(check, "fail", expected, null, missingClip(id, clips), id));
         continue;
       }
       if (check === "clip.appearsBy") {
@@ -242,7 +257,7 @@ function clipChecks({ requirements, series, filmSeconds, range, fps, timeline, c
         found.push(item(check, ok ? "pass" : "fail", expected, round(clip.start), `clip ${id} starts at ${seconds(clip.start)}${ok ? ", by" : ", after"} ${seconds(by)}.`, id));
       } else if (check === "clip.before") {
         const other = byId.get(before!);
-        if (!other) found.push(item(check, "fail", expected, null, `clip ${before} is not on the timeline.`, id));
+        if (!other) found.push(item(check, "fail", expected, null, missingClip(before!, clips), id));
         else {
           const ok = clip.start < other.start;
           found.push(item(check, ok ? "pass" : "fail", expected, round(clip.start), `clip ${id} starts at ${seconds(clip.start)}, ${ok ? "before" : "not before"} clip ${before} at ${seconds(other.start)}.`, id));

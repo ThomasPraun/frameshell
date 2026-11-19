@@ -97,7 +97,7 @@
           "clip": {
             "type": "string",
             "minLength": 1,
-            "description": "Clip id from `timeline.show`, e.g. `c_1a2b3c`."
+            "description": "Clip id from `timeline.show`, e.g. `c_1a2b3c`. A clip inside a nested timeline is `<nested clip id>/<its clip id>`, the way the flattened film names it."
           },
           "appearsBy": {
             "description": "The clip starts at or before this time: seconds, or a marker id or label (optionally `hook+0.5`), as `marker.list` shows them.",

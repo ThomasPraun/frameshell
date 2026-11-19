@@ -104,6 +104,23 @@ import { syncMetrics } from "./sync.js";
 /** A timeline flattened for a format, as `ExportService.resolvedTimeline` gives it. */
 type Flat = Awaited<ReturnType<ExportService["resolvedTimeline"]>>;
 
+/**
+ * The clips of the flattened timeline's video and audio tracks that sit inside a nested clip (id `<nested clip id>/<inner id>`),
+ * as spans on the timeline's clock; `known` are the top-level ids, which stay as the timeline lists them.
+ */
+function nestedClipSpans(flat: Timeline, fps: number, known: ReadonlySet<string>): ClipSpan[] {
+  const found: ClipSpan[] = [];
+  for (const track of flat.tracks) {
+    if (track.kind !== "video" && track.kind !== "audio") continue;
+    for (const clip of track.clips) {
+      if (!clip.id.includes("/") || known.has(clip.id)) continue;
+      const length = clipLength(clip, { fps });
+      found.push({ id: clip.id, start: clip.start, end: Number.isFinite(length) ? clip.start + length : null });
+    }
+  }
+  return found;
+}
+
 /** A clip of a video track of the flattened timeline, as `ReviewService.#videoClip` finds it. */
 interface VideoClip {
   clip: ClipPicture["clip"];
@@ -436,6 +453,12 @@ export class ReviewService {
         const requirements = request.requirements !== undefined ? request.requirements : await readRequirementsFile(root);
         if (requirements) {
           const inFrame = loaded !== null && requirements.clips.some((clip) => clip.staysInFrame !== undefined);
+          // Clips inside nested timelines are named `<nested clip id>/<inner id>`: read from the flattened timeline, and only when the file asks about clips.
+          let judgedClips = clips;
+          if (clips !== null && requirements.clips.length > 0) {
+            const resolved = await flat().catch(() => null);
+            if (resolved) judgedClips = [...clips, ...nestedClipSpans(resolved.timeline, source.fps, new Set(clips.map((clip) => clip.id)))];
+          }
           let placement: FramePlacement | null = null;
           if (inFrame) {
             const found = await placed("staysInFrame");
@@ -453,7 +476,7 @@ export class ReviewService {
             range: seconds,
             fps: source.fps,
             timeline: loaded?.timeline ?? null,
-            clips,
+            clips: judgedClips,
             tracks: loaded ? subtitles : null,
             placement,
           });

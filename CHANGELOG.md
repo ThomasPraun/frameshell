@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Requirements of `review` reach clips inside nested timelines, follow-up of #457 (epic #451; no protocol change,
+  `PROTOCOL_VERSION` stays, descriptions only): every per-clip requirement (`appearsBy`, `before`, `keepsMoving`,
+  `staysInFrame`) and clip waiver names a clip inside a nested timeline by the id the flattened film gives it,
+  `<nested clip id>/<its clip id>`, and is judged on that clip's span; `staysInFrame` reads its boxes from the same
+  flattened timeline. A bare inner id fails with a message naming the path or paths to use instead of judging every
+  placement; a waiver on it says so in the run's warnings. The flattened timeline is read only when the file has clip
+  requirements. This closes the "not yet" of the sixth slice of #457 below for nested clips.
 - Premiere XML export, slice 2 of #701 (ADR 0047; no protocol change, `PROTOCOL_VERSION` stays): File > Export
   Premiere XML… in the app (video projects; en + es), sharing one hand-off path with File > Export OpenTimelineIO…: main
   asks where to save, the daemon writes, a notice counts what the file leaves out and names the CLI command that lists
