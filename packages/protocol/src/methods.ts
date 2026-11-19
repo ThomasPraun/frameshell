@@ -57,7 +57,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 181;
+export const PROTOCOL_VERSION = 182;
 
 export {
   type MethodSpec,
@@ -747,8 +747,9 @@ export const ErrorCode = {
    * data: `{ provider, voice, lines: string[], cost: { amount, currency } | null, characters, confirmation }`, a paid generation
    * (pass the `confirmation` token too). `render` data: `{ finals: { clip, type, format, seconds }[], seconds, limit, hint }`,
    * final renders of generated clips estimated over `limit` seconds in all (`seconds` null when a plugin could not say).
-   * `transcribe` data: `{ provider, model, asset, seconds, cost: { amount, currency } | null, remote, confirmation }`: a
-   * cloud or paid transcription (ADR 0046) that would upload the asset's audio; pass the `confirmation` token too.
+   * `transcribe` data: `{ provider, model, asset, seconds, cost: { amount, currency } | null, costUnknown, remote, confirmation }`: a
+   * cloud or paid transcription (ADR 0046) that would upload the asset's audio; pass the `confirmation` token too. `cost` null
+   * with `costUnknown` false = the provider declares itself free but gives no estimate (it charges nothing).
    */
   ConfirmationRequired: -32048,
   /**

@@ -41,7 +41,12 @@ describe("transcribeAsk", () => {
 
   it("marks an estimate of exactly 0 as free, and any other amount or no estimate as not", () => {
     expect(transcribeAsk(refusal({ cost: { amount: 0, currency: "USD" } }))).toMatchObject({ cost: "0 USD", costFree: true });
-    expect(transcribeAsk(refusal({ cost: { amount: 0.00004, currency: "USD" } }))).toMatchObject({ costFree: false });
+    expect(transcribeAsk(refusal({ cost: { amount: 0.00004, currency: "USD" } }))).toMatchObject({ cost: "< 0.0001 USD", costFree: false });
+    expect(transcribeAsk(refusal({ cost: null, costUnknown: true }))).toMatchObject({ cost: null, costFree: false });
+  });
+
+  it("marks a provider that declares itself free without an estimate as free, and a daemon that sends no costUnknown as unknown", () => {
+    expect(transcribeAsk(refusal({ cost: null, costUnknown: false }))).toMatchObject({ cost: null, costFree: true });
     expect(transcribeAsk(refusal({ cost: null }))).toMatchObject({ cost: null, costFree: false });
   });
 
@@ -94,7 +99,7 @@ describe("runTranscribe", () => {
     });
     const confirm = vi.fn(async (_ask: TranscribeAsk) => true);
     expect(await runTranscribe(request, confirm)).toBe(result);
-    expect(confirm.mock.calls.map(([ask]) => [ask.cost, ask.changed])).toEqual([["0.0126 USD", false], ["0.02 USD", true]]);
+    expect(confirm.mock.calls.map(([ask]) => [ask.cost, ask.changed])).toEqual([["0.0126 USD", false], ["0.0200 USD", true]]);
     expect(request.mock.calls).toEqual([[null], [{ yes: true, confirmation: TOKEN }], [{ yes: true, confirmation: "second" }]]);
   });
 

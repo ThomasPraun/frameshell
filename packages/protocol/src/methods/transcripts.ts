@@ -21,7 +21,7 @@ export const transcriptMethods = {
       "TranscriptionProviderNotFound when no loaded plugin provides the provider, TranscriptionFailed when the engine fails, " +
       "TranscriptNameTaken when both transcript names belong to other assets. A cloud or paid provider (e.g. `openai` from " +
       "`@frameshell/openai-transcription`, ADR 0046) gets no audio until the person confirms: the call fails with " +
-      "ConfirmationRequired (data: provider, model, asset, seconds, cost or null when unknown, remote, confirmation) saying " +
+      "ConfirmationRequired (data: provider, model, asset, seconds, cost, costUnknown, remote, confirmation; cost null with costUnknown false = a provider that declares itself free) saying " +
       "that the asset's audio is uploaded and what it costs; call again with `yes` and that `confirmation` only after the " +
       "person agreed. Every run asks again. whisper.cpp never asks.",
     params: z.strictObject({

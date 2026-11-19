@@ -1,8 +1,8 @@
 // The app's transcription ask (ADR 0046 decision 10): `transcribe` refuses a cloud or paid provider with
 // `ConfirmationRequired` before any audio leaves the machine; the ask is the daemon's own, shown in a native box.
 // No dialog code here, so it is testable. The loop is the one of voiceover (`confirmation.ts`).
-import { ErrorCode, type MethodResult } from "@frameshell/protocol";
-import { type Confirmed, formatCost, isAsk, runConfirmed } from "./confirmation.js";
+import { type Cost, ErrorCode, type MethodResult, formatCost } from "@frameshell/protocol";
+import { type Confirmed, isAsk, runConfirmed } from "./confirmation.js";
 
 /** What the person is asked to confirm: the provider, the file whose audio is uploaded, how long it is, and the estimate. */
 export interface TranscribeAsk {
@@ -13,9 +13,12 @@ export interface TranscribeAsk {
   asset: string;
   /** Length of the audio the provider would get. */
   seconds: number;
-  /** The estimated first pass as text (`0.03 USD`); null when the provider gives no estimate and does not declare itself free. */
+  /** The estimated first pass as text (`0.0300 USD`); null when the provider gives no estimate. */
   cost: string | null;
-  /** True when the estimate is exactly 0: the provider charges nothing, though the audio still leaves this machine. */
+  /**
+   * True when the provider charges nothing, though the audio still leaves this machine: an estimate of exactly 0, or no
+   * estimate from a provider that declares itself free. A daemon that does not send `costUnknown` reads as unknown.
+   */
   costFree: boolean;
   /** True when the audio is uploaded to a service (`remote`); false when it only may leave the machine at an unknown cost. */
   remote: boolean;
@@ -29,7 +32,7 @@ export interface TranscribeAsk {
 export function transcribeAsk(error: unknown): TranscribeAsk | null {
   if (!isAsk(error)) return null;
   const data = error.data as
-    | { provider?: string; model?: string | null; asset?: string; seconds?: number; cost?: { amount: number; currency: string } | null; remote?: boolean; confirmation?: string }
+    | { provider?: string; model?: string | null; asset?: string; seconds?: number; cost?: Cost | null; costUnknown?: boolean; remote?: boolean; confirmation?: string }
     | undefined;
   if (!data?.confirmation) return null;
   return {
@@ -38,7 +41,7 @@ export function transcribeAsk(error: unknown): TranscribeAsk | null {
     asset: data.asset ?? "",
     seconds: data.seconds ?? 0,
     cost: data.cost ? formatCost(data.cost) : null,
-    costFree: data.cost?.amount === 0,
+    costFree: data.cost ? data.cost.amount === 0 : data.costUnknown === false,
     remote: data.remote === true,
     changed: error.code === ErrorCode.ConfirmationStale,
     confirmation: data.confirmation,

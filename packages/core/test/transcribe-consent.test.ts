@@ -68,6 +68,7 @@ describe("transcribe consent", () => {
       asset: "assets/talk.mp4",
       seconds: 90,
       cost: { amount: expect.closeTo(0.009, 10), currency: "USD" },
+      costUnknown: false,
       remote: true,
       confirmation: expect.stringMatching(/^[0-9a-f]{32}$/),
     });
@@ -111,7 +112,7 @@ describe("transcribe consent", () => {
     expect(error.code).toBe(ErrorCode.ConfirmationRequired);
     expect(error.message).toMatch(/to that service and may cost money: it gives no usable estimate/);
     expect(error.message).not.toContain("NaN");
-    expect(error.data).toMatchObject({ cost: null });
+    expect(error.data).toMatchObject({ cost: null, costUnknown: true });
     expect(calls).toEqual([]);
   });
 
@@ -121,13 +122,15 @@ describe("transcribe consent", () => {
     const error = await refusal(run(dir, provider));
     expect(error.code).toBe(ErrorCode.ConfirmationRequired);
     expect(error.message).toMatch(/may send its audio \(1:30 of audio\) off this machine and may cost money/);
-    expect(error.data).toMatchObject({ cost: null, remote: false });
+    expect(error.data).toMatchObject({ cost: null, costUnknown: true, remote: false });
     expect(calls).toEqual([]);
   });
 
   it("asks before a free remote provider, and not before a local one that is free or estimates 0", async () => {
     const remote = counted({ free: true, remote: true });
-    expect((await refusal(run(project(), remote.provider))).message).toMatch(/uploads its audio \(1:30 of audio\) to that service\. Ask/);
+    const asked = await refusal(run(project(), remote.provider));
+    expect(asked.message).toMatch(/uploads its audio \(1:30 of audio\) to that service\. Ask/);
+    expect(asked.data).toMatchObject({ cost: null, costUnknown: false, remote: true });
     for (const shape of [{ free: true }, { estimate: () => ({ cost: 0, currency: "USD" }) }, { id: "whisper-cpp" }]) {
       const { provider, calls } = counted(shape);
       await run(project(), provider);
