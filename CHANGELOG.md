@@ -1662,7 +1662,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Docs: `docs/SPEC.md` status lines match what shipped, DOC2 of epic #451 (no decision changed, no wire change): the
   header says alpha with the last-edited date instead of "draft v0.1", decision 38 names `clip verify` (ADR 0033) and
-  the style token sheet in generated clips (ADR 0028) as built, decisions 32 and the style paragraph of §5 mark
+  the style token sheet in generated clips (ADR 0028) as built, decisions 4, 32 and 36 and the style paragraph of §5.8 mark
   per-format overrides and style in captions and fonts as built, and the roadmap marks Remotion, live preview, OpenAI
   transcription, OTIO and Premiere XML as shipped with their ADRs, leaving Deepgram, ElevenLabs Scribe, the effects/LUT
   and UI panel extension points and the plugin index website open.
