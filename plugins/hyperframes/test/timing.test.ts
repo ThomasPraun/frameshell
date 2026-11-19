@@ -128,7 +128,7 @@ describe("timing in renders and live pages", () => {
   });
 });
 
-describe("the motion runtime reads window.frameshellTiming (runtime 0.5.0)", () => {
+describe("the motion runtime reads window.frameshellTiming (runtime 0.6.0)", () => {
   /** The shipped runtime in one page, after the given scripts (a render copy's head script, or none). */
   function motion(...before: string[]): Record<string, (...args: unknown[]) => unknown> {
     const page: Record<string, unknown> = {};
@@ -159,6 +159,13 @@ describe("the motion runtime reads window.frameshellTiming (runtime 0.5.0)", () 
       expect(M["sinceBeat"]!(2.5, 1)).toBe(1.5);
       expect(M["beats"]!({ ...nominal, duration: 1.5 })).toHaveLength(3);
       expect(M["markers"]!()).toEqual([]);
+      expect(M["words"]!()).toEqual([]);
     }
+  });
+
+  it("lists the words the host wrote, and none without them", () => {
+    const words = [{ at: 0.5, end: 0.9, text: "Hello", id: "w_000001" }];
+    expect(motion(`window.frameshellTiming = ${JSON.stringify({ words })};`)["words"]!()).toEqual(words);
+    expect(motion('window.frameshellTiming = { words: [], wordsProblem: "no-transcript" };')["words"]!()).toEqual([]);
   });
 });

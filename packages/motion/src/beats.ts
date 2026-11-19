@@ -20,6 +20,18 @@ export interface TimingMarker {
   readonly color?: string;
 }
 
+/** One word of `window.frameshellTiming.words`: a transcript word the timeline plays, as the plugin API's `RenderWord`. */
+export interface TimingWord {
+  /** Composition seconds the word starts. */
+  readonly at: number;
+  /** Composition seconds the word ends. */
+  readonly end: number;
+  /** The word as the person corrected it. */
+  readonly text: string;
+  /** The transcript's id, as `word:w_000012` names it. */
+  readonly id: string;
+}
+
 /** `window.frameshellTiming`, as a composition that asked with `<meta name="frameshell-timing" content="beats markers">` finds it. */
 export interface FrameshellTiming {
   readonly beats?: readonly TimingBeat[];
@@ -27,6 +39,9 @@ export interface FrameshellTiming {
   /** Stable code (`no-tempo`, `no-beats`, `low-confidence`...) of why `beats` is empty although asked. */
   readonly beatsProblem?: string;
   readonly markers?: readonly TimingMarker[];
+  readonly words?: readonly TimingWord[];
+  /** Stable code (`no-transcript`, `stale-transcript`) of why `words` is empty although asked. */
+  readonly wordsProblem?: string;
 }
 
 /**
@@ -217,4 +232,14 @@ export function markers(label?: string): readonly TimingMarker[] {
   if (!Array.isArray(list)) return [];
   const want = label?.trim().toLowerCase();
   return want === undefined ? list : list.filter((marker) => marker.label.trim().toLowerCase() === want);
+}
+
+/**
+ * The transcript words the timeline plays inside the clip, ascending, in composition seconds. `[]` when the page has
+ * no `words` timing or the host found none (`frameshellTiming()?.wordsProblem` says why): words have no nominal
+ * fallback, so a composition that needs one keeps its text as a prop.
+ */
+export function words(): readonly TimingWord[] {
+  const list = timing()?.words;
+  return Array.isArray(list) ? list : [];
 }

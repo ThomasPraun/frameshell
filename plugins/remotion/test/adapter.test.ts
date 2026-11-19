@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { LiveContext, PluginApi, RenderContext, RenderProgress, RenderTiming } from "@frameshell/plugin-api";
+import type { LiveContext, PluginApi, RenderContext, RenderProgress, RenderTiming, RenderTimingKind } from "@frameshell/plugin-api";
 import { parsePluginManifest } from "@frameshell/schema";
 import { patchedBundle, withSheet } from "../src/elements.js";
 import {
   BUNDLE_DIR,
   NO_CONFIG,
+  TIMING_HELPER_SOURCE,
   type RemotionProjectConfig,
   type RemotionComposition,
   type RemotionModules,
@@ -441,6 +442,23 @@ describe("remotion adapter render", () => {
     const problem: RenderTiming = { beats: [], beatsProblem: "no-beats" };
     await adapter(load).render({ id: "c_1", source: SOURCE, props: { composition: "Intro", timing: ["beats"] } }, { ...ctx, timing: problem });
     expect(calls.render[0]!["inputProps"]).toEqual({ frameshellTiming: { beats: [], beatsProblem: "no-beats" } });
+  });
+
+  it("warns once per render when a clip asks for words and the project's timing hook predates them", async () => {
+    const helper = join(project, "compositions", "remotion", "src", "frameshell-timing.ts");
+    const current = TIMING_HELPER_SOURCE;
+    const old = current.replaceAll("wordsProblem", "wordsWhy");
+    const run = async (source: string, timing: RenderTimingKind[]) => {
+      writeFileSync(helper, source);
+      const warnings: string[] = [];
+      const { load } = fakeRemotion();
+      await adapter(load).render({ id: "c_1", source: SOURCE, props: { composition: "Intro", timing } }, { ...context(tempDir()).ctx, warn: (message) => warnings.push(message) });
+      return warnings;
+    };
+    expect(await run(old, ["words"])).toEqual([expect.stringContaining("Clip c_1: compositions/remotion/src/frameshell-timing.ts predates transcript words")]);
+    expect(await run(old, ["beats", "markers"])).toEqual([]);
+    expect(await run(current, ["words"])).toEqual([]);
+    expect(await run("// my own hook", ["words"])).toEqual([]);
   });
 
   it("leaves a clip that did not ask exactly as it was", async () => {

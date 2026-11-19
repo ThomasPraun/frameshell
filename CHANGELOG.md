@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion runtime 0.6.0 (ADR 0029 decision 8, ADR 0033, small fixes 6 of #451; no protocol change): `M.words()` lists the
+  transcript words the timeline plays inside the clip, `{ at, end, text, id }` in composition seconds, as the page's
+  `frameshellTiming.words` has them, or `[]` with no `words` timing or when `wordsProblem` is set (no nominal fallback,
+  so a composition keeps its text as a prop). Nothing 0.5.0 exports changes: a clip keeps its frozen copy until
+  `frameshell hyperframes update`, which now reports 0.6.0.
 - OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
   `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
   default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden
@@ -1577,6 +1582,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Remotion adapter warns (`RenderContext.warn`) when a clip asks for `words` and the project's own
+  `src/frameshell-timing.ts` predates them, and `frameshell remotion new` says so too; the file is never changed.
+- `scripts/test-scope.mjs` runs no tests for anything under `spikes/`.
 - Small fixes, wave 24 (slice SF5, part of #451; no protocol change, plugin API `apiVersion` stays "1"):
   `RENDER_TIMING_KINDS` in `@frameshell/plugin-api` is the one list of timing kinds the host reads (`clipTiming`); the
   `hyperframes` and `remotion` adapters keep a type-only copy, since an installed plugin carries no plugin-api
@@ -1727,6 +1735,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Closing a terminal tab whose shell had already exited, with the exit event not yet delivered, no longer calls
+  `pty.kill()` on it (it throws or logs on Windows); the close waits for the exit event instead (small fixes 6 of #451).
 - Generated clips: a pass over a timeline (`clip.renders`, `ensure`, `finals`, `check`, `gc`, the background refresh)
   reads the transcript once for all the clips that ask for `words`, instead of once per clip; a transcript changed
   between two calls still re-keys, and render keys are unchanged.

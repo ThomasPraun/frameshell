@@ -40,6 +40,21 @@ const TITLE_SETTLE_MS = 5000;
 /** Longest {@link TerminalManager.killAll} waits for shells to exit: quitting must not hang on one. */
 const EXIT_WAIT_MS = 5000;
 
+/**
+ * Whether process `pid` still exists. A shell that exited but whose `onExit` has not arrived yet (node-pty waits
+ * for trailing output first) is not: killing it throws or logs on Windows, so {@link TerminalManager} skips that and
+ * waits for the exit event.
+ */
+export function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 interface Entry {
   pty: pty.IPty;
   /** Settles when the shell has exited. */
@@ -246,7 +261,7 @@ export class TerminalManager {
     clearTimeout(timer);
   }
 
-  /** Settles when the shell has exited; at once when unknown or already gone. */
+  /** Settles when the shell has exited; at once when unknown or already gone. An exited shell is not killed again. */
   #kill(id: string): Promise<void> {
     this.#output.delete(id);
     const entry = this.#terminals.get(id);
@@ -254,6 +269,7 @@ export class TerminalManager {
     this.#terminals.delete(id);
     clearTimeout(entry.timer);
     this.#stopWatching(id, entry);
+    if (!processExists(entry.pty.pid)) return entry.exited;
     try {
       entry.pty.kill();
     } catch {
