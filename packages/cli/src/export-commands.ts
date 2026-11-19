@@ -4,11 +4,13 @@ import type { DaemonConnection } from "@frameshell/protocol";
 /** Help text of `export otio` (ADR 0045), in `frameshell --help`. */
 export const EXPORT_USAGE = `  export otio [--timeline id] [--out file.otio] [--absolute-paths]
                                Write the timeline as an OpenTimelineIO file for an editor: media clips with
-                               source ranges and speed, gaps, track mute and hide, markers. Generated and
-                               nested clips keep their slot and length as missing media; program tracks,
-                               subtitles, transitions, transforms, keys, grades, audio effects and the sound of
-                               video-track clips are left out and listed as warnings. Media paths are relative to the file unless
-                               --absolute-paths. Default file: exports/<timeline>.otio. Never edits the timeline
+                               source ranges and speed, gaps, dissolves between butted clips, track mute and
+                               hide, markers. Generated and nested clips keep their slot and length as missing
+                               media; program tracks, subtitles, dips and fades, transition shapes, transforms,
+                               keys, grades, audio effects and the sound of video-track clips are left out and
+                               listed as warnings. Image projects are refused. Media paths are relative to the
+                               file unless --absolute-paths. Default file: exports/<timeline>.otio. Never edits
+                               the timeline
 `;
 
 /** Flags each `export` command takes besides the global ones. */

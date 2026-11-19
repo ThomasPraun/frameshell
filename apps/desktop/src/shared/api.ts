@@ -269,10 +269,11 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * Command an application menu entry sends to the focused project window.
  * `showTranscript`: open the transcript view (View > Transcript).
  * `imageFromFrame`: make an image project from the frame at the playhead (File > New Image from Frame, ADR 0017).
+ * `exportOtio`: save the timeline as an OpenTimelineIO file (File > Export OpenTimelineIO, ADR 0045).
  * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "toggleReview" | "toggleTerminal";
+export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportOtio" | "toggleReview" | "toggleTerminal";
 
 /**
  * Everything the renderer may ask of main, exposed as `window.frameshell` by
@@ -454,6 +455,12 @@ export interface FrameshellApi {
      * absolute path written, or null when cancelled. Rejects with the daemon's message.
      */
     exportImage(timeline: string): Promise<string | null>;
+    /**
+     * Save `timeline` as an OpenTimelineIO file where the user picks in the OS dialog, written by the daemon's
+     * `export.otio` (ADR 0045). Resolves with the absolute path written and what the file leaves out, or null when
+     * cancelled. Rejects with the daemon's message (an image project has nothing to export).
+     */
+    exportOtio(timeline: string): Promise<{ path: string; warnings: string[] } | null>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
@@ -1023,6 +1030,7 @@ export const Channel = {
   timelineAddLayers: "timeline:add-layers",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
+  timelineExportOtio: "timeline:export-otio",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",

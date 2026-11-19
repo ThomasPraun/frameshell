@@ -1,5 +1,5 @@
 import { posix, win32 } from "node:path";
-import { type Clip, type ClipTrack, type MarkerColor, type Timeline, type TransitionContext, clipLength } from "@frameshell/schema";
+import { type Clip, type ClipTrack, type MarkerColor, type Timeline, type TransitionContext, clipLength, edgeTransitions } from "@frameshell/schema";
 
 /**
  * OpenTimelineIO export (ADR 0045): a Frameshell timeline as the JSON of an `.otio` file, for editors that read it.
@@ -14,7 +14,7 @@ export interface OtioOptions {
   name?: string | undefined;
   /** `target_url` of a project-relative asset path. */
   assetUrl(asset: string): string;
-  /** Seconds of material a nested timeline clip draws from; see `TransitionContext.sourceDuration`. */
+  /** Seconds of material a clip draws from (a nested timeline; a media file, for the handles of a dissolve); see `TransitionContext.sourceDuration`. */
   sourceDuration?: ((clip: Clip) => number | undefined) | undefined;
 }
 
@@ -103,9 +103,12 @@ class Dropped {
   }
 }
 
-/** Features of a clip the file does not carry, by the words the warning uses. */
-function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean, trackMuted: boolean): void {
-  if (clip.dissolve !== undefined || clip.shape !== undefined || clip.fadeIn !== undefined || clip.fadeOut !== undefined) dropped.add("transitions (dissolves, fades)", clip.id);
+/** Features of a clip the file does not carry, by the words the warning uses. `dissolved`: its dissolve is written as a `Transition.1`. */
+function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean, trackMuted: boolean, dissolved: boolean): void {
+  if (clip.fadeIn !== undefined || clip.fadeOut !== undefined || (clip.dissolve !== undefined && !dissolved)) {
+    dropped.add("dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it)", clip.id);
+  }
+  if (clip.shape !== undefined) dropped.add(dissolved ? "transition shape (its dissolve is written as a plain one)" : "transition shape (no dissolve carries it)", clip.id);
   if (clip.transform !== undefined || clip.keys !== undefined) dropped.add("transform and keys", clip.id);
   if ("grade" in clip && clip.grade !== undefined) dropped.add("colour grade", clip.id);
   if (
@@ -124,12 +127,28 @@ function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean, trackMuted: 
 }
 
 /**
+ * A `Transition.1` between two clips: a dissolve centred on the cut, `half` frames each side. `shape` (wipe, push, iris)
+ * is kept in the metadata only: the transition type stays a plain `SMPTE_Dissolve`.
+ */
+function dissolveObject(clip: Clip, half: number, halfSeconds: number, rate: number): OtioObject {
+  return {
+    OTIO_SCHEMA: "Transition.1",
+    name: "",
+    transition_type: "SMPTE_Dissolve",
+    in_offset: time(half, rate),
+    out_offset: time(half, rate),
+    metadata: { frameshell: { clipId: clip.id, dissolve: clip.dissolve, half: halfSeconds, ...(clip.shape !== undefined ? { shape: clip.shape } : {}) } },
+  };
+}
+
+/**
  * The OTIO document of `timeline` (ADR 0045): video and audio tracks bottom first, a `Gap.1` for each hole, media clips
  * as `Clip.2` with an `ExternalReference.1` (`source_range` from `in`, lasting the timeline length, since OTIO lays items
  * out by it; `LinearTimeWarp.1` when `speed` is not 1), generated and nested clips as
- * `Clip.2` with a `MissingReference.1` of their length, markers on the stack. Every time is a whole frame at `fps`.
- * Program tracks, subtitle tracks, transitions, transforms, keys, grades and audio effects are left out and named in
- * `warnings`.
+ * `Clip.2` with a `MissingReference.1` of their length, markers on the stack, dissolves between butted clips as
+ * `Transition.1` (`edgeTransitions` decides which, never recomputed here). Every time is a whole frame at `fps`.
+ * Program tracks, subtitle tracks, dips and fades, transition shapes, transforms, keys, grades and audio effects are
+ * left out and named in `warnings`.
  */
 export function timelineToOtio(timeline: Timeline, options: OtioOptions): OtioExport {
   const { fps } = options;
@@ -190,10 +209,11 @@ interface Shared {
   dropped: Dropped;
 }
 
-/** One `Track.1`: clips in order with a `Gap.1` for every hole. A muted audio track and a hidden video track are disabled. */
+/** One `Track.1`: clips in order with a `Gap.1` for every hole and a `Transition.1` where a dissolve joins two. A muted audio track and a hidden video track are disabled. */
 function trackObject(track: ClipTrack, ordinal: number, shared: Shared): { track: OtioObject; clips: number } {
   const { frames, fps, context, warnings, dropped } = shared;
   const out: OtioObject[] = [];
+  const edges = edgeTransitions(track.clips, context);
   let cursor = 0;
   let clips = 0;
   for (const clip of [...track.clips].sort((a, b) => a.start - b.start)) {
@@ -205,10 +225,14 @@ function trackObject(track: ClipTrack, ordinal: number, shared: Shared): { track
     const startFrames = frames(clip.start);
     const endFrames = Math.max(startFrames + 1, frames(clip.start + length));
     const lengthFrames = endFrames - startFrames;
+    const edge = edges.get(clip.id);
+    // A Transition.1 sits between two Clip.2: the frame positions must agree with the butted clips the dissolve was cut for.
+    const joined = edge?.mode === "dissolve" && edge.dissolve > 0 && startFrames <= cursor && out[out.length - 1]?.["OTIO_SCHEMA"] === "Clip.2";
+    if (joined) out.push(dissolveObject(clip, Math.max(1, frames(edge.dissolve)), edge.dissolve, fps));
     if (startFrames > cursor) out.push({ OTIO_SCHEMA: "Gap.1", ...item("", range(0, startFrames - cursor, fps)) });
     cursor = Math.max(cursor, endFrames);
     out.push(clipOf(clip, lengthFrames, track.kind === "audio", shared));
-    leftOut(clip, dropped, track.kind === "audio", track.muted === true);
+    leftOut(clip, dropped, track.kind === "audio", track.muted === true, joined);
     clips += 1;
   }
 
