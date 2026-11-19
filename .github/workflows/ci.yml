@@ -60,11 +60,11 @@ jobs:
       - if: matrix.shard == 1
         run: pnpm lint
       - run: pnpm test ${{ needs.scope.outputs.filter }} --shard=${{ matrix.shard }}/2 --passWithNoTests
-      # The OTIO export read back by the real OpenTimelineIO library (opt-in test, ADR 0045). A step of its own, since
-      # vitest's sharding may put the file in either shard; one cell only, and only when the scope selects OTIO tests.
-      - name: OpenTimelineIO real-library test
+      # The OTIO export read back by the real OpenTimelineIO library (opt-in test, ADR 0045). One cell only, and only
+      # when the scope runs the whole unit suite (any change under packages/ does, which is where the converter lives).
+      - name: Decide on the OpenTimelineIO test
         id: otio
-        if: matrix.os == 'ubuntu-latest' && matrix.shard == 1 && (needs.scope.outputs.unit == 'all' || contains(needs.scope.outputs.filter, 'otio'))
+        if: matrix.os == 'ubuntu-latest' && matrix.shard == 1 && needs.scope.outputs.unit == 'all'
         run: echo "run=true" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         if: steps.otio.outputs.run == 'true'
@@ -72,7 +72,8 @@ jobs:
           python-version: "3.12"
       - if: steps.otio.outputs.run == 'true'
         run: pip install opentimelineio==0.18.1
-      - if: steps.otio.outputs.run == 'true'
+      - name: OpenTimelineIO real-library test
+        if: steps.otio.outputs.run == 'true'
         run: pnpm exec vitest run packages/core/test/otio-real
         env:
           FRAMESHELL_TEST_OTIO: "1"
