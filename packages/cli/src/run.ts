@@ -85,7 +85,7 @@ Commands:
                                --install downloads missing managed binaries first; --reprobe tests the
                                encoders again instead of using the answer cached per machine
   doctor --remove <name> [--json]
-                               Delete a managed download to free disk (a package such as ffmpeg or whisper-cli,
+                               Delete a managed download to free disk (a package such as ffmpeg or whisper-cpp,
                                or a model id; names and sizes are listed under "Downloads" by \`doctor\`). It
                                downloads again on next use. Refused while it installs or jobs run
   import <file…> [--link] [--wait] [--source-url u --licence id --author name --title t --credit line]
@@ -887,7 +887,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const result = await conn.request("binaries.remove", { name: inv.name });
       if (flags.json) return json(result);
       return result.removed
-        ? `Removed ${result.name} (${result.versions.join(", ")}): freed ${formatBytes(result.bytes)}. It downloads again when something needs it.\n`
+        ? `Removed ${result.name}${result.versions.length > 0 ? ` (${result.versions.join(", ")})` : ""}: freed ${formatBytes(result.bytes)}. It downloads again when something needs it.\n`
         : `${result.name} is not on disk: nothing to remove.\n`;
     }
     case "import": {

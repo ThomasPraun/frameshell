@@ -12,6 +12,16 @@ import { tempDir } from "./helpers.js";
 // Local fixture server: real HTTP, real hashing, real `tar`; no network.
 const files = new Map<string, Buffer>();
 const hits = new Map<string, number>();
+/** Requests held at the server until released, to keep an install in flight. */
+const holds = new Map<string, { reached: () => void; released: Promise<void> }>();
+/** Hold the next request for `path`: `reached` resolves when it arrives, `release` lets it answer. */
+function holdRequest(path: string) {
+  let reachedNow!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>((resolve) => (reachedNow = resolve));
+  holds.set(path, { reached: reachedNow, released: new Promise<void>((resolve) => (release = resolve)) });
+  return { reached, release };
+}
 let server: Server;
 let base: string;
 
@@ -23,8 +33,16 @@ beforeAll(async () => {
       res.writeHead(404).end();
       return;
     }
+    const hold = holds.get(req.url ?? "");
+    holds.delete(req.url ?? "");
     // Slow first byte so concurrent installs overlap.
-    setTimeout(() => res.writeHead(200, { "content-length": body.length }).end(body), 50);
+    const answer = () => res.writeHead(200, { "content-length": body.length }).end(body);
+    if (hold) {
+      hold.reached();
+      void hold.released.then(answer);
+    } else {
+      setTimeout(answer, 50);
+    }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -608,7 +626,6 @@ describe("BinaryManager models", () => {
 
 describe("BinaryManager removal", () => {
   const modelBytes = Buffer.from("ggml-model-bytes".repeat(1000));
-  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   it("lists what is on disk with bytes, deletes every version, and downloads again on next use", async () => {
     const pkg = pinned(goodArchive());
@@ -668,12 +685,30 @@ describe("BinaryManager removal", () => {
   });
 
   it("refuses while the package is installing, then removes it once installed", async () => {
-    const binaries = manager(pinned(goodArchive()));
+    const pkg = pinned(goodArchive());
+    const hold = holdRequest([...files.keys()].at(-1)!);
+    const binaries = manager(pkg);
     const installing = binaries.ensure("alpha");
-    await wait(25);
+    await hold.reached;
     await expect(binaries.remove("tools")).rejects.toMatchObject({ code: ErrorCode.BinaryInUse, data: { name: "tools", reason: "installing" } });
+    hold.release();
     await installing;
     expect(await binaries.remove("tools")).toMatchObject({ removed: true });
+  });
+
+  it("refuses a model only while that exact model installs, not one whose id starts with the same text", async () => {
+    const path = `/${Math.random().toString(36).slice(2)}/model.bin`;
+    files.set(path, modelBytes);
+    const pin = (id: string) => ({ id, version: "abc123", origin: "https://example.test", license: "MIT", urls: [`${base}${path}`], sha256: sha256(modelBytes), size: modelBytes.length, file: `${id}.bin` });
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [], models: [pin("ggml-test"), pin("ggml-test-q5")] });
+    await binaries.ensureModel("ggml-test");
+    const hold = holdRequest(path);
+    const installing = binaries.ensureModel("ggml-test-q5");
+    await hold.reached;
+    expect(await binaries.remove("ggml-test")).toMatchObject({ removed: true });
+    await expect(binaries.remove("ggml-test-q5")).rejects.toMatchObject({ code: ErrorCode.BinaryInUse, data: { reason: "installing" } });
+    hold.release();
+    await installing;
   });
 
   it("keeps package names and model ids apart, since one name picks the download", () => {

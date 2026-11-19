@@ -219,7 +219,7 @@ export const connectionMethods = {
     mutating: true,
     description:
       "Delete a managed download from this machine to free disk: a binary package (`ffmpeg` also covers ffprobe; " +
-      "`whisper-cli`, `chrome-headless-shell`, `sherpa-onnx`, `onnxruntime-web`, ...) or a pinned model " +
+      "`whisper-cpp` (its `whisper-cli`), `whisper-server`, `chrome-headless-shell`, `sherpa-onnx`, `onnxruntime-web`, ...) or a pinned model " +
       "(`ggml-large-v3-turbo-q5_0`, ...), every installed version of it. Names and sizes are in `doctor` `downloads`. " +
       "It downloads again the next time something needs it. Machine-wide, not per project. Never touches a `binaries` " +
       "override, a tool Frameshell does not download (Blender) or a model registered with `model.add`. Fails with " +

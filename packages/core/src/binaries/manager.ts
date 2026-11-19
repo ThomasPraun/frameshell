@@ -118,19 +118,27 @@ export interface ManagedDownloadInfo {
   kind: "package" | "model";
   /** Tools a package ships; empty for a model. */
   tools: string[];
-  /** Installed version (model: revision) directories, sorted. */
+  /** Installed version (model: revision) directory names, sorted by name. */
   versions: string[];
+  /** Size on disk of everything under the package or model directory. */
   bytes: number;
 }
 
 /** What {@link BinaryManager.remove} deleted. */
 export interface RemovedDownload {
+  /** Package name or model id that was asked for. */
   name: string;
   kind: "package" | "model";
+  /** False when nothing was on disk. */
   removed: boolean;
+  /** Version (model: revision) directory names that were deleted, sorted by name. */
   versions: string[];
+  /** Bytes freed. */
   bytes: number;
 }
+
+/** Prefix of a directory being deleted by {@link BinaryManager.remove}; dot-prefixed so nothing lists it as an install. */
+const REMOVING_PREFIX = ".removing-";
 
 /** In-flight install shared by concurrent callers. */
 interface Install {
@@ -304,8 +312,11 @@ export class BinaryManager {
   /**
    * Delete a managed download (package or pinned model name) with every installed version, including the
    * `.failed.json` markers of a package; it downloads again on next use. Nothing on disk gives `removed: false`.
-   * Throws `BinaryInUse` while its install runs or the system keeps a file open (Windows), and a plain
-   * `Error` naming the removable names for an unknown one. Callers that know of running work check it first.
+   * Throws `BinaryInUse` while its install runs or the system keeps a file open (Windows), and `InvalidParams`
+   * naming the removable names for an unknown one. Callers that know of running work check it first.
+   *
+   * The directory is renamed away first, then deleted: a refused rename (Windows, a program runs from it) leaves
+   * the install whole, and an install publishing meanwhile never meets a half-deleted directory.
    */
   async remove(name: string): Promise<RemovedDownload> {
     const pkg = this.#packages.find((candidate) => candidate.name === name && !candidate.userInstall);
@@ -317,21 +328,31 @@ export class BinaryManager {
       });
     }
     const kind = pkg ? "package" : "model";
-    const prefix = pkg ? `pkg:${name}:` : `model:${name}`;
-    if ([...this.#installing.keys()].some((key) => key.startsWith(prefix))) {
+    const installing = (key: string) => (pkg ? key.startsWith(`pkg:${name}:`) : key === `model:${name}`);
+    if ([...this.#installing.keys()].some(installing)) {
       throw inUse(name, "installing", `${name} is being downloaded right now. Wait for it to finish, then remove it.`);
     }
     const entry = await this.#onDisk(kind, name, pkg?.tools ?? []);
     if (!entry) return { name, kind, removed: false, versions: [], bytes: 0 };
+    const dir = this.#downloadDir(kind, name);
+    const parent = dirname(dir);
+    const trash = join(parent, `${REMOVING_PREFIX}${name}-${randomUUID()}`);
     try {
-      await rm(this.#downloadDir(kind, name), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await renameRetrying(dir, trash);
     } catch (error) {
       if (["EBUSY", "EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) {
         throw inUse(name, "files-open", `The system keeps files of ${name} open (a program still runs from them). Stop it and try again.`);
       }
       throw error;
     }
-    return { name, kind, removed: true, versions: entry.versions, bytes: entry.bytes };
+    const bytes = await diskBytes(trash);
+    // Best effort: the download is gone for every reader once renamed; a locked leftover goes with the next removal.
+    for (const leftover of await readdir(parent).catch(() => [] as string[])) {
+      if (leftover.startsWith(`${REMOVING_PREFIX}${name}-`)) {
+        await rm(join(parent, leftover), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
+      }
+    }
+    return { name, kind, removed: true, versions: entry.versions, bytes };
   }
 
   #downloadDir(kind: "package" | "model", name: string): string {

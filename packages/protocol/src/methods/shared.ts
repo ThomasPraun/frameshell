@@ -109,10 +109,10 @@ export const BinaryReportSchema = z.object({
 
 /** One managed download on disk: what `doctor` lists and `binaries.remove` frees. */
 export const ManagedDownloadSchema = z.object({
-  name: z.string().describe("Name `binaries.remove` takes: a package (`ffmpeg`, `whisper-cli`) or a pinned model id (`ggml-large-v3-turbo-q5_0`)."),
+  name: z.string().describe("Name `binaries.remove` takes: a package (`ffmpeg`, `whisper-cpp`) or a pinned model id (`ggml-large-v3-turbo-q5_0`)."),
   kind: z.enum(["package", "model"]).describe("`package`: native tools or modules; `model`: one pinned model file."),
   tools: z.array(z.string()).describe("Tools a package ships (`ffmpeg`, `ffprobe`); empty for a model."),
-  versions: z.array(z.string()).describe("Installed version directories (a model: revisions), oldest first."),
+  versions: z.array(z.string()).describe("Installed version directory names (a model: revisions), sorted by name."),
   bytes: z.number().describe("Bytes on disk under the data dir, in every installed version."),
 });
 
