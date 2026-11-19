@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -6,6 +5,7 @@ import type { Clip, Timeline } from "@frameshell/schema";
 import { timelineToOtio } from "../src/index.js";
 import { tempDir } from "./helpers.js";
 import { otioProblems } from "./otio-check.js";
+import { readWithPython } from "./otio-python.js";
 
 // The export read back by OpenTimelineIO itself. Opt in: `pip install opentimelineio`, then
 // `FRAMESHELL_TEST_OTIO=1 pnpm test packages/core/test/otio` (FRAMESHELL_TEST_PYTHON picks the interpreter).
@@ -42,20 +42,7 @@ interface Read {
   duration: number;
 }
 
-/** Runs the first interpreter that can import `opentimelineio`; throws with what it tried otherwise. */
-function readWithOtio(path: string): Read {
-  const candidates = [process.env["FRAMESHELL_TEST_PYTHON"], "python3", "python", "py -3"].filter((candidate): candidate is string => Boolean(candidate));
-  const failures: string[] = [];
-  for (const candidate of candidates) {
-    const [command, ...prefix] = candidate.split(" ");
-    try {
-      return JSON.parse(execFileSync(command!, [...prefix, "-I", "-c", READ, path], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) as Read;
-    } catch (error) {
-      failures.push(`${candidate}: ${(error as Error).message.split("\n").slice(-2).join(" ").trim()}`);
-    }
-  }
-  throw new Error(`no Python can read the file with opentimelineio (pip install opentimelineio):\n${failures.join("\n")}`);
-}
+const readWithOtio = (path: string): Read => readWithPython<Read>(READ, path, "pip install opentimelineio");
 
 const media = (id: string, start: number, from: number, to: number, extra: Record<string, unknown> = {}): Clip =>
   ({ id, type: "media", asset: "assets/take.mp4", start, in: from, out: to, ...extra }) as Clip;

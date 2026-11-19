@@ -38,6 +38,7 @@ import {
   type LiveClipPage,
   type MenuCommand,
   type AgentChoice,
+  type HandoffKind,
   type ClaudeCodeStatus,
   type ClaudeDesktopStatus,
   type OpenOutcome,
@@ -672,10 +673,14 @@ async function pickImageExport(window: BrowserWindow, defaultPath: string): Prom
   return result.canceled ? undefined : result.filePath;
 }
 
-/** Where to save an OpenTimelineIO export, starting at `defaultPath`; the daemon refuses any name that does not end in `.otio`. */
-async function pickOtioExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+/** File extension of each editor hand-off file (ADR 0045, 0047): the save dialog offers it and the daemon refuses any other. */
+const HANDOFF_EXTENSIONS: Record<HandoffKind, string> = { otio: "otio", premiere: "xml" };
+
+/** Where to save an editor hand-off file of `kind`, starting at `defaultPath`. */
+async function pickHandoffExport(window: BrowserWindow, kind: HandoffKind, defaultPath: string): Promise<string | undefined> {
   const said = text.app.dialogs;
-  const result = await dialog.showSaveDialog(window, { title: said.exportOtio, defaultPath, filters: [{ name: said.otioFile, extensions: ["otio"] }] });
+  const [title, name] = kind === "otio" ? [said.exportOtio, said.otioFile] : [said.exportPremiere, said.premiereFile];
+  const result = await dialog.showSaveDialog(window, { title, defaultPath, filters: [{ name, extensions: [HANDOFF_EXTENSIONS[kind]] }] });
   return result.canceled ? undefined : result.filePath;
 }
 
@@ -761,7 +766,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", "export-otio"];
+const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", "export-otio", "export-premiere"];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -1754,15 +1759,17 @@ function registerIpc(): void {
       return (await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out })).path;
     }),
   );
-  ipcMain.handle(Channel.timelineExportOtio, (event, timeline: string) =>
+  ipcMain.handle(Channel.timelineExportHandoff, (event, kind: string, timeline: string) =>
     outcome(async () => {
+      if (kind !== "otio" && kind !== "premiere") throw new Error(`Unknown export kind: ${String(kind)}`);
       const state = stateOf(event.sender);
       const { project } = await requireProject(state);
       const name = String(timeline);
-      const out = await pickOtioExport(state.window, join(project.dir, "exports", `${name}.otio`));
+      const out = await pickHandoffExport(state.window, kind, join(project.dir, "exports", `${name}.${HANDOFF_EXTENSIONS[kind]}`));
       if (!out) return null;
-      // The daemon writes the file: the app never writes project files, and its relative media paths start from the folder picked.
-      const { path, warnings } = await daemon.request("export.otio", { cwd: project.dir, timeline: name, out });
+      // The daemon writes the file: the app never writes project files, and OTIO's relative media paths start from the folder picked.
+      const params = { cwd: project.dir, timeline: name, out };
+      const { path, warnings } = await (kind === "otio" ? daemon.request("export.otio", params) : daemon.request("export.premiereXml", params));
       return { path, warnings };
     }),
   );
@@ -1994,6 +2001,7 @@ function buildMenu(): void {
           click: (_item, focused) => command("imageFromFrame", focused),
         },
         { id: "export-otio", label: said.exportOtio, click: (_item, focused) => command("exportOtio", focused) },
+        { id: "export-premiere", label: said.exportPremiere, click: (_item, focused) => command("exportPremiere", focused) },
         { id: "review-mode", label: said.reviewMode, type: "checkbox", checked: false, click: (_item, focused) => command("toggleReview", focused) },
         { type: "separator" },
         { label: said.installCli, click: () => void cliCommand(installCli) },

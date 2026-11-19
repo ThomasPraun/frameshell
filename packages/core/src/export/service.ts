@@ -23,6 +23,7 @@ import {
   type FormatLayout,
   type FormatSource,
   type MulticamGroup,
+  type ProjectConfig,
   type ResolvedFormat,
   type ResolvedSubtitleTrack,
   type Size,
@@ -724,10 +725,10 @@ export class ExportService {
     loaded?: { timeline: Timeline; fps: number },
   ): Promise<Omit<ExportPremiereXmlResult, "view" | "proposal">> {
     const out = params.out ?? join(root, "exports", `${params.timeline}.xml`);
-    await this.#handoffGuard(root, out, ".xml", "Premiere XML", "export.premiereXml");
+    const config = await this.#handoffGuard(root, out, ".xml", "Premiere XML", "export.premiereXml");
     const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
     const { totals, facts } = await this.#handoffFacts(root, timeline, fps, true);
-    const size = (await readEnclosingProject(root))?.config.resolution ?? DEFAULT_RESOLUTION;
+    const size = config?.resolution ?? DEFAULT_RESOLUTION;
     const result = timelineToPremiereXml(timeline, {
       fps,
       size,
@@ -742,8 +743,9 @@ export class ExportService {
   /**
    * The refusals of every editor hand-off file: `out` must end in `ext` (a timeline or project file is never overwritten),
    * and an image project has no cut to hand over. `kind`: the file as the message names it; `op`: the method.
+   * Returns the project's config (undefined outside a project), so the caller does not read it again.
    */
-  async #handoffGuard(root: string, out: string, ext: string, kind: string, op: string): Promise<void> {
+  async #handoffGuard(root: string, out: string, ext: string, kind: string, op: string): Promise<ProjectConfig | undefined> {
     if (extname(out).toLowerCase() !== ext) {
       throw new RpcError(
         ErrorCode.InvalidOperation,
@@ -751,12 +753,14 @@ export class ExportService {
         { op, field: "out" },
       );
     }
-    if ((await readEnclosingProject(root))?.config.kind === "image") {
+    const config = (await readEnclosingProject(root))?.config;
+    if (config?.kind === "image") {
       throw new RpcError(ErrorCode.InvalidOperation, `${op}: image projects have no cut to hand to an editor; use render or the image export.`, {
         op,
         reason: "image project",
       });
     }
+    return config;
   }
 
   /**

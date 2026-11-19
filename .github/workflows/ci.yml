@@ -60,8 +60,9 @@ jobs:
       - if: matrix.shard == 1
         run: pnpm lint
       - run: pnpm test ${{ needs.scope.outputs.filter }} --shard=${{ matrix.shard }}/2 --passWithNoTests
-      # The OTIO export read back by the real OpenTimelineIO library (opt-in test, ADR 0045). One cell only, and only
-      # when the scope runs the whole unit suite (any change under packages/ does, which is where the converter lives).
+      # The OTIO export read back by the real OpenTimelineIO library (opt-in test, ADR 0045), and the Premiere XML export
+      # read back by its fcp_xml adapter (ADR 0047). One cell only, and only when the scope runs the whole unit suite
+      # (any change under packages/ does, which is where the converters live).
       - name: Decide on the OpenTimelineIO test
         id: otio
         if: matrix.os == 'ubuntu-latest' && matrix.shard == 1 && needs.scope.outputs.unit == 'all'
@@ -71,10 +72,10 @@ jobs:
         with:
           python-version: "3.12"
       - if: steps.otio.outputs.run == 'true'
-        run: pip install opentimelineio==0.18.1
-      - name: OpenTimelineIO real-library test
+        run: pip install opentimelineio==0.18.1 otio-fcp-adapter==1.0.0
+      - name: OpenTimelineIO real-library tests
         if: steps.otio.outputs.run == 'true'
-        run: pnpm exec vitest run packages/core/test/otio-real
+        run: pnpm exec vitest run packages/core/test/otio-real packages/core/test/premiere-real
         env:
           FRAMESHELL_TEST_OTIO: "1"
       - if: matrix.shard == 2
