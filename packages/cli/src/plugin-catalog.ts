@@ -31,5 +31,5 @@ function downloadSummary(plugin: MethodResult<"plugin.catalog">["plugins"][numbe
 }
 
 function megabytes(bytes: number): string {
-  return `${Math.round(bytes / 1_000_000)} MB`;
+  return bytes < 1_000_000 ? "<1 MB" : `${Math.round(bytes / 1_000_000)} MB`;
 }

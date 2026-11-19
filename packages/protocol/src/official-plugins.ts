@@ -1,8 +1,14 @@
+/** What an official plugin adds; the wire schema of `plugin.catalog` takes its enum from this list. */
+export const OFFICIAL_PLUGIN_KINDS = ["clip-adapter", "transcription-provider", "speech-provider"] as const;
+
 /** What an official plugin adds. */
-export type OfficialPluginKind = "clip-adapter" | "transcription-provider" | "speech-provider";
+export type OfficialPluginKind = (typeof OFFICIAL_PLUGIN_KINDS)[number];
+
+/** What a person must have or do before an official plugin is useful; the wire schema takes its enum from this list. */
+export const PLUGIN_NEED_KINDS = ["none", "blender", "openai-key", "remotion-project"] as const;
 
 /** What a person must have or do before an official plugin is useful. */
-export type PluginNeedKind = "none" | "blender" | "openai-key" | "remotion-project";
+export type PluginNeedKind = (typeof PLUGIN_NEED_KINDS)[number];
 
 /** A managed download an official plugin asks for on first use. Sizes come from the binary manifest, never from here. */
 export interface OfficialDownload {
@@ -18,12 +24,14 @@ export interface OfficialDownload {
 export interface OfficialPlugin {
   /** npm package name, also its key in a project's `frameshell.json`. */
   name: string;
+  /** What the plugin adds. */
   kind: OfficialPluginKind;
   /** Clip type (`clip-adapter`) or provider id (the others) it contributes. */
   provides: readonly string[];
   /** One sentence for a person: what it lets them do. */
   purpose: string;
-  need: { kind: PluginNeedKind; text: string };
+  /** What the person must have or do: `text` in words, `variable` the environment variable of a key need (`openai-key`). */
+  need: { kind: PluginNeedKind; text: string; variable?: string };
   /** The provider charges per use. */
   paid: boolean;
   /** Audio or text leaves the machine. */
@@ -32,7 +40,9 @@ export interface OfficialPlugin {
   downloads: readonly OfficialDownload[];
 }
 
-const OPENAI_KEY = "Your own OpenAI API key in the OPENAI_API_KEY environment variable, paid per use to OpenAI";
+/** Equals `KEY_VARIABLE` of both OpenAI plugins; `official-plugins.test.ts` checks it. */
+const OPENAI_VARIABLE = "OPENAI_API_KEY";
+const OPENAI_KEY = `Your own OpenAI API key in the ${OPENAI_VARIABLE} environment variable, paid per use to OpenAI`;
 
 /**
  * The one list of official plugins. The daemon's install hints, the `plugin.catalog` method (CLI, MCP and app) and
@@ -58,7 +68,7 @@ export const OFFICIAL_PLUGINS: readonly OfficialPlugin[] = [
     kind: "transcription-provider",
     provides: ["openai"],
     purpose: "Transcribes speech with OpenAI's cloud service instead of on this computer.",
-    need: { kind: "openai-key", text: `${OPENAI_KEY}; the audio is uploaded, and Frameshell asks before every upload.` },
+    need: { kind: "openai-key", variable: OPENAI_VARIABLE, text: `${OPENAI_KEY}; the audio is uploaded, and Frameshell asks before every upload.` },
     paid: true,
     cloud: true,
     downloads: [],
@@ -68,7 +78,7 @@ export const OFFICIAL_PLUGINS: readonly OfficialPlugin[] = [
     kind: "speech-provider",
     provides: ["openai"],
     purpose: "Generates voiceover narration from text with OpenAI's cloud voices.",
-    need: { kind: "openai-key", text: `${OPENAI_KEY}; the voiceover text is sent to OpenAI, and Frameshell shows the cost and asks first.` },
+    need: { kind: "openai-key", variable: OPENAI_VARIABLE, text: `${OPENAI_KEY}; the voiceover text is sent to OpenAI, and Frameshell shows the cost and asks first.` },
     paid: true,
     cloud: true,
     downloads: [],
@@ -106,7 +116,7 @@ export const OFFICIAL_PLUGINS: readonly OfficialPlugin[] = [
     kind: "clip-adapter",
     provides: ["blender"],
     purpose: "Adds 3D scenes from .blend files, rendered to clips with transparency.",
-    need: { kind: "blender", text: "Your own Blender installed on this computer (4.5 LTS or any 5.x); Frameshell never downloads it." },
+    need: { kind: "blender", text: "Your own Blender installed on this computer (4.5 LTS and 5.x); Frameshell never downloads it." },
     paid: false,
     cloud: false,
     downloads: [{ kind: "binary", id: "ffmpeg", what: "ffmpeg and ffprobe, which encode the render (also used by every video import)" }],

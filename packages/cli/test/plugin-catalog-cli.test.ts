@@ -26,6 +26,8 @@ beforeAll(async () => {
   const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), standardPaths: false });
   daemon = await startDaemon({ socketPath, binaries });
   project = tempDir();
+  // The daemon runs in this process: a key in the developer's shell must not change the output.
+  delete process.env.OPENAI_API_KEY;
   expect((await frameshell(["init", "."])).code).toBe(0);
 });
 

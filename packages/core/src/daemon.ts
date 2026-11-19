@@ -1742,8 +1742,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
     "plugin.catalog": async ({ cwd }) => {
       const dir = await root(cwd);
-      const { config } = (await readEnclosingProject(dir))!;
-      return buildCatalog({ binaries, project: { dir, binaries: config.binaries }, listed: await plugins.list(dir) });
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
     },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);

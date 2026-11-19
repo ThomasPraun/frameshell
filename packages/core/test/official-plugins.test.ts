@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { OFFICIAL_PLUGINS, officialPlugin, officialPluginProviding } from "@frameshell/protocol";
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MODELS, DEFAULT_PACKAGES } from "../src/index.js";
+import { BLENDER_PACKAGE, DEFAULT_MODELS, DEFAULT_PACKAGES } from "../src/index.js";
 
 // Seam under test: the one table of official plugins (`packages/protocol/src/official-plugins.ts`) against the
 // plugin packages in `plugins/` and the binary manifest it names downloads from.
@@ -66,6 +66,16 @@ describe("official plugin table", () => {
         expect(plugin.downloads.some((download) => download.kind === "binary" && tools(download.id).includes(tool)), `${plugin.name} downloads ${tool}`).toBe(true);
       }
     }
+  });
+
+  it("names the key variable the OpenAI plugins read and the Blender versions the manifest supports", () => {
+    for (const plugin of OFFICIAL_PLUGINS.filter((candidate) => candidate.need.kind === "openai-key")) {
+      const source = readFileSync(join(PLUGINS_DIR, plugin.name.replace("@frameshell/", ""), "src", "provider.ts"), "utf8");
+      expect(plugin.need.variable, plugin.name).toBe(/export const KEY_VARIABLE = "([^"]+)"/.exec(source)![1]);
+      expect(plugin.need.text, plugin.name).toContain(plugin.need.variable!);
+    }
+    expect(OFFICIAL_PLUGINS.filter((candidate) => candidate.need.kind !== "openai-key").every((candidate) => candidate.need.variable === undefined)).toBe(true);
+    expect(officialPlugin("@frameshell/blender")!.need.text).toContain(BLENDER_PACKAGE.userInstall!.supported);
   });
 
   it("finds the plugin for the default transcription provider and each clip type", () => {

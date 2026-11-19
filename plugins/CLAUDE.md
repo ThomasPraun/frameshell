@@ -11,7 +11,7 @@ Each plugin = own npm package; `files` whitelist (`node scripts/plugins-npm.mjs 
 
 ## Official plugin table
 
-- ONE list of official plugins: `OFFICIAL_PLUGINS` in `packages/protocol/src/official-plugins.ts` (package, kind, provided ids, purpose, need, paid/cloud, managed downloads). Read by host install hints (`providerHint` in `packages/core/src/plugins/host.ts`), `plugin.catalog` (`plugins/catalog.ts`), app `TRANSCRIPTION_PLUGIN`. Never a second list.
+- ONE list of official plugins: `OFFICIAL_PLUGINS` in `packages/protocol/src/official-plugins.ts` (package, kind, provided ids, purpose, need, paid/cloud, managed downloads). Read by host install hints (`providerHint` in `packages/core/src/plugins/host.ts`), `plugin.catalog` (`packages/core/src/plugins/catalog.ts`), app `TRANSCRIPTION_PLUGIN`. Never a second list.
 - Add, rename or change plugin: edit table in same change. `packages/core/test/official-plugins.test.ts` checks it vs `plugins/*` manifests + binary manifest.
 - Only official plugins in catalog. Third-party stay terminal-only.
 

@@ -1,14 +1,12 @@
 import { type MethodResult, OFFICIAL_PLUGINS, type OfficialDownload, type OfficialPlugin } from "@frameshell/protocol";
 import type { BinaryManager, ProjectBinaries } from "../binaries/manager.js";
 
-/** Environment variable the OpenAI plugins read the person's key from. */
-const OPENAI_KEY_VARIABLE = "OPENAI_API_KEY";
-
 type Catalog = MethodResult<"plugin.catalog">;
 type CatalogEntry = Catalog["plugins"][number];
 
 /** What {@link buildCatalog} reads besides the table. */
 export interface CatalogInputs {
+  /** Reads the managed downloads' state. */
   binaries: BinaryManager;
   /** Project root and its `binaries` overrides. */
   project: ProjectBinaries;
@@ -66,7 +64,7 @@ async function needMet(plugin: OfficialPlugin, binaries: BinaryManager, project:
     case "none":
       return true;
     case "openai-key":
-      return (env[OPENAI_KEY_VARIABLE] ?? "").trim() !== "";
+      return (env[plugin.need.variable ?? ""] ?? "").trim() !== "";
     case "blender":
       return (await binaries.locate("blender", project)).installed;
     case "remotion-project":
