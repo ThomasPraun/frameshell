@@ -133,6 +133,8 @@ export interface VoicePrintOptions {
   extractAudio: AudioExtractor;
   progress: (progress: Progress) => void;
   signal?: AbortSignal | undefined;
+  /** Only read the cache: a print not in it is reported missing, and no audio is extracted nor model run (`people.tune`). */
+  cacheOnly?: boolean | undefined;
 }
 
 interface CacheFile {
@@ -206,6 +208,10 @@ export async function computeVoicePrints(options: VoicePrintOptions): Promise<Ma
       else todo.push({ entry, key, stretches });
     }
     if (todo.length === 0) continue;
+    if (options.cacheOnly) {
+      for (const { entry } of todo) outcomes.set(voiceKey(entry), { ok: false, reason: `${entry.speaker ? `${entry.speaker} of ${rel}` : rel} has no cached voice print` });
+      continue;
+    }
 
     let audio: string;
     try {

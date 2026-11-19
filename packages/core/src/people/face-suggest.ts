@@ -3,7 +3,7 @@ import { type Person, type Transcript, speakerLinkKey, wordSpeaker } from "@fram
 import { type ClusterTrack, type FaceCluster, type FaceModel, type FaceOwners, overlapSeconds, personFacePrint, presence, spanSeconds } from "./face-clusters.js";
 import { mergeSpans } from "./ranges.js";
 import { suggestionId } from "./suggest.js";
-import { cosine } from "./vector.js";
+import { clearMatch, cosine } from "./vector.js";
 
 /** A face nobody has is asked about once on screen this long (ADR 0020 decision 5): shorter ones are extras. */
 export const FACE_MIN_SCREEN_S = 10;
@@ -57,7 +57,7 @@ function newFaces({ model, owners }: FaceSuggestInput, named: Map<string, Person
     const ranked = prints.map(({ person, print }) => ({ person, score: cosine(cluster.mean, print) })).sort((a, b) => b.score - a.score);
     const [best, second] = ranked;
     const face = suggestedFace(cluster);
-    if (best && best.score >= FACE_PERSON_MATCH && (!second || best.score - second.score >= FACE_PERSON_MARGIN)) {
+    if (best && clearMatch(best.score, second?.score, FACE_PERSON_MATCH, FACE_PERSON_MARGIN)) {
       const score = round2(best.score);
       suggestions.push({
         id: suggestionId("face", [best.person.id, cluster.handle]),

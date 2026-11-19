@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { DaemonConnection, MethodParams, MethodResult, PersonInfo, Progress } from "@frameshell/protocol";
+import type { DaemonConnection, MethodParams, MethodResult, PersonInfo, Progress, TuneDistribution, TuneSweepRow } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of the `people` commands (ADR 0020), in `frameshell --help`. */
@@ -30,6 +30,10 @@ export const PEOPLE_USAGE = `  people list                  The project's people
   people confirm <suggestion>… [--reject] [--person <person>]
                                Apply suggested links (yes), or with --reject dismiss them for good. A suggestion
                                naming nobody (a new face) needs --person: an existing person or a new name
+  people tune                  Read-only report on the voice and face thresholds, replayed on what you confirmed:
+                               linked speakers (cached voice prints) and face anchors are the truth. Score spreads
+                               and, per threshold, correct and wrong suggestions. Changes, scans and downloads nothing
+                               (run people suggest and people scan first); --json has every score and the timings
 `;
 
 /** Flags each `people` command takes besides the global ones. */
@@ -44,6 +48,7 @@ export const PEOPLE_FLAGS: Record<string, readonly string[]> = {
   "people ranges": ["on-screen", "onscreen", "timeline"],
   "people suggest": [],
   "people confirm": ["reject", "person"],
+  "people tune": [],
 };
 
 /** A parsed `people` command; paths are as typed, resolved against the working directory when run. */
@@ -56,6 +61,7 @@ export type PeopleInvocation =
   | { kind: "people.link" | "people.unlink"; person: string; target: PeopleTargetInput }
   | { kind: "people.ranges"; person: string; onScreen: boolean; timeline?: string }
   | { kind: "people.suggest" }
+  | { kind: "people.tune" }
   | { kind: "people.confirm"; suggestions: string[]; reject: boolean; person?: string };
 
 /** One target of `people link`, as typed. */
@@ -81,6 +87,7 @@ export function parsePeople(
   const [sub, ...args] = rest;
   if (sub === "list") return args.length === 0 ? { kind: "people.list" } : null;
   if (sub === "suggest") return args.length === 0 ? { kind: "people.suggest" } : null;
+  if (sub === "tune") return args.length === 0 ? { kind: "people.tune" } : null;
   if (sub === "confirm") {
     if (args.length === 0) return null;
     const bad = args.find((id) => !/^sg_[0-9a-f]{8}$/.test(id));
@@ -190,6 +197,10 @@ export async function executePeople(conn: DaemonConnection, inv: PeopleInvocatio
       const result = await conn.request("people.suggest", { cwd }, onProgress ? { onProgress } : {});
       return json ? print(result) : formatSuggestions(result);
     }
+    case "people.tune": {
+      const result = await conn.request("people.tune", { cwd });
+      return json ? print(result) : formatTune(result);
+    }
     case "people.confirm": {
       const result = await conn.request(
         "people.confirm",
@@ -237,6 +248,67 @@ function describeTarget(target: PeopleTargetInput): string {
 function linkCount(person: PersonInfo): string {
   const count = person.speakers.length + person.angles.length + person.faces.length;
   return `${count} link${count === 1 ? "" : "s"}`;
+}
+
+/** `people tune` for people: score spreads, then each sweep as a table; `*` marks the constants now. */
+export function formatTune(result: MethodResult<"people.tune">): string {
+  const lines: string[] = [];
+  const spread = (label: string, d: TuneDistribution | null) =>
+    lines.push(d ? `  ${label.padEnd(10)} n=${d.count}  min ${d.min.toFixed(2)}  p10 ${d.p10.toFixed(2)}  median ${d.median.toFixed(2)}  p90 ${d.p90.toFixed(2)}  max ${d.max.toFixed(2)}` : `  ${label.padEnd(10)} none`);
+  const gap = (value: number | null) => lines.push(`  gap        ${value === null ? "n/a" : value.toFixed(2)} (lowest same-person minus highest different-person score; above 0 one line separates them)`);
+  if (result.voice) {
+    const v = result.voice;
+    lines.push(`Voices: ${v.speakers} linked speakers of ${v.people} people (${v.usable} with another print of their person to match)`);
+    spread("same", v.same);
+    spread("different", v.different);
+    gap(v.gap);
+    spread("margin", v.margin);
+    lines.push(`  now: SPEAKER_MATCH ${v.current.match}, SPEAKER_MARGIN ${v.current.margin}; ${v.wrong.length} wrong suggestion${v.wrong.length === 1 ? "" : "s"}`);
+    for (const wrong of v.wrong) lines.push(`    ${wrong.subject} is ${wrong.expected}, suggested ${wrong.suggested} (${wrong.score.toFixed(2)})`);
+    lines.push("", ...sweepTable("match", v.rows, v.current), "");
+  }
+  if (result.faces) {
+    const f = result.faces;
+    lines.push(`Faces: ${f.tracks} anchored face tracks of ${f.people} people`);
+    spread("same", f.same);
+    spread("different", f.different);
+    gap(f.gap);
+    lines.push("", `  cluster cut (FACE_CLUSTER_MATCH, now ${f.clusterCurrent}): purity 1 = no cluster mixes people`);
+    lines.push("    match  clusters  purity  mixed  splits");
+    for (const row of f.clusterRows) {
+      const mark = row.match === f.clusterCurrent ? "*" : " ";
+      lines.push(`  ${mark} ${row.match.toFixed(2)}  ${String(row.clusters).padStart(8)}  ${row.purity === null ? "   n/a" : row.purity.toFixed(3).padStart(6)}  ${String(row.mixed).padStart(5)}  ${String(row.splits).padStart(6)}`);
+    }
+    const p = f.person;
+    lines.push("", `  face to person: ${p.clusters} clusters with one anchored person, ${p.usable} with that person elsewhere to match`);
+    spread("margin", p.margin);
+    lines.push(`  now: FACE_PERSON_MATCH ${p.current.match}, FACE_PERSON_MARGIN ${p.current.margin}; ${p.wrong.length} wrong suggestion${p.wrong.length === 1 ? "" : "s"}`);
+    for (const wrong of p.wrong) lines.push(`    ${wrong.subject} is ${wrong.expected}, suggested ${wrong.suggested} (${wrong.score.toFixed(2)})`);
+    lines.push("", ...sweepTable("match", p.rows, p.current));
+  }
+  if (!result.voice && !result.faces) lines.push("Nothing to tune yet.");
+  if (result.hints.length > 0) lines.push("", ...result.hints.map((hint) => `hint: ${hint}`));
+  lines.push("", `Read in ${result.timings.voicesMs} ms (voices), ${result.timings.facesMs} ms (faces); sweeps ${result.timings.sweepMs} ms. Nothing was changed. --json has every score.`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** A sweep as a grid, one line per match and one column per margin: `correct/wrong` suggestions; `*` marks the current line. */
+function sweepTable(title: string, rows: readonly TuneSweepRow[], current: { match: number; margin: number }): string[] {
+  const margins = [...new Set(rows.map((row) => row.margin))];
+  const matches = [...new Set(rows.map((row) => row.match))];
+  const star = (match: number, margin = current.margin) => (match === current.match && margin === current.margin ? "*" : " ");
+  const cell = (match: number, margin: number) => {
+    const row = rows.find((candidate) => candidate.match === match && candidate.margin === margin)!;
+    return `${row.correct}/${row.wrong}${star(match, margin)}`.padStart(9);
+  };
+  const out = [`  correct/wrong suggestions; ${title} down, margin across`, `  ${title.padEnd(6)}${margins.map((margin) => margin.toFixed(2).padStart(9)).join("")}`];
+  for (const match of matches) out.push(`  ${match.toFixed(2).padEnd(6)}${margins.map((margin) => cell(match, margin)).join("")}`);
+  const percent = (value: number | null) => (value === null ? "n/a" : `${Math.round(value * 100)}%`).padStart(9);
+  out.push("", `  at margin ${current.margin}:`, "    match  suggested  correct  wrong  precision   recall");
+  for (const row of rows.filter((candidate) => candidate.margin === current.margin)) {
+    out.push(`  ${star(row.match)} ${row.match.toFixed(2)}  ${String(row.suggested).padStart(9)}  ${String(row.correct).padStart(7)}  ${String(row.wrong).padStart(5)}  ${percent(row.precision)}  ${percent(row.recall)}`);
+  }
+  return out;
 }
 
 /** `people suggest` for people: one line per suggestion with its id, then the hints. */

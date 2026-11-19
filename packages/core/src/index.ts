@@ -109,7 +109,8 @@ export {
   voiceStretches,
 } from "./people/voices.js";
 export { type PersonVoice, SPEAKER_MARGIN, SPEAKER_MATCH, type SpeakerVoice, speakerSuggestions, suggestionId } from "./people/suggest.js";
-export { averageLinkage, cosine } from "./people/vector.js";
+export { averageLinkage, clearMatch, cosine, cutLinkage, linkageMerges } from "./people/vector.js";
+export { DEFAULT_TUNE_GRID, type FaceTuneSample, type TuneGrid, type TuneWho, type VoiceTuneSample, distribution, tuneFaces, tuneVoices } from "./people/tuning.js";
 export { DEFAULT_TX_IDLE_GAP_MS } from "./history/transactions.js";
 export { type AppDirs, resolveAppDirs } from "@frameshell/protocol";
 export {

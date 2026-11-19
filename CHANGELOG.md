@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell people tune` (`people.tune`, MCP `people_tune`; protocol 178): a read-only tuning report for the voice
+  and face suggestion thresholds (ADR 0020 decision 15). It replays matching on the people the owner confirmed (linked
+  speakers with cached voice prints, face tracks a face anchor names): same-person and different-person score spreads,
+  and for each `SPEAKER_MATCH` and `SPEAKER_MARGIN`, `FACE_CLUSTER_MATCH` and `FACE_PERSON_MATCH` and
+  `FACE_PERSON_MARGIN` tried, correct and wrong suggestions, precision, recall, cluster purity and splits. Nothing is
+  scanned, downloaded or changed, and no threshold changes. Results go in `docs/research/people-acceptance-run.md`.
+
 - `grade.analyze` and `grade.compare` on generated and nested clips, slice 11 of #384 (ADR 0031, epic #451;
   protocol 177): `grade compare` (MCP `grade_compare`) draws one frame of a generated clip or a nested timeline clip
   under candidate grades through the export frame path, as it did footage (a multicam shot is refused with reason
