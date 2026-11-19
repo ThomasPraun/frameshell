@@ -1,17 +1,38 @@
-// Shared by make-corpus.mjs and run.mjs: repo guard, managed ffmpeg lookup, decode, the built detector.
+// Shared by make-corpus.mjs, fetch-cc0.mjs and run.mjs: repo guard, managed ffmpeg lookup, decode, the built detector.
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-/** Refuse a directory inside the repo: this spike never holds audio next to the code. */
+function real(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** The nearest ancestor of `path` that holds a `.git` entry (a checkout or a worktree), or null. */
+function gitRootOf(path) {
+  for (let at = path; ; at = dirname(at)) {
+    if (existsSync(join(at, ".git"))) return at;
+    if (dirname(at) === at) return null;
+  }
+}
+
+/** Refuse a directory inside the repo or any git checkout (symlinks resolved): this spike never holds audio next to code. */
 export function outsideRepo(dir) {
   const path = resolve(dir);
-  const rel = relative(REPO, path);
-  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
-    throw new Error(`refusing ${path}: it is inside the repo (${REPO}); use a temp directory`);
+  const checked = real(path);
+  const inside = (root) => {
+    const rel = relative(real(root), checked);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  };
+  const git = gitRootOf(checked);
+  if (inside(REPO) || git) {
+    throw new Error(`refusing ${path}: it is inside a repo (${git ?? REPO}); use a temp directory`);
   }
   return path;
 }
@@ -63,6 +84,13 @@ export async function decode(file, mode = "sidecar") {
   const { channels, rate } = DECODES[mode];
   const pcm = await ffmpeg(["-i", file, "-map", "0:a:0", "-ac", String(channels), "-ar", String(rate), "-f", "s16le", "pipe:1"]);
   return { pcm: new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength), channels, rate };
+}
+
+/** The product's LOW threshold (`LOW_BEAT_CONFIDENCE` of the built schema), never a copy. */
+export async function lowBeatConfidence() {
+  const file = join(REPO, "packages", "schema", "dist", "beats.js");
+  if (!existsSync(file)) throw new Error(`${file} is missing: run pnpm build first`);
+  return (await import(pathToFileURL(file).href)).LOW_BEAT_CONFIDENCE;
 }
 
 /** A module of the built core (`pnpm build` of packages/core first), by path under `dist/`. */

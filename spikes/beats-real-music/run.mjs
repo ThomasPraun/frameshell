@@ -11,7 +11,7 @@
 // (rubato, no clean BPM) are reported but never counted as failures.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { decode, loadCore, outsideRepo } from "./lib.mjs";
+import { decode, loadCore, lowBeatConfidence, outsideRepo } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
@@ -101,6 +101,8 @@ function residuals(beats, truth, cls) {
   };
 }
 
+const LOW_CONFIDENCE = await lowBeatConfidence();
+// One decoded track at a time: the hint re-run reuses it, then it is dropped.
 const decoded = new Map();
 async function analyse(file, mode, hint) {
   const key = `${file}|${mode}`;
@@ -128,7 +130,7 @@ for (const track of manifest.tracks) {
       const a = result.analysis;
       row.bpm = a.bpm;
       row.confidence = a.confidence;
-      row.low = a.confidence < 0.5;
+      row.low = a.confidence < LOW_CONFIDENCE;
       row.alternatives = a.alternatives.map((alt) => `${alt.tempo}:${alt.bpm}`);
       row.downbeat = a.downbeat;
       const cls = track.bpm ? tempoClass(a.bpm, track.bpm) : "n/a";
@@ -155,6 +157,7 @@ for (const track of manifest.tracks) {
     row.error = String(error.message ?? error);
     row.outcome = "error";
   }
+  decoded.clear();
   rows.push(row);
   if (!flag("--json")) {
     const f = (v, d = 1) => (v === null || v === undefined ? "-" : typeof v === "number" ? v.toFixed(d) : v);

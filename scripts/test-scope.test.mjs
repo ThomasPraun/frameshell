@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { testScope } from "./test-scope.mjs";
 
 describe("testScope", () => {
-  it("runs nothing for docs, website, evals and root markdown", () => {
+  it("runs nothing for docs, website, evals, root markdown and the beats spike", () => {
     expect(testScope(["docs/adr/0040-batch.md", "website/src/index.astro", "CHANGELOG.md", "evals/x/README.md", "spikes/beats-real-music/run.mjs"])).toEqual(
       { unit: "none", filter: [], e2e: false },
     );
