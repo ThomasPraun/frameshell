@@ -154,6 +154,10 @@ const api: FrameshellApi = {
     markers: () => invokeOutcome(Channel.voiceoverMarkers),
     place: (path, start, replace) => invokeOutcome(Channel.voiceoverPlace, path, start, replace),
   },
+  transcript: {
+    run: (asset) => invokeOutcome(Channel.transcribeRun, asset),
+    onProgress: (listener) => subscribe(Channel.transcribeProgress, listener),
+  },
   models: {
     list: () => invokeOutcome(Channel.modelsList),
     use: (model) => invokeOutcome(Channel.modelsUse, model),
