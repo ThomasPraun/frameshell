@@ -8,7 +8,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeBurstClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// Seam under test: `word:` time references through a real daemon (ADR 0029 slice 4 part 3): the daemon reads the
+// Seam under test: `word:` time references through a real daemon (ADR 0029): the daemon reads the
 // project's transcripts (and their hashes) for the timeline as each call sees it, in operations and in methods that
 // resolve times of their own. The transcript is written by hand on a recording of tone bursts.
 const MEDIA_TIMEOUT = 180_000;

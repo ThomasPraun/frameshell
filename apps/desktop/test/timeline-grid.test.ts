@@ -4,7 +4,7 @@ import { type Grab, dragEdits, dragPreview, grabAt, snapPoints } from "../src/re
 import { LANE_HEIGHT, layoutTimeline } from "../src/renderer/src/timeline/layout.js";
 import { DEFAULT_THEME, type Paint2D, paintTimeline } from "../src/renderer/src/timeline/paint.js";
 
-// Seam under test: the beat grid (ADR 0029 slice 3) in the panel's pure geometry, drag snapping and painter.
+// Seam under test: the beat grid (ADR 0029) in the panel's pure geometry, drag snapping and painter.
 
 const titles = (id: string, start: number, end: number) => ({ id, type: "titles", start, end, duration: end - start });
 

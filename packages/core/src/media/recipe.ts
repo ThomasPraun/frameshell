@@ -71,7 +71,7 @@ export function proxyArgs(input: string, output: string, fps: number): string[] 
 }
 
 /**
- * CFR preview proxy of a source with alpha (#90): VP9 WebM with the alpha
+ * CFR preview proxy of a source with alpha: VP9 WebM with the alpha
  * plane as a second VP9 stream (`alpha_mode=1`), the format the preview
  * already decodes for generated clip renders (ADR 0002). Same frame grid,
  * scale, colour tags and fixed GOP as {@link proxyArgs}; keyframes are forced

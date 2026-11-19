@@ -446,10 +446,10 @@ export function shapeAt(shape: TransitionShape, f: number): ShapeFrame {
   return { outgoing: still, incoming: { ...still, clip } };
 }
 
-/** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5, #483: "darken ~40 %"). */
+/** How much a dip cut darkens the outgoing picture over black (ADR 0030 decision 5: "darken ~40 %"). */
 export const DIP_DEPTH = 0.4;
 
-/** Frames a dip cut darkens before the cut (#483: "for 3 frames"). */
+/** Frames a dip cut darkens before the cut ("for 3 frames"). */
 export const DIP_FRAMES = 3;
 
 /**

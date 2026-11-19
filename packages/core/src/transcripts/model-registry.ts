@@ -79,7 +79,7 @@ export async function detectModelFormat(path: string): Promise<ModelFormat> {
 }
 
 /**
- * Model files the user registered on this machine (`<configDir>/models.json`, #427): id → file, format, SHA-256 at
+ * Model files the user registered on this machine (`<configDir>/models.json`): id → file, format, SHA-256 at
  * registration and provider options, plus a default model per provider. Projects name only ids, so they stay
  * portable; the file behind an id is per machine. Writes are serialized within the process.
  */

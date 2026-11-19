@@ -11,7 +11,7 @@ import { launch, panelWindow, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// People panel (#344, ADR 0020) in the built app: a real daemon, a synthetic 8 s take with a diarized transcript
+// People panel (ADR 0020) in the built app: a real daemon, a synthetic 8 s take with a diarized transcript
 // (Ana says words 1-5, Ben the rest). The person is added, a voice linked, picked (words and spans selected),
 // renamed (the transcript follows, and a rename in the transcript renames the person), every change undone with
 // Cmd/Ctrl+Z; a multicam angle is suggested as a person. The voice model is offered, never fetched; a voice plays,

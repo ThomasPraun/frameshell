@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Project-config document a config operation changes (ADR 0036). `project`: `formats` of `frameshell.json`;
- * `style`: `style.json` (ADR 0028); `requirements`: `requirements.json` (#457).
+ * `style`: `style.json` (ADR 0028); `requirements`: `requirements.json`.
  */
 export const ConfigDocSchema = z
   .enum(["project", "style", "requirements"])

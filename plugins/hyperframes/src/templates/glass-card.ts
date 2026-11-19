@@ -2,7 +2,7 @@ import { COLOR_HELPERS, PLACEHOLDER, type Template, type TemplateInput, type Tem
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Glass card (#462, #466): a translucent card with a hairline border, a light
+ * Glass card: a translucent card with a hairline border, a light
  * edge along its top and a skewed shine band that crosses once after the card
  * springs in (and again every `shineEvery` seconds if asked). The card only
  * paints the glass look; the blur, saturation and dark scrim under it come

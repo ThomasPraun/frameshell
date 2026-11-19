@@ -169,4 +169,5 @@ const es: typeof en = {
   personNotLinked: (reason) => `No se pudo vincular: ${reason}`,
 };
 
+/** English and Spanish strings of the People panel. */
 export const people = { en, es };

@@ -23,7 +23,7 @@ import { generatedClips } from "./renderer.js";
 
 const execFileAsync = promisify(execFile);
 
-/** Where in each probe's span the probe falls: `(i + 0.37) / n`, off the frame grid and the clip's edges (#465). */
+/** Where in each probe's span the probe falls: `(i + 0.37) / n`, off the frame grid and the clip's edges. */
 const PROBE_PHASE = 0.37;
 
 /** What {@link ClipVerifier} needs from the daemon. */

@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Select and resize (#466 TP5, UI demo): a cursor presses a card, so its
+ * Select and resize (UI demo): a cursor presses a card, so its
  * selection ring and its handles (4 corner squares or 8 dots) appear on the
  * click's own frame; it then drags the bottom-right handle outward or inward
  * until the card has the target size, lets go, and a badge with the final size

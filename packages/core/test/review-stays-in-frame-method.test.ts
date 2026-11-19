@@ -8,7 +8,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// `staysInFrame` of a footage clip through `review` (#457): the faces of a written face-scan cache, laid out in the
+// `staysInFrame` of a footage clip through `review`: the faces of a written face-scan cache, laid out in the
 // format reviewed. A 4:3 test picture: the 9x16 cover crop keeps its middle, so a face at the right leaves that frame only.
 const MEDIA_TIMEOUT = 180_000;
 

@@ -2,7 +2,7 @@ import type { DoctorResult } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { DIAGNOSTICS_MAX_BYTES, type DiagnosticsInput, buildDiagnostics, redactHome } from "../src/main/diagnostics.js";
 
-// Seam under test: the text Help > Copy Diagnostics puts on the clipboard (#194).
+// Seam under test: the text Help > Copy Diagnostics puts on the clipboard.
 
 const home = "/Users/ana";
 

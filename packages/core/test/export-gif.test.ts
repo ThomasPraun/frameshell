@@ -7,7 +7,7 @@ import { BUILTIN_PRESETS, type Daemon, type ExportSource, compileRender, execute
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// GIF export (ADR 0039 slice 2) on a real managed ffmpeg and tiny synthetic media.
+// GIF export (ADR 0039) on a real managed ffmpeg and tiny synthetic media.
 const MEDIA_TIMEOUT = 180_000;
 
 /** What a GIF holds: its size, loop count and each frame's delay in 1/100 s, read from the file's own blocks. */

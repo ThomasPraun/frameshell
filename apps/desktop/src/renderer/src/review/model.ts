@@ -162,7 +162,7 @@ export function styleLines(proposal: OpenProposal): StyleLine[] {
 }
 
 /**
- * The bar's list of what `proposal` changes in `requirements.json` (#457, ADR 0036), in key order: `film.maxSeconds`,
+ * The bar's list of what `proposal` changes in `requirements.json` (ADR 0036), in key order: `film.maxSeconds`,
  * `captions.minSize`, `fail`, `clip:<id>.<field>`, `waiver:<check>[:<clip>]` (its reason), with the values as text.
  */
 export function requirementLines(proposal: OpenProposal): StyleLine[] {

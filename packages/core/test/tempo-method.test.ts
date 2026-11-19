@@ -8,8 +8,8 @@ import { wavOf } from "./beat-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// `tempo.set`, `tempo.show`, `timeline.show` with `grid`, `snapTo` and `beats.changed` through a real daemon (ADR 0029
-// slice 3). The music is a silent WAV; its beat grid is a hand-written `exact` beats file (120 BPM, a beat every 0.5 s
+// `tempo.set`, `tempo.show`, `timeline.show` with `grid`, `snapTo` and `beats.changed` through a real daemon (ADR 0029).
+// The music is a silent WAV; its beat grid is a hand-written `exact` beats file (120 BPM, a beat every 0.5 s
 // from 0.5 s, a bar every 4), so nothing here depends on the detector.
 const MEDIA_TIMEOUT = 120_000;
 const BEATS_PATH = "beats/music.beats.json";

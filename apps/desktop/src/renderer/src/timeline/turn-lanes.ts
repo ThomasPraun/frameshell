@@ -1,4 +1,4 @@
-// Turn lanes of a program track (ADR 0016 decision 3, #247): who speaks, per angle, drawn under the shots and painted by
+// Turn lanes of a program track (ADR 0016 decision 3): who speaks, per angle, drawn under the shots and painted by
 // hand. Turns and painted marks are on the group clock; the lanes are on the timeline clock, which only shows the
 // stretches some shot plays. Pure and DOM-free, like layout.ts.
 import type { TimelineEdit } from "../../../shared/api.js";

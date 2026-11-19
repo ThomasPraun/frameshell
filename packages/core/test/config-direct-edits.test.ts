@@ -5,7 +5,7 @@ import { type AppDirs, type DaemonConnection, connectToDaemon } from "@frameshel
 import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// Hand edits of frameshell.json formats and of style.json (ADR 0036 slice 5): the daemon's watcher turns them into
+// Hand edits of frameshell.json formats and of style.json (ADR 0036): the daemon's watcher turns them into
 // config operations of author `file`, journaled at once or held by review mode. The edit is a plain write to the file.
 
 let daemon: Daemon | undefined;

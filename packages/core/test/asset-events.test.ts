@@ -61,7 +61,7 @@ function record<E extends EventName>(event: E) {
 
 /**
  * Resolve once the daemon's `assets/` watcher reports new files from OS events. macOS rebuilds its
- * shared FSEvents stream after each new directory watch and drops events meanwhile (#53): keep dropping
+ * shared FSEvents stream after each new directory watch and drops events meanwhile: keep dropping
  * probe files. The first one shown may come from the initial scan; one written after it cannot.
  */
 async function watcherLive(assets: ReturnType<typeof record<"asset.changed">>): Promise<void> {
@@ -154,7 +154,7 @@ describe("asset.changed and job.progress notifications", () => {
 
   it("reach the subscriber before any reply that already shows their change", async () => {
     // `frameshell import --wait` prints each job event, then reads `job.list` for jobs it may have missed:
-    // a reply overtaking older events made it print steps twice (#79). Raw lines keep the arrival order.
+    // a reply overtaking older events made it print steps twice. Raw lines keep the arrival order.
     const socket = createConnection(daemon.socketPath);
     await new Promise<void>((resolve, reject) => socket.once("connect", resolve).once("error", reject));
     const arrived: { id?: number; method?: string; result?: unknown; params?: { job?: { id: string } } }[] = [];

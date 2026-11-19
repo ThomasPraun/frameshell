@@ -1,7 +1,7 @@
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, panelWindow, sandbox } from "./harness.js";
 
-// The app's one tooltip (#409): hover or keyboard focus shows what a control does and its shortcut, Escape hides it,
+// The app's one tooltip: hover or keyboard focus shows what a control does and its shortcut, Escape hides it,
 // and a detached panel (ADR 0012) shows it in its own window.
 const box = sandbox("ask");
 const SIDEBAR_KEY = process.platform === "darwin" ? "⌘B" : "Ctrl+B";

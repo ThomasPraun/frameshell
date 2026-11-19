@@ -8,7 +8,7 @@ import { noFaceScanner } from "./face-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `analyze` curve, ink, mouth sync and labels (#471 slice 3), with real ffmpeg on three 8 s films at 30 fps, 320x180:
+// `analyze` curve, ink, mouth sync and labels, with real ffmpeg on three 8 s films at 30 fps, 320x180:
 //   slide.mp4: a white box slides right with an out ease from 1 s to 3 s, and left with an in ease from 4 s to 6 s;
 //   caption.mp4: a gray picture with the outline of a box in the bottom left from 3 s to 6 s;
 //   talk.mp4: a tone in bursts, and a "mouth" that flickers in the same bursts 0.2 s later.

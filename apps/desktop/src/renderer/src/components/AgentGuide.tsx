@@ -22,10 +22,10 @@ function writeHidden(hidden: boolean): void {
 }
 
 /**
- * How to talk to an agent (#190), above the docked terminals. With no agent in the active terminal: the agents
+ * How to talk to an agent, above the docked terminals. With no agent in the active terminal: the agents
  * found, each with Start, the others with their official installer typed into the terminal for the user to run,
- * and Claude Desktop (#191). With an agent running: prompt suggestions it types there, unsent. A video made from
- * an idea (#472) adds its prompt as the first suggestion and keeps the guide open until it is hidden.
+ * and Claude Desktop. With an agent running: prompt suggestions it types there, unsent. A video made from
+ * an idea adds its prompt as the first suggestion and keeps the guide open until it is hidden.
  */
 export function AgentGuide({
   agent,
@@ -39,7 +39,7 @@ export function AgentGuide({
   agent: string | null;
   /** The shell is in use: only the way to open the guide shows, until opened. */
   compact: boolean;
-  /** The prompt for the film of the project's idea (#472); null when the project was not made from one, or it was dismissed. */
+  /** The prompt for the film of the project's idea; null when the project was not made from one, or it was dismissed. */
   idea: string | null;
   /** The person hid the guide while an idea was offered: forget the idea, keep the guide's own hidden setting. */
   onIdeaDone: () => void;

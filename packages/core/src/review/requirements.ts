@@ -6,7 +6,7 @@ import { BLANK_SPREAD, stillSpans } from "./metrics.js";
 import type { BoxSpan } from "./placement.js";
 import type { MotionSeries } from "./source.js";
 
-// `requirements.json` judged against a run (#457): the assertions the person states, the craft warnings that are
+// `requirements.json` judged against a run: the assertions the person states, the craft warnings that are
 // failures in this project, and the waivers that accept a warning with a reason. Pure: metrics in, metrics out.
 
 /** A clip of the reviewed timeline: where it plays, timeline seconds (`end` null: to the end of the film). */

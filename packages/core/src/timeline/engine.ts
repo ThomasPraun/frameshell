@@ -113,7 +113,7 @@ export interface ClipTypeInfo {
 
 /**
  * Where a cut or trim edge lands, before frame snapping. Energy snapping
- * (#12, ADR 0003) plugs in here to move edges into audio pauses.
+ * (ADR 0003) plugs in here to move edges into audio pauses.
  */
 export interface EditPoint {
   /** Seconds on {@link EditPoint.clock}. */
@@ -166,7 +166,7 @@ export interface EditContext {
   clipTypes(): Promise<ReadonlyMap<string, ClipTypeInfo>>;
   /** Fresh id with prefix `c` (clip), `t` (track), `g` (multicam group) or `m` (marker); the engine retries on collision. */
   newId(prefix: IdPrefix): string;
-  /** Edge adjustment seam for `cut` and `clip.trim` (#12). Absent: edges stay. */
+  /** Edge adjustment seam for `cut` and `clip.trim`. Absent: edges stay. */
   resolveEditPoint?: EditPointResolver;
   /** Project default snap half-width, seconds (`editing.snapWindow`); an op's `snapWindow` overrides it. */
   snapWindow?: number;

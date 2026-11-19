@@ -19,7 +19,7 @@ export interface RunLog {
   probes: [number, number][];
   /**
    * Program frames the engine drew, in order (`drawnFrames`). Interior drops count from it, not from `probes`: the
-   * worker draws without the page's main thread, so a late page rAF misses frames that did reach the screen (#573).
+   * worker draws without the page's main thread, so a late page rAF misses frames that did reach the screen.
    */
   drawn: number[];
   /** The engine's `dropped` stats of the play: which frames not in `drawn` were starved, which were cadence. */
@@ -297,7 +297,7 @@ function ctxToPerf(run: RunLog, c: number): number {
   return best.performanceTime + (c - best.contextTime) * 1000;
 }
 
-/** ADR 0001 pass thresholds for #15, each with a verdict and the numbers behind it. */
+/** ADR 0001 pass thresholds, each with a verdict and the numbers behind it. */
 export function checkThresholds(s: Summary): { id: number; pass: boolean; detail: string }[] {
   const pc = (a: number, b: number) => (100 * a) / b;
   const v = s.video;

@@ -11,7 +11,7 @@ import { TAKE_GAP_MS, createAngleCutter, planAngleCut } from "../src/renderer/sr
 import { angleKey } from "../src/renderer/src/timeline/angle-keys.js";
 import { type TrackRow, layoutTimeline } from "../src/renderer/src/timeline/layout.js";
 
-// Seam under test: number keys to shots (#242): the plan from the layout and playhead, the keys that count, and
+// Seam under test: number keys to shots: the plan from the layout and playhead, the keys that count, and
 // the cutter's transactions against a real daemon and main's editor.
 
 const cleanups: (() => unknown)[] = [];

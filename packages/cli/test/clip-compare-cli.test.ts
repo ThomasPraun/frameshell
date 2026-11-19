@@ -2,7 +2,7 @@ import type { ClipCompareResult, DaemonConnection } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { executeTimeline, parseClipLook, parseTimelineCommand } from "../src/timeline-commands.js";
 
-// Seam under test: `clip compare` (#482, ADR 0035) from argv to the `clip.compare` request and the report.
+// Seam under test: `clip compare` (ADR 0035) from argv to the `clip.compare` request and the report.
 
 const result: ClipCompareResult = {
   view: "current",

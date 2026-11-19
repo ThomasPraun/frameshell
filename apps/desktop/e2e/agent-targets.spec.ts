@@ -2,7 +2,7 @@ import { type ElectronApplication, type Page, expect, test } from "@playwright/t
 import { type DaemonConnection, connectToDaemon } from "@frameshell/protocol";
 import { launch, sandbox } from "./harness.js";
 
-// Chat about this to agents outside the app (ADR 0025, #429): a fake MCP client registers as Claude Code would
+// Chat about this to agents outside the app (ADR 0025): a fake MCP client registers as Claude Code would
 // (`target.register` with `clientInfo` `claude-code` / `Claude Code`), then reads its inbox with `inbox.take`. The app
 // sends to it, names it in a submenu once a second target registers, and says in the status bar when it read.
 const box = sandbox("demo");

@@ -1,6 +1,6 @@
 // page.evaluate bodies run in the renderer.
 /// <reference lib="dom" />
-// ADR 0001 pass thresholds on the real app (#15). Opt-in, real time, long: FRAMESHELL_PREVIEW_MEASURE=1.
+// ADR 0001 pass thresholds on the real app. Opt-in, real time, long: FRAMESHELL_PREVIEW_MEASURE=1.
 //   FRAMESHELL_PREVIEW_MEASURE_MINUTES  source length (default 30, the ADR fixture; the spike's cut list fits in it)
 //   FRAMESHELL_PREVIEW_MEASURE_CUTS     play only the first N cuts (default: all, 200 at 30 min)
 // Source, project and ingest outputs are kept under .cache/preview-measure/ and reused by later runs.

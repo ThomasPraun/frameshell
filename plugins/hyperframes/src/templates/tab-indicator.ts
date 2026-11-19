@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Stretching tab indicator (#466): a row of tabs and a pill or an underline
+ * Stretching tab indicator: a row of tabs and a pill or an underline
  * that moves between them by stretching: the edge it moves toward leaves
  * first, the other follows a beat later, then both settle. The tabs are one
  * `|`-separated prop and the sequence another (`2@1.2|4@2.4`: tab number or

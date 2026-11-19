@@ -10,7 +10,7 @@ import { TimeRefError, type TimelineWord, type TimelineWords, resolveTimeRef, re
 import { placeWords, readTimelineWords } from "../src/transcripts/timeline-words.js";
 import { tempDir } from "./helpers.js";
 
-// Seam under test: `word:` time references (ADR 0029 slice 4 part 3), read by the one TimeRef resolver from the words a
+// Seam under test: `word:` time references (ADR 0029), read by the one TimeRef resolver from the words a
 // timeline plays, and that word list as `placeWords` (cleanup's placement) builds it.
 
 const timeline = { id: "main" };

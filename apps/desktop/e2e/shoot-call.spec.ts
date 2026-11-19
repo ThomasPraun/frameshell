@@ -4,7 +4,7 @@ import { type ElectronApplication, type Page, expect, test } from "@playwright/t
 import { launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 
-// After a call recorded in the Shoot view (#394, ADR 0024 decision 8): the view offers splitting the call window into
+// After a call recorded in the Shoot view (ADR 0024 decision 8): the view offers splitting the call window into
 // its tiles, finding who speaks in the system audio and linking speakers in People. The session is written to disk as
 // one the app was killed in (camera, a gallery-view call window, mic, system audio), so it is finished on open; screen
 // capture of a real call needs macOS permissions no test can grant (docs/acceptance/shoot.md).

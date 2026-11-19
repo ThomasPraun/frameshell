@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { type Lang, isLang, langOf } from "../shared/i18n/index.js";
 
-/** The UI language the user picked in View > Language, or `system` to follow the OS (#189). */
+/** The UI language the user picked in View > Language, or `system` to follow the OS. */
 export type LanguageChoice = Lang | "system";
 
 /** The choice saved in `file`; `system` when there is none or it is unreadable. */

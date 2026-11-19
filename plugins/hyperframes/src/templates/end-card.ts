@@ -1,7 +1,7 @@
 import { COLOR_HELPERS, PLACEHOLDER, type Template, type TemplateInput, type TemplateVariable, fontSetup, pageHead } from "./kit.js";
 
 /**
- * End card with a call to action (#466): logo, name, a button-like CTA and the
+ * End card with a call to action: logo, name, a button-like CTA and the
  * address spring in one after the other on a solid radial background. It never
  * sits still: the whole card pushes in slowly and the CTA underline re-lights
  * on a steady beat.

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// Black-box: built CLI and auto-started daemon (#427). Model files are tiny stand-ins; nothing is transcribed.
+// Black-box: built CLI and auto-started daemon. Model files are tiny stand-ins; nothing is transcribed.
 const cliBin = fileURLToPath(new URL("../dist/bin/frameshell.js", import.meta.url));
 const socketPath =
   process.platform === "win32"

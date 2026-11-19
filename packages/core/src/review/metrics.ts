@@ -10,10 +10,10 @@ import { soundListWarnings } from "./sound.js";
 import type { MotionSeries } from "./source.js";
 import { syncWarnings } from "./sync.js";
 
-// The numbers of `review` (#457): what a picture sheet cannot tell. Pure: a motion series and cues in, metrics out.
-// Thresholds are the owner's launch-film checklist in #457's comments (the HyperFrames `check` and earshot ranges it
+// The numbers of `review`: what a picture sheet cannot tell. Pure: a motion series and cues in, metrics out.
+// Thresholds are the owner's launch-film checklist (the HyperFrames `check` and earshot ranges it
 // cites); they are judgments with a number, so every one is a warning, never a failure. Still pictures, big changes
-// and bursts are `analyze`'s (`analyze/rhythm.ts`): one scale for a reference and our film (#471). On a sampled
+// and bursts are `analyze`'s (`analyze/rhythm.ts`): one scale for a reference and our film. On a sampled
 // series every threshold applies per sample interval, as if each sample were a frame.
 
 /** Still stretches longer than this (seconds) are craft warnings. */

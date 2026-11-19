@@ -306,4 +306,5 @@ const es: typeof en = {
   removeTransition: "Quitar transición",
 };
 
+/** English and Spanish strings of the timeline panel and its canvas. */
 export const timeline = { en, es };

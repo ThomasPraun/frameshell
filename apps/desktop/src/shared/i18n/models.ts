@@ -1,4 +1,4 @@
-// Transcription model picker (#427) in the transcript toolbar (renderer/src/components/ModelPicker.tsx) and its
+// Transcription model picker in the transcript toolbar (renderer/src/components/ModelPicker.tsx) and its
 // file dialog (main/index.ts).
 
 const en = {

@@ -1,5 +1,5 @@
 // What the engine worker decodes a layer's pictures from: a media proxy (H.264 MP4, or VP9 WebM with alpha for sources
-// with alpha (#90), both read by byte ranges, ADR 0001) or a cached clip render (WebM, alpha as a second stream,
+// with alpha, both read by byte ranges, ADR 0001) or a cached clip render (WebM, alpha as a second stream,
 // ADR 0002, read whole), or a proxy whose alpha is its subject matte, or that matte alone (ADR 0032). One shape, so a
 // layer decodes all of them the same way.
 import { type SyncTable, syncTable } from "./decode-plan.js";
@@ -55,7 +55,7 @@ export function splitMattedPath(path: string): { picture: string | null; matte: 
 const NO_PICTURE = new Uint8Array(0);
 
 /**
- * `matte` as the alpha of a picture another layer decodes (ADR 0032 slice MX2): every frame is an alpha frame, decoded
+ * `matte` as the alpha of a picture another layer decodes (ADR 0032): every frame is an alpha frame, decoded
  * by the alpha decoder as in {@link mattedSource}, and the matte's frame N still goes with the proxy's frame N.
  */
 export function matteOnlySource(matte: VideoSource): VideoSource {
@@ -105,7 +105,7 @@ export function isReadWhole(path: string): boolean {
 
 /**
  * Open the project file `path`: `.webm` renders are read whole (they are
- * small); a `.webm` proxy (VP9 with alpha, #90) is indexed from its head and
+ * small); a `.webm` proxy (VP9 with alpha) is indexed from its head and
  * Cues and read by ranges; anything else is an MP4 proxy indexed from its
  * head and read by ranges. Rejects when the file cannot be demuxed.
  */

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { OperationRequest } from "../src/timeline/engine.js";
 import { MARKER_SNAP_REACH_S, MAX_GRID_BEATS, nearestBeat, snapRequest, tempoGrid } from "../src/timeline/tempo.js";
 
-// Seam under test: the timeline's beat grid on the timeline clock (ADR 0029 slice 3), pure but for the beats file
+// Seam under test: the timeline's beat grid on the timeline clock (ADR 0029), pure but for the beats file
 // lookup, which these tests inject.
 
 const FPS = 30;

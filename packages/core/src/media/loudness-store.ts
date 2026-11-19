@@ -60,12 +60,12 @@ export interface LoudnessStoreOptions {
 
 /**
  * EBU R128 loudness of assets (integrated LUFS, range, true peak), cached by content hash in {@link LOUDNESS_DIR}
- * (ADR 0037 slice 3). A reading is of the asset's own sound on the source clock, whole or of a part of it (the seconds a
+ * (ADR 0037). A reading is of the asset's own sound on the source clock, whole or of a part of it (the seconds a
  * clip plays, `SoundRange`): clip gain and speed are not in it, callers add what they know. A part is cached beside the
  * whole file by its hash and its start and end in milliseconds, so the same part is measured once; one that spans the
  * whole file or is shorter than a gating block ({@link MIN_RANGE_SECONDS}) is the whole-file reading. Measured by the
- * managed ffmpeg's `ebur128` ({@link measureLoudness}, the one the reference analysis uses); `music.candidates` and
- * `duck --level` read it, and sound placement (#463) will.
+ * managed ffmpeg's `ebur128` ({@link measureLoudness}, the one the reference analysis uses); `music.candidates`,
+ * `duck --level` and `audio.inspect` read it.
  */
 export class LoudnessStore {
   readonly #options: LoudnessStoreOptions;

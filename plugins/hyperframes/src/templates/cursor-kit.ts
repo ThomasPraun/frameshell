@@ -56,7 +56,7 @@ export const CURSOR_HTML = `<i id="ripple" class="ripple"></i>
 
 /**
  * Page-script math of the cursor (pure: needs `M`, `S` and `unit` only). A cursor
- * is a carrier (#466): it travels leg by leg on quadratic arcs whose control
+ * is a carrier: it travels leg by leg on quadratic arcs whose control
  * point sits 15 % of the leg's length off the chord, eases in and out with a
  * tiny overshoot, and may hesitate near its target. A click scales it to 0.84
  * in 0.1 s and back in 0.22 s.

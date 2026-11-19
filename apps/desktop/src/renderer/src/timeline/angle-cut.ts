@@ -1,4 +1,4 @@
-// Cutting to an angle by number key or click (#242, ADR 0016 decision 5): which shot is under the playhead, what
+// Cutting to an angle by number key or click (ADR 0016 decision 5): which shot is under the playhead, what
 // to split and set, and the serial queue that sends it. The multicam viewer calls `cutToAngle` too.
 import type { OperationResult, TimelineView } from "@frameshell/protocol";
 import { CREATED_CLIP, EDIT_BURST_GAP_MAX_MS, type EditOptions, type TimelineEdit } from "../../../shared/api.js";

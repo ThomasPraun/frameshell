@@ -6,12 +6,12 @@ import { FINALS_FILE, FinalTimes } from "./finals.js";
 
 /** A listing folder: `<.blend content hash, 16 hex>-<path hash, 8 hex>` (see `listingPath` in `deps.ts`). */
 const LISTING_DIR = /^[0-9a-f]{16}-[0-9a-f]{8}$/;
-/** `range/<inMs>-<endMs>ms.json` (before slice 6 `<endMs>ms.json`, still recognised so it goes) and `version/<major.minor[.patch]>.json`, the key markers `adapter.ts` writes. */
+/** `range/<inMs>-<endMs>ms.json` (older `<endMs>ms.json` names are still recognised so they go) and `version/<major.minor[.patch]>.json`, the key markers `adapter.ts` writes. */
 const RANGE_FILE = /^(?:\d+-)?\d+ms\.json$/;
 const VERSION_FILE = /^\d+(?:\.\d+){1,2}\.json$/;
 
 /**
- * Deletes the files the adapter keeps in {@link STATE_DIR} that no current clip names as an input (ADR 0035 slice 5):
+ * Deletes the files the adapter keeps in {@link STATE_DIR} that no current clip names as an input (ADR 0035):
  * listing folders of saved .blend versions, range markers of lengths no clip has, version markers of other Blenders.
  * `finals.json` is not deleted but pruned of the .blend files no clip names as an input (its `last` rate stays), and is
  * reported as one entry with the bytes it shrank by. Entries are recognised by name alone; anything else there (unknown

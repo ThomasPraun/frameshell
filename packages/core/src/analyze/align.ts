@@ -2,7 +2,7 @@ import type { AnalyzeDiffEnergy, AnalyzeDiffSample, AnalyzeDiffWindow } from "@f
 import { bestLag, correlationAtLag } from "./correlate.js";
 
 // Two films lined up in time, and their activity and SSIM compared at matching moments. Pure: `diff.ts` reads the films.
-// By activity-curve alignment, not a pass or fail (#471, third pass of the #451 research): a film in the style of a reference
+// By activity-curve alignment, not a pass or fail: a film in the style of a reference
 // moves where it moves, so the two curves match without the frames being alike.
 
 /** Samples per second the activity of both films is resampled to before they are correlated; also the resolution of the lag, 50 ms. */

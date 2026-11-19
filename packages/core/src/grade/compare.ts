@@ -12,9 +12,9 @@ import { NestedTimelineError, clipEnd, nestedClipError } from "../timeline/timin
 import { round } from "./levels.js";
 import { correctionFlags } from "./suggest.js";
 
-// `grade.compare` (#384, ADR 0031): one frame of a clip under several grades, each rendered by the `frame` export path
+// `grade.compare` (ADR 0031): one frame of a clip under several grades, each rendered by the `frame` export path
 // on a copy of the loaded timeline whose clip carries that grade, tiled into one labelled sheet. Never edits the timeline.
-// Footage, photos, generated clips and nested timelines take a grade; the frame path draws each as it exports (slice 11).
+// Footage, photos, generated clips and nested timelines take a grade; the frame path draws each as it exports.
 
 /** Where compare sheets go by default, project-relative: regenerable, gitignored with the rest of `.frameshell/`. */
 export const GRADE_COMPARE_DIR = [".frameshell", "grade"] as const;

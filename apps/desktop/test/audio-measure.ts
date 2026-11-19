@@ -1,4 +1,4 @@
-// Measurements of synthetic test audio shared by the preview stretch tests (#499).
+// Measurements of synthetic test audio shared by the preview stretch tests.
 
 /** 1 ms moving mean of |x| at `rate`. */
 export function envelope(x: Float32Array, rate = 48_000): Float32Array {

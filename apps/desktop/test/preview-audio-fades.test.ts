@@ -11,7 +11,7 @@ import { audioReads, envelopeGain, renderRead, sourceWindow } from "../src/rende
 import { compileProgram } from "../src/renderer/src/preview/program.js";
 import { StretchChain } from "../src/renderer/src/preview/time-stretch.js";
 
-// Seam under test: a clip's sample-accurate audio fades (#585) ramp the preview's samples as export's `afade` does,
+// Seam under test: a clip's sample-accurate audio fades ramp the preview's samples as export's `afade` does,
 // sample for sample. The export mix runs on the real managed ffmpeg.
 
 const RATE = 48_000;

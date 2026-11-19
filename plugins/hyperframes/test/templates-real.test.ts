@@ -13,7 +13,7 @@ import { BinaryManager } from "@frameshell/core";
 import { TEMPLATES, createHyperframesAdapter, newComposition } from "../src/index.js";
 import { usesThree } from "../src/templates/index.js";
 
-// Opt-in like render-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the templates of #466 in managed Chrome. Live pages at the
+// Opt-in like render-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the templates in managed Chrome. Live pages at the
 // four formats check the per-format layout and cold-vs-reseek determinism; one real render per template checks alpha and speed.
 const execFileAsync = promisify(execFile);
 const tempDir = () => realpathSync(mkdtempSync(join(tmpdir(), "frameshell-templates-real-")));
@@ -205,7 +205,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     );
   });
 
-  // The templates read from the live page (#466): what the page leaves on screen once it has played, and where it is on the way.
+  // The templates read from the live page: what the page leaves on screen once it has played, and where it is on the way.
   describe("templates in the live page", () => {
     /** Opens the scaffolded template with `props` in managed Chrome, hands the page to `check`, closes everything. */
     async function inPage(template: string, props: Record<string, unknown>, duration: number | undefined, check: (page: Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>) => Promise<void>, size: readonly [number, number] = [480, 270]) {
@@ -515,7 +515,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       });
     }, 120_000);
 
-    // The brand and overlay group (TP3): what each page leaves on screen at the start, at its peak and at its end.
+    // The brand and overlay group: what each page leaves on screen at the start, at its peak and at its end.
     type LivePage = Parameters<Parameters<typeof inPage>[3]>[0];
     /** RGBA bytes of the page at `t`, transparent where the page paints nothing. */
     const rgbaAt = async (page: LivePage, dir: string, t: number): Promise<Buffer> => {
@@ -743,7 +743,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       });
     }, 120_000);
 
-    // TP4: what each page leaves at the start, mid-move and once it has settled. `rgbaAt` (above) paints the page at a time.
+    // What each page leaves at the start, mid-move and once it has settled. `rgbaAt` (above) paints the page at a time.
     const rotateOf = (selector: string) => `Array.from(document.querySelectorAll('${selector}')).map(function (e) { return Number(/rotate\\(([-\\d.]+)deg/.exec(e.style.transform)[1]); })`;
     const transformsOf = (selector: string) => `Array.from(document.querySelectorAll('${selector}')).map(function (e) { return e.style.transform; })`;
     const alphaAt = (rgba: Buffer, x: number, y: number, width = 480) => rgba[(Math.round(y) * width + Math.round(x)) * 4 + 3]!;
@@ -933,7 +933,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       });
     }, 120_000);
 
-    // TP5: lean-in and select-resize, judged by what they paint and by the layout they leave.
+    // Lean-in and select-resize, judged by what they paint and by the layout they leave.
     const rectOf = (selector: string) => `(function () { var r = document.querySelector('${selector}').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; })()`;
     const poseOf = (id: string) => `(function () { var m = /translate\\(([-\\d.]+)px, ([-\\d.]+)px\\) rotate\\(([-\\d.]+)deg\\) scale\\(([-\\d.]+)/.exec(document.getElementById('${id}').style.transform); return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]; })()`;
     /** Bounding box [left, top, right, bottom] of the pixels of `rgba` that pass `test`, or null. */

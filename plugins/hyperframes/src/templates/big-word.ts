@@ -1,7 +1,7 @@
 import { PLACEHOLDER, type Template, type TemplateInput, type TemplateVariable, fontSetup, pageHead } from "./kit.js";
 
 /**
- * Big word behind the subject (#466, ADR 0032): one huge word whose letters
+ * Big word behind the subject (ADR 0032): one huge word whose letters
  * rise through a mask, drifting slowly while it holds. Transparent, built for
  * a video track with `behind` set to the footage track, so the word sits
  * between the background and the person. Its default place is the upper part

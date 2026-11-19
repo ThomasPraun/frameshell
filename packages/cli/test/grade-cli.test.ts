@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTimelineCommand } from "../src/timeline-commands.js";
 
-// Seam under test: `clip set --grade-*` / `--clear-grade` (ADR 0031, #384) from argv to the `clip.set` request.
+// Seam under test: `clip set --grade-*` / `--clear-grade` (ADR 0031) from argv to the `clip.set` request.
 
 describe("clip set --grade-* (#384)", () => {
   it("sends only the numbers given, merged by the daemon into the clip's grade", () => {

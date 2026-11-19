@@ -33,7 +33,7 @@ import { sceneScores } from "./scene.js";
 import { DEFAULT_CUT_THRESHOLD, detectCuts, frameAt, frameStart, shotLengthsRead, shotLocator, shotMiddle, shotStats, shotsOf } from "./shots.js";
 import { styleSuggestions } from "./suggest.js";
 
-// `analyze` (#471): shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness, tempo and audio of a reference video, on the managed ffmpeg.
+// `analyze`: shot table, contact sheet, palette, look, rhythm, events, curve, ink, mouth sync, loudness, tempo and audio of a reference video, on the managed ffmpeg.
 // Frame sampling and sheet tiling are `review`'s (`review/plan.ts`, `review/images.ts`); the beat detector is `media/beats.ts`.
 
 /** Most tiles of the contact sheet in all images: a longer film is sampled more coarsely than 2 per second. */
@@ -124,7 +124,7 @@ interface Sound {
 type TempoWithBeats = NonNullable<AnalyzeResultShape["tempo"]> & { beats: number[]; downbeats: number[] };
 
 /**
- * `analyze` (#471): what a reference video does, in numbers an agent can copy the grammar of: where it cuts, what
+ * `analyze`: what a reference video does, in numbers an agent can copy the grammar of: where it cuts, what
  * colours it uses, how loud it is and what tempo it keeps. Never touches project files; writes `.frameshell/analysis/<name>/`.
  */
 export class AnalyzeService {

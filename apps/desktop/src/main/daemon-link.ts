@@ -28,7 +28,7 @@ export interface DaemonLinkOptions {
   startTimeoutMs?: number;
   /** Script run as frameshelld. Default: the installed `@frameshell/core/frameshelld`. Tests only. */
   daemonEntry?: string;
-  /** Starts a daemon process. Default: spawn from this process. The app passes `helperDaemonLauncher` (#112). */
+  /** Starts a daemon process. Default: spawn from this process. The app passes `helperDaemonLauncher`. */
   launch?: DaemonLauncher;
 }
 

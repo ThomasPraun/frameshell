@@ -14,7 +14,7 @@ import {
 } from "../src/main/live-recognition.js";
 import type { LiveHeard, LiveStatus } from "../src/shared/api.js";
 
-// Seam under test: main's live recognizer (#393, ADR 0024 decision 5) with a fake whisper-server.
+// Seam under test: main's live recognizer (ADR 0024 decision 5) with a fake whisper-server.
 
 describe("live recognition pieces", () => {
   it("keeps the newest seconds of audio and counts what came since the last window", () => {

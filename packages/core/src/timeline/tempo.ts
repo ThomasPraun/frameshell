@@ -6,7 +6,7 @@ import { TimeRefError, type WordLoader, onceWords, resolveTimeRefAsync, unusable
 import type { OperationRequest } from "./engine.js";
 
 /**
- * The timeline's beat grid on the timeline clock (ADR 0029 slice 3): the one place `tempo` turns into beat and bar
+ * The timeline's beat grid on the timeline clock (ADR 0029): the one place `tempo` turns into beat and bar
  * times, read by `tempo.show`, `timeline.show` with `grid` (the app paints it) and `--snap-to`. Pure apart from the
  * injected beats file lookup.
  */

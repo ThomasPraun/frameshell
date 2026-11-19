@@ -58,7 +58,7 @@ export type OpenOutcome =
   | { status: "error"; message: string };
 
 /**
- * Background setup of a project created from videos (#188): installing the
+ * Background setup of a project created from videos: installing the
  * transcription plugin, first-run downloads, transcribing. `fraction` is of
  * the current step when known. `state` `done` and `failed` end it.
  */
@@ -101,7 +101,7 @@ export interface VideoProjectPlan {
 /** Frame of a project made from audio alone: 16:9 (1920x1080) or 9:16 (1080x1920). */
 export type AudioOrientation = "landscape" | "portrait";
 
-/** What the person says about a video they want made from nothing (#472), from the Welcome form. */
+/** What the person says about a video they want made from nothing, from the Welcome form. */
 export interface IdeaBrief {
   /** Name of the video; also the project's name. */
   name: string;
@@ -284,7 +284,7 @@ export type { HandoffKind };
  * the preload. The renderer never touches Node or the file system directly.
  */
 export interface FrameshellApi {
-  /** UI language of the app (#189); main reloads the windows when the user changes it. */
+  /** UI language of the app; main reloads the windows when the user changes it. */
   readonly lang: Lang;
   project: {
     /** Project of this window; null shows the welcome screen. */
@@ -301,7 +301,7 @@ export interface FrameshellApi {
     forgetRecent(dir: string): Promise<string[]>;
     /** Show recent project folder `dir` in Finder / Explorer / the file manager; ignored for folders not in the list. */
     revealRecent(dir: string): Promise<void>;
-    /** Stop warning that this window's project is in a synced folder (#187); kept per project in the config dir. */
+    /** Stop warning that this window's project is in a synced folder; kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
     /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
     chooseVideos(): Promise<VideoProjectPlan | null>;
@@ -311,7 +311,7 @@ export interface FrameshellApi {
      * a video file; `plan` is null when nothing is.
      */
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
-    /** Videos or audio the OS asked to open in this window (Open with, #184), once: null when none or already taken. */
+    /** Videos or audio the OS asked to open in this window (Open with), once: null when none or already taken. */
     takeOffered(): Promise<VideoProjectPlan | null>;
     /** Called when the OS offers videos to this window; take them with {@link takeOffered}. Returns an unsubscribe function. */
     onVideosOffered(listener: () => void): () => void;
@@ -334,20 +334,20 @@ export interface FrameshellApi {
       options?: { transcribe?: boolean; orientation?: AudioOrientation },
     ): Promise<OpenOutcome>;
     /**
-     * Where the project of an idea goes (#472): `place.parent` (default the user's videos folder) and `place.name`
+     * Where the project of an idea goes: `place.parent` (default the user's videos folder) and `place.name`
      * (default "Untitled video"), numbered when the folder exists. Nothing is created.
      */
     planIdea(place?: { parent?: string; name?: string }): Promise<IdeaProjectPlan>;
     /**
-     * Create an empty project for `brief` (#472), without footage, and open it in this window: `project.init` at the
+     * Create an empty project for `brief`, without footage, and open it in this window: `project.init` at the
      * size of the first format, then `format.add` for each other one, through the daemon. `parent` is the folder
      * it goes in (default the videos folder). The brief is kept for {@link takeIdea}.
      */
     fromIdea(brief: IdeaBrief, parent?: string): Promise<OpenOutcome>;
-    /** The brief this window's project was made from, once (#472): null when it was not made from an idea or already taken. */
+    /** The brief this window's project was made from, once: null when it was not made from an idea or already taken. */
     takeIdea(): Promise<IdeaBrief | null>;
     /**
-     * Setup still running, or just ended, for this window's project (#188);
+     * Setup still running, or just ended, for this window's project;
      * null when none. With `transcribe`, {@link fromVideos} installs the
      * transcription plugin and transcribes the videos in the background.
      */
@@ -662,7 +662,7 @@ export interface FrameshellApi {
     onProgress(listener: (progress: TranscribeProgress) => void): () => void;
   };
   models: {
-    /** `model.list` for the window's project (#427): provider models, files registered on this machine, the project's choice. */
+    /** `model.list` for the window's project: provider models, files registered on this machine, the project's choice. */
     list(): Promise<MethodResult<"model.list">>;
     /** `transcription.set`: the project's model, or null for the default. Rejects with the daemon's message, e.g. ModelNotRegistered. */
     use(model: string | null): Promise<MethodResult<"transcription.set">>;
@@ -752,7 +752,7 @@ export interface FrameshellApi {
     /** Bytes still to download before the default transcription provider transcribes a first take: its tool and model. */
     transcriptionDownload(): Promise<number>;
     /**
-     * Install the default transcription provider (`@frameshell/whisper-cpp`) into the window's project (#411); the
+     * Install the default transcription provider (`@frameshell/whisper-cpp`) into the window's project; the
      * daemon then transcribes the takes that failed without it. Rejects with the daemon's message.
      */
     installTranscription(): Promise<void>;
@@ -891,7 +891,7 @@ export interface ShootFinish {
 }
 
 /**
- * An update of the app (#193), for the banner. `available`: a newer release
+ * An update of the app, for the banner. `available`: a newer release
  * to download from `url` (Windows, `.deb`, or where installing failed).
  * `ready`: downloaded and installed on restart (macOS, AppImage).
  */
@@ -949,7 +949,7 @@ export interface LiveClipPage {
   key: string;
 }
 
-/** An agent CLI the agent guide offers (#190), and where it was found. */
+/** An agent CLI the agent guide offers, and where it was found. */
 export interface AgentChoice {
   /** Also the label `agent-detect.ts` gives a terminal running it. */
   id: string;
@@ -964,7 +964,7 @@ export interface AgentChoice {
   path: string | null;
 }
 
-/** Frameshell's entry in Claude Desktop's MCP config (#191). */
+/** Frameshell's entry in Claude Desktop's MCP config. */
 export interface ClaudeDesktopStatus {
   /** Claude Desktop exists on this platform (macOS, Windows). */
   available: boolean;

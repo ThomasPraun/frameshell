@@ -1,4 +1,4 @@
-// Planning and checking a project made from an idea, with no footage (#472): folder, formats, brief.
+// Planning and checking a project made from an idea, with no footage: folder, formats, brief.
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { BUILTIN_FORMATS, BUILTIN_FORMAT_IDS } from "@frameshell/schema";

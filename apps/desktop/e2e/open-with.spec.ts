@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 import { makeAudio, useTestBinaries } from "./media.js";
 
-// Videos the OS asks the app to open (#184): launch arguments on Windows and Linux, `open-file` on macOS. Both end
+// Videos the OS asks the app to open: launch arguments on Windows and Linux, `open-file` on macOS. Both end
 // in the same routing; launch arguments are what an e2e can pass.
 const box = sandbox("demo");
 // New projects probe their first video: the shared ffprobe, not a download per sandbox.

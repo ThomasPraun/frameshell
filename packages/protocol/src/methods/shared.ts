@@ -593,7 +593,7 @@ export const ExportPresetResultSchema = z.looseObject({
   plugin: z.string().nullable().describe("Package that contributed the preset; null for presets built into Frameshell."),
 });
 
-/** A project's copy of the core agent skill against the bundled one (#396). */
+/** A project's copy of the core agent skill against the bundled one. */
 export const CoreSkillStateSchema = z.object({
   state: z
     .enum(["current", "outdated", "edited", "absent"])

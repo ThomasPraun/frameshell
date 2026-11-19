@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Explorer right-click menu (#415): Open, Reveal, Copy path and Move to Trash, which main confirms in a native message
+// Explorer right-click menu: Open, Reveal, Copy path and Move to Trash, which main confirms in a native message
 // box naming the timeline clips that use the file (daemon `file.uses`). The box and `shell.trashItem` are stubbed in
 // main: the real OS trash is never touched.
 const box = sandbox("demo");

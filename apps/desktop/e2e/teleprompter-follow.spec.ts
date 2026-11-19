@@ -3,7 +3,7 @@
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, panelWindow, sandbox } from "./harness.js";
 
-// Live following (#393, ADR 0024): the stand-in recognizer (FRAMESHELL_SHOOT_STAND_IN=1) hears what the test says in
+// Live following (ADR 0024): the stand-in recognizer (FRAMESHELL_SHOOT_STAND_IN=1) hears what the test says in
 // main, and the detached teleprompter follows it: steps, a skipped sentence struck through, a FREE slot that waits
 // for a pause, keys that resync, and a hold that makes it wait.
 const box = sandbox("teleprompter");

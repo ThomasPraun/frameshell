@@ -9,7 +9,7 @@ import { round } from "../grade/levels.js";
 import { captureParallelism } from "../review/source.js";
 import { type SheetTile, writeSheet } from "../review/sheet.js";
 
-// `clip.compare` (#482 slice 3, ADR 0035): one frame of a generated clip under several props or sources, each rendered by
+// `clip.compare` (ADR 0035): one frame of a generated clip under several props or sources, each rendered by
 // the `frame` export path on a copy of the loaded timeline whose clip carries that variant, tiled into one labelled
 // sheet with the sheet writer `grade.compare` and `review` share. Never edits the timeline.
 
@@ -33,7 +33,7 @@ export interface ClipCompareRequest {
   out?: string | undefined;
   tileWidth: number;
   projectFormat?: string | undefined;
-  /** Draw every tile from finals, as `frame` with `final` does (ADR 0035 slice 7). */
+  /** Draw every tile from finals, as `frame` with `final` does (ADR 0035). */
   final?: boolean | undefined;
   /** The person agreed to wait for those finals when they are estimated over 5 minutes in all, or unknown. */
   yes?: boolean | undefined;

@@ -1,4 +1,4 @@
-// `sound.music` (ADR 0038 slice 3): times → bars, sections and accents → the spec → the take (and its beat grid) →
+// `sound.music` (ADR 0038): times → bars, sections and accents → the spec → the take (and its beat grid) →
 // where the clip goes. Planning touches no timeline file, so the daemon opens the transaction only to place it.
 import { ErrorCode, type OperationResult, RpcError, type SoundMusicResult, type ValidatedParams } from "@frameshell/protocol";
 import { MUSIC_MAX_BARS, MUSIC_MAX_SECONDS, MUSIC_PRESET_DEFAULTS, type MusicSection, type Timeline, type Track } from "@frameshell/schema";

@@ -7,7 +7,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Format switcher (ADR 0027 slice 2): with formats in `frameshell.json` the preview shows the frame as each format
+// Format switcher (ADR 0027): with formats in `frameshell.json` the preview shows the frame as each format
 // exports it. The clip is red on its left half and lime on its right; in 9:16 its centre covers the whole frame, so
 // the top of the canvas is picture, not a letterbox bar.
 const box = sandbox("multicam");
@@ -115,7 +115,7 @@ test("the switcher shows the declared formats; 9:16 covers the frame with the cl
   await expect(page.getByRole("button", { name: "Pick" })).toBeEnabled();
 });
 
-// Editing in a format (ADR 0027 slice 4): what the handles and the inspector change in 9:16 lands in the clip's
+// Editing in a format (ADR 0027): what the handles and the inspector change in 9:16 lands in the clip's
 // `formats["9x16"]` override; the clip itself, and so the primary format, stays as it was.
 test("in 9:16 the handles and the inspector edit the clip there only", async () => {
   test.setTimeout(120_000);

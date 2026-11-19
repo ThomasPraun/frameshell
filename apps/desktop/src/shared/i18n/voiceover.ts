@@ -119,4 +119,5 @@ const es: typeof en = {
   placeFailed: "No se pudo colocar la voz en off",
 };
 
+/** English and Spanish strings of the voiceover dialog. */
 export const voiceover = { en, es };

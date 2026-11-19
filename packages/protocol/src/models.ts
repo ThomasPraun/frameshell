@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Transcription models (#427): the provider's pinned models, and model files the user registered on this machine
+// Transcription models: the provider's pinned models, and model files the user registered on this machine
 // (`<configDir>/models.json`). A project names only a model id; the file behind a registered id is per machine.
 
 /** Id of a registered model: what `transcription.model` and `--model` name. */

@@ -1,4 +1,4 @@
-// Agent CLIs the agent panel offers (#190): which are installed, and how to start or install them.
+// Agent CLIs the agent panel offers: which are installed, and how to start or install them.
 import { execFile } from "node:child_process";
 import { access, constants } from "node:fs/promises";
 import { posix, win32 } from "node:path";

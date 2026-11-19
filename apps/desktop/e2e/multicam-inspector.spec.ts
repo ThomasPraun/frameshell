@@ -7,7 +7,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Correcting shots by hand (#241, ADR 0016 decision 5): the program track paints each shot's angles, the shot
+// Correcting shots by hand (ADR 0016 decision 5): the program track paints each shot's angles, the shot
 // inspector changes layout and angles through `shot.set`, the group's angles through `multicam.angle`; the preview
 // follows and undo restores. Each angle is a flat colour, so the preview's left and right halves read as letters.
 const box = sandbox("multicam");

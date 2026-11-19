@@ -169,7 +169,7 @@ export function Workspace({ project }: { project: ProjectView }) {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // Keys 1-9 cut to that angle at the playhead, also while playing; Shift adds it to the shot (#242).
+  // Keys 1-9 cut to that angle at the playhead, also while playing; Shift adds it to the shot.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const key = angleKey(event);
@@ -185,7 +185,7 @@ export function Workspace({ project }: { project: ProjectView }) {
     return listenEverywhere("keydown", onKey);
   }, []);
 
-  // Media dropped from the OS goes into assets/ (#183); in an image project each picture also becomes a layer on top.
+  // Media dropped from the OS goes into assets/; in an image project each picture also becomes a layer on top.
   // The terminal keeps drops for itself.
   const dropping = useFileDrop(
     useCallback(
@@ -618,7 +618,7 @@ function CollapsedRail({ side, label, shortcut, onExpand }: { side: "left" | "ri
   );
 }
 
-/** The project is in a folder a cloud service syncs (#187): say what that costs, until dismissed. */
+/** The project is in a folder a cloud service syncs: say what that costs, until dismissed. */
 function SyncWarning({ synced }: { synced: { service: string; root: string } }) {
   const [shown, setShown] = useState(true);
   if (!shown) return null;
@@ -638,7 +638,7 @@ function SyncWarning({ synced }: { synced: { service: string; root: string } }) 
 /** How long a finished setup's last line stays in the status bar, ms. A failure stays until the next change. */
 const SETUP_DONE_MS = 8000;
 
-/** Background setup of a project created from videos (#188), as main reports it. */
+/** Background setup of a project created from videos, as main reports it. */
 function useProjectSetup(): ProjectSetup | null {
   const [setup, setSetup] = useState<ProjectSetup | null>(null);
   useEffect(() => {

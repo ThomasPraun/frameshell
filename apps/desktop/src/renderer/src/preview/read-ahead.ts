@@ -1,4 +1,4 @@
-// Encoded-picture read-ahead for the engine's decode pipelines (#105). Ranged reads go through the main process's
+// Encoded-picture read-ahead for the engine's decode pipelines. Ranged reads go through the main process's
 // `frameshell-media://` handler, which can answer late on a loaded machine. Started only when the decoder needs the
 // next picture, that latency eats the few decoded frames kept ahead (0.4 s). Reads run ahead of the decoder instead.
 import type { DecodeStep } from "./decode-plan.js";

@@ -3,7 +3,7 @@ import { delimiter, dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launch, sandbox, terminalText } from "./harness.js";
 
-// A video made from an idea (#472): the Welcome form writes an empty project whose formats go in through the daemon,
+// A video made from an idea: the Welcome form writes an empty project whose formats go in through the daemon,
 // then the agent guide offers the prompt for the film. The folder dialog is replaced in main; the stand-in agent
 // (fake-agent.mjs) is installed as `gemini` on PATH like in agent-guide.
 const FAKE_AGENT = join(import.meta.dirname, "fake-agent.mjs");

@@ -6,7 +6,7 @@ import { createTimeline } from "@frameshell/schema";
 import { CONFIG_JOURNAL, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// Project-config changes in history (ADR 0036 slice 1): format edits are journaled in their transaction, listed by
+// Project-config changes in history (ADR 0036): format edits are journaled in their transaction, listed by
 // `history`, undone by `revert` and `tx.abort` (`desktop/…` = `ui`). Review mode: config-review.test.ts.
 
 let daemon: Daemon | undefined;

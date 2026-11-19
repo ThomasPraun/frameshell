@@ -8,7 +8,7 @@ import { CORE_SKILL_FILES, SHIPPED_SKILL_HASHES } from "../src/skills/core-skill
 import { coreSkillState, refreshCoreSkill } from "../src/skills/refresh.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// A project's copy of the core agent skill kept current (#396): unedited old copies update, edited ones are left alone.
+// A project's copy of the core agent skill kept current: unedited old copies update, edited ones are left alone.
 
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 const skillDir = (root: string) => join(root, ".claude", "skills", "frameshell");

@@ -1,4 +1,4 @@
-// Connect Claude Desktop (#191): a `frameshell` entry in its MCP config, which starts `frameshell mcp` outside any
+// Connect Claude Desktop: a `frameshell` entry in its MCP config, which starts `frameshell mcp` outside any
 // project, so the server follows the app window the user works in (ADR 0014). The JSON editing is shared with
 // Connect Claude Code (`@frameshell/cli`, `config-file.ts`).
 import { readFile, stat } from "node:fs/promises";

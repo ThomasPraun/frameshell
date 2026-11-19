@@ -3,7 +3,7 @@ import { CRAFT_CHECKS, type CraftCheck, FormatIdSchema, PLATFORM_IDS, type Platf
 import { styleValue } from "./style-commands.js";
 import { UsageError } from "./timeline-commands.js";
 
-/** Help text of `review` (#457), in `frameshell --help`. */
+/** Help text of `review`, in `frameshell --help`. */
 export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,beats,cuts,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop] [--crop-at x,y[,size] [--clip id]] [--pop t] [--onion clip] [--speed clip]
                                Look at the film before showing it: write contact sheets and strips into
                                .frameshell/review/<n>/ (last 10 kept; project files untouched) and print their paths.

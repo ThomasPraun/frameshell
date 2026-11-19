@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import { createHyperframesAdapter, newComposition } from "../src/index.js";
 
-// Opt-in like templates-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the UI demo templates (#466, #549) in managed Chrome.
+// Opt-in like templates-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the UI demo templates in managed Chrome.
 // A page is seeked frame by frame at 30 fps and its elements are read, so each "same frame" is checked on what is painted.
 const FPS = 30;
 const execFileAsync = promisify(execFile);

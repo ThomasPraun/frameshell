@@ -15,7 +15,7 @@ import { assColor, assDocument } from "./ass.js";
 
 /**
  * Cover image and finished frame 0: a chosen frame of the timeline with one big word over it, in the
- * subtitle face and the `big-keyword` look until the project style (#468) holds its own. Pure: the face's
+ * subtitle face and the `big-keyword` look until the project style holds its own. Pure: the face's
  * metrics come in as an argument, so plans stay golden-testable.
  */
 

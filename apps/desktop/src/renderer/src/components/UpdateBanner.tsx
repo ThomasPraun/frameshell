@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { UpdateStatus } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 
-/** A newer version (#193): a link to its download, or "Restart to update" once downloaded. Floats above the window. */
+/** A newer version: a link to its download, or "Restart to update" once downloaded. Floats above the window. */
 export function UpdateBanner() {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   useEffect(() => {

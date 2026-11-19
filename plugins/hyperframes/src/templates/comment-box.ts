@@ -14,7 +14,7 @@ import {
 import { TYPING_MATH } from "./typing-kit.js";
 
 /**
- * Comment box (#549, variant of `typing-field`): a card with an avatar and a
+ * Comment box (variant of `typing-field`): a card with an avatar and a
  * text area types a comment over a few lines (the same seeded rhythm and blinking
  * caret), then a cursor presses its button; on that same frame the button
  * presses, a progress line fills and the confirmation appears when it ends. With

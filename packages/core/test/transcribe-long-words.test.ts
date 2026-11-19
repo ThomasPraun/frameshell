@@ -9,7 +9,7 @@ import { tempDir } from "./helpers.js";
 import { toneWav } from "./whisper-fixture.js";
 
 /**
- * #117: a retake whisper swallowed. Speech (tone) at 0.5-1.4 ("Hola"),
+ * A retake whisper swallowed. Speech (tone) at 0.5-1.4 ("Hola"),
  * 2.0-2.5 ("incluido."), 3.0-4.0 and 4.5-6.0 (the swallowed "Aquella semana,
  * otra vez."), 7.0-7.5 ("Fin"). The full pass hears "incluido." spanning
  * 2.0-6.5.
@@ -169,7 +169,7 @@ describe("transcribeAsset: long words (#117)", () => {
   });
 
   it("re-transcribes adjacent long words in one window and recovers words in the gap between them", async () => {
-    // #117's real shape: `incluido.` then `La`, the swallowed phrase running across the gap.
+    // Real shape: `incluido.` then `La`, the swallowed phrase running across the gap.
     const { dir, extract } = project([
       [0.5, 1.4],
       [2.0, 2.5],

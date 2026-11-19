@@ -4,7 +4,7 @@ import { FrameGrid } from "../timeline/grid.js";
 import type { Box } from "./safe.js";
 import { BEHIND_EATEN, BEHIND_FINE, BEHIND_FLOATS, GRAPHIC_ALPHA } from "./thresholds.js";
 
-// A word behind the person (ADR 0032, #461): how much of it the person covers, from the word's render alpha and the
+// A word behind the person (ADR 0032): how much of it the person covers, from the word's render alpha and the
 // plate's matte, both placed in the film, at the first, middle and last frame of its time behind the person. Pure: the
 // frames come from `placement.ts` (`alphaMask`, `matteFrame`), the gathering from `ReviewService`.
 

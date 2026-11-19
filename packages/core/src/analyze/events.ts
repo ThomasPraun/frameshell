@@ -5,7 +5,7 @@ import { stillRuns } from "./rhythm.js";
 import { frameAt, frameStart } from "./shots.js";
 
 // What happens in a film, moment by moment: flashes, elements that appear or disappear, holds and hits of the sound.
-// Pure: `picture.ts` measures the per-frame series, `service.ts` decodes the sound. After HyperFrames' `measure` (Apache-2.0), ported per #478.
+// Pure: `picture.ts` measures the per-frame series, `service.ts` decodes the sound. After HyperFrames' `measure` (Apache-2.0).
 
 /** Cells of the grid the picture is split in. */
 export const CELLS = LOOK_COLUMNS * LOOK_ROWS;

@@ -7,7 +7,7 @@ import type { FrameshellApi } from "../src/shared/api.js";
 import { launch, sandbox } from "./harness.js";
 import { makeAudio, makeSource, testFfmpeg, useTestBinaries } from "./media.js";
 
-// Projects created from a video (ADR 0013, #182): the welcome screen plans the folder beside the video, creates the
+// Projects created from a video (ADR 0013): the welcome screen plans the folder beside the video, creates the
 // project and imports the video without the terminal. The native file dialog is replaced in main.
 const box = sandbox("demo");
 // New projects probe their first video: the shared ffprobe, not a download per sandbox.
@@ -61,7 +61,7 @@ test("choosing a video creates its project beside it and opens it", async () => 
     );
     expect(other.plan).toMatchObject({ dir: join(home, "broll"), existing: false });
 
-    // A drop plans the videos among the files and names the rest (#183).
+    // A drop plans the videos among the files and names the rest.
     const notes = join(home, "notes.pdf");
     writeFileSync(notes, "%PDF");
     const mixed = await page.evaluate(
@@ -146,7 +146,7 @@ for (const { frame, label, size } of [
     await makeAudio(episode);
     const { app, page } = await launch({ ...own, projectDir: folder });
     try {
-      // A drop plans the audio among the files and names the rest (#183).
+      // A drop plans the audio among the files and names the rest.
       const notes = join(folder, "notes.pdf");
       writeFileSync(notes, "%PDF");
       const dropped = await page.evaluate(

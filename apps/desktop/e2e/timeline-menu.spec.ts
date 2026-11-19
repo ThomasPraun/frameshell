@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Timeline clip right-click menu (#416): the edit commands of the keys, on the right-clicked clip or the selection
+// Timeline clip right-click menu: the edit commands of the keys, on the right-clicked clip or the selection
 // holding it, disabled where the key would do nothing. Real daemon; generated `titles` clips need no media or plugin.
 const box = sandbox("editing");
 const mainFile = join(box.projectDir, "timelines", "main.json");

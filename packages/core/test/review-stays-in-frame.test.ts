@@ -9,7 +9,7 @@ import type { MotionSeries } from "../src/review/source.js";
 import { mediaTools, run } from "./media-tools.js";
 import { tempDir } from "./helpers.js";
 
-// `staysInFrame` (#457): the boxes of what a clip draws, from `placement.ts`, against the frame of the format reviewed.
+// `staysInFrame`: the boxes of what a clip draws, from `placement.ts`, against the frame of the format reviewed.
 
 const film = { width: 1080, height: 1920 };
 const MOTION: MotionSeries = { times: [0, 1, 2, 3, 4], energy: [0, 5, 5, 5, 5], spread: [50, 50, 50, 50, 50], first: 0, step: 30 };

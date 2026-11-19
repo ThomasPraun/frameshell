@@ -71,4 +71,5 @@ const es: typeof en = {
   dismiss: "Descartar",
 };
 
+/** English and Spanish strings of review mode: the switch and the proposal bar. */
 export const review = { en, es };

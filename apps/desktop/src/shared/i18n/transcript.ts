@@ -110,4 +110,5 @@ const es: typeof en = {
   speakerTitleRename: (name) => `Habla ${name}. Doble clic para renombrar; haz clic derecho en palabras para indicar que habla otra persona.`,
 };
 
+/** English and Spanish strings of the transcript editor tab. */
 export const transcript = { en, es };

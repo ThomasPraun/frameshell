@@ -1,6 +1,6 @@
 import { type DaemonLaunch, type DaemonLauncher, type SpawnedDaemon, spawnDetachedDaemon } from "@frameshell/cli";
 
-// Why a helper process (#112): on Windows a spawned child inherits every inheritable handle of its parent. Electron's
+// Why a helper process: on Windows a spawned child inherits every inheritable handle of its parent. Electron's
 // main process leaves its stdio handles inheritable, so a daemon spawned from it holds the pipes of whoever reads the
 // app's output (Playwright, a terminal) until it idles out. A utility process marks its stdio non-inheritable, gets
 // only the handles Chromium hands it, and runs with stdio "ignore": a daemon it spawns holds none of the app's pipes.

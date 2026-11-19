@@ -13,7 +13,7 @@ import {
   uninstallCli,
 } from "../src/main/cli-install.js";
 
-// Seam under test: the File menu's install of the system-wide `frameshell` (#139), against a temp dir for the link
+// Seam under test: the File menu's install of the system-wide `frameshell`, against a temp dir for the link
 // and a fake host for prompts and the Windows registry.
 
 function setup(platform: NodeJS.Platform = "linux") {

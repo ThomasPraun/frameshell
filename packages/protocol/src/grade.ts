@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { GRADE_LOOKS, GradeSchema, lookNames } from "@frameshell/schema";
 
-// `grade.analyze` (#384, ADR 0031): measured levels of a clip's picture and a bounded correction suggestion, never applied.
+// `grade.analyze` (ADR 0031): measured levels of a clip's picture and a bounded correction suggestion, never applied.
 
 /** What kind of clip `grade.analyze` and `grade.compare` were asked about: footage or a photo, a generated clip (a plugin's render), a nested timeline (compare only). */
 export const GradeClipKindSchema = z.enum(["media", "generated", "timeline"]);
@@ -65,7 +65,7 @@ export const GradeAnalyzeResultSchema = z.object({
 /** Result of `grade.analyze`. */
 export type GradeAnalyzeResultShape = z.infer<typeof GradeAnalyzeResultSchema>;
 
-// `grade.compare` (#384, ADR 0031): one frame of a clip under several looks next to a neutral baseline, as one image.
+// `grade.compare` (ADR 0031): one frame of a clip under several looks next to a neutral baseline, as one image.
 
 /** Most looks one `grade.compare` renders. */
 export const GRADE_COMPARE_MAX_LOOKS = 16;

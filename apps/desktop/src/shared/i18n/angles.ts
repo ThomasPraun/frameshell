@@ -31,4 +31,5 @@ const es: typeof en = {
   turnsFailed: (reason) => `Marcas de quién habla no disponibles: ${reason}`,
 };
 
+/** English and Spanish strings of the multicam viewer. */
 export const angles = { en, es };

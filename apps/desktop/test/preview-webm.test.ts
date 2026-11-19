@@ -12,7 +12,7 @@ import { openWebm, openWebmProxy, readWebmProxy } from "../src/renderer/src/prev
 
 let alpha: Uint8Array;
 let opaque: Uint8Array;
-/** VP9-alpha proxies by the ingest recipe (#90): 3 s at 30 fps, tiny (several GOPs per Cluster) and 540p (one each). */
+/** VP9-alpha proxies by the ingest recipe: 3 s at 30 fps, tiny (several GOPs per Cluster) and 540p (one each). */
 let tinyProxy: Uint8Array;
 let bigProxy: Uint8Array;
 

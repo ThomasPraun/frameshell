@@ -68,4 +68,5 @@ const es: typeof en = {
   placeVoiceover: "Colocar voz en off…",
 };
 
+/** English and Spanish strings of editor tabs, script hovers and the file explorer. */
 export const editor = { en, es };

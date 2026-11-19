@@ -2,11 +2,11 @@ import { LOW_BEAT_CONFIDENCE } from "@frameshell/schema";
 import { fft } from "../fft.js";
 
 /**
- * Beat detector (ADR 0029 decision 3, #458): a straight beat grid of one music
+ * Beat detector (ADR 0029 decision 3): a straight beat grid of one music
  * asset, measured from its audio. Pure DSP on mono samples; the caller brings
  * the PCM (`beats-store.ts`).
  *
- * Recipe, after the thresholds measured in #458 and #689 (HyperFrames' `beats`, Apache-2.0, is a reference
+ * Recipe, after the thresholds measured on real music (HyperFrames' `beats`, Apache-2.0, is a reference
  * only; corpus and numbers in docs/research/beats-real-music.md):
  * 1. resample to {@link ANALYSIS_RATE} and take the spectral-flux onset envelope (hop 128, window 2048,
  *    log magnitude, 100 ms of silent pre-roll so a hit at t = 0 has a frame before it);

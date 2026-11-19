@@ -12,7 +12,7 @@ import { findClicks } from "./sound.js";
 import type { Onset } from "./sync.js";
 import { CLICK_BAND_HZ, HARSH_BAND_HZ } from "./thresholds.js";
 
-// The sound `review` reads (#457): where sounds start, for the sync check (the anchors of generated takes on the
+// The sound `review` reads: where sounds start, for the sync check (the anchors of generated takes on the
 // timeline's audio tracks, or the hits found in an exported file's sound), and the decoded sound of a file for the
 // sound review list. A timeline's sound is mixed only by `render`, so nothing else of it is heard here.
 

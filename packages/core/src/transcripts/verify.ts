@@ -75,7 +75,7 @@ const WEAK_FACTOR = 0.5;
 /**
  * Seconds of export audio kept on each side of a lost candidate when it is
  * re-transcribed alone: enough context for whisper to decode the phrase
- * (#115: a 12 s window heard what the full pass skipped).
+ * (a 12 s window heard what the full pass skipped).
  */
 const RECHECK_PAD_S = 5;
 
@@ -326,6 +326,7 @@ function keptWords(
   return { words, unchecked, warnings };
 }
 
+/** Clips in start order, each cut where the next begins and dropped when nothing of it plays. */
 export function visibleClips(clips: readonly MediaClip[]): Visible[] {
   const placed = clips
     .map((clip) => {
@@ -393,7 +394,7 @@ function reported(word: KeptWord, agreement: number): (factor: number) => LostWo
 }
 
 /**
- * Settle the lost candidates of `report` in place (#115): whisper can skip a
+ * Settle the lost candidates of `report` in place: whisper can skip a
  * phrase in a long pass that it hears fine in a short one, so each candidate
  * is re-transcribed in a window of {@link RECHECK_PAD_S} around it first.
  * Heard there: confirmed, not reported. Heard as other text: `garbled`.

@@ -1,4 +1,4 @@
-// Film finish in the app (ADR 0043 slice 4b): the numbers the inspector shows for a clip's vignette and grain, and the
+// Film finish in the app (ADR 0043): the numbers the inspector shows for a clip's vignette and grain, and the
 // letterbox menu's choices. Pure, so the window and its tests share them; no number of the formulas lives here.
 import { GRAIN_LIMITS, type GrainFields, VIGNETTE_LIMITS, type VignetteFields } from "@frameshell/schema/finish";
 
@@ -41,6 +41,7 @@ export const VIGNETTE_SLIDERS = [
   { name: "softness", step: 0.01 },
 ] as const satisfies readonly { name: keyof ShownVignette; step: number }[];
 
+/** The grain sliders, same shape as {@link VIGNETTE_SLIDERS}. */
 export const GRAIN_SLIDERS = [
   { name: "amount", step: 0.01 },
   { name: "size", step: 0.1 },

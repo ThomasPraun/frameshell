@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CONFIG_JOURNAL, type Daemon, type SuggestionInput, contrastRatio, startDaemon, styleSuggestions } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// `analyze` numbers as `style.json` suggestions (#471): the pure rules on hand-made results, then `style.apply` with
+// `analyze` numbers as `style.json` suggestions: the pure rules on hand-made results, then `style.apply` with
 // `analysis` over the daemon socket on an `analysis.json` written by the test (no video is decoded).
 
 const move = (duration: number, fit = 0.2): AnalyzeMove => ({ startFrame: 0, endFrame: 1, start: 0, end: duration, duration, peak: 10, peakAt: 0, ease: "out", fit });

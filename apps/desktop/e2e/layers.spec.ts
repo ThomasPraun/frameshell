@@ -10,7 +10,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { addBarcodeAsset, waitForIngest } from "./preview-probe.js";
 
-// Generated clips in the preview (#24, #98, SPEC §3.4 / §6.5): a clip added to the timeline renders in the daemon's
+// Generated clips in the preview (SPEC §3.4 / §6.5): a clip added to the timeline renders in the daemon's
 // background; the preview shows a slate with the render's progress, then the engine decodes the cached VP9-alpha
 // render and composites it in track order with every other layer, as export does. The `card` fixture adapter renders
 // a flat colour VP9-alpha card with ffmpeg (after a paced "paint" when the card asks for one), so no headless Chrome
@@ -142,7 +142,7 @@ test("a generated clip under a media overlay on a higher track is hidden there, 
   }
   const { mean, worst, worstAt } = blockDiff(preview, exported, SIZE);
   test.info().annotations.push({ type: "preview vs export", description: `mean block diff ${mean.toFixed(2)}, worst ${worst.toFixed(1)} at ${worstAt}` });
-  // Same bounds as the #17 overlay test: colour conversion on average, layout at the worst block.
+  // Same bounds as the overlay test: colour conversion on average, layout at the worst block.
   expect(mean).toBeLessThan(10);
   expect(worst, `worst 16 px block at ${worstAt}`).toBeLessThan(32);
 

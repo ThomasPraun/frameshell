@@ -51,7 +51,7 @@ const en = {
     checkUpdates: "Check for Updates…",
     autoUpdates: "Check for Updates Automatically",
   },
-  // Update check (#193): main's dialogs (main/updater.ts) and the renderer's banner (components/UpdateBanner.tsx).
+  // Update check: main's dialogs (main/updater.ts) and the renderer's banner (components/UpdateBanner.tsx).
   updates: {
     upToDate: (version: string) => `Frameshell ${version} is the latest version.`,
     available: (version: string) => `Frameshell ${version} is available.`,
@@ -358,4 +358,5 @@ const es: typeof en = {
   },
 };
 
+/** English and Spanish strings of the main process: menus, dialogs, new project setup, CLI install. */
 export const app = { en, es };

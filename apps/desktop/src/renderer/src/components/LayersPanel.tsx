@@ -54,7 +54,7 @@ export function LayersPanel({
     }
   }, []);
 
-  // Undo and redo, as the timeline panel takes them when it is shown (#119).
+  // Undo and redo, as the timeline panel takes them when it is shown.
   useEffect(() => {
     const undoRedo = (direction: HistoryCommand) =>
       void window.frameshell.timeline[direction](TIMELINE).then(

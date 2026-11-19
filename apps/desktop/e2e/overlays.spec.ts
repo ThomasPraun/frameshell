@@ -8,7 +8,7 @@ import { blockDiff, blockMean, exportedPixels, previewPixels } from "./frames.js
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { addBarcodeAsset, waitForIngest } from "./preview-probe.js";
 
-// Overlays and audio tracks (#17): upper video tracks composite over the base in the preview exactly where export puts
+// Overlays and audio tracks: upper video tracks composite over the base in the preview exactly where export puts
 // them, their transform and the clips' gain are edited from the preview and the inspector as `ui` operations.
 const box = sandbox("overlays");
 const mainFile = join(box.projectDir, "timelines", "main.json");

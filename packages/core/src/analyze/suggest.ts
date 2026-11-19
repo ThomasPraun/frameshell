@@ -4,7 +4,7 @@ import { hsl, isNeutral } from "../brand/findings.js";
 import { luminance } from "../export/cover.js";
 import { median } from "./median.js";
 
-// `style.json` values read from an analysis (#471): the grammar of a reference as `style.set` calls. Pure: `service.ts`
+// `style.json` values read from an analysis: the grammar of a reference as `style.set` calls. Pure: `service.ts`
 // feeds it the measured result. Never applied here; `style.apply` with `analysis` applies what the person agrees to.
 
 /** Share of the picture the largest palette colour must hold to be the background; less is a subject, not a ground. */

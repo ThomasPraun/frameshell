@@ -8,7 +8,7 @@ import { type Daemon, commandSpeechProvider, readCommandSpeechProvider, readGlob
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// Seam under test: the machine-level `command` speech provider (ADR 0034 slice 2), read from the global config
+// Seam under test: the machine-level `command` speech provider (ADR 0034), read from the global config
 // only, driven by a stub TTS program (node, so it runs on every platform), and the free-or-paid rule.
 
 const STUB = fileURLToPath(new URL("./fixtures/speech-command/tts.mjs", import.meta.url));

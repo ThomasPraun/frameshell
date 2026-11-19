@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Cursor click (#466, UI demo): a cursor enters from outside the frame, hesitates,
+ * Cursor click (UI demo): a cursor enters from outside the frame, hesitates,
  * clicks a button, and on that same frame the button presses, a ring spreads and
  * a confirmation springs in; then the cursor drifts aside. With `camera` set to
  * follow, the frame zooms in with the cursor to the click and pulls back after it.

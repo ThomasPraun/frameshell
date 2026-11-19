@@ -1,7 +1,7 @@
 import { ANALYSIS_NAME_PATTERN, ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type AnalyzeDiffResult, type AnalyzeResult, type DaemonConnection, labelOf } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
-/** Help text of `analyze` (#471), in `frameshell --help`. */
+/** Help text of `analyze`, in `frameshell --help`. */
 export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--no-speech] [--no-faces]
                                Measure a reference video: shot table (cuts, cuts per minute, shot lengths), contact sheet
                                at 2 frames a second and a frame per shot, dominant colours and look (brightness, contrast,

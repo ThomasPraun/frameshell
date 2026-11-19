@@ -381,7 +381,7 @@ export interface SubtitleCue {
   entry: SubtitleEntry;
 }
 
-/** Hand-written captions of a track (#460) that {@link subtitleCues} applies. */
+/** Hand-written captions of a track that {@link subtitleCues} applies. */
 export interface CaptionRules {
   /** Chunks and keywords; words no phrase holds are grouped by the style. */
   phrases?: readonly CaptionPhrase[] | undefined;
@@ -410,7 +410,7 @@ export function cueTokens(cue: SubtitleCue): string[] {
  * transcript speaker, or with none), and the first cue of a turn carries the
  * speaker's name as `label`, counted in `maxChars`.
  *
- * `rules.phrases` (#460) put the words they hold into the cues they chunk,
+ * `rules.phrases` put the words they hold into the cues they chunk,
  * whatever the limits above: a chunk lasts until the next cue starts, at
  * most 0.35 s after its last word and not under 0.4 s (the next cue still
  * wins). A phrase's keyword is `keyword` of its cue. Words a cut removed

@@ -29,7 +29,7 @@ import { mediaTools, testBinaryManager } from "./media-tools.js";
 
 // Seams under test: the sequencer and its grid (`synthesizeMusic`, `musicGrid`, `arrangeSections`), the loudness meter
 // and limiter, and `sound.music` through a real in-process daemon: the take, its exact beats file, the placement in one
-// transaction and the tempo (ADR 0038 slice 3).
+// transaction and the tempo (ADR 0038).
 
 const MEDIA_TIMEOUT = 120_000;
 const SR = 48_000;

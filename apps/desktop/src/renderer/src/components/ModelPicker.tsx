@@ -7,7 +7,7 @@ import { CUSTOM_CHOICE, DEFAULT_CHOICE, type ModelOption, fileName, modelChoices
 export type ModelStatus = (text: string, tone: "info" | "error" | "warning") => void;
 
 /**
- * Transcription model picker of the transcript toolbar (#427): the project's `transcription.model` (Default = this
+ * Transcription model picker of the transcript toolbar: the project's `transcription.model` (Default = this
  * machine's default, else the provider's), the provider's own models with their size, the model files registered on
  * this computer, and "Custom file…", which registers a file under a name and selects it. Re-reads the list when its
  * window gets focus, so a change made in the terminal shows. `onProvider` hears the project's transcription provider id.

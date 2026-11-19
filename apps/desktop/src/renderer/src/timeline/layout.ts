@@ -136,7 +136,7 @@ export interface ShotBox {
   doubtful: boolean;
 }
 
-/** One angle's turn lane under a program track (#247). */
+/** One angle's turn lane under a program track. */
 export interface TurnLane {
   angle: ShotAngle;
   /** Top edge in content px. */

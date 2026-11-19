@@ -6,7 +6,7 @@ import { type Daemon, PEOPLE_DIR, type PeopleScanRequest, startDaemon } from "..
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `analyze` finds the faces itself for the mouth sync (#471 slice AL), with real ffmpeg and a stand-in scanner that sees one face
+// `analyze` finds the faces itself for the mouth sync, with real ffmpeg and a stand-in scanner that sees one face
 // the whole film (nothing is downloaded). Films outside the project, 8 s at 30 fps, 320x180: a tone in bursts and a "mouth"
 // that flickers in the same bursts `shift` seconds later; each shift is a different file, so a scan of one is no scan of another.
 const MEDIA_TIMEOUT = 240_000;

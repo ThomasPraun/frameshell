@@ -6,7 +6,7 @@ import { noFaceScanner } from "./face-fixture.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `review` and `analyze` on one scale (#457, #471), with real ffmpeg, on textured colour footage so a reader that saw
+// `review` and `analyze` on one scale, with real ffmpeg, on textured colour footage so a reader that saw
 // another grey would disagree: SMPTE bars held 3.5 s, 1.5 s of colour bars turning in hue (the Y plane stays, the
 // colour moves), four 0.2 s flashes (white, red, blue, green: a burst of cuts) and 1.5 s of moving pattern with noise.
 const MEDIA_TIMEOUT = 300_000;

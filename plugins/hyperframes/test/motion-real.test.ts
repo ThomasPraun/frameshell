@@ -229,7 +229,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
     "paints the settling tail frame by frame as it paints each frame cold (no change too small for Chrome to repaint)",
     async () => {
       // Near rest the spring moves the box less than 1/80 px a frame: before the runtime wrote on a 1/32 px grid,
-      // Chrome kept the older raster and frames 26 to 29 of a sequential render differed from cold by 8/255 (#501).
+      // Chrome kept the older raster and frames 26 to 29 of a sequential render differed from cold by 8/255.
       const dir = project();
       const composition = join(dir, "compositions", "hyperframes", "motion");
       const server = createServer((request, response) => {

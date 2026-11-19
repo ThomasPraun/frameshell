@@ -13,7 +13,7 @@ import {
 import { FINISH_PRESETS, SHADOWS_VARIABLE, STUDIO_SCRIPT, type ThreeTemplate, finishVariable, loadScript, threePageHead } from "./three-kit.js";
 
 /**
- * 3D title (#473, ADR 0042): a short text of extruded Archivo Black letters (the typeface JSON the plugin ships,
+ * 3D title (ADR 0042): a short text of extruded Archivo Black letters (the typeface JSON the plugin ships,
  * `pnpm gen:typeface`), lit in the shared studio. The text is laid out in at most three lines that shrink to the
  * format's width, and the letters arrive together (the depth rises out of the flat text) or one by one on a spring
  * stagger (swing in, or drop in) before a slow turn, a glint sweep and an optional headline. A character the typeface

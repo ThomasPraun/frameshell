@@ -8,7 +8,7 @@ import { exportedPixels, previewPixels } from "./frames.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Colour grade in the preview (ADR 0031, #384): the engine's WebGL2 pass against export's `lut3d` on the same frame.
+// Colour grade in the preview (ADR 0031): the engine's WebGL2 pass against export's `lut3d` on the same frame.
 // A still in RGB keeps YUV out: the frames agree within 1 level on almost every channel (docs/research/webgl2-grade.md).
 const box = sandbox("overlays");
 const mainFile = join(box.projectDir, "timelines", "main.json");

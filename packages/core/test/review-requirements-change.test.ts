@@ -6,7 +6,7 @@ import { parseRequirementsFile } from "@frameshell/schema";
 import { CONFIG_JOURNAL, type Daemon, requirementsState, requirementsWritten, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// `requirements.json` as a config document (ADR 0036, #457): `review.require`, `review.waive`, `file.write` and hand
+// `requirements.json` as a config document (ADR 0036): `review.require`, `review.waive`, `file.write` and hand
 // edits all go through the config journal, so history, revert, tx abort and review mode hold them.
 
 let daemon: Daemon | undefined;

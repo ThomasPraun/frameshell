@@ -15,7 +15,7 @@ import {
 } from "./kit.js";
 
 /**
- * Number wheel (#466): an odometer. Every digit is a column that rolls to its
+ * Number wheel: an odometer. Every digit is a column that rolls to its
  * final digit, the left columns landing first and the right ones last, then the
  * number holds. A column is a fixed slot as wide as the widest tabular digit
  * (measured on the machine that renders: `1ch` is the width of the 0 alone) and

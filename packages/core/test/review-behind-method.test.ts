@@ -9,7 +9,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
-// `review` of words behind the person (ADR 0032, #461) through a real daemon, the stand-in matte (bright = person) and
+// `review` of words behind the person (ADR 0032) through a real daemon, the stand-in matte (bright = person) and
 // `card` words with alpha. A still 60 px white square (x 130 to 190, y 60 to 120 of 320x180) is the person; a face
 // scan puts its face on the square's top 20 rows. Three words, one second each: 37.5 % covered, none, all and the face;
 // then a still picture, which is no generated clip. `review`'s own frame captures make the matte, as `frame` does.

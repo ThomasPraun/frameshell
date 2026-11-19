@@ -16,7 +16,7 @@ import {
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Work cards (#466, owner decision 2026-11-16): a column of task cards, one
+ * Work cards (owner decision): a column of task cards, one
  * line each (`title:status`), that come in staggered, pulse when they start
  * and fill one shared progress bar together. No icons: a title, a status chip
  * and the bar. The progress is one curve for the whole clip (`progressAt`,

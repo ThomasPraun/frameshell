@@ -9,7 +9,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
-// `grade.analyze` (#384, ADR 0031): the pure numbers (parse, mean, suggestion), then the method through a real daemon and the
+// `grade.analyze` (ADR 0031): the pure numbers (parse, mean, suggestion), then the method through a real daemon and the
 // managed ffmpeg on synthetic ramps whose levels are known.
 const MEDIA_TIMEOUT = 240_000;
 
