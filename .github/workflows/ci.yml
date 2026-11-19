@@ -60,6 +60,22 @@ jobs:
       - if: matrix.shard == 1
         run: pnpm lint
       - run: pnpm test ${{ needs.scope.outputs.filter }} --shard=${{ matrix.shard }}/2 --passWithNoTests
+      # The OTIO export read back by the real OpenTimelineIO library (opt-in test, ADR 0045). A step of its own, since
+      # vitest's sharding may put the file in either shard; one cell only, and only when the scope selects OTIO tests.
+      - name: OpenTimelineIO real-library test
+        id: otio
+        if: matrix.os == 'ubuntu-latest' && matrix.shard == 1 && (needs.scope.outputs.unit == 'all' || contains(needs.scope.outputs.filter, 'otio'))
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        if: steps.otio.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - if: steps.otio.outputs.run == 'true'
+        run: pip install opentimelineio==0.18.1
+      - if: steps.otio.outputs.run == 'true'
+        run: pnpm exec vitest run packages/core/test/otio-real
+        env:
+          FRAMESHELL_TEST_OTIO: "1"
       - if: matrix.shard == 2
         run: pnpm build
       # Official plugins as npm would publish them (release.yml publishes them): pack, check the tarballs, npm publish --dry-run.

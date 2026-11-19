@@ -6,11 +6,11 @@ export const EXPORT_USAGE = `  export otio [--timeline id] [--out file.otio] [--
                                Write the timeline as an OpenTimelineIO file for an editor: media clips with
                                source ranges and speed, gaps, dissolves between butted clips, track mute and
                                hide, markers. Generated and nested clips keep their slot and length as missing
-                               media; program tracks, subtitles, dips and fades, transition shapes, transforms,
-                               keys, grades, audio effects and the sound of video-track clips are left out and
-                               listed as warnings. Image projects are refused. Media paths are relative to the
-                               file unless --absolute-paths. Default file: exports/<timeline>.otio. Never edits
-                               the timeline
+                               media; the sound of video-track clips goes on an extra Audio track per video
+                               track. Program tracks, subtitles, dips and fades, transition shapes, transforms,
+                               keys, grades, audio effects and sound fades are left out and listed as warnings.
+                               Image projects are refused. Media paths are relative to the file unless
+                               --absolute-paths. Default file: exports/<timeline>.otio. Never edits the timeline
 `;
 
 /** Flags each `export` command takes besides the global ones. */

@@ -28,14 +28,16 @@ for track in timeline.tracks:
             entry.update(start=child.source_range.start_time.value, duration=child.source_range.duration.value)
         if isinstance(child, otio.schema.Clip):
             entry["reference"] = type(child.media_reference).__name__
+            entry["enabled"] = child.enabled
+            entry["clipId"] = child.metadata.get("frameshell", {}).get("clipId")
         children.append(entry)
-    tracks.append({"kind": track.kind, "duration": track.duration().value, "children": children})
+    tracks.append({"name": track.name, "kind": track.kind, "enabled": track.enabled, "duration": track.duration().value, "children": children})
 markers = [[marker.name, marker.marked_range.start_time.value] for marker in timeline.tracks.markers]
 print(json.dumps({"tracks": tracks, "markers": markers, "duration": timeline.duration().value}))
 `;
 
 interface Read {
-  tracks: { kind: string; duration: number; children: Record<string, unknown>[] }[];
+  tracks: { name: string; kind: string; enabled: boolean; duration: number; children: Record<string, unknown>[] }[];
   markers: [string, number][];
   duration: number;
 }
@@ -86,11 +88,17 @@ describe.skipIf(!ENABLED)("OpenTimelineIO reads the export", () => {
     writeFileSync(path, JSON.stringify(otio, null, 2));
 
     const read = readWithOtio(path);
-    const [video, audio] = read.tracks;
-    expect(read.tracks.map((track) => track.kind)).toEqual(["Video", "Audio"]);
+    const [video, audio, mirror] = read.tracks;
+    expect(read.tracks.map((track) => [track.name, track.kind])).toEqual([
+      ["V1", "Video"],
+      ["A1", "Audio"],
+      ["V1 sound", "Audio"],
+    ]);
     // 30 fps frames: c_a 0-60, c_b 60-120 (dissolve of 15 frames each side of the cut), gap 120-150, c_fast 150-210, c_gen 210-270.
     expect(video!.duration).toBe(270);
     expect(audio!.duration).toBe(270);
+    // The mirror stops after c_fast: the generated clip has no sound to mirror, so it ends 60 frames before the picture.
+    expect(mirror!.duration).toBe(210);
     expect(read.duration).toBe(270);
     expect(video!.children.map((child) => child["type"])).toEqual(["Clip", "Transition", "Clip", "Gap", "Clip", "Clip"]);
     expect(video!.children[1]).toMatchObject({ kind: "SMPTE_Dissolve", inOffset: 15, outOffset: 15 });
@@ -99,5 +107,39 @@ describe.skipIf(!ENABLED)("OpenTimelineIO reads the export", () => {
     expect(video!.children[4]).toMatchObject({ start: 300, duration: 60 });
     expect(video!.children[5]).toMatchObject({ start: 0, duration: 60, reference: "MissingReference" });
     expect(read.markers).toEqual([["hook", 150]]);
+  });
+
+  it("the sound mirror of a video track: same layout and crossfade, a muted clip and a muted track disabled", () => {
+    const timeline = {
+      schemaVersion: 1,
+      id: "main",
+      revision: 1,
+      tracks: [
+        { id: "t_v1", kind: "video", clips: [media("c_a", 0, 2, 4), media("c_b", 2, 5, 7, { dissolve: 1, audio: { muted: true } }), media("c_c", 5, 0, 2, { speed: 2 })] },
+        { id: "t_v2", kind: "video", name: "Cam", muted: true, clips: [media("c_d", 1, 0, 3)] },
+      ],
+    } as Timeline;
+    const { otio } = timelineToOtio(timeline, { fps: 30, assetUrl: (asset) => `../${asset}`, sourceDuration: () => 100 });
+    expect(otioProblems(otio)).toEqual([]);
+    const path = join(tempDir(), "mirror.otio");
+    writeFileSync(path, JSON.stringify(otio, null, 2));
+
+    const read = readWithOtio(path);
+    expect(read.tracks.map((track) => [track.name, track.kind, track.enabled])).toEqual([
+      ["V1", "Video", true],
+      ["Cam", "Video", true],
+      ["V1 sound", "Audio", true],
+      ["Cam sound", "Audio", false],
+    ]);
+    const [video, , sound, camSound] = read.tracks;
+    expect(sound!.duration).toBe(video!.duration);
+    expect(sound!.children.map((child) => child["type"])).toEqual(video!.children.map((child) => child["type"]));
+    expect(sound!.children.map((child) => [child["start"], child["duration"]])).toEqual(video!.children.map((child) => [child["start"], child["duration"]]));
+    expect(sound!.children.filter((child) => child["type"] === "Clip").map((child) => [child["clipId"], child["enabled"]])).toEqual([
+      ["c_a", true],
+      ["c_b", false],
+      ["c_c", true],
+    ]);
+    expect(camSound!.children.map((child) => child["type"])).toEqual(["Gap", "Clip"]);
   });
 });

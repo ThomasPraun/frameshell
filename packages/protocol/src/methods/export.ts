@@ -673,11 +673,14 @@ export const exportMethods = {
       "timeline is never edited. Every time is a whole frame at the project rate. Mapped: video and audio tracks (bottom first; a hidden " +
       "video track and a muted audio track are disabled), media clips as `Clip.2` from the source `in` for the timeline length, `LinearTimeWarp` for a `speed` " +
       "other than 1 and the clip id, start and timeline length in `metadata.frameshell`, a gap for every hole, markers (label, colour, frame). " +
+      "The sound of the media clips of each video track (not still images) is mirrored on one extra Audio track after all the real ones, named `<video track> sound`, " +
+      "`metadata.frameshell.mirrorOf` = the video track id, same ranges, speed, dissolves and `clipId` as the picture (a muted clip or track is disabled there); " +
+      "an editor that also links the file's own audio plays that sound twice, so use one of the two. Clip gain (`audio.gain`) is metadata only, with a warning. " +
       "Generated clips (`hyperframes`, `remotion`, `blender`) and nested timeline clips keep their slot, name and timeline length as a clip " +
       "with a missing media reference, plus a warning: render the clip and relink it in the editor. A dissolve between two clips that end and start at " +
       "the same frame is a `Transition.1` (`SMPTE_Dissolve`, centred on the cut, the effective half length in frames each side; a wipe, push or iris dissolve is written as a plain one, its shape only in the metadata, with a warning). " +
       "NOT exported, each named in `warnings`: " +
-      "multicam program tracks, subtitle tracks, dips and fades (`fadeIn`, `fadeOut`, a dissolve with no handle or no clip before it), transition shapes, transforms and keys, colour grades, film finish, audio effects, the sound of media clips on video tracks (OTIO keeps sound on audio tracks). " +
+      "multicam program tracks, subtitle tracks, dips and fades (`fadeIn`, `fadeOut`, a dissolve with no handle or no clip before it), transition shapes, transforms and keys, colour grades, film finish, audio effects, sound fades (`audio.fadeInMs`, `audio.fadeOutMs`). " +
       "Media paths (`target_url`) are relative to the `.otio` file by default, so the folder can move with the project; " +
       "`absolutePaths: true` writes `file://` URLs. Fails with InvalidOperation (`out` is not a `.otio` file; an image project, which has no cut to hand to an editor), TimelineNotFound.",
     params: z.strictObject({
@@ -697,8 +700,8 @@ export const exportMethods = {
       path: z.string().describe("Absolute path of the `.otio` file written."),
       timeline: z.string(),
       fps: z.number().describe("Rate of every time in the file: the project frame rate."),
-      tracks: z.int().describe("Video and audio tracks written."),
-      clips: z.int().describe("`Clip.2` items written, those with missing media included."),
+      tracks: z.int().describe("Video and audio tracks written, the sound mirror tracks included."),
+      clips: z.int().describe("`Clip.2` items written on the tracks of the timeline, those with missing media included; the sound mirror clips are not counted."),
       markers: z.int().describe("Markers written."),
       warnings: z.array(z.string()).describe("What the file does not carry or carries differently; empty when nothing."),
     }),

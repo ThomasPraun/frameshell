@@ -55,11 +55,10 @@ describe("export.otio", () => {
   it("writes exports/<timeline>.otio, relative to the file, and reports what it left as missing", async () => {
     const result = await conn.request("export.otio", { cwd: project });
     const path = join(project, "exports", "main.otio");
-    expect(result).toMatchObject({ path, timeline: "main", fps: 30, tracks: 1, clips: 3, markers: 1 });
+    expect(result).toMatchObject({ path, timeline: "main", fps: 30, tracks: 2, clips: 3, markers: 1 });
     expect(result.warnings).toEqual([
       "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand.",
       "nested timeline clip c_inner (inner) exported as missing media of its length: export that timeline on its own and relink it.",
-      "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 1 clip not exported (c_a).",
     ]);
     const otio = JSON.parse(readFileSync(path, "utf8"));
     expect(otio.OTIO_SCHEMA).toBe("Timeline.1");
@@ -68,6 +67,10 @@ describe("export.otio", () => {
     expect(children.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual(["Clip.2", "Gap.1", "Clip.2", "Clip.2"]);
     expect(children[0].media_references.DEFAULT_MEDIA.target_url).toBe("../assets/take.mp4");
     expect(children[3].source_range.duration.value).toBe(45);
+    // The sound of the one media clip is the mirror track, linked to the picture by clip id (the file is missing, so it is taken to have sound).
+    expect(otio.tracks.children[1]).toMatchObject({ kind: "Audio", name: "V1 sound", metadata: { frameshell: { mirrorOf: "t_v1" } } });
+    expect(otio.tracks.children[1].children.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual(["Clip.2"]);
+    expect(otio.tracks.children[1].children[0].metadata.frameshell.linkedClipId).toBe("c_a");
     expect(otio.tracks.markers[0]).toMatchObject({ name: "hook", color: "BLUE" });
     // Read-only: the timeline is as it was.
     expect(JSON.parse(readFileSync(join(project, "timelines", "main.json"), "utf8")).revision).toBe(3);
@@ -105,20 +108,52 @@ describe("export.otio", () => {
           id: "t_v1",
           kind: "video",
           clips: [
-            { id: "c_a", type: "media", asset: "assets/short.mp4", start: 0, in: 0, out: 2, audio: { muted: true } },
-            { id: "c_b", type: "media", asset: "assets/short.mp4", start: 2, in: 0.5, out: 2.1, dissolve: 1, audio: { muted: true } },
+            { id: "c_a", type: "media", asset: "assets/short.mp4", start: 0, in: 0, out: 2 },
+            { id: "c_b", type: "media", asset: "assets/short.mp4", start: 2, in: 0.5, out: 2.1, dissolve: 1 },
           ],
         },
       ],
     };
     writeFileSync(join(project, "timelines", "dissolved.json"), JSON.stringify(dissolved, null, 2));
     const result = await conn.request("export.otio", { cwd: project, timeline: "dissolved" });
-    expect(result).toMatchObject({ tracks: 1, clips: 2 });
+    expect(result).toMatchObject({ tracks: 2, clips: 2 });
     expect(result.warnings.filter((warning) => warning.includes("dissolve") || warning.includes("transition"))).toEqual([]);
     const otio = JSON.parse(readFileSync(join(project, "exports", "dissolved.otio"), "utf8"));
     const children = otio.tracks.children[0].children;
     expect(children.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual(["Clip.2", "Transition.1", "Clip.2"]);
     expect(children[1]).toMatchObject({ transition_type: "SMPTE_Dissolve", in_offset: { value: 6 }, out_offset: { value: 6 } });
+    expect(otioProblems(otio)).toEqual([]);
+    // The sound crossfades with the picture: same half on the Audio track.
+    const sound = otio.tracks.children[1].children;
+    expect(sound.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual(["Clip.2", "Transition.1", "Clip.2"]);
+    expect(sound[1]).toMatchObject({ in_offset: { value: 6 }, out_offset: { value: 6 } });
+  }, 120_000);
+
+  it("mirrors the sound of a video, and not of a still image, on the Audio track", async () => {
+    const { ffmpeg } = await mediaTools();
+    mkdirSync(join(project, "assets"), { recursive: true });
+    await run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x36", "-frames:v", "1", join(project, "assets", "photo.png")]);
+    await run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=64x36:r=30:d=2", "-pix_fmt", "yuv420p", join(project, "assets", "clip.mp4")]);
+    const mixed = {
+      ...timeline,
+      id: "mixed",
+      tracks: [
+        {
+          id: "t_v1",
+          kind: "video",
+          clips: [
+            { id: "c_pic", type: "media", asset: "assets/photo.png", start: 0, in: 0, out: 2 },
+            { id: "c_vid", type: "media", asset: "assets/clip.mp4", start: 2, in: 0, out: 2 },
+          ],
+        },
+      ],
+    };
+    writeFileSync(join(project, "timelines", "mixed.json"), JSON.stringify(mixed, null, 2));
+    const result = await conn.request("export.otio", { cwd: project, timeline: "mixed" });
+    expect(result).toMatchObject({ tracks: 2, clips: 2 });
+    const otio = JSON.parse(readFileSync(join(project, "exports", "mixed.otio"), "utf8"));
+    expect(otio.tracks.children[1].children.map((child: { OTIO_SCHEMA: string }) => child.OTIO_SCHEMA)).toEqual(["Gap.1", "Clip.2"]);
+    expect(otio.tracks.children[1].children[1].metadata.frameshell.linkedClipId).toBe("c_vid");
     expect(otioProblems(otio)).toEqual([]);
   }, 120_000);
 

@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LinearTimeWarp` for `speed`, gaps, markers as `Marker.2`, every time a whole frame at the project rate. Generated
   and nested timeline clips keep their slot, name and timeline length as `Clip.2` with a `MissingReference.1` and a
   warning. Multicam program tracks, subtitle tracks, transitions, transforms and keys, grades, film finish, audio
-  effects and the sound of media clips on video tracks are not exported and are named in `warnings`. `target_url` is relative to the file, `--absolute-paths` writes
+  effects and (until slice 3) the sound of media clips on video tracks are not exported and are named in `warnings`. `target_url` is relative to the file, `--absolute-paths` writes
   `file://` URLs. No new dependency and no Python; dissolves and an app menu come in later slices.
 - OpenTimelineIO export, slice 2 of #383 (ADR 0045): a dissolve between two clips that end and start at the same frame
   is a `Transition.1` (`SMPTE_Dissolve`, centred on the cut, the half length `edgeTransitions` gives, in whole frames
@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warnings, named as such. File > Export OpenTimelineIO… in the app (video projects; it asks where to save, the daemon
   writes, a notice counts what the file leaves out). Gated real-library test `FRAMESHELL_TEST_OTIO=1 pnpm test
   packages/core/test/otio` (needs `pip install opentimelineio`).
+- OpenTimelineIO export, slice 3 of #383 (ADR 0045; no protocol change, still 180): the sound of the media clips of
+  each video track (still images have none) is mirrored on one extra `Audio` track per video track, after every real
+  track (`<video track> sound`, `metadata.frameshell.mirrorOf`, clips linked to their picture by `clipId` and
+  `linkedClipId`): same ranges, speed and `Transition.1` crossfades, a muted clip or track disabled there, a muted video
+  track no longer warns. Clip `gain` stays metadata and now has one warning (also on audio-track clips); sound fades
+  (`audio.fadeInMs`, `audio.fadeOutMs`) get one too. `tracks` counts the mirror tracks, `clips` only the pictures and
+  real audio clips. The app notice names `frameshell export otio --out <file>.otio` and fixes "verla" for one thing in
+  Spanish. The real-library test now also reads the mirror and has run against OpenTimelineIO 0.18.1; CI runs it on
+  ubuntu shard 1 when OTIO files change.
 - `frameshell people tune` (`people.tune`, MCP `people_tune`; protocol 178): a read-only tuning report for the voice
   and face suggestion thresholds (ADR 0020 decision 15). It replays matching on the people the owner confirmed (linked
   speakers with cached voice prints, face tracks a face anchor names): same-person and different-person score spreads,
