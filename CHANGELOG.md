@@ -1669,6 +1669,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A new project made from video or audio asks before downloading transcription (no protocol change,
+  `PROTOCOL_VERSION` stays): when the transcription tool or its model is still to be downloaded, a native box states the
+  size, says it runs on this machine and nothing is uploaded, and offers "Download and transcribe" (default) or "Skip
+  transcription". Skipping, or closing the box, makes the project as usual without a transcript and installs nothing;
+  the setup status says it was skipped and that the agent can transcribe later (for audio: that the project has only the
+  audio, without background or subtitles). With nothing to download the setup runs as before, with no question; the
+  cloud-provider ask is unchanged. Strings en + es; pure decision `chooseDownload` in
+  `apps/desktop/src/main/transcription-download.ts`.
 - Agent docs split (DOC1, epic #451; docs and tooling only, no protocol change): the root `CLAUDE.md`, loaded on every
   turn, shrinks from about 15k to about 2.6k tokens. It keeps a short doc map that routes each area to a nested
   `CLAUDE.md`, a "Shared truths" table (concepts with one owner file shared by export, preview, engine or CLI, with

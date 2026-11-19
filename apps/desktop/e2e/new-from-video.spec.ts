@@ -2,7 +2,7 @@
 /// <reference lib="dom" />
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { type ElectronApplication, expect, test } from "@playwright/test";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { launch, sandbox } from "./harness.js";
 import { makeAudio, makeSource, testFfmpeg, useTestBinaries } from "./media.js";
@@ -19,6 +19,25 @@ const interview = join(home, "interview.mp4");
 writeFileSync(interview, Buffer.alloc(4096, 7));
 const broll = join(home, "broll.mov");
 writeFileSync(broll, Buffer.alloc(2048, 3));
+
+/**
+ * Answer the transcription download box (a new sandbox has no whisper model, so it always shows) with `button`
+ * (0 = download and transcribe, 1 = skip). {@link boxes} reads what it said.
+ */
+async function answerDownloadBox(app: ElectronApplication, button: number): Promise<void> {
+  await app.evaluate(({ dialog }, answer) => {
+    const asked: { message: string; detail?: string; buttons?: string[] }[] = [];
+    (globalThis as { boxes?: typeof asked }).boxes = asked;
+    dialog.showMessageBox = (async (...args: unknown[]) => {
+      const options = args.at(-1) as { message: string; detail?: string; buttons?: string[] };
+      asked.push({ message: options.message, ...(options.detail ? { detail: options.detail } : {}), ...(options.buttons ? { buttons: options.buttons } : {}) });
+      return { response: answer, checkboxChecked: false };
+    }) as typeof dialog.showMessageBox;
+  }, button);
+}
+
+const boxes = (app: ElectronApplication) =>
+  app.evaluate(() => (globalThis as { boxes?: { message: string; detail?: string; buttons?: string[] }[] }).boxes ?? []);
 
 /** Launch on a folder that is not a project, so the window shows the welcome screen. */
 async function launchWelcome() {
@@ -92,6 +111,7 @@ test("with transcription on, the setup runs in the background and its outcome sh
     await app.evaluate(({ dialog }, files) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
     }, [take]);
+    await answerDownloadBox(app, 0);
     await page.getByRole("button", { name: "New from video, audio or image…" }).click();
     const form = page.getByRole("form", { name: "New project from video, audio or image" });
     await expect(form.getByLabel("Transcribe what is said")).toBeChecked();
@@ -100,6 +120,39 @@ test("with transcription on, the setup runs in the background and its outcome sh
     const setup = page.getByTestId("project-setup");
     await expect(setup).toContainText("Could not download the transcription plugin.", { timeout: 120_000 });
     await expect(setup).toHaveAttribute("title", /npm install failed/);
+    // The person was asked first, with the size and where it runs, and "Download and transcribe" is the default button.
+    const [box] = await boxes(app);
+    expect(box).toMatchObject({ message: "Transcribe what is said?", buttons: ["Download and transcribe", "Skip transcription"] });
+    expect(box?.detail).toMatch(/runs on this machine.*downloads ~\d+(\.\d)? (MB|GB)/);
+  } finally {
+    await app.close();
+  }
+});
+
+test("skipping the transcription download makes the project without a transcript and says so", async () => {
+  const own = sandbox("demo");
+  await useTestBinaries(own.configDir);
+  const folder = join(dirname(own.projectDir), "videos-skipped");
+  mkdirSync(folder, { recursive: true });
+  const take = join(folder, "talk.mp4");
+  writeFileSync(take, Buffer.alloc(1024, 9));
+  const { app, page } = await launch(
+    { ...own, projectDir: folder },
+    { env: { npm_config_offline: "true", npm_config_cache: join(dirname(own.projectDir), "npm-cache") } },
+  );
+  try {
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
+    }, [take]);
+    await answerDownloadBox(app, 1);
+    await page.getByRole("button", { name: "New from video, audio or image…" }).click();
+    const form = page.getByRole("form", { name: "New project from video, audio or image" });
+    await form.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });
+    // Not the plugin failure of the test above: the plugin was never installed.
+    await expect(page.getByTestId("project-setup")).toContainText("Transcription was skipped. Ask the agent to transcribe when you want.", { timeout: 60_000 });
+    expect(readFileSync(join(folder, "talk", "frameshell.json"), "utf8")).not.toContain("whisper-cpp");
+    expect(await boxes(app)).toHaveLength(1);
   } finally {
     await app.close();
   }
@@ -195,12 +248,39 @@ test("an audio-only project with transcription on runs the setup in the backgrou
     await app.evaluate(({ dialog }, files) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
     }, [episode]);
+    await answerDownloadBox(app, 0);
     await page.getByRole("button", { name: "New from video, audio or image…" }).click();
     const form = page.getByRole("form", { name: "New project from video, audio or image" });
     await expect(form.getByLabel("Transcribe what is said")).toBeChecked();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });
     await expect(page.getByTestId("project-setup")).toContainText("Could not download the transcription plugin.", { timeout: 120_000 });
+  } finally {
+    await app.close();
+  }
+});
+
+test("skipping transcription of an audio project leaves just the audio and says so", async () => {
+  const own = sandbox("demo");
+  await useTestBinaries(own.configDir);
+  const folder = join(dirname(own.projectDir), "podcasts-skipped");
+  mkdirSync(folder, { recursive: true });
+  const episode = join(folder, "talk.mp3");
+  await makeAudio(episode);
+  const { app, page } = await launch(
+    { ...own, projectDir: folder },
+    { env: { npm_config_offline: "true", npm_config_cache: join(dirname(own.projectDir), "npm-cache") } },
+  );
+  try {
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
+    }, [episode]);
+    await answerDownloadBox(app, 1);
+    await page.getByRole("button", { name: "New from video, audio or image…" }).click();
+    const form = page.getByRole("form", { name: "New project from video, audio or image" });
+    await form.getByRole("button", { name: "Create project" }).click();
+    await expect(page.locator(".titlebar-project")).toHaveText("talk", { timeout: 60_000 });
+    await expect(page.getByTestId("project-setup")).toContainText("the project has only the audio, without background or subtitles", { timeout: 60_000 });
   } finally {
     await app.close();
   }
