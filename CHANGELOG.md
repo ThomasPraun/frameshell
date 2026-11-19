@@ -1544,10 +1544,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RENDER_TIMING_KINDS` in `@frameshell/plugin-api` is the one list of timing kinds the host reads (`clipTiming`); the
   `hyperframes` and `remotion` adapters keep a type-only copy, since an installed plugin carries no plugin-api
   (ADR 0021), and a test in each holds it equal to the list. `work-cards` and `notification-stack` with `onBeats` on
-  hold beat-placed starts to the room before the exit on a short clip (order kept, at least 0.08 s between steps);
-  with `onBeats` off, or on a clip long enough, the times and the render keys are unchanged. `checklist` is left as it
+  hold beat-placed starts to the room before the exit on a short clip (order kept, held 0.08 s apart at the end);
+  with `onBeats` off, with no usable grid, or on a clip long enough, the times and the render keys are unchanged. `checklist` is left as it
   is: its ticks follow `tickStart` and `tickGap` with no room pulled in, so there is none to clamp to. Clips
-  scaffolded earlier keep their copy of the template until `frameshell hyperframes update`. `grade.analyze` on a
+  scaffolded earlier keep their copy of the template (`hyperframes update` refreshes only the runtime files, never a
+  composition's HTML); scaffold again with `hyperframes new --template` to get the clamp. `grade.analyze` on a
   nested timeline clip lists the first eight media and generated clips inside it (all of them in the error's
   `data.inside`), still naming `grade.compare`; a nested file that is missing, empty or unreadable gives the old
   message.

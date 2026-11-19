@@ -24,9 +24,11 @@ const LISTED_INSIDE = 8;
 
 /** A clip on a video track of a nested timeline file, as {@link GradeAnalyzerOptions.nestedClips} lists it. */
 export interface NestedClipRef {
+  /** Clip id inside the nested timeline file. */
   id: string;
   /** `media`, `shot`, `timeline` or the type of a generated clip. */
   type: string;
+  /** Id of the track holding the clip, when known. */
   track?: string | undefined;
 }
 

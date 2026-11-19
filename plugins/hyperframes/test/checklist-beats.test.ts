@@ -165,9 +165,12 @@ describe("other templates with steps on the music's beats", () => {
     it("leaves the fixed schedule alone: no onBeats, or no grid, is as asked even past the room", () => {
       expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, BEATS, {}))).toEqual(near([0.4, 1.3, 2.2]));
       expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, undefined, { onBeats: false }))).toEqual(near([0.4, 1.3, 2.2]));
+      for (const timing of [undefined, { beats: [], beatsProblem: "no-beats" as const }, { ...BEATS, beatsProblem: "low-confidence" as const }]) {
+        expect(onClipOf(SHORT, () => stepTimes(notificationStack, card, 3, timing, { onBeats: true }))).toEqual(near([0.4, 1.3, 2.2]));
+      }
     });
 
-    it("keeps every work card's start before the room, as the pull-in computed it", () => {
+    it("holds every work card's start to the room the pull-in computed", () => {
       // The pull-in puts the starts at 0.55, 0.76, 0.97; beats would say 0.75, 1.25, 1.75; a card shows 0.25 s before its start.
       const lands = onClipOf(SHORT, () => stepTimes(workCards, card, 3, BEATS, { onBeats: true }));
       expect(lands).toEqual(near([0.5, 0.62, 0.7]));
