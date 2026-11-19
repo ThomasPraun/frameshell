@@ -72,7 +72,7 @@ import { BatchService } from "./batch/service.js";
 import { findClip } from "./batch/variant.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
-import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
+import { BinaryManager, type ProjectBinaries, inUse } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
@@ -1728,6 +1728,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const project = found ? { dir: found.dir, binaries: found.config.binaries } : undefined;
       const format = found ? { resolution: found.config.resolution, fps: found.config.fps } : undefined;
       return { ...(await runDoctor(binaries, { project, install, reprobe, encoders: encoderCache, ...(format ? { format } : {}) })), skill: found ? await coreSkillState(found.dir) : null };
+    },
+    "binaries.remove": async ({ name }) => {
+      // Jobs and transcriptions do not say which downloads they use, so any of them blocks a removal.
+      if (jobs.busy || clipJobs.busy || transcriptions.size > 0) {
+        throw inUse(name, "busy", "Jobs or a transcription are running or queued and may use it. See `frameshell status`; remove it when they finish (`job cancel` stops one).");
+      }
+      return binaries.remove(name);
     },
     "skill.update": async ({ cwd, force }) => {
       const dir = await root(cwd);

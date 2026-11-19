@@ -84,6 +84,10 @@ Commands:
                                and disk estimate) and the frameshell on PATH; exit 1 on problems.
                                --install downloads missing managed binaries first; --reprobe tests the
                                encoders again instead of using the answer cached per machine
+  doctor --remove <name> [--json]
+                               Delete a managed download to free disk (a package such as ffmpeg or whisper-cli,
+                               or a model id; names and sizes are listed under "Downloads" by \`doctor\`). It
+                               downloads again on next use. Refused while it installs or jobs run
   import <file…> [--link] [--wait] [--source-url u --licence id --author name --title t --credit line]
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
                                --link hard-links instead of copying; --wait blocks until done
@@ -200,7 +204,7 @@ const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "n
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   init: ["name", "no-skill", "kind"],
   status: [],
-  doctor: ["install", "reprobe"],
+  doctor: ["install", "reprobe", "remove"],
   import: ["link", "wait", ...PROVENANCE_FLAGS],
   ...CREDITS_FLAGS,
   gc: ["dry-run"],
@@ -264,6 +268,7 @@ type Invocation =
   | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined; projectKind?: "video" | "image" }
   | { kind: "status" }
   | { kind: "doctor"; install: boolean; reprobe: boolean }
+  | { kind: "doctor.remove"; name: string }
   | { kind: "import"; files: string[]; link: boolean; wait: boolean; provenance: ProvenanceInput }
   | { kind: "gc"; dryRun: boolean }
   | { kind: "plugin.install"; spec: string }
@@ -540,6 +545,7 @@ function parseBuiltin(
     quality?: string | undefined;
     install: boolean;
     reprobe: boolean;
+    remove?: boolean | undefined;
     link: boolean;
     wait: boolean;
     "dry-run": boolean;
@@ -824,7 +830,8 @@ function parseBuiltin(
     return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined, ...(projectKind ? { projectKind } : {}) };
   }
   if (command === "status" && rest.length === 0) return { kind: "status" };
-  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
+  if (command === "doctor" && options.remove && rest.length === 1 && !options.install && !options.reprobe) return { kind: "doctor.remove", name: rest[0]! };
+  if (command === "doctor" && !options.remove && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
   if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait, provenance: provenanceOf(options) };
   if (command === "gc" && rest.length === 0) return { kind: "gc", dryRun: options["dry-run"] };
   if (command !== "plugin") return null;
@@ -875,6 +882,13 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       // Which `frameshell` this shell runs: only the CLI sees the caller's PATH. Advice, never a problem.
       const command = inspectPathCli(SELF, process.env);
       return flags.json ? json({ ...report, command }) : formatDoctor(report, command);
+    }
+    case "doctor.remove": {
+      const result = await conn.request("binaries.remove", { name: inv.name });
+      if (flags.json) return json(result);
+      return result.removed
+        ? `Removed ${result.name} (${result.versions.join(", ")}): freed ${formatBytes(result.bytes)}. It downloads again when something needs it.\n`
+        : `${result.name} is not on disk: nothing to remove.\n`;
     }
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
@@ -1715,6 +1729,10 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
       lines.push(`  ${candidate.name.padEnd(20)} ${state}${candidate.name === report.encoders.picked ? "  <- used for renders" : ""}`);
     }
     lines.push(`  tested ${report.encoders.probedAt}${report.encoders.cached ? " (cached; --reprobe tests again)" : ""}`);
+  }
+  if (report.downloads.length > 0) {
+    lines.push("", "Downloads on disk (`frameshell doctor --remove <name>` frees one):");
+    for (const download of report.downloads) lines.push(`  ${download.name.padEnd(32)} ${formatBytes(download.bytes).padStart(10)}  ${download.kind}${download.versions.length > 0 ? ` · ${download.versions.join(", ")}` : ""}`);
   }
   const { profile } = report;
   lines.push(

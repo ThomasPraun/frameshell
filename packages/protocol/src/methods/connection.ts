@@ -9,6 +9,7 @@ import {
   DaemonIdentitySchema,
   ProjectSummarySchema,
   BinaryReportSchema,
+  ManagedDownloadSchema,
   CodecReportSchema,
   EncoderReportSchema,
   MachineProfileSchema,
@@ -199,6 +200,12 @@ export const connectionMethods = {
       platform: z.string().describe("`<os>-<arch>` key used to pick pinned builds, e.g. `darwin-arm64`."),
       dataDir: z.string().describe("App data directory holding managed binaries."),
       binaries: z.array(BinaryReportSchema),
+      downloads: z
+        .array(ManagedDownloadSchema)
+        .describe(
+          "Managed downloads on disk (packages and models), each with its bytes, biggest first; empty when nothing was downloaded yet. " +
+            "One the person no longer wants is freed with `binaries.remove`.",
+        ),
       codecs: z
         .array(CodecReportSchema)
         .describe("Empty when ffmpeg is not installed or not runnable."),
@@ -206,6 +213,28 @@ export const connectionMethods = {
       profile: MachineProfileSchema.describe("Speed class and recommended sizes of this machine."),
       problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
       skill: CoreSkillStateSchema.nullable().describe("The project's copy of the agent skill; null when `cwd` is in no project."),
+    }),
+  },
+  "binaries.remove": {
+    mutating: true,
+    description:
+      "Delete a managed download from this machine to free disk: a binary package (`ffmpeg` also covers ffprobe; " +
+      "`whisper-cli`, `chrome-headless-shell`, `sherpa-onnx`, `onnxruntime-web`, ...) or a pinned model " +
+      "(`ggml-large-v3-turbo-q5_0`, ...), every installed version of it. Names and sizes are in `doctor` `downloads`. " +
+      "It downloads again the next time something needs it. Machine-wide, not per project. Never touches a `binaries` " +
+      "override, a tool Frameshell does not download (Blender) or a model registered with `model.add`. Fails with " +
+      "BinaryInUse while it installs, while jobs or a transcription run, or while the operating system keeps its files " +
+      "open. Remove only on the person's request: it can mean a large download again. Removing what is not on disk " +
+      "succeeds with `removed: false`.",
+    params: z.strictObject({
+      name: z.string().min(1).describe("Package or model name from `doctor` `downloads`."),
+    }),
+    result: z.object({
+      name: z.string(),
+      kind: z.enum(["package", "model"]),
+      removed: z.boolean().describe("False when nothing of it was on disk."),
+      versions: z.array(z.string()).describe("Version directories deleted."),
+      bytes: z.number().describe("Bytes freed."),
     }),
   },
   "skill.update": {

@@ -11,6 +11,7 @@ import {
   IdempotencyKeySchema,
   ProjectSummarySchema,
   BinaryReportSchema,
+  ManagedDownloadSchema,
   CodecReportSchema,
   EncoderNameSchema,
   QualityTierSchema,
@@ -57,7 +58,7 @@ import { uiMethods } from "./methods/ui.js";
  * Wire protocol version. Client and daemon must match exactly; bump on any
  * breaking change to a method, param, result or error code.
  */
-export const PROTOCOL_VERSION = 182;
+export const PROTOCOL_VERSION = 183;
 
 export {
   type MethodSpec,
@@ -386,6 +387,10 @@ export type QualityTier = z.output<typeof QualityTierSchema>;
 export type MachineProfile = z.output<typeof MachineProfileSchema>;
 /** One binary in a {@link DoctorResult}. */
 export type BinaryReport = z.output<typeof BinaryReportSchema>;
+/** One managed download on disk in a {@link DoctorResult}. */
+export type ManagedDownload = z.output<typeof ManagedDownloadSchema>;
+/** Result of `binaries.remove`. */
+export type BinariesRemoveResult = MethodResult<"binaries.remove">;
 /** One encoder or decoder in a {@link DoctorResult}. */
 export type CodecReport = z.output<typeof CodecReportSchema>;
 /** Plugin trust state of a project. */
@@ -758,6 +763,11 @@ export const ErrorCode = {
    * since, so nothing was generated or sent.
    */
   ConfirmationStale: -32049,
+  /**
+   * data: `{ name, reason, hint }`: `binaries.remove` refused; reason `installing` (its download is running), `busy` (jobs
+   * or a transcription run and may use it) or `files-open` (the operating system keeps its files open).
+   */
+  BinaryInUse: -32050,
 } as const;
 
 /** Error raised by the client when the daemon answers with a JSON-RPC error. */

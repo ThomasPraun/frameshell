@@ -107,7 +107,7 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
   }
   const hardware = encoders !== null && encoders.picked !== null && encoders.picked !== "libx264";
   const profile = machineProfile(readMachineFacts(hardware), options.format ?? DEFAULT_PROJECT_FORMAT);
-  return { platform: binaries.platform, dataDir: binaries.dataDir, binaries: reports, codecs, encoders, profile, problems };
+  return { platform: binaries.platform, dataDir: binaries.dataDir, binaries: reports, downloads: await binaries.downloads(), codecs, encoders, profile, problems };
 }
 
 /** A module cannot be run to ask: a managed install is its pin (the version is in its path); an override is taken as given. */

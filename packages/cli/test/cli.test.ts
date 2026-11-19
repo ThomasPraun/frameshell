@@ -278,6 +278,34 @@ describe("frameshell doctor", () => {
     FRAMESHELL_CONFIG_DIR: configDir,
   });
 
+  it("lists downloads on disk, and --remove <name> frees one and says how much", () => {
+    // The daemon outlives the calls, so one slow start does not repeat for each.
+    const env = { ...isolated(), PATH: tempDir(), FRAMESHELL_IDLE_TIMEOUT_MS: "10000" };
+    const install = join(env.FRAMESHELL_DATA_DIR, "binaries", "ffmpeg", "9.0.2", "x");
+    mkdirSync(install, { recursive: true });
+    writeFileSync(join(install, "ffmpeg"), "x".repeat(3 * 1024));
+
+    const first = frameshell(["doctor", "--json"], tempDir(), env);
+    expect(first.stderr).toBe("");
+    const listed = JSON.parse(first.stdout);
+    expect(listed.downloads).toEqual([{ name: "ffmpeg", kind: "package", tools: ["ffmpeg", "ffprobe"], versions: ["9.0.2"], bytes: 3072 }]);
+    expect(frameshell(["doctor"], tempDir(), env).stdout).toMatch(/Downloads on disk[^\n]*\n {2}ffmpeg\s+3\.0 KB {2}package · 9\.0\.2/);
+
+    const removed = frameshell(["doctor", "--remove", "ffmpeg"], tempDir(), env);
+    expect(removed.stderr).toBe("");
+    expect(removed.code).toBe(0);
+    expect(removed.stdout).toContain("Removed ffmpeg (9.0.2): freed 3.0 KB");
+    const after = frameshell(["doctor", "--json"], tempDir(), env);
+    expect(after.stderr).toBe("");
+    expect(JSON.parse(after.stdout).downloads).toEqual([]);
+    expect(JSON.parse(frameshell(["doctor", "--remove", "ffmpeg", "--json"], tempDir(), env).stdout)).toMatchObject({ removed: false, bytes: 0 });
+
+    const unknown = frameshell(["doctor", "--remove", "nope"], tempDir(), env);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/Unknown managed download "nope"/);
+    expect(frameshell(["doctor", "--remove"], tempDir(), env).code).toBe(2);
+  });
+
   it("--json lists managed ffmpeg, ffprobe, whisper-cli, whisper-server, headless Chrome, the diarization tool, ONNX Runtime Web and the user-installed Blender as not installed, without downloading, and exits 1", () => {
     // A PATH without frameshell, whatever the machine has installed.
     const env = { ...isolated(), PATH: tempDir() };

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Remove managed downloads to free disk (`PROTOCOL_VERSION` 183): new method `binaries.remove { name }` deletes a binary
+  package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
+  model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with
+  the new error `BinaryInUse` while the package installs, while jobs or a transcription run (the daemon does not know
+  which downloads they use), or while the system keeps its files open (Windows). It never touches a `binaries` override,
+  Blender, or a model registered with `model.add`. `doctor` gains `downloads`: what is on disk with bytes each, still
+  read-only. CLI: `frameshell doctor --remove <name>` (plain `doctor` lists the downloads too); MCP tool
+  `binaries_remove` from the registry; skill `cli.md` row.
 - Requirements of `review` reach clips inside nested timelines, follow-up of #457 (epic #451; no protocol change,
   `PROTOCOL_VERSION` stays, descriptions only): every per-clip requirement (`appearsBy`, `before`, `keepsMoving`,
   `staysInFrame`) and clip waiver names a clip inside a nested timeline by the id the flattened film gives it,
