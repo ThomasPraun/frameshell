@@ -10,11 +10,6 @@ export interface Confirmed {
   confirmation: string;
 }
 
-/** `0.04 USD`: the amount to at most 4 decimals, then its currency. */
-export function formatCost(cost: { amount: number; currency: string }): string {
-  return `${Number(cost.amount.toFixed(4))} ${cost.currency}`;
-}
-
 /** True for the two errors that carry an ask: `ConfirmationRequired` and `ConfirmationStale`. */
 export function isAsk(error: unknown): error is RpcError {
   return error instanceof RpcError && (error.code === ErrorCode.ConfirmationRequired || error.code === ErrorCode.ConfirmationStale);

@@ -2,9 +2,8 @@
 // or costs money; every other caller loads its provider through `requireLocalTranscription` and never uploads.
 import { createHash } from "node:crypto";
 import type { TranscribeOptions, TranscriptionProvider } from "@frameshell/plugin-api";
-import { ErrorCode, RpcError } from "@frameshell/protocol";
+import { ErrorCode, RpcError, formatCost } from "@frameshell/protocol";
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
-import { formatCost } from "../cost.js";
 import { pcmWavSeconds } from "./window.js";
 
 /**
@@ -76,7 +75,8 @@ export async function confirmTranscription(run: TranscriptionRun): Promise<void>
     .update(JSON.stringify([providerId, run.model, run.assetHash, cents]))
     .digest("hex")
     .slice(0, 32);
-  const ask = { provider: providerId, model: run.model, asset: run.asset, seconds, cost, remote, confirmation };
+  // `costUnknown` is not in the token: it follows from the provider, which the token already names.
+  const ask = { provider: providerId, model: run.model, asset: run.asset, seconds, cost, costUnknown: unknownCost, remote, confirmation };
   const heard = `${formatLength(seconds)} of audio`;
   const sent = remote
     ? `Transcribing ${run.asset} with ${providerId} uploads its audio (${heard}) to that service`

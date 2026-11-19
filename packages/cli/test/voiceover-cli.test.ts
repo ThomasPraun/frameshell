@@ -119,7 +119,7 @@ describe("frameshell voiceover generate", () => {
 
     const ok = frameshell([...paid, "--yes", "--confirmation", token!]);
     expect(ok.code).toBe(0);
-    expect(ok.stdout).toContain("2 generated · about 0.05 USD");
+    expect(ok.stdout).toContain("2 generated · about 0.0500 USD");
     expect(existsSync(join(project, "assets", "voiceover", "paid", "hook-1.wav"))).toBe(true);
   });
 

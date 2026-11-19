@@ -6,6 +6,8 @@ Check for [#689](https://github.com/ThomasPraun/frameshell/issues/689), the foll
 
 The tables below are the baseline of `onset-flux@1`. The four DSP fixes the owner approved (2026-11-19, Q3) are measured in [After the DSP fixes](#after-the-dsp-fixes-onset-flux2); that section carries the updated go/no-go.
 
+Final verdict after the fixes (`onset-flux@2`): drift and latency bias are fixed, and no CC0 tempo is off by a non-octave ratio any more (32 of 34 right-tempo synthetic tracks hold p95 15 ms, median bias +0.8 ms); what is left is 2 synthetic 3:2 misreads on processed variants, 3 correct CC0 tracks that stay LOW, and octave ambiguity (now confident on 12 of 12 synthetic and 4 of 5 CC0 octave errors). Octave ambiguity and downbeat are what a learned detector would address. #689 stays open for the owner's go/no-go.
+
 **Go for the learned-detector spike, with a licence verdict of "usable", and a cheaper DSP fix list to try first.** The threshold was fixed before the run: go only if the DSP grid is wrong (not just octave-correctable with `edits.tempo`) on more than about 20 % of the real/CC0 set, or misses 15 ms on synthetic music.
 
 | Criterion | Measured | Verdict |

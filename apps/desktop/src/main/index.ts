@@ -128,7 +128,7 @@ import {
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
-import { type TranscribeAsk, formatLength, runTranscribe } from "./transcribe-ask.js";
+import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
@@ -893,7 +893,9 @@ function reportSetup(dir: string, setup: ProjectSetup): void {
 async function confirmTranscription(parent: BrowserWindow | null | undefined, ask: TranscribeAsk): Promise<boolean> {
   const said = text.app.dialogs;
   const sent = ask.remote ? said.transcribeAskUploads(ask.provider) : said.transcribeAskMayLeave(ask.provider);
-  const price = ask.cost === null ? said.transcribeAskCostUnknown : ask.costFree ? said.transcribeAskCostFree : said.transcribeAskCostKnown(ask.cost, ask.provider);
+  const kind = transcribePrice(ask);
+  const price =
+    kind === "free" ? said.transcribeAskCostFree : kind === "unknown" || ask.cost === null ? said.transcribeAskCostUnknown : said.transcribeAskCostKnown(ask.cost, ask.provider);
   const options: Electron.MessageBoxOptions = {
     type: "warning",
     message: said.transcribeAskTitle(ask.provider, ask.asset, formatLength(ask.seconds)),

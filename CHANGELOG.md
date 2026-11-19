@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Premiere XML export, slice 2 of #701 (ADR 0047; no protocol change, `PROTOCOL_VERSION` stays 181): File > Export
+- Premiere XML export, slice 2 of #701 (ADR 0047; no protocol change, `PROTOCOL_VERSION` stays): File > Export
   Premiere XML… in the app (video projects; en + es), sharing one hand-off path with File > Export OpenTimelineIO…: main
   asks where to save, the daemon writes, a notice counts what the file leaves out and names the CLI command that lists
   it (the OTIO menu and its wording are as before; the IPC channel is now one `timeline:export-handoff` with the kind).
@@ -21,6 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unverified), the UNC path spelling is pinned by a test and noted as unverified, and the review leftovers are closed
   (TSDoc, the CLI help comment, one project read per export). Neither the Audio Levels filter nor the dissolves have
   been opened in Premiere Pro yet.
+- Small fixes, wave 27 (slice SF8, parts of #382 and #689; protocol 182):
+  the `ConfirmationRequired` and `ConfirmationStale` data of `transcribe` carries `costUnknown` (true when the provider
+  gives no usable estimate and does not declare itself free; not in the confirmation token, so tokens are unchanged).
+  `cost` null with `costUnknown` false is a free remote provider with no estimate: the app's box now says "charges
+  nothing, but the audio still leaves this machine" for it, as it does for an estimate of 0. A daemon that does not send
+  the field reads as unknown in the app (the safe side). One `formatCost` in `@frameshell/protocol` (`cost.ts`) replaces
+  the twins in `packages/core` and the app: 4 decimals under 1, else 2, `0 USD` for exactly 0 and `< 0.0001 USD` for a
+  positive amount that would round to zero. Visible change: the app's cost texts read `0.0400 USD` and `1.50 EUR`
+  where they read `0.04 USD` and `1.5 EUR`, and `voiceover generate` prints its cost through it too (`about 0.0500 USD`, no raw float). The app's price text is chosen by `transcribePrice` (free before unknown), so a free remote provider without an estimate shows the free text, not "may charge you". Docs only: SPEC 5.9's example beats file says `onset-flux@2`, ADR 0029
+  decision 10 says octave errors became more confident (12 of 12 synthetic, 4 of 5 CC0) and that octave and downbeat
+  are the only reasons left for the learned spike (#689 stays open for the owner's go/no-go), and the research note
+  has its final verdict at the top. No detector change. Left for later: the Premiere XML app menu, `people tune` on
+  real recordings (#700), the learned beat spike (#689), the `whisper-1` replacement (#702).
 - Small fixes, wave 26 (slice SF7, parts of #451, #382, #689 and #702; no protocol change, `PROTOCOL_VERSION` stays):
   `notification-stack`'s fixed schedule (`onBeats` off or no usable grid) is held to the same room before the exit as
   its beat-placed one, through the one `stepTimes` formula (latest start minus `minGap` per later card, never before
