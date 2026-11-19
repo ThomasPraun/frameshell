@@ -14,6 +14,8 @@ Area files: `media/`, `timeline/`, `export/`, `batch/`, `clips/`, `review/`, `an
 - Picture rhythm: still/big-change/burst constants + functions only from `analyze/rhythm.ts`: one scale for `analyze` + `review`, never a review copy. One grey `greyOf` + `pictureFilter` (`analyze/picture.ts`); never ffmpeg `format=gray`.
 - Global config `configDir` `config.json`: one reader `readGlobalConfig` (`global-config.ts`), shared by binary overrides + `speech.command`.
 - Providers (`SpeechProvider` contract + `contributes.speechProviders`): one host lookup for transcription + speech providers (`#provider` in `plugins/host.ts`); built-in providers before plugins.
+- Transcription callers (ADR 0046): consent gate `confirmTranscription` in `transcribe` only, every run. Every other caller (analyze, shoot takes, voiceover verify, ...) loads via daemon `localTranscription` (`requireLocalTranscription`), never `plugins.transcriptionProvider` directly. Detail: `transcripts/CLAUDE.md`.
+- `daemon.ts` handler or call into area X: read X's `CLAUDE.md` first; daemon-side rules live there (refuse LOW grid in `operate`: `timeline/`; render `matte` step: `matte/`; `duckPlanner`/`levelAgainStep`: `music/`; `speech.command` never in `frameshell.json`: `voiceover/`).
 - ffmpeg rawvideo reader `media/raw-frames.ts`: shared by matte + faces.
 
 ## Areas without own file
