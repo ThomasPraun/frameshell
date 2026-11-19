@@ -130,6 +130,7 @@ import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
+import { type DownloadChoice, chooseDownload, downloadSize } from "./transcription-download.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
@@ -907,6 +908,25 @@ async function confirmTranscription(parent: BrowserWindow | null | undefined, as
   return response === 0;
 }
 
+/**
+ * Ask in a native box before a new project downloads transcription: the size, and that it runs on this machine. Closing
+ * the box skips; nothing is downloaded unless the person chose it.
+ */
+async function askDownload(parent: BrowserWindow | null | undefined, bytes: number): Promise<DownloadChoice> {
+  const said = text.app.dialogs;
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    message: said.transcribeDownloadTitle,
+    detail: said.transcribeDownloadDetail(downloadSize(bytes)),
+    buttons: [said.transcribeDownloadYes, said.transcribeDownloadSkip],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  };
+  const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  return response === 0 ? "transcribe" : "skip";
+}
+
 /** `transcribe` of `asset` in project `cwd`, asking the person first when the provider is cloud or paid; null when they declined. */
 function transcribeConfirmed(
   cwd: string,
@@ -927,7 +947,9 @@ function transcribeConfirmed(
 
 /**
  * Install the transcription plugin into the new project at `dir` and
- * transcribe `assets`, in the background, reporting each step. The
+ * transcribe `assets`, in the background, reporting each step. When
+ * transcription still has to be downloaded, the person is asked first and
+ * may skip: the project stays as it is, without a transcript. The
  * user created the project, so the plugin is trusted as `plugin.install`
  * trusts it. Fails softly: the project stays usable and the agent can retry.
  * With `background` (a project made from audio), the transcript is followed by
@@ -942,11 +964,20 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
   let failure = said.downloadFailed;
   try {
     running(said.starting);
+    const parent = [...windows.values()].find((state) => state.project?.dir === dir)?.window;
+    const choice = await chooseDownload(await transcriptionDownload(dir), (bytes) => {
+      running(said.waitingForDownloadAnswer);
+      return askDownload(parent, bytes);
+    });
+    if (choice === "skip") {
+      reportSetup(dir, { message: background ? said.transcriptionSkippedAudio : said.transcriptionSkipped, detail: null, fraction: null, state: "done" });
+      return;
+    }
+    running(said.starting);
     await ensureTranscriptionPlugin(dir);
     for (const asset of assets) {
       failure = said.transcribeFailed(name(asset));
       running(said.transcribing(name(asset)));
-      const parent = [...windows.values()].find((state) => state.project?.dir === dir)?.window;
       const done = await transcribeConfirmed(
         dir,
         asset,
