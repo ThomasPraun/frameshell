@@ -9,7 +9,7 @@ const en = {
   /** The timeline saved as an OpenTimelineIO file (ADR 0045), and how many things the file leaves out. */
   otioExported: (name: string) => `Exported ${name}.`,
   otioExportedWith: (name: string, count: number) =>
-    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the file: run frameshell export otio to list ${count === 1 ? "it" : "them"}.`,
+    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the file: run frameshell export otio --out <file>.otio in a terminal to list ${count === 1 ? "it" : "them"}.`,
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
@@ -89,7 +89,7 @@ const es: typeof en = {
   frameImageOpened: (name) => `${name} se abrió en una ventana nueva.`,
   otioExported: (name) => `Se exportó ${name}.`,
   otioExportedWith: (name, count) =>
-    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo: ejecuta frameshell export otio para verlas.`,
+    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo: ejecuta frameshell export otio --out <archivo>.otio en una terminal para ${count === 1 ? "verla" : "verlas"}.`,
   dropToImport: "Suelta para importar a assets/",
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,

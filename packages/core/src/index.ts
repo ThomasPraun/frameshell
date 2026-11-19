@@ -303,7 +303,7 @@ export {
   gifSizeWarning,
   loudnessTarget,
 } from "./export/presets.js";
-export { type OtioExport, type OtioObject, type OtioOptions, type OtioUrlBase, otioAssetUrl, timelineToOtio } from "./export/otio.js";
+export { type OtioExport, type OtioObject, type OtioOptions, type OtioUrlBase, mirrorsSound, otioAssetUrl, soundMirrorName, timelineToOtio } from "./export/otio.js";
 export { type CoverChoice, type ExecuteRenderOptions, ExportService, type ExportServiceOptions, type PlannedRender, type RenderRequest, executeRender } from "./export/service.js";
 export {
   DEFAULT_SNAP_WINDOW_S,

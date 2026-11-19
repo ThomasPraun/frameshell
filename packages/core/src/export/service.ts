@@ -42,6 +42,7 @@ import type { ClipEnsureOptions, FinalRenderState } from "../clips/renderer.js";
 import { formatNotFound } from "../formats.js";
 import type { JobQueue, JobUpdate } from "../jobs/queue.js";
 import { runTool } from "../media/ffmpeg.js";
+import { assetKindOf } from "../media/kind.js";
 import { readEnclosingProject } from "../projects.js";
 import { readNestedFile, resolveNestedIn, transformedProgram } from "../timeline/nested.js";
 import { resolveTranscript } from "../transcripts/transcriber.js";
@@ -712,17 +713,17 @@ export class ExportService {
     const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
     const nested = this.#options.nestedDuration?.(root, timeline.id, fps);
     const totals = new Map<string, number>();
-    const assets = new Map<string, number | undefined>();
+    const facts = new Map<string, { seconds: number | undefined; silent: boolean }>();
     for (const track of timeline.tracks) {
       if (track.kind === "subtitles" || track.kind === "program") continue;
       const dissolves = track.clips.some((clip) => clip.dissolve !== undefined);
       for (const clip of track.clips) {
         if ("asset" in clip) {
-          // The handles a dissolve may use (`edgeTransitions`) come from the length of the source: only tracks with a dissolve ask.
-          if (!dissolves) continue;
-          if (!assets.has(clip.asset)) assets.set(clip.asset, await this.#sourceSeconds(root, clip.asset));
-          const seconds = assets.get(clip.asset);
-          if (seconds !== undefined) totals.set(clip.id, seconds);
+          // The handles a dissolve may use (`edgeTransitions`) come from the length of the source; the sound mirror of a video track needs to know a still has none.
+          if (!dissolves && track.kind !== "video") continue;
+          if (!facts.has(clip.asset)) facts.set(clip.asset, await this.#assetFacts(root, clip.asset));
+          const seconds = facts.get(clip.asset)?.seconds;
+          if (dissolves && seconds !== undefined) totals.set(clip.id, seconds);
         } else if (nested && clip.type === "timeline" && "source" in clip && clip.source) {
           try {
             totals.set(clip.id, await nested(clip.source));
@@ -733,7 +734,12 @@ export class ExportService {
       }
     }
     const base = { root, outDir: dirname(out), absolute: params.absolutePaths === true };
-    const result = timelineToOtio(timeline, { fps, assetUrl: (asset) => otioAssetUrl(base, asset), sourceDuration: (clip) => totals.get(clip.id) });
+    const result = timelineToOtio(timeline, {
+      fps,
+      assetUrl: (asset) => otioAssetUrl(base, asset),
+      sourceDuration: (clip) => totals.get(clip.id),
+      assetHasSound: (asset) => facts.get(asset)?.silent !== true,
+    });
     await writeTextAtomic(out, `${JSON.stringify(result.otio, null, 2)}\n`);
     return { path: out, timeline: timeline.id, fps, tracks: result.tracks, clips: result.clips, markers: result.markers, warnings: result.warnings };
   }
@@ -944,13 +950,18 @@ export class ExportService {
     return found;
   }
 
-  /** Seconds of `asset` as `edgeTransitions` counts its handles: a still has no end; undefined when it cannot be probed (a missing file). */
-  async #sourceSeconds(root: string, asset: string): Promise<number | undefined> {
+  /**
+   * What an OTIO export needs of `asset`: its seconds as `edgeTransitions` counts its handles (a still has no end; undefined
+   * when it cannot be probed, a missing file) and whether it is silent by kind (a still image, an SVG or font file).
+   * A file that cannot be probed is taken to have sound: the editor finds out when it relinks.
+   */
+  async #assetFacts(root: string, asset: string): Promise<{ seconds: number | undefined; silent: boolean }> {
     try {
       const probe = await this.#options.probe(root, asset);
-      return probe.video?.still ? Number.POSITIVE_INFINITY : (probe.duration ?? undefined);
+      const still = probe.video?.still === true;
+      return { seconds: still ? Number.POSITIVE_INFINITY : (probe.duration ?? undefined), silent: still };
     } catch {
-      return undefined;
+      return { seconds: undefined, silent: assetKindOf(asset) !== "media" };
     }
   }
 

@@ -258,15 +258,138 @@
             }
           ],
           "kind": "Audio"
+        },
+        {
+          "OTIO_SCHEMA": "Track.1",
+          "name": "V1 sound",
+          "source_range": null,
+          "effects": [],
+          "markers": [],
+          "enabled": true,
+          "metadata": {
+            "frameshell": {
+              "mirrorOf": "t_v1"
+            }
+          },
+          "children": [
+            {
+              "OTIO_SCHEMA": "Clip.2",
+              "name": "take.mp4",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                }
+              },
+              "effects": [],
+              "markers": [],
+              "enabled": true,
+              "metadata": {
+                "frameshell": {
+                  "clipId": "c_a",
+                  "start": 0,
+                  "length": 2,
+                  "linkedClipId": "c_a",
+                  "sound": true
+                }
+              },
+              "media_references": {
+                "DEFAULT_MEDIA": {
+                  "OTIO_SCHEMA": "ExternalReference.1",
+                  "name": "",
+                  "available_range": null,
+                  "metadata": {},
+                  "target_url": "../assets/take.mp4"
+                }
+              },
+              "active_media_reference_key": "DEFAULT_MEDIA"
+            },
+            {
+              "OTIO_SCHEMA": "Gap.1",
+              "name": "",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 90
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 0
+                }
+              },
+              "effects": [],
+              "markers": [],
+              "enabled": true,
+              "metadata": {}
+            },
+            {
+              "OTIO_SCHEMA": "Clip.2",
+              "name": "take.mp4",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 300
+                }
+              },
+              "effects": [
+                {
+                  "OTIO_SCHEMA": "LinearTimeWarp.1",
+                  "name": "",
+                  "effect_name": "LinearTimeWarp",
+                  "time_scalar": 2,
+                  "metadata": {}
+                }
+              ],
+              "markers": [],
+              "enabled": true,
+              "metadata": {
+                "frameshell": {
+                  "clipId": "c_b",
+                  "start": 5,
+                  "length": 2,
+                  "linkedClipId": "c_b",
+                  "speed": 2,
+                  "sound": true
+                }
+              },
+              "media_references": {
+                "DEFAULT_MEDIA": {
+                  "OTIO_SCHEMA": "ExternalReference.1",
+                  "name": "",
+                  "available_range": null,
+                  "metadata": {},
+                  "target_url": "../assets/take.mp4"
+                }
+              },
+              "active_media_reference_key": "DEFAULT_MEDIA"
+            }
+          ],
+          "kind": "Audio"
         }
       ]
     }
   },
   "warnings": [
-    "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand.",
-    "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 2 clips not exported (c_a, c_b)."
+    "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand."
   ],
-  "tracks": 2,
+  "tracks": 3,
   "clips": 4,
   "markers": 1
 }

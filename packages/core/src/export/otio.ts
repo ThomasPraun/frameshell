@@ -16,6 +16,8 @@ export interface OtioOptions {
   assetUrl(asset: string): string;
   /** Seconds of material a clip draws from (a nested timeline; a media file, for the handles of a dissolve); see `TransitionContext.sourceDuration`. */
   sourceDuration?: ((clip: Clip) => number | undefined) | undefined;
+  /** Whether a media asset has sound a mirror track carries: false for a still image. Default: every media asset has. */
+  assetHasSound?: ((asset: string) => boolean) | undefined;
 }
 
 /** What {@link timelineToOtio} returns. */
@@ -85,26 +87,40 @@ function sourceName(source: string): string {
   return stem === "index" && parts.length > 0 ? parts[parts.length - 1]! : stem;
 }
 
-/** Collects the ids of clips that carry something the file leaves out, one warning per kind. */
+/** Collects the ids of clips that carry something the file leaves out or only half carries, one warning per kind. */
 class Dropped {
-  readonly #kinds = new Map<string, string[]>();
+  readonly #kinds = new Map<string, { ids: string[]; outcome: string }>();
 
-  add(kind: string, clip: string): void {
-    const ids = this.#kinds.get(kind) ?? [];
-    ids.push(clip);
-    this.#kinds.set(kind, ids);
+  /** `outcome`: what the file does with it, as the warning words it. */
+  add(kind: string, clip: string, outcome = "not exported"): void {
+    const entry = this.#kinds.get(kind) ?? { ids: [], outcome };
+    entry.ids.push(clip);
+    this.#kinds.set(kind, entry);
   }
 
   warnings(): string[] {
-    return [...this.#kinds].map(([kind, ids]) => {
+    return [...this.#kinds].map(([kind, { ids, outcome }]) => {
       const shown = ids.slice(0, LISTED_IDS).join(", ");
-      return `${kind} on ${ids.length} clip${ids.length === 1 ? "" : "s"} not exported (${shown}${ids.length > LISTED_IDS ? ", …" : ""}).`;
+      return `${kind} on ${ids.length} clip${ids.length === 1 ? "" : "s"} ${outcome} (${shown}${ids.length > LISTED_IDS ? ", …" : ""}).`;
     });
   }
 }
 
+/**
+ * Whether `clip` has sound a sound-mirror Audio track carries (ADR 0045 decision 5): a media clip whose asset is not a
+ * still image. Decided by kind, never by probing the file for an audio stream.
+ */
+export function mirrorsSound(clip: Clip, assetHasSound?: (asset: string) => boolean): boolean {
+  return "asset" in clip && (assetHasSound?.(clip.asset) ?? true);
+}
+
+/** Name of the Audio track that mirrors the sound of the video track named `videoName`. */
+export function soundMirrorName(videoName: string): string {
+  return `${videoName} sound`;
+}
+
 /** Features of a clip the file does not carry, by the words the warning uses. `dissolved`: its dissolve is written as a `Transition.1`. */
-function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean, trackMuted: boolean, dissolved: boolean): void {
+function leftOut(clip: Clip, dropped: Dropped, dissolved: boolean): void {
   if (clip.fadeIn !== undefined || clip.fadeOut !== undefined || (clip.dissolve !== undefined && !dissolved)) {
     dropped.add("dips and fades (fadeIn, fadeOut, dissolve with no handle or no clip before it)", clip.id);
   }
@@ -121,23 +137,27 @@ function leftOut(clip: Clip, dropped: Dropped, audioTrack: boolean, trackMuted: 
   }
   if (clip.formats !== undefined) dropped.add("per-format overrides", clip.id);
   if ("asset" in clip && clip.audio?.effects !== undefined && clip.audio.effects.length > 0) dropped.add("audio effects", clip.id);
-  if (clip.audio?.muted === true && !audioTrack) dropped.add("muted sound of a video clip", clip.id);
-  // OTIO keeps sound on Audio tracks, and a video-track clip is written on a Video track only.
-  if ("asset" in clip && !audioTrack && !trackMuted && clip.audio?.muted !== true) dropped.add("sound of media clips on a video track (OTIO keeps sound on audio tracks)", clip.id);
+  if ("asset" in clip && clip.audio !== undefined && (clip.audio.fadeInMs !== undefined || clip.audio.fadeOutMs !== undefined)) {
+    dropped.add("sound fades (audio.fadeInMs, audio.fadeOutMs)", clip.id);
+  }
+  if ("asset" in clip && clip.audio?.muted !== true && clip.audio?.gain !== undefined && clip.audio.gain !== 0) {
+    dropped.add("clip gain (audio.gain)", clip.id, "kept as metadata only, with no level change in the file");
+  }
 }
 
 /**
  * A `Transition.1` between two clips: a dissolve centred on the cut, `half` frames each side. `shape` (wipe, push, iris)
- * is kept in the metadata only: the transition type stays a plain `SMPTE_Dissolve`.
+ * is kept in the metadata only: the transition type stays a plain `SMPTE_Dissolve`. `sound`: the crossfade of a sound
+ * mirror, which has no shape.
  */
-function dissolveObject(clip: Clip, half: number, halfSeconds: number, rate: number): OtioObject {
+function dissolveObject(clip: Clip, half: number, halfSeconds: number, rate: number, sound: boolean): OtioObject {
   return {
     OTIO_SCHEMA: "Transition.1",
     name: "",
     transition_type: "SMPTE_Dissolve",
     in_offset: time(half, rate),
     out_offset: time(half, rate),
-    metadata: { frameshell: { clipId: clip.id, dissolve: clip.dissolve, half: halfSeconds, ...(clip.shape !== undefined ? { shape: clip.shape } : {}) } },
+    metadata: { frameshell: { clipId: clip.id, dissolve: clip.dissolve, half: halfSeconds, ...(sound ? { sound: true } : clip.shape !== undefined ? { shape: clip.shape } : {}) } },
   };
 }
 
@@ -147,8 +167,11 @@ function dissolveObject(clip: Clip, half: number, halfSeconds: number, rate: num
  * out by it; `LinearTimeWarp.1` when `speed` is not 1), generated and nested clips as
  * `Clip.2` with a `MissingReference.1` of their length, markers on the stack, dissolves between butted clips as
  * `Transition.1` (`edgeTransitions` decides which, never recomputed here). Every time is a whole frame at `fps`.
- * Program tracks, subtitle tracks, dips and fades, transition shapes, transforms, keys, grades and audio effects are
- * left out and named in `warnings`.
+ * The sound of the media clips of each video track is mirrored onto one extra Audio track after all the real ones
+ * (`<video track> sound`, `metadata.frameshell.mirrorOf`, clips linked by `clipId`): same ranges, speed and crossfades,
+ * disabled where the clip or the track is muted. `clips` counts the pictures, not their mirrors.
+ * Program tracks, subtitle tracks, dips and fades, transition shapes, transforms, keys, grades, audio effects and sound
+ * fades are left out and named in `warnings`; clip gain is metadata only, and named too.
  */
 export function timelineToOtio(timeline: Timeline, options: OtioOptions): OtioExport {
   const { fps } = options;
@@ -158,6 +181,8 @@ export function timelineToOtio(timeline: Timeline, options: OtioOptions): OtioEx
   const frames = (seconds: number) => Math.round(seconds * fps);
   const children: OtioObject[] = [];
   const counts = { video: 0, audio: 0 };
+  const shared: Shared = { frames, fps, context, options, warnings, dropped };
+  const videos: { track: ClipTrack; name: string }[] = [];
   let clipCount = 0;
 
   for (const track of timeline.tracks) {
@@ -170,9 +195,16 @@ export function timelineToOtio(timeline: Timeline, options: OtioOptions): OtioEx
       continue;
     }
     counts[track.kind] += 1;
-    const built = trackObject(track, counts[track.kind], { frames, fps, context, options, warnings, dropped });
+    const name = track.name ?? `${track.kind === "video" ? "V" : "A"}${counts[track.kind]}`;
+    const built = trackObject(track, name, "picture", shared);
     clipCount += built.clips;
     children.push(built.track);
+    if (track.kind === "video") videos.push({ track, name });
+  }
+  // After every real track, so the ordinals of the real audio tracks are what they are without the mirrors.
+  for (const { track, name } of videos) {
+    const mirror = trackObject(track, soundMirrorName(name), "sound", shared);
+    if (mirror.clips > 0) children.push(mirror.track);
   }
 
   if (timeline.letterbox !== undefined) warnings.push("letterbox bars not exported.");
@@ -209,14 +241,23 @@ interface Shared {
   dropped: Dropped;
 }
 
-/** One `Track.1`: clips in order with a `Gap.1` for every hole and a `Transition.1` where a dissolve joins two. A muted audio track and a hidden video track are disabled. */
-function trackObject(track: ClipTrack, ordinal: number, shared: Shared): { track: OtioObject; clips: number } {
+/** What {@link trackObject} writes: `track` itself, or the Audio track that mirrors the sound of a video track's media clips. */
+type TrackMode = "picture" | "sound";
+
+/**
+ * One `Track.1`: clips in order with a `Gap.1` for every hole and a `Transition.1` where a dissolve joins two. A muted audio
+ * track and a hidden video track are disabled. `sound` mode writes the mirror of a video track: only the clips that have
+ * sound, on an Audio track disabled when the video track is muted, and warning of nothing the picture track already did.
+ */
+function trackObject(track: ClipTrack, name: string, mode: TrackMode, shared: Shared): { track: OtioObject; clips: number } {
   const { frames, fps, context, warnings, dropped } = shared;
+  const sound = mode === "sound";
   const out: OtioObject[] = [];
   const edges = edgeTransitions(track.clips, context);
   let cursor = 0;
   let clips = 0;
   for (const clip of [...track.clips].sort((a, b) => a.start - b.start)) {
+    if (sound && !mirrorsSound(clip, shared.options.assetHasSound)) continue;
     const length = clipLength(clip, context);
     if (!Number.isFinite(length)) {
       warnings.push(`clip ${clip.id} (nested ${"source" in clip ? clip.source : "timeline"}) has no known length: skipped.`);
@@ -228,33 +269,41 @@ function trackObject(track: ClipTrack, ordinal: number, shared: Shared): { track
     const edge = edges.get(clip.id);
     // A Transition.1 sits between two Clip.2: the frame positions must agree with the butted clips the dissolve was cut for.
     const joined = edge?.mode === "dissolve" && edge.dissolve > 0 && startFrames <= cursor && out[out.length - 1]?.["OTIO_SCHEMA"] === "Clip.2";
-    if (joined) out.push(dissolveObject(clip, Math.max(1, frames(edge.dissolve)), edge.dissolve, fps));
+    if (joined) out.push(dissolveObject(clip, Math.max(1, frames(edge.dissolve)), edge.dissolve, fps, sound));
     if (startFrames > cursor) out.push({ OTIO_SCHEMA: "Gap.1", ...item("", range(0, startFrames - cursor, fps)) });
     cursor = Math.max(cursor, endFrames);
-    out.push(clipOf(clip, lengthFrames, track.kind === "audio", shared));
-    leftOut(clip, dropped, track.kind === "audio", track.muted === true, joined);
+    out.push(clipOf(clip, lengthFrames, mode, track.kind === "audio", shared));
+    if (!sound) leftOut(clip, dropped, joined);
     clips += 1;
   }
 
-  if (track.kind === "video" && track.behind !== undefined) warnings.push(`video track ${track.id} sits behind the person on track ${track.behind} (subject matte): exported as a plain track.`);
-  const hidden = track.kind === "video" && track.hidden === true;
+  if (!sound && track.kind === "video" && track.behind !== undefined) {
+    warnings.push(`video track ${track.id} sits behind the person on track ${track.behind} (subject matte): exported as a plain track.`);
+  }
+  const hidden = !sound && track.kind === "video" && track.hidden === true;
   const muted = track.muted === true;
-  // A muted video track still shows its picture, and OTIO has no switch for the sound alone.
-  if (muted && track.kind === "video") warnings.push(`video track ${track.id} is muted: exported enabled, since its picture shows.`);
-  const enabled = track.kind === "audio" ? !muted : !hidden;
-  const name = track.name ?? `${track.kind === "video" ? "V" : "A"}${ordinal}`;
-  const metadata = { frameshell: { trackId: track.id, ...(muted ? { muted: true } : {}), ...(hidden ? { hidden: true } : {}) } };
+  // A muted video track keeps its picture enabled: its sound is on the mirror track, which is the one disabled.
+  const enabled = sound || track.kind === "audio" ? !muted : !hidden;
+  const metadata = {
+    frameshell: { ...(sound ? { mirrorOf: track.id } : { trackId: track.id }), ...(muted ? { muted: true } : {}), ...(hidden ? { hidden: true } : {}) },
+  };
   return {
-    track: { OTIO_SCHEMA: "Track.1", ...item(name, null, metadata), enabled, children: out, kind: track.kind === "video" ? "Video" : "Audio" },
+    track: { OTIO_SCHEMA: "Track.1", ...item(name, null, metadata), enabled, children: out, kind: track.kind === "video" && !sound ? "Video" : "Audio" },
     clips,
   };
 }
 
-/** The `Clip.2` of one clip: media with an external reference, anything Frameshell renders as a missing one. */
-function clipOf(clip: Clip, lengthFrames: number, audioTrack: boolean, shared: Shared): OtioObject {
+/**
+ * The `Clip.2` of one clip: media with an external reference, anything Frameshell renders as a missing one. In `sound`
+ * mode (the mirror of a video track: media clips only) it is the same clip, disabled when its sound is muted and linked
+ * to the picture by `linkedClipId`.
+ */
+function clipOf(clip: Clip, lengthFrames: number, mode: TrackMode, audioTrack: boolean, shared: Shared): OtioObject {
   const { frames, fps, options, warnings } = shared;
-  const own = { clipId: clip.id, start: clip.start, length: lengthFrames / fps };
-  const enabled = !(audioTrack && clip.audio?.muted === true);
+  const sound = mode === "sound";
+  const own = { clipId: clip.id, start: clip.start, length: lengthFrames / fps, ...(sound ? { linkedClipId: clip.id } : {}) };
+  // A muted clip on a video track still shows its picture: only a track that carries sound switches off with it.
+  const enabled = !((sound || audioTrack) && clip.audio?.muted === true);
   if ("asset" in clip) {
     const speed = clip.speed ?? 1;
     const effects: OtioObject[] = speed === 1 ? [] : [{ OTIO_SCHEMA: "LinearTimeWarp.1", name: "", effect_name: "LinearTimeWarp", time_scalar: speed, metadata: {} }];
@@ -264,7 +313,7 @@ function clipOf(clip: Clip, lengthFrames: number, audioTrack: boolean, shared: S
       range(frames(clip.in), lengthFrames, fps),
       { OTIO_SCHEMA: "ExternalReference.1", name: "", available_range: null, metadata: {}, target_url: options.assetUrl(clip.asset) },
       effects,
-      { frameshell: { ...own, ...(gain !== undefined && gain !== 0 ? { gain } : {}), ...(speed !== 1 ? { speed } : {}) } },
+      { frameshell: { ...own, ...(gain !== undefined && gain !== 0 ? { gain } : {}), ...(speed !== 1 ? { speed } : {}), ...(sound ? { sound: true } : {}) } },
       enabled,
     );
   }
