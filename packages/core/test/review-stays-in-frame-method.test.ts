@@ -88,3 +88,59 @@ describe("review: requirements of a review-mode proposal", () => {
     MEDIA_TIMEOUT,
   );
 });
+
+describe("review: requirements on a clip inside a nested timeline", () => {
+  it(
+    "judges `<nested clip id>/<clip id>` from the flattened film and answers a bare inner id with the path",
+    async () => {
+      const outer = {
+        schemaVersion: 1,
+        id: "outer",
+        revision: 0,
+        tracks: [{ id: "v1", kind: "video", clips: [{ id: "c_nest", type: "timeline", source: "timelines/main.json", start: 0.2, in: 0, duration: 1 }] }],
+      };
+      await conn.request("file.write", { path: join(project, "timelines", "outer.json"), content: JSON.stringify(outer) });
+      const path = `c_nest/${clip}`;
+      await conn.request("review.require", { cwd: project, clip: path, path: "staysInFrame", value: true });
+      await conn.request("review.require", { cwd: project, clip: path, path: "appearsBy", value: 0.1 });
+      await conn.request("review.require", { cwd: project, clip, path: "staysInFrame", value: true });
+
+      const result = await conn.request("review", { cwd: project, timeline: "outer", projectFormat: "9x16", sheets: ["metrics"] });
+      const checks = result.metrics!.requirements!.checks;
+      // The face sits right of the 9x16 crop's middle strip.
+      expect(checks.find((check) => check.id === "clip.staysInFrame" && check.clip === path)).toMatchObject({ status: "fail", format: "9x16" });
+      expect(checks.find((check) => check.id === "clip.appearsBy" && check.clip === path)).toMatchObject({ status: "fail", actual: 0.2 });
+      // The bare id is not a clip of this timeline: the message names the path.
+      expect(checks.find((check) => check.id === "clip.staysInFrame" && check.clip === clip)).toMatchObject({
+        status: "fail",
+        message: expect.stringContaining(`name it as ${path}`),
+      });
+
+      const wide = await conn.request("review", { cwd: project, timeline: "outer", sheets: ["metrics"] });
+      expect(wide.metrics!.requirements!.checks.find((check) => check.id === "clip.staysInFrame" && check.clip === path)).toMatchObject({ status: "pass", format: "16x9" });
+    },
+    MEDIA_TIMEOUT,
+  );
+});
+
+describe("review: waivers on a clip inside a nested timeline", () => {
+  it(
+    "reads the flattened film for a file whose only nested reference is a clip waiver",
+    async () => {
+      const path = `c_nest/${clip}`;
+      for (const name of [path, clip]) {
+        await conn.request("review.require", { cwd: project, clip: name, path: "staysInFrame", value: null });
+        await conn.request("review.require", { cwd: project, clip: name, path: "appearsBy", value: null });
+      }
+      await conn.request("review.waive", { cwd: project, check: "static", clip: path, reason: "a held title" });
+      await conn.request("review.waive", { cwd: project, check: "reading", clip, reason: "named without its path" });
+
+      const result = await conn.request("review", { cwd: project, timeline: "outer", sheets: ["metrics"] });
+      const notes = result.warnings.filter((warning) => warning.startsWith("requirements:"));
+      // The nested path is a clip of the flattened film: its waiver is not reported as naming a missing clip.
+      expect(notes.some((note) => note.includes(path) && note.includes("not on the timeline"))).toBe(false);
+      expect(notes.some((note) => note.includes("the waiver of reading") && note.includes(`name it as ${path}`))).toBe(true);
+    },
+    MEDIA_TIMEOUT,
+  );
+});

@@ -169,6 +169,26 @@ describe("requirements: craft warnings and waivers", () => {
     expect(whole.metrics.waived[0]).not.toHaveProperty("clip");
   });
 
+  it("answers a bare inner clip id with the path of the nested clip, in a check, a `before` target and a waiver", () => {
+    const nested: ClipSpan[] = [
+      { id: "c_a", start: 0, end: 3 },
+      { id: "c_nest/c_in", start: 1, end: 2 },
+      { id: "c_other/c_in", start: 4, end: 5 },
+    ];
+    const asked = judge(file({ clips: [{ clip: "c_in", appearsBy: 5 }, { clip: "c_a", before: "c_in" }] }), { clips: nested });
+    expect(checkOf(asked, "clip.appearsBy", "c_in")).toMatchObject({ status: "fail", message: "clip c_in is inside a nested timeline: name it as c_nest/c_in, c_other/c_in (<nested clip id>/<clip id>)." });
+    expect(checkOf(asked, "clip.before", "c_a").message).toContain("name it as c_nest/c_in");
+    const waived = judge(file({ waivers: [{ check: "static", clip: "c_in", reason: "x" }] }), { series: still, clips: nested });
+    expect(waived.notes).toEqual([expect.stringContaining("the waiver of static names clip c_in, which is inside a nested timeline: name it as c_nest/c_in")]);
+  });
+
+  it("judges a clip inside a nested timeline by its flattened id", () => {
+    const nested: ClipSpan[] = [{ id: "c_nest/c_in", start: 1, end: 2 }];
+    const result = judge(file({ clips: [{ clip: "c_nest/c_in", appearsBy: 1.5, keepsMoving: { maxStatic: 0.5 } }] }), { clips: nested });
+    expect(checkOf(result, "clip.appearsBy", "c_nest/c_in")).toMatchObject({ status: "pass", actual: 1 });
+    expect(checkOf(result, "clip.keepsMoving", "c_nest/c_in").status).toBe("fail");
+  });
+
   it("says in the notes which waivers name a clip it cannot place", () => {
     const named = file({ waivers: [{ check: "static", clip: "c_gone", reason: "x" }] });
     expect(judge(named, { series: still }).notes).toEqual([expect.stringContaining("clip c_gone, which is not on the timeline")]);
