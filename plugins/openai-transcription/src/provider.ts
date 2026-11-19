@@ -214,7 +214,7 @@ async function failure(response: Response, key: string, model: string): Promise<
   const suffix = detail ? `: ${detail}` : "";
   if ((status === 404 || status === 400) && (upstream.code === "model_not_found" || (status === 404 && RETIRED_MODEL.test(upstream.message)))) {
     return new Error(
-      `OpenAI no longer serves the model "${scrub(model, key)}" (retired or removed, HTTP ${status}); this provider only uses ${DEFAULT_MODEL}. Update @frameshell/openai-transcription or use \`--provider whisper-cpp\`${suffix}`,
+      `OpenAI no longer serves the model "${scrub(model, key)}" (retired, removed, or not available to this key, HTTP ${status}); this provider only uses ${DEFAULT_MODEL}. Update @frameshell/openai-transcription or use \`--provider whisper-cpp\`${suffix}`,
     );
   }
   if (status === 404) return new Error(`OpenAI answered not found (HTTP 404): check ${BASE_URL_VARIABLE}${suffix}`);

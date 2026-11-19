@@ -160,7 +160,7 @@ export const notificationStack: Template = {
       var OUT = 0.3;
       ${STEP_TIMES}
       // Beat-placed or fixed, the starts are held to the room before the exit so a short clip still shows every card.
-      var arrive = stepTimes(P.startAt, P.gap, n, P.onBeats, D - OUT - 0.5, 0.08);
+      var arrive = stepTimes(P.startAt, P.gap, n, P.onBeats, D - OUT - 0.5, 0.08, true);
       var step = CARD * STEP * fs;
 
       M.bind("${id}", function (t) {
