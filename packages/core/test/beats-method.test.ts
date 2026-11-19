@@ -59,7 +59,7 @@ describe("beats.measure and beats.show", () => {
       expect(result).toMatchObject({
         asset: "assets/loop.wav",
         file: "beats/loop.beats.json",
-        detector: "onset-flux@1",
+        detector: "onset-flux@2",
         meter: 4,
         low: false,
         sampleRate: 48_000,

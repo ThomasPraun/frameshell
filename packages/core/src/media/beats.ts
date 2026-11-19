@@ -6,21 +6,26 @@ import { fft } from "../fft.js";
  * asset, measured from its audio. Pure DSP on mono samples; the caller brings
  * the PCM (`beats-store.ts`).
  *
- * Recipe, after the thresholds measured in #458 (HyperFrames' `beats`, Apache-2.0, is a reference only):
+ * Recipe, after the thresholds measured in #458 and #689 (HyperFrames' `beats`, Apache-2.0, is a reference
+ * only; corpus and numbers in docs/research/beats-real-music.md):
  * 1. resample to {@link ANALYSIS_RATE} and take the spectral-flux onset envelope (hop 128, window 2048,
  *    log magnitude, 100 ms of silent pre-roll so a hit at t = 0 has a frame before it);
  * 2. pick its peaks, drop those under 0.12 of the strongest, and refine each to the sample where a 0.5 ms
- *    average of the 30 Hz-high-passed signal leaves the floor (the envelope alone is 20-50 ms late);
+ *    average of the 30 Hz-high-passed signal, held over 10 ms, rises 20% from its floor (the envelope alone
+ *    is 20-50 ms late; without the hold a low kick's later, louder cycle won);
  * 3. tempo by autocorrelation of the envelope with interpolated lags, seeded with a hint, folded to the
- *    octave of the hint (or 70-170 BPM); phase by the comb that collects most hit energy at 5 ms steps;
- *    one straight period fitted by least squares over the hits, widening window by window;
+ *    octave of the hint (or 70-170 BPM); period (within 1%) and phase by the comb that collects most hit
+ *    energy over the middle minute; one straight period fitted by least squares over the hits, widening
+ *    window by window, then refitted over the whole audio as the match tolerance narrows to 15 ms; a 3:2 or
+ *    4:3 tempo whose beats carry clearly more hit energy replaces the measured one;
  * 4. each beat snaps to a hit within {@link SNAP_S}; the bar starts at the phase with most 20-150 Hz energy;
- * 5. confidence from how many beats found a hit and how periodic the envelope is. Calm music gets a bogus
- *    double-time grid: that shows as low confidence, with the other tempi offered.
+ * 5. confidence from how many beats found a hit and how many of those sit within 15 ms; a grid whose half
+ *    holds every other beat with twice the energy (calm music gets a bogus double-time grid) or with a near
+ *    3:2 rival stays low, with the other tempi offered. One octave off is not told apart: both grids hold.
  */
 
 /** Detector id written to the beats file; bump the number when a result can change for the same audio. */
-export const BEAT_DETECTOR = "onset-flux@1";
+export const BEAT_DETECTOR = "onset-flux@2";
 /** Rate the analysis runs at; faster sources are resampled to it, slower ones are used as they are. */
 export const ANALYSIS_RATE = 22_050;
 /** STFT window, in samples at the analysis rate. */
@@ -31,10 +36,46 @@ export const HOP = 128;
 const PRE_ROLL_S = 0.1;
 /** Peaks under this fraction of the strongest are not hits. */
 const MIN_PEAK = 0.12;
+/** Window of the running maximum the onset refinement reads, seconds: a half period of a 50 Hz tone. */
+const HOLD_S = 0.01;
+/** How far before a hit's loudest point the refinement looks for the quiet it rose from, seconds. */
+const FLOOR_S = 0.05;
 /** A beat snaps to a hit this close (seconds). */
 export const SNAP_S = 0.008;
 /** A hit this close to a grid beat belongs to it when fitting and scoring (seconds). */
 const MATCH_S = 0.03;
+/** Match tolerances of the refits over the whole audio after the widening fit, seconds, loosest first. */
+const REFIT_S = [0.03, 0.02, 0.015];
+/** How far from the autocorrelation's period the grid search looks, and its step (fractions of the period). */
+const PERIOD_SEARCH = 0.01;
+const PERIOD_STEP = 0.00025;
+/** Stretch of audio the grid search scores: at {@link PERIOD_STEP} the grid walks at most 7.5 ms over it. */
+const GRID_SEARCH_S = 60;
+/** A hit this close to a beat is on it: counts toward beat energy and the grid's precision (seconds). */
+const TIGHT_S = 0.015;
+/**
+ * A 3:2 or 4:3 rival replaces the measured tempo when its beat energy is at least this many times the
+ * incumbent's and at least {@link RIVAL_MIN_ENERGY}; from {@link RIVAL_DOUBT} the confidence stays under LOW.
+ * Measured on the #689 corpus (docs/research/beats-real-music.md): right tempi had rivals up to 1.12x,
+ * dotted-quarter misreads 1.34x and up (two at 1.10x and 1.19x stay); wandering real tracks' rivals: 0.12.
+ */
+const RIVAL_GAIN = 1.25;
+const RIVAL_DOUBT = 1.15;
+const RIVAL_MIN_ENERGY = 0.15;
+const RIVAL_CAP = 0.45;
+/** Fewest beats of the measured grid that may switch to a rival: half-time grids of 8-bar takes switched wrongly. */
+const RIVAL_MIN_BEATS = 24;
+/**
+ * Confidence knobs ({@link confidenceOf}), from the same corpus: share of beats with a hit that counts as a
+ * complete grid; share of matched hits within {@link TIGHT_S} that gives no confidence, and full confidence
+ * (wandering real tracks: 0.61-0.68; straight grids 0.74 and up); a half grid that holds this share of its
+ * beats with this many times the energy per beat reads as half time.
+ */
+const FULL_SHARE = 0.75;
+const TIGHT_FLOOR = 0.5;
+const TIGHT_FULL = 0.8;
+const HALF_SHARE = 0.9;
+const HALF_ENERGY = 1.8;
 /** Tempo range a measured grid is folded into when there is no hint. */
 const MIN_BPM = 70;
 const MAX_BPM = 170;
@@ -274,26 +315,43 @@ function attackEnvelope(signal: Signal): Float32Array {
 }
 
 /**
- * The sample where the hit announced by the envelope peak at `frame` begins: the loudest point near the
- * window edge the new sound entered through, back to the energy minimum before it, then up to where the
- * attack rises 20% of the way from that floor.
+ * Running maximum of `attack` over the {@link HOLD_S} before each sample. |y| of a low tone dips to zero every
+ * half period; the hold reads a kick's cycles as one rise, so the floor search does not stop between them.
  */
-function refine(attack: Float32Array, frame: number, rate: number, preRoll: number): number {
+function holdEnvelope(attack: Float32Array, rate: number): Float32Array {
+  const width = Math.max(1, Math.round(HOLD_S * rate));
+  const hold = new Float32Array(attack.length);
+  // Monotonic deque of indices whose values decrease: the front is the window's maximum.
+  const queue = new Int32Array(attack.length);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < attack.length; i++) {
+    while (tail > head && attack[queue[tail - 1]!]! <= attack[i]!) tail--;
+    queue[tail++] = i;
+    if (queue[head]! <= i - width) head++;
+    hold[i] = attack[queue[head]!]!;
+  }
+  return hold;
+}
+
+/**
+ * The sample where the hit announced by the envelope peak at `frame` begins: the loudest point near the
+ * window edge the new sound entered through, back to the floor of the {@link holdEnvelope} before it, then
+ * back from the loudest point to the first sample that reached 20% of the way from that floor without a
+ * {@link HOLD_S} gap under that level since. A low kick's loudest cycle is often its third or fourth.
+ */
+function refine(attack: Float32Array, hold: Float32Array, frame: number, rate: number, preRoll: number): number {
   const edge = frame * HOP - preRoll + WINDOW / 2;
   const from = Math.max(0, edge - Math.round(0.09 * rate));
   const to = Math.min(attack.length - 1, edge + Math.round(0.012 * rate));
   if (to <= from) return Math.max(0, Math.min(attack.length - 1, edge));
   let top = from;
   for (let i = from; i <= to; i++) if (attack[i]! > attack[top]!) top = i;
-  const look = Math.round(0.003 * rate);
   let floor = top;
-  for (let i = top; i >= from; i--) {
-    if (attack[i]! <= attack[floor]!) floor = i;
-    else if (i < floor - look) break;
-  }
-  const level = attack[floor]! + 0.2 * (attack[top]! - attack[floor]!);
-  let onset = floor;
-  while (onset < top && attack[onset]! < level) onset++;
+  for (let i = top; i >= Math.max(from, top - Math.round(FLOOR_S * rate)); i--) if (hold[i]! < hold[floor]!) floor = i;
+  const level = hold[floor]! + 0.2 * (attack[top]! - hold[floor]!);
+  let onset = top;
+  while (onset > floor && hold[onset - 1]! >= level) onset--;
   return onset;
 }
 
@@ -302,11 +360,12 @@ function findHits(signal: Signal, envelope: Float32Array): Hit[] {
   const peaks = pickPeaks(envelope, signal.rate);
   if (peaks.length === 0) return [];
   const attack = attackEnvelope(signal);
+  const hold = holdEnvelope(attack, signal.rate);
   const preRoll = Math.round(PRE_ROLL_S * signal.rate);
   const strongest = peaks.reduce((best, peak) => Math.max(best, peak.value), 0);
   const hits: Hit[] = [];
   for (const peak of peaks) {
-    const sample = refine(attack, peak.frame, signal.rate, preRoll);
+    const sample = refine(attack, hold, peak.frame, signal.rate, preRoll);
     hits.push({ time: sample / signal.rate, strength: peak.value / strongest });
   }
   hits.sort((a, b) => a.time - b.time);
@@ -341,8 +400,10 @@ function autocorrelation(values: Float64Array, lag: number, zero: number): numbe
 
 interface Tempo {
   bpm: number;
-  /** Autocorrelation at the tempo's period against at lag 0: how periodic the envelope is. */
-  strength: number;
+  /** Autocorrelation at `bpm`'s period weighed by the tempo prior: what picked {@link Tempo.bpm}. */
+  score: (bpm: number) => number;
+  /** `bpm` moved by octaves to the hint's octave, else into 70-170 BPM. */
+  fold: (bpm: number) => number;
 }
 
 /** Tempo of the envelope: the autocorrelation peak that the prior (hint, else 120 BPM) prefers, folded to one octave. */
@@ -380,19 +441,23 @@ function estimateTempo(envelope: Float32Array, rate: number, hint: number | unde
       if (value > best.score) best = { bpm, score: value };
     }
   }
-  let bpm = best.bpm;
-  const strength = autocorrelation(part, (60 * perSecond) / bpm, zero);
-  if (hint !== undefined) {
-    for (const octave of [0.25, 0.5, 2, 4]) if (Math.abs(Math.log2((bpm * octave) / hint)) < Math.abs(Math.log2(bpm / hint))) bpm *= octave;
-  } else {
-    while (bpm < MIN_BPM) bpm *= 2;
-    while (bpm > MAX_BPM) bpm /= 2;
-  }
-  return { bpm, strength };
+  const fold = (bpm: number) => {
+    if (hint !== undefined) {
+      for (const octave of [0.25, 0.5, 2, 4]) if (Math.abs(Math.log2((bpm * octave) / hint)) < Math.abs(Math.log2(bpm / hint))) bpm *= octave;
+    } else {
+      while (bpm < MIN_BPM) bpm *= 2;
+      while (bpm > MAX_BPM) bpm /= 2;
+    }
+    return bpm;
+  };
+  return { bpm: fold(best.bpm), score, fold };
 }
 
-/** Phase in [0, period) where the hits cluster: the comb position at 5 ms steps with most hit energy, then the weighted mean offset of the hits near it. */
-function findPhase(hits: Hit[], period: number): number {
+/**
+ * Phase in [0, period) where the hits cluster: the comb position at 5 ms steps with most hit energy, then the
+ * weighted mean offset of the hits near it. `score` is that comb's hit energy.
+ */
+function findPhase(hits: Hit[], period: number): { phase: number; score: number } {
   const steps = Math.max(1, Math.floor(period / 0.005));
   let best = 0;
   let bestScore = -1;
@@ -420,7 +485,7 @@ function findPhase(hits: Hit[], period: number): number {
     }
   }
   const phase = weights > 0 ? best + weighted / weights : best;
-  return ((phase % period) + period) % period;
+  return { phase: ((phase % period) + period) % period, score: bestScore };
 }
 
 interface Grid {
@@ -428,17 +493,39 @@ interface Grid {
   phase: number;
 }
 
-/** One straight period through the hits near the grid, fitted over a window that widens until it covers the audio. */
+/**
+ * The period within {@link PERIOD_SEARCH} of `period` whose best phase collects most hit energy over the middle
+ * {@link GRID_SEARCH_S} of the hits, with that phase. The autocorrelation's period can be a few tenths of a
+ * percent off: over a minute that walks the grid off the beats, and the window fit then matches the wrong hits.
+ */
+function searchGrid(hits: Hit[], period: number, duration: number): Grid {
+  const from = Math.max(0, (duration - GRID_SEARCH_S) / 2);
+  const window = hits.filter((hit) => hit.time >= from && hit.time <= from + GRID_SEARCH_S);
+  const steps = Math.round(PERIOD_SEARCH / PERIOD_STEP);
+  let best = { period, ...findPhase(window, period) };
+  for (let k = -steps; k <= steps; k++) {
+    const candidate = period * (1 + k * PERIOD_STEP);
+    const found = findPhase(window, candidate);
+    if (found.score > best.score) best = { period: candidate, ...found };
+  }
+  return { period: best.period, phase: best.phase };
+}
+
+/**
+ * One straight period through the hits near the grid, fitted over a window that widens until it covers the
+ * audio, then refitted over the whole audio while the match tolerance narrows (each pass matches against the
+ * last fit, so a hit that only an off grid reached drops out).
+ */
 function fitGrid(hits: Hit[], first: Grid, duration: number): Grid {
   let { period, phase } = first;
   const initial = period;
-  for (let end = Math.min(duration, Math.max(8, 16 * period)); ; end = Math.min(duration, end * 1.7)) {
+  const fit = (end: number, tolerance: number) => {
     const matched = new Map<number, { index: number; time: number; weight: number; error: number }>();
     for (const hit of hits) {
       if (hit.time > end) break;
       const index = Math.round((hit.time - phase) / period);
       const error = Math.abs(hit.time - (phase + index * period));
-      if (error > MATCH_S) continue;
+      if (error > tolerance) continue;
       const known = matched.get(index);
       if (!known || error < known.error) matched.set(index, { index, time: hit.time, weight: hit.strength, error });
     }
@@ -469,8 +556,12 @@ function fitGrid(hits: Hit[], first: Grid, duration: number): Grid {
         }
       }
     }
+  };
+  for (let end = Math.min(duration, Math.max(8, 16 * period)); ; end = Math.min(duration, end * 1.7)) {
+    fit(end, MATCH_S);
     if (end >= duration) break;
   }
+  for (const tolerance of REFIT_S) fit(duration, tolerance);
   return { period, phase };
 }
 
@@ -551,6 +642,100 @@ function findDownbeat(signal: Signal, beats: number[], meter: number): number {
 
 const round = (value: number, decimals: number) => Math.round(value * 10 ** decimals) / 10 ** decimals;
 
+/** A grid fitted at one tempo: every beat over the audio and how the hits back it ({@link coverage}). */
+interface FittedGrid extends Grid {
+  /** The tempo the grid was searched at, before the fit. */
+  bpm: number;
+  /** Grid beats from the start to the end of the audio, seconds. */
+  times: number[];
+  share: number;
+  residual: number;
+  first: number;
+  last: number;
+  /** Mean strength of the hit within {@link TIGHT_S} of each beat between the first and last one with a hit. */
+  energy: number;
+  /** Of the beats with a hit within {@link MATCH_S}, the share whose hit is within {@link TIGHT_S}. */
+  tight: number;
+}
+
+/** Grid at `bpm`: searched near it, fitted over the hits, with its coverage and beat energy. */
+function gridAt(hits: Hit[], bpm: number, duration: number): FittedGrid {
+  const { period, phase } = fitGrid(hits, searchGrid(hits, 60 / bpm, duration), duration);
+  const times: number[] = [];
+  // From just before 0: a fit through a hit at t = 0 can put its beat a hair early.
+  for (let index = Math.ceil((-SNAP_S - phase) / period); phase + index * period < duration; index++) times.push(phase + index * period);
+  const reach = coverage(times, hits);
+  let energy = 0;
+  let matched = 0;
+  let close = 0;
+  if (reach.share > 0) {
+    for (let index = reach.first; index <= reach.last; index++) {
+      const hit = nearest(hits, times[index]!);
+      const gap = hit ? Math.abs(hit.time - times[index]!) : Infinity;
+      if (gap <= MATCH_S) matched++;
+      if (gap <= TIGHT_S) {
+        close++;
+        energy += hit!.strength;
+      }
+    }
+    energy /= reach.last - reach.first + 1;
+  }
+  return { bpm, period, phase, times, ...reach, energy, tight: matched > 0 ? close / matched : 0 };
+}
+
+/** The tempo ratios of the rivals the autocorrelation can mistake for the beat: 3:2 and 4:3, by family. */
+const RIVAL_FAMILIES = [
+  [3 / 2, 3 / 4],
+  [2 / 3, 4 / 3],
+];
+
+/**
+ * Beat energy of the strongest 3:2 or 4:3 rival of `grid` against the incumbent's own at its tempo and
+ * at double time (which holds every incumbent beat too), with that rival's family.
+ */
+function strongestRival(fitAt: (bpm: number) => FittedGrid, grid: FittedGrid): { ratio: number; family: number[] } {
+  const base = Math.max(grid.energy, fitAt(grid.bpm * 2).energy);
+  let best = { ratio: 0, family: RIVAL_FAMILIES[0]! };
+  for (const family of RIVAL_FAMILIES) {
+    for (const ratio of family) {
+      const energy = fitAt(grid.bpm * ratio).energy;
+      if (energy < RIVAL_MIN_ENERGY) continue;
+      if (energy / Math.max(base, 1e-9) > best.ratio) best = { ratio: energy / Math.max(base, 1e-9), family };
+    }
+  }
+  return best;
+}
+
+/**
+ * The grid of a tempo 3:2 or 4:3 from `tempo`'s when its beats carry clearly more hit energy than the
+ * incumbent's ({@link strongestRival}), else `grid`. The autocorrelation can prefer a dotted-quarter pulse;
+ * the beats it puts between the kicks then miss them. Of the rival's octaves, the one the tempo prior
+ * scores higher wins, as for the first pick.
+ */
+function rivalGrid(fitAt: (bpm: number) => FittedGrid, tempo: Tempo, grid: FittedGrid): FittedGrid {
+  if (grid.last - grid.first + 1 < RIVAL_MIN_BEATS) return grid;
+  const rival = strongestRival(fitAt, grid);
+  if (rival.ratio < RIVAL_GAIN) return grid;
+  const choices = [...new Set(rival.family.map((ratio) => tempo.fold(tempo.bpm * ratio)))];
+  return fitAt(choices.reduce((pick, choice) => (tempo.score(choice) > tempo.score(pick) ? choice : pick)));
+}
+
+/**
+ * How sure the grid is, 0..1: the share of its beats with a hit (a grid with hits on {@link FULL_SHARE} of
+ * them is complete; sparse parts are music, not doubt) times how many of those hits sit within
+ * {@link TIGHT_S} (a straight grid over wandering music finds them 15-30 ms off). Two rivals cap it: a half
+ * grid that holds its beats with about twice the energy per beat (every other beat empty: half time) keeps
+ * the stricter `share ** 1.5`, and a 3:2 rival short of a switch ({@link RIVAL_DOUBT}) keeps it under LOW.
+ */
+function confidenceOf(fitAt: (bpm: number) => FittedGrid, grid: FittedGrid): number {
+  const precision = Math.min(1, Math.max(0, (grid.tight - TIGHT_FLOOR) / (TIGHT_FULL - TIGHT_FLOOR)));
+  let confidence = Math.min(1, grid.share / FULL_SHARE) * precision;
+  const half = fitAt(grid.bpm / 2);
+  if (half.share >= HALF_SHARE && half.energy >= HALF_ENERGY * grid.energy) confidence = Math.min(confidence, grid.share ** 1.5);
+  if (strongestRival(fitAt, grid).ratio >= RIVAL_DOUBT) confidence = Math.min(confidence, RIVAL_CAP);
+  return confidence;
+}
+
 /**
  * Measure the beat grid of `signal`, given its onset `envelope` ({@link onsetEnvelope}). Throws
  * {@link NoBeatsError} when there are too few hits to hold a grid.
@@ -561,26 +746,25 @@ export function detectBeats(signal: Signal, envelope: Float32Array, options: Bea
   if (hits.length < 4) throw new NoBeatsError("there are too few hits to hold a beat grid (silence, or no rhythm)");
   const tempo = estimateTempo(envelope, signal.rate, options.hint);
   if (!tempo) throw new NoBeatsError("the sound has no repeating rhythm");
-  const initial = 60 / tempo.bpm;
-  const grid = fitGrid(hits, { period: initial, phase: findPhase(hits, initial) }, duration);
-  const { period, phase } = grid;
-  const first = Math.ceil(-phase / period - 1e-6);
-  const grid0: number[] = [];
-  for (let index = first; phase + index * period < duration; index++) grid0.push(phase + index * period);
-  const reach = coverage(grid0, hits);
-  if (reach.share === 0) throw new NoBeatsError("no hit falls on the beat grid");
+  const fitted = new Map<number, FittedGrid>();
+  const fitAt = (bpm: number) => {
+    let grid = fitted.get(bpm);
+    if (!grid) fitted.set(bpm, (grid = gridAt(hits, bpm, duration)));
+    return grid;
+  };
+  const grid = rivalGrid(fitAt, tempo, fitAt(tempo.bpm));
+  const { period, times: all, share, residual } = grid;
+  if (share === 0) throw new NoBeatsError("no hit falls on the beat grid");
   // The grid stands where there is rhythm: beats before the first and after the last hit would be guesses.
-  const times = grid0.slice(reach.first, reach.last + 1);
+  const times = all.slice(grid.first, grid.last + 1);
   if (times.length < 2) throw new NoBeatsError("the audio holds fewer than two beats");
-  const { share, residual } = reach;
   const beats = times.map((time) => {
     const hit = nearest(hits, time);
-    return hit && Math.abs(hit.time - time) <= SNAP_S ? hit.time : time;
+    return hit && Math.abs(hit.time - time) <= SNAP_S ? hit.time : Math.max(0, time);
   });
   const meter = 4;
   const downbeat = findDownbeat(signal, beats, meter);
-  const periodic = Math.min(1, Math.max(0, tempo.strength / 0.3));
-  let confidence = share ** 1.5 * (0.6 + 0.4 * periodic);
+  let confidence = confidenceOf(fitAt, grid);
   if ((options.sourceRate ?? signal.rate) < FULL_RATE) confidence = Math.min(confidence, LOW_RATE_CONFIDENCE);
   const bpm = round(60 / period, 2);
   const alternatives: BeatAnalysis["alternatives"] = [];

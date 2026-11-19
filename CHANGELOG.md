@@ -1570,6 +1570,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Beat detector `onset-flux@2` (#689, ADR 0029; DSP only, same envelope cache, beats file and protocol): hits of a
+  low kick are placed on its first cycle, not a later louder one (median bias on generated music 12.7 → 0.8 ms); the
+  period is searched within 1 % by the comb and refitted over the whole audio as the match tolerance narrows, so a
+  straight grid no longer walks 100-300 ms off over a minute; a 3:2 or 4:3 tempo whose beats carry clearly more hit
+  energy replaces a dotted-quarter misread; confidence now weighs how many matched hits sit within 15 ms instead of
+  the saturated periodicity term, and stays LOW when a 3:2 rival is close. Measured on the #689 corpus
+  (`docs/research/beats-real-music.md`): 32 of 34 right-tempo synthetic tracks within p95 15 ms (was 7 of 28), no
+  CC0 track with a tempo that is not one octave off (was 3 of 17). One octave off is still not told apart. Existing
+  beats files keep `onset-flux@1` and their grid until measured again (`frameshell beats measure`); nothing migrates.
 - `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
   from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
   so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.

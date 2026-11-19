@@ -1,6 +1,6 @@
 # Spike: the DSP beat detector on generated and CC0 music (#689)
 
-Checks `onset-flux@1` (`packages/core/src/media/beats.ts`) against music that is not a click track. Findings, method and
+Checks the DSP beat detector (`packages/core/src/media/beats.ts`; `onset-flux@1`, now `@2`) against music that is not a click track. Findings, method and
 the go/no-go for a learned detector: [`docs/research/beats-real-music.md`](../../docs/research/beats-real-music.md).
 
 Self-contained, no dependencies, never part of the pnpm workspace. It imports the **built** core (`pnpm build` at the repo
