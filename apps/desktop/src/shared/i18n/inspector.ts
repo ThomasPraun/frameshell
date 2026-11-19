@@ -513,4 +513,5 @@ const es: typeof en = {
   usePrimaryTitle: (format) => `Descartar lo cambiado en ${format}: se ve otra vez como en el formato principal`,
 };
 
+/** English and Spanish strings of the clip, subtitle-track, shot and multicam-group inspectors. */
 export const inspector = { en, es };

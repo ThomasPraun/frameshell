@@ -136,7 +136,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
       expect(moved).toEqual(short);
       expect(short[2]).toBe(".frameshell/blender/range/0-1000ms.json");
       expect(longer[2]).toBe(".frameshell/blender/range/0-2000ms.json");
-      // A head trim changes what is rendered (the head is not), so it re-renders: owner decision on #482, 2026-11-17.
+      // A head trim changes what is rendered (the head is not), so it re-renders.
       expect(trimmedIn[2]).toBe(".frameshell/blender/range/1000-2000ms.json");
       const sameEndOtherStart = await blender.inputs!(clip({ duration: 0.5, in: 1.5 }), inputsContext(project, stub.path));
       expect(sameEndOtherStart[2]).toBe(".frameshell/blender/range/1500-2000ms.json");
@@ -541,7 +541,7 @@ describe.skipIf(process.platform === "win32")("blender adapter with a stand-in B
     });
 
     it("render a still final as the host narrows it, frame k alone after k transparent frames, keyed by its own range, estimated as one frame", async () => {
-      // The host's copy of a clip for the final of composition frame 7 at 10 fps (ADR 0035 slice 7).
+      // The host's copy of a clip for the final of composition frame 7 at 10 fps (ADR 0035).
       const still = clip({ in: 7 / 10, duration: 1 / 10 });
       const format = { projectDir: project, fps: 10, width: 1000, height: 1000 };
       expect(await adapter().finals!.estimate(still, format)).toBe(10 + 1 * 5);

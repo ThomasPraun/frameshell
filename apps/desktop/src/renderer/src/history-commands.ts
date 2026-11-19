@@ -1,4 +1,4 @@
-// Edit menu Undo and Redo in the renderer (#119): text fields first, then the timeline.
+// Edit menu Undo and Redo in the renderer: text fields first, then the timeline.
 import type { HistoryCommand } from "../../shared/api.js";
 import { elementOf, focusedWindow } from "./windows.js";
 

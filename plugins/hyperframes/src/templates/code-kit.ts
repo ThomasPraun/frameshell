@@ -3,7 +3,7 @@ import type { BrandTokens } from "./tokens.js";
 import { WINDOW_DOTS_CSS, WINDOW_DOTS_HTML } from "./ui-parts.js";
 
 /**
- * Shared parts of the code templates (#466): `code-typing`, `code-diff` and
+ * Shared parts of the code templates: `code-typing`, `code-diff` and
  * `code-morph` draw one editor window. The tokenizer is small on purpose (one
  * line at a time, no dependency): keywords, strings, numbers, comments and calls
  * are coloured, the rest is plain. It is page script, so a render needs no network.

@@ -12,7 +12,7 @@ import {
 } from "../src/renderer/src/teleprompter/follower.js";
 import { promptStream } from "../src/renderer/src/teleprompter/model.js";
 
-// Seam under test: the live follower (#393), on the spike's fixtures (spikes/shoot-capture/scripts/speech-data.mjs,
+// Seam under test: the live follower, on the spike's fixtures (spikes/shoot-capture/scripts/speech-data.mjs,
 // follower.test.mjs): the script, and the variant read with sentence 3 skipped, extra words, a misread word, a restart.
 
 const SCRIPT = [

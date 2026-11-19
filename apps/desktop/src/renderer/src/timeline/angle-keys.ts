@@ -1,4 +1,4 @@
-// Keys 1-9 and Shift+1-9 cut to an angle (#242). Pure: Workspace listens, `cutToAngle` cuts.
+// Keys 1-9 and Shift+1-9 cut to an angle. Pure: Workspace listens, `cutToAngle` cuts.
 import { editsText } from "../history-commands.js";
 import { elementOf } from "../windows.js";
 

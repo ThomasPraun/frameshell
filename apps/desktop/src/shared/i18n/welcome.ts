@@ -112,4 +112,5 @@ const es: typeof en = {
   ideaBadUrl: "Eso no es una dirección web. Empieza con https://",
 };
 
+/** English and Spanish strings of the welcome screen and new project flows. */
 export const welcome = { en, es };

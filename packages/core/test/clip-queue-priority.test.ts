@@ -8,7 +8,7 @@ import { makeClip } from "./media-fixtures.js";
 import { mediaTools, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
-// Clip render queue order (#502) through the daemon, with the `card` fixture adapter as the stand-in whose
+// Clip render queue order through the daemon, with the `card` fixture adapter as the stand-in whose
 // render time is known (`delayMs`): a long render holds the one clip slot while the rest line up behind it.
 const TIMEOUT = 180_000;
 

@@ -2,7 +2,7 @@ import { CRAFT_CHECKS, STYLE_SOURCES, SafeZoneSchema } from "@frameshell/schema"
 import { z } from "zod";
 import { type TimelineViewName, ViewedShape } from "./proposals.js";
 
-// `review` (#457, epic #451): contact sheets and strips an agent looks at before it shows the person anything.
+// `review`: contact sheets and strips an agent looks at before it shows the person anything.
 
 /** The sheets `sheets` can ask for, in the order they are written. */
 export const REVIEW_PICKED_SHEETS = ["contact", "safe", "phone", "motion", "seam", "beats", "cuts"] as const;
@@ -675,7 +675,7 @@ export interface RequirementsChange {
 }
 
 /**
- * What a `review.require` or `review.waive` changed in `requirements.json` (#457, ADR 0036).
+ * What a `review.require` or `review.waive` changed in `requirements.json` (ADR 0036).
  * Typed explicitly: inferred, it pushes the `methods` registry past the declaration size the compiler can print.
  */
 export const RequirementsChangeSchema: z.ZodType<RequirementsChange> = z.object({

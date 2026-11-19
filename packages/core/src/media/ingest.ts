@@ -132,7 +132,7 @@ async function build(
     await mkdir(store.abs(DERIVED_DIRS.proxies), { recursive: true });
     if (moving) {
       report("proxy");
-      // Alpha needs VP9 WebM (#90): H.264 has no alpha plane.
+      // Alpha needs VP9 WebM: H.264 has no alpha plane.
       const proxy = `${DERIVED_DIRS.proxies}/${key}.${alpha ? "webm" : "mp4"}`;
       const temp = `${store.abs(proxy)}.${partial}`;
       temps.push(temp);

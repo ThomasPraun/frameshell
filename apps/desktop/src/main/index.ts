@@ -147,14 +147,14 @@ import { Updater } from "./updater.js";
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 // One packaged app per user data dir: a second launch (Open with, a click in Explorer) hands its files to this one
-// (#184). Unpackaged builds skip it, so a dev build runs beside the installed app.
+// Unpackaged builds skip it, so a dev build runs beside the installed app.
 const primary = !app.isPackaged || app.requestSingleInstanceLock();
 if (!primary) app.quit();
 
 const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
 // Spawning the daemon reuses process.execPath (Electron): run it as plain Node. Spawned from a utility process so it
-// never holds this process's stdio handles (#112).
+// never holds this process's stdio handles.
 const daemon = new DaemonLink({
   socketPath,
   client: `desktop/${APP_VERSION}`,
@@ -189,14 +189,14 @@ daemon.onReconnect(() => ui.resync());
 const layouts = new LayoutStore(join(app.getPath("userData"), "layouts"));
 /** Detached panels and their windows' placement (ADR 0012): a user decision, global, so in `configDir`. */
 const panelWindows = new PanelWindowStore(join(resolveAppDirs(process.env).configDir, "panel-windows.json"));
-/** Projects whose synced-folder warning the user dismissed (#187): a user decision, so in `configDir`. */
+/** Projects whose synced-folder warning the user dismissed: a user decision, so in `configDir`. */
 const syncWarningsFile = join(resolveAppDirs(process.env).configDir, "sync-warnings-dismissed.json");
-/** UI language picked in View > Language (#189): a user decision, global, so in `configDir`. */
+/** UI language picked in View > Language: a user decision, global, so in `configDir`. */
 const languageFile = join(resolveAppDirs(process.env).configDir, "language.json");
 let languageChoice: LanguageChoice = readLanguageChoice(languageFile);
 /** UI strings in the app's language; set once the app is ready (`app.getLocale()`), English before. */
 let text: Dict = strings("en");
-/** Update check (#193); its opt-out is a user decision, so in `configDir`. */
+/** Update check; its opt-out is a user decision, so in `configDir`. */
 const updater = new Updater({
   mode: updateMode({ packaged: app.isPackaged, platform: process.platform, version: APP_VERSION, env: process.env }),
   preferences: new UpdatePreferences(join(resolveAppDirs(process.env).configDir, "updates.json")),
@@ -208,7 +208,7 @@ const updater = new Updater({
 });
 /** Placement saves wait for the window to stop moving. */
 const PLACEMENT_SAVE_MS = 400;
-// A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to (#139),
+// A dev build gets its own shim dir: the installed app's shim, which the system-wide `frameshell` links to,
 // must keep pointing at the installed app.
 const binDir = join(app.getPath("userData"), app.isPackaged ? "bin" : "bin-dev");
 const cliShim = join(binDir, process.platform === "win32" ? "frameshell.cmd" : "frameshell");
@@ -265,7 +265,7 @@ interface WindowState {
   panels: Map<BrowserWindow, DetachablePanel>;
   /** Folder the window was created to open; unset for a window made to show the welcome screen. */
   startDir: string | undefined;
-  /** Videos the OS asked to open (#184), waiting for the welcome screen to take them; null when none. */
+  /** Videos the OS asked to open, waiting for the welcome screen to take them; null when none. */
   offered: VideoProjectPlan | null;
   /**
    * The project window is closing or reloading: its panel windows close
@@ -707,7 +707,7 @@ async function createFromVideos(
     const plan = await planVideoProject(request.files, { parent: request.parent, name: request.name });
     let assets: string[] = [];
     if (!plan.existing) {
-      // The project takes the first video's size, frame rate and sample rate (#197); the defaults when ffprobe
+      // The project takes the first video's size, frame rate and sample rate; the defaults when ffprobe
       // cannot read it, so an odd file never blocks the project. Audio alone has no picture: the chosen frame (ADR 0015).
       // Pictures make an image project the size of the first one (ADR 0017).
       const like = plan.files.find((file) => !isAudioFile(file)) ?? plan.files[0];
@@ -732,7 +732,7 @@ async function createFromVideos(
   }
 }
 
-/** Briefs of projects made from an idea (#472), by project folder, until the project's window takes them. */
+/** Briefs of projects made from an idea, by project folder, until the project's window takes them. */
 const ideas = new Map<string, IdeaBrief>();
 
 /** Folder new ideas go in unless the person picks another: the OS videos folder. */
@@ -741,7 +741,7 @@ function ideaParent(parent?: string): string {
 }
 
 /**
- * Create the empty project of an idea (#472) and open it. The first format sets the project's size, the other
+ * Create the empty project of an idea and open it. The first format sets the project's size, the other
  * ones go in with `format.add`, so they are journaled like any format change (ADR 0027, 0036).
  */
 async function createFromIdea(state: WindowState, raw: IdeaBrief, parent?: string): Promise<OpenOutcome> {
@@ -829,7 +829,7 @@ const AUDIO_FRAMES = {
 /**
  * Put the videos among `assets` one after another on a new video track of the
  * main timeline, and the audio files on a new audio track (A1, ADR 0015), as
- * one `ui` transaction, so a single undo takes them off (#197). A file that
+ * one `ui` transaction, so a single undo takes them off. A file that
  * cannot be placed (unreadable, or a picture, which has no length) is skipped; the rest still go in.
  */
 async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
@@ -851,7 +851,7 @@ async function placeOnTimeline(dir: string, assets: string[]): Promise<void> {
   });
 }
 
-/** Official transcription plugin a project made from videos gets (#188). */
+/** Official transcription plugin a project made from videos gets. */
 const TRANSCRIPTION_PLUGIN = "@frameshell/whisper-cpp";
 /** Model whisper-cpp uses when nobody names one; twin of `DEFAULT_MODEL` in `plugins/whisper-cpp/src/provider.ts`. */
 const WHISPER_DEFAULT_MODEL = "large-v3-turbo-q5_0";
@@ -927,7 +927,7 @@ function transcribeConfirmed(
 
 /**
  * Install the transcription plugin into the new project at `dir` and
- * transcribe `assets`, in the background, reporting each step (#188). The
+ * transcribe `assets`, in the background, reporting each step. The
  * user created the project, so the plugin is trusted as `plugin.install`
  * trusts it. Fails softly: the project stays usable and the agent can retry.
  * With `background` (a project made from audio), the transcript is followed by
@@ -1000,7 +1000,7 @@ function welcomeWindow(): WindowState | undefined {
 }
 
 /**
- * Open what the OS handed the app (#184): folders as projects; videos as a
+ * Open what the OS handed the app: folders as projects; videos as a
  * project made from them, offered on a welcome screen for confirmation, or
  * opened at once when their project exists already (ADR 0013). Other files are ignored.
  */
@@ -1139,7 +1139,7 @@ function registerVoiceoverIpc(): void {
   );
 }
 
-/** The transcript view's model picker (#427): thin daemon requests for the window's project, plus the file dialog. */
+/** The transcript view's model picker: thin daemon requests for the window's project, plus the file dialog. */
 function registerModelIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
   ipcMain.handle(Channel.modelsList, (event) => outcome(async () => daemon.request("model.list", { cwd: await dirOf(event.sender) })));
@@ -2076,7 +2076,7 @@ function buildMenu(): void {
 }
 
 /**
- * Agent CLIs of the agent guide (#190), searched on the app's PATH, the login shell's (what the app's terminals
+ * Agent CLIs of the agent guide, searched on the app's PATH, the login shell's (what the app's terminals
  * get) and the usual install folders. Started by path: the one found runs, whatever the terminal's PATH holds.
  */
 async function findAgents(): Promise<AgentChoice[]> {
@@ -2089,7 +2089,7 @@ async function findAgents(): Promise<AgentChoice[]> {
   return found.map((agent) => (agent.path ? { ...agent, command: startCommand(agent.path, platform) } : agent));
 }
 
-/** Claude Desktop's config file, where it has one (#191). */
+/** Claude Desktop's config file, where it has one. */
 const claudeDesktopConfig = claudeDesktopConfigPath(process.platform, homedir(), process.env);
 
 async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
@@ -2100,7 +2100,7 @@ async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
 
 /**
  * Add (after showing the entry) or remove Frameshell's server in Claude Desktop's config, through the stable
- * `frameshell` shim so app updates keep it working (#191). Message boxes say what changed and to restart Claude.
+ * `frameshell` shim so app updates keep it working. Message boxes say what changed and to restart Claude.
  */
 async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promise<ClaudeDesktopStatus> {
   const said = text.agents.dialog;
@@ -2190,7 +2190,7 @@ async function changeClaudeCode(connect: boolean, sender: WebContents): Promise<
 }
 
 /**
- * Switch the UI language (#189): save the choice, rebuild the menus, and reload the project windows so the
+ * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the
  * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
  */
 async function setLanguage(choice: LanguageChoice): Promise<void> {
@@ -2205,7 +2205,7 @@ async function setLanguage(choice: LanguageChoice): Promise<void> {
 
 const BUG_REPORT_URL = "https://github.com/ThomasPraun/frameshell/issues/new?template=bug.yml";
 
-/** Help > Copy Diagnostics (#194): puts the report on the clipboard, then offers to open the bug form. No telemetry. */
+/** Help > Copy Diagnostics: puts the report on the clipboard, then offers to open the bug form. No telemetry. */
 async function copyDiagnostics(): Promise<void> {
   const parent = BrowserWindow.getFocusedWindow() ?? undefined;
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -2266,7 +2266,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/** Runs the File menu's install or uninstall of the system-wide CLI (#139) and reports the outcome in a message box. */
+/** Runs the File menu's install or uninstall of the system-wide CLI and reports the outcome in a message box. */
 async function cliCommand(action: (shim: string, host: CliInstallHost) => Promise<CliInstallOutcome>) {
   const parent = BrowserWindow.getFocusedWindow() ?? undefined;
   const box = (options: Electron.MessageBoxOptions) =>

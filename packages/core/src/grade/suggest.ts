@@ -2,7 +2,7 @@ import type { Grade } from "@frameshell/schema";
 import { type FrameLevels, round } from "./levels.js";
 
 // A bounded first-pass correction from measured levels, in the fields of a clip's grade (ADR 0031: correct first,
-// then style). Pure; `analyze.ts` measures. The numbers are judgment, not colour science: see the ADR's slice 6.
+// then style). Pure; `analyze.ts` measures. The numbers are judgment, not colour science: see ADR 0031.
 
 /** The correction fields a suggestion can carry: a grade without its LUT. */
 export type GradeCorrection = Omit<Grade, "lut" | "lutMix">;

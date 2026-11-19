@@ -6,7 +6,7 @@ import { type Dict, strings } from "../shared/i18n/index.js";
 export const EDIT_MENU_IDS = { undo: "edit-undo", redo: "edit-redo" } as const;
 
 /**
- * The app's Edit menu (#119). Undo and Redo do not use Electron's `undo` and
+ * The app's Edit menu. Undo and Redo do not use Electron's `undo` and
  * `redo` roles, which only undo text: they hand the command to the focused
  * window (`dispatch`, with the window Electron reports focused, if any), which undoes text in a text field and the timeline
  * anywhere else. The page sees their keys first: a key it handles (the

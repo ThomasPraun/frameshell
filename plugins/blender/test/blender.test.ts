@@ -226,7 +226,7 @@ describe("the plugin package", () => {
     activate({ project: { dir: "/p" }, registerClipType: (adapter: ClipAdapter) => registered.push(adapter) } as unknown as PluginApi);
     expect(registered.map((adapter) => adapter.type)).toEqual(["blender"]);
     expect(registered[0]!.propsSchema).toBe(propsSchema);
-    // Windowed finals: the host may ask for a final of one frame (ADR 0035 slice 7).
+    // Windowed finals: the host may ask for a final of one frame (ADR 0035).
     expect(registered[0]!.finals?.windowed).toBe(true);
   });
 });

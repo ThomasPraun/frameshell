@@ -33,7 +33,7 @@ export const AUDIO_EFFECT_LIMITS = {
   highpassSweep: { startHz: { min: 10, max: 2000, default: 40 }, endHz: { min: 10, max: 2000, default: 300 } },
 } as const satisfies Record<(typeof AUDIO_EFFECT_KINDS)[number], Record<string, EffectParamLimit>>;
 
-/** Shortest and longest window of a `highpassSweep`, seconds of the asset (ADR 0037 slice 6). */
+/** Shortest and longest window of a `highpassSweep`, seconds of the asset (ADR 0037). */
 export const SWEEP_SECONDS = { min: 0.1, max: 30 } as const;
 /** Slack on {@link SWEEP_SECONDS}: window ends are rounded to the millisecond, so `5.3 - 5.2` must pass as 0.1. */
 export const SWEEP_EPSILON = 1e-6;
@@ -49,7 +49,7 @@ export type NormalizedAudioEffect =
   | { kind: "highpassSweep"; from: number; to: number; startHz: number; endHz: number; auto?: "music" };
 
 /**
- * The voice chain (#464): high-pass at 85 Hz, light FFT denoise, gentle 2.5:1 compression. `clip set --voice`
+ * The voice chain: high-pass at 85 Hz, light FFT denoise, gentle 2.5:1 compression. `clip set --voice`
  * writes these as explicit entries; they are also every parameter's default.
  */
 export const VOICE_CHAIN: readonly NormalizedAudioEffect[] = [
@@ -142,7 +142,7 @@ export const BACKDROP_LIMITS = {
 } as const;
 
 /**
- * Glass of the motion kit (#462): backdrop blur 46 px, saturate 1.45, a dark scrim of 0.55 (0.72 over bright
+ * Glass of the motion kit: backdrop blur 46 px, saturate 1.45, a dark scrim of 0.55 (0.72 over bright
  * footage). The default of the style's `glass`; never applied to a clip unless asked (`clip set --glass`).
  */
 export const GLASS: Readonly<{ blur: number; saturate: number; dim: number }> = { blur: 46, saturate: 1.45, dim: 0.55 };

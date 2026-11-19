@@ -19,7 +19,7 @@ export interface ConnectOrStartOptions {
   daemonEntry?: string;
   /**
    * Starts one daemon process. Default {@link spawnDetachedDaemon}, from this process. The desktop app passes one that
-   * spawns from a helper process, so the daemon never holds the app's own stdio handles (Windows, #112).
+   * spawns from a helper process, so the daemon never holds the app's own stdio handles (Windows).
    */
   launch?: DaemonLauncher;
 }
@@ -125,7 +125,7 @@ export async function connectOrStartDaemon(options: ConnectOrStartOptions): Prom
  * until {@link SpawnedDaemon.release}, to relay startup errors; `watch.onStderr` sees each chunk as it arrives.
  *
  * On Windows the child also inherits every inheritable handle of this process. Plain Node makes its own stdio
- * non-inheritable at startup; Electron's main process does not, so the app spawns through a helper process (#112).
+ * non-inheritable at startup; Electron's main process does not, so the app spawns through a helper process.
  */
 export function spawnDetachedDaemon(
   { execPath, entry, env }: DaemonLaunch,

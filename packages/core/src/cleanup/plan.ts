@@ -4,7 +4,7 @@ import { ENERGY_HOP_S } from "../media/energy.js";
 import { FrameGrid } from "../timeline/grid.js";
 
 /**
- * Cuts for dead air and false starts (#455), planned on the timeline clock from the words the timeline keeps and the
+ * Cuts for dead air and false starts, planned on the timeline clock from the words the timeline keeps and the
  * audio energy under them. Pure: `speech.ts` gathers the inputs, `daemon.ts` makes the cuts.
  */
 

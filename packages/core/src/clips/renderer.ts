@@ -167,8 +167,8 @@ export interface ClipEnsureOptions {
    */
   waitForFinals?: boolean | undefined;
   /**
-   * Timeline seconds of the one frame a still draws (`frame` and `clip.compare` asked for `final`; never `review`, ADR 0035
-   * slice 7). With `tier` `final`, a clip shown at that frame whose adapter renders windowed finals (`finals.windowed`)
+   * Timeline seconds of the one frame a still draws (`frame` and `clip.compare` asked for `final`; never `review`, ADR 0035).
+   * With `tier` `final`, a clip shown at that frame whose adapter renders windowed finals (`finals.windowed`)
    * and has no motion blur is drawn from its whole final when cached, else from a final of that frame alone, rendered
    * (interactive) and waited for; a failure throws, never falls back to the draft. Every other clip as without it.
    */
@@ -552,7 +552,7 @@ export class ClipRenderer {
    * Final renders of the generated clips of `timeline` whose adapter renders finals (ADR 0035), in track then time
    * order, at the project resolution or `size`; never renders. A missing final carries the adapter's estimate of its
    * time. Clips without a key are left out: {@link check} and {@link ensure} report them. With `stillAt` (timeline
-   * seconds), what {@link ensure} with `stillFinalAt` would draw instead (slice 7): a clip's whole final when cached, else
+   * seconds), what {@link ensure} with `stillFinalAt` would draw instead: a clip's whole final when cached, else
    * its final of that one frame; clips that would get neither (not shown there, no windowed finals) are left out.
    */
   async finals(root: string, timeline: Timeline, size?: { width: number; height: number }, stillAt?: number): Promise<FinalRenderState[]> {
@@ -617,8 +617,8 @@ export class ClipRenderer {
    * cannot be (invalid timeline, plugin missing or untrusted, adapter error),
    * entries are kept and `skipped` says why. A key with a render pending is
    * kept. `busy`: a render or export job runs, so nothing is deleted.
-   * Then each adapter with a `gc` hook cleans its own files, given the paths its clips' inputs name now (ADR 0035
-   * slice 5); what it removes is reported as kind `clip`. It is not asked when a key is unknown.
+   * Then each adapter with a `gc` hook cleans its own files, given the paths its clips' inputs name now (ADR 0035);
+   * what it removes is reported as kind `clip`. It is not asked when a key is unknown.
    */
   async gc(root: string, options: { dryRun: boolean; temps: boolean; busy: boolean }): Promise<{ removed: GcEntry[]; skipped: GcSkip[] }> {
     const skipped: GcSkip[] = [];
@@ -795,7 +795,7 @@ export class ClipRenderer {
 
   /**
    * Keys of `clip`, placed on `timeline` (whose beats and markers a clip that asks for timing reads). With `still`, its
-   * `final` is the final of that one composition frame (slice 7): the adapter's inputs are those of {@link stillClip},
+   * `final` is the final of that one composition frame: the adapter's inputs are those of {@link stillClip},
    * its timing still the whole clip's, as the frame shows it in the whole final. `words` is the pass's memoised read of
    * `timeline`'s words ({@link #wordsPass}); without it, a clip that asks for words reads them itself.
    */
@@ -1058,7 +1058,7 @@ function backgroundFinal(final: Variant | null): boolean {
 }
 
 /**
- * Composition frame of `clip` that a still at timeline `at` draws from a final of that frame alone (ADR 0035 slice 7), or
+ * Composition frame of `clip` that a still at timeline `at` draws from a final of that frame alone (ADR 0035), or
  * null when it gets none: its adapter has no windowed finals (`finals.windowed`), its final is blurred (that key ignores the
  * window), or the clip does not show at `at`.
  */

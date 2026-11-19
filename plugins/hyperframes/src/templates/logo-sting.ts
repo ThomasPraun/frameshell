@@ -10,7 +10,7 @@ import {
 } from "./kit.js";
 
 /**
- * Logo sting (#466): a short brand hit. The logo lands with a playful spring
+ * Logo sting: a short brand hit. The logo lands with a playful spring
  * while a ring leaves it, a soft light band sweeps across the frame, and the
  * name rises through a mask under it. With no logo file a monogram of the
  * name's first letter stands in. Opaque from the first frame, so it can open

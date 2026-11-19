@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 import type { FrameshellApi } from "../src/shared/api.js";
 import { launch, sandbox } from "./harness.js";
 
-// Media dropped from the OS (#183). A synthetic drop has no file on disk behind it, so the drop target is checked
+// Media dropped from the OS. A synthetic drop has no file on disk behind it, so the drop target is checked
 // with a synthetic drag, and the import it calls with real paths.
 const box = sandbox("demo");
 const outside = dirname(box.projectDir);

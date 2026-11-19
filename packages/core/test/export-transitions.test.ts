@@ -505,7 +505,7 @@ describe("export transitions and keys (real ffmpeg)", () => {
         expect(shown[40]![32 * 64 + 4]!, `${kind} after`).toBeGreaterThan(150);
 
         if (kind !== "wipe") continue;
-        // Slice 3: the same wipe on an upper track, both clips a half-size inset over grey (columns and rows 16-47):
+        // The same wipe on an upper track, both clips a half-size inset over grey (columns and rows 16-47):
         // the outgoing inset shows only left of the edge, the incoming one right of it, grey around both.
         sources.set("assets/grey.mp4", await flat("grey.mp4", "0x808080"));
         const inset = { transform: { scale: 0.5 } };

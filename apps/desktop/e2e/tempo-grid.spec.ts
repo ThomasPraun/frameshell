@@ -7,7 +7,7 @@ import { type DaemonConnection, connectToDaemon } from "@frameshell/protocol";
 import { launch, sandbox } from "./harness.js";
 import { addBarcodeAsset } from "./preview-probe.js";
 
-// The beat grid (ADR 0029 slice 3) in the built app: the timeline follows a music clip's beats file, draws it, and
+// The beat grid (ADR 0029) in the built app: the timeline follows a music clip's beats file, draws it, and
 // dragged clips snap to it; a hand edit of the beats file changes the grid live. Real daemon and ffprobe; the beats
 // file is written by hand (`exact` detector), so no detector runs.
 const box = sandbox("editing");

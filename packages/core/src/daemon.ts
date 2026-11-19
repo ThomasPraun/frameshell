@@ -349,7 +349,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   // Hub key of each root as jobs and media name it (the caller's spelling). `events.subscribe` keys by
   // `canonicalPath`: publishing under the raw root misses subscribers of another spelling (Windows 8.3
   // `RUNNER~1`, symlinks). Resolved synchronously, memoized per root: an event is written in the same tick as
-  // its change, so no reply snapshotting a later state can overtake it (#79).
+  // its change, so no reply snapshotting a later state can overtake it.
   const hubKeys = new Map<string, string>();
   const publishFor = <E extends EventName>(event: E, root: string, params: EventParams<E>): void => {
     let key = hubKeys.get(root);
@@ -403,9 +403,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       }),
   });
   const timelineWatcher = new TimelineWatcher({ onChange: (dir, id): Promise<void> => timelines.reconcile(dir, id) });
-  // ADR 0036 slice 5: hand edits of `formats` and of `style.json` become config operations.
+  // ADR 0036: hand edits of `formats` and of `style.json` become config operations.
   const configWatcher = new ConfigWatcher({ onChange: (dir, doc): Promise<void> => directConfigEdits.reconcile(dir, doc) });
-  // ADR 0029 slice 3: a beats file written, hand-edited or removed changes the grid of every timeline following that asset.
+  // ADR 0029: a beats file written, hand-edited or removed changes the grid of every timeline following that asset.
   const beatsWatcher = new BeatsWatcher({
     onChange: ({ root: dir, file, change, message }) => publishFor("beats.changed", dir, { project: dir, file, change, ...(message !== undefined ? { message } : {}) }),
   });
@@ -413,7 +413,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const skillUpdates = new Map<string, string[]>();
   const projects = new ProjectRegistry({
     onOpen: (dir) => {
-      // An unedited older copy of the agent skill becomes this version's; never blocks opening (#396).
+      // An unedited older copy of the agent skill becomes this version's; never blocks opening.
       void refreshCoreSkill(dir).then(
         (result) => {
           if (result.written.length + result.removed.length > 0) skillUpdates.set(canonicalPathSync(dir), [...result.written, ...result.removed]);
@@ -1742,7 +1742,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);
       const installed = await plugins.install(dir, spec, cwd);
-      // Takes cut while the project had no provider (#411) get their words now.
+      // Takes cut while the project had no provider get their words now.
       for (const failed of [...takeFailures.values()]) if (failed.dir === dir) queueTake(dir, failed.script, failed.take);
       return installed;
     },

@@ -6,7 +6,7 @@ import type { Segment } from "./preview-analysis.js";
 
 // Program frames the engine drew, from every `data-shown` change of the preview frame. The engine worker draws without
 // the page's main thread (ADR 0001): a page rAF that runs late misses frames that did reach the screen, so drops are
-// counted from these draws (#567, #573); canvas reads only check what a frame showed and in which order. The engine
+// counted from these draws; canvas reads only check what a frame showed and in which order. The engine
 // says why each one was dropped (`dropsIn`).
 
 interface DrawLog {
@@ -53,7 +53,7 @@ export async function drawnFrames(page: Page): Promise<number[]> {
 export interface Drops {
   /** Not decoded when a tick wanted them, or skipped after an engine tick overran a frame: 0 under ADR 0001 threshold 3. */
   starved: number[];
-  /** No tick while they were due and the engine was idle: host scheduling, reported only (ADR 0001 amendment, #567). */
+  /** No tick while they were due and the engine was idle: host scheduling, reported only (ADR 0001 amendment). */
   cadence: number[];
 }
 

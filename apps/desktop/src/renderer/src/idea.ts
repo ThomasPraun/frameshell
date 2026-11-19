@@ -1,4 +1,4 @@
-// The brief of a video made from an idea (#472) as the prompt typed into the agent; used by Welcome (choices) and AgentGuide.
+// The brief of a video made from an idea as the prompt typed into the agent; used by Welcome (choices) and AgentGuide.
 import type { IdeaBrief } from "../../shared/api.js";
 import { t } from "./i18n.js";
 

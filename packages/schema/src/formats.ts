@@ -13,7 +13,7 @@ export { FormatIdSchema, RESERVED_FORMAT_IDS } from "./format-id.js";
  * captions do: export, `frame` and the preview read them, later review too.
  */
 
-/** Built-in format ids and their canvases (ADR 0027 decision 6, measured canvases from #469). */
+/** Built-in format ids and their canvases (ADR 0027 decision 6, measured canvases). */
 export const BUILTIN_FORMATS: Readonly<Record<string, Size>> = Object.freeze({
   "16x9": Object.freeze({ width: 1920, height: 1080 }),
   "1x1": Object.freeze({ width: 1080, height: 1080 }),
@@ -26,7 +26,7 @@ export const BUILTIN_FORMAT_IDS = Object.freeze(Object.keys(BUILTIN_FORMATS));
 
 /**
  * Caption size factor in a vertical format other than the primary: vertical type reads at about
- * 1.3-1.35 x the landscape size (measured in #469); the low end keeps two-line cues inside 1080 px.
+ * 1.3-1.35 x the landscape size (measured); the low end keeps two-line cues inside 1080 px.
  */
 export const VERTICAL_CAPTION_SCALE = 1.3;
 

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { laidOutBox, launch, panelWindow, sandbox } from "./harness.js";
 
-// Review mode (ADR 0019, #320, #321) in the built app: the switch in the History view, an agent's transaction
+// Review mode (ADR 0019) in the built app: the switch in the History view, an agent's transaction
 // waiting as a proposal behind the bar, Before / After on preview and timeline, Accept applying it, Reject
 // discarding the next one. The agent is the CLI the test runs, as an `agent:claude` session; real daemon.
 const box = sandbox("history");

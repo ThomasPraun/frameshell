@@ -6,7 +6,7 @@ import { shapeProgress } from "@frameshell/schema/transitions";
 import { describe, expect, it } from "vitest";
 import { compileProgram, programAt, spanShape } from "../src/renderer/src/preview/program.js";
 
-// Seam under test: shaped dissolves on upper tracks and inside nested clips (ADR 0030 slice 3), preview against the
+// Seam under test: shaped dissolves on upper tracks and inside nested clips (ADR 0030), preview against the
 // export compiler on the same timeline: on every frame both cut the same number of pictures, at the same progress.
 // The geometry each draws for a progress is pinned on both sides against `shapeAt` (export-animation, preview-transitions).
 

@@ -112,7 +112,7 @@ interface ViewState {
 /** Pointer gesture in progress on the lanes. */
 type Gesture =
   | { kind: "scrub"; pointer: number }
-  /** Drag over an angle's turn lane: paints who speaks over the time swept (#247). */
+  /** Drag over an angle's turn lane: paints who speaks over the time swept. */
   | { kind: "paint"; pointer: number; row: TrackRow; angle: string; time: number; clientX: number; moving: boolean }
   /** Drag over empty lane space: selects the time range swept. */
   | { kind: "range"; pointer: number; time: number; clientX: number; moving: boolean }
@@ -236,7 +236,7 @@ export function TimelinePanel({
     [run],
   );
 
-  // Undo and redo anywhere in the window but text fields (#119): their keys here, the Edit menu's items via App.
+  // Undo and redo anywhere in the window but text fields: their keys here, the Edit menu's items via App.
   // A key handled here is prevented, so it never also reaches the menu; one in a text field is left to the field.
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {

@@ -5,7 +5,7 @@ import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `review` metrics of #457's sync, loop seam and delivery checks, on a real managed ffmpeg and tiny synthetic films.
+// `review` metrics of sync, loop seam and delivery checks, on a real managed ffmpeg and tiny synthetic films.
 const MEDIA_TIMEOUT = 180_000;
 
 let daemon: Daemon;

@@ -38,7 +38,7 @@ const NEUTRAL: NormalizedGrade = {
 };
 
 /**
- * A video-track clip's colour grade (ADR 0031, #384; media, generated or nested timeline clip): five sliders for the correction (exposure, white balance, contrast,
+ * A video-track clip's colour grade (ADR 0031; media, generated or nested timeline clip): five sliders for the correction (exposure, white balance, contrast,
  * saturation), a Look menu (the built-in looks of `grade-looks.ts`: one `clip.set grade` writes that look's five numbers,
  * leaving the LUT), a project `.cube` LUT with its mix, and a reset. Dragging a slider shows its value; the release is one
  * `clip.set grade` that changes that number only, so a drag is one undo step and the agent's other numbers stay.

@@ -2,7 +2,7 @@ import type { MediaProbe, ReviewFinding, ReviewDelivery, ReviewLoudness } from "
 import type { ExportPreset } from "@frameshell/schema";
 import { DELIVERY_FPS, DELIVERY_FRAMES, DELIVERY_LOUDNESS_LU } from "./thresholds.js";
 
-// Delivery check (#457, from the 2.5D shorts course): the exported file read back with ffprobe against what the export plan
+// Delivery check (from the 2.5D shorts course): the exported file read back with ffprobe against what the export plan
 // said it would be. Pure: the plan, the preset and the probe in, the comparisons out.
 
 /** What the export plan promises of the file; from `RenderResult`. */

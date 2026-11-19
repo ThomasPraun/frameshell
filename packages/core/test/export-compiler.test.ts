@@ -1317,7 +1317,7 @@ describe("formats (ADR 0027)", () => {
     // 1920x1080 talk: its centre 608x1080 scaled to 1080x1920, no black bars.
     expect(vertical).toContain("crop=608:1080:656:0,scale=1080:1920,setsar=1,format=yuv420p");
     expect(vertical).not.toContain("force_original_aspect_ratio=decrease");
-    // The untransformed title on the upper track has alpha (decision 13 of #469): fitted whole, centred, never cropped.
+    // The untransformed title on the upper track has alpha (decision 13): fitted whole, centred, never cropped.
     expect(vertical).toMatch(/\[1:v:0\][^;]*scale=1080:608,setsar=1,format=rgba.*\[o0\]/);
     expect(vertical).toContain("[base][o0]overlay=x=0:y=656");
     // The square: the centre 1080x1080 of the frame at its own size.

@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import type { DaemonConnection, ModelListResult, Progress } from "@frameshell/protocol";
 import { UsageError } from "./timeline-commands.js";
 
-/** Help text of the `model` commands (#427), in `frameshell --help`. */
+/** Help text of the `model` commands, in `frameshell --help`. */
 export const MODEL_USAGE = `  model list                   Transcription models: the provider's own (size, downloaded), model files registered
                                on this machine (format, state), this machine's defaults, and what this project uses
   model add <id> <file> [--dtw preset]

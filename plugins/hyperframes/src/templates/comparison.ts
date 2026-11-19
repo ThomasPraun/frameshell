@@ -12,7 +12,7 @@ import {
 } from "./kit.js";
 
 /**
- * Comparison (#466): the rejected option rises in, a line strikes it out and
+ * Comparison: the rejected option rises in, a line strikes it out and
  * it dims, then the chosen option springs in on a solid accent pill. Side by
  * side on wide frames, stacked on square and tall ones. Transparent unless
  * `backdrop` is raised.

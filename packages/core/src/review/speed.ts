@@ -1,7 +1,7 @@
 import type { ReviewSpeedSpan } from "@frameshell/protocol";
 import { SPEED_LINEAR_FRAMES, SPEED_LINEAR_SHARE, SPEED_LINEAR_SPREAD, SPEED_STOP_FRAMES, SPEED_STOP_PX } from "./thresholds.js";
 
-// The speed graph of `review --speed` (#457). Pure: hero-point samples in, the speed between them and the stretches
+// The speed graph of `review --speed`. Pure: hero-point samples in, the speed between them and the stretches
 // that read mechanical (a constant speed: no ease; a dead stop mid-move) out. Frames are timeline frame indexes.
 
 /** Where a clip's hero point is at one timeline frame: film px. */

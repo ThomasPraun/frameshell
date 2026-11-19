@@ -690,7 +690,7 @@ describe("motion blur in generated clips", () => {
   );
 });
 
-// Finals (ADR 0035 slice 2, on the draft/final model of ADR 0041 decision 11): a `final-card` is an adapter with
+// Finals (ADR 0035, on the draft/final model of ADR 0041 decision 11): a `final-card` is an adapter with
 // `finals`, like Blender. Its draft is blue and its final red; the final is rendered only when an export waits for it.
 describe("finals of generated clips", () => {
   let dir = "";
@@ -1046,7 +1046,7 @@ describe("timing in generated clips", () => {
   );
 });
 
-// Still finals (ADR 0035 slice 7): a `window-card` renders windowed finals as Blender does, so `frame` and `clip.compare`
+// Still finals (ADR 0035): a `window-card` renders windowed finals as Blender does, so `frame` and `clip.compare`
 // with `final` draw it from a final of the one frame shown, keyed apart from its draft and its whole final. At 30 fps a
 // clip at 1 s with `in` 0.2 shows composition frame 6 + (timeline frame - 30).
 describe("still finals of generated clips", () => {

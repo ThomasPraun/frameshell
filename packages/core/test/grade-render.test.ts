@@ -19,7 +19,7 @@ import { runTool } from "../src/media/ffmpeg.js";
 import { tempDir } from "./helpers.js";
 import { mediaTools, run, runBuffer } from "./media-tools.js";
 
-// Export side of the grade parity (ADR 0031, #384): the managed ffmpeg's `lut3d` on the compiled frame graph against
+// Export side of the grade parity (ADR 0031): the managed ffmpeg's `lut3d` on the compiled frame graph against
 // `applyGradeTable`, the steps the preview's shader runs. A still in RGB keeps YUV out of the comparison.
 const MEDIA_TIMEOUT = 180_000;
 const W = 96;

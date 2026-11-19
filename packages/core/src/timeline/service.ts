@@ -101,7 +101,7 @@ export interface TimelineServiceOptions {
   clipTypes(root: string): Promise<ReadonlyMap<string, ClipAdapter>>;
   /** Id generator. Default: prefix + 6 random hex digits (`c_1a2b3c`). */
   newId?: (prefix: IdPrefix) => string;
-  /** Cut/trim edge adjustment per project and fps (#12 energy snapping). Default: none, edges stay. */
+  /** Cut/trim edge adjustment per project and fps (energy snapping). Default: none, edges stay. */
   resolveEditPoint?: (root: string, fps: number) => EditPointResolver | undefined;
   /**
    * Called after each applied operation (including `revert`) is written and
@@ -126,12 +126,12 @@ export interface TimelineServiceOptions {
   config?: ConfigJournal;
   /**
    * Beats file of a project-relative asset, or null when it has none; throws `InvalidProjectFile` for a broken one.
-   * Read by `beat:N` and `bar:N` time references (ADR 0029 slice 4). Default: no asset has one.
+   * Read by `beat:N` and `bar:N` time references (ADR 0029). Default: no asset has one.
    */
   beatsOf?: (root: string, asset: string) => Promise<BeatsFile | null>;
   /**
    * The words `timeline` (in the state an operation sees) plays, read from the project's transcripts; for `word:` time
-   * references (ADR 0029 slice 4). Default: none can be read, so a `word:` reference is refused.
+   * references (ADR 0029). Default: none can be read, so a `word:` reference is refused.
    */
   wordsOf?: (root: string, timeline: Timeline, fps: number) => Promise<TimelineWords>;
 }
@@ -740,7 +740,7 @@ export class TimelineService {
   }
 
   /**
-   * A hand edit of config document `doc` that is already in its file (ADR 0036 slice 5): `edit.base` is the keyed
+   * A hand edit of config document `doc` that is already in its file (ADR 0036): `edit.base` is the keyed
    * state the journal last recorded, `edit.next` the file's. With no review mode it is journaled as a `file.edit`
    * operation of author `file`, the file left as it is. In review mode it waits in a ready proposal of author
    * `file` and the document goes back to `edit.base`; when another proposal is open the edit is not taken in:
@@ -2416,7 +2416,7 @@ export async function readTimelineFile(root: string, rel: string): Promise<Timel
  * Project-relative `asset`/`source` args, so the record and the file never
  * hold caller-specific paths. A relative path is tried against `cwd` first,
  * then the project root; a bare timeline id (`intro`) means `timelines/intro.json`.
- * Time references (marker names, ADR 0037; `beat:N`, `bar:N` and `word:`, ADR 0029 slice 4) become seconds against
+ * Time references (marker names, ADR 0037; `beat:N`, `bar:N` and `word:`, ADR 0029) become seconds against
  * `timeline`, the state the operation applies to; `loadGrid` reads its beat grid, `loadWords` the words it plays.
  */
 async function normalizeArgs(call: TimelineCall, timeline: Timeline, loadGrid: GridLoader, loadWords: WordLoader | undefined): Promise<OperationRequest> {

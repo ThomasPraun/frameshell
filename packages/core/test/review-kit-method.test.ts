@@ -11,7 +11,7 @@ import { SPEED_ALPHA_WIDTH } from "../src/review/thresholds.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, runBuffer, testBinaryManager } from "./media-tools.js";
 
-// `review` (#457) cuts sheet and per-clip kit (pop, onion, speed) on a 3 s project at 30 fps: black, white, black clips of
+// `review` cuts sheet and per-clip kit (pop, onion, speed) on a 3 s project at 30 fps: black, white, black clips of
 // one 320x240 footage on a 1920x1080 film, cut at 1 s and 2 s. Real ffmpeg.
 const MEDIA_TIMEOUT = 240_000;
 

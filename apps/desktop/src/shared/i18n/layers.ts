@@ -33,4 +33,5 @@ const es: typeof en = {
   failed: (message) => `No se pudo cambiar la capa: ${message}`,
 };
 
+/** English and Spanish strings of the Layers panel of image projects. */
 export const layers = { en, es };

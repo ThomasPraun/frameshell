@@ -13,7 +13,7 @@ export const GRADE_LIMITS = {
   lutMix: { min: 0, max: 1, default: 1 },
 } as const;
 
-/** Most lattice points per side of a `.cube` LUT (#384). */
+/** Most lattice points per side of a `.cube` LUT. */
 export const MAX_LUT_SIZE = 65;
 
 /** Lattice points per side of a grade's table without a LUT, or with a smaller one. */

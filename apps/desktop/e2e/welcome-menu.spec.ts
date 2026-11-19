@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Recent projects on the welcome screen (#418): right-click offers Open, Reveal and Remove from Recent. Reveal is
+// Recent projects on the welcome screen: right-click offers Open, Reveal and Remove from Recent. Reveal is
 // stubbed in main and only takes folders of the recent list; Remove leaves the folder on disk.
 const box = sandbox("demo");
 const recentFile = join(box.dataDir, "desktop", "recent.json");

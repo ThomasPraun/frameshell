@@ -2,7 +2,7 @@ import type { ShapeSettings } from "@frameshell/schema";
 import { type DipPoint, dipAt } from "../media/duck.js";
 
 /**
- * The arithmetic of `music.shape` (ADR 0037 slice 4): the dip curve the music follows around a hit and at its ending.
+ * The arithmetic of `music.shape` (ADR 0037): the dip curve the music follows around a hit and at its ending.
  * Pure: `shape-run.ts` finds the clip and resolves the times, the `music.shape` operation writes the keys.
  */
 

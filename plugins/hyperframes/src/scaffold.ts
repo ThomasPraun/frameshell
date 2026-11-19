@@ -54,7 +54,7 @@ function parseArgs(args: readonly string[]): NewArgs {
  * `frameshell hyperframes new <name> [--template t] [--duration s]`: scaffold
  * `compositions/hyperframes/<name>/index.html` at the project resolution.
  * Without a template: a transparent background, one clip and a CSS animation
- * driven by the HyperFrames clock. With `--template` (ADR 0033, #466): a motion
+ * driven by the HyperFrames clock. With `--template` (ADR 0033): a motion
  * composition painted by the Frameshell motion runtime, which is copied next
  * to it (frozen per composition; `hyperframes update` refreshes it), with typed
  * props and the brand values of `style.json` as their defaults. A 3D template

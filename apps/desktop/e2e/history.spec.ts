@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { isWindows, laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 
-// History panel (#18) in the built app: the agent edits from the integrated terminal in a labeled transaction, a
+// History panel in the built app: the agent edits from the integrated terminal in a labeled transaction, a
 // direct file edit follows; the panel lists both live, marks a selected entry's changes on the timeline, and reverts
 // a transaction or one operation, reporting conflicts. Real daemon; generated `titles` clips need no media.
 const box = sandbox("history");

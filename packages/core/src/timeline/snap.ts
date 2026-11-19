@@ -24,7 +24,7 @@ interface Heard {
 
 /**
  * {@link EditPointResolver} that moves cut and trim edges into audio pauses
- * (#12, ADR 0003). Trims use the trimmed clip's audio. Cuts use every
+ * (ADR 0003). Trims use the trimmed clip's audio. Cuts use every
  * audible media clip of the cut tracks under the window: a timeline point is
  * quiet only when all of them are, and a gap with no clip is silence.
  * Source-clock edges stay inside the point's `min`/`max` (op `snapBounds`).

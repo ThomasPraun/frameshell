@@ -2,7 +2,7 @@ import type { TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { cropViewBox, groupTimeAt, programRows, sameTurns, speakerChoices, speakingAt, turnsKey, viewerModel } from "../src/renderer/src/angles/model.js";
 
-// Seam under test: what the multicam viewer shows at a playhead time (#243): group clock, shot angles, speakers.
+// Seam under test: what the multicam viewer shows at a playhead time: group clock, shot angles, speakers.
 
 const GROUP = {
   id: "g_talk",

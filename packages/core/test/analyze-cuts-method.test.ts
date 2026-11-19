@@ -5,7 +5,7 @@ import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// `analyze` cuts (#471 slice 4) with real ffmpeg on a 9 s film at 30 fps, 320x180, six 1.5 s segments:
+// `analyze` cuts with real ffmpeg on a 9 s film at 30 fps, 320x180, six 1.5 s segments:
 //   0.0 s  scene A, a bright box on the left
 //   1.5 s  scene A, the box moved right           -> a jump cut (the scene score misses it)
 //   3.0 s  the same, scaled 1.4x about the centre -> a punch-in (a big one: the scene score sees it too)

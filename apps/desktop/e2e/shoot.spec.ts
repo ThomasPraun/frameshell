@@ -7,7 +7,7 @@ import { type ElectronApplication, type Page, expect, test } from "@playwright/t
 import { launch, sandbox } from "./harness.js";
 import { testFfmpeg } from "./media.js";
 
-// The Shoot view's recorder (#390, ADR 0024): Chromium's fake camera and microphone, and a stand-in screen that
+// The Shoot view's recorder (ADR 0024): Chromium's fake camera and microphone, and a stand-in screen that
 // captures the app's own page through the real getDisplayMedia path (never `--use-fake-ui-for-media-stream`, which
 // breaks screen capture). One session ends with End; the next is killed while recording and recovered on relaunch.
 const box = sandbox("multicam");

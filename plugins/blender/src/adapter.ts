@@ -99,7 +99,7 @@ export function createBlenderAdapter(options: BlenderAdapterOptions): ClipAdapte
       const info = await deps.hash(source);
       // The host's stop ends a listing's Blender (up to 5 minutes), so none outlives the daemon.
       const linked = await deps.list(source, blender, info, context.signal);
-      // Files outside the project enter the key by content only (ADR 0035 slice 4): no absolute path in the project.
+      // Files outside the project enter the key by content only (ADR 0035): no absolute path in the project.
       const outside = await deps.outsideKey(source, info, linked.outside);
       return [
         source,
@@ -219,7 +219,7 @@ function startFrameOf(clip: BlenderClip, fps: number): number {
 }
 
 /**
- * What a render draws (ADR 0035 slice 6): the clip's part only, frames `startFrame` up to {@link frameCount}. `frames` is
+ * What a render draws (ADR 0035): the clip's part only, frames `startFrame` up to {@link frameCount}. `frames` is
  * the length of that window: how many files `render.py` writes, what progress counts and what a final is estimated on.
  * The head before it is not rendered; the encode pads it transparent, so file time t is still composition time t.
  */

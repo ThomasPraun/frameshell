@@ -1,7 +1,7 @@
 import { PLACEHOLDER, type Template, type TemplateInput, type TemplateVariable, fontSetup, pageHead } from "./kit.js";
 
 /**
- * Kinetic headline (#466): the words rise one by one through a mask, the
+ * Kinetic headline: the words rise one by one through a mask, the
  * keyword in the accent colour, a slow drift while it holds, an exit through
  * the same mask. Transparent background, so it works over footage.
  */

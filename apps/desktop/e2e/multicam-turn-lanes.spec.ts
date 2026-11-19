@@ -8,7 +8,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Correcting who speaks by hand (#247, ADR 0016 decision 3): a turn lane per angle under the program track, painted
+// Correcting who speaks by hand (ADR 0016 decision 3): a turn lane per angle under the program track, painted
 // with the mouse into the group's `painted` turns by `multicam.paint` ops of author `ui`; one stroke is one undo step;
 // the angle panel picks an angle's transcript speaker. One file shared by two angles, with a hand-written transcript
 // where Ana says seconds 1-3 and Ben 4-6, so the turns come from words and need no audio levels.

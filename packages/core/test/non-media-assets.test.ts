@@ -8,7 +8,7 @@ import { assetKindOf } from "../src/media/kind.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// Fonts and SVGs are files of the project, not footage (#520): ingest hashes them and builds nothing, so no ffmpeg runs here.
+// Fonts and SVGs are files of the project, not footage: ingest hashes them and builds nothing, so no ffmpeg runs here.
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>';
 const FONT = Buffer.from("not a real font, only bytes");
 

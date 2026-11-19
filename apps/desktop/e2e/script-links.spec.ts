@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { laidOutBox, launch, sandbox } from "./harness.js";
 
-// Scene <-> clip linking (SPEC §5.5) in the built app, against the canvas timeline (#14):
+// Scene <-> clip linking (SPEC §5.5) in the built app, against the canvas timeline:
 // real daemon, fixture timeline with scene and whole-script scriptRefs, clicks on canvas pixels.
 const box = sandbox("scripted");
 

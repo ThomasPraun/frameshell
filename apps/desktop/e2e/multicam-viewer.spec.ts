@@ -7,7 +7,7 @@ import { laidOutBox, launch, panelWindow, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// The multicam viewer (#243, ADR 0016 decision 5): every angle in a grid at the playhead; a click cuts to the angle as
+// The multicam viewer (ADR 0016 decision 5): every angle in a grid at the playhead; a click cuts to the angle as
 // its number key does, Shift+click adds it; the panel works in its own window too.
 const box = sandbox("multicam");
 const mainFile = join(box.projectDir, "timelines", "main.json");

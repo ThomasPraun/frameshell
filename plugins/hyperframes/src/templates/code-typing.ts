@@ -12,7 +12,7 @@ import {
 import { TYPING_MATH } from "./typing-kit.js";
 
 /**
- * Code typing (#466): a code window where the snippet types out key by key
+ * Code typing: a code window where the snippet types out key by key
  * with the seeded rhythm of `typing-field` and a caret that blinks when it
  * rests. The indentation of a line appears with the Enter before it, as an
  * editor does. `pauses` names lines the typing waits after. The window keeps its

@@ -1,6 +1,6 @@
 import { type FrameSpan, type SpeedInterval, peakSpeed } from "./speed.js";
 
-// The chart of `review --speed` (#457), drawn into RGB pixels with no library: speed over the clip's frames, linear
+// The chart of `review --speed`, drawn into RGB pixels with no library: speed over the clip's frames, linear
 // stretches shaded amber, dead stops red. Pure; `encodeRgbPng` writes it and the sheet step burns the label in.
 
 /** An RGB picture, `width * height * 3` bytes, rows top to bottom. */

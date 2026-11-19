@@ -12,6 +12,7 @@ import type { LiveHeard, LiveStatus } from "../shared/api.js";
 export const LIVE_SAMPLE_RATE = 16_000;
 /** Seconds of audio per recognition, and between two (spike Q5/Q6: hop 0.5 s halves the follower's lag). */
 export const LIVE_WINDOW_S = 3.5;
+/** Seconds between the starts of two recognitions. */
 export const LIVE_HOP_S = 0.5;
 /** Encoder context, frames of 20 ms: 8 s instead of 30, two to three times faster, no loss (spike Q5). */
 export const LIVE_AUDIO_CONTEXT = 400;

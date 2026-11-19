@@ -13,7 +13,7 @@ import {
 import { UI_HELPERS } from "./ui-parts.js";
 
 /**
- * Chat bubble (#466): an optional question bubble springs in on one side,
+ * Chat bubble: an optional question bubble springs in on one side,
  * three typing dots bounce on the other, then the dots give way to the reply.
  * The reply's slot is as big as the reply from the first frame, so nothing
  * shifts when it lands. Transparent unless `backdrop` is raised.

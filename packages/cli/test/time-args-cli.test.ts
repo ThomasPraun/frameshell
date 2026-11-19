@@ -3,7 +3,7 @@ import { parseSound } from "../src/sound-commands.js";
 import { UsageError, parseTimelineCommand } from "../src/timeline-commands.js";
 
 // Seam under test: the CLI turns every timeline time flag into a number (seconds) or the text the daemon resolves as a
-// TimeRef (a marker, `beat:N`, `bar:N`, `word:<text>`, ADR 0029 slice 4), and never parses a name itself.
+// TimeRef (a marker, `beat:N`, `bar:N`, `word:<text>`, ADR 0029), and never parses a name itself.
 
 describe("time flags that take a TimeRef", () => {
   it("captions set sends --from and --to as seconds or as text", () => {

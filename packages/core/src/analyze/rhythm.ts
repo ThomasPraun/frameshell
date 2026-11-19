@@ -3,20 +3,20 @@ import { slidingMedians } from "./median.js";
 import { type Cut, MIN_CUT_GAP_FRAMES, detectCuts, frameStart } from "./shots.js";
 
 // Rhythm of a film: how steady its shots are, how much of it holds still and where changes pile up. Pure: `picture.ts`
-// measures `activity`. After HyperFrames' `measure` (Apache-2.0), ported per #478. A big change is #457's visual event
+// measures `activity`. After HyperFrames' `measure` (Apache-2.0). A big change is a visual event
 // (4x its surroundings, or 15 % mean grey change), so the metrics of `review` for a film of ours share this scale.
 
 /** Grey levels (0 to 255, on a 64 px wide picture) of mean change between two frames under which a frame counts as still. */
 export const STILL_LEVEL = 0.5;
-/** Share of the grey range (255) a frame's mean change must reach to be a big change by itself: #457's 15 %, about 38 levels. */
+/** Share of the grey range (255) a frame's mean change must reach to be a big change by itself: 15 %, about 38 levels. */
 export const BIG_CHANGE_SHARE = 0.15;
 /** Grey levels of mean change between two frames from which the picture made a big change whatever is around it. */
 export const BIG_CHANGE_LEVEL = 255 * BIG_CHANGE_SHARE;
-/** Times the median change of the frames around it a frame's change must reach to be a big change: #457's 4x. */
+/** Times the median change of the frames around it a frame's change must reach to be a big change: 4x. */
 export const BIG_CHANGE_RATIO = 4;
-/** Grey levels below which a change is never big, so noise in a still picture is not 4x of nothing: #457's floor for visual events. */
+/** Grey levels below which a change is never big, so noise in a still picture is not 4x of nothing: the floor for visual events. */
 export const BIG_CHANGE_FLOOR = 1;
-/** Seconds on each side of a frame whose changes are its surroundings. #457 does not say; half a second spans a gesture, not a shot. */
+/** Seconds on each side of a frame whose changes are its surroundings. Half a second spans a gesture, not a shot. */
 export const BIG_CHANGE_SURROUND_S = 0.5;
 /** Big changes in {@link BURST_WINDOW_S} that make a burst. */
 export const BURST_CHANGES = 3;

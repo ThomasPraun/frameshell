@@ -126,7 +126,7 @@ export const SOUND_MAX_PER_FRAME = 2;
 /** Most sounds one `sound.place` call places. */
 export const SOUND_MAX_PLACEMENTS = 200;
 
-/** Genre presets of the music sequencer (ADR 0038 slice 3): each has its own instruments, groove, tempo and chords. */
+/** Genre presets of the music sequencer (ADR 0038): each has its own instruments, groove, tempo and chords. */
 export const MUSIC_PRESETS = ["synthwave", "lofi", "minimal"] as const;
 
 /** One of {@link MUSIC_PRESETS}. */
@@ -137,7 +137,7 @@ export const MusicPresetSchema = z.enum(MUSIC_PRESETS);
 
 /**
  * Tempo (BPM) and chords (one per bar, repeating) a preset plays when the caller names none; `swing` delays every
- * odd 16th by that fraction of a 16th. Numbers from the owner's notes on #463 (minimal has none: 110 BPM is ours).
+ * odd 16th by that fraction of a 16th. Numbers from the owner's notes (minimal has none: 110 BPM is ours).
  */
 export const MUSIC_PRESET_DEFAULTS: Readonly<Record<MusicPreset, { bpm: number; chords: readonly string[]; swing: number }>> = {
   synthwave: { bpm: 118, chords: ["Am", "F", "C", "G"], swing: 0 },

@@ -3,7 +3,7 @@ import { FrameGrid } from "../timeline/grid.js";
 import type { TimelineWords } from "../timeline/time-ref.js";
 import { type SourceTranscript, type Visible, sourceTranscripts, visibleClips } from "./verify.js";
 
-/** A word belongs to a clip when at least this much of it, or half of it when shorter, plays there (#455, ticket comment on word clocks). */
+/** A word belongs to a clip when at least this much of it, or half of it when shorter, plays there. */
 const MIN_OVERLAP_S = 0.15;
 
 /** A transcript word as it plays on the timeline clock. */
@@ -132,7 +132,7 @@ function overlapOf(word: { start: number; end: number }, placed: Visible): numbe
 }
 
 /**
- * The words `word:` time references read (ADR 0029 slice 4): the kept words `timeline` plays, as {@link placeWords}
+ * The words `word:` time references read (ADR 0029): the kept words `timeline` plays, as {@link placeWords}
  * finds them for `cleanup`, and the heard clips whose asset has no current transcript.
  */
 export async function readTimelineWords(

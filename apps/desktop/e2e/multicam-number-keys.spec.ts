@@ -7,7 +7,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Switching angles with the number keys (#242, ADR 0016 decision 5): a key cuts the shot under the playhead there and
+// Switching angles with the number keys (ADR 0016 decision 5): a key cuts the shot under the playhead there and
 // sets the new part to that angle, also while playing; the presses of one playback are one undo step.
 const box = sandbox("multicam");
 const mainFile = join(box.projectDir, "timelines", "main.json");

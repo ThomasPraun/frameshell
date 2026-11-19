@@ -87,7 +87,7 @@ interface Marked {
  *   the menu also links the speaker to a person, or unlinks it (ADR 0020).
  * - Right-click opens "Chat about this" on the selection (a kept word outside it is
  *   selected first) with the word commands above.
- * - The toolbar's model picker sets the project's transcription model (#427).
+ * - The toolbar's model picker sets the project's transcription model.
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {
   const { view, error } = useTimelineView(SELECTION_TIMELINE);

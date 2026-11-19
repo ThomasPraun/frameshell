@@ -160,4 +160,5 @@ const es: typeof en = {
   segmentSize: (n, of, percent) => `tamaño ${n}/${of} · ${percent}% (↑ más grande, ↓ más pequeño)`,
 };
 
+/** English and Spanish strings of the preview panel and its overlays. */
 export const preview = { en, es };

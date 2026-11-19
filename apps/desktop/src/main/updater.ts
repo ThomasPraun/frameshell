@@ -1,4 +1,4 @@
-// Update check (#193): GitHub Releases on start and daily. `auto` builds install with electron-updater; `notify`
+// Update check: GitHub Releases on start and daily. `auto` builds install with electron-updater; `notify`
 // builds, and `auto` builds whose install fails (unsigned, read-only volume), show a banner linking to the download.
 import { BrowserWindow, app, dialog, net, shell } from "electron";
 import type { AppUpdater } from "electron-updater";

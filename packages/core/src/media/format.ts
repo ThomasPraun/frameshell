@@ -1,4 +1,4 @@
-// A new project's format from its first video (#197): resolution, frame rate and sample rate it plays at.
+// A new project's format from its first video: resolution, frame rate and sample rate it plays at.
 import type { MediaProbe } from "@frameshell/protocol";
 
 /** Frame rates footage comes in; a measured rate this close to one is that rate. Phones measure 29.6 for 30. */

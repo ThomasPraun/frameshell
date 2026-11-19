@@ -8,7 +8,7 @@ import { blockDiff, blockMean, exportedPixels, previewPixels } from "./frames.js
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { addBarcodeAsset, waitForIngest } from "./preview-probe.js";
 
-// VP9-alpha media assets (#90): their proxy keeps alpha (VP9 WebM), so the preview composites them over lower tracks
+// VP9-alpha media assets: their proxy keeps alpha (VP9 WebM), so the preview composites them over lower tracks
 // as export does, instead of drawing them opaque.
 const box = sandbox("overlays");
 const mainFile = join(box.projectDir, "timelines", "main.json");

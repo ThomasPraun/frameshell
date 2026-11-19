@@ -16,7 +16,7 @@ import {
 const DEFAULT_TEXT = "Editing a video should feel like editing a document.";
 
 /**
- * Cursor text select (#466, UI demo): words rise into a paragraph, a cursor
+ * Cursor text select (UI demo): words rise into a paragraph, a cursor
  * presses at the start of a phrase and drags along it (down to the next line
  * when the phrase wraps), the highlight following the cursor word by word; on
  * release a small action pill pops over the selection. The page measures its own

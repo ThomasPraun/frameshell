@@ -7,7 +7,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run } from "./media-tools.js";
 import { fakeWhisperCli, whisperPluginFixture, whisperReadyBinaries, whisperSegment } from "./whisper-fixture.js";
 
-// Seam under test (#411): a project without its transcription provider, through a real daemon, the managed ffmpeg,
+// Seam under test: a project without its transcription provider, through a real daemon, the managed ffmpeg,
 // the official plugin installed with npm from a local git repo and a fake whisper-cli.
 
 const SCRIPT_PATH = "scripts/launch.md";

@@ -7,7 +7,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Reframing for 9:16 (#251, ADR 0016): the preview's 9x16 format cuts a solo shot as a vertical export does, and
+// Reframing for 9:16 (ADR 0016): the preview's 9x16 format cuts a solo shot as a vertical export does, and
 // the shot inspector's X field sets a reframe key at the playhead through `multicam.reframe`. The angle's
 // picture is red on its left half and lime on its right, so the cut reads as two letters.
 const box = sandbox("multicam");

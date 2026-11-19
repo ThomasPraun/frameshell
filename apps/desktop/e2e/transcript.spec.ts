@@ -8,7 +8,7 @@ import { laidOutBox, launch, sandbox } from "./harness.js";
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// Transcript view (#21) in the built app: a real daemon, a synthetic take whose "words" are tone bursts with
+// Transcript view in the built app: a real daemon, a synthetic take whose "words" are tone bursts with
 // silent pauses between them (so energy snapping has pauses to find), then three words of continuous speech
 // (80 ms gaps, shorter than a pause), and a hand-written transcript of it.
 const box = sandbox("transcript");
@@ -69,7 +69,7 @@ async function writeTake(): Promise<void> {
       assetHash: hash,
       provider: "whisper-cpp",
       model: "large-v3-turbo-q5_0",
-      // "nine" carries the transcriber's speechInside flag (#117): the view warns against cutting inside it.
+      // "nine" carries the transcriber's speechInside flag: the view warns against cutting inside it.
       words: WORDS.map(([text, start, end], k) => ({ id: id(k), text, start, end, ...(k === 8 ? { speechInside: true } : {}) })),
       edits: {},
     }),
@@ -214,7 +214,7 @@ test("restoring a word in continuous speech brings back that word only, with no 
   for (const k of [6, 8]) await expect(word(k)).toHaveAttribute("data-state", "kept");
 });
 
-// #118: whole passages, other tracks, word corrections, opening the view.
+// Whole passages, other tracks, word corrections, opening the view.
 const MUSIC = "assets/music.wav";
 
 /** Replace the picture track's clips and the music track (null: no music track) at the current revision. */

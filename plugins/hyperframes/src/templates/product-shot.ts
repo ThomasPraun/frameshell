@@ -12,7 +12,7 @@ import {
 import { FINISH_PRESETS, SHADOWS_VARIABLE, STUDIO_SCRIPT, type ThreeTemplate, finishVariable, loadScript, threePageHead } from "./three-kit.js";
 
 /**
- * 3D product shot (#473, ADR 0042): a product in studio light (the built-in rounded box, or a GLB from the
+ * 3D product shot (ADR 0042): a product in studio light (the built-in rounded box, or a GLB from the
  * composition directory) arrives on a camera push-in, a glint light sweeps across it, it turns slowly while the
  * camera creeps and orbits, and a headline rises under it. three.js on the motion runtime's clock: every pose
  * is a function of t. Transparent unless `backdrop` is raised.

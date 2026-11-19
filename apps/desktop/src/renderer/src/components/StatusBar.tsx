@@ -11,7 +11,7 @@ const AGENT_NOTICE_MS = 6_000;
 /**
  * Bottom strip: which daemon serves the project, which terminal session CLI
  * calls are attributed to, a transient `notice` (e.g. why "Chat about this" did nothing),
- * the background `setup` of a new project (#188), briefly what the agent
+ * the background `setup` of a new project, briefly what the agent
  * just did to the view (MCP navigation), references sent to agents outside
  * the app: waiting, then read, and how many each has not read, and the
  * connected agents while the terminal panel is closed (ADR 0025).

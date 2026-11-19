@@ -542,7 +542,7 @@ export class MediaService {
           // Clone on APFS/Btrfs/ReFS: instant and no extra space; plain copy elsewhere.
           await copyFile(source, temp, constants.COPYFILE_FICLONE);
           await renameRetrying(temp, target);
-          // The project's own copy of the footage: read-only, so an agent or a tool cannot overwrite it by mistake (#186).
+          // The project's own copy of the footage: read-only, so an agent or a tool cannot overwrite it by mistake.
           // Never for links, which share the user's original file. After the rename: a read-only temp file left by a
           // failed rename could not be removed on Windows.
           await chmod(target, 0o444);

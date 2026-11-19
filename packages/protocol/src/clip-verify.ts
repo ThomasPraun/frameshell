@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// `clip.verify` (#465 slice 3, ADR 0033): a generated clip's picture must be a pure function of time.
+// `clip.verify` (ADR 0033): a generated clip's picture must be a pure function of time.
 
 /** Most one channel of one pixel may differ between a cold frame and the same frame after a reseek (ADR 0033 decision 6). */
 export const VERIFY_DEFAULT_TOLERANCE = 2;

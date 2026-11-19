@@ -98,6 +98,7 @@ export function injectProbeHead(html: string, head: string, elementCss = "", sty
   return scripts + html;
 }
 
+/** True when `rel`, from `path.relative`, leaves its base directory (`..`) or is absolute, e.g. another drive. */
 export function escapes(rel: string): boolean {
   return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
 }

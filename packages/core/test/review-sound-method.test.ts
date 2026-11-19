@@ -5,7 +5,7 @@ import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, run, testBinaryManager } from "./media-tools.js";
 
-// The sound review list of `review` (#457) on a real managed ffmpeg: a timeline heard clip by clip from its assets'
+// The sound review list of `review` on a real managed ffmpeg: a timeline heard clip by clip from its assets'
 // envelopes, and a file's decoded mix (its end and its clicks). Every fixture is synthetic and made per test run.
 const MEDIA_TIMEOUT = 180_000;
 

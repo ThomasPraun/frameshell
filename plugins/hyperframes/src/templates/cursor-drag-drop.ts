@@ -13,7 +13,7 @@ import {
 } from "./kit.js";
 
 /**
- * Cursor drag and drop (#466, UI demo): a cursor grabs a card, carries it on an
+ * Cursor drag and drop (UI demo): a cursor grabs a card, carries it on an
  * arc to a drop zone and lets go; the drop is the beat the zone answers on the
  * same frame (it fills, rings, a check pops in). Side by side on wide frames,
  * stacked on the others. Transparent unless `backdrop` is raised.

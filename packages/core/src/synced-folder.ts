@@ -1,4 +1,4 @@
-// Is a project inside a folder a cloud service syncs (#187)? `.frameshell/` there uploads gigabytes of proxies and
+// Is a project inside a folder a cloud service syncs? `.frameshell/` there uploads gigabytes of proxies and
 // renders, and a sync client rewriting the history journal mid-write can corrupt it.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";

@@ -103,7 +103,7 @@ test("the subject layer draws the person over the word behind them: the preview 
 /**
  * Play from the first frame to the end. Returns the source frames read off the canvas at each page display frame (the
  * barcode; -1 where none reads), the program frames the engine drew, the drops inside the word (1 s to 5 s) by kind
- * (#567, `draw-log.ts`) and the engine's counters, annotated under `label`.
+ * (`draw-log.ts`) and the engine's counters, annotated under `label`.
  */
 async function playThroughWord(label: string): Promise<{ read: number[]; drawn: number[]; drops: Drops; after: EngineStats | null }> {
   await page.keyboard.press("Home");
@@ -112,7 +112,7 @@ async function playThroughWord(label: string): Promise<{ read: number[]; drawn: 
   await startDrawLog(page);
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByTestId("preview-frame")).toHaveAttribute("data-playing", "true");
-  // Until playback stops. Drops are counted from the engine's draws, not from these reads (#567; draw-log.ts).
+  // Until playback stops. Drops are counted from the engine's draws, not from these reads (draw-log.ts).
   const read = await page.evaluate(async (limit) => {
     const readShown = (window as unknown as { readShownFrame: () => number }).readShownFrame;
     const box = document.querySelector('[data-testid="preview-frame"]')!;

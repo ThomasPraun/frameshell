@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parseCliShim } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 
-// Seam under test: the `.deb` maintainer scripts (#143), rendered as electron-builder renders them and run against a
+// Seam under test: the `.deb` maintainer scripts, rendered as electron-builder renders them and run against a
 // temp root instead of `/`, with only the tools they need on PATH.
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), "..", "build", "linux");

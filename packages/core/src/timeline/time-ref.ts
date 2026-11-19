@@ -14,11 +14,11 @@ import type { TempoResult, TimelineGrid } from "./tempo.js";
  * 2. the id or label (ignoring case) of a marker of the timeline: its time;
  * 3. such a name with an offset in seconds (`hook+0.5`, `outro-1`): the marker's time plus the offset. The whole
  *    string is tried as a name first, so a label like `end-card` is never read as `end` minus `card`;
- * 4. a scheme prefix: `beat:N` and `bar:N` (ADR 0029 slice 4) read the timeline's beat grid, counting from 1 in the
+ * 4. a scheme prefix: `beat:N` and `bar:N` (ADR 0029) read the timeline's beat grid, counting from 1 in the
  *    music FILE (`beat:1` is its first measured beat, `bar:1` its first downbeat, whatever the clip trims; a pickup
  *    makes `bar:N` differ from `beat:(meter*(N-1)+1)`), carried on at the grid's period past the measured part, with the
  *    same optional `+s`/`-s` offset as a marker (`bar:8-0.2`); `N` may be fractional (`beat:2.5`, halfway between beats
- *    2 and 3). `word:<text>[#n][+s|-s]` (ADR 0029 slice 4 part 3) is the start of the nth time the timeline plays a
+ *    2 and 3). `word:<text>[#n][+s|-s]` (ADR 0029) is the start of the nth time the timeline plays a
  *    spoken word (`word:this#2`, `word:over+0.2`), or a transcript word id (`word:w_000012`). New schemes join
  *    {@link SCHEMES}; nothing else changes.
  */

@@ -127,7 +127,7 @@ export function TerminalPanel({
   /** Tabs whose shell the user ran something in: the agent guide shrinks there to leave the terminal its rows. */
   const [used, setUsed] = useState<ReadonlySet<number>>(() => new Set());
   const markUsed = useCallback((key: number) => setUsed((current) => (current.has(key) ? current : new Set(current).add(key))), []);
-  /** Prompt for the film of a project made from an idea (#472), taken once from main; null when none. */
+  /** Prompt for the film of a project made from an idea, taken once from main; null when none. */
   const [idea, setIdea] = useState<string | null>(null);
   useEffect(() => {
     void window.frameshell.project.takeIdea().then((brief) => setIdea(brief ? ideaPrompt(brief) : null));

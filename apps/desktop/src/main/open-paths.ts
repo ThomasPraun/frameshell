@@ -1,4 +1,4 @@
-// Files and folders the OS asks the app to open (#184): launch arguments, a second launch, macOS open-file.
+// Files and folders the OS asks the app to open: launch arguments, a second launch, macOS open-file.
 import { resolve } from "node:path";
 
 /**

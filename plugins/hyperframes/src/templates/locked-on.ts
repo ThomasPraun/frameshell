@@ -10,7 +10,7 @@ import {
 } from "./kit.js";
 
 /**
- * Locked on (#466 TP4): four corner brackets that start far outside a target
+ * Locked on: four corner brackets that start far outside a target
  * box, snap onto its corners with an overshoot (they pass the corner a little
  * and come back), then a hairline outline, a one-off pulse and a small label
  * confirm the lock. The target is `x`, `y`, `w`, `h` as fractions of the frame,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// `music.fit` (#485, ADR 0037): back-time a music clip so its final hit lands on a cut.
+// `music.fit` (ADR 0037): back-time a music clip so its final hit lands on a cut.
 
 /** Most the speed of a fitted clip may change, as a fraction of its speed: ±1.7 % (ADR 0037 decision 3). */
 export const MUSIC_FIT_MAX_VARISPEED = 0.017;
@@ -88,7 +88,7 @@ export const MusicFitResultSchema = z.object({
 /** See {@link MusicFitResultSchema}. */
 export type MusicFitResult = z.output<typeof MusicFitResultSchema>;
 
-// `music.candidates` (#485 slice 3, ADR 0037 decision 4): several tracks under the same picture at one loudness.
+// `music.candidates` (ADR 0037 decision 4): several tracks under the same picture at one loudness.
 
 /** Most candidates one call places: the ear stops telling them apart. */
 export const MUSIC_CANDIDATES_MAX = 7;
@@ -130,7 +130,7 @@ export const MusicCandidatesResultSchema = z.object({
   warnings: z.array(z.string()),
 });
 
-// `music.shape` (#485 slice 4, ADR 0037 decision 6): the music steps down before a hit and fades at the ending.
+// `music.shape` (ADR 0037 decision 6): the music steps down before a hit and fades at the ending.
 
 /** One thing a shaping does. */
 export const MusicShapeStepSchema = z.object({
@@ -208,7 +208,7 @@ export type MusicCandidatesResult = z.output<typeof MusicCandidatesResultSchema>
 /** See {@link MusicCandidateSchema}. */
 export type MusicCandidate = z.output<typeof MusicCandidateSchema>;
 
-// `music.pick` (#485, ADR 0037): keep one of the candidate tracks.
+// `music.pick` (ADR 0037): keep one of the candidate tracks.
 
 /** One candidate track `music.pick` removed, muted or left in place. */
 export const MusicPickTrackSchema = z.object({
@@ -245,7 +245,7 @@ export const MusicPickResultSchema = z.object({
 /** See {@link MusicPickResultSchema}. */
 export type MusicPickResult = z.output<typeof MusicPickResultSchema>;
 
-// `music.grid` (#485 slice 5, ADR 0037 decision 8): move picture cuts onto the timeline's beat grid.
+// `music.grid` (ADR 0037 decision 8): move picture cuts onto the timeline's beat grid.
 
 /** Default of `maxShift`: the farthest a cut moves onto a beat, seconds (half a beat at 120 BPM). */
 export const MUSIC_GRID_MAX_SHIFT_DEFAULT_S = 0.25;

@@ -6,7 +6,7 @@ import { type ElectronApplication, type Page, expect, test } from "@playwright/t
 import { launch, sandbox } from "./harness.js";
 import { testFfmpeg } from "./media.js";
 
-// Takes in a shoot session (#391, ADR 0024): T and C mark takes while recording, each take is checked against the
+// Takes in a shoot session (ADR 0024): T and C mark takes while recording, each take is checked against the
 // shoot script seconds after C (stand-in transcriber, FRAMESHELL_SHOOT_STAND_IN: it hears the scene without the
 // middle word of its longest line), accepted or recorded again, and the session's end makes the takes shots.
 const box = sandbox("multicam");

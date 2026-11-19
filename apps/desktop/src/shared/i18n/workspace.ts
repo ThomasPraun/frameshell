@@ -167,4 +167,5 @@ const es: typeof en = {
   and: "y",
 };
 
+/** English and Spanish strings of the project window shell: status bar, sidebar, detached panels, drops. */
 export const workspace = { en, es };

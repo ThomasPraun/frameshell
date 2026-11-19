@@ -34,4 +34,5 @@ const es: typeof en = {
   agentTarget: (terminal, agent) => `${terminal} (${agent})`,
 };
 
+/** English and Spanish strings of terminal tabs and windows. */
 export const terminal = { en, es };

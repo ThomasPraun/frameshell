@@ -2,7 +2,7 @@
 // from any build (npm package, packaged app) without files outside the package.
 // A test fails when the bundle drifts from skills/frameshell: run `pnpm gen:skill` after editing it.
 // It also adds the files' SHA-256 to src/skills/shipped.json, the versions a project's copy may hold
-// unedited (#396). `--seed-tags` adds every version at the release tags too (needs the git tags).
+// unedited. `--seed-tags` adds every version at the release tags too (needs the git tags).
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";

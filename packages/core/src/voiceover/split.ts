@@ -1,17 +1,17 @@
 import { energyEnvelope } from "../media/energy.js";
 import type { Pcm16 } from "../transcripts/window.js";
 
-/** RMS resolution of the split (#470: 5 ms), finer than the 10 ms envelope of cut snapping (ADR 0003). */
+/** RMS resolution of the split (5 ms), finer than the 10 ms envelope of cut snapping (ADR 0003). */
 export const SPLIT_HOP_S = 0.005;
-/** Quiet = this far below the take's loudest 5 ms (#470: -38 dB relative to peak); the same range as the trim. */
+/** Quiet = this far below the take's loudest 5 ms (-38 dB relative to peak); the same range as the trim. */
 export const SPLIT_RANGE_DB = 38;
-/** A quiet run this long ends a phrase (#470: 60 ms); shorter ones are the gaps between words. */
+/** A quiet run this long ends a phrase (60 ms); shorter ones are the gaps between words. */
 export const SPLIT_MIN_SILENCE_S = 0.06;
-/** Air kept before a phrase's first sound (#470: 20 ms). */
+/** Air kept before a phrase's first sound (20 ms). */
 export const SPLIT_LEAD_S = 0.02;
-/** Air kept after a phrase's last sound (#470: 30 ms). */
+/** Air kept after a phrase's last sound (30 ms). */
 export const SPLIT_TAIL_S = 0.03;
-/** Fade a phrase clip gets at both ends (#470: 12 ms), so a trimmed edge never clicks. */
+/** Fade a phrase clip gets at both ends (12 ms), so a trimmed edge never clicks. */
 export const PHRASE_FADE_S = 0.012;
 /** A take whose loudest 5 ms stays under this (dBFS) holds no speech: one phrase, the whole take. */
 const SILENT_DB = -60;

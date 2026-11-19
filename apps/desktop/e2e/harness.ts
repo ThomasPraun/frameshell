@@ -104,7 +104,7 @@ export async function terminalText(page: Page): Promise<string> {
 /**
  * Type a command into the active terminal and press Enter, once the shell drew its prompt (output non-empty and
  * unchanged for 300 ms). Keys typed while a login shell still starts are reordered or lost by its line editor.
- * On Windows the first PowerShell prompt can take about a minute on a loaded runner (#533), so it is awaited first.
+ * On Windows the first PowerShell prompt can take about a minute on a loaded runner, so it is awaited first.
  */
 export async function runInTerminal(page: Page, command: string): Promise<void> {
   if (isWindows) {

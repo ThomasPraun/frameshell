@@ -9,7 +9,7 @@ import { boxCrossings, filmInsets, safeFlags, safeWarnings, subjectsAt } from ".
 import { mediaTools, run } from "./media-tools.js";
 import { tempDir } from "./helpers.js";
 
-// Graphics and faces against a platform's safe zones (#457): boxes in the film's pixels, then crossings.
+// Graphics and faces against a platform's safe zones: boxes in the film's pixels, then crossings.
 
 const film = { width: 1080, height: 1920 };
 const insets = filmInsets(SAFE_ZONES["instagram-reels"], film);

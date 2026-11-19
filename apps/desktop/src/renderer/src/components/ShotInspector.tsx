@@ -217,7 +217,7 @@ function ShotReframe({ clip, shot, group }: { clip: ClipBox; shot: ShotBox; grou
 }
 
 /**
- * Which speaker of the transcript of an angle's sound is this angle's person (`multicam.angle` `speaker`, #247):
+ * Which speaker of the transcript of an angle's sound is this angle's person (`multicam.angle` `speaker`):
  * its turns then come from that speaker's words. Automatic clears it.
  */
 function AngleSpeaker({

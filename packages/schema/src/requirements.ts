@@ -4,7 +4,7 @@ import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 /** Canonical `$schema` URL for a project's `requirements.json`. */
 export const REQUIREMENTS_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/requirements.json`;
 
-/** Project-relative path of the file where the person states what the film must be (checked by `review`, #457). */
+/** Project-relative path of the file where the person states what the film must be (checked by `review`). */
 export const REQUIREMENTS_FILE = "requirements.json";
 
 /** The craft checks `review` can raise a warning for (`metrics.craft`); `fail` and `waivers` name them. */
@@ -131,7 +131,7 @@ export const WaiverSchema = z.strictObject({
 });
 
 /**
- * Zod model of `requirements.json` (#457): the expectations of the film that `review` checks and the craft
+ * Zod model of `requirements.json`: the expectations of the film that `review` checks and the craft
  * warnings that are failures here or accepted. Craft warnings are warnings unless `fail` names their check; a
  * failing one is lifted by a waiver. An assertion that does not hold is a failure. Written through the config journal
  * (ADR 0036): `review.require`, `review.waive`, a journaled `file.write` or a hand edit; `review` never changes it.

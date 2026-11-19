@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EDIT_MENU_IDS, editMenu } from "../src/main/edit-menu.js";
 import type { HistoryCommand } from "../src/shared/api.js";
 
-// Seam under test: the app's Edit menu template (#119). Undo and Redo reach the window, clipboard roles stay.
+// Seam under test: the app's Edit menu template. Undo and Redo reach the window, clipboard roles stay.
 
 const items = (platform: NodeJS.Platform, dispatch: (command: HistoryCommand, focused: unknown) => void = () => undefined) =>
   editMenu(platform, dispatch).submenu as MenuItemConstructorOptions[];

@@ -41,9 +41,9 @@ export const SHADOWS_VARIABLE: TemplateVariable = {
 };
 
 /**
- * Page script of the studio every 3D template shares (#473 studio defaults, ADR 0042). `studio(canvas, width,
+ * Page script of the studio every 3D template shares (studio defaults, ADR 0042). `studio(canvas, width,
  * height, shadows)` returns the renderer, scene, camera, key light and ground; `ready(key, promise)` holds the
- * render until the promise settles. `THREE.DefaultLoadingManager` gates nothing in three 0.187 (spike #531).
+ * render until the promise settles. `THREE.DefaultLoadingManager` gates nothing in three 0.187.
  */
 export const STUDIO_SCRIPT = String.raw`
       function studio(canvas, width, height, shadows) {

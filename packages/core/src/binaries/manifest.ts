@@ -901,6 +901,7 @@ export const FACE_RECOGNITION_MODELS: readonly ManagedModel[] = [
 
 /** Model ids of the photo segmenter (`segment.prepare`): MobileSAM's image encoder and mask decoder. */
 export const PHOTO_SEGMENTATION_ENCODER_MODEL = "mobilesam-encoder";
+/** Model id of the mask decoder. */
 export const PHOTO_SEGMENTATION_DECODER_MODEL = "mobilesam-decoder";
 
 const MOBILESAM_REVISION = "0d3b403339b4674a82493d5e97964dd78089ddc8";

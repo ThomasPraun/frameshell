@@ -4,7 +4,7 @@ import { CELLS, type PictureSeries, cellStats } from "./events.js";
 import { type LookBuilder, frameLook, luma } from "./look.js";
 
 // One pass over every frame of the film, small: the look of each shot, and the series rhythm and events are found on.
-// After HyperFrames' `measure` (Apache-2.0), ported per #478.
+// After HyperFrames' `measure` (Apache-2.0).
 
 /** Longest side of the frames the picture is measured on, px: area-averaged, so a thin caption still moves a cell. */
 export const PICTURE_LONG_SIDE = 64;

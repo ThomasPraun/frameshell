@@ -14,7 +14,7 @@ import {
 import { SCREEN_HELPERS, SKELETON_HTML } from "./ui-parts.js";
 
 /**
- * Phone fan (#466 TP4): three phones that start as a stack and fan out, the
+ * Phone fan: three phones that start as a stack and fan out, the
  * outer two turning about a point below the middle one (a hand of cards), each
  * showing one picture. A phone with no picture shows the plain app screen
  * `device-frame` shows (`paintSkeleton`, `dressPhone` in `ui-parts.ts`). The

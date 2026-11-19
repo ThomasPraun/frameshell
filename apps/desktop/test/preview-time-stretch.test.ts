@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { StretchChain, type StretchSpan, stretch, stretchWindow } from "../src/renderer/src/preview/time-stretch.js";
 import { dominantHz, onset } from "./audio-measure.js";
 
-// Seam under test: the preview's pitch-keeping stretch of a span at clip speed ≠ 1 (#499), on synthetic tones.
+// Seam under test: the preview's pitch-keeping stretch of a span at clip speed ≠ 1, on synthetic tones.
 
 const RATE = 48_000;
 

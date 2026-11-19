@@ -8,7 +8,7 @@ import { describeDrops, drawnFrames, dropsIn, startDrawLog } from "./draw-log.js
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { engineStats, statsDelta, waitForIngest } from "./preview-probe.js";
 
-// Multicam shots in the preview (#238, ADR 0016): a program track's shots are laid out by `shotLayers` (as export
+// Multicam shots in the preview (ADR 0016): a program track's shots are laid out by `shotLayers` (as export
 // lays them out), one decoder per visible angle, every angle's sound under every shot. Each angle is a flat colour, so
 // the layout on the canvas reads as a few letters: R(ed), G(reen), B(lue), Y(ellow), K (black).
 const box = sandbox("multicam");

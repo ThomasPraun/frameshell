@@ -1,6 +1,6 @@
 import type { SfxKind } from "@frameshell/schema";
 
-// The numbers `review` judges a film by, as data (#457, decided in #478). Ported from HyperFrames' `check` and
+// The numbers `review` judges a film by, as data. Ported from HyperFrames' `check` and
 // `measure` (Apache-2.0, https://github.com/heygen-com/hyperframes) and from the ranges the owner measured on seven launch
 // films with earshot; every one is a judgment with a number, so each is a warning, never a failure.
 
@@ -47,7 +47,7 @@ export const GRAPHIC_SAMPLES = 12;
 /** Most frames of a generated clip measured per second. */
 export const GRAPHIC_HZ = 4;
 
-// The sound review list (#457): the 2.5D shorts course's rules ("the voice is always on top", "no whoosh repeated more than
+// The sound review list: the 2.5D shorts course's rules ("the voice is always on top", "no whoosh repeated more than
 // twice", "the music resolves on the final frame") and earshot's mechanical audio QA, with its numbers.
 
 /** Seconds per window of the voice-over-bed check: a few syllables, so one buried word shows and pauses between words do not. */
@@ -56,7 +56,7 @@ export const VOICE_WINDOW_S = 0.5;
 export const VOICE_OVER_BED_DB = 6;
 /** Most low stretches listed in `sound.voice.low`. */
 export const VOICE_LISTED = 20;
-/** Plays of one effect file allowed in a film: "no whoosh repeated more than twice" (2.5D shorts course, #457). */
+/** Plays of one effect file allowed in a film: "no whoosh repeated more than twice" (2.5D shorts course). */
 export const SFX_REPEAT_MAX = 2;
 /** Effects a key run repeats by design (`sound.place` `typing` rotates six takes of these): left out of the repeat count. */
 export const SFX_REPEAT_EXEMPT: readonly SfxKind[] = ["tick", "click"];
@@ -131,7 +131,7 @@ export const EDGE_FLOOR_DBFS = ENDING_DBFS;
 /** Most edges listed in `sound.edges`. */
 export const EDGE_LISTED = 20;
 
-// The speed graph of a hero point (`review --speed`, #457): when a move reads mechanical. Judgments with a number, so
+// The speed graph of a hero point (`review --speed`): when a move reads mechanical. Judgments with a number, so
 // warnings only. A constant speed is the tell of a key with no ease; a dead stop mid-move reads as a hitch.
 
 /**
@@ -150,8 +150,8 @@ export const SPEED_STOP_FRAMES = 4;
 /** Width a generated clip's alpha is read at for its hero point, px; the centre is an alpha-weighted mean, finer than a pixel. */
 export const SPEED_ALPHA_WIDTH = 480;
 
-// Words behind the person (ADR 0032, #461): the share of a word that the subject's matte covers. The 30 to 55 % that reads
-// best is the claude-video-effects recipe quoted in #461; the warning bands are the owner's decision there (2026-11-17).
+// Words behind the person (ADR 0032): the share of a word that the subject's matte covers. The 30 to 55 % that reads
+// best is the claude-video-effects recipe; the warning bands are the owner's decision of 2026-11-17.
 
 /** Shares of the word covered (0 to 1) that read best: the person clearly in front, the word still read. */
 export const BEHIND_FINE = [0.3, 0.55] as const;

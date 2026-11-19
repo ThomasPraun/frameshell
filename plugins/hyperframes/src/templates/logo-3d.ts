@@ -12,7 +12,7 @@ import {
 import { FINISH_PRESETS, SHADOWS_VARIABLE, STUDIO_SCRIPT, type ThreeTemplate, finishVariable, loadScript, threePageHead } from "./three-kit.js";
 
 /**
- * 3D logo (#473, ADR 0042): an SVG logo from the composition directory (or a built-in mark) is extruded with
+ * 3D logo (ADR 0042): an SVG logo from the composition directory (or a built-in mark) is extruded with
  * three.js `SVGLoader` and `ExtrudeGeometry`, lit in the shared studio, and reveals itself (the depth rises out of
  * the flat logo, the logo swings in, or it drops in) before a slow turn, a glint sweep and an optional headline.
  * Filled paths only: strokes, text, images, gradients and `<use>` are not extruded (outline them first). Every pose

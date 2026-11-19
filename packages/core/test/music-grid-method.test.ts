@@ -10,7 +10,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { makeBurstClip } from "./media-fixtures.js";
 import { testBinaryManager } from "./media-tools.js";
 
-// `music.grid` through a real daemon (ADR 0037 slice 5). The shots are one synthetic recording with sound, its transcript
+// `music.grid` through a real daemon (ADR 0037). The shots are one synthetic recording with sound, its transcript
 // written by hand with one word at 2.0–2.06 s of the file. The music is a silent WAV whose beat grid is a hand-written
 // `exact` beats file: a beat every 0.5 s from 0.5 s. Shots meet at 2.1 s (off the grid; moving it to 2.0 s would cut the
 // word) and 4.4 s (moves to 4.5 s).

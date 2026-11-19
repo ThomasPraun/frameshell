@@ -2,7 +2,7 @@ import { CAMERA_MATH, CURSOR_CSS, CURSOR_HTML, CURSOR_MATH, CURSOR_SCRIPT, camer
 import { COLOR_HELPERS, PLACEHOLDER, type Template, type TemplateInput, type TemplateVariable, fontSetup, pageHead, trimScript } from "./kit.js";
 
 /**
- * App window mockup (#466, UI demo): a window in CRM, spreadsheet or inbox style
+ * App window mockup (UI demo): a window in CRM, spreadsheet or inbox style
  * springs in, its rows follow one by one, then a cursor clicks a row and, on that
  * same frame, the row highlight sweeps across, the other rows dim and the
  * window's own state changes (an unread dot clears in the inbox). With the cursor

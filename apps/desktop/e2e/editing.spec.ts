@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// Timeline editing (#16) in the built app: pointer drags and keys on the canvas become daemon operations by `ui`,
+// Timeline editing in the built app: pointer drags and keys on the canvas become daemon operations by `ui`,
 // saved at once and journaled. Real daemon; generated `titles` clips need no media or plugin.
 const box = sandbox("editing");
 const mainFile = join(box.projectDir, "timelines", "main.json");

@@ -6,7 +6,7 @@ import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harn
 import { ffmpegRun, testFfmpeg } from "./media.js";
 import { waitForIngest } from "./preview-probe.js";
 
-// "Chat about this" (#49) in the built app: a real daemon, a synthetic take with a hand-written transcript on the
+// "Chat about this" in the built app: a real daemon, a synthetic take with a hand-written transcript on the
 // timeline, and a stand-in agent TUI (e2e/fake-agent.mjs: raw stdin, bracketed paste, prints SUBMITTED on
 // Enter) running in the real terminal. Cmd/Ctrl+L and the context menu type SPEC §10 references at its prompt.
 const box = sandbox("ask");

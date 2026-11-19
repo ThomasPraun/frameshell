@@ -7,7 +7,7 @@ import { tempDir, uniqueSocketPath } from "./helpers.js";
 import { mediaTools, testBinaryManager } from "./media-tools.js";
 import { CARD_PLUGIN, installLocalPlugin } from "./plugin-fixture.js";
 
-// The `gc` hook of a clip adapter (ADR 0035 slice 5) through the daemon: the `gc-card` fixture type keeps one marker
+// The `gc` hook of a clip adapter (ADR 0035) through the daemon: the `gc-card` fixture type keeps one marker
 // file per clip under `.frameshell/card-state/` and deletes the ones no clip names, as the Blender plugin does for its
 // listings. The host's part is what is tested here: which inputs it gathers, and when it asks.
 const TIMEOUT = 180_000;

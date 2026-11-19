@@ -6,7 +6,7 @@ import { pitchOf, pitchTrack } from "./pitch.js";
 import { frameAt, frameStart } from "./shots.js";
 import { type HeardWord, type Sentence, paceOf, sentenceText, sentencesOf } from "./speech.js";
 
-// What the sound of a reference does (#471): sentences with pace, pitch and the voice against the music under it, effects over the
+// What the sound of a reference does: sentences with pace, pitch and the voice against the music under it, effects over the
 // music, and sections of steady level. Everything is read from the mix (its 10 ms energy envelope and a 16 kHz copy for the pitch),
 // never from separated stems, so every figure is an estimate. Pure: `service.ts` decodes the sound and runs the transcription.
 

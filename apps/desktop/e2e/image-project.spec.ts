@@ -61,7 +61,7 @@ test("pictures start an image project: layers instead of the timeline, no playhe
       .poll(() => layers.locator(".layers-thumb img").evaluateAll((images) => images.map((image) => (image as HTMLImageElement).naturalWidth > 0)))
       .toEqual([true, true]);
 
-    // No transcript view in an image project (#289): no key, no tab-strip button, no View menu item.
+    // No transcript view in an image project: no key, no tab-strip button, no View menu item.
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+t" : "Control+Shift+t");
     await expect(page.getByRole("tab", { name: "Transcript" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Transcript", exact: true })).toHaveCount(0);
@@ -76,7 +76,7 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
     await expect(layers.locator(".layers-label")).toHaveText(["logo", "poster"]);
 
-    // Right-click offers the row buttons' commands after Chat about this (#420); the top layer cannot move up.
+    // Right-click offers the row buttons' commands after Chat about this; the top layer cannot move up.
     await layers.locator(".layers-row", { hasText: "logo" }).click({ button: "right" });
     const menu = page.getByRole("menu");
     await expect(menu.getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename", "Move up", "Move down", "Delete layer"]);
@@ -152,7 +152,7 @@ test("Mod+Shift+S makes an image project from the frame at the playhead, beside 
     // The video project is unchanged and still open.
     await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
     await expect(page.locator(".statusbar")).toContainText("Opened interview frame 00-00 in a new window.");
-    // The video-only menu items follow the focused window's kind (#289).
+    // The video-only menu items follow the focused window's kind.
     await focusWindow(app, "interview frame 00-00");
     await expect.poll(() => videoMenu(app)).toEqual([false, false, false, false]);
     await focusWindow(app, "interview");

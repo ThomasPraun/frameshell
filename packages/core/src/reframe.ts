@@ -1,4 +1,4 @@
-// Single-clip reframe (`clip.reframe`, epic #451): where a clip's picture must sit so a face stays framed in a
+// Single-clip reframe (`clip.reframe`): where a clip's picture must sit so a face stays framed in a
 // frame of another aspect. Pure geometry; the layer model is `layerRect` in @frameshell/schema.
 import type { KeyEase } from "@frameshell/schema";
 import type { FacePoint } from "./multicam/faces.js";

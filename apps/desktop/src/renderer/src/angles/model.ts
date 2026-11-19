@@ -1,4 +1,4 @@
-// What the multicam viewer shows at the playhead (#243, ADR 0016 decision 5): the group's angles, which ones the
+// What the multicam viewer shows at the playhead (ADR 0016 decision 5): the group's angles, which ones the
 // current shot uses, who speaks, and where each angle's file is. Pure: the panel draws it.
 import type { MulticamTurnsResult, TimelineView } from "@frameshell/protocol";
 import type { TranscriptSource } from "../transcript/model.js";
@@ -113,7 +113,7 @@ function shotAnglesAt(row: TrackRow, time: number, fps: number): string[] {
   return clip?.shot?.angles.map((angle: ShotAngle) => angle.id) ?? [];
 }
 
-/** What the angle panel offers for an angle's `speaker` (#247). */
+/** What the angle panel offers for an angle's `speaker`. */
 export interface SpeakerChoices {
   /** Project-relative file the angle is heard through (its mic's, else its own); null when it has no sound. */
   asset: string | null;

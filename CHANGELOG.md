@@ -1669,6 +1669,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that does not exist; CI's scope job runs it on every change. With `--split <rev>` it also checks that every token and
   rule clause of an older root file survives in some `CLAUDE.md`. `scripts/test-scope.mjs` runs no tests for a
   `CLAUDE.md` change at any depth.
+- Docs: `docs/SPEC.md` status lines match what shipped, DOC2 of epic #451 (no decision changed, no wire change): the
+  header says alpha with the last-edited date instead of "draft v0.1", decision 38 names `clip verify` (ADR 0033) and
+  the style token sheet in generated clips (ADR 0028) as built, decisions 4, 32 and 36 and the style paragraph of §5.8 mark
+  per-format overrides and style in captions and fonts as built, and the roadmap marks Remotion, live preview, OpenAI
+  transcription, OTIO and Premiere XML as shipped with their ADRs, leaving Deepgram, ElevenLabs Scribe, the effects/LUT
+  and UI panel extension points and the plugin index website open.
 - Small fixes, wave 28 (SF9, epic #451): the app's editor hand-off kinds (OpenTimelineIO, Premiere XML) are one table in
   `apps/desktop/src/shared/handoff.ts` (command, menu item id, extension, daemon method, CLI name) that the File menu,
   save dialog, IPC check, notice and its CLI hint read, instead of the same two-way branch in five places. No visible

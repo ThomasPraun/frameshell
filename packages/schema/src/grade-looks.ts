@@ -1,4 +1,4 @@
-// Built-in looks (ADR 0031 decision 8, slice 10): named grades as plain correction numbers, no `.cube` file and no
+// Built-in looks (ADR 0031 decision 8): named grades as plain correction numbers, no `.cube` file and no
 // third-party LUT. No Zod here, like grade.ts: a look is a `Grade` written into the clip, so it stays the clip's own copy.
 import type { Grade } from "./timeline.js";
 

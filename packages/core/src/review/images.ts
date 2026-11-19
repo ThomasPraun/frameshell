@@ -9,7 +9,7 @@ import { type CropRect, type FramePick, type SheetLayout, frameTime, splitImages
 import { DIFFERENCE_GAIN, type ShadeFractions, writeDifference, writeSheet } from "./sheet.js";
 import { type FilmSource, captureParallelism } from "./source.js";
 
-// From picked frames to labelled sheet images. Shared by `review` and #471 `analyze`.
+// From picked frames to labelled sheet images. Shared by `review` and `analyze`.
 
 /** Frames of a source captured once into `dir`, whichever sheet asks for them. */
 export class Frames {

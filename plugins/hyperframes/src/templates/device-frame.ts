@@ -10,7 +10,7 @@ import {
 import { SCREEN_HELPERS, SKELETON_HTML, WINDOW_DOTS_CSS, WINDOW_DOTS_HTML } from "./ui-parts.js";
 
 /**
- * Device frame (#466): a browser window or a phone around a real screenshot,
+ * Device frame: a browser window or a phone around a real screenshot,
  * on a solid radial background with a soft accent glow. The device springs in
  * and the screenshot inside it pushes in slowly toward a point of interest.
  * Without a screenshot (or when its file is missing) a plain app skeleton

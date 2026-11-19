@@ -6,7 +6,7 @@ import { greyOf, pictureSize } from "../src/analyze/picture.js";
 import { bigChanges, bursts, lengthCv, rhythmOf, stillRuns } from "../src/analyze/rhythm.js";
 import { shotLocator } from "../src/analyze/shots.js";
 
-// The pure parts of `analyze` slice 2 (#471): look, rhythm and events from per-frame series.
+// The pure parts of `analyze`: look, rhythm and events from per-frame series.
 
 /** Interleaved RGB of a `width` x `height` frame of one colour, with `paint(x, y)` optionally replacing a pixel. */
 function frame(width: number, height: number, color: [number, number, number], paint?: (x: number, y: number) => [number, number, number] | null): Uint8Array {

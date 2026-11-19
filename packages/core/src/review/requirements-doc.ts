@@ -8,7 +8,7 @@ import { readJsonIfExists, writeTextAtomic } from "../fs-util.js";
 import { readRequirementsFile } from "./requirements-file.js";
 
 /**
- * The `requirements` config document (ADR 0036, #457): `requirements.json` as keyed state. Keys, after
+ * The `requirements` config document (ADR 0036): `requirements.json` as keyed state. Keys, after
  * {@link REQUIREMENTS_KEY}: each of `REQUIREMENT_PATHS` (`film.maxSeconds`, `captions.minSize`, `fail`...),
  * `clip:<id>.<field>` per assertion of a clip, `waiver:<check>` and `waiver:<check>:<clip>` with the reason.
  * Entries the file repeats for one clip or waiver read as one key (later fields of a clip win, the first waiver's

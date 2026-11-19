@@ -61,7 +61,7 @@ export const TransformSchema = z
   .describe("Overlay placement (video tracks only).");
 
 /**
- * What the `track.duck` that wrote a clip's `auto: "duck"` keys was asked (ADR 0037 slice 3): kept on the clip so a later
+ * What the `track.duck` that wrote a clip's `auto: "duck"` keys was asked (ADR 0037): kept on the clip so a later
  * run of it (`music.fit` moving the clip) dips the same way over the same tracks. Not applied by itself: the keys are the duck.
  */
 export const DuckSettingsSchema = z.strictObject({
@@ -78,7 +78,7 @@ export const DuckSettingsSchema = z.strictObject({
 export type DuckSettings = z.output<typeof DuckSettingsSchema>;
 
 /**
- * What the `music.shape` that wrote a clip's `auto: "music"` keys was asked (ADR 0037 slice 4): kept on the clip so the
+ * What the `music.shape` that wrote a clip's `auto: "music"` keys was asked (ADR 0037): kept on the clip so the
  * same shaping can run again after `music.fit` moves it. Times are resolved timeline seconds, not names. Not applied by itself.
  */
 export const ShapeSettingsSchema = z.strictObject({
@@ -807,7 +807,7 @@ export const ProgramTrackSchema = z.strictObject({
 export const SUBTITLE_ENTRIES = ["none", "chars", "words", "line"] as const;
 
 /**
- * One hand-chunked caption phrase (#460): transcript words of one asset, in
+ * One hand-chunked caption phrase: transcript words of one asset, in
  * order, cut into cues. The ids are the transcript's, so cuts and text
  * corrections keep it: a word a cut removed is simply not shown.
  */

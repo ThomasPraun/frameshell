@@ -14,7 +14,7 @@ import {
 } from "./kit.js";
 
 /**
- * Animated counter (#466): a number counts from one value to another (up or
+ * Animated counter: a number counts from one value to another (up or
  * down) in about a second and then holds, in tabular figures so the digits
  * never jitter, with an optional soft glow while it climbs. Transparent
  * unless `backdrop` is raised.
