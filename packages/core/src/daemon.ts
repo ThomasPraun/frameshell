@@ -830,6 +830,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     probe: (dir, asset) => media.probe(dir, asset),
     loadTimeline: (dir, id) => timelines.load(dir, id),
+    nestedDuration: (dir, timeline, fps) => timelines.nestedDuration(dir, timeline, fps),
     pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
     encoder: (ffmpeg) => encoderCache.pick(ffmpeg),
     clips: {
@@ -1878,6 +1879,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.cover(dir, { timeline, ...choice }, loaded)) };
+    },
+    "export.otio": async ({ cwd, timeline, view, ...choice }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.otio(dir, { timeline, ...choice }, loaded)) };
     },
     transcribe: async ({ cwd, asset, provider, model, language }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.

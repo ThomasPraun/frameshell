@@ -1,0 +1,39 @@
+---
+status: accepted
+---
+
+# OpenTimelineIO export: a derived file, export only, what is left out is said
+
+#383 (epic #451) asks for OTIO and Premiere XML export so a cut made with an agent can go on in an editor. SPEC decision 3 already settles the direction: the declarative timeline JSON is the source of truth and OTIO is **export only**. This ADR records how the export is built; it changes no existing decision. The owner chose the options below on 2026-11-18 (question Q1, every recommendation accepted). **Slice 1 is built: cuts, gaps, speed, mute and hide, markers. Dissolves, the app menu and Premiere XML are later slices; #383 stays open.**
+
+## Context (verified)
+
+- Timelines are JSON files with video, audio, program and subtitle tracks, first video track = bottom layer; a media clip lasts `(out - in) / speed` on the timeline (`clipLength` in `packages/schema/src/transitions.ts`), a generated or nested clip lasts `duration` (a nested one without it: the rest of the nested timeline).
+- Times are stored in seconds and snapped by the core to the project's frame grid (`FrameGrid`, 3 decimals); the project `fps` is a positive number and may be fractional (30000/1001).
+- A derived file that is written next to the project and never read back already exists: `cover` writes `exports/<timeline>-cover.png`.
+
+## Decision
+
+1. **Export only, read-only.** `export.otio` writes a file derived from the timeline and never changes it (no transaction, no journal entry, not a `mutating` method, no review-mode proposal). The file is regenerated on every call and never read back: no import, no sync, nothing in the project depends on it (SPEC decision 3).
+2. **Format.** Plain OTIO JSON as OpenTimelineIO 0.15 and later writes it: `Timeline.1` (`name` = timeline id, `global_start_time` 0, `metadata.frameshell` = `timelineId`, `revision`, `schemaVersion`), one `Stack.1` of `Track.1` children with markers as `Marker.2` on the stack, `Clip.2`, `Gap.1`, `ExternalReference.1`, `MissingReference.1`, `LinearTimeWarp.1`, `RationalTime.1`, `TimeRange.1`. A `Clip.2` keeps its reference in `media_references` under `DEFAULT_MEDIA` with `active_media_reference_key`, which is how OTIO 0.15+ stores it (`media_reference` is `Clip.1`). No new dependency, no Python, no render, no job queue: a pure converter (`packages/core/src/export/otio.ts`).
+3. **Time.** The rate of every time is the project fps, passed unchanged when it is fractional. Every value is one `RationalTime.1` whose `value` is a whole frame count, `Math.round(seconds * fps)`; a gap is the difference of two frame positions, never a sum of rounded lengths, so nothing drifts over a long track. Clip length is `clipLength` with the engine's `TransitionContext` (`sourceDuration` of a nested clip comes from `TimelineService.nestedDuration`); it is never recomputed privately.
+4. **Paths.** `target_url` is relative to the `.otio` file, `/`-separated and percent-encoded, so the project folder can move; `--absolute-paths` writes `file://` URLs. An asset with no relative path from the file (another Windows drive) gets a `file://` URL. `otioAssetUrl` is the one place that builds it.
+5. **What is mapped (slice 1).** Video and audio tracks in timeline order (OTIO bottom track first = Frameshell first video track). A hidden video track and a muted audio track get `enabled: false`; a muted video track keeps its picture, so it stays enabled with a warning (OTIO has no switch for its sound alone). A clip muted on an audio track is disabled. Media clips: `Clip.2` named after the file, `source_range` in **source** time (`in`, `out - in`), an `ExternalReference.1`, `LinearTimeWarp.1` with `time_scalar` = `speed` when it is not 1, and `metadata.frameshell` with `clipId`, `start`, `length` (timeline seconds), `gain` and `speed` when set. Holes become `Gap.1` of timeline length (a gap counts the timeline length of the clips before it). Markers: `Marker.2` with `name` = label, a zero-length `marked_range`, colour red, orange, yellow, green, blue or purple as OTIO `RED`… `PURPLE`, `GREEN` when unset, sorted by time.
+6. **Generated and nested timeline clips keep their slot** (`hyperframes`, `remotion`, `blender`, any adapter): a `Clip.2` with a `MissingReference.1`, named `<type> <source name>` (`timeline <name>` for a nested one), `source_range` from 0 for the clip's timeline length, `metadata.frameshell.type`, plus a warning telling the person to render it and relink the file. A nested clip whose length is unknown is skipped with a warning.
+7. **What is not exported, said in `warnings`** (one line per kind, with the first five clip ids): multicam program tracks and their shots, subtitle tracks, dissolves and fades (`dissolve`, `fadeIn`, `fadeOut`), transforms and keys, colour grades, film finish and effects (`vignette`, `grain`, `backdrop`, `motionBlur`), audio effects, the muted sound of a video clip. Clip `gain` is kept only as metadata. The timeline `letterbox` is named in a warning too; the primary format is exported, per-format overrides are not.
+8. **Where it is written.** `exports/<timeline>.otio` by default, or `out`, which must end in `.otio` (refused otherwise with `InvalidOperation`, so a timeline or project file can never be overwritten); the folder is created and the file written atomically (`writeTextAtomic`). The result carries `path`, `timeline`, `fps`, `tracks`, `clips`, `markers` and `warnings`.
+9. **Surface.** Method `export.otio` (params `timeline`, `out`, `absolutePaths`, `view`), CLI `frameshell export otio [--timeline id] [--out file.otio] [--absolute-paths]` (prints the path and a `warning:` line each), MCP tool `export_otio` from the registry. No app menu yet (a later slice). Protocol 178.
+
+## Considered options
+
+- **Generated and nested clips as `Gap.1`:** keeps the file smaller but the editor loses the slot, the name and the knowledge that something belongs there. Rejected for a missing reference of the clip's length.
+- **Render generated clips into the export:** needs the clip render queue, Chrome and time; an export that waits on renders is not a quick hand-off. Later, if asked.
+- **The `opentimelineio` Python package or a native binding:** a dependency for a file that is a JSON tree; the structural test in this repo checks the shape, and an opt-in test (`FRAMESHELL_TEST_OTIO=1`) reads the file with the real library.
+- **OTIO import:** a second source of truth, against SPEC decision 3.
+- **`media_reference` (`Clip.1`):** older readers; OTIO 0.15 reads `Clip.2` and has done so since 2021.
+
+## Consequences and open points
+
+- OTIO's layout is sequential: an item takes the length of its `source_range.duration`. For a clip with `speed` other than 1 that is the source length, as the owner chose, while the clip is shorter (or longer) on the timeline, so an editor that lays items out by source duration moves what follows on the same track. Each such clip puts a warning in `warnings`, and `metadata.frameshell.start` and `length` hold the true place. Whether to write the timeline length instead (editors differ in how they read a `LinearTimeWarp`) waits for a check against real editors.
+- The file is only checked structurally here (every object has its `OTIO_SCHEMA`, every time is a whole-frame `RationalTime.1`, a golden document); the optional `FRAMESHELL_TEST_OTIO=1` test is the one that reads it with the library.
+- Later slices: dissolves (`Transition.1` between items), the app menu, Premiere XML.
