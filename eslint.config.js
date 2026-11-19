@@ -8,6 +8,8 @@ export default tseslint.config(
       "**/node_modules/**",
       "spikes/**",
       ".claude/**",
+      // Test binaries CI restores from cache; onnxruntime-web ships .mjs files.
+      ".cache/**",
       "apps/desktop/out/**",
       "apps/desktop/release/**",
       "apps/desktop/test-results/**",
