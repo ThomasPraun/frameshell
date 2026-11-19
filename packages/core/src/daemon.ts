@@ -672,7 +672,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL, { onProgress: progress }),
     });
   /** Voice prints of one project for one request; the speaker model is installed only when a print is not cached. */
-  const voicePrinter = (dir: string, progress: (update: Progress) => void): VoicePrinter => {
+  const voicePrinter = (dir: string, progress: (update: Progress) => void, cacheOnly = false): VoicePrinter => {
     const embed: VoiceEmbedder =
       options.voiceEmbedder ??
       (async (request) => {
@@ -691,6 +691,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio ?? extractAudioWithFfmpeg,
         progress,
+        cacheOnly,
       });
   };
   /** Bytes the voice model (ONNX Runtime Web and CAM++) still has to download; 0 when installed or a test embedder stands in. */
@@ -837,6 +838,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     probe: (dir, asset) => media.probe(dir, asset),
     loadTimeline: (dir, id) => timelines.load(dir, id),
+    nestedDuration: (dir, timeline, fps) => timelines.nestedDuration(dir, timeline, fps),
     pluginPresets: async (dir) => (await plugins.presets(dir)).presets,
     encoder: (ffmpeg) => encoderCache.pick(ffmpeg),
     clips: {
@@ -1885,6 +1887,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
       return { view: shown, proposal, ...(await exports.cover(dir, { timeline, ...choice }, loaded)) };
+    },
+    "export.otio": async ({ cwd, timeline, view, ...choice }, caller) => {
+      const dir = await root(cwd);
+      const { view: shown, proposal, ...loaded } = await timelines.viewTimeline(dir, timeline, await viewOf(dir, caller, view));
+      return { view: shown, proposal, ...(await exports.otio(dir, { timeline, ...choice }, loaded)) };
     },
     transcribe: async ({ cwd, asset, provider, model, language, yes, confirmation }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
@@ -3573,6 +3580,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             };
       const found = await transcribing(dir, () => people.suggest(dir, { voices, faces: faceScans(dir), scripts: () => shoots.voices(dir) }));
       return { dir, ...found, ...(held ? { voiceDownload: { bytes: missing } } : {}) };
+    },
+    "people.tune": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return people.tune(dir, { voices: voicePrinter(dir, () => {}, true), faces: faceScans(dir) });
     },
     "people.confirm": async ({ cwd, suggestions, reject, person }, caller, request) => {
       const dir = await root(cwd);

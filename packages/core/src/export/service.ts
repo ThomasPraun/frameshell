@@ -6,6 +6,7 @@ import {
   type CoverResult,
   ErrorCode,
   type EncoderName,
+  type ExportOtioResult,
   type ExportPresetInfo,
   type FrameFormat,
   type FrameResult,
@@ -76,7 +77,8 @@ import { gradeFiles } from "./grade.js";
 import { LOUDNESS_PASSES, limiterEngages, settleTrim } from "./true-peak.js";
 import { readCaptionTokens } from "../style/captions.js";
 import { BUILTIN_PRESETS, DEFAULT_PRESET_ID, fitInside, gifSizeWarning, loudnessTarget } from "./presets.js";
-import { renameRetrying } from "../fs-util.js";
+import { renameRetrying, writeTextAtomic } from "../fs-util.js";
+import { otioAssetUrl, timelineToOtio } from "./otio.js";
 import { loopSeamWarning } from "./seam.js";
 
 /** Options for {@link executeRender}. */
@@ -277,6 +279,11 @@ export interface ExportServiceOptions {
    * clip); null when missing or invalid. Default: read the file.
    */
   readNested?(root: string, source: string): Promise<Timeline | null>;
+  /**
+   * Duration of a nested timeline (project-relative `source`) as clips of timeline `timeline` play it; see
+   * `TimelineService.nestedDuration`. Absent: a nested clip with no `duration` has no known length in an OTIO export.
+   */
+  nestedDuration?(root: string, timeline: string, fps: number): (source: string) => Promise<number>;
   /**
    * Transcript of a project-relative asset (subtitle words); null when it
    * has none or it cannot be read. Default: `transcripts/<asset>.words.json`.
@@ -676,6 +683,43 @@ export class ExportService {
       height: shot.height,
       warnings: [...cover.warnings, ...shot.warnings],
     };
+  }
+
+  /**
+   * Write `timeline` as an OpenTimelineIO file (see the `export.otio` method, ADR 0045): derived, read-only, atomic.
+   * `loaded`: see {@link ExportService.frame}.
+   */
+  async otio(
+    root: string,
+    params: { timeline: string; out?: string | undefined; absolutePaths?: boolean | undefined },
+    loaded?: { timeline: Timeline; fps: number },
+  ): Promise<Omit<ExportOtioResult, "view" | "proposal">> {
+    const out = params.out ?? join(root, "exports", `${params.timeline}.otio`);
+    if (extname(out).toLowerCase() !== ".otio") {
+      throw new RpcError(
+        ErrorCode.InvalidOperation,
+        `The OTIO file must end in .otio, got ${basename(out)}: a timeline or project file is never overwritten.`,
+        { op: "export.otio", field: "out" },
+      );
+    }
+    const { timeline, fps } = loaded ?? (await this.#options.loadTimeline(root, params.timeline));
+    const nested = this.#options.nestedDuration?.(root, timeline.id, fps);
+    const totals = new Map<string, number>();
+    for (const track of timeline.tracks) {
+      if (track.kind === "subtitles" || !nested) continue;
+      for (const clip of track.clips) {
+        if (clip.type !== "timeline" || !("source" in clip) || !clip.source) continue;
+        try {
+          totals.set(clip.id, await nested(clip.source));
+        } catch {
+          // An unreadable nested file leaves the clip without a length: the converter skips it with a warning.
+        }
+      }
+    }
+    const base = { root, outDir: dirname(out), absolute: params.absolutePaths === true };
+    const result = timelineToOtio(timeline, { fps, assetUrl: (asset) => otioAssetUrl(base, asset), sourceDuration: (clip) => totals.get(clip.id) });
+    await writeTextAtomic(out, `${JSON.stringify(result.otio, null, 2)}\n`);
+    return { path: out, timeline: timeline.id, fps, tracks: result.tracks, clips: result.clips, markers: result.markers, warnings: result.warnings };
   }
 
   /**

@@ -15,9 +15,10 @@ frameshell people suggest                                                # sg_â€
 frameshell people confirm sg_9c04e1d2                                    # yes: link it   (--reject: no, never ask again)
 frameshell people confirm sg_51aa07c3 --person Ana                       # a suggestion naming nobody: who it is (new name = new person)
 frameshell people ranges Juan                                            # spans where he speaks; --on-screen: where he shows
+frameshell people tune                                                   # read-only: how the voice and face thresholds do on the links confirmed
 ```
 
-MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` (`speaker`, `angle` or `face` objects, exactly one per call), `people_scan`, `people_suggest`, `people_confirm`, `people_ranges` (`person`, `kind` `speaks` or `onscreen`, `timeline`). `ui_select { person: { id } }` shows the user that person's spans and words in the app.
+MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link`, `people_unlink` (`speaker`, `angle` or `face` objects, exactly one per call), `people_scan`, `people_suggest`, `people_tune`, `people_confirm`, `people_ranges` (`person`, `kind` `speaks` or `onscreen`, `timeline`). `ui_select { person: { id } }` shows the user that person's spans and words in the app.
 
 - A person is an id (`p_3fa2c1`) or the exact name (ignoring case); names are unique ignoring case.
 - A transcript speaker, an angle or a face anchor belongs to one person; a link to a whole transcript excludes other people's speakers of it.
@@ -28,6 +29,7 @@ MCP: `people_list`, `people_add`, `people_rename`, `people_remove`, `people_link
 - A link whose transcript, speaker, timeline, group, angle or video is gone is `missing`: listed, ignored, never deleted (a re-run may bring it back). `unlink` still removes it.
 - Edit the file by hand if you like (hand-written ids such as `p_juan` are fine); an invalid file fails the people commands only.
 - `people scan` only finds faces and caches their prints under `.frameshell/people/` (derived, regenerable, never in `people.json`); it links nothing. Run it when asked, not on every import.
+- `people tune` is for the owner tuning thresholds on real recordings, not part of editing: it only reads, and the constants it reports are changed in code by a person, never by an agent.
 - People changes are not timeline operations: they apply at once, are not in `history` and review mode does not hold them, even while it is on. Undo with the inverse command (`unlink`, `rename`, `remove`); the person undoes the last change, yours too, with Cmd/Ctrl+Z in the People panel.
 
 ## Ranges

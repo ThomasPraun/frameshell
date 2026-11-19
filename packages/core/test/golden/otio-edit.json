@@ -1,0 +1,272 @@
+{
+  "otio": {
+    "OTIO_SCHEMA": "Timeline.1",
+    "name": "main",
+    "global_start_time": {
+      "OTIO_SCHEMA": "RationalTime.1",
+      "rate": 30,
+      "value": 0
+    },
+    "metadata": {
+      "frameshell": {
+        "timelineId": "main",
+        "revision": 4,
+        "schemaVersion": 1
+      }
+    },
+    "tracks": {
+      "OTIO_SCHEMA": "Stack.1",
+      "name": "tracks",
+      "source_range": null,
+      "effects": [],
+      "markers": [
+        {
+          "OTIO_SCHEMA": "Marker.2",
+          "name": "hook",
+          "color": "ORANGE",
+          "comment": "",
+          "marked_range": {
+            "OTIO_SCHEMA": "TimeRange.1",
+            "duration": {
+              "OTIO_SCHEMA": "RationalTime.1",
+              "rate": 30,
+              "value": 0
+            },
+            "start_time": {
+              "OTIO_SCHEMA": "RationalTime.1",
+              "rate": 30,
+              "value": 150
+            }
+          },
+          "metadata": {
+            "frameshell": {
+              "markerId": "m_1"
+            }
+          }
+        }
+      ],
+      "enabled": true,
+      "metadata": {},
+      "children": [
+        {
+          "OTIO_SCHEMA": "Track.1",
+          "name": "V1",
+          "source_range": null,
+          "effects": [],
+          "markers": [],
+          "enabled": true,
+          "metadata": {
+            "frameshell": {
+              "trackId": "t_v1"
+            }
+          },
+          "children": [
+            {
+              "OTIO_SCHEMA": "Clip.2",
+              "name": "take.mp4",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                }
+              },
+              "effects": [],
+              "markers": [],
+              "enabled": true,
+              "metadata": {
+                "frameshell": {
+                  "clipId": "c_a",
+                  "start": 0,
+                  "length": 2
+                }
+              },
+              "media_references": {
+                "DEFAULT_MEDIA": {
+                  "OTIO_SCHEMA": "ExternalReference.1",
+                  "name": "",
+                  "available_range": null,
+                  "metadata": {},
+                  "target_url": "../assets/take.mp4"
+                }
+              },
+              "active_media_reference_key": "DEFAULT_MEDIA"
+            },
+            {
+              "OTIO_SCHEMA": "Gap.1",
+              "name": "",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 90
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 0
+                }
+              },
+              "effects": [],
+              "markers": [],
+              "enabled": true,
+              "metadata": {}
+            },
+            {
+              "OTIO_SCHEMA": "Clip.2",
+              "name": "take.mp4",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 300
+                }
+              },
+              "effects": [
+                {
+                  "OTIO_SCHEMA": "LinearTimeWarp.1",
+                  "name": "",
+                  "effect_name": "LinearTimeWarp",
+                  "time_scalar": 2,
+                  "metadata": {}
+                }
+              ],
+              "markers": [],
+              "enabled": true,
+              "metadata": {
+                "frameshell": {
+                  "clipId": "c_b",
+                  "start": 5,
+                  "length": 2,
+                  "speed": 2
+                }
+              },
+              "media_references": {
+                "DEFAULT_MEDIA": {
+                  "OTIO_SCHEMA": "ExternalReference.1",
+                  "name": "",
+                  "available_range": null,
+                  "metadata": {},
+                  "target_url": "../assets/take.mp4"
+                }
+              },
+              "active_media_reference_key": "DEFAULT_MEDIA"
+            },
+            {
+              "OTIO_SCHEMA": "Clip.2",
+              "name": "hyperframes title",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 60
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 0
+                }
+              },
+              "effects": [],
+              "markers": [],
+              "enabled": true,
+              "metadata": {
+                "frameshell": {
+                  "clipId": "c_gen",
+                  "start": 7,
+                  "length": 2,
+                  "type": "hyperframes"
+                }
+              },
+              "media_references": {
+                "DEFAULT_MEDIA": {
+                  "OTIO_SCHEMA": "MissingReference.1",
+                  "name": "",
+                  "available_range": null,
+                  "metadata": {}
+                }
+              },
+              "active_media_reference_key": "DEFAULT_MEDIA"
+            }
+          ],
+          "kind": "Video"
+        },
+        {
+          "OTIO_SCHEMA": "Track.1",
+          "name": "Music",
+          "source_range": null,
+          "effects": [],
+          "markers": [],
+          "enabled": false,
+          "metadata": {
+            "frameshell": {
+              "trackId": "t_a1",
+              "muted": true
+            }
+          },
+          "children": [
+            {
+              "OTIO_SCHEMA": "Clip.2",
+              "name": "theme.wav",
+              "source_range": {
+                "OTIO_SCHEMA": "TimeRange.1",
+                "duration": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 270
+                },
+                "start_time": {
+                  "OTIO_SCHEMA": "RationalTime.1",
+                  "rate": 30,
+                  "value": 0
+                }
+              },
+              "effects": [],
+              "markers": [],
+              "enabled": true,
+              "metadata": {
+                "frameshell": {
+                  "clipId": "c_m",
+                  "start": 0,
+                  "length": 9
+                }
+              },
+              "media_references": {
+                "DEFAULT_MEDIA": {
+                  "OTIO_SCHEMA": "ExternalReference.1",
+                  "name": "",
+                  "available_range": null,
+                  "metadata": {},
+                  "target_url": "../assets/music/theme.wav"
+                }
+              },
+              "active_media_reference_key": "DEFAULT_MEDIA"
+            }
+          ],
+          "kind": "Audio"
+        }
+      ]
+    }
+  },
+  "warnings": [
+    "generated clip c_gen (hyperframes) exported as missing media of its length: render it and relink the file by hand.",
+    "sound of media clips on a video track (OTIO keeps sound on audio tracks) on 2 clips not exported (c_a, c_b)."
+  ],
+  "tracks": 2,
+  "clips": 4,
+  "markers": 1
+}

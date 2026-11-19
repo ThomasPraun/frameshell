@@ -42,6 +42,7 @@ import { VOICEOVER_FLAGS, VOICEOVER_USAGE, type VoiceoverInvocation, executeVoic
 import { SOUND_FLAGS, SOUND_USAGE, type SoundInvocation, executeSound, parseSound } from "./sound-commands.js";
 import { JOB_FLAGS, JOB_USAGE, type JobInvocation, executeJob, formatJob, parseJob } from "./job-commands.js";
 import { STYLE_FLAGS, STYLE_USAGE, type StyleInvocation, executeStyle, parseStyle } from "./style-commands.js";
+import { EXPORT_FLAGS, EXPORT_USAGE, type ExportInvocation, executeExport, parseExport } from "./export-commands.js";
 import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parseFormat } from "./format-commands.js";
 import { BATCH_FLAGS, BATCH_USAGE, type BatchCancelInvocation, type BatchInvocation, batchOutcome, batchLabel, canceledLine, canceledRows, describeBatch, describeCancel, onInterrupt, parseBatch, waitReviews, watchCanceled } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
@@ -109,7 +110,7 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                Find who says each word of the asset's transcript (speaker diarization,
                                local): speaker ids on its words, names in its speakers list. --people:
                                how many talk, when known. First run downloads the engine (about 95 MB)
-${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop] [--yes]
+${MODEL_USAGE}${FORMAT_USAGE}${BATCH_USAGE}${EXPORT_USAGE}  render [--preset p] [--quality draft|final] [--formats id,id] [--out file] [--timeline id] [--cover-frame [--cover-text word] [--cover-at s] [--cover-color #rrggbb]] [--loop] [--yes]
                                Export a timeline to video (default preset: export.defaultPreset,
                                else youtube-1080p; default file: exports/<timeline>-<preset>.<container>).
                                --quality draft: 30 fps at most, fast encode for review rounds; final:
@@ -187,13 +188,13 @@ Options:
   --version    Show the CLI version
 `;
 
-const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "job", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "brand", "skill", "model", "format", "batch", ...TIMELINE_COMMANDS]);
+const BUILTINS = new Set(["init", "status", "doctor", "import", "credits", "gc", "job", "plugin", "transcribe", "render", "frame", "cover", "review", "analyze", "inspect", "script", "proposal", "people", "shoot", "voiceover", "sound", "beats", "matte", "style", "brand", "skill", "model", "format", "batch", "export", ...TIMELINE_COMMANDS]);
 
 /** Flags every command accepts. */
 export const GLOBAL_FLAGS = ["json", "trust", "help", "version"] as const;
 
 /** Options the parser knows that no timeline command takes (the timeline ones are in `TIMELINE_OPTIONS`). */
-const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "pop", "onion", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "no-faces", "from-analysis", "only"] as const;
+const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "no-verify", "quality", "provider", "model", "language", "verify", "speakers", "people", "point", "px", "timeout", "tx", "angle", "face", "on-screen", "onscreen", "reject", "segment", "scene", "recorded-at", "undo", "restore", "dtw", "lines", "tempo", "confirmation", "formats", "rows", "failed", "review", "active", "size", ...PROVENANCE_FLAGS, "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "bars", "sections", "chords", "accents", "no-place", "range", "sheets", "platform", "every", "crop-at", "pop", "onion", "reset-edits", "variant", "seed", "pitch", "length", "role", "tier", "cuts", "which", "typing", "rate", "lag", "max-lag", "snapshots", "no-speech", "no-faces", "from-analysis", "only", "absolute-paths"] as const;
 
 /** Flags each built-in, non-timeline command takes besides {@link GLOBAL_FLAGS}; enforced when parsing. */
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
@@ -229,6 +230,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   matte: [],
   ...STYLE_FLAGS,
   ...FORMAT_FLAGS,
+  ...EXPORT_FLAGS,
   ...BATCH_FLAGS,
   "skill update": ["force"],
   ask: ASK_FLAGS,
@@ -296,6 +298,7 @@ type Invocation =
   | BrandInvocation
   | { kind: "matte"; asset: string }
   | FormatInvocation
+  | ExportInvocation
   | BatchInvocation
   | BatchCancelInvocation
   | { kind: "skill.update"; force: boolean }
@@ -411,6 +414,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
           color: { type: "string" },
           "cover-frame": { type: "boolean", default: false },
           loop: { type: "boolean", default: false },
+          "absolute-paths": { type: "boolean", default: false },
           "cover-text": { type: "string" },
           "cover-at": { type: "string" },
           "cover-color": { type: "string" },
@@ -495,7 +499,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function checkBuiltinFlags(positionals: string[], values: Record<string, unknown>): void {
   const [command, sub] = positionals;
   // `credits` alone checks; `credits set` records.
-  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" || (command === "review" && (sub === "require" || sub === "waive")) ? `${command} ${sub ?? ""}` : command!;
+  const key = command === "credits" ? (sub === "set" ? "credits set" : "credits") : command === "plugin" || command === "script" || command === "proposal" || command === "people" || command === "shoot" || command === "voiceover" || command === "sound" || command === "beats" || command === "style" || command === "job" || command === "brand" || command === "skill" || command === "model" || command === "format" || command === "export" || (command === "review" && (sub === "require" || sub === "waive")) ? `${command} ${sub ?? ""}` : command!;
   if (TIMELINE_COMMANDS.has(command!)) {
     // Timeline flags are checked per command by `parseTimelineCommand`; these belong to other commands.
     const foreign = NON_TIMELINE_FLAGS.filter((flag) => values[flag] !== undefined && values[flag] !== false);
@@ -617,6 +621,7 @@ function parseBuiltin(
     text?: string | undefined;
     color?: string | undefined;
     "cover-frame"?: boolean | undefined;
+    "absolute-paths"?: boolean | undefined;
     loop?: boolean | undefined;
     "cover-text"?: string | undefined;
     "cover-at"?: string | undefined;
@@ -650,6 +655,7 @@ function parseBuiltin(
   if (command === "job") return parseJob(rest, options);
   if (command === "brand") return parseBrand(rest, options);
   if (command === "format") return parseFormat(rest, options);
+  if (command === "export") return parseExport(rest, options);
   if (command === "batch") return parseBatch(rest, options);
   if (command === "review") return parseReview(rest, options);
   if (command === "analyze") return parseAnalyze(rest, options);
@@ -982,6 +988,8 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
     case "format.add":
     case "format.remove":
       return executeFormat(conn, inv, cwd, flags.json);
+    case "export.otio":
+      return executeExport(conn, inv, cwd, flags.json);
     case "model.list":
     case "model.add":
     case "model.remove":
@@ -1018,6 +1026,7 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       return `${skillLine(result) ?? `Agent skill ${result.dir} is current.`}\n`;
     }
     case "people.ranges":
+    case "people.tune":
       return executePeople(conn, inv, cwd, flags.json);
     case "people.suggest":
     case "people.confirm":

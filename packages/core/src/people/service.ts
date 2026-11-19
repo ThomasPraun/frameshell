@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { ErrorCode, type MethodResult, type PEOPLE_CHANGES, type PeopleSuggestion, type PersonInfo, RpcError } from "@frameshell/protocol";
+import { ErrorCode, type MethodResult, type PEOPLE_CHANGES, type PeopleSuggestion, type PeopleTuneResult, type PersonInfo, RpcError } from "@frameshell/protocol";
 import {
   PEOPLE_FILE,
   type PeopleFile,
@@ -23,12 +23,13 @@ import {
 import { canonicalPath, exists, readJsonIfExists, writeJsonAtomic } from "../fs-util.js";
 import type { FacePoint, SourceRange } from "../multicam/faces.js";
 import { readPrevious } from "../transcripts/transcriber.js";
-import { type FaceModel, type FaceOwners, type ScannedAsset, clusterFacesOffThread, facesOfPeople, presence } from "./face-clusters.js";
+import { type ClusterTrack, type FaceModel, type FaceOwners, type ScannedAsset, clusterFacesOffThread, facesOfPeople, presence, resolveAnchor } from "./face-clusters.js";
 import { angleSuggestions } from "./angle-suggest.js";
 import { faceSuggestions } from "./face-suggest.js";
 import { type PersonRanges, type RangeKind, type RangesSource, type Span, personRanges } from "./ranges.js";
 import { type ScriptVoice, scriptSuggestions } from "./script-suggest.js";
 import { type PersonVoice, type SpeakerVoice, speakerSuggestions } from "./suggest.js";
+import { type TuneWho, type VoiceTuneSample, tuneFaces, tuneVoices } from "./tuning.js";
 import { type VoiceOutcome, type VoiceWanted, meanPrint, voiceKey } from "./voices.js";
 
 /** Voice prints of transcript speakers, by {@link voiceKey}; the daemon backs it with `computeVoicePrints`. */
@@ -227,6 +228,64 @@ export class PeopleService {
   }
 
   /**
+   * How the suggestion thresholds do on what people confirmed (ADR 0020 decision 15): the linked speakers' cached
+   * voice prints and the face tracks a face anchor names are the truth, and {@link tuneVoices} and {@link tuneFaces}
+   * replay the matching at many thresholds. Read-only: voice prints missing from the cache and unscanned videos
+   * are left out with a hint, never made.
+   */
+  async tune(root: string, sources: { voices: VoicePrinter; faces: FaceScans }): Promise<PeopleTuneResult> {
+    const file = await readPeople(root);
+    const hints: string[] = [];
+    const transcripts = await readAllTranscripts(root, hints);
+
+    const voicesStart = performance.now();
+    const owned = linkedVoices(file, transcripts);
+    const wanted = owned.flatMap((entry) => entry.wanted);
+    const outcomes = wanted.length > 0 ? await sources.voices(wanted) : new Map<string, VoiceOutcome>();
+    const voiceSamples: VoiceTuneSample[] = [];
+    const reasons = new Set<string>();
+    for (const { person, wanted: links } of owned) {
+      for (const link of links) {
+        const outcome = outcomes.get(voiceKey(link));
+        if (outcome?.ok) voiceSamples.push({ key: link.speaker ? `${link.transcript}:${link.speaker}` : link.transcript, person: { id: person.id, name: person.name }, print: outcome.value.print, seconds: outcome.value.seconds });
+        else if (outcome) reasons.add(outcome.reason);
+      }
+    }
+    hints.push(...[...reasons].map((reason) => `${reason}: it is left out. Make voice prints with \`frameshell people suggest\`.`));
+    const voicesMs = performance.now() - voicesStart;
+
+    const facesStart = performance.now();
+    const model = await clusterFacesOffThread(await sources.faces());
+    const anchored = new Map<ClusterTrack, TuneWho>();
+    for (const person of file.people) {
+      for (const anchor of person.faces) {
+        const track = resolveAnchor(model, anchor);
+        if (track && !anchored.has(track)) anchored.set(track, { id: person.id, name: person.name });
+      }
+    }
+    const faceSamples = model.tracks.flatMap((track) => (track.mean ? [{ key: track.key, person: anchored.get(track) ?? null, mean: track.mean }] : []));
+    const facesMs = performance.now() - facesStart;
+
+    const sweepStart = performance.now();
+    const voice = tuneVoices(voiceSamples);
+    const faces = tuneFaces(faceSamples);
+    const sweepMs = performance.now() - sweepStart;
+    if (!voice) {
+      const people = new Set(voiceSamples.map((sample) => sample.person.id)).size;
+      hints.push(`Voice tuning needs two or more people with a linked speaker whose voice print is cached; ${people} ${people === 1 ? "has" : "have"} one. Link speakers (\`frameshell people link\`), then \`frameshell people suggest\` makes the prints.`);
+    }
+    if (!faces) {
+      const people = new Set([...anchored.values()].map((who) => who.id)).size;
+      hints.push(
+        model.scans.size === 0
+          ? "No video has a face scan: frameshell people scan"
+          : `Face tuning needs two or more people with a face anchor on a scanned face; ${people} ${people === 1 ? "has" : "have"} one. Link faces (\`frameshell people link --face\`), a face of each person in every video if possible.`,
+      );
+    }
+    return { dir: root, voice, faces, timings: { voicesMs: Math.round(voicesMs), facesMs: Math.round(facesMs), sweepMs: Math.round(sweepMs) }, hints };
+  }
+
+  /**
    * Answer suggestions by id: apply each one's links (`by` recorded, as
    * `link`), or with `reject` add the ids to `dismissed`. A suggestion naming
    * nobody is linked to `person` (id or name; a new name adds the person).
@@ -408,14 +467,8 @@ function personFaces({ owners }: { owners: FaceOwners }, person: Person): { span
   return { spans, warnings };
 }
 
-/**
- * `speaker` suggestions and their hints. A person's voice is the mean of
- * their linked speakers' prints (weighted by seconds of speech); candidates
- * are the speakers of transcripts linked to nobody.
- */
-async function voiceSuggestions(file: PeopleFile, transcripts: Map<string, Transcript>, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
-  const hints: string[] = [];
-  const claimed = new Set(file.people.flatMap((person) => person.speakers.map(speakerLinkKey)));
+/** Each person's linked speakers that still exist in `transcripts`, as voices to print; people with none are left out. */
+function linkedVoices(file: PeopleFile, transcripts: Map<string, Transcript>): { person: Person; wanted: VoiceWanted[] }[] {
   const owned: { person: Person; wanted: VoiceWanted[] }[] = [];
   for (const person of file.people) {
     const wanted = person.speakers.filter((link) => {
@@ -424,6 +477,18 @@ async function voiceSuggestions(file: PeopleFile, transcripts: Map<string, Trans
     });
     if (wanted.length > 0) owned.push({ person, wanted: wanted.map(({ transcript, speaker }) => ({ transcript, speaker })) });
   }
+  return owned;
+}
+
+/**
+ * `speaker` suggestions and their hints. A person's voice is the mean of
+ * their linked speakers' prints (weighted by seconds of speech); candidates
+ * are the speakers of transcripts linked to nobody.
+ */
+async function voiceSuggestions(file: PeopleFile, transcripts: Map<string, Transcript>, voices: VoicePrinter): Promise<{ suggestions: PeopleSuggestion[]; hints: string[] }> {
+  const hints: string[] = [];
+  const claimed = new Set(file.people.flatMap((person) => person.speakers.map(speakerLinkKey)));
+  const owned = linkedVoices(file, transcripts);
   if (owned.length === 0) {
     hints.push("No person has a linked transcript speaker yet, so there is no voice to compare with: frameshell people link <person> --speaker <transcript>:<speaker>");
     return { suggestions: [], hints };

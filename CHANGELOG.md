@@ -9,7 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- OpenAI transcription provider, first slice of #382 (ADR 0046, epic #451; protocol 178):
+- OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
+  `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
+  default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden
+  video track and a muted audio track disabled), media clips as `Clip.2` from their source `in`, lasting their timeline length, with a
+  `LinearTimeWarp` for `speed`, gaps, markers as `Marker.2`, every time a whole frame at the project rate. Generated
+  and nested timeline clips keep their slot, name and timeline length as `Clip.2` with a `MissingReference.1` and a
+  warning. Multicam program tracks, subtitle tracks, transitions, transforms and keys, grades, film finish, audio
+  effects and the sound of media clips on video tracks are not exported and are named in `warnings`. `target_url` is relative to the file, `--absolute-paths` writes
+  `file://` URLs. No new dependency and no Python; dissolves and an app menu come in later slices.
+- `frameshell people tune` (`people.tune`, MCP `people_tune`; protocol 178): a read-only tuning report for the voice
+  and face suggestion thresholds (ADR 0020 decision 15). It replays matching on the people the owner confirmed (linked
+  speakers with cached voice prints, face tracks a face anchor names): same-person and different-person score spreads,
+  and for each `SPEAKER_MATCH` and `SPEAKER_MARGIN`, `FACE_CLUSTER_MATCH` and `FACE_PERSON_MATCH` and
+  `FACE_PERSON_MARGIN` tried, correct and wrong suggestions, precision, recall, cluster purity and splits. Nothing is
+  scanned, downloaded or changed, and no threshold changes. Results go in `docs/research/people-acceptance-run.md`.
+
+- OpenAI transcription provider, first slice of #382 (ADR 0046, epic #451; protocol 180):
   `frameshell plugin install @frameshell/openai-transcription` adds the paid cloud provider `openai`
   (`whisper-1`, word timestamps as the service gives them, a note in `warnings`) for
   `frameshell transcribe <asset> --provider openai`. whisper.cpp stays the default. Every run is refused with
