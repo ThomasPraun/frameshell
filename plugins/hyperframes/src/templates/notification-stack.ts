@@ -156,11 +156,11 @@ export const notificationStack: Template = {
         return el;
       });
 
-      ${STEP_TIMES}
-      var arrive = stepTimes(P.startAt, P.gap, n, P.onBeats);
-
       var D = S.duration;
       var OUT = 0.3;
+      ${STEP_TIMES}
+      var arrive = stepTimes(P.startAt, P.gap, n, P.onBeats, D - OUT - 0.2);
+
       var step = CARD * STEP * fs;
 
       M.bind("${id}", function (t) {

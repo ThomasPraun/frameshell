@@ -218,15 +218,18 @@ export function onBeatsVariable(steps: string, from: string): TemplateVariable {
  * Page-script `stepTimes(start, gap, count, onBeats)`: the times of `count` steps from `start`, `gap` apart, or with
  * `onBeats` the clip's beats from the first one at or after `start` (motion runtime 0.5.0, ADR 0029 decision 8).
  * Without a usable grid the beats fall back to those same steps (the nominal grid), so `onBeats` never changes a
- * clip that has none. Needs `M`.
+ * clip that has none. `last`, when given, is the latest a step may start (kept at 0 or more): each time is clamped
+ * to [`start`, `last`], so on a clip too short for its steps (or with beats past its end) they stack on that last
+ * moment instead of landing after the exit. Needs `M`.
  */
 export const STEP_TIMES = String.raw`
-      function stepTimes(start, gap, count, onBeats) {
+      function stepTimes(start, gap, count, onBeats, last) {
         var steps = { bpm: 60 / gap, offset: start };
         var from = onBeats ? M.beatAt(start, steps) : null;
         var first = from ? (from.phase > 1e-6 ? from.index + 1 : from.index) : 0;
+        var hi = last === undefined ? Infinity : Math.max(0, last);
         var times = [];
-        for (var i = 0; i < count; i++) times.push(onBeats ? M.beatTime(first + i, steps) : start + i * gap);
+        for (var i = 0; i < count; i++) times.push(Math.min(Math.max(onBeats ? M.beatTime(first + i, steps) : start + i * gap, start), hi));
         return times;
       }`;
 

@@ -39,7 +39,11 @@ const boxFill: Mark = (row) => (row["firstChild"] as Record<string, unknown>)["f
  * props `given`.
  */
 function opacities(template: Template, mark: Mark, timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]): number[][] {
-  const duration = template.defaultDuration;
+  return opacitiesIn(template.defaultDuration, template, mark, timing, given, ...times);
+}
+
+/** {@link opacities} of a clip of `duration` seconds. */
+function opacitiesIn(duration: number, template: Template, mark: Mark, timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]): number[][] {
   const html = template.render({ id: "list", width: 1920, height: 1080, duration, tokens: TOKENS });
   const attribute = /data-composition-variables='([^']*)'/.exec(html)![1]!.replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&amp;/g, "&");
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]!).at(-1)!;
@@ -76,10 +80,13 @@ function opacities(template: Template, mark: Mark, timing: RenderTiming | undefi
 const fills = (timing: RenderTiming | undefined, given: Record<string, unknown>, ...times: number[]) => opacities(checklist, boxFill, timing, given, ...times);
 
 /** Seconds at which each of the first `count` rows starts to show its mark, to 10 ms, found by scanning the clip. */
-function stepTimes(template: Template, mark: Mark, count: number, timing: RenderTiming | undefined, given: Record<string, unknown>): number[] {
-  const steps = Array.from({ length: 400 }, (_, i) => i / 100);
-  const seen = opacities(template, mark, timing, given, ...steps);
-  return Array.from({ length: count }, (_, item) => steps[seen.findIndex((row) => row[item]! > 0)]! - 0.01);
+function stepTimes(template: Template, mark: Mark, count: number, timing: RenderTiming | undefined, given: Record<string, unknown>, duration = template.defaultDuration): number[] {
+  const steps = Array.from({ length: Math.ceil(duration * 100) }, (_, i) => i / 100);
+  const seen = opacitiesIn(duration, template, mark, timing, given, ...steps);
+  return Array.from({ length: count }, (_, item) => {
+    const found = seen.findIndex((row) => row[item]! > 0);
+    return found < 0 ? Number.POSITIVE_INFINITY : steps[found]! - 0.01;
+  });
 }
 
 const tickTimes = (timing: RenderTiming | undefined, given: Record<string, unknown>) => stepTimes(checklist, boxFill, 4, timing, given);
@@ -135,5 +142,43 @@ describe("other templates with steps on the music's beats", () => {
     expect(stepTimes(workCards, card, 3, { beats: [], beatsProblem: "no-beats" }, { onBeats: true })).toEqual(near([0.3, 0.8, 1.3]));
     // The first beat at or after 0.55 s is 0.75 s, then 1.25 and 1.75: the cards land 0.25 s before each.
     expect(stepTimes(workCards, card, 3, BEATS, { onBeats: true })).toEqual(near([0.5, 1, 1.5]));
+  });
+});
+
+describe("steps on a clip too short for them (notification-stack, work-cards)", () => {
+  const card: Mark = (row) => row as unknown as { style: { opacity: string } };
+  const LEAD = 0.25;
+  const near = (times: number[]) => times.map((s) => expect.closeTo(s, 1));
+  const items = (n: number) => Array.from({ length: n }, (_, i) => `Person ${i}: message ${i}`).join("|");
+  // A card is first seen at `at`; the last allowed start is D - 0.3 - 0.2, and a work card shows LEAD before its start.
+  const cases = [
+    { template: notificationStack, lead: 0, name: "notification-stack" },
+    { template: workCards, lead: LEAD, name: "work-cards" },
+  ];
+
+  for (const { template, lead, name } of cases) {
+    it(`${name}: no card lands after D - 0.5 whatever D, the number of cards and onBeats`, () => {
+      for (const duration of [0.4, 0.8, 1.5, 2.5, 4.5, 6]) {
+        for (const n of [1, 3, 5]) {
+          for (const onBeats of [false, true]) {
+            const times = stepTimes(template, card, n, BEATS, { items: items(n), onBeats }, duration);
+            for (const at of times) expect(at).toBeLessThanOrEqual(Math.max(0, duration - 0.5 - lead) + 0.011);
+          }
+        }
+      }
+    });
+  }
+
+  it("keeps default props on a default-length clip as they were (steps already inside the clip)", () => {
+    expect(stepTimes(notificationStack, card, 3, undefined, {})).toEqual(near([0.4, 1.3, 2.2]));
+    expect(stepTimes(workCards, card, 3, undefined, {})).toEqual(near([0.3, 0.8, 1.3]));
+    expect(stepTimes(notificationStack, card, 3, BEATS, { onBeats: true })).toEqual(near([0.75, 1.25, 1.75]));
+  });
+
+  it("pulls beats that fall past the end of the clip back to its last allowed moment", () => {
+    const late: RenderTiming = { beats: [{ at: 3.7, beat: 1 }, { at: 4.2, beat: 2 }], tempo: { bpm: 120, meter: 4 } };
+    // 2 s clip: the last start is 1.5 s. The grid runs back from its first beat at its period, so the beats at or after startAt (0.4) are 0.7, 1.2 and 1.7 s.
+    const times = stepTimes(notificationStack, card, 3, late, { onBeats: true }, 2);
+    expect(times).toEqual(near([0.7, 1.2, 1.5]));
   });
 });

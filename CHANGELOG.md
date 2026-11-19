@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Motion runtime 0.6.0 (ADR 0029 decision 8, ADR 0033, small fixes 6 of #451; no protocol change): `M.words()` lists the
+  transcript words the timeline plays inside the clip, `{ at, end, text, id }` in composition seconds, as the page's
+  `frameshellTiming.words` has them, or `[]` with no `words` timing or when `wordsProblem` is set (no nominal fallback,
+  so a composition keeps its text as a prop). Nothing 0.5.0 exports changes: a clip keeps its frozen copy until
+  `frameshell hyperframes update`, which now reports 0.6.0.
 - OpenTimelineIO export, slice 1 of #383 (ADR 0045, SPEC decision 50; protocol 179): `frameshell export otio` (MCP
   `export_otio`, method `export.otio`) writes the timeline as a derived `.otio` file, `exports/<timeline>.otio` by
   default, for editors that read it. Export only, read-only, never read back. Carried: video and audio tracks (a hidden
@@ -1570,6 +1575,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `notification-stack` and `work-cards` (small fixes 6 of #451): a card never starts later than 0.2 s before the exit
+  begins. Each start is held to [first start, clip length - 0.3 - 0.2] (0 or more), with `onBeats` too, so on a clip too
+  short for its cards, or with beats past its end, the late ones stack on that last moment instead of landing after the
+  exit. Default props on the default length are unchanged; a `notification-stack` with six cards on its default 5 s was
+  the one default case that reached past the limit (the sixth card at 4.9 s now starts at 4.5 s).
+- `clip.renders` and the exports read the transcript words once per pass over a timeline, however many clips ask for
+  `words`, instead of once per asking clip.
+- The Remotion adapter warns (`RenderContext.warn`) when a clip asks for `words` and the project's own
+  `src/frameshell-timing.ts` predates them, and `frameshell remotion new` says so too; the file is never changed.
+- `scripts/test-scope.mjs` runs no tests for anything under `spikes/`.
+
 - `analyze` of a file over an hour (only the first hour's picture is read) now takes its rhythm's shot-length CV
   from the shots as far as they were read (`shotLengthsRead` in `analyze/shots.ts`, the one rule `review` uses too),
   so the CV of a truncated file shifts to the one `review --file` reports; the shots table still lists the whole film.
@@ -1706,6 +1722,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Closing a terminal tab whose shell had already exited, with the exit event not yet delivered, no longer calls
+  `pty.kill()` on it (it throws or logs on Windows); the close waits for the exit event instead (small fixes 6 of #451).
 - Review switch (ADR 0019, test hardening #515, #516, #533): the "Review agent changes before applying" checkbox keeps
   the click until the review state agrees with it (or the call fails), instead of jumping back when the daemon's reply
   arrives before its event; this was the cause of the flaky checkbox in the review and config-proposal e2e specs.

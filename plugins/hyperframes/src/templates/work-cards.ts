@@ -160,7 +160,7 @@ export const workCards: Template = {
       var LEAD = 0.25; // seconds from a card landing to its start (the pulse and the bar joining)
       ${STEP_TIMES}
       // The starts are the steps, or the beats: a card lands LEAD before its beat and pulses on it.
-      var starts = stepTimes(start + LEAD, gap, n, P.onBeats);
+      var starts = stepTimes(start + LEAD, gap, n, P.onBeats, D - OUT - 0.2);
 
       M.bind("${id}", function (t) {
         var out = M.ease("exit", (t - (D - OUT)) / OUT);
