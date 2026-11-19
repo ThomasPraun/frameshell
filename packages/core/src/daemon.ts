@@ -665,7 +665,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       recognizer: await binaries.ensureModel(FACE_RECOGNITION_MODEL, { onProgress: progress }),
     });
   /** Voice prints of one project for one request; the speaker model is installed only when a print is not cached. */
-  const voicePrinter = (dir: string, progress: (update: Progress) => void): VoicePrinter => {
+  const voicePrinter = (dir: string, progress: (update: Progress) => void, cacheOnly = false): VoicePrinter => {
     const embed: VoiceEmbedder =
       options.voiceEmbedder ??
       (async (request) => {
@@ -684,6 +684,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio ?? extractAudioWithFfmpeg,
         progress,
+        cacheOnly,
       });
   };
   /** Bytes the voice model (ONNX Runtime Web and CAM++) still has to download; 0 when installed or a test embedder stands in. */
@@ -3564,6 +3565,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             };
       const found = await transcribing(dir, () => people.suggest(dir, { voices, faces: faceScans(dir), scripts: () => shoots.voices(dir) }));
       return { dir, ...found, ...(held ? { voiceDownload: { bytes: missing } } : {}) };
+    },
+    "people.tune": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return people.tune(dir, { voices: voicePrinter(dir, () => {}, true), faces: faceScans(dir) });
     },
     "people.confirm": async ({ cwd, suggestions, reject, person }, caller, request) => {
       const dir = await root(cwd);
