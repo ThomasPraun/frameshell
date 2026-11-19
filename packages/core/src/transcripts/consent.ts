@@ -3,14 +3,15 @@
 import { createHash } from "node:crypto";
 import type { TranscribeOptions, TranscriptionProvider } from "@frameshell/plugin-api";
 import { ErrorCode, RpcError } from "@frameshell/protocol";
+import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import { formatCost } from "../cost.js";
 import { pcmWavSeconds } from "./window.js";
 
 /**
- * Provider ids that run on this machine for free whatever their plugin version: projects pin `whisper-cpp`
+ * Provider ids that run on this machine for free whatever their plugin version: projects pin the default provider's
  * versions older than `TranscriptionProvider.free` (ADR 0046 decision 2).
  */
-const LOCAL_ENGINES: ReadonlySet<string> = new Set(["whisper-cpp"]);
+const LOCAL_ENGINES: ReadonlySet<string> = new Set([DEFAULT_TRANSCRIPTION_PROVIDER]);
 
 /** True when `provider` keeps the audio on this machine and never charges: the only kind background checks use. */
 export function isLocalFreeTranscription(provider: TranscriptionProvider): boolean {

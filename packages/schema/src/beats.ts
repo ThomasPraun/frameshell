@@ -37,8 +37,8 @@ export const BeatsFileSchema = z
     asset: z.string().min(1),
     /** `sha256:<hex>` of the asset bytes; a mismatch means the grid is stale. */
     assetHash: z.string().regex(/^sha256:[0-9a-f]{64}$/, "must be `sha256:` + 64 lowercase hex digits"),
-    /** `exact` (written, not measured) or the detector and its version, e.g. `onset-flux@1`. */
-    detector: z.string().regex(/^(exact|[a-z][a-z0-9-]*@\d+)$/, "must be `exact` or look like `onset-flux@1`"),
+    /** `exact` (written, not measured) or the detector and its version, e.g. `onset-flux@2`. */
+    detector: z.string().regex(/^(exact|[a-z][a-z0-9-]*@\d+)$/, "must be `exact` or look like `onset-flux@2`"),
     /** Sample rate of the audio that was analysed; under 44.1 kHz the grid is the less precise fallback. Absent for `exact`. */
     sampleRate: z.int().positive().optional(),
     /** Beats per minute of the measured `beats`, before `edits`. */

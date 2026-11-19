@@ -2,6 +2,12 @@ import { z } from "zod";
 import { SCHEMA_VERSION, type ParseResult, formatIssues } from "./common.js";
 import { FormatEntrySchema, formatProblems } from "./formats.js";
 
+/**
+ * Id of the transcription provider a project without `transcription.provider` uses: the local, free one
+ * (`plugins/whisper-cpp` keeps its own copy, since plugins depend only on plugin-api).
+ */
+export const DEFAULT_TRANSCRIPTION_PROVIDER = "whisper-cpp";
+
 /** Canonical `$schema` URL for `frameshell.json`, matching the generated JSON Schema `$id`. */
 export const PROJECT_SCHEMA_URL = `https://frameshell.dev/schema/v${SCHEMA_VERSION}/project.json`;
 

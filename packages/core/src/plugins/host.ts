@@ -9,6 +9,7 @@ import {
   RpcError,
   type TrustState,
 } from "@frameshell/protocol";
+import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import type { ClipAdapter, PluginManifest, SpeechProvider, TranscriptionProvider } from "@frameshell/plugin-api";
 import type { RegisteredClipType } from "../clips/renderer.js";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
@@ -385,7 +386,7 @@ const TRANSCRIPTION: ProviderKind<TranscriptionProvider> = {
   declared: (manifest) => manifest.contributes.transcriptionProviders,
   notFound: ErrorCode.TranscriptionProviderNotFound,
   hint: (id) =>
-    id === "whisper-cpp"
+    id === DEFAULT_TRANSCRIPTION_PROVIDER
       ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`."
       : id === "openai"
         ? " Install the OpenAI provider with `frameshell plugin install @frameshell/openai-transcription`."

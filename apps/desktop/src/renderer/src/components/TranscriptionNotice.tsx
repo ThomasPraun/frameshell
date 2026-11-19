@@ -1,3 +1,4 @@
+import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import { useEffect, useState } from "react";
 import { t } from "../i18n.js";
 import { takes, useTakes } from "../shoot/takes.js";
@@ -12,7 +13,7 @@ export function TranscriptionNotice() {
   const { status } = useTakes();
   const transcription = status?.transcription ?? null;
   const missing = transcription !== null && !transcription.ready;
-  const offer = missing && transcription.provider === "whisper-cpp";
+  const offer = missing && transcription.provider === DEFAULT_TRANSCRIPTION_PROVIDER;
   const [bytes, setBytes] = useState<number | null>(null);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);

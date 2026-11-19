@@ -1,6 +1,7 @@
 import { ErrorCode, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { type Confirmed, type CostAsk, canceledRun, costAsk, formatCost, progressOf, runVoiceover, startOf, verifyPlanOf } from "../src/main/voiceover.js";
+import { type Confirmed, formatCost } from "../src/main/confirmation.js";
+import { type CostAsk, canceledRun, costAsk, progressOf, runVoiceover, startOf, verifyPlanOf } from "../src/main/voiceover.js";
 import { strings } from "../src/shared/i18n/index.js";
 
 const result = { lines: [] } as unknown as VoiceoverGenerateResult;

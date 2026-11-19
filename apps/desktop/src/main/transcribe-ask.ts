@@ -15,6 +15,8 @@ export interface TranscribeAsk {
   seconds: number;
   /** The estimated first pass as text (`0.03 USD`); null when the provider gives no estimate and does not declare itself free. */
   cost: string | null;
+  /** True when the estimate is exactly 0: the provider charges nothing, though the audio still leaves this machine. */
+  costFree: boolean;
   /** True when the audio is uploaded to a service (`remote`); false when it only may leave the machine at an unknown cost. */
   remote: boolean;
   /** True when this ask replaces one the person confirmed: the file, its audio or the price changed since (`ConfirmationStale`). */
@@ -36,6 +38,7 @@ export function transcribeAsk(error: unknown): TranscribeAsk | null {
     asset: data.asset ?? "",
     seconds: data.seconds ?? 0,
     cost: data.cost ? formatCost(data.cost) : null,
+    costFree: data.cost?.amount === 0,
     remote: data.remote === true,
     changed: error.code === ErrorCode.ConfirmationStale,
     confirmation: data.confirmation,
