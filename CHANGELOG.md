@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- View > Shoot (Ctrl+Alt+R, ⌘⌥R on macOS) and View > Teleprompter (Ctrl+Alt+P) open those sidebar views, showing a
+  hidden sidebar first (#737). Disabled in image projects.
+
+### Fixed
+
+- The Shoot view keeps the picked camera, microphone, screen and system audio when another view shows (#737): the
+  devices are still freed a second after the view goes, and opened again as picked when it comes back. The microphone
+  picked last is remembered on the machine and picked first next time when it is still connected.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

@@ -336,6 +336,20 @@ export function Workspace({ project }: { project: ProjectView }) {
     };
   }, [showTranscript, image]);
 
+  // View > Shoot and View > Teleprompter (#737): the sidebar opens on that view, also when it was hidden.
+  useEffect(() => {
+    if (image) return;
+    return window.frameshell.menu.onCommand((command) => {
+      if (command !== "showShoot" && command !== "showTeleprompter") return;
+      const sidebarView = command === "showShoot" ? "shoot" : "teleprompter";
+      setLayout((current) => {
+        if (!current) return current;
+        const shown = current.panels.sidebar.collapsed ? togglePanel(current, "sidebar") : current;
+        return { ...shown, sidebarView };
+      });
+    });
+  }, [image]);
+
   // New image from the frame at the playhead (ADR 0017): Mod+Shift+S or File > New Image from Frame; a video project's only.
   useEffect(() => {
     if (image) return;

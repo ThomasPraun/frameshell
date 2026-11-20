@@ -276,8 +276,17 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * OpenTimelineIO, ADR 0045) or a Premiere Pro XML file (File > Export Premiere XML, ADR 0047).
  * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
+ * `showShoot`, `showTeleprompter`: show the sidebar on the Shoot or Teleprompter view (View > Shoot, View > Teleprompter).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportOtio" | "exportPremiere" | "toggleReview" | "toggleTerminal";
+export type MenuCommand =
+  | "showTranscript"
+  | "imageFromFrame"
+  | "exportOtio"
+  | "exportPremiere"
+  | "toggleReview"
+  | "toggleTerminal"
+  | "showShoot"
+  | "showTeleprompter";
 
 export type { HandoffKind };
 

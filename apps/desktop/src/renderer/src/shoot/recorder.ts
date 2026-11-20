@@ -47,6 +47,26 @@ export interface ShootState {
 }
 
 const LEVEL_MS = 100;
+/** Where the microphone picked last is kept, per machine (this browser profile). */
+const DEVICES_KEY = "frameshell.shoot.devices";
+
+/** The devices picked last on this machine; nothing when storage is unavailable. */
+function remembered(): { mic?: string } {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(DEVICES_KEY) ?? "{}");
+    return typeof value === "object" && value !== null && typeof (value as { mic?: unknown }).mic === "string" ? { mic: (value as { mic: string }).mic } : {};
+  } catch {
+    return {};
+  }
+}
+
+function remember(next: { mic: string }): void {
+  try {
+    localStorage.setItem(DEVICES_KEY, JSON.stringify({ ...remembered(), ...next }));
+  } catch {
+    // Storage off: the first microphone is picked next time.
+  }
+}
 
 /**
  * Create a recorder store. The app has one ({@link shoot}); it needs the
@@ -88,6 +108,8 @@ export function createShootRecorder() {
   /** `performance.now()` of the first recorder's start: 0 on the session clock (the group clock). */
   let origin: number | null = null;
   let beforeEnd: (() => Promise<void>) | null = null;
+  /** The sources picked when the last Shoot view went away and the devices were freed; null when none were. */
+  let released: { camera: string | null; mic: string | null; screen: ShootScreenSource | null; systemAudio: boolean } | null = null;
 
   const set = (next: Partial<ShootState>) => {
     state = { ...state, ...next };
@@ -105,7 +127,11 @@ export function createShootRecorder() {
     const mics = list("audioinput");
     const access = devices.some((device) => device.label !== "");
     set({ cameras, mics, access });
-    if (access && state.mic === null && mics.length > 0 && !busy()) await store.selectMic(mics[0]!.id);
+    // The microphone picked last on this machine, when it is still there; else the first one.
+    if (access && state.mic === null && released === null && mics.length > 0 && !busy()) {
+      const last = remembered().mic;
+      await store.selectMic(mics.some((mic) => mic.id === last) ? last! : mics[0]!.id);
+    }
   }
 
   function meter(kind: "mic" | "system", stream: MediaStream | null): void {
@@ -173,6 +199,10 @@ export function createShootRecorder() {
     meter("system", state.systemAudio ? stream : null);
   }
 
+  /**
+   * Free the devices once no Shoot view shows. The choices stay (#737): the next view opens the same camera,
+   * microphone, screen and system audio again ({@link reopen}).
+   */
   function releaseAll(): void {
     stopStream(micStream);
     micStream = null;
@@ -180,7 +210,23 @@ export function createShootRecorder() {
     stopStream(state.screenStream);
     meter("mic", null);
     meter("system", null);
+    released = { camera: state.camera, mic: state.mic, screen: state.screen, systemAudio: state.systemAudio };
     set({ cameraStream: null, screenStream: null, camera: null, mic: null, screen: null, systemAudio: false });
+  }
+
+  /** Open again what {@link releaseAll} let go, as the person had picked it. */
+  async function reopen(): Promise<void> {
+    const kept = released;
+    released = null;
+    if (!kept || busy()) return;
+    await Promise.all([
+      kept.mic ? store.selectMic(kept.mic) : Promise.resolve(),
+      kept.camera ? store.selectCamera(kept.camera) : Promise.resolve(),
+    ]);
+    if (kept.screen || kept.systemAudio) {
+      set({ screen: kept.screen, systemAudio: kept.systemAudio && state.support === "available" });
+      await openDisplay().catch((error: unknown) => set({ screen: null, systemAudio: false, error: message(error) }));
+    }
   }
 
   const store = {
@@ -228,7 +274,7 @@ export function createShootRecorder() {
           .recovered()
           .then((list) => list.at(-1) && set({ finished: list.at(-1)! }), () => undefined);
         api().onRecovered((finish) => set({ finished: finish }));
-      }
+      } else void reopen();
       return () => {
         mounted--;
         if (mounted > 0) return;
@@ -279,6 +325,7 @@ export function createShootRecorder() {
           audio: { deviceId: { exact: id }, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         });
         if (state.mic !== id) return stopStream(stream);
+        remember({ mic: id });
         micStream = stream;
         meter("mic", stream);
       } catch (error) {
