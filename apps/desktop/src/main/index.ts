@@ -28,7 +28,7 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
-import { ErrorCode, RpcError, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
+import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
@@ -51,6 +51,8 @@ import {
   type VoiceoverRun,
   type PeopleChange,
   type PersonTarget,
+  type MachineDownloads,
+  type PluginsView,
   type TargetsChange,
   type ProposalChange,
   type ShootChange,
@@ -69,6 +71,7 @@ import {
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import { HANDOFF_KINDS, HANDOFFS, isHandoffKind } from "../shared/handoff.js";
+import { downloadSize, sizeText } from "../shared/sizes.js";
 import {
   type CliInstallHost,
   type CliInstallOutcome,
@@ -130,7 +133,7 @@ import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
-import { type DownloadChoice, chooseDownload, downloadSize } from "./transcription-download.js";
+import { type DownloadChoice, chooseDownload } from "./transcription-download.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
@@ -1201,6 +1204,59 @@ function registerModelIpc(): void {
   );
 }
 
+/**
+ * The Plugins view: the official catalog of the window's project, install and remove, the trust decision, and this
+ * machine's managed downloads. Removals ask in a native box first; only official plugins install from here.
+ */
+function registerPluginsIpc(): void {
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  const confirm = async (sender: WebContents, message: string, detail: string) => {
+    const parent = BrowserWindow.fromWebContents(sender);
+    const said = text.plugins.confirm;
+    const options: Electron.MessageBoxOptions = { type: "warning", message, detail, buttons: [said.remove, said.cancel], defaultId: 1, cancelId: 1, noLink: true };
+    const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+    return response === 0;
+  };
+  ipcMain.handle(Channel.pluginsRead, (event) =>
+    outcome(async (): Promise<PluginsView> => {
+      const cwd = await dirOf(event.sender);
+      const catalog = await daemon.request("plugin.catalog", { cwd });
+      const { plugins } = await daemon.request("plugin.list", { cwd });
+      return { catalog, declared: plugins };
+    }),
+  );
+  ipcMain.handle(Channel.pluginsInstall, (event, name: string) =>
+    outcome(async () => {
+      if (!officialPlugin(name)) throw new Error(`${name} is not an official plugin: install it from a terminal.`);
+      return daemon.request("plugin.install", { cwd: await dirOf(event.sender), spec: name });
+    }),
+  );
+  ipcMain.handle(Channel.pluginsRemove, (event, name: string) =>
+    outcome(async () => {
+      const cwd = await dirOf(event.sender);
+      const title = text.plugins.about[name]?.title ?? name;
+      if (!(await confirm(event.sender, text.plugins.confirm.removePlugin(title), text.plugins.confirm.removePluginDetail))) return false;
+      await daemon.request("plugin.remove", { cwd, name });
+      return true;
+    }),
+  );
+  ipcMain.handle(Channel.pluginsTrust, (event, decision: "trust" | "deny") =>
+    outcome(async () => daemon.request("project.trust", { cwd: await dirOf(event.sender), decision: decision === "trust" ? "trust" : "deny" })),
+  );
+  ipcMain.handle(Channel.pluginsDownloads, (event) =>
+    outcome(async (): Promise<MachineDownloads> => {
+      const { dataDir, downloads, binaries } = await daemon.request("doctor", { cwd: await dirOf(event.sender) });
+      return { dataDir, downloads, binaries };
+    }),
+  );
+  ipcMain.handle(Channel.pluginsRemoveDownload, (event, name: string, bytes: number) =>
+    outcome(async () => {
+      if (!(await confirm(event.sender, text.plugins.confirm.removeDownload(name, sizeText(bytes)), text.plugins.confirm.removeDownloadDetail))) return null;
+      return daemon.request("binaries.remove", { name });
+    }),
+  );
+}
+
 /** The People panel's calls (ADR 0020): thin daemon requests for the window's project, made by the app (no `by`). */
 function registerPeopleIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
@@ -1883,6 +1939,7 @@ function registerIpc(): void {
   );
   registerPeopleIpc();
   registerModelIpc();
+  registerPluginsIpc();
   registerShootIpc();
   registerLiveIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>

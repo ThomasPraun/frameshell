@@ -3,6 +3,8 @@ import type {
   AgentTarget,
   AssetInfo,
   AudioBakesResult,
+  BinariesRemoveResult,
+  PluginInfo,
   MatteStatusResult,
   ClipRendersResult,
   HistoryDiffResult,
@@ -674,6 +676,26 @@ export interface FrameshellApi {
      */
     add(id: string, file: string, options: Record<string, string>): Promise<MethodResult<"model.add">>;
   };
+  plugins: {
+    /** `plugin.catalog` and `plugin.list` of the window's project. Rejects with the daemon's message. */
+    read(): Promise<PluginsView>;
+    /**
+     * `plugin.install` of an official plugin by package name (others are refused); trusts the project's plugin list
+     * as `plugin.install` does. Rejects with the daemon's message, e.g. ProjectNotTrusted.
+     */
+    install(name: string): Promise<MethodResult<"plugin.install">>;
+    /** `plugin.remove` after a native confirm box. Resolves false when the person cancelled. */
+    remove(name: string): Promise<boolean>;
+    /** `project.trust`, sent only from the person's click on Trust or Don't trust. */
+    trust(decision: "trust" | "deny"): Promise<MethodResult<"project.trust">>;
+    /** Managed downloads of this machine (`doctor`, never with `install`). */
+    downloads(): Promise<MachineDownloads>;
+    /**
+     * `binaries.remove` after a native confirm box naming `bytes`; null when the person cancelled. Rejects with the
+     * daemon's message, e.g. BinaryInUse.
+     */
+    removeDownload(name: string, bytes: number): Promise<BinariesRemoveResult | null>;
+  };
   people: {
     /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
     list(): Promise<MethodResult<"people.list">>;
@@ -920,6 +942,16 @@ export type VoiceoverRun =
   | { status: "declined" }
   | { status: "canceled"; kept: number };
 
+/** What the Plugins view reads about the window's project: the official catalog and every plugin it declares. */
+export interface PluginsView {
+  catalog: MethodResult<"plugin.catalog">;
+  /** As `plugin.list` reports them, official or not. */
+  declared: PluginInfo[];
+}
+
+/** Managed downloads of this machine as `doctor` reports them: on disk (`downloads`) and every tool (`binaries`). */
+export type MachineDownloads = Pick<MethodResult<"doctor">, "dataDir" | "downloads" | "binaries">;
+
 /** What {@link FrameshellApi.transcript}`.run` did: transcribed, or the person declined the upload. */
 export type TranscribeRun = { status: "done" } | { status: "declined" };
 
@@ -1094,6 +1126,12 @@ export const Channel = {
   modelsUse: "models:use",
   modelsPickFile: "models:pick-file",
   modelsAdd: "models:add",
+  pluginsRead: "plugins:read",
+  pluginsInstall: "plugins:install",
+  pluginsRemove: "plugins:remove",
+  pluginsTrust: "plugins:trust",
+  pluginsDownloads: "plugins:downloads",
+  pluginsRemoveDownload: "plugins:remove-download",
   peopleList: "people:list",
   peopleAdd: "people:add",
   peopleRename: "people:rename",

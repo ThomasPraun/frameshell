@@ -1,15 +1,15 @@
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import { useEffect, useState } from "react";
 import { t } from "../i18n.js";
+import { transcriptionInstallCommand } from "../plugins/install-command.js";
 import { takes, useTakes } from "../shoot/takes.js";
-
-const INSTALL_COMMAND = "frameshell plugin install @frameshell/whisper-cpp";
 
 /**
  * Shown in the Shoot view while the project's transcription provider does not load: takes cut then are never
  * compared. Offers the default provider in one click; the daemon transcribes the takes that failed once it is in.
+ * `onShowPlugins` opens the Plugins view, where the other choices are.
  */
-export function TranscriptionNotice() {
+export function TranscriptionNotice({ onShowPlugins }: { onShowPlugins?: (() => void) | undefined } = {}) {
   const { status } = useTakes();
   const transcription = status?.transcription ?? null;
   const missing = transcription !== null && !transcription.ready;
@@ -52,8 +52,13 @@ export function TranscriptionNotice() {
           <button className="button" data-testid="shoot-install-transcription" disabled={installing || bytes === null} onClick={() => void install()}>
             {installing ? t.shoot.installingTranscription : t.shoot.installTranscription(Math.round((bytes ?? 0) / 1_000_000))}
           </button>
-          <span className="shoot-note">{t.shoot.transcriptionCommand(INSTALL_COMMAND)}</span>
+          <span className="shoot-note">{t.shoot.transcriptionCommand(transcriptionInstallCommand(DEFAULT_TRANSCRIPTION_PROVIDER))}</span>
         </div>
+      )}
+      {onShowPlugins && (
+        <button className="button" data-testid="shoot-show-plugins" onClick={onShowPlugins}>
+          {t.plugins.showAll}
+        </button>
       )}
       {error && <p className="shoot-error">{t.shoot.failed(error)}</p>}
     </div>

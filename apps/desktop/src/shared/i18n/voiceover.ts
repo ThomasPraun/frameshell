@@ -32,7 +32,8 @@ const en = {
     misread === 0 && doubtful === 0
       ? "Every line was heard as written."
       : `${misread === 1 ? "1 line was misread" : `${misread} lines were misread`}, ${doubtful === 1 ? "1 may be the transcription's doing" : `${doubtful} may be the transcription's doing`}.`,
-  notCheckedUnavailable: "Not checked against the script: this project has no transcription plugin the app can use (frameshell plugin install @frameshell/whisper-cpp).",
+  notCheckedUnavailable: (command: string) =>
+    `Not checked against the script: this project has no transcription plugin the app can use. Add one in the Plugins view, or in a terminal: ${command}`,
   notCheckedDeclined: "Not checked against the script: you skipped the transcription download.",
   notCheckedWhy: (reason: string) => `Not checked against the script: ${reason}`,
   misreadKind: {
@@ -91,7 +92,8 @@ const es: typeof en = {
     misread === 0 && doubtful === 0
       ? "Todas las líneas se oyeron como están escritas."
       : `${misread === 1 ? "1 línea se leyó mal" : `${misread} líneas se leyeron mal`}, ${doubtful === 1 ? "1 puede ser culpa de la transcripción" : `${doubtful} pueden ser culpa de la transcripción`}.`,
-  notCheckedUnavailable: "Sin comprobar contra el guion: este proyecto no tiene un plugin de transcripción que la app pueda usar (frameshell plugin install @frameshell/whisper-cpp).",
+  notCheckedUnavailable: (command) =>
+    `Sin comprobar contra el guion: este proyecto no tiene un plugin de transcripción que la app pueda usar. Añade uno en la vista Plugins, o en una terminal: ${command}`,
   notCheckedDeclined: "Sin comprobar contra el guion: omitiste la descarga de la transcripción.",
   notCheckedWhy: (reason) => `Sin comprobar contra el guion: ${reason}`,
   misreadKind: {

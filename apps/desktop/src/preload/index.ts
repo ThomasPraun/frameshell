@@ -165,6 +165,14 @@ const api: FrameshellApi = {
     pickFile: () => ipcRenderer.invoke(Channel.modelsPickFile),
     add: (id, file, options) => invokeOutcome(Channel.modelsAdd, id, file, options),
   },
+  plugins: {
+    read: () => invokeOutcome(Channel.pluginsRead),
+    install: (name) => invokeOutcome(Channel.pluginsInstall, name),
+    remove: (name) => invokeOutcome(Channel.pluginsRemove, name),
+    trust: (decision) => invokeOutcome(Channel.pluginsTrust, decision),
+    downloads: () => invokeOutcome(Channel.pluginsDownloads),
+    removeDownload: (name, bytes) => invokeOutcome(Channel.pluginsRemoveDownload, name, bytes),
+  },
   people: {
     list: () => invokeOutcome(Channel.peopleList),
     add: (name) => invokeOutcome(Channel.peopleAdd, name),

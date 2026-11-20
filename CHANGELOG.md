@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Plugins view in the app (no protocol change): the Plugins sidebar tab, empty until now, lists the official plugins
+  from `plugin.catalog` for the project with what each is for, what it needs (Blender found or not, `OPENAI_API_KEY`
+  set or not: the app never shows or asks for the key), whether it is paid and sends audio or text off the computer,
+  what it downloads on first use and its state (not installed, installed, did not load, off until trusted), with
+  Install (official plugins only) and Remove (confirmed first). A project that declares plugins nobody decided on, or
+  that were refused, shows a banner saying plugins run with full access to the computer, with Trust and Don't trust:
+  `project.trust` is sent only on that click. A Downloads section lists this computer's managed downloads (ffmpeg,
+  whisper.cpp, headless Chrome, models) on disk with their size and total, and what is not downloaded yet, with Remove
+  (`binaries.remove`, confirmed first; a refusal such as BinaryInUse is shown). The Shoot view's transcription notice
+  links to the view, and its install command and the voiceover report's come from the official table. Plugin
+  descriptions in the app are in English and Spanish; the skill's app description names the view.
 - Remove managed downloads to free disk (`PROTOCOL_VERSION` 184): new method `binaries.remove { name }` deletes a binary
   package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
   model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with

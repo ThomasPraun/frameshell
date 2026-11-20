@@ -12,9 +12,13 @@ import { TranscriptionNotice } from "./TranscriptionNotice.js";
  * Shoot view (ADR 0024, Spanish UI "Rodaje"): pick a camera, a microphone (the one required source), a screen or
  * window from Frameshell's own list and system audio, each with a live preview or level; then Start and End one
  * continuous session. The recorder lives outside this view ({@link shoot}), so a session keeps recording while the
- * view switches tabs or moves to its own window. `onShowPeople` switches the sidebar to People; absent in a window of its own.
+ * view switches tabs or moves to its own window. `onShowPeople` / `onShowPlugins` switch the sidebar to People / Plugins;
+ * absent in a window of its own.
  */
-export function ShootPanel({ onShowPeople }: { onShowPeople?: (() => void) | undefined } = {}) {
+export function ShootPanel({
+  onShowPeople,
+  onShowPlugins,
+}: { onShowPeople?: (() => void) | undefined; onShowPlugins?: (() => void) | undefined } = {}) {
   const state = useShoot();
   const [picking, setPicking] = useState(false);
   useEffect(() => shoot.mount(), []);
@@ -36,7 +40,7 @@ export function ShootPanel({ onShowPeople }: { onShowPeople?: (() => void) | und
   return (
     <div className="shoot-panel" data-testid="shoot-panel" data-phase={state.phase}>
       <p className="shoot-hint">{t.shoot.intro}</p>
-      <TranscriptionNotice />
+      <TranscriptionNotice onShowPlugins={onShowPlugins} />
       {liveStatus.state === "unavailable" && (
         <p className="shoot-note" role="status" data-testid="shoot-live-unavailable">
           {t.shoot.liveUnavailable(liveStatus.detail ?? "")}

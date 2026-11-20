@@ -5050,3 +5050,139 @@ button.track-head:focus-visible {
   font-size: 11px;
   white-space: normal;
 }
+
+/* ---------- Plugins view ---------- */
+
+.plugins-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px;
+  min-height: 0;
+}
+
+.plugins-panel .button {
+  padding: 4px 10px;
+}
+
+.plugins-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugins-heading,
+.plugins-subheading {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.plugins-meta,
+.plugin-purpose,
+.plugins-total,
+.plugins-notice,
+.plugins-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.plugin-purpose {
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.plugins-meta.is-unmet,
+.plugins-error,
+.plugins-notice.is-error {
+  color: var(--danger);
+}
+
+.plugins-trust {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.plugins-trust p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.plugins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+
+.plugin-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.plugin-title {
+  font-weight: 600;
+}
+
+.plugin-state {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+.plugin-state.is-loaded {
+  color: var(--diff-added);
+}
+
+.plugin-state.is-error {
+  color: var(--danger);
+}
+
+.plugin-state.is-untrusted {
+  color: var(--accent);
+}
+
+.plugins-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.download {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.download-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.download-size {
+  color: var(--text-muted);
+  font-size: 11px;
+}
