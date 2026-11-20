@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
+  toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
+  each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of
+  being cut off (#741).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

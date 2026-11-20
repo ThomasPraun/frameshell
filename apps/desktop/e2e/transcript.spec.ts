@@ -293,6 +293,25 @@ test("double-clicking a word corrects its text as a transcript edit", async () =
   await expect(status()).toContainText("Corrected “five” to “fyve”");
 });
 
+test("Delete cuts the selected words from the timeline as one ui cut, and undo brings them back (#741)", async () => {
+  const before = journaled().length;
+  const clips = savedClips();
+  const six = await middle(5);
+  await page.mouse.click(six.x, six.y);
+  await expect(word(5)).toHaveClass(/is-selected/);
+  await expect(page.locator(".transcript-cut")).toBeEnabled();
+  await transcript().press("Delete");
+  await expect(word(5)).toHaveAttribute("data-state", "struck");
+  expect(journaled().slice(before)).toEqual([{ op: "cut", author: "ui" }]);
+  await expect(status()).toContainText("Cut “six”. Undo brings it back.");
+  // Its neighbours keep every syllable.
+  for (const k of [4, 6]) await expect(word(k)).toHaveAttribute("data-state", "kept");
+  await page.locator(".timeline-scroller").focus();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(word(5)).toHaveAttribute("data-state", "kept");
+  expect(savedClips()).toEqual(clips);
+});
+
 test("found speakers name each paragraph, and the context menu says who says a word, as a transcript edit", async () => {
   const path = join(box.projectDir, TRANSCRIPT);
   const before = JSON.parse(readFileSync(path, "utf8"));
