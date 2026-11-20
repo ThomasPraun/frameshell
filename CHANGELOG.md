@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Connect Codex (and the ChatGPT desktop app, which shares its file) and Gemini CLI: `frameshell setup codex|gemini
+  [--status | --remove] [--command path]` add Frameshell's MCP server to `~/.codex/config.toml` (the
+  `[mcp_servers.frameshell]` table; `CODEX_HOME` when set) or `~/.gemini/settings.json`, with long tool timeouts for the
+  blocking waits (an hour). Only Frameshell's entries change and every other byte stays (comments, CRLF), with a backup;
+  a Codex file that does not parse (new dependency `smol-toml`) is refused untouched. The functions (`connectCodex`,
+  `codexState`, `connectGemini`, ...) are exported from `@frameshell/cli` for the app. Docs: `docs/mcp.md` "Connect
+  other AI apps" (ChatGPT web is not supported).
 - Remove managed downloads to free disk (`PROTOCOL_VERSION` 184): new method `binaries.remove { name }` deletes a binary
   package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
   model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with

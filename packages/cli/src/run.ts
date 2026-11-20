@@ -183,6 +183,11 @@ ${JOB_USAGE}${PEOPLE_USAGE}${SHOOT_USAGE}${VOICEOVER_USAGE}${SOUND_USAGE}${BEATS
   setup claude-code [--status | --remove] [--command path]
                                Connect Claude Code (user level): the MCP server and a prompt hook that hands it
                                what the person sent from the app; backs up and changes only Frameshell's entries
+  setup codex [--status | --remove] [--command path]
+                               Connect Codex and the ChatGPT desktop app (~/.codex/config.toml, the
+                               [mcp_servers.frameshell] table); same backup, same promise
+  setup gemini [--status | --remove] [--command path]
+                               Connect Gemini CLI (~/.gemini/settings.json, mcpServers.frameshell)
   mcp                          Serve MCP on stdio for agents: every operation as a typed tool, project
                                files as resources. Register: claude mcp add frameshell -- frameshell mcp
   <plugin> <command> [args…]   Run a plugin-provided command
@@ -243,6 +248,8 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "skill update": ["force"],
   ask: ASK_FLAGS,
   "setup claude-code": SETUP_FLAGS,
+  "setup codex": SETUP_FLAGS,
+  "setup gemini": SETUP_FLAGS,
   mcp: [],
 };
 

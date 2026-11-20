@@ -6,6 +6,7 @@ import {
   InvalidConfigError,
   type JsonPath,
   SERVER_KEY,
+  type ServerSetup,
   editConfigFile,
   parseConfig,
   serverEntry,
@@ -32,11 +33,7 @@ export function claudeCodePaths(home: string, env: NodeJS.ProcessEnv): ClaudeCod
 }
 
 /** How Claude Code is told to run Frameshell. */
-export interface ClaudeCodeSetup {
-  /** The `frameshell` executable: a bare name on PATH, or the full path of the app's shim. */
-  command: string;
-  platform: NodeJS.Platform;
-}
+export type ClaudeCodeSetup = ServerSetup;
 
 /** Frameshell's server as Claude Code stores user-scope servers (what `claude mcp add --scope user` writes). */
 export function claudeCodeServer(setup: ClaudeCodeSetup): { type: "stdio"; command: string; args: string[]; env: Record<string, never> } {
