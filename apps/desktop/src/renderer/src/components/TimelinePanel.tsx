@@ -1610,6 +1610,11 @@ function ClipTooltip({ hover, fps, formats }: { hover: { row: TrackRow; clip: Cl
       <span className="clip-tooltip-faint">
         {clip.problem ? clip.problem : t.timeline.clipDetail(formatDuration(clip.end - clip.start), row.label, clip.type)}
       </span>
+      {clip.renderError && (
+        <span className="clip-tooltip-danger" data-testid="clip-tooltip-render">
+          {clip.renderError}
+        </span>
+      )}
       {adjusted.length > 0 && <span data-testid="clip-tooltip-formats">{t.timeline.formatOverrides(adjusted.join(", "))}</span>}
       <span className="clip-tooltip-faint">{clip.id}</span>
     </div>

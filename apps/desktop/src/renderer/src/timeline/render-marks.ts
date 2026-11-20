@@ -11,9 +11,9 @@ export function renderMark(state: ClipRenderInfo["state"]): ClipRenderMark {
 
 /**
  * `layout` with the render state of each generated clip of its own tracks (nested clips are the nested timeline's):
- * a failed or unavailable render becomes the clip's `problem`, `failed(error)`, so the lane paints it red and the
- * tooltip and clip list say why (#746). Clips without a known render are left as they are; same object when none
- * changes.
+ * a failed or unavailable render carries `failed(error)` as its `renderError`, so the lane paints it red and the
+ * tooltip says why (#746). The clip stays editable like any other: its length is known. Clips without a known render
+ * are left as they are; same object when none changes.
  */
 export function withRenders(layout: TimelineLayout, renders: ReadonlyMap<string, ClipRenderInfo>, failed: (error: string) => string): TimelineLayout {
   if (renders.size === 0) return layout;
@@ -25,7 +25,7 @@ export function withRenders(layout: TimelineLayout, renders: ReadonlyMap<string,
       if (!info) return clip;
       const mark = renderMark(info.state);
       rowChanged = true;
-      return { ...clip, render: mark, ...(mark === "failed" && clip.problem === null ? { problem: failed(info.error ?? info.state) } : {}) };
+      return { ...clip, render: mark, ...(mark === "failed" ? { renderError: failed(info.error ?? info.state) } : {}) };
     });
     if (!rowChanged) return row;
     changed = true;

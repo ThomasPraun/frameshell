@@ -16,7 +16,7 @@ describe("render marks (#746)", () => {
     expect(renderMark("unavailable")).toBe("failed");
   });
 
-  it("marks generated clips, and a failed one carries the whole reason as its problem", () => {
+  it("marks generated clips, and a failed one carries the whole reason, never as a problem (its length is known)", () => {
     const before = layout([box("c_gen", "generated"), box("c_bad", "generated"), box("c_media", "media")]);
     const renders = new Map([
       ["c_gen", info("c_gen", "ready")],
@@ -26,7 +26,8 @@ describe("render marks (#746)", () => {
     const after = withRenders(before, renders, (error) => `Render failed: ${error}`);
     const [gen, bad, media] = after.rows[0]!.clips;
     expect(gen).toMatchObject({ render: "ready", problem: null });
-    expect(bad).toMatchObject({ render: "failed", problem: "Render failed: page crashed at 1.2 s" });
+    expect(gen).not.toHaveProperty("renderError");
+    expect(bad).toMatchObject({ render: "failed", problem: null, renderError: "Render failed: page crashed at 1.2 s" });
     expect(media).toBe(before.rows[0]!.clips[2]);
   });
 

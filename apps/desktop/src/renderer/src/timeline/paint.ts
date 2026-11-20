@@ -412,7 +412,7 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   if (clip.asset && row.kind === "video") media = paintThumbnails(ctx, input, clip, x0, left, right, y, h);
   if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, clip.muted || row.muted ? theme.textFaint : kind.edge);
   // A generated clip is hatched until its render is ready (#746): rendering, ready and failed no longer look alike.
-  if ((clip.kind === "generated" && clip.render !== "ready") || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem ? colors.dangerFill : kind.hatch);
+  if ((clip.kind === "generated" && clip.render !== "ready") || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem || clip.render === "failed" ? colors.dangerFill : kind.hatch);
   ctx.restore();
 
   if (clip.kind === "timeline" && w > 6) {
