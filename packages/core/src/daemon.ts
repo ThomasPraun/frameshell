@@ -122,6 +122,7 @@ import { type GallerySource, galleryReport, planGallery } from "./multicam/galle
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { ClipVerifier } from "./clips/verify.js";
+import { buildCatalog } from "./plugins/catalog.js";
 import { PluginHost } from "./plugins/host.js";
 import { type FaceScans, PeopleService, type VoicePrinter } from "./people/service.js";
 import { readProjectFaceScans, scanFileFaces, scanProjectFaces } from "./people/scan-run.js";
@@ -1746,6 +1747,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "project.trust": async ({ cwd, decision }) => plugins.setTrust(await root(cwd), decision),
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
+    "plugin.catalog": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
+    },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);
       const installed = await plugins.install(dir, spec, cwd);

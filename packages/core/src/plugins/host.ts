@@ -4,12 +4,14 @@ import {
   type AppDirs,
   ErrorCode,
   type MethodResult,
+  type OfficialPluginKind,
   type PluginInfo,
   type PluginPins,
   RpcError,
   type TrustState,
+  installHint,
+  officialPluginProviding,
 } from "@frameshell/protocol";
-import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import type { ClipAdapter, PluginManifest, SpeechProvider, TranscriptionProvider } from "@frameshell/plugin-api";
 import type { RegisteredClipType } from "../clips/renderer.js";
 import { type LoadedPlugin, PluginLoadError, loadPlugin, readManifest } from "./loader.js";
@@ -306,7 +308,8 @@ export class PluginHost {
     }
     const broken = (loaded ?? []).find((p) => p.manifest?.contributes.clipTypes.includes(type));
     if (broken) return `${broken.info.name} provides \`${type}\` clips but failed to load: ${broken.info.error}`;
-    const plugin = OFFICIAL_ADAPTERS[type] ?? "<spec>";
+    const official = officialPluginProviding("clip-adapter", type);
+    const plugin = official?.name ?? "<spec>";
     return `No installed plugin renders \`${type}\` clips. Install one: \`frameshell plugin install ${plugin}\`.`;
   }
 
@@ -380,17 +383,18 @@ interface ProviderKind<T> {
 
 const INSTALL_HINT = " Install the plugin that provides it with `frameshell plugin install <spec>`.";
 
+/** How to get provider `id` of `kind`: the official plugin that provides it, else the generic sentence. */
+function providerHint(kind: OfficialPluginKind, id: string): string {
+  const official = officialPluginProviding(kind, id);
+  return official ? installHint(official) : INSTALL_HINT;
+}
+
 const TRANSCRIPTION: ProviderKind<TranscriptionProvider> = {
   label: "transcription provider",
   registered: (plugin) => plugin.transcriptionProviders,
   declared: (manifest) => manifest.contributes.transcriptionProviders,
   notFound: ErrorCode.TranscriptionProviderNotFound,
-  hint: (id) =>
-    id === DEFAULT_TRANSCRIPTION_PROVIDER
-      ? " Install the default provider with `frameshell plugin install @frameshell/whisper-cpp`."
-      : id === "openai"
-        ? " Install the OpenAI provider with `frameshell plugin install @frameshell/openai-transcription`."
-        : INSTALL_HINT,
+  hint: (id) => providerHint("transcription-provider", id),
 };
 
 const SPEECH: ProviderKind<SpeechProvider> = {
@@ -398,14 +402,7 @@ const SPEECH: ProviderKind<SpeechProvider> = {
   registered: (plugin) => plugin.speechProviders,
   declared: (manifest) => manifest.contributes.speechProviders,
   notFound: ErrorCode.SpeechProviderNotFound,
-  hint: (id) => (id === "openai" ? " Install the OpenAI provider with `frameshell plugin install @frameshell/openai-speech`." : INSTALL_HINT),
-};
-
-/** Official plugin of each official clip type, for install hints. */
-const OFFICIAL_ADAPTERS: Readonly<Record<string, string>> = {
-  hyperframes: "@frameshell/hyperframes",
-  remotion: "@frameshell/remotion",
-  blender: "@frameshell/blender",
+  hint: (id) => providerHint("speech-provider", id),
 };
 
 /** Link the skills of the plugins that loaded; a failure to link is a warning, never a failed load. */
