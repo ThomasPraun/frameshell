@@ -45,15 +45,26 @@ const anchors = [...t.sections.map((s) => s.id), "pi"];
           }
         </div>
         <p class="note">{t.pick.note}</p>
-        <aside class="terminal">
-          <h3>{t.terminal.title}</h3>
-          <p set:html={t.terminal.body} />
-        </aside>
       </div>
     </section>
 
     {
-      t.sections.map((section) => (
+      t.sections.map((section, i) => (
+        <Fragment>
+          {section.group !== t.sections[i - 1]?.group && (
+            <section class="group">
+              <div class="wrap">
+                <h2 class="group-title">{t.groups[section.group as keyof typeof t.groups].title}</h2>
+                <p>{t.groups[section.group as keyof typeof t.groups].body}</p>
+                {section.group === "developers" && (
+                  <aside class="terminal">
+                    <h3>{t.terminal.title}</h3>
+                    <p set:html={t.terminal.body} />
+                  </aside>
+                )}
+              </div>
+            </section>
+          )}
         <section class="agent" id={section.id}>
           <div class="wrap">
             <h2>
@@ -82,6 +93,7 @@ const anchors = [...t.sections.map((s) => s.id), "pi"];
             </ol>
           </div>
         </section>
+        </Fragment>
       ))
     }
 
@@ -204,10 +216,20 @@ const anchors = [...t.sections.map((s) => s.id), "pi"];
     font-size: 15px;
   }
 
+  .group,
   .agent,
   .asks,
   .help {
     border-top: 1px solid var(--line-soft);
+  }
+
+  .group + .agent {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .group-title {
+    font-size: clamp(2rem, 4.4vw, 3.2rem);
   }
 
   /* Chooser: three columns on wide screens, one block per agent on phones. */

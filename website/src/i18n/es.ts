@@ -108,7 +108,7 @@ export const es: Dict = {
       {
         you: false,
         title: "Pide la edición",
-        body: "Describe lo que quieres con tus palabras. Claude Code, Codex, Gemini CLI o cualquier otro agente corre dentro de Frameshell y hace el cambio.",
+        body: "Describe lo que quieres con tus palabras, en la app de IA que ya usas: Claude Desktop, la app de escritorio de ChatGPT, o un agente de código como Claude Code, Codex o Gemini CLI. Hace el cambio en tu proyecto.",
       },
       {
         you: true,
@@ -178,7 +178,7 @@ export const es: Dict = {
     },
     mcp: {
       title: "Servidor MCP",
-      body: "Controla un proyecto desde Claude Code o cualquier cliente MCP, fotogramas incluidos.",
+      body: "Controla un proyecto desde Claude Desktop, la app de escritorio de ChatGPT, Claude Code o cualquier cliente MCP, fotogramas incluidos.",
     },
     multicam: {
       title: "Multicámara, con una tecla",
@@ -274,21 +274,27 @@ export const es: Dict = {
       allAfter: ".",
     },
     folder: {
-      title: "Abre una carpeta con tus clips",
-      body: "Ábrela en Frameshell y, en su terminal, ejecuta:",
-      aside: "Las herramientas que necesita (ffmpeg, whisper.cpp, Chrome headless) se descargan la primera vez que se usan.",
+      title: "Empieza un proyecto",
+      body: "En la pantalla de bienvenida elige <strong>Nuevo desde un video, audio o imagen…</strong> (o suelta tus archivos ahí), o <strong>Abrir carpeta…</strong> para una carpeta que ya tengas.",
+      aside: "Si quieres una transcripción y la herramienta de transcripción todavía no está en tu computadora, Frameshell te dice el tamaño y pregunta antes. Las demás herramientas que necesita (ffmpeg, Chrome headless) se descargan la primera vez que se usan.",
+    },
+    connect: {
+      title: "Conecta tu IA",
+      body: "Haz clic en <strong>Conecta tu IA</strong> en la barra de título de la ventana del proyecto y luego en <strong>Conectar</strong> en la tarjeta de Claude Desktop o de la app de escritorio de ChatGPT. Cierra esa app y vuelve a abrirla una vez para terminar.",
+      aside: "ChatGPT en la web no es compatible. Para Claude Code, Codex, Gemini CLI, Cursor o VS Code, mira las herramientas para desarrolladores más abajo.",
     },
     plugins: {
-      title: "Agrega lo que necesites",
-      body: "Los plugins oficiales se instalan por proyecto:",
+      title: "Agrega extras si quieres",
+      body: "Los plugins son opcionales. Abre la vista <strong>Plugins</strong> en la barra lateral para ver qué necesita, cuánto cuesta y qué descarga cada uno, y luego instálalo con un clic. Tu IA puede sugerirte uno; no se instala nada sin tu sí.",
       whisper: "Subtítulos a partir de la voz",
       hyperframes: "Títulos y animaciones en HTML",
       remotion: "Composiciones de Remotion (React)",
+      developers: "Para desarrolladores: los mismos plugins se instalan desde una terminal con <code>frameshell plugin install</code>.",
     },
     ask: {
-      more: "Cómo instalar y conectar cada agente",
+      more: "Cómo conectar cada IA",
       title: "Pide tu edición",
-      body: "Abre Claude Code, Codex o Gemini CLI en la misma terminal y describe el video que quieres, como se lo dirías a un editor. El comando <code>frameshell</code> ya está en su PATH, y el skill que <code>frameshell init</code> escribió en el proyecto le enseña la CLI.",
+      body: "En tu app de IA, describe el video que quieres, como se lo dirías a un editor. Con tu proyecto abierto en Frameshell, la IA lo edita y ves cada cambio en la vista previa y en la línea de tiempo. La terminal dentro de Frameshell es opcional; empieza plegada.",
     },
   },
   oss: {
@@ -312,32 +318,44 @@ export const es: Dict = {
     meta: {
       title: "Conecta tu agente: Frameshell",
       description:
-        "Cómo conectar un agente de IA a Frameshell, paso a paso: Claude Desktop, Claude Code, Codex, Gemini CLI, OpenCode y Pi. Qué necesita cada uno, cómo instalarlo y qué pedirle primero.",
+        "Cómo conectar una IA a Frameshell, paso a paso: Claude Desktop y la app de escritorio de ChatGPT con un clic desde la app, y después las herramientas para desarrolladores Claude Code, Codex, Gemini CLI, OpenCode y Pi. Qué necesita cada una y qué pedirle primero.",
     },
     marker: "Agentes",
     title: "Conecta tu agente.",
-    lede: "Frameshell no trae una IA propia. Usas el agente que ya tienes, o eliges uno de abajo, y edita el video mientras lo ves en la app. Lo configuras una vez y funciona en todos tus proyectos.",
+    lede: "Frameshell no trae una IA propia. Usas la app de IA que ya tienes, o eliges una de abajo, y edita el video mientras lo ves en la app. La configuras una vez y funciona en todos tus proyectos.",
+    groups: {
+      desktop: {
+        title: "Apps de escritorio",
+        body: "La forma más fácil y la que conviene probar primero: chateas en la app que ya conoces y conectarla es un clic en Frameshell. Sin terminal.",
+      },
+      developers: {
+        title: "Para desarrolladores",
+        body: "Agentes de línea de comandos que corren en una terminal, la de Frameshell o cualquier otra. Piden un poco más de configuración.",
+      },
+    },
     pick: {
       title: "¿Cuál elijo?",
       body: "Todos pueden editar tu video. Cambia la app en la que hablas con él y la cuenta que necesita.",
       head: ["Agente", "Hablas con él en", "Cuenta que necesita"],
       rows: [
         ["Claude Desktop", "La app de chat de Claude. Sin terminal.", "Una cuenta de Claude"],
+        ["App de escritorio de ChatGPT", "La app de ChatGPT para tu computadora. Sin terminal.", "Una cuenta de ChatGPT"],
         ["Claude Code", "La terminal dentro de Frameshell", "Claude Pro, Max, Team o Enterprise, o una API key de Anthropic"],
         ["Codex", "La terminal dentro de Frameshell", "ChatGPT Plus, Pro o Business, o una API key de OpenAI"],
         ["Gemini CLI", "La terminal dentro de Frameshell", "Una API key de Gemini o un plan pago de Google"],
         ["OpenCode", "La terminal dentro de Frameshell", "Una cuenta en cualquiera de los proveedores de modelos que admite"],
         ["Pi", "La terminal dentro de Frameshell", "Una cuenta en cualquiera de los proveedores de modelos que admite"],
       ],
-      note: "¿Es tu primera vez? Empieza con Claude Desktop si tienes cuenta de Claude, o con Claude Code si pagas Claude.",
+      note: "¿Es tu primera vez? Empieza con Claude Desktop o con la app de escritorio de ChatGPT, según la cuenta que tengas: sin terminal y con un clic en Frameshell.",
     },
     terminal: {
-      title: "La terminal dentro de Frameshell",
-      body: "Todos los agentes menos Claude Desktop corren en el panel de la derecha de la ventana del proyecto. Arriba de la terminal, el panel <strong>Habla con un agente</strong> muestra los agentes que tienes instalados, cada uno con un botón para abrirlo, y escribe el comando de instalación de los que faltan. Después le hablas con palabras normales. El comando <code>frameshell</code> ya está disponible para que el agente lo use.",
+      title: "La terminal dentro de Frameshell es opcional",
+      body: "En los proyectos nuevos empieza plegada: haz clic en la tira con la marca de la terminal, a la derecha de la ventana, o elige <strong>Ver → Terminal</strong> (Ctrl+\\ en Windows y Linux, Cmd+\\ en macOS). El shell arranca la primera vez que la abres. Los agentes para desarrolladores de más abajo corren ahí. Arriba de la terminal, el panel <strong>Habla con un agente</strong> muestra los agentes que tienes instalados, cada uno con un botón para abrirlo, y escribe el comando de instalación de los que faltan. El comando <code>frameshell</code> ya está disponible para que el agente lo use.",
     },
     sections: [
       {
         id: "claude-desktop",
+        group: "desktop",
         name: "Claude Desktop",
         tag: "El más fácil",
         intro: "Chateas con Claude en su propia app y edita el proyecto abierto en Frameshell a través de la conexión MCP de Frameshell.",
@@ -349,12 +367,12 @@ export const es: Dict = {
           },
           {
             title: "Conecta Frameshell con Claude",
-            body: "En Frameshell 0.8 o posterior, abre un proyecto y haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal. Frameshell te muestra lo que agrega a la configuración de Claude, deja los demás servidores como están y guarda una copia antes.",
+            body: "En Frameshell, abre un proyecto y haz clic en <strong>Conecta tu IA</strong> en la barra de título de la ventana (o en la tarjeta de la pantalla de bienvenida), y luego en <strong>Conectar</strong> en la tarjeta de Claude Desktop. Frameshell se agrega a la configuración de Claude, deja todo lo demás como está y guarda una copia del archivo antes. <strong>Desconectar</strong> lo quita de nuevo.",
             cmds: [],
           },
           {
             title: "O agrégalo a mano",
-            body: "En Linux o con una versión anterior: en Frameshell elige <strong>Archivo → Instalar el comando 'frameshell' en el PATH</strong> (el paquete .deb ya lo trae). Luego, en Claude, abre <strong>Settings → Developer → Edit Config</strong>, pon esto en el archivo sin borrar lo que ya haya en <code>mcpServers</code> y guárdalo:",
+            body: "En Linux, o con Frameshell 0.18 o anterior (tenía un botón <strong>Conectar Claude Desktop</strong> arriba de la terminal): en Frameshell elige <strong>Archivo → Instalar el comando 'frameshell' en el PATH</strong> (el paquete .deb ya lo trae). Luego, en Claude, abre <strong>Settings → Developer → Edit Config</strong>, pon esto en el archivo sin borrar lo que ya haya en <code>mcpServers</code> y guárdalo:",
             cmds: [
               { os: "macOS", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/local/bin/frameshell", "args": ["mcp"] } } }' },
               { os: "Windows", cmd: '{ "mcpServers": { "frameshell": { "command": "cmd", "args": ["/c", "%LOCALAPPDATA%\\\\Frameshell\\\\desktop\\\\bin\\\\frameshell.cmd", "mcp"] } } }' },
@@ -363,18 +381,48 @@ export const es: Dict = {
           },
           {
             title: "Reinicia Claude",
-            body: "Cierra Claude por completo y vuelve a abrirlo. Frameshell aparece entonces entre sus conectores.",
+            body: "Cierra Claude por completo y vuelve a abrirlo. Frameshell aparece entonces entre sus conectores. El botón <strong>Abrir</strong> de la tarjeta inicia Claude por ti y copia una frase inicial para pegar en el chat; <strong>Descargar</strong> aparece cuando la app parece no estar instalada.",
             cmds: [],
           },
           {
             title: "Pruébalo",
-            body: "Con tu proyecto abierto en Frameshell, pregúntale a Claude: <em>“¿Qué videos tiene mi proyecto de Frameshell?”</em> Claude trabaja en el proyecto de la ventana de Frameshell que usaste por última vez. Con versiones anteriores a la 0.8, dile dónde está el proyecto.",
+            body: "Con tu proyecto abierto en Frameshell, pregúntale a Claude: <em>“¿Qué videos tiene mi proyecto de Frameshell?”</em> Claude trabaja en el proyecto de la ventana de Frameshell que usaste por última vez. También lee la guía de Frameshell a través de la conexión, así que no tienes que explicarle la herramienta, y te ofrece opciones antes de instalar, descargar o gastar algo.",
+            cmds: [],
+          },
+        ],
+      },
+      {
+        id: "chatgpt-desktop",
+        group: "desktop",
+        name: "App de escritorio de ChatGPT",
+        tag: "",
+        intro: "Chateas con ChatGPT en la app de OpenAI para tu computadora. Frameshell se agrega a la opción de servidores MCP que la app comparte con Codex.",
+        steps: [
+          {
+            title: "Instala ChatGPT",
+            body: 'Descarga la app de <a href="https://chatgpt.com/download">chatgpt.com/download</a> e inicia sesión.',
+            cmds: [],
+          },
+          {
+            title: "Conecta Frameshell con ChatGPT",
+            body: "En Frameshell, haz clic en <strong>Conecta tu IA</strong> en la barra de título de la ventana del proyecto y luego en <strong>Conectar</strong> en la tarjeta de ChatGPT. Frameshell cambia solo su propia entrada en el archivo de configuración y guarda una copia antes. <strong>Desconectar</strong> la quita. Conectar Codex CLI conecta también esta app, y al revés: comparten un solo archivo.",
+            cmds: [],
+          },
+          {
+            title: "Reinicia ChatGPT",
+            body: "Cierra la app por completo y vuelve a abrirla. El botón <strong>Abrir</strong> de la tarjeta la inicia y copia una frase inicial para pegar en el chat; <strong>Descargar</strong> aparece cuando la app parece no estar instalada.",
+            cmds: [],
+          },
+          {
+            title: "Lo que no pudimos verificar",
+            body: "Si la app de escritorio de ChatGPT usa estos servidores MCP en un chat normal, o solo en su modo Codex, depende de la app y de tu plan, y no lo hemos confirmado. Si tus chats no ven Frameshell, prueba el modo Codex. <strong>ChatGPT en la web no es compatible</strong>: solo llega a servidores en internet y Frameshell corre en tu computadora.",
             cmds: [],
           },
         ],
       },
       {
         id: "claude-code",
+        group: "developers",
         name: "Claude Code",
         tag: "",
         intro: "El agente de Anthropic para la terminal. Encuentra solo la skill de Frameshell en tu proyecto.",
@@ -389,7 +437,7 @@ export const es: Dict = {
           },
           {
             title: "Ábrelo en Frameshell",
-            body: "Abre tu proyecto, haz clic en el panel de la terminal, escribe <code>claude</code> y presiona Enter. La primera vez abre tu navegador para iniciar sesión.",
+            body: "Abre tu proyecto, abre su terminal (haz clic en la tira de la derecha, o <strong>Ver → Terminal</strong>), escribe <code>claude</code> y presiona Enter. La primera vez abre tu navegador para iniciar sesión.",
             cmds: [],
           },
           {
@@ -401,6 +449,7 @@ export const es: Dict = {
       },
       {
         id: "codex",
+        group: "developers",
         name: "Codex",
         tag: "",
         intro: "El agente de OpenAI para la terminal. Lee el AGENTS.md del proyecto, que lo lleva a la skill de Frameshell.",
@@ -427,6 +476,7 @@ export const es: Dict = {
       },
       {
         id: "gemini",
+        group: "developers",
         name: "Gemini CLI",
         tag: "",
         intro: "El agente de Google para la terminal. Lee el GEMINI.md del proyecto. En junio de 2026 Google lo reemplazó por Antigravity CLI para las cuentas gratuitas; con una API key o un plan pago sigue funcionando.",
@@ -453,6 +503,7 @@ export const es: Dict = {
       },
       {
         id: "opencode",
+        group: "developers",
         name: "OpenCode",
         tag: "",
         intro: "Un agente de código abierto que funciona con muchos proveedores de modelos. Carga solo la skill de Frameshell del proyecto.",
@@ -511,7 +562,7 @@ export const es: Dict = {
       items: [
         "<strong>“frameshell: command not found”</strong> fuera de Frameshell: elige File → Install 'frameshell' Command in PATH y abre una terminal nueva.",
         "<strong>El agente no conoce Frameshell:</strong> ábrelo desde la terminal de Frameshell, en la carpeta del proyecto, o pídele que lea <code>.claude/skills/frameshell/SKILL.md</code>.",
-        "<strong>Claude Desktop no muestra Frameshell:</strong> revisa que el archivo de configuración sea JSON válido, cierra Claude por completo y vuelve a abrirlo.",
+        "<strong>Claude Desktop o ChatGPT no muestra Frameshell:</strong> abre Conecta tu IA y revisa que su tarjeta diga Conectado (si dice que Frameshell está configurado con otro comando, elige Volver a conectar), y luego cierra la app por completo y vuelve a abrirla. Si la tarjeta muestra un error, el archivo de configuración de la app no es válido: arréglalo o quítalo primero.",
         "<strong>Cualquier otra cosa:</strong> ejecuta <code>frameshell doctor</code> en la terminal del proyecto y envía lo que muestra en un issue de GitHub.",
       ],
       issues: "Abrir un issue",

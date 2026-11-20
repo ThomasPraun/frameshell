@@ -9,7 +9,6 @@ const { version } = Astro.props;
 const all = strings(Astro.currentLocale);
 const t = all.start;
 const d = t.download;
-const copy = all.runtime.copy;
 
 const downloads = [
   { os: "macOS", items: [[d.appleSilicon, "macArm"], [d.intel, "macIntel"]], note: d.macNote },
@@ -52,26 +51,28 @@ const plugins = [
       </li>
       <li>
         <h3>{t.folder.title}</h3>
-        <p>{t.folder.body}</p>
-        <div class="cmd"><code>frameshell init</code><button type="button" data-copy>{copy}</button></div>
+        <p set:html={t.folder.body} />
         <p class="aside">{t.folder.aside}</p>
       </li>
       <li>
+        <h3>{t.connect.title}</h3>
+        <p set:html={t.connect.body} />
+        <p class="aside">{t.connect.aside}</p>
+      </li>
+      <li>
         <h3>{t.plugins.title}</h3>
-        <p>{t.plugins.body}</p>
-        <div class="plugins">
+        <p set:html={t.plugins.body} />
+        <ul class="plugins">
           {
             plugins.map(([name, what]) => (
-              <div>
-                <div class="cmd">
-                  <code>frameshell plugin install {name}</code>
-                  <button type="button" data-copy>{copy}</button>
-                </div>
+              <li>
+                <code>{name}</code>
                 <span class="aside">{what}</span>
-              </div>
+              </li>
             ))
           }
-        </div>
+        </ul>
+        <p class="aside" set:html={t.plugins.developers} />
       </li>
       <li>
         <h3>{t.ask.title}</h3>
@@ -135,7 +136,7 @@ const plugins = [
     color: var(--muted);
   }
 
-  p code {
+  p :global(code) {
     color: var(--text);
   }
 
@@ -192,11 +193,27 @@ const plugins = [
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
   }
 
   .plugins .aside {
     display: block;
     margin-top: 4px;
+  }
+
+  .aside :global(code) {
+    color: var(--text);
+  }
+
+  p :global(strong) {
+    color: var(--text);
+  }
+
+  p + .aside,
+  .plugins + .aside {
+    margin-top: 10px;
   }
 
   @media (max-width: 760px) {
