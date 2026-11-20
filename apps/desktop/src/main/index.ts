@@ -38,9 +38,8 @@ import {
   type LiveClipPage,
   type MenuCommand,
   type AgentChoice,
+  isAiAppId,
   type HandoffKind,
-  type ClaudeCodeStatus,
-  type ClaudeDesktopStatus,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -83,24 +82,8 @@ import { captureContextFrame } from "./context-frames.js";
 import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
-import {
-  claudeCodeHookCommand,
-  claudeCodePaths,
-  claudeCodeServer,
-  claudeCodeState,
-  connectClaudeCode,
-  disconnectClaudeCode,
-} from "@frameshell/cli";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
-import {
-  InvalidConfigError,
-  SERVER_KEY,
-  claudeDesktopConfigPath,
-  claudeDesktopState,
-  connectClaudeDesktop,
-  disconnectClaudeDesktop,
-  serverEntry,
-} from "./claude-desktop.js";
+import { aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
 import { LayoutStore } from "./layout-store.js";
@@ -1550,12 +1533,15 @@ function registerIpc(): void {
   ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
   ipcMain.handle(Channel.agentsDetect, () => findAgents());
   ipcMain.handle(Channel.agentsInstallCli, () => cliCommand(installCli));
-  ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
-  ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
-  ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
-  ipcMain.handle(Channel.agentsClaudeCode, () => claudeCodeStatus());
-  ipcMain.handle(Channel.agentsConnectClaudeCode, (event) => changeClaudeCode(true, event.sender));
-  ipcMain.handle(Channel.agentsDisconnectClaudeCode, (event) => changeClaudeCode(false, event.sender));
+  ipcMain.handle(Channel.agentsApps, () => aiApps(aiAppsAt));
+  ipcMain.handle(Channel.agentsConnect, (_event, id: unknown) => {
+    if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
+    return changeAiApp(id, true, aiAppsAt);
+  });
+  ipcMain.handle(Channel.agentsDisconnect, (_event, id: unknown) => {
+    if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
+    return changeAiApp(id, false, aiAppsAt);
+  });
   ipcMain.handle(Channel.agentsTargets, (event) =>
     outcome(async () => (await daemon.request("target.list", { cwd: (await requireProject(stateOf(event.sender))).project.dir })).targets),
   );
@@ -2120,105 +2106,8 @@ async function findAgents(): Promise<AgentChoice[]> {
   return found.map((agent) => (agent.path ? { ...agent, command: startCommand(agent.path, platform) } : agent));
 }
 
-/** Claude Desktop's config file, where it has one. */
-const claudeDesktopConfig = claudeDesktopConfigPath(process.platform, homedir(), process.env);
-
-async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
-  if (!claudeDesktopConfig) return { available: false, installed: false, connected: false };
-  const state = await claudeDesktopState(claudeDesktopConfig, serverEntry(cliShim, process.platform)).catch(() => ({ installed: true, connected: false }));
-  return { available: true, ...state };
-}
-
-/**
- * Add (after showing the entry) or remove Frameshell's server in Claude Desktop's config, through the stable
- * `frameshell` shim so app updates keep it working. Message boxes say what changed and to restart Claude.
- */
-async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promise<ClaudeDesktopStatus> {
-  const said = text.agents.dialog;
-  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
-  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-  const file = claudeDesktopConfig;
-  if (!file) return claudeDesktopStatus();
-  try {
-    if (connect) {
-      if (!(await claudeDesktopStatus()).installed) {
-        await box({ type: "info", message: said.notInstalled });
-        return claudeDesktopStatus();
-      }
-      const entry = JSON.stringify({ [SERVER_KEY]: serverEntry(cliShim, process.platform) }, null, 2);
-      const { response } = await box({
-        type: "question",
-        message: said.connect,
-        detail: said.connectDetail(file, entry),
-        buttons: [said.connectButton, said.cancel],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (response !== 0) return claudeDesktopStatus();
-      const backup = await connectClaudeDesktop(file, serverEntry(cliShim, process.platform));
-      await box({ type: "info", message: said.connected, ...(backup ? { detail: said.backup(backup) } : {}) });
-    } else {
-      const backup = await disconnectClaudeDesktop(file);
-      await box({ type: "info", message: said.disconnected, ...(backup ? { detail: said.backup(backup) } : {}) });
-    }
-  } catch (error) {
-    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
-    await box({ type: "error", message: said.failed, detail });
-  }
-  return claudeDesktopStatus();
-}
-
-/** Frameshell's server and prompt hook in Claude Code's user settings, run through the app's stable shim (ADR 0025). */
-const claudeCodeSetup = { command: cliShim, platform: process.platform };
-
-async function claudeCodeStatus(): Promise<ClaudeCodeStatus> {
-  const paths = claudeCodePaths(homedir(), process.env);
-  const { installed, server, hook, connected } = await claudeCodeState(paths, claudeCodeSetup).catch(() => ({
-    installed: true,
-    server: false,
-    hook: false,
-    connected: false,
-  }));
-  return { installed, server, hook, connected };
-}
-
-/** Add (after showing both entries) or remove Frameshell's MCP server and prompt hook in Claude Code's user settings. */
-async function changeClaudeCode(connect: boolean, sender: WebContents): Promise<ClaudeCodeStatus> {
-  const said = text.agents.codeDialog;
-  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
-  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-  const paths = claudeCodePaths(homedir(), process.env);
-  try {
-    if (connect) {
-      if (!(await claudeCodeStatus()).installed) {
-        await box({ type: "info", message: said.notInstalled });
-        return claudeCodeStatus();
-      }
-      const server = JSON.stringify({ mcpServers: { [SERVER_KEY]: claudeCodeServer(claudeCodeSetup) } }, null, 2);
-      const hook = claudeCodeHookCommand(claudeCodeSetup);
-      const { response } = await box({
-        type: "question",
-        message: said.connect,
-        detail: said.connectDetail(paths.mcp, server, paths.settings, hook),
-        buttons: [said.connectButton, said.cancel],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (response !== 0) return claudeCodeStatus();
-      const backups = await connectClaudeCode(paths, claudeCodeSetup);
-      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
-      await box({ type: "info", message: said.connected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
-    } else {
-      const backups = await disconnectClaudeCode(paths);
-      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
-      await box({ type: "info", message: said.disconnected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
-    }
-  } catch (error) {
-    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
-    await box({ type: "error", message: said.failed, detail });
-  }
-  return claudeCodeStatus();
-}
+/** The AI apps of "Connect your AI", told to run the stable shim so app updates keep them working. */
+const aiAppsAt = aiAppsPlace(process.env, { command: cliShim, platform: process.platform });
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the

@@ -3,7 +3,7 @@
 // Connect Claude Code (`@frameshell/cli`, `config-file.ts`).
 import { stat } from "node:fs/promises";
 import { dirname, posix, win32 } from "node:path";
-import { InvalidConfigError, SERVER_KEY, type ServerEntry, editMcpServer, mcpServerState, serverEntry } from "@frameshell/cli";
+import { InvalidConfigError, SERVER_KEY, type ServerEntry, type ServerState, editMcpServer, mcpServerState, serverEntry } from "@frameshell/cli";
 
 export { InvalidConfigError, SERVER_KEY, type ServerEntry, serverEntry };
 
@@ -18,21 +18,15 @@ export function claudeDesktopConfigPath(platform: NodeJS.Platform, home: string,
 }
 
 /** What the config says about Frameshell. */
-export interface ClaudeDesktopState {
-  /** Claude Desktop's folder exists: it is (or was) installed. */
-  installed: boolean;
-  /** The config has the `frameshell` server `entry`. */
-  connected: boolean;
-}
+export type ClaudeDesktopState = ServerState;
 
-/** Read the state of the config at `file` for `entry`. */
+/** Read the state of the config at `file` for `entry`. Throws {@link InvalidConfigError} for a file that is not JSON. */
 export async function claudeDesktopState(file: string, entry: ServerEntry): Promise<ClaudeDesktopState> {
   const installed = await stat(dirname(file)).then(
     (info) => info.isDirectory(),
     () => false,
   );
-  const { connected } = await mcpServerState(file, entry, installed);
-  return { installed, connected };
+  return mcpServerState(file, entry, installed);
 }
 
 /**

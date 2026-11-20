@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OpenOutcome, ProjectView } from "../../shared/api.js";
 import { AuditionDialogHost } from "./components/AuditionDialog.js";
+import { ConnectAiHost } from "./components/ConnectAi.js";
 import { ContextMenuHost } from "./components/ContextMenu.js";
 import { TooltipHost } from "./components/Tooltip.js";
 import { UpdateBanner } from "./components/UpdateBanner.js";
@@ -31,6 +32,7 @@ export function App() {
       <UpdateBanner />
       <ContextMenuHost />
       <VoiceoverDialogHost />
+      <ConnectAiHost />
       {project && <AuditionDialogHost mediaUrl={project.mediaUrl} />}
       <TooltipHost />
     </>

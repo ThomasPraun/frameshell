@@ -3,12 +3,14 @@ import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../s
 import { useFileDrop } from "../file-drop.js";
 import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
+import { ConnectAiButton } from "./ConnectAi.js";
 import { contextMenu } from "./ContextMenu.js";
 import { NewFromIdea } from "./NewFromIdea.js";
 
 /**
  * First screen of a window with no project: start from a video, audio or image file, or from an idea with no footage,
- * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project.
+ * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project; and
+ * "Connect your AI".
  */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
@@ -144,6 +146,16 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
           <p className="welcome-error" role="alert">
             {error}
           </p>
+        )}
+
+        {!plan && !idea && (
+          <section className="welcome-connect" aria-label={t.agents.connect.welcome.title} data-testid="welcome-connect">
+            <div>
+              <h2>{t.agents.connect.welcome.title}</h2>
+              <p>{t.agents.connect.welcome.body}</p>
+            </div>
+            <ConnectAiButton className="button primary" />
+          </section>
         )}
 
         {recent.length > 0 && !plan && !idea && (

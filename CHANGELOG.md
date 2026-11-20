@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Connect your AI, one panel for connecting the AI apps people already use, desktop apps first: big cards for Claude
+  Desktop and the ChatGPT desktop app (it uses the MCP servers setting it shares with Codex; ChatGPT on the web is not
+  supported), then a smaller "For developers" group with Claude Code, Codex CLI (same file as the ChatGPT app, one
+  state), Gemini CLI, and a copyable snippet for Cursor, VS Code and other MCP clients. Opens from a "Connect your AI"
+  button in the project window's title bar, a card on the welcome screen and a link in the agent guide, which no longer
+  has its own connect buttons. Connect and Disconnect work inline (no native dialog): state, "restart the app to
+  finish", backups and errors show on each card, and every open reads the apps' settings again. English and Spanish.
 - Connect Codex (and the ChatGPT desktop app, which shares its file) and Gemini CLI: `frameshell setup codex|gemini
   [--status | --remove] [--command path]` add Frameshell's MCP server to `~/.codex/config.toml` (the
   `[mcp_servers.frameshell]` table; `CODEX_HOME` when set) or `~/.gemini/settings.json`, with long tool timeouts for the

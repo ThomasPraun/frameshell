@@ -37,6 +37,7 @@ import { Sidebar, SidebarWindow, sidebarViews } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
 import { teleprompter } from "../teleprompter/store.js";
 import { StatusBar } from "./StatusBar.js";
+import { ConnectAiButton } from "./ConnectAi.js";
 import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
 import { TimelinePanel } from "./TimelinePanel.js";
 import { TRANSCRIPT_TAB, type TranscriptFocus } from "./TranscriptView.js";
@@ -442,6 +443,9 @@ export function Workspace({ project }: { project: ProjectView }) {
       <header className="titlebar drag">
         <span className="titlebar-project">{project.name}</span>
         <span className="titlebar-path">{project.dir}</span>
+        <div className="titlebar-actions">
+          <ConnectAiButton className="button titlebar-connect" />
+        </div>
       </header>
       {project.synced && <SyncWarning synced={project.synced} />}
       <ProposalBar />
