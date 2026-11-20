@@ -48,6 +48,11 @@ export interface TranscriptionRun {
   yes: boolean;
   /** Token of the refusal the person confirmed; absent, `yes` confirms whatever the run costs. */
   confirmation?: string | undefined;
+  /**
+   * Id of the local engine that times a text-only model's words (ADR 0046 decision 11), null for a timed model. The
+   * provider then gets no re-check windows, so the ask names the local timing instead of them.
+   */
+  localTiming?: string | null | undefined;
 }
 
 /**
@@ -82,13 +87,14 @@ export async function confirmTranscription(run: TranscriptionRun): Promise<void>
     ? `Transcribing ${run.asset} with ${providerId} uploads its audio (${heard}) to that service`
     : `Transcribing ${run.asset} with ${providerId} may send its audio (${heard}) off this machine`;
   const charged = (cost !== null && cost.amount > 0) || unknownCost;
+  const timing = run.localTiming ? `${run.localTiming} times its words on this machine first. ` : "";
   const price =
     cost !== null && cost.amount > 0
-      ? ` and costs about ${formatCost(cost)}, plus short re-checks of over-long words. `
+      ? ` and costs about ${formatCost(cost)}${timing ? ". " : ", plus short re-checks of over-long words. "}`
       : unknownCost
         ? " and may cost money: it gives no usable estimate and does not declare itself free. "
         : ". ";
-  const message = sent + price;
+  const message = sent + price + timing;
   if (!run.yes) {
     throw new RpcError(
       ErrorCode.ConfirmationRequired,

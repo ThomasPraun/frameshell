@@ -19,5 +19,5 @@ Each plugin = own npm package; `files` whitelist (`node scripts/plugins-npm.mjs 
 
 - Key from `OPENAI_API_KEY` env only, read per call. Every network text through `scrub`; never in errors/progress/files.
 - `scrub` of openai-transcription = hand copy of openai-speech's + parity test (`openai-transcription/test`).
-- Price from one table `MODEL_PRICES` with source + date; unknown model = `estimate` throws. Speech: price per character; model env `FRAMESHELL_OPENAI_SPEECH_MODEL` in `version`. Transcription: `whisper-1` only.
+- Price from one table `MODEL_PRICES` with source + date; unknown model = `estimate` throws. Speech: price per character; model env `FRAMESHELL_OPENAI_SPEECH_MODEL` in `version`. Transcription: `gpt-transcribe` (`textOnly`, host times it, ADR 0046 d11) + `whisper-1` until 2027-02-26.
 - Tests stub HTTP server only, never real API.

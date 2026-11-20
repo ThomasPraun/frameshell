@@ -71,9 +71,11 @@ describe("transcribe with the openai-transcription plugin", () => {
     }
   });
 
-  const transcribe = (params: Record<string, unknown> = {}) => conn.request("transcribe", { cwd: root, asset: "assets/voice.wav", provider: "openai", ...params });
+  const transcribeWith = (params: Record<string, unknown> = {}) => conn.request("transcribe", { cwd: root, asset: "assets/voice.wav", provider: "openai", ...params });
+  const transcribe = transcribeWith;
 
   it("asks before uploading, transcribes only after `yes` with the token, and never writes the key into the project", async () => {
+    const transcribe = (params: Record<string, unknown> = {}) => transcribeWith({ model: "whisper-1", ...params });
     const refused = await transcribe().then(() => null, (error: unknown) => error as RpcError);
     expect(refused).toBeInstanceOf(RpcError);
     expect(refused!.code).toBe(ErrorCode.ConfirmationRequired);
@@ -109,7 +111,16 @@ describe("transcribe with the openai-transcription plugin", () => {
   it("refuses another model before uploading", async () => {
     await expect(transcribe({ yes: true, model: "gpt-4o-transcribe" })).rejects.toMatchObject({
       code: ErrorCode.TranscriptionFailed,
-      message: expect.stringContaining("only with whisper-1"),
+      message: expect.stringContaining("only with gpt-transcribe or whisper-1"),
+    });
+    expect(requests).toEqual([]);
+  });
+
+  it("with the default text-only model, needs whisper.cpp for the times and fails before the ask without it", async () => {
+    // No `@frameshell/whisper-cpp` in this project: the local timing cannot load, so nothing is asked or uploaded.
+    await expect(transcribe({ yes: true })).rejects.toMatchObject({
+      code: ErrorCode.TranscriptionFailed,
+      message: expect.stringMatching(/gpt-transcribe gives no word times, which whisper\.cpp adds on this machine.*whisper-cpp/s),
     });
     expect(requests).toEqual([]);
   });
