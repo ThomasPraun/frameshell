@@ -281,7 +281,7 @@ export const es: Dict = {
     connect: {
       title: "Conecta tu IA",
       body: "Instala Claude Desktop o la app de escritorio de ChatGPT y ábrela una vez. Luego, en Frameshell, haz clic en <strong>Conecta tu IA</strong> en la barra de título de la ventana del proyecto y en <strong>Conectar</strong> en la tarjeta de esa app. Cierra la app y vuelve a abrirla una vez para terminar.",
-      aside: "Esto requiere una versión de Frameshell posterior a la 0.18. Con la 0.18, abre un proyecto y haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal (la app de escritorio de ChatGPT necesita la versión nueva). ChatGPT en la web no es compatible. Para Cursor o VS Code, copia el fragmento del grupo \"Para desarrolladores\" de Conecta tu IA. El botón Conectar de Frameshell para Claude Desktop no está disponible en Linux: usa ese fragmento o una herramienta para desarrolladores.",
+      aside: "Esto requiere Frameshell 0.19 o posterior. Con la 0.18, abre un proyecto y haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal (la app de escritorio de ChatGPT necesita la 0.19 o posterior). ChatGPT en la web no es compatible. Para Cursor o VS Code, copia el fragmento del grupo \"Para desarrolladores\" de Conecta tu IA. El botón Conectar de Frameshell para Claude Desktop no está disponible en Linux: usa ese fragmento o una herramienta para desarrolladores.",
       more: "Claude Code, Codex y Gemini CLI: cómo conectar cada uno",
     },
     plugins: {
@@ -369,7 +369,7 @@ export const es: Dict = {
           },
           {
             title: "Conecta Frameshell con Claude",
-            body: "En Frameshell, abre un proyecto y haz clic en <strong>Conecta tu IA</strong> en la barra de título de la ventana (o en la tarjeta de la pantalla de bienvenida), y luego en <strong>Conectar</strong> en la tarjeta de Claude Desktop. Frameshell se agrega a la configuración de Claude, deja todo lo demás como está y guarda una copia del archivo antes. <strong>Desconectar</strong> lo quita de nuevo. Esto requiere una versión posterior a la 0.18; con Frameshell 0.8 a 0.18, haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal. El botón Conectar de Frameshell para Claude Desktop no está disponible en Linux; ahí usa el paso siguiente.",
+            body: "En Frameshell, abre un proyecto y haz clic en <strong>Conecta tu IA</strong> en la barra de título de la ventana (o en la tarjeta de la pantalla de bienvenida), y luego en <strong>Conectar</strong> en la tarjeta de Claude Desktop. Frameshell se agrega a la configuración de Claude, deja todo lo demás como está y guarda una copia del archivo antes. <strong>Desconectar</strong> lo quita de nuevo. Esto requiere Frameshell 0.19 o posterior; con Frameshell 0.8 a 0.18, haz clic en <strong>Conectar Claude Desktop</strong>, arriba de la terminal. El botón Conectar de Frameshell para Claude Desktop no está disponible en Linux; ahí usa el paso siguiente.",
             cmds: [],
           },
           {
@@ -383,7 +383,7 @@ export const es: Dict = {
           },
           {
             title: "Reinicia Claude",
-            body: "Cierra Claude por completo y vuelve a abrirlo. Frameshell aparece entonces entre sus conectores.",
+            body: "Cierra Claude por completo y vuelve a abrirlo. Frameshell aparece entonces entre sus conectores. Desde la 0.19, <strong>Abrir Claude Desktop</strong> en la tarjeta abre Claude por ti y copia una frase inicial para que la pegues en el chat; <strong>Descargar Claude Desktop</strong> aparece cuando parece que la app no está instalada.",
             cmds: [],
           },
           {
@@ -398,7 +398,7 @@ export const es: Dict = {
         group: "desktop",
         name: "App de escritorio de ChatGPT",
         tag: "",
-        intro: "Chateas con ChatGPT en la app de OpenAI para tu computadora. Frameshell se agrega a la opción de servidores MCP que la app comparte con Codex. Esto requiere una versión de Frameshell posterior a la 0.18, y no conocemos una app de escritorio de ChatGPT para Linux; ahí, usa una herramienta para desarrolladores de más abajo.",
+        intro: "Chateas con ChatGPT en la app de OpenAI para tu computadora. Frameshell se agrega a la opción de servidores MCP que la app comparte con Codex. Esto requiere Frameshell 0.19 o posterior, y no conocemos una app de escritorio de ChatGPT para Linux; ahí, usa una herramienta para desarrolladores de más abajo.",
         steps: [
           {
             title: "Instala ChatGPT",
@@ -412,7 +412,7 @@ export const es: Dict = {
           },
           {
             title: "Reinicia ChatGPT",
-            body: "Cierra la app por completo y vuelve a abrirla.",
+            body: "Cierra la app por completo y vuelve a abrirla. <strong>Abrir ChatGPT</strong> en la tarjeta la abre y copia una frase inicial para que la pegues en el chat; <strong>Descargar ChatGPT</strong> aparece cuando parece que la app no está instalada.",
             cmds: [],
           },
           {

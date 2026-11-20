@@ -282,7 +282,7 @@ export const en = {
     connect: {
       title: "Connect your AI",
       body: "Install Claude Desktop or the ChatGPT desktop app and open it once. Then in Frameshell click <strong>Connect your AI</strong> in the project window's title bar, and <strong>Connect</strong> on that app's card. Quit and reopen the app once to finish.",
-      aside: "This needs a Frameshell version newer than 0.18. With 0.18, open a project and click <strong>Connect Claude Desktop</strong> above the terminal instead (the ChatGPT desktop app needs the newer version). ChatGPT on the web is not supported. For Cursor or VS Code, copy the snippet from the \"For developers\" group of Connect your AI. Frameshell's Connect button for Claude Desktop is not available on Linux: use that snippet or a developer tool.",
+      aside: "This needs Frameshell 0.19 or later. With 0.18, open a project and click <strong>Connect Claude Desktop</strong> above the terminal instead (the ChatGPT desktop app needs 0.19 or later). ChatGPT on the web is not supported. For Cursor or VS Code, copy the snippet from the \"For developers\" group of Connect your AI. Frameshell's Connect button for Claude Desktop is not available on Linux: use that snippet or a developer tool.",
       more: "Claude Code, Codex and Gemini CLI: how to connect each",
     },
     plugins: {
@@ -371,7 +371,7 @@ export const en = {
           },
           {
             title: "Connect Frameshell to Claude",
-            body: "In Frameshell, open a project and click <strong>Connect your AI</strong> in the window's title bar (or the card on the welcome screen), then <strong>Connect</strong> on the Claude Desktop card. Frameshell adds itself to Claude's settings, keeps everything else there as it is, and saves a copy of the file first. <strong>Disconnect</strong> takes it out again. This needs a version newer than 0.18; with Frameshell 0.8 to 0.18, click <strong>Connect Claude Desktop</strong> above the terminal instead. Frameshell's Connect button for Claude Desktop is not available on Linux; use the next step there.",
+            body: "In Frameshell, open a project and click <strong>Connect your AI</strong> in the window's title bar (or the card on the welcome screen), then <strong>Connect</strong> on the Claude Desktop card. Frameshell adds itself to Claude's settings, keeps everything else there as it is, and saves a copy of the file first. <strong>Disconnect</strong> takes it out again. This needs Frameshell 0.19 or later; with Frameshell 0.8 to 0.18, click <strong>Connect Claude Desktop</strong> above the terminal instead. Frameshell's Connect button for Claude Desktop is not available on Linux; use the next step there.",
             cmds: [],
           },
           {
@@ -385,7 +385,7 @@ export const en = {
           },
           {
             title: "Restart Claude",
-            body: "Quit Claude completely and open it again. Frameshell then shows among its connectors.",
+            body: "Quit Claude completely and open it again. Frameshell then shows among its connectors. In 0.19 or later, <strong>Open Claude Desktop</strong> on the card starts Claude for you and copies a starter phrase to paste into the chat; <strong>Download Claude Desktop</strong> shows when the app looks not installed.",
             cmds: [],
           },
           {
@@ -400,7 +400,7 @@ export const en = {
         group: "desktop",
         name: "ChatGPT desktop app",
         tag: "",
-        intro: "You chat with ChatGPT in OpenAI's app for your computer. Frameshell adds itself to the MCP servers setting the app shares with Codex. This needs a Frameshell version newer than 0.18, and we know of no ChatGPT desktop app for Linux; there, use a developer tool below.",
+        intro: "You chat with ChatGPT in OpenAI's app for your computer. Frameshell adds itself to the MCP servers setting the app shares with Codex. This needs Frameshell 0.19 or later, and we know of no ChatGPT desktop app for Linux; there, use a developer tool below.",
         steps: [
           {
             title: "Install ChatGPT",
@@ -414,7 +414,7 @@ export const en = {
           },
           {
             title: "Restart ChatGPT",
-            body: "Quit the app completely and open it again.",
+            body: "Quit the app completely and open it again. <strong>Open ChatGPT</strong> on the card starts it and copies a starter phrase to paste into the chat; <strong>Download ChatGPT</strong> shows when the app looks not installed.",
             cmds: [],
           },
           {
