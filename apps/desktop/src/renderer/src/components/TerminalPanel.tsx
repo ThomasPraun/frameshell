@@ -11,7 +11,8 @@ import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
 import { ideaPrompt } from "../idea.js";
 import { usePanelWindow } from "../panel-window.js";
-import { panelShortcut } from "../shortcuts.js";
+import { isMac, panelShortcut } from "../shortcuts.js";
+import { terminalPaste } from "../terminal-paste.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 import { AgentGuide } from "./AgentGuide.js";
@@ -96,6 +97,8 @@ export interface AgentTerminal {
 /** A started xterm, as the panel drives it. */
 interface ViewHandle {
   type(lines: readonly string[]): void;
+  /** Put the keyboard in this terminal. */
+  focus(): void;
 }
 
 /**
@@ -412,6 +415,8 @@ export function TerminalPanel({
           onIdeaDone={() => setIdea(null)}
           onRun={(command) => {
             if (activeTab.info) window.frameshell.terminals.write(activeTab.info.id, `${command}\r`);
+            // The agent's first screen asks something (folder trust): the keys must reach it without a click first (#743).
+            views.current.get(activeTab.key)?.focus();
           }}
           onType={(text) => {
             const view = views.current.get(activeTab.key);
@@ -531,6 +536,8 @@ function TerminalView({
     const doc = element.ownerDocument;
     const view = doc.defaultView ?? window;
     let disposed = false;
+    /** The pty this view shows, once started. */
+    let started: string | null = null;
     const cleanups: (() => void)[] = [];
     const xterm = new Terminal({
       fontFamily: FONT_FAMILY,
@@ -541,6 +548,15 @@ function TerminalView({
       allowProposedApi: true,
       theme: THEME,
     });
+    // Ctrl+V pastes text on Windows and Linux, as in other terminals there (#743). xterm would send ^V, which Claude Code
+    // reads as "paste an image" and a shell as "insert the next key literally": leave the key to the browser, whose
+    // paste event xterm turns into a (bracketed) paste. With no text on the clipboard (an image), the program gets
+    // the ^V it asked for. Ctrl+Shift+V keeps working; macOS pastes with Cmd+V.
+    if (!isMac) {
+      const paste = terminalPaste(element, () => started !== null && window.frameshell.terminals.write(started, "\x16"), view);
+      xterm.attachCustomKeyEventHandler(paste.keyHandler);
+      cleanups.push(paste.dispose);
+    }
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.loadAddon(new Unicode11Addon());
@@ -558,6 +574,7 @@ function TerminalView({
       fitAddon.fit();
       const info = await start(tabKey, { cols: xterm.cols, rows: xterm.rows });
       if (!info || disposed) return;
+      started = info.id;
       // Output sent before the replay is in it: drop it until then, so nothing shows twice.
       let live = false;
       cleanups.push(route(info.id, (data) => live && xterm.write(data)));
@@ -579,6 +596,9 @@ function TerminalView({
           type(lines) {
             // paste(): what a user's paste does, wrapped in bracketed-paste marks when the program asked for them.
             xterm.paste(agentInput(lines, xterm.modes.bracketedPasteMode));
+            xterm.focus();
+          },
+          focus() {
             xterm.focus();
           },
         }),

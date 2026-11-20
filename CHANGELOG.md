@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Built-in terminal on Windows and Linux: Ctrl+V pastes the clipboard's text into any program, Claude Code included,
+  which read it as "paste an image" before. With no text on the clipboard (an image), the program still gets its ^V.
+  Ctrl+Shift+V keeps working (#743).
+- Starting an agent from the agent guide puts the keyboard in its terminal, so its first question (folder trust) can be
+  answered without a click (#743).
+- Agents on Windows find `frameshell` from Git Bash (Claude Code runs its commands there): the app writes an `sh` twin
+  of its `frameshell.cmd`, so the bare name works and matches the project's `Bash(frameshell *)` permission (#743).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
