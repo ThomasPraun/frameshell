@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
+  frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field
+  no longer scrolls the panel sideways, an open inspector leaves the picture about half the panel and scrolls instead
+  of adding a sideways bar, long inspector hints wrap, and render slates stay inside a small frame (#745).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
