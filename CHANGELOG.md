@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whisper.cpp, headless Chrome, models) on disk with their size and total, and what is not downloaded yet, with Remove
   (`binaries.remove`, confirmed first; a refusal such as BinaryInUse is shown). The Shoot view's transcription notice
   links to the view, and its install command and the voiceover report's come from the official table. Plugin
-  descriptions in the app are in English and Spanish; the skill's app description names the view.
+  descriptions in the app are in English and Spanish; the skill's app description names the view. The official
+  plugin table is also exported as the subpath `@frameshell/protocol/official-plugins` (for the app's renderer),
+  with `installCommand(plugin)` for the terminal command.
 - Remove managed downloads to free disk (`PROTOCOL_VERSION` 184): new method `binaries.remove { name }` deletes a binary
   package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
   model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with

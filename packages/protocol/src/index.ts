@@ -27,6 +27,7 @@ export {
   type OfficialPluginKind,
   type PluginNeedKind,
   OFFICIAL_PLUGINS,
+  installCommand,
   installHint,
   officialPlugin,
   officialPluginProviding,

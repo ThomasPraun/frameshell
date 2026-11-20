@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { OFFICIAL_PLUGINS } from "@frameshell/protocol";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
@@ -42,8 +43,8 @@ test.afterAll(async () => {
 
 test("lists every official plugin with what it needs, costs and downloads, nothing installed", async () => {
   const panel = page.getByTestId("plugins-panel");
-  await expect(page.locator('[data-testid="plugin"]')).toHaveCount(6);
-  await expect(page.locator('[data-testid="plugin"][data-state="not-installed"]')).toHaveCount(6);
+  await expect(page.locator('[data-testid="plugin"]')).toHaveCount(OFFICIAL_PLUGINS.length);
+  await expect(page.locator('[data-testid="plugin"][data-state="not-installed"]')).toHaveCount(OFFICIAL_PLUGINS.length);
   await expect(page.getByTestId("plugins-trust")).toHaveCount(0);
   await expect(panel).toContainText("Installing a plugin also trusts this project's plugin list");
 

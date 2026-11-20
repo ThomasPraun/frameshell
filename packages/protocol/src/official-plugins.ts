@@ -133,7 +133,12 @@ export function officialPluginProviding(kind: OfficialPluginKind, id: string): O
   return OFFICIAL_PLUGINS.find((plugin) => plugin.kind === kind && plugin.provides.includes(id));
 }
 
+/** Terminal command that installs official plugin `plugin`. */
+export function installCommand(plugin: Pick<OfficialPlugin, "name">): string {
+  return `frameshell plugin install ${plugin.name}`;
+}
+
 /** Sentence (leading space) saying how to get official plugin `plugin`. */
 export function installHint(plugin: Pick<OfficialPlugin, "name">): string {
-  return ` Install ${plugin.name} with \`frameshell plugin install ${plugin.name}\`; \`frameshell plugin catalog\` lists what official plugins need and download.`;
+  return ` Install ${plugin.name} with \`${installCommand(plugin)}\`; \`frameshell plugin catalog\` lists what official plugins need and download.`;
 }

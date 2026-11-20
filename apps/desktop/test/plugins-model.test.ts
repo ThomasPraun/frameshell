@@ -159,6 +159,10 @@ describe("official plugin words", () => {
     expect(Object.keys(strings.en.about).sort()).toEqual(OFFICIAL_PLUGINS.map((plugin) => plugin.name).sort());
   });
 
+  it("says each official plugin's purpose in English as the official table does", () => {
+    for (const plugin of OFFICIAL_PLUGINS) expect(strings.en.about[plugin.name]?.purpose, plugin.name).toBe(plugin.purpose);
+  });
+
   it("builds the transcription install command from the official table", () => {
     expect(transcriptionInstallCommand("whisper-cpp")).toBe("frameshell plugin install @frameshell/whisper-cpp");
     expect(transcriptionInstallCommand("nobody")).toBe("frameshell plugin catalog");

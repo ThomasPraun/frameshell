@@ -1221,6 +1221,7 @@ function registerPluginsIpc(): void {
     outcome(async (): Promise<PluginsView> => {
       const cwd = await dirOf(event.sender);
       const catalog = await daemon.request("plugin.catalog", { cwd });
+      if (catalog.trust === "not-required") return { catalog, declared: [] };
       const { plugins } = await daemon.request("plugin.list", { cwd });
       return { catalog, declared: plugins };
     }),

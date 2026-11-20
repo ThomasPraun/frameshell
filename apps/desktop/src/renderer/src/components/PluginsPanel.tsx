@@ -75,8 +75,10 @@ export function PluginsPanel() {
     act(
       `install:${row.name}`,
       async () => {
-        await window.frameshell.plugins.install(row.name);
-        return t.plugins.installed(titleOf(row.name));
+        const { plugin } = await window.frameshell.plugins.install(row.name);
+        return plugin.status === "error"
+          ? t.plugins.installedNotLoaded(titleOf(row.name), plugin.error ?? "")
+          : t.plugins.installed(titleOf(row.name));
       },
       t.plugins.installFailed,
     );

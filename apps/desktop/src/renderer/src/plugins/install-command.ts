@@ -1,4 +1,4 @@
-import { officialPluginProviding } from "@frameshell/protocol/official-plugins";
+import { installCommand, officialPluginProviding } from "@frameshell/protocol/official-plugins";
 
 /**
  * Terminal command that installs the official plugin providing transcription `provider`, from the one official table;
@@ -6,5 +6,5 @@ import { officialPluginProviding } from "@frameshell/protocol/official-plugins";
  */
 export function transcriptionInstallCommand(provider: string): string {
   const plugin = officialPluginProviding("transcription-provider", provider);
-  return plugin ? `frameshell plugin install ${plugin.name}` : "frameshell plugin catalog";
+  return plugin ? installCommand(plugin) : "frameshell plugin catalog";
 }

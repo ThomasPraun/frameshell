@@ -677,7 +677,10 @@ export interface FrameshellApi {
     add(id: string, file: string, options: Record<string, string>): Promise<MethodResult<"model.add">>;
   };
   plugins: {
-    /** `plugin.catalog` and `plugin.list` of the window's project. Rejects with the daemon's message. */
+    /**
+     * `plugin.catalog` of the window's project, plus `plugin.list` when it declares plugins. Rejects with the
+     * daemon's message.
+     */
     read(): Promise<PluginsView>;
     /**
      * `plugin.install` of an official plugin by package name (others are refused); trusts the project's plugin list
