@@ -89,7 +89,10 @@ test("Ctrl+V pastes the clipboard's text into the terminal once; with no text th
   await expect.poll(async () => (await terminalText(page)).split("pasted-once").length - 1).toBe(2);
 
   // The tty's own ^V (quote the next key) is turned off, so `cat -v` shows the one it gets.
-  await runInTerminal(page, "stty lnext undef; cat -v");
+  // The keys below must reach `cat`, not the shell's line editor (where ^V quotes the Enter after it): wait for the
+  // line to run. The marker is printed in two halves, so the echoed command line never contains it whole.
+  await runInTerminal(page, "stty lnext undef; printf 'cat-%s\\n' started; cat -v");
+  await expect.poll(() => terminalText(page)).toContain("cat-started");
   // No text on the clipboard, as with a screenshot copied for Claude Code.
   await app.evaluate(({ clipboard }) => clipboard.clear());
   await page.keyboard.press("Control+v");

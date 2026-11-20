@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - "Chat about this" with no agent running copies the reference to the clipboard, shows the terminal and says to start
   an agent, instead of typing it at a shell prompt where Enter would run it (ADR 0048, #743).
+- Desktop: on Windows the app's terminals detect the agent running in them (Claude Code, Codex, ...) from the process
+  table, as macOS and Linux do from the foreground process, so Chat about this types at it without Connect Claude Code
+  (ADR 0048, #743).
 
 ### Fixed
 
