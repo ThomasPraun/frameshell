@@ -265,7 +265,14 @@ export function TimelinePanel({
   const { history } = useSelection();
   const { diff } = useHistoryDiff(TIMELINE, history, view?.revision ?? null);
   const proposed = useProposalMarks(TIMELINE);
-  // A History pick wins over the proposal's marks (After, ADR 0019).
+  // A History pick wins over the proposal's marks (After, ADR 0019); a proposal that arrives after the pick clears it,
+  // so the agent's new changes are what the lanes mark (#754).
+  const proposalTx = proposed?.tx ?? null;
+  const seenProposal = useRef<string | null>(null);
+  useEffect(() => {
+    if (proposalTx !== null && proposalTx !== seenProposal.current && selection.get().history !== null) selection.clear();
+    seenProposal.current = proposalTx;
+  }, [proposalTx]);
   const marks = history !== null ? (diff?.target === history ? diff.clips : null) : (proposed?.marks ?? null);
 
   useEffect(() => {

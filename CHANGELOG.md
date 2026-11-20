@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Changing the language (View > Language) no longer kills the terminal (#754): the reloaded window shows the shells
+  it had, with their output, and an agent running in one goes on. The same holds for any reload of the window.
+- Window menu lists the open project windows on Windows and Linux, to switch between projects (macOS lists them
+  itself) (#754).
+- Release builds leave Reload, Force Reload and Developer Tools out of View, so Ctrl+R no longer reloads the window
+  by accident; `FRAMESHELL_DEVTOOLS=1` brings them back (#754).
+- A new agent proposal clears a History pick, so its diff shows on the lanes instead of the old entry's marks (#754).
+- Take and History times follow the UI language instead of the system's (#754).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

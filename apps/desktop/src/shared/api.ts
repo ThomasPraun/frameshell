@@ -133,6 +133,14 @@ export interface TerminalInfo {
   shell: string;
 }
 
+/** A terminal of the window that outlived its view, as {@link FrameshellApi.terminals} `list` reports it. */
+export interface TerminalSurvivor extends TerminalInfo {
+  /** Its shell's exit code once it exited; null while it runs. */
+  exitCode: number | null;
+  /** Agent CLI running in it now, e.g. `claude`; null when none or unknown. */
+  agent: string | null;
+}
+
 /**
  * A timeline of the window's project changed (daemon `timeline.changed`), or,
  * with `timeline: null`, the daemon connection was re-established and any
@@ -378,6 +386,11 @@ export interface FrameshellApi {
   };
   terminals: {
     create(size: { cols: number; rows: number }): Promise<TerminalInfo>;
+    /**
+     * The window's terminals not closed yet, oldest first. After a reload (a language change, Ctrl+R) the panel
+     * shows these again, so the shells and agents in them go on; empty in a fresh window.
+     */
+    list(): Promise<TerminalSurvivor[]>;
     /**
      * Output to feed a view mounting on terminal `id` (ADR 0012): its recent
      * output, about 10,000 lines. Data events sent before the reply are in
@@ -1134,6 +1147,7 @@ export const Channel = {
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
+  terminalList: "terminal:list",
   terminalWrite: "terminal:write",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",

@@ -101,6 +101,23 @@ describe("TerminalManager", () => {
     expect(manager.attach("never-created")).toBeNull();
   });
 
+  // A reloaded window (language change, Ctrl+R) shows the terminals it had instead of starting new ones.
+  it("lists the terminals not killed yet, exited ones with their code, until they are killed", async () => {
+    const { manager, output, exits, launch } = setup();
+    const a = manager.create(launch("term-list1"), { cols: 80, rows: 24 });
+    const b = manager.create(launch("term-list2"), { cols: 80, rows: 24 });
+    expect(manager.list().map(({ id, session, exitCode }) => ({ id, session, exitCode }))).toEqual([
+      { id: a.id, session: "term-list1", exitCode: null },
+      { id: b.id, session: "term-list2", exitCode: null },
+    ]);
+    await waitForPrompt(output, a.id);
+    manager.write(a.id, "exit 3\r");
+    await expect.poll(() => exits.has(a.id), { timeout: POLL_MS }).toBe(true);
+    expect(manager.list().find(({ id }) => id === a.id)?.exitCode).toBe(3);
+    manager.kill(a.id);
+    expect(manager.list().map(({ id }) => id)).toEqual([b.id]);
+  });
+
   it("caps the output it keeps", async () => {
     const { manager, output, launch } = setup({ outputLimits: { lines: 20, size: 100_000 } });
     const { id } = manager.create(launch("term-cap"), { cols: 80, rows: 24 });
