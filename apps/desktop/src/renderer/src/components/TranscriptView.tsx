@@ -489,10 +489,12 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
         )}
         {/* A row of its own under the buttons: it wraps instead of being cut off, and never moves when they change. */}
         <span className="hint">{t.transcript.hint}</span>
-        {pickerAssets.length === 1 && (
+        {/* Always there once a transcript is shown, off until the selection is in one asset: selecting never reflows the toolbar (#741). */}
+        {model && model.assets.length > 0 && (
           <SpeakerPicker
-            asset={pickerAssets[0]!}
-            count={speakerTargets(pickerAssets[0]!).length}
+            asset={pickerAssets.length === 1 ? pickerAssets[0]! : model.assets[0]!}
+            count={pickerAssets.length === 1 ? speakerTargets(pickerAssets[0]!).length : 0}
+            disabled={pickerAssets.length !== 1}
             onPick={(speaker) => void saveSpeaker(pickerAssets[0]!.path, speakerTargets(pickerAssets[0]!), speaker)}
           />
         )}
@@ -760,15 +762,27 @@ function WordEditor({
 }
 
 /**
- * Who says the selected words: a speaker of the transcript, or a new one. Offered while the selection (marked here
- * or made anywhere) sits in one transcript; a pick saves at once and the box goes back to its prompt.
+ * Who says the selected words: a speaker of the transcript, or a new one. Always shown, so a selection never reflows
+ * the toolbar; enabled while the selection (marked here or made anywhere) sits in one transcript. A pick saves at once
+ * and the box goes back to its prompt.
  */
-function SpeakerPicker({ asset, count, onPick }: { asset: AssetTranscript; count: number; onPick: (speaker: { id: string; name: string } | null) => void }) {
+function SpeakerPicker({
+  asset,
+  count,
+  disabled,
+  onPick,
+}: {
+  asset: AssetTranscript;
+  count: number;
+  disabled: boolean;
+  onPick: (speaker: { id: string; name: string } | null) => void;
+}) {
   return (
     <select
       className="clip-field-select transcript-speaker-picker"
+      disabled={disabled}
       aria-label={t.transcript.saidByLabel}
-      data-tip={t.transcript.saidByTitle(count)}
+      data-tip={disabled ? t.transcript.saidByIdle : t.transcript.saidByTitle(count)}
       data-testid="speaker-picker"
       value=""
       onChange={(event) => {
