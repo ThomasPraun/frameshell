@@ -37,6 +37,22 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
     return window.frameshell.project.onVideosOffered(take);
   }, []);
 
+  // File > New Project from Video… / New Video from an Idea… (#740): start that way at once, once.
+  useEffect(() => {
+    const take = () =>
+      void window.frameshell.project.takeStart().then((start) => {
+        if (start === "video") void chooseVideosRef.current();
+        else if (start === "idea") {
+          setPlan(null);
+          setIdea(true);
+          setNotProject(null);
+          setError(null);
+        }
+      });
+    take();
+    return window.frameshell.project.onStartOffered(take);
+  }, []);
+
   const run = async (action: () => Promise<OpenOutcome>) => {
     setBusy(true);
     setError(null);
@@ -70,6 +86,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
   );
   const dragging = useFileDrop(useCallback((paths: string[]) => void dropped(paths), [dropped]));
 
+  const chooseVideosRef = useRef(async () => {});
   const chooseVideos = async () => {
     setError(null);
     try {
@@ -82,6 +99,8 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
       setError((failure as Error).message);
     }
   };
+
+  chooseVideosRef.current = chooseVideos;
 
   return (
     <main className={`welcome drag${dragging ? " is-dropping" : ""}`}>
