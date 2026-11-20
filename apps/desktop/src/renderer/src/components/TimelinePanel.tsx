@@ -1,6 +1,7 @@
 import type { ClipDiff, MatteStateInfo, OperationResult } from "@frameshell/protocol";
 import { type Clip, MARKER_LABEL_MAX } from "@frameshell/schema";
 import {
+  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -73,6 +74,7 @@ import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
 import { type EdgeHit, edgeAt } from "../timeline/transitions.js";
+import { addToTimeline, carriesMedia, droppedMedia, onMediaAdded } from "../timeline/media-drag.js";
 import { type PaintMode, clearEdit, laneAt, paintEdits, shotSpans, unpaintEdits } from "../timeline/turn-lanes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
@@ -173,6 +175,7 @@ export function TimelinePanel({
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const scenes = useSceneSpans(TIMELINE, view?.revision ?? null);
   const [status, setStatus] = useState<Status | null>(null);
+  useEffect(() => onMediaAdded((line) => setStatus(line.text ? { tone: line.error ? "error" : "info", text: line.text } : null)), []);
   // Program tracks whose turn lanes are open, and the turns they draw (measured again when anything they hear changes).
   const [lanesOpen, setLanesOpen] = useState<ReadonlySet<string>>(new Set());
   const { sources, hashes } = useTranscripts();
@@ -802,6 +805,29 @@ function TimelineCanvas({
 
   const timeAt = (x: number) => (x + state.current.scrollLeft) / state.current.pxPerSecond;
 
+  /** Media dragged from Files (#738): the timeline takes it, unless this is an image project (layers, not time). */
+  const onMediaDragOver = (event: DragEvent) => {
+    if (image || !carriesMedia(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  /** Media dropped from Files: on the video or audio track under the pointer from the time there, else where it goes by kind. */
+  const onMediaDrop = (event: DragEvent) => {
+    if (image || !carriesMedia(event.dataTransfer)) return;
+    event.preventDefault();
+    const paths = droppedMedia(event.dataTransfer);
+    const box = scroller.current;
+    const layout = latest.current.layout;
+    if (paths.length === 0 || !box || !layout) return;
+    const rect = box.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const contentY = event.clientY - rect.top + state.current.scrollTop;
+    const row = layout.rows.find((candidate) => contentY >= candidate.top && contentY < candidate.top + candidate.height);
+    const target = row && (row.kind === "video" || row.kind === "audio") ? { track: row.id, start: onGrid(timeAt(x)) } : undefined;
+    void addToTimeline(paths, target);
+  };
+
   /** On the frame grid, as a stroke on a turn lane names frames the agent can address. */
   const onGrid = (time: number) => Math.max(0, Math.round(time * latest.current.fps) / latest.current.fps);
 
@@ -1424,6 +1450,8 @@ function TimelineCanvas({
           onLostPointerCapture={onPointerCancel}
           onContextMenu={onContextMenu}
           onPointerLeave={() => setHover(null)}
+          onDragOver={onMediaDragOver}
+          onDrop={onMediaDrop}
         >
           <div ref={sizer} className="timeline-sizer" />
         </div>

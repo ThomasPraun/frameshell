@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Put media on the timeline without an agent: right-click a video, sound or picture in `assets/` in Files and choose
+  Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
+  none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
