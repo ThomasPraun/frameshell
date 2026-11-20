@@ -11,7 +11,8 @@ export const MCP_USAGE = `Usage: frameshell mcp [--channel]
 
 Serve the Model Context Protocol on stdin/stdout for MCP clients (Claude Code, Codex, Cursor…).
 Every daemon operation becomes a typed tool; timelines, history, transcripts and status are
-resources. Tools act on the project enclosing the directory it starts in.
+resources, and so is the agent skill (frameshell://skill), for clients that cannot load it.
+Tools act on the project enclosing the directory it starts in.
 
 --channel (or FRAMESHELL_CHANNEL=1) also pushes references sent from the app ("Chat about this")
 into the session as Claude Code channel events, so Claude reacts without a message from you.
@@ -51,10 +52,13 @@ export async function runMcp(argv: string[], io: McpIo): Promise<number> {
   }
   const channel = argv.includes("--channel") || /^(1|true|yes|on)$/i.test(io.env["FRAMESHELL_CHANNEL"] ?? "");
   const session = io.env["FRAMESHELL_SESSION"] || `mcp-${randomBytes(4).toString("hex")}`;
+  // Loaded here, not at the top: only the MCP server needs the bundled skill, every other command starts faster without it.
+  const { CORE_SKILL_FILES } = await import("@frameshell/core/skill");
   await serveStdio({
     cwd: io.cwd,
     version: CLI_VERSION,
     channel,
+    skill: CORE_SKILL_FILES,
     stdin: io.stdin,
     stdout: io.stdout,
     connect: (mcpClient) =>

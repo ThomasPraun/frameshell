@@ -37,7 +37,7 @@ Area rules live in nested `CLAUDE.md` files. Claude Code loads one when you read
 | Preview player | `apps/desktop/src/renderer/src/preview/CLAUDE.md` |
 | Plugins, cloud providers | `plugins/CLAUDE.md`; `plugins/hyperframes/CLAUDE.md`; `plugins/blender/CLAUDE.md` |
 | Managed binaries (ffmpeg, whisper.cpp, headless Chrome, models: pins, sources, licences, mirror, re-pin) | `docs/binaries.md` |
-| MCP server (tools from registry, resources, frame images, default project from active window, `--channel` Claude Code channel push; `ui_*` state + navigation, broker daemon → app window) | `docs/mcp.md`; `packages/mcp/src/server.ts`, `packages/mcp/src/project.ts`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts`; ADR 0014 |
+| MCP server (tools from registry, resources, skill as resources `frameshell://skill`, frame images, default project from active window, `--channel` Claude Code channel push; `ui_*` state + navigation, broker daemon → app window) | `docs/mcp.md`; `packages/mcp/src/server.ts`, `packages/mcp/src/project.ts`, `packages/mcp/src/skill.ts`; `packages/core/src/ui/broker.ts`, `apps/desktop/src/renderer/src/ui-link.ts`; ADR 0014 |
 | Agent skill (content, bundle into core, shipped hashes + refresh of project copy, plugin skill links, name check, Case B eval) | `skills/frameshell/`; `packages/core/src/skills/` (`refresh.ts`, `shipped.json` grows on `pnpm gen:skill`), `packages/core/src/plugins/skills.ts`; `packages/cli/test/skill-docs.test.ts`; `evals/agent-skill/README.md` |
 | Release packaging, signing secrets, cutting a release, update files | `docs/release.md` |
 | Landing page frameshell.dev (Astro, own npm, Cloudflare Pages, hero video slot) | `website/README.md` |

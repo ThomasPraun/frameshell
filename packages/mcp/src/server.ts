@@ -28,6 +28,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { contactSheet, decodePng, encodePng, fitWithin } from "./png.js";
 import { ProjectResolver, type ResolvedProject, appProjectNote, insideProject } from "./project.js";
+import { SkillResources } from "./skill.js";
 import { ProjectResources, STATUS_URI, historyUri, timelineUri, transcriptUri } from "./resources.js";
 import { CAPTURE_MAX_SIDE, FramesStripParams, REVIEW_MAX_IMAGES, REVIEW_MAX_SIDE, STRIP_MAX_WIDTH, type ToolSpec, buildTools } from "./tools.js";
 
@@ -53,6 +54,11 @@ export interface McpServerOptions {
    * reference sent to this client's inbox as `notifications/claude/channel`, taking it from the inbox (ADR 0025).
    */
   channel?: boolean;
+  /**
+   * Files of the agent skill, path relative to the skill directory (`SKILL.md`, `reference/cli.md`) to Markdown, served
+   * as resources `frameshell://skill[/<path>]` with or without a project. The CLI passes the skill bundled into core.
+   */
+  skill?: Readonly<Record<string, string>>;
 }
 
 /** Seconds one `inbox.wait` of the channel pump blocks before it asks again. */
@@ -76,7 +82,11 @@ const INSTRUCTIONS =
   "Tools without `cwd` act on the project enclosing the directory this server started in; when that is in no " +
   "project (one server for every project, e.g. Claude Desktop), on the project open in the Frameshell app window " +
   "the user used last, and the result then names it in a `Project: <dir>` line: check it is the project you mean, " +
-  "since it follows the user switching windows. No project either way: open one in Frameshell, or pass `cwd`.";
+  "since it follows the user switching windows. No project either way: open one in Frameshell, or pass `cwd`. " +
+  "`plugin_catalog` lists the options that exist (plugins, downloads, paid providers): offer them, the person chooses.";
+
+/** Added when the skill is served: the MCP-only client has no other way to learn the workflows. */
+const SKILL_INSTRUCTIONS = " Read resource `frameshell://skill` first for how to do each kind of work.";
 
 /**
  * Stdio-agnostic MCP server over frameshelld (SPEC §7b): every public registry
@@ -85,6 +95,8 @@ const INSTRUCTIONS =
  */
 export function createMcpServer(options: McpServerOptions): Server {
   const { cwd } = options;
+  const skill = new SkillResources(options.skill ?? {});
+  const instructions = INSTRUCTIONS + (skill.available ? SKILL_INSTRUCTIONS : "") + (options.channel ? CHANNEL_INSTRUCTIONS : "");
   const server = new Server(
     { name: "frameshell", version: options.version ?? "0.0.0" },
     {
@@ -93,7 +105,7 @@ export function createMcpServer(options: McpServerOptions): Server {
         resources: { subscribe: true, listChanged: true },
         ...(options.channel ? { experimental: { "claude/channel": {} } } : {}),
       },
-      instructions: options.channel ? INSTRUCTIONS + CHANNEL_INSTRUCTIONS : INSTRUCTIONS,
+      instructions,
     },
   );
   const tools = buildTools(cwd);
@@ -222,11 +234,13 @@ export function createMcpServer(options: McpServerOptions): Server {
     const { resources: list, timelines } = await resources.list();
     for (const timeline of timelines) known.add(timeline);
     await watch().catch(() => {});
-    return { resources: list };
+    return { resources: [...list, ...skill.list()] };
   });
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: resources.templates() }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, () => ({ resourceTemplates: [...resources.templates(), ...skill.templates()] }));
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const { uri } = request.params;
+    const doc = skill.read(uri);
+    if (doc) return { contents: [doc] };
     return { contents: [{ uri, mimeType: "application/json", text: await resources.read(uri) }] };
   });
   server.setRequestHandler(SubscribeRequestSchema, async (request) => {
