@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The status bar, `frameshell status` and Help > Copy diagnostics name the release version of the daemon
+  (`frameshelld 0.19.0`) instead of `0.0.0` (#739): inside a packaged app the daemon reports the app's stamped
+  version, since the workspace packages stay at `0.0.0`.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
