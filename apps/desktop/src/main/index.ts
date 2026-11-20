@@ -29,7 +29,7 @@ import {
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
+import type { EventParams, MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
@@ -536,6 +536,18 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
       onResync: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
     }),
+    // #742: a transcription the app did not start (CLI, agent, Transcript view) shows in the status bar too.
+    daemon.subscribe("transcription.progress", project.dir, {
+      onEvent: (update) => showOtherTranscription(project.dir, update),
+      onResync: () => {
+        if (!otherTranscriptions.has(project.dir)) return;
+        otherTranscriptions.delete(project.dir);
+        setups.delete(project.dir);
+        for (const state of windows.values()) {
+          if (state.project?.dir === project.dir) send(state.window.webContents, Channel.projectSetupChanged, null);
+        }
+      },
+    }),
     // ADR 0025: "Chat about this" lists the agents outside the app's terminals and says when they read.
     daemon.subscribe("target.changed", project.dir, {
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.agentsTargetsChanged, change satisfies TargetsChange),
@@ -862,6 +874,33 @@ async function transcriptionDownload(dir: string): Promise<number> {
   const model = await binaries.locateModel(`ggml-${project?.effective ?? WHISPER_DEFAULT_MODEL}`).catch(() => null);
   return toolBytes + (model && !model.installed ? model.pinned.size : 0);
 }
+/** The `transcription.progress` run the status bar shows, by project dir, while it is one the app did not start itself. */
+const otherTranscriptions = new Map<string, string>();
+
+/**
+ * Show a `transcribe` run of the project at `dir` in its status bar, unless a setup of the app is running there (that
+ * setup already shows its own run, with its own words). One run at a time: a second one waits until the first ends.
+ */
+function showOtherTranscription(dir: string, update: EventParams<"transcription.progress">): void {
+  const shown = otherTranscriptions.get(dir);
+  if (shown === undefined && setups.get(dir)?.state === "running") return;
+  if (shown !== undefined && shown !== update.id) return;
+  const said = text.app.setup;
+  const name = update.asset.split("/").pop() ?? update.asset;
+  if (update.state === "running") {
+    otherTranscriptions.set(dir, update.id);
+    reportSetup(dir, { message: `${name}: ${describeProgress(update, said.progress)}`, detail: null, fraction: update.fraction ?? null, state: "running" });
+    return;
+  }
+  otherTranscriptions.delete(dir);
+  reportSetup(
+    dir,
+    update.state === "done"
+      ? { message: said.transcribed(name), detail: null, fraction: null, state: "done" }
+      : { message: said.transcribeFailed(name), detail: update.message, fraction: null, state: "failed" },
+  );
+}
+
 /** Setup of each project created from videos, by project dir, while it runs and as it ended. */
 const setups = new Map<string, ProjectSetup>();
 

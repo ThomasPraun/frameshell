@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Daemon event `transcription.progress` (protocol 185): every `transcribe` run of a project, from any client, announces
+  its steps and its end to subscribers. The app shows a transcription started from the CLI or by the agent in the
+  status bar, as it does for its own (#742).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
