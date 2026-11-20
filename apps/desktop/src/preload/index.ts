@@ -196,6 +196,7 @@ const api: FrameshellApi = {
     end: (id) => invokeOutcome(Channel.shootEnd, id),
     recovered: () => invokeOutcome(Channel.shootRecovered),
     onRecovered: (listener) => subscribe(Channel.shootRecoveredChanged, listener),
+    onEndRequested: (listener) => subscribe(Channel.shootEndRequested, listener),
     cut: (id, take) => invokeOutcome(Channel.shootCut, id, take),
     check: (script) => invokeOutcome(Channel.shootCheck, script),
     status: (script) => invokeOutcome(Channel.shootStatus, script),

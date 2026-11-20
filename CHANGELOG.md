@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A global shortcut ends a recording shoot from any app (#744): Ctrl+Alt+Shift+S (⌘⌥⇧S on macOS), held only while
+  a session records, so remote help or a person in a call app can stop it while Frameshell's windows are hidden from
+  captures. The Shoot view says so while recording; when another app owns the keys, End stays the only way and no
+  hint shows.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

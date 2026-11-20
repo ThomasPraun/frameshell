@@ -41,6 +41,8 @@ export interface ShootState {
   phase: ShootPhase;
   /** `performance.now()` when recording began. */
   startedAt: number | null;
+  /** The global End shortcut is held for the session recording now (another app may own the keys). */
+  endShortcut: boolean;
   error: string | null;
   /** The session finished last here: by End, or recovered after a crash. */
   finished: ShootFinish | null;
@@ -73,6 +75,7 @@ export function createShootRecorder() {
     systemSilent: false,
     phase: "idle",
     startedAt: null,
+    endShortcut: false,
     error: null,
     finished: null,
   };
@@ -228,6 +231,8 @@ export function createShootRecorder() {
           .recovered()
           .then((list) => list.at(-1) && set({ finished: list.at(-1)! }), () => undefined);
         api().onRecovered((finish) => set({ finished: finish }));
+        // The global End shortcut, pressed in any app while this window records.
+        api().onEndRequested(() => void store.end());
       }
       return () => {
         mounted--;
@@ -351,7 +356,7 @@ export function createShootRecorder() {
         }
         origin = Math.min(...Object.values(starts));
         set({ phase: "recording", startedAt: performance.now() });
-        await api().started(opened, starts);
+        set({ endShortcut: await api().started(opened, starts) });
       } catch (error) {
         set({ error: message(error) });
         if (session) await store.end();
@@ -385,9 +390,9 @@ export function createShootRecorder() {
       session = null;
       try {
         const finished = await api().end(current.id);
-        set({ phase: "idle", startedAt: null, finished });
+        set({ phase: "idle", startedAt: null, endShortcut: false, finished });
       } catch (error) {
-        set({ phase: "idle", startedAt: null, error: message(error) });
+        set({ phase: "idle", startedAt: null, endShortcut: false, error: message(error) });
       }
       if (mounted === 0) releaseAll();
     },
