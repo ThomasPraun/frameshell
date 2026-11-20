@@ -19,7 +19,7 @@ import {
   geminiState,
 } from "@frameshell/cli";
 import { AI_APP_IDS, type AiAppChange, type AiAppId, type AiAppProblem, type AiAppStatus, type AiApps } from "../shared/api.js";
-import { SERVER_KEY, claudeDesktopConfigPath, claudeDesktopState, connectClaudeDesktop, disconnectClaudeDesktop, serverEntry } from "./claude-desktop.js";
+import { SERVER_KEY, claudeDesktopConfigFile, claudeDesktopState, connectClaudeDesktop, disconnectClaudeDesktop, serverEntry } from "./claude-desktop.js";
 
 /** Where the AI apps keep their settings, and the `frameshell` command they are told to run. */
 export interface AiAppsPlace {
@@ -47,10 +47,10 @@ interface Connector {
 }
 
 /** App `id`'s connector at `place`; null where the app does not exist (Claude Desktop on Linux). */
-function connectorOf(id: AiAppId, { home, env, setup }: AiAppsPlace): Connector | null {
+async function connectorOf(id: AiAppId, { home, env, setup }: AiAppsPlace): Promise<Connector | null> {
   switch (id) {
     case "claude-desktop": {
-      const file = claudeDesktopConfigPath(setup.platform, home, env);
+      const file = await claudeDesktopConfigFile(setup.platform, home, env);
       if (!file) return null;
       const entry = serverEntry(setup.command, setup.platform);
       return {
@@ -99,7 +99,7 @@ function problemOf(error: unknown): AiAppProblem {
 
 /** What app `id`'s settings say about Frameshell now. Never throws: a file that cannot be read is its `problem`. */
 export async function aiAppStatus(id: AiAppId, place: AiAppsPlace): Promise<AiAppStatus> {
-  const connector = connectorOf(id, place);
+  const connector = await connectorOf(id, place);
   if (!connector) return { id, available: false, installed: false, connected: false, different: false, files: [], problem: null };
   try {
     return { id, available: true, ...(await connector.state()), files: connector.files, problem: null };
@@ -128,7 +128,7 @@ export async function aiApps(place: AiAppsPlace): Promise<AiApps> {
  */
 export async function changeAiApp(id: AiAppId, connect: boolean, place: AiAppsPlace): Promise<AiAppChange> {
   const before = await aiAppStatus(id, place);
-  const connector = connectorOf(id, place);
+  const connector = await connectorOf(id, place);
   if (!connector) return { status: before, backups: [], problem: null };
   if (connect && !before.installed) return { status: before, backups: [], problem: { kind: "not-installed" } };
   try {
