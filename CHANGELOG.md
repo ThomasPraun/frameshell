@@ -1719,6 +1719,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Docs and website for a non-developer start (no code change): the README now walks through download, open or start a
+  project, Connect your AI (Claude Desktop or the ChatGPT desktop app), then talking to it, with plugins as optional
+  extras from the Plugins view; the terminal, `frameshell init`, the CLI on PATH, plugin install commands and the
+  coding agents moved to a "For developers" section. The website's home steps no longer start in the terminal, and its
+  "Connect your agent" page (English and Spanish) leads with Claude Desktop and the ChatGPT desktop app, adds the
+  ChatGPT desktop app with its honest notes, then lists the developer tools; the Connect your AI steps say they need a
+  version newer than 0.18 and keep the 0.18 "Connect Claude Desktop" path. `docs/SPEC.md` gains as-built lines for
+  the Plugins view, Connect your AI and the folded terminal; no decision changes.
 - Desktop app: the terminal starts folded in a new project, an optional extra. A slim strip at the right edge shows the
   prompt mark and the word Terminal; one click (or View > Terminal, Cmd/Ctrl+\) opens it at its kept width. No shell
   starts and the agent guide does not load until the terminal is first shown; after that it stays mounted, so folding it
