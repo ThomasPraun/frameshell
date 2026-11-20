@@ -22,5 +22,21 @@ export {
   connectClaudeCode,
   disconnectClaudeCode,
 } from "./claude-code-setup.js";
-export { InvalidConfigError, SERVER_KEY, type ServerEntry, editConfigFile, parseConfig, serverEntry, valueAt, withValue } from "./config-file.js";
+export {
+  InvalidConfigError,
+  SERVER_KEY,
+  type ServerEntry,
+  type ServerSetup,
+  type ServerState,
+  TOOL_TIMEOUT_S,
+  editConfigFile,
+  editMcpServer,
+  mcpServerState,
+  parseConfig,
+  serverEntry,
+  valueAt,
+  withValue,
+} from "./config-file.js";
+export { type CodexBackup, type CodexState, codexConfigPath, codexServer, codexState, codexTable, connectCodex, disconnectCodex } from "./codex-setup.js";
+export { type GeminiState, connectGemini, disconnectGemini, geminiServer, geminiSettingsPath, geminiState } from "./gemini-setup.js";
 export { ASK_USAGE, type AskIo, formatReferences, runAsk } from "./ask-command.js";

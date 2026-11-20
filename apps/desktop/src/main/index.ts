@@ -28,7 +28,7 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
-import { ErrorCode, RpcError, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
+import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
@@ -38,9 +38,8 @@ import {
   type LiveClipPage,
   type MenuCommand,
   type AgentChoice,
+  isAiAppId,
   type HandoffKind,
-  type ClaudeCodeStatus,
-  type ClaudeDesktopStatus,
   type OpenOutcome,
   type Outcome,
   type ProjectView,
@@ -51,6 +50,8 @@ import {
   type VoiceoverRun,
   type PeopleChange,
   type PersonTarget,
+  type MachineDownloads,
+  type PluginsView,
   type TargetsChange,
   type ProposalChange,
   type ShootChange,
@@ -69,6 +70,7 @@ import {
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import { HANDOFF_KINDS, HANDOFFS, isHandoffKind } from "../shared/handoff.js";
+import { downloadSize, sizeText } from "../shared/sizes.js";
 import {
   type CliInstallHost,
   type CliInstallOutcome,
@@ -83,24 +85,8 @@ import { captureContextFrame } from "./context-frames.js";
 import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
-import {
-  claudeCodeHookCommand,
-  claudeCodePaths,
-  claudeCodeServer,
-  claudeCodeState,
-  connectClaudeCode,
-  disconnectClaudeCode,
-} from "@frameshell/cli";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
-import {
-  InvalidConfigError,
-  SERVER_KEY,
-  claudeDesktopConfigPath,
-  claudeDesktopState,
-  connectClaudeDesktop,
-  disconnectClaudeDesktop,
-  serverEntry,
-} from "./claude-desktop.js";
+import { aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
 import { LayoutStore } from "./layout-store.js";
@@ -130,7 +116,7 @@ import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
-import { type DownloadChoice, chooseDownload, downloadSize } from "./transcription-download.js";
+import { type DownloadChoice, chooseDownload } from "./transcription-download.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
@@ -1201,6 +1187,60 @@ function registerModelIpc(): void {
   );
 }
 
+/**
+ * The Plugins view: the official catalog of the window's project, install and remove, the trust decision, and this
+ * machine's managed downloads. Removals ask in a native box first; only official plugins install from here.
+ */
+function registerPluginsIpc(): void {
+  const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
+  const confirm = async (sender: WebContents, message: string, detail: string) => {
+    const parent = BrowserWindow.fromWebContents(sender);
+    const said = text.plugins.confirm;
+    const options: Electron.MessageBoxOptions = { type: "warning", message, detail, buttons: [said.remove, said.cancel], defaultId: 1, cancelId: 1, noLink: true };
+    const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+    return response === 0;
+  };
+  ipcMain.handle(Channel.pluginsRead, (event) =>
+    outcome(async (): Promise<PluginsView> => {
+      const cwd = await dirOf(event.sender);
+      const catalog = await daemon.request("plugin.catalog", { cwd });
+      if (catalog.trust === "not-required") return { catalog, declared: [] };
+      const { plugins } = await daemon.request("plugin.list", { cwd });
+      return { catalog, declared: plugins };
+    }),
+  );
+  ipcMain.handle(Channel.pluginsInstall, (event, name: string) =>
+    outcome(async () => {
+      if (!officialPlugin(name)) throw new Error(`${name} is not an official plugin: install it from a terminal.`);
+      return daemon.request("plugin.install", { cwd: await dirOf(event.sender), spec: name });
+    }),
+  );
+  ipcMain.handle(Channel.pluginsRemove, (event, name: string) =>
+    outcome(async () => {
+      const cwd = await dirOf(event.sender);
+      const title = text.plugins.about[name]?.title ?? name;
+      if (!(await confirm(event.sender, text.plugins.confirm.removePlugin(title), text.plugins.confirm.removePluginDetail))) return false;
+      await daemon.request("plugin.remove", { cwd, name });
+      return true;
+    }),
+  );
+  ipcMain.handle(Channel.pluginsTrust, (event, decision: "trust" | "deny") =>
+    outcome(async () => daemon.request("project.trust", { cwd: await dirOf(event.sender), decision: decision === "trust" ? "trust" : "deny" })),
+  );
+  ipcMain.handle(Channel.pluginsDownloads, (event) =>
+    outcome(async (): Promise<MachineDownloads> => {
+      const { dataDir, downloads, binaries } = await daemon.request("doctor", { cwd: await dirOf(event.sender) });
+      return { dataDir, downloads, binaries };
+    }),
+  );
+  ipcMain.handle(Channel.pluginsRemoveDownload, (event, name: string, bytes: number) =>
+    outcome(async () => {
+      if (!(await confirm(event.sender, text.plugins.confirm.removeDownload(name, sizeText(bytes)), text.plugins.confirm.removeDownloadDetail))) return null;
+      return daemon.request("binaries.remove", { name });
+    }),
+  );
+}
+
 /** The People panel's calls (ADR 0020): thin daemon requests for the window's project, made by the app (no `by`). */
 function registerPeopleIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
@@ -1550,12 +1590,15 @@ function registerIpc(): void {
   ipcMain.on(Channel.lang, (event) => (event.returnValue = uiLanguage(languageChoice, app.getLocale())));
   ipcMain.handle(Channel.agentsDetect, () => findAgents());
   ipcMain.handle(Channel.agentsInstallCli, () => cliCommand(installCli));
-  ipcMain.handle(Channel.agentsClaudeDesktop, () => claudeDesktopStatus());
-  ipcMain.handle(Channel.agentsConnectClaudeDesktop, (event) => changeClaudeDesktop(true, event.sender));
-  ipcMain.handle(Channel.agentsDisconnectClaudeDesktop, (event) => changeClaudeDesktop(false, event.sender));
-  ipcMain.handle(Channel.agentsClaudeCode, () => claudeCodeStatus());
-  ipcMain.handle(Channel.agentsConnectClaudeCode, (event) => changeClaudeCode(true, event.sender));
-  ipcMain.handle(Channel.agentsDisconnectClaudeCode, (event) => changeClaudeCode(false, event.sender));
+  ipcMain.handle(Channel.agentsApps, () => aiApps(aiAppsAt));
+  ipcMain.handle(Channel.agentsConnect, (_event, id: unknown) => {
+    if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
+    return changeAiApp(id, true, aiAppsAt);
+  });
+  ipcMain.handle(Channel.agentsDisconnect, (_event, id: unknown) => {
+    if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
+    return changeAiApp(id, false, aiAppsAt);
+  });
   ipcMain.handle(Channel.agentsTargets, (event) =>
     outcome(async () => (await daemon.request("target.list", { cwd: (await requireProject(stateOf(event.sender))).project.dir })).targets),
   );
@@ -1883,6 +1926,7 @@ function registerIpc(): void {
   );
   registerPeopleIpc();
   registerModelIpc();
+  registerPluginsIpc();
   registerShootIpc();
   registerLiveIpc();
   ipcMain.handle(Channel.scriptsOutline, (event, file: string) =>
@@ -2120,105 +2164,8 @@ async function findAgents(): Promise<AgentChoice[]> {
   return found.map((agent) => (agent.path ? { ...agent, command: startCommand(agent.path, platform) } : agent));
 }
 
-/** Claude Desktop's config file, where it has one. */
-const claudeDesktopConfig = claudeDesktopConfigPath(process.platform, homedir(), process.env);
-
-async function claudeDesktopStatus(): Promise<ClaudeDesktopStatus> {
-  if (!claudeDesktopConfig) return { available: false, installed: false, connected: false };
-  const state = await claudeDesktopState(claudeDesktopConfig, serverEntry(cliShim, process.platform)).catch(() => ({ installed: true, connected: false }));
-  return { available: true, ...state };
-}
-
-/**
- * Add (after showing the entry) or remove Frameshell's server in Claude Desktop's config, through the stable
- * `frameshell` shim so app updates keep it working. Message boxes say what changed and to restart Claude.
- */
-async function changeClaudeDesktop(connect: boolean, sender: WebContents): Promise<ClaudeDesktopStatus> {
-  const said = text.agents.dialog;
-  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
-  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-  const file = claudeDesktopConfig;
-  if (!file) return claudeDesktopStatus();
-  try {
-    if (connect) {
-      if (!(await claudeDesktopStatus()).installed) {
-        await box({ type: "info", message: said.notInstalled });
-        return claudeDesktopStatus();
-      }
-      const entry = JSON.stringify({ [SERVER_KEY]: serverEntry(cliShim, process.platform) }, null, 2);
-      const { response } = await box({
-        type: "question",
-        message: said.connect,
-        detail: said.connectDetail(file, entry),
-        buttons: [said.connectButton, said.cancel],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (response !== 0) return claudeDesktopStatus();
-      const backup = await connectClaudeDesktop(file, serverEntry(cliShim, process.platform));
-      await box({ type: "info", message: said.connected, ...(backup ? { detail: said.backup(backup) } : {}) });
-    } else {
-      const backup = await disconnectClaudeDesktop(file);
-      await box({ type: "info", message: said.disconnected, ...(backup ? { detail: said.backup(backup) } : {}) });
-    }
-  } catch (error) {
-    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
-    await box({ type: "error", message: said.failed, detail });
-  }
-  return claudeDesktopStatus();
-}
-
-/** Frameshell's server and prompt hook in Claude Code's user settings, run through the app's stable shim (ADR 0025). */
-const claudeCodeSetup = { command: cliShim, platform: process.platform };
-
-async function claudeCodeStatus(): Promise<ClaudeCodeStatus> {
-  const paths = claudeCodePaths(homedir(), process.env);
-  const { installed, server, hook, connected } = await claudeCodeState(paths, claudeCodeSetup).catch(() => ({
-    installed: true,
-    server: false,
-    hook: false,
-    connected: false,
-  }));
-  return { installed, server, hook, connected };
-}
-
-/** Add (after showing both entries) or remove Frameshell's MCP server and prompt hook in Claude Code's user settings. */
-async function changeClaudeCode(connect: boolean, sender: WebContents): Promise<ClaudeCodeStatus> {
-  const said = text.agents.codeDialog;
-  const parent = BrowserWindow.fromWebContents(sender) ?? undefined;
-  const box = (options: Electron.MessageBoxOptions) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-  const paths = claudeCodePaths(homedir(), process.env);
-  try {
-    if (connect) {
-      if (!(await claudeCodeStatus()).installed) {
-        await box({ type: "info", message: said.notInstalled });
-        return claudeCodeStatus();
-      }
-      const server = JSON.stringify({ mcpServers: { [SERVER_KEY]: claudeCodeServer(claudeCodeSetup) } }, null, 2);
-      const hook = claudeCodeHookCommand(claudeCodeSetup);
-      const { response } = await box({
-        type: "question",
-        message: said.connect,
-        detail: said.connectDetail(paths.mcp, server, paths.settings, hook),
-        buttons: [said.connectButton, said.cancel],
-        defaultId: 0,
-        cancelId: 1,
-      });
-      if (response !== 0) return claudeCodeStatus();
-      const backups = await connectClaudeCode(paths, claudeCodeSetup);
-      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
-      await box({ type: "info", message: said.connected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
-    } else {
-      const backups = await disconnectClaudeCode(paths);
-      const saved = [backups.mcp, backups.settings].filter((file): file is string => file !== null);
-      await box({ type: "info", message: said.disconnected, ...(saved.length > 0 ? { detail: said.backups(saved.join("\n")) } : {}) });
-    }
-  } catch (error) {
-    const detail = error instanceof InvalidConfigError ? said.invalid(error.file) : (error as Error).message;
-    await box({ type: "error", message: said.failed, detail });
-  }
-  return claudeCodeStatus();
-}
+/** The AI apps of "Connect your AI", told to run the stable shim so app updates keep them working. */
+const aiAppsAt = aiAppsPlace(process.env, { command: cliShim, platform: process.platform });
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the

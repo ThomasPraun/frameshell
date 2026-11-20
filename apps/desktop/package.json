@@ -29,7 +29,8 @@
     "chokidar": "^5.0.0",
     "electron-updater": "6.8.10",
     "jsonc-parser": "3.3.1",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "smol-toml": "1.9.1"
   },
   "devDependencies": {
     "@expo-google-fonts/archivo-black": "0.4.1",

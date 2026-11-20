@@ -47,7 +47,7 @@ describe("connectClaudeDesktop", () => {
   it("adds only the frameshell server, keeping every other byte, and backs the file up", async () => {
     const before = '{\n  "mcpServers": {\n    "files": { "command": "npx", "args": ["-y", "server-files"] }\n  },\n  "theme": "dark"\n}\n';
     const file = await configIn(before);
-    expect(await claudeDesktopState(file, entry)).toEqual({ installed: true, connected: false });
+    expect(await claudeDesktopState(file, entry)).toEqual({ installed: true, connected: false, different: false });
 
     const backup = await connectClaudeDesktop(file, entry);
     expect(await readFile(backup!, "utf8")).toBe(before);
@@ -58,7 +58,7 @@ describe("connectClaudeDesktop", () => {
     });
     expect(after).toContain('"files": { "command": "npx", "args": ["-y", "server-files"] }');
     expect(after.endsWith('  "theme": "dark"\n}\n')).toBe(true);
-    expect(await claudeDesktopState(file, entry)).toEqual({ installed: true, connected: true });
+    expect(await claudeDesktopState(file, entry)).toEqual({ installed: true, connected: true, different: false });
 
     // Connecting again points the entry at the current shim, once.
     await connectClaudeDesktop(file, serverEntry("/new/frameshell", "linux"));
@@ -92,7 +92,7 @@ describe("disconnectClaudeDesktop", () => {
     await connectClaudeDesktop(file, entry);
     await disconnectClaudeDesktop(file);
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ mcpServers: { files: { command: "npx" } } });
-    expect(await claudeDesktopState(file, entry)).toEqual({ installed: true, connected: false });
+    expect(await claudeDesktopState(file, entry)).toEqual({ installed: true, connected: false, different: false });
   });
 
   it("does nothing when Frameshell is not in the config", async () => {
@@ -108,6 +108,7 @@ describe("claudeDesktopState", () => {
     expect(await claudeDesktopState(join(tmpdir(), "no-such-claude", "claude_desktop_config.json"), entry)).toEqual({
       installed: false,
       connected: false,
+      different: false,
     });
   });
 });

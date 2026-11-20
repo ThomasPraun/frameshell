@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AgentChoice, ClaudeCodeStatus, ClaudeDesktopStatus } from "../../../shared/api.js";
+import type { AgentChoice } from "../../../shared/api.js";
+import { connectPanel } from "../connect/store.js";
 import { t } from "../i18n.js";
 
 /** Remembered across projects and restarts: a per-viewer convenience, so browser storage. */
@@ -22,9 +23,9 @@ function writeHidden(hidden: boolean): void {
 }
 
 /**
- * How to talk to an agent, above the docked terminals. With no agent in the active terminal: the agents
- * found, each with Start, the others with their official installer typed into the terminal for the user to run,
- * and Claude Desktop. With an agent running: prompt suggestions it types there, unsent. A video made from
+ * How to talk to an agent, above the docked terminals. With no agent in the active terminal: first the way to
+ * "Connect your AI" (desktop apps), then the agents found, each with Start, the others with their official installer
+ * typed into the terminal for the user to run. With an agent running: prompt suggestions it types there, unsent. A video made from
  * an idea adds its prompt as the first suggestion and keeps the guide open until it is hidden.
  */
 export function AgentGuide({
@@ -50,15 +51,11 @@ export function AgentGuide({
 }) {
   const [hidden, setHidden] = useState(readHidden);
   const [choices, setChoices] = useState<AgentChoice[] | null>(null);
-  const [claude, setClaude] = useState<ClaudeDesktopStatus | null>(null);
-  const [code, setCode] = useState<ClaudeCodeStatus | null>(null);
   const [installTyped, setInstallTyped] = useState(false);
   const [opened, setOpened] = useState(false);
 
   const detect = useCallback(() => {
     void window.frameshell.agents.detect().then(setChoices);
-    void window.frameshell.agents.claudeDesktop().then(setClaude);
-    void window.frameshell.agents.claudeCode().then(setCode);
   }, []);
   useEffect(detect, [detect]);
 
@@ -114,6 +111,13 @@ export function AgentGuide({
         </button>
       </header>
       <p className="agent-guide-lede">{t.agents.lede}</p>
+      <button
+        className="link agent-guide-apps"
+        data-testid="agent-guide-connect"
+        onClick={(event) => connectPanel.open(event.currentTarget.ownerDocument.defaultView ?? window)}
+      >
+        {t.agents.desktopApps}
+      </button>
       {idea && (
         <p className="agent-guide-hint" role="status">
           {t.agents.idea.ready}
@@ -163,32 +167,6 @@ export function AgentGuide({
         </details>
       )}
       <div className="agent-guide-more">
-        {claude?.available &&
-          (claude.connected ? (
-            <span>
-              {t.agents.claudeConnected}{" "}
-              <button className="link" onClick={() => void window.frameshell.agents.disconnectClaudeDesktop().then(setClaude)}>
-                {t.agents.disconnectClaude}
-              </button>
-            </span>
-          ) : (
-            <button className="link" onClick={() => void window.frameshell.agents.connectClaudeDesktop().then(setClaude)}>
-              {t.agents.connectClaude}
-            </button>
-          ))}
-        {code?.installed &&
-          (code.connected ? (
-            <span>
-              {t.agents.codeConnected}{" "}
-              <button className="link" onClick={() => void window.frameshell.agents.disconnectClaudeCode().then(setCode)}>
-                {t.agents.disconnectCode}
-              </button>
-            </span>
-          ) : (
-            <button className="link" onClick={() => void window.frameshell.agents.connectClaudeCode().then(setCode)}>
-              {t.agents.connectCode}
-            </button>
-          ))}
         <button className="link" onClick={() => void window.frameshell.agents.installCli()}>
           {t.agents.installCli}
         </button>

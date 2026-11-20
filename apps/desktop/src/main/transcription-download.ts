@@ -11,8 +11,3 @@ export type DownloadChoice = "transcribe" | "skip";
 export async function chooseDownload(bytes: number, ask: (bytes: number) => Promise<DownloadChoice>): Promise<DownloadChoice> {
   return bytes > 0 ? ask(bytes) : "transcribe";
 }
-
-/** `bytes` as a rounded size for a download box: `~620 MB` below a gigabyte, else `~1.2 GB`. */
-export function downloadSize(bytes: number): string {
-  return bytes < 1e9 ? `~${Math.max(1, Math.round(bytes / 1e6))} MB` : `~${(bytes / 1e9).toFixed(1)} GB`;
-}

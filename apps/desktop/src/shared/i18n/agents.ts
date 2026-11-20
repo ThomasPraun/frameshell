@@ -1,5 +1,5 @@
-// Agent guide above the terminals (renderer/src/components/AgentGuide.tsx) and the Claude Desktop connection
-// dialogs (main/index.ts).
+// Agent guide above the terminals (renderer/src/components/AgentGuide.tsx) and "Connect your AI"
+// (renderer/src/components/ConnectAi.tsx).
 
 const en = {
   title: "Talk to an agent",
@@ -41,38 +41,57 @@ const en = {
       " First write three storylines, each in a different world, with a different device and form, and recommend one." +
       " Wait for my choice before building anything. Then list your assumptions, and put a free alternative next to every paid item (tools, stock, music, voices, fonts).",
   },
-  connectClaude: "Connect Claude Desktop",
-  disconnectClaude: "Disconnect Claude Desktop",
-  claudeConnected: "Claude Desktop is connected",
-  connectCode: "Connect Claude Code",
-  disconnectCode: "Disconnect Claude Code",
-  codeConnected: "Claude Code is connected",
+  /** Opens "Connect your AI" from the guide, before the terminal agents. */
+  desktopApps: "Prefer an app? Connect Claude Desktop or ChatGPT",
   installCli: "Install the 'frameshell' command for other terminals",
-  codeDialog: {
-    connect: "Connect Claude Code to Frameshell?",
-    connectDetail: (mcpFile: string, server: string, settingsFile: string, hook: string) =>
-      `Frameshell adds this server to ${mcpFile}:\n\n${server}\n\nand this hook, which runs on every message you send in Claude Code, to ${settingsFile}:\n\n${hook}\n\nThe hook hands Claude Code what you send with "Chat about this"; it prints nothing outside a Frameshell project or with the app closed. Everything else in both files stays as it is, and each file is backed up first.`,
-    connectButton: "Connect",
-    cancel: "Cancel",
-    connected: "Claude Code is connected. Restart your running Claude Code sessions to use Frameshell.",
-    backups: (files: string) => `Backup of the previous settings:\n${files}`,
-    disconnected: "Frameshell was removed from Claude Code. Restart your running Claude Code sessions to apply it.",
-    notInstalled: "Claude Code is not installed on this computer.",
-    failed: "Could not change Claude Code's settings.",
-    invalid: (file: string) => `${file} is not valid JSON, or its hooks are not a list. Fix or remove it, then connect again.`,
-  },
-  dialog: {
-    connect: "Connect Claude Desktop to Frameshell?",
-    connectDetail: (file: string, entry: string) =>
-      `Frameshell adds this server to ${file}:\n\n${entry}\n\nOther servers stay as they are, and the file is backed up first. Claude Desktop then works on the project open in Frameshell.`,
-    connectButton: "Connect",
-    cancel: "Cancel",
-    connected: "Claude Desktop is connected. Quit and reopen Claude Desktop to use Frameshell.",
-    backup: (file: string) => `Backup of the previous settings: ${file}`,
-    disconnected: "Frameshell was removed from Claude Desktop. Quit and reopen Claude Desktop to apply it.",
-    notInstalled: "Claude Desktop is not installed on this computer.",
-    failed: "Could not change Claude Desktop's settings.",
-    invalid: (file: string) => `${file} is not valid JSON. Fix or remove it, then connect again.`,
+  /** "Connect your AI" (renderer/src/components/ConnectAi.tsx): desktop apps first, developer tools after. */
+  connect: {
+    open: "Connect your AI",
+    openTitle: "Use Claude Desktop, ChatGPT or another AI app to edit with Frameshell",
+    title: "Connect your AI",
+    lede: "Connect an AI app you already use, then ask it in your own words to edit the video open here. Frameshell adds itself to the app's settings; everything else there stays as it is, and a copy is kept first.",
+    close: "Close",
+    checkAgain: "Check again",
+    connect: "Connect",
+    connectAgain: "Connect again",
+    disconnect: "Disconnect",
+    connected: "Connected",
+    working: "Working…",
+    notAvailable: "Not available on this system.",
+    notInstalled: (name: string) => `${name} is not on this computer yet. Install it, open it once, then Check again.`,
+    different: "Frameshell is set up there with another command. Connect again to use this app.",
+    restartConnected: (name: string) => `Done. Quit and reopen ${name} to finish.`,
+    restartDisconnected: (name: string) => `Frameshell was removed. Quit and reopen ${name} to finish.`,
+    backups: (files: string) => `Copy of the previous settings: ${files}`,
+    invalid: (file: string) => `${file} is not valid, so Frameshell left it alone. Fix or remove it, then connect again.`,
+    failed: (message: string) => `Could not change the settings: ${message}`,
+    desktop: "Desktop apps",
+    developers: "For developers",
+    developersLede: "Command-line tools and code editors.",
+    apps: {
+      claudeDesktop: { name: "Claude Desktop", about: "Anthropic's Claude app for Mac and Windows." },
+      chatgpt: {
+        name: "ChatGPT (desktop app)",
+        about: "OpenAI's ChatGPT app for your computer.",
+        note: "Uses the MCP servers setting the app shares with Codex; you may need its Codex mode. ChatGPT on the web is not supported.",
+      },
+      claudeCode: { name: "Claude Code", about: "Adds the server and a prompt hook that hands Claude Code what you send with Chat about this." },
+      codexCli: { name: "Codex CLI", about: "Same settings file as the ChatGPT desktop app: connecting one connects both." },
+      gemini: { name: "Gemini CLI", about: "Google's Gemini in the terminal." },
+    },
+    others: {
+      name: "Cursor, VS Code and others",
+      about: "Paste this into the app's MCP settings.",
+      mcpServers: "Cursor and most apps",
+      vscode: "VS Code (mcp.json)",
+      copy: "Copy",
+      copied: "Copied",
+    },
+    /** The card on the welcome screen. */
+    welcome: {
+      title: "Edit by asking your AI",
+      body: "Connect Claude Desktop or ChatGPT and tell it what to change. No terminal needed.",
+    },
   },
 };
 
@@ -111,40 +130,56 @@ const es: typeof en = {
       " Primero escribe tres historias, cada una en un mundo distinto, con otro dispositivo y otra forma, y recomienda una." +
       " Espera mi elección antes de construir nada. Después enumera tus supuestos y pon una alternativa gratuita junto a cada elemento de pago (herramientas, stock, música, voces, tipografías).",
   },
-  connectClaude: "Conectar Claude Desktop",
-  disconnectClaude: "Desconectar Claude Desktop",
-  claudeConnected: "Claude Desktop está conectado",
-  connectCode: "Conectar Claude Code",
-  disconnectCode: "Desconectar Claude Code",
-  codeConnected: "Claude Code está conectado",
+  desktopApps: "¿Prefieres una app? Conecta Claude Desktop o ChatGPT",
   installCli: "Instalar el comando 'frameshell' para otras terminales",
-  codeDialog: {
-    connect: "¿Conectar Claude Code con Frameshell?",
-    connectDetail: (mcpFile, server, settingsFile, hook) =>
-      `Frameshell agrega este servidor a ${mcpFile}:\n\n${server}\n\ny este hook, que se ejecuta con cada mensaje que envías en Claude Code, a ${settingsFile}:\n\n${hook}\n\nEl hook le entrega a Claude Code lo que envías con "Hablar de esto"; no imprime nada fuera de un proyecto de Frameshell ni con la app cerrada. Todo lo demás de ambos archivos queda como está y antes se guarda una copia de cada uno.`,
-    connectButton: "Conectar",
-    cancel: "Cancelar",
-    connected: "Claude Code está conectado. Reinicia tus sesiones de Claude Code abiertas para usar Frameshell.",
-    backups: (files) => `Copia de la configuración anterior:\n${files}`,
-    disconnected: "Se quitó Frameshell de Claude Code. Reinicia tus sesiones de Claude Code abiertas para aplicarlo.",
-    notInstalled: "Claude Code no está instalado en esta computadora.",
-    failed: "No se pudo cambiar la configuración de Claude Code.",
-    invalid: (file) => `${file} no es un JSON válido, o sus hooks no son una lista. Corrígelo o bórralo y vuelve a conectar.`,
-  },
-  dialog: {
-    connect: "¿Conectar Claude Desktop con Frameshell?",
-    connectDetail: (file, entry) =>
-      `Frameshell agrega este servidor a ${file}:\n\n${entry}\n\nLos demás servidores quedan como están y antes se guarda una copia del archivo. Después, Claude Desktop trabaja en el proyecto abierto en Frameshell.`,
-    connectButton: "Conectar",
-    cancel: "Cancelar",
-    connected: "Claude Desktop está conectado. Cierra Claude Desktop y vuelve a abrirlo para usar Frameshell.",
-    backup: (file) => `Copia de la configuración anterior: ${file}`,
-    disconnected: "Se quitó Frameshell de Claude Desktop. Cierra Claude Desktop y vuelve a abrirlo para aplicarlo.",
-    notInstalled: "Claude Desktop no está instalado en esta computadora.",
-    failed: "No se pudo cambiar la configuración de Claude Desktop.",
-    invalid: (file) => `${file} no es un JSON válido. Corrígelo o bórralo y vuelve a conectar.`,
+  connect: {
+    open: "Conecta tu IA",
+    openTitle: "Usa Claude Desktop, ChatGPT u otra app de IA para editar con Frameshell",
+    title: "Conecta tu IA",
+    lede: "Conecta una app de IA que ya usas y pídele con tus palabras que edite el video abierto aquí. Frameshell se agrega a la configuración de la app; todo lo demás queda como está y antes se guarda una copia.",
+    close: "Cerrar",
+    checkAgain: "Volver a buscar",
+    connect: "Conectar",
+    connectAgain: "Volver a conectar",
+    disconnect: "Desconectar",
+    connected: "Conectado",
+    working: "Trabajando…",
+    notAvailable: "No está disponible en este sistema.",
+    notInstalled: (name) => `${name} todavía no está en esta computadora. Instálalo, ábrelo una vez y luego toca Volver a buscar.`,
+    different: "Frameshell está configurado ahí con otro comando. Vuelve a conectar para usar esta app.",
+    restartConnected: (name) => `Listo. Cierra ${name} y vuelve a abrirlo para terminar.`,
+    restartDisconnected: (name) => `Se quitó Frameshell. Cierra ${name} y vuelve a abrirlo para terminar.`,
+    backups: (files) => `Copia de la configuración anterior: ${files}`,
+    invalid: (file) => `${file} no es válido, así que Frameshell no lo tocó. Corrígelo o bórralo y vuelve a conectar.`,
+    failed: (message) => `No se pudo cambiar la configuración: ${message}`,
+    desktop: "Apps de escritorio",
+    developers: "Para desarrolladores",
+    developersLede: "Herramientas de línea de comandos y editores de código.",
+    apps: {
+      claudeDesktop: { name: "Claude Desktop", about: "La app de Claude de Anthropic para Mac y Windows." },
+      chatgpt: {
+        name: "ChatGPT (app de escritorio)",
+        about: "La app de ChatGPT de OpenAI para tu computadora.",
+        note: "Usa la opción de servidores MCP que la app comparte con Codex; puede que necesites su modo Codex. ChatGPT en la web no es compatible.",
+      },
+      claudeCode: { name: "Claude Code", about: "Agrega el servidor y un hook que le entrega a Claude Code lo que envías con Hablar de esto." },
+      codexCli: { name: "Codex CLI", about: "Usa el mismo archivo de configuración que la app de escritorio de ChatGPT: conectar uno conecta ambos." },
+      gemini: { name: "Gemini CLI", about: "Gemini de Google en la terminal." },
+    },
+    others: {
+      name: "Cursor, VS Code y otras",
+      about: "Pega esto en la configuración MCP de la app.",
+      mcpServers: "Cursor y la mayoría de las apps",
+      vscode: "VS Code (mcp.json)",
+      copy: "Copiar",
+      copied: "Copiado",
+    },
+    welcome: {
+      title: "Edita pidiéndoselo a tu IA",
+      body: "Conecta Claude Desktop o ChatGPT y dile qué cambiar. No necesitas la terminal.",
+    },
   },
 };
 
-/** English and Spanish strings of the agent guide and Claude Desktop dialogs. */
+/** English and Spanish strings of the agent guide and "Connect your AI". */
 export const agents = { en, es };

@@ -27,6 +27,15 @@ Frameshell is an IDE for video. You edit the project from the terminal; the huma
 
 Done = transaction committed, result checked, tx id reported. That tx id is your **resume point**.
 
+## Options, not obligations
+
+What the person asks for decides the tools. Frameshell has optional plugins and downloads, none of them a step of the work: a plain edit, with no plugin installed and nothing downloaded beyond what the task needs, is always a valid answer.
+
+- When a technique or plugin would make the result better (titles or 3D motion, React scenes, a cloud transcription or voice, a model the person lacks), run `frameshell plugin catalog` (MCP `plugin_catalog`). It lists the official plugins: what each is for, what it needs from the person (their own Blender, their own OpenAI key, a Remotion project), whether it is paid or sends data off the machine, what it downloads and how big, and whether this project has it.
+- Offer the options that fit, each with what it needs, costs, downloads and takes, and say what the plain edit would look like instead. The person picks.
+- Never install a plugin, start a download, pass `--trust` or spend money (`--yes`) without the person's yes to that specific step. A person who wants none of it gets a plain edit.
+- `frameshell doctor` lists what is already on disk. Free the space of a download (`doctor --remove <name>`) only when the person asks; it downloads again on next use.
+
 ## Resume from the human's edits
 
 When the user says they changed something, or just "continue":
@@ -56,6 +65,7 @@ When you guide the human through the app, name only these places; do not invent 
 - **Layers panel** (image projects, in place of the timeline). One row per video track, topmost layer first: select, rename, opacity, move up or down, delete. `Export image` in the preview header saves PNG, JPEG or WebP. In a video project, File > New Image from Frame (Cmd/Ctrl+Shift+S) starts an image project from the frame at the playhead.
 - **People** (sidebar tab, multicam and video projects). Suggestions on top with Confirm and Dismiss (a face shows its frame; a name field when nobody is named), `Scan faces`, then each person with their voices, angles and faces (`missing` marks, "Confirmed by agent"). Clicking a person selects their words in the transcript view and their spans on the timeline (Speaks / On screen); Cmd/Ctrl+Z there undoes the last people change, yours included.
 - **History** (sidebar tab beside Explorer). Transactions newest first: author (`You`, `Terminal`, `agent: <label>`, `File`, `Plugin`), label, operation count, time. Selecting one marks its changes on the timeline (`+` added, `−` removed, `↔` moved, `~` changed); `Revert` undoes it. `ui_show_tx_diff` opens it on your transaction.
+- **Plugins** (sidebar tab). The official plugins from `plugin.catalog` with what each needs, costs and downloads on first use, Install and Remove; a trust banner (Trust / Don't trust) when the project declares plugins nobody trusted yet; and this computer's managed downloads with their size and Remove (`binaries.remove`). The person can decide there: point them to it, or run `frameshell plugin install` only after their yes.
 - **App terminal tools.** In an app terminal the ffmpeg, ffprobe and whisper-cli Frameshell uses are in `$FRAMESHELL_FFMPEG`, `$FRAMESHELL_FFPROBE`, `$FRAMESHELL_WHISPER_CLI` (e.g. `"$FRAMESHELL_FFMPEG" -i assets/talk.mp4 -af volumedetect -f null -`). Managed downloads are also on `PATH`; `binaries` overrides are only in the variables. Prefer the variables: a login profile may put another ffmpeg first on `PATH`. Unset = not downloaded when the terminal opened; Frameshell downloads them on first use, a new terminal then sees them.
 
 ## Reference
@@ -87,5 +97,6 @@ When you guide the human through the app, name only these places; do not invent 
 | The prompt holds a `[frameshell] …` line, or the user says "this" or "what I sent" from the app while you run outside its terminals (`inbox_take`, `frameshell ask --take`) | [selection.md](reference/selection.md) |
 | Project files on disk: `frameshell.json`, timeline, transcript, script; direct file edits | [project-model.md](reference/project-model.md) |
 | The person's style: colours, fonts, type sizes, motion personality, sound levels, platforms and safe zones, rules and banned list (`style.json`, `style show`) | [project-model.md](reference/project-model.md#style) |
-| Titles, lower thirds, animated overlays (HyperFrames clips) | The `hyperframes` skill, exposed when `@frameshell/hyperframes` is installed (`frameshell plugin list` shows its skills) |
-| React-built scenes, UI demos, overlays from the user's React code (Remotion clips) | The `remotion` skill, exposed when `@frameshell/remotion` is installed |
+| Titles, lower thirds, animated overlays (HyperFrames clips) | The `hyperframes` skill, exposed when `@frameshell/hyperframes` is installed (`frameshell plugin list` shows its skills). Optional: offer it from `plugin catalog` first |
+| React-built scenes, UI demos, overlays from the user's React code (Remotion clips) | The `remotion` skill, exposed when `@frameshell/remotion` is installed. Optional: offer it from `plugin catalog` first |
+| Which plugins and downloads exist, what each needs, costs and takes (an option the person chooses, never a step) | `frameshell plugin catalog` (MCP `plugin_catalog`); see *Options, not obligations* above |

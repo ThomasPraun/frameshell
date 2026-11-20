@@ -649,6 +649,26 @@ code {
   background: var(--bg-panel);
 }
 
+/* The terminal's rail names itself: its mark, then the label read top to bottom. */
+.rail-labelled {
+  width: 30px;
+  padding-top: 10px;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+}
+
+.rail .terminal-mark {
+  width: 16px;
+  height: 14px;
+}
+
+.rail-label {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
 /* ---------- Sidebar ---------- */
 
 .view-switch {
@@ -5049,4 +5069,302 @@ button.track-head:focus-visible {
   color: var(--accent);
   font-size: 11px;
   white-space: normal;
+}
+
+/* ---------- Connect your AI ---------- */
+
+.titlebar {
+  position: relative;
+}
+
+.titlebar-actions {
+  position: absolute;
+  right: 10px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+}
+
+.titlebar-connect {
+  padding: 2px 10px;
+  font-size: 12px;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.welcome-connect {
+  margin-top: 24px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.welcome-connect h2 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.welcome-connect p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.welcome-connect .button {
+  flex: none;
+}
+
+.connect-ai {
+  width: min(720px, 100%);
+}
+
+.connect-ai-lede {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.connect-ai-desktop {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.connect-ai-developers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+
+.connect-ai-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-panel);
+}
+
+.connect-ai-card.is-big {
+  padding: 16px;
+  gap: 8px;
+  border-color: var(--line);
+  font-size: 13px;
+}
+
+.connect-ai-card[data-state="connected"] {
+  border-color: var(--track-audio);
+}
+
+.connect-ai-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connect-ai-name {
+  margin: 0;
+  font-size: 13px;
+}
+
+.connect-ai-card.is-big .connect-ai-name {
+  font-size: 17px;
+}
+
+.connect-ai-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--bg-app);
+  background: var(--track-audio);
+}
+
+.connect-ai-about,
+.connect-ai-done {
+  margin: 0;
+}
+
+.connect-ai-done {
+  color: var(--track-audio);
+}
+
+.connect-ai-hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.connect-ai-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.connect-ai-snippet-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+}
+
+.connect-ai-snippet pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: 4px;
+  background: var(--bg-term);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  user-select: text;
+}
+
+.agent-guide-apps {
+  align-self: flex-start;
+  font-weight: 600;
+}
+
+/* ---------- Plugins view ---------- */
+
+.plugins-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px;
+  min-height: 0;
+}
+
+.plugins-panel .button {
+  padding: 4px 10px;
+}
+
+.plugins-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plugins-heading,
+.plugins-subheading {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.plugins-meta,
+.plugin-purpose,
+.plugins-total,
+.plugins-notice,
+.plugins-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.plugin-purpose {
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.plugins-meta.is-unmet,
+.plugins-error,
+.plugins-notice.is-error {
+  color: var(--danger);
+}
+
+.plugins-trust {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.plugins-trust p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.plugins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+
+.plugin-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.plugin-title {
+  font-weight: 600;
+}
+
+.plugin-state {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+.plugin-state.is-loaded {
+  color: var(--diff-added);
+}
+
+.plugin-state.is-error {
+  color: var(--danger);
+}
+
+.plugin-state.is-untrusted {
+  color: var(--accent);
+}
+
+.plugins-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.download {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.download-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.download-size {
+  color: var(--text-muted);
+  font-size: 11px;
 }

@@ -12,6 +12,10 @@
     "./probe": {
       "types": "./dist/probe.d.ts",
       "default": "./dist/probe.js"
+    },
+    "./official-plugins": {
+      "types": "./dist/official-plugins.d.ts",
+      "default": "./dist/official-plugins.js"
     }
   },
   "files": ["dist"],

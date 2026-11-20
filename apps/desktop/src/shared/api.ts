@@ -3,6 +3,8 @@ import type {
   AgentTarget,
   AssetInfo,
   AudioBakesResult,
+  BinariesRemoveResult,
+  PluginInfo,
   MatteStatusResult,
   ClipRendersResult,
   HistoryDiffResult,
@@ -507,14 +509,12 @@ export interface FrameshellApi {
     detect(): Promise<AgentChoice[]>;
     /** Install the `frameshell` command for terminals outside the app (the File menu's command, with its dialogs). */
     installCli(): Promise<void>;
-    claudeDesktop(): Promise<ClaudeDesktopStatus>;
-    /** Ask, then add Frameshell to Claude Desktop's config; resolves with the state after (unchanged if declined). */
-    connectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
-    disconnectClaudeDesktop(): Promise<ClaudeDesktopStatus>;
-    claudeCode(): Promise<ClaudeCodeStatus>;
-    /** Ask, then add Frameshell's MCP server and prompt hook to Claude Code's user settings (ADR 0025); resolves with the state after. */
-    connectClaudeCode(): Promise<ClaudeCodeStatus>;
-    disconnectClaudeCode(): Promise<ClaudeCodeStatus>;
+    /** The AI apps of "Connect your AI", read from their settings files now, and the server entry they run. */
+    apps(): Promise<AiApps>;
+    /** Add Frameshell's MCP server to app `id`'s settings, keeping everything else (backup first); resolves with the state after. */
+    connect(id: AiAppId): Promise<AiAppChange>;
+    /** Remove Frameshell's entries from app `id`'s settings, and nothing else. */
+    disconnect(id: AiAppId): Promise<AiAppChange>;
     /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
     targets(): Promise<AgentTarget[]>;
     /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
@@ -673,6 +673,29 @@ export interface FrameshellApi {
      * with the daemon's message, e.g. UnsupportedModelFormat for a pickle file.
      */
     add(id: string, file: string, options: Record<string, string>): Promise<MethodResult<"model.add">>;
+  };
+  plugins: {
+    /**
+     * `plugin.catalog` of the window's project, plus `plugin.list` when it declares plugins. Rejects with the
+     * daemon's message.
+     */
+    read(): Promise<PluginsView>;
+    /**
+     * `plugin.install` of an official plugin by package name (others are refused); trusts the project's plugin list
+     * as `plugin.install` does. Rejects with the daemon's message, e.g. ProjectNotTrusted.
+     */
+    install(name: string): Promise<MethodResult<"plugin.install">>;
+    /** `plugin.remove` after a native confirm box. Resolves false when the person cancelled. */
+    remove(name: string): Promise<boolean>;
+    /** `project.trust`, sent only from the person's click on Trust or Don't trust. */
+    trust(decision: "trust" | "deny"): Promise<MethodResult<"project.trust">>;
+    /** Managed downloads of this machine (`doctor`, never with `install`). */
+    downloads(): Promise<MachineDownloads>;
+    /**
+     * `binaries.remove` after a native confirm box naming `bytes`; null when the person cancelled. Rejects with the
+     * daemon's message, e.g. BinaryInUse.
+     */
+    removeDownload(name: string, bytes: number): Promise<BinariesRemoveResult | null>;
   };
   people: {
     /** `people.list` of the window's project (ADR 0020). Rejects with the daemon's message, e.g. InvalidProjectFile. */
@@ -920,6 +943,16 @@ export type VoiceoverRun =
   | { status: "declined" }
   | { status: "canceled"; kept: number };
 
+/** What the Plugins view reads about the window's project: the official catalog and every plugin it declares. */
+export interface PluginsView {
+  catalog: MethodResult<"plugin.catalog">;
+  /** As `plugin.list` reports them, official or not. */
+  declared: PluginInfo[];
+}
+
+/** Managed downloads of this machine as `doctor` reports them: on disk (`downloads`) and every tool (`binaries`). */
+export type MachineDownloads = Pick<MethodResult<"doctor">, "dataDir" | "downloads" | "binaries">;
+
 /** What {@link FrameshellApi.transcript}`.run` did: transcribed, or the person declined the upload. */
 export type TranscribeRun = { status: "done" } | { status: "declined" };
 
@@ -964,26 +997,64 @@ export interface AgentChoice {
   path: string | null;
 }
 
-/** Frameshell's entry in Claude Desktop's MCP config. */
-export interface ClaudeDesktopStatus {
-  /** Claude Desktop exists on this platform (macOS, Windows). */
+/**
+ * AI apps "Connect your AI" connects in one step: `claude-desktop` (Claude Desktop), `codex` (the ChatGPT desktop app,
+ * Codex CLI and its IDE extension, which share `~/.codex/config.toml`), `claude-code`, `gemini` (Gemini CLI).
+ */
+export const AI_APP_IDS = ["claude-desktop", "codex", "claude-code", "gemini"] as const;
+
+/** One of {@link AI_APP_IDS}. */
+export type AiAppId = (typeof AI_APP_IDS)[number];
+
+/** Whether `value` (from the renderer) names an AI app. */
+export function isAiAppId(value: unknown): value is AiAppId {
+  return AI_APP_IDS.some((id) => id === value);
+}
+
+/** Why reading or changing an app's settings did not work. */
+export type AiAppProblem =
+  /** Connect refused: the app's settings folder does not exist. */
+  | { kind: "not-installed" }
+  /** `file` does not parse (or is not the shape Frameshell edits): left as it is. */
+  | { kind: "invalid"; file: string }
+  | { kind: "failed"; message: string };
+
+/** What an AI app's settings say about Frameshell. */
+export interface AiAppStatus {
+  id: AiAppId;
+  /** The app exists on this platform (Claude Desktop: macOS, Windows). */
   available: boolean;
   /** Its settings folder exists: it is installed, or was. */
   installed: boolean;
-  /** Its config runs this app's `frameshell mcp`. */
+  /** Its settings run this app's `frameshell mcp` (Claude Code: and have the prompt hook). */
   connected: boolean;
+  /** Its settings hold Frameshell entries that run something else (an older shim, `frameshell` on PATH, a hand edit). */
+  different: boolean;
+  /** The settings files Frameshell edits. */
+  files: string[];
+  /** The settings could not be read. */
+  problem: AiAppProblem | null;
 }
 
-/** Frameshell's entries in Claude Code's user settings (ADR 0025 decision 7). */
-export interface ClaudeCodeStatus {
-  /** Claude Code's settings exist: it is installed, or was. */
-  installed: boolean;
-  /** `~/.claude.json` runs this app's `frameshell mcp`. */
-  server: boolean;
-  /** `settings.json` has the prompt hook that hands over what "Chat about this" sent. */
-  hook: boolean;
-  /** Both. */
-  connected: boolean;
+/** Every AI app's status, and Frameshell's server as text to paste into apps with no connector. */
+export interface AiApps {
+  apps: AiAppStatus[];
+  snippets: {
+    /** `{ "mcpServers": { "frameshell": … } }`: Cursor, Windsurf and most MCP clients. */
+    mcpServers: string;
+    /** `{ "servers": { "frameshell": { "type": "stdio", … } } }`: VS Code's `mcp.json`. */
+    vscode: string;
+  };
+}
+
+/** The result of Connect or Disconnect. */
+export interface AiAppChange {
+  /** The state after. */
+  status: AiAppStatus;
+  /** Copies of the files as they were before the change. */
+  backups: string[];
+  /** Why nothing changed; null when the change was made (or there was nothing to change). */
+  problem: AiAppProblem | null;
 }
 
 /** IPC channel names; one place so main and preload cannot drift. */
@@ -991,12 +1062,9 @@ export const Channel = {
   lang: "app:lang",
   agentsDetect: "agents:detect",
   agentsInstallCli: "agents:install-cli",
-  agentsClaudeDesktop: "agents:claude-desktop",
-  agentsConnectClaudeDesktop: "agents:connect-claude-desktop",
-  agentsDisconnectClaudeDesktop: "agents:disconnect-claude-desktop",
-  agentsClaudeCode: "agents:claude-code",
-  agentsConnectClaudeCode: "agents:connect-claude-code",
-  agentsDisconnectClaudeCode: "agents:disconnect-claude-code",
+  agentsApps: "agents:apps",
+  agentsConnect: "agents:connect",
+  agentsDisconnect: "agents:disconnect",
   agentsTargets: "agents:targets",
   agentsSend: "agents:send",
   agentsTargetsChanged: "agents:targets-changed",
@@ -1094,6 +1162,12 @@ export const Channel = {
   modelsUse: "models:use",
   modelsPickFile: "models:pick-file",
   modelsAdd: "models:add",
+  pluginsRead: "plugins:read",
+  pluginsInstall: "plugins:install",
+  pluginsRemove: "plugins:remove",
+  pluginsTrust: "plugins:trust",
+  pluginsDownloads: "plugins:downloads",
+  pluginsRemoveDownload: "plugins:remove-download",
   peopleList: "people:list",
   peopleAdd: "people:add",
   peopleRename: "people:rename",

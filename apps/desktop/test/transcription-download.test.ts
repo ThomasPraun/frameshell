@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { chooseDownload, downloadSize } from "../src/main/transcription-download.js";
+import { chooseDownload } from "../src/main/transcription-download.js";
+import { downloadSize, sizeText } from "../src/shared/sizes.js";
 
 describe("chooseDownload", () => {
   it("asks when something is still to download and returns the answer", async () => {
@@ -21,5 +22,10 @@ describe("downloadSize", () => {
     expect(downloadSize(574_000_000)).toBe("~574 MB");
     expect(downloadSize(10)).toBe("~1 MB");
     expect(downloadSize(1_240_000_000)).toBe("~1.2 GB");
+  });
+
+  it("drops the approximate mark for a size on disk", () => {
+    expect(sizeText(2_500_000)).toBe("3 MB");
+    expect(sizeText(3_040_000_000)).toBe("3.0 GB");
   });
 });

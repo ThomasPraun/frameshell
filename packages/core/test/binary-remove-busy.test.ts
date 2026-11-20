@@ -19,7 +19,7 @@ vi.mock("../src/fs-util.js", async (importOriginal) => {
 });
 
 describe("BinaryManager removal while files are open", () => {
-  it("refuses with files-open and leaves the install whole, then removes once nothing holds it", async () => {
+  it("refuses and leaves the install whole, then removes once nothing holds it", async () => {
     const dataDir = tempDir();
     const binaries = new BinaryManager({
       dataDir,
@@ -30,7 +30,12 @@ describe("BinaryManager removal while files are open", () => {
     mkdirSync(install, { recursive: true });
     for (const file of ["install.json", "alpha", "lib.dll"]) writeFileSync(join(install, file), file);
 
-    await expect(binaries.remove("tools")).rejects.toMatchObject({ code: ErrorCode.BinaryInUse, data: { name: "tools", reason: "files-open" } });
+    // EPERM means open files only on Windows; elsewhere it is a permission problem.
+    const refusal =
+      process.platform === "win32"
+        ? { code: ErrorCode.BinaryInUse, data: { name: "tools", reason: "files-open" } }
+        : { message: expect.stringContaining("no permission") };
+    await expect(binaries.remove("tools")).rejects.toMatchObject(refusal);
     expect(readdirSync(install).sort()).toEqual(["alpha", "install.json", "lib.dll"]);
     expect(readdirSync(join(dataDir, "binaries"))).toEqual(["tools"]);
 
