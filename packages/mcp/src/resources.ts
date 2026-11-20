@@ -3,6 +3,7 @@ import { join, relative, sep } from "node:path";
 import { type DaemonConnection, ErrorCode as RpcErrorCode, type MethodName, RpcError, isMethodName } from "@frameshell/protocol";
 import { ErrorCode, McpError, type Resource, type ResourceTemplate } from "@modelcontextprotocol/sdk/types.js";
 import type { ResolvedProject } from "./project.js";
+import { SKILL_FILE_TEMPLATE, SKILL_URI } from "./skill.js";
 
 /** URI scheme of every resource this server serves. */
 const SCHEME = "frameshell://";
@@ -26,7 +27,7 @@ const TRANSCRIPT_TEMPLATE = `${SCHEME}transcripts/{file}`;
 const OUTLINE_TEMPLATE = `${SCHEME}scripts/{file}/outline`;
 
 /** Every resource URI the server can serve, as a URI or template; docs naming others are wrong. */
-export const RESOURCE_TEMPLATES: readonly string[] = [STATUS_URI, TIMELINE_TEMPLATE, HISTORY_TEMPLATE, TRANSCRIPT_TEMPLATE, OUTLINE_TEMPLATE];
+export const RESOURCE_TEMPLATES: readonly string[] = [STATUS_URI, TIMELINE_TEMPLATE, HISTORY_TEMPLATE, TRANSCRIPT_TEMPLATE, OUTLINE_TEMPLATE, SKILL_URI, SKILL_FILE_TEMPLATE];
 
 const JSON_MIME = "application/json";
 

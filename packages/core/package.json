@@ -14,6 +14,10 @@
       "types": "./dist/binaries/manager.d.ts",
       "default": "./dist/binaries/manager.js"
     },
+    "./skill": {
+      "types": "./dist/skills/core-skill.d.ts",
+      "default": "./dist/skills/core-skill.js"
+    },
     "./fs-util": {
       "types": "./dist/fs-util.d.ts",
       "default": "./dist/fs-util.js"

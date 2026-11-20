@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The agent skill over MCP, so a client that never loads `.claude/skills` (Claude Desktop) learns the workflows and the
+  options too: `frameshell://skill` (SKILL.md) and `frameshell://skill/{path}` (every reference file) are listed and
+  readable as `text/markdown` with no project open, served from the skill bundled into core (new export
+  `@frameshell/core/skill`; `createMcpServer({ skill })`). The server instructions say to read it first and to call
+  `plugin_catalog` to see which options exist. The skill gains *Options, not obligations*: the person's request decides
+  the tools; offer the plugins and downloads that fit, with what each needs, costs and takes, from `plugin catalog`;
+  never install, download, trust or spend without a yes; no plugin at all is a plain edit. The reference rows for
+  transcription, voiceover, motion films, HyperFrames and Remotion point to it.
 - Remove managed downloads to free disk (`PROTOCOL_VERSION` 184): new method `binaries.remove { name }` deletes a binary
   package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
   model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with

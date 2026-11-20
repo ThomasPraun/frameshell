@@ -86,6 +86,17 @@ describe("frameshell mcp", () => {
     expect(names).toEqual(expect.arrayContaining(["clip_add", "cut", "transcribe", "revert", "frame_capture", "frames_strip", "tx_begin"]));
   });
 
+  it("serves the agent skill before any project exists, from the bundle of the build", async () => {
+    // The directory is in no project yet: the skill needs none.
+    const { resources } = await client.listResources();
+    expect(resources.map((r) => r.uri)).toEqual(expect.arrayContaining(["frameshell://status", "frameshell://skill", "frameshell://skill/reference/cli.md"]));
+    const { contents } = await client.readResource({ uri: "frameshell://skill" });
+    expect(contents[0]).toMatchObject({ mimeType: "text/markdown", text: expect.stringContaining("## Options, not obligations") });
+    const reference = await client.readResource({ uri: "frameshell://skill/reference/cli.md" });
+    expect((reference.contents[0] as { text: string }).text).toContain("frameshell plugin catalog");
+    expect(client.getInstructions()).toContain("frameshell://skill");
+  });
+
   it(
     "edits a fixture project end to end: import, cut, transcribe, capture a frame, revert",
     async () => {
