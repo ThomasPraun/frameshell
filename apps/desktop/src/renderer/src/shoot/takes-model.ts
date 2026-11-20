@@ -36,6 +36,8 @@ export interface CutTake {
   number: number;
   /** Cut under half a second after T: nothing was kept. */
   short: boolean;
+  /** The microphone stayed nearly silent from T to C: worth recording again before moving on. */
+  quiet: boolean;
   /** The cut itself failed. */
   error: string | null;
 }
@@ -63,6 +65,15 @@ export function cutOutcome(status: ShootStatusResult | null, last: CutTake): Cut
   if (!take || take.state === "transcribing") return { kind: "analyzing" };
   if (take.state === "analyzed") return { kind: "analyzed", differences: take.deviations.length };
   return { kind: "failed", problem: take.problem ?? take.state };
+}
+
+/**
+ * Deviations of `take` the scene view leaves out: it lists only the chosen take of the current scene, and only that
+ * scene's deviations. Speech outside every scene (scene null), other scenes, or a take that is not the chosen one
+ * land here, so a take's outcome ("2 differences") always has rows to review.
+ */
+export function unshownDeviations(take: { id: string; deviations: readonly DeviationInfo[] }, chosen: string | null, scene: string | null): DeviationInfo[] {
+  return take.deviations.filter((deviation) => take.id !== chosen || deviation.scene !== scene);
 }
 
 /** What a key press asks of the takes while recording: `take` (T, a new take), `cut` (C), or null. */

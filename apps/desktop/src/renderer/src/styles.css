@@ -4952,8 +4952,24 @@ button.track-head:focus-visible {
 }
 
 .take-status-outcome.is-failed,
-.take-status-outcome.is-short {
+.take-status-outcome.is-short,
+.take-status-outcome.is-quiet {
   color: var(--danger);
+}
+
+.take-status-outcome.is-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.shoot-last {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 @keyframes take-status-arrive {

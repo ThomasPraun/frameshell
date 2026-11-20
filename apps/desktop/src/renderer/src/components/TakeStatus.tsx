@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { t } from "../i18n.js";
 import { elapsedLabel } from "../shoot/model.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
 import { type CutOutcome, type CutTake, currentScene, cutOutcome, sceneTitle } from "../shoot/takes-model.js";
-import { useTakes } from "../shoot/takes.js";
+import { takes as takesStore, useTakes } from "../shoot/takes.js";
 
 /**
  * Where the takes are, for the person reading (ADR 0024): ready for T, the take being recorded with its running time,
@@ -67,11 +67,38 @@ function Outcome({ last, outcome, place }: { last: CutTake; outcome: CutOutcome;
               ? t.teleprompter.takeDifferences(n, outcome.differences)
               : t.shoot.takeDifferences(n, outcome.differences);
   const tone = outcome.kind === "analyzed" ? (outcome.differences === 0 ? "clean" : "differences") : outcome.kind;
+  const key = `${last.number}-${last.scene}-${tone}`;
+  const quiet = last.quiet && (
+    <span key={`${key}-quiet`} className="take-status-outcome is-quiet" role="alert" data-testid="take-status-quiet">
+      {t.shoot.takeQuiet(n)}
+    </span>
+  );
+  // In the Shoot view, differences are a link to their rows below: the take's scene becomes current and they scroll in.
+  if (place === "shoot" && tone === "differences") {
+    const show = (event: MouseEvent<HTMLButtonElement>) => {
+      const document = event.currentTarget.ownerDocument;
+      takesStore.pick(last.scene);
+      document.defaultView?.requestAnimationFrame(() =>
+        document.querySelector('[data-testid="shoot-last-take"], [data-testid="shoot-current"]')?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+      );
+    };
+    return (
+      <>
+        <button key={key} className={`take-status-outcome is-${tone} is-link`} role="status" aria-live="polite" data-testid="take-status-outcome" data-outcome={tone} title={text} onClick={show}>
+          {text}
+        </button>
+        {quiet}
+      </>
+    );
+  }
   // Keyed by take and outcome, so each new outcome is announced and its highlight plays once.
   return (
-    <span key={`${last.number}-${last.scene}-${tone}`} className={`take-status-outcome is-${tone}`} role="status" aria-live="polite" data-testid="take-status-outcome" data-outcome={tone} title={text}>
-      {text}
-    </span>
+    <>
+      <span key={key} className={`take-status-outcome is-${tone}`} role="status" aria-live="polite" data-testid="take-status-outcome" data-outcome={tone} title={text}>
+        {text}
+      </span>
+      {quiet}
+    </>
   );
 }
 
