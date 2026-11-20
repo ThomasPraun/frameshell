@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- "Chat about this" with no agent running copies the reference to the clipboard, shows the terminal and says to start
+  an agent, instead of typing it at a shell prompt where Enter would run it (ADR 0048, #743).
+
 ### Fixed
 
 - Built-in terminal on Windows and Linux: Ctrl+V pastes the clipboard's text into any program, Claude Code included,
