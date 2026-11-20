@@ -29,6 +29,9 @@ import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
 import { useAssets, useNestedViews, useProjectFormats, useProjectKind } from "../preview/useProgram.js";
+import { useClipRenders } from "../preview/useClipRenders.js";
+import { withRenders } from "../timeline/render-marks.js";
+import { canOpenFiles, openInEditor } from "../editor-opener.js";
 import { useMatteStatus } from "../preview/useSubjectMattes.js";
 import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
 import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
@@ -191,7 +194,11 @@ export function TimelinePanel({
   // A nested clip's handles are its timeline's seconds outside the window (ADR 0018 decision 5).
   const nested = useNestedViews(view ?? null);
   const transitions = useMemo(() => ({ sourceDuration: (clip: Clip) => (assets ? sourceSeconds(clip, assets, nested) : undefined) }), [assets, nested]);
-  const layout = useMemo(() => (view ? layoutTimeline(view, scenes, turnLanes, transitions) : null), [view, scenes, turnLanes, transitions]);
+  const renders = useClipRenders(view ?? null, nested);
+  const layout = useMemo(
+    () => (view ? withRenders(layoutTimeline(view, scenes, turnLanes, transitions), renders, t.timeline.renderFailed) : null),
+    [view, scenes, turnLanes, transitions, renders],
+  );
   const empty = layout !== null && layout.clipCount === 0;
   const mattes = useMatteStatus(view ?? null, nested, assets);
   const toggleLanes = useCallback(
@@ -1087,6 +1094,8 @@ function TimelineCanvas({
       item(t.timeline.trimStartToPlayhead, "[", { kind: "trim", side: "head" }),
       item(t.timeline.trimEndToPlayhead, "]", { kind: "trim", side: "tail" }),
       ...(file ? [revealItem(file, true)] : []),
+      // A generated clip's composition opens in this window's editor (#746).
+      ...(clip.kind === "generated" && clip.source && canOpenFiles() ? [{ label: t.timeline.openComposition, run: () => void openInEditor(clip.source!) }] : []),
       item(t.timeline.deleteClips(ids.length), DELETE_KEY, { kind: "delete", ripple: false }, { separated: true, danger: true }),
       item(t.timeline.rippleDeleteClips(ids.length), RIPPLE_DELETE_KEY, { kind: "delete", ripple: true }, { danger: true }),
     ];

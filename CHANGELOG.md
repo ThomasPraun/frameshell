@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
+  failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
+  the blurred render's state. The clip's context menu has "Open composition" (#746).
+
+### Changed
+
+- The timeline hatches a generated clip only until its render is ready, and marks a failed render red with the
+  reason in its tooltip (#746).
+- Clip inspector wording per clip: a video clip offers "Use an image instead…", not "Replace image…"; Transitions
+  and Keyframes have visible headings; the Look menu shows the look a clip took, or "Adjusted" (#746).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

@@ -27,6 +27,7 @@ import { angleKey } from "../timeline/angle-keys.js";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
 import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
+import { registerEditorOpener } from "../editor-opener.js";
 import { EditorArea } from "./EditorArea.js";
 import { LayersPanel } from "./LayersPanel.js";
 import { PreviewPanel } from "./PreviewPanel.js";
@@ -382,6 +383,12 @@ export function Workspace({ project }: { project: ProjectView }) {
         });
     });
   }, [image]);
+
+  // Panels open project files in this window's editor through one opener (#746: a generated clip's composition).
+  useEffect(() => {
+    registerEditorOpener(browseFile);
+    return () => registerEditorOpener(null);
+  }, [browseFile]);
 
   // What the agent sees of this window (`ui_state`) and how it navigates it. Commands commit synchronously,
   // so the state the agent gets back already shows the opened tab or panel.
