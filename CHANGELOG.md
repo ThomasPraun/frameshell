@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Connect your AI finds Claude Desktop installed from the Microsoft Store on Windows: that build keeps its settings in
+  `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude`, so the card said it was not installed and refused
+  Connect. Once Open has found and started an app, its card no longer says the app is not installed (#735).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

@@ -57,6 +57,12 @@ describe("cardView", () => {
     expect(cardView(status({ installed: false }), false)).toMatchObject({ kind: "not-installed", open: true, download: true });
   });
 
+  it("never says not installed once Open found the app; it waits for its settings instead (#735)", () => {
+    const opened = { kind: "opened", copied: true } as const;
+    expect(cardView(status({ installed: false }), false, undefined, opened)).toMatchObject({ kind: "no-settings", open: true, download: false, connect: null });
+    expect(cardView(status({ installed: false }), false, undefined, { kind: "not-found" })).toMatchObject({ kind: "not-installed", download: true });
+  });
+
   it("offers nothing to open while reading, working, or where the app does not exist", () => {
     for (const view of [cardView(undefined, false), cardView(status(), true), cardView(status({ available: false, installed: false }), false)]) {
       expect(view).toMatchObject({ open: false, download: false, launch: null });
