@@ -79,6 +79,8 @@ const en = {
     chooseImage: "Choose an image",
     images: "Images",
     exportImage: "Export image",
+    /** An image saved under an extension Frameshell does not write (#749). */
+    imageExtension: (extension: string) => `Frameshell saves images as PNG, JPEG or WebP, not ${extension}. Pick one of those.`,
     png: "PNG image",
     jpeg: "JPEG image",
     webp: "WebP image",
@@ -268,6 +270,7 @@ const es: typeof en = {
     chooseImage: "Elegir una imagen",
     images: "Imágenes",
     exportImage: "Exportar imagen",
+    imageExtension: (extension) => `Frameshell guarda imágenes como PNG, JPEG o WebP, no como ${extension}. Elige uno de esos.`,
     png: "Imagen PNG",
     jpeg: "Imagen JPEG",
     webp: "Imagen WebP",

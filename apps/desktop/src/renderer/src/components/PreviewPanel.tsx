@@ -34,6 +34,7 @@ import { SubtitleInspector } from "./SubtitleInspector.js";
 import { sendClipEdit } from "./clip-edits.js";
 import { elementOf, isTag, listenEverywhere, windowOf } from "../windows.js";
 import { rich, t } from "../i18n.js";
+import { systemErrorText } from "../system-error.js";
 import { useShootRecording } from "../shoot/recorder.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
@@ -738,23 +739,37 @@ function TransportBar({
 /** Header button of an image project: save the picture where the user picks (PNG, JPEG or WebP). */
 function ExportImageButton({ disabled, onNotice }: { disabled: boolean; onNotice: (notice: string | null) => void }) {
   const [busy, setBusy] = useState(false);
+  // The image just saved: a way to its folder beside the button (#749).
+  const [saved, setSaved] = useState<string | null>(null);
   return (
-    <button
-      className="button preview-export"
-      data-tip={t.preview.exportImageHint}
-      disabled={disabled || busy}
-      data-testid="preview-export-image"
-      onClick={() => {
-        setBusy(true);
-        window.frameshell.timeline
-          .exportImage(SELECTION_TIMELINE)
-          .then((path) => path && onNotice(t.preview.exported(path.split(/[\\/]/).pop() ?? path)))
-          .catch((error: Error) => onNotice(error.message))
-          .finally(() => setBusy(false));
-      }}
-    >
-      {t.preview.exportImage}
-    </button>
+    <>
+      <button
+        className="button preview-export"
+        data-tip={t.preview.exportImageHint}
+        disabled={disabled || busy}
+        data-testid="preview-export-image"
+        onClick={() => {
+          setBusy(true);
+          setSaved(null);
+          window.frameshell.timeline
+            .exportImage(SELECTION_TIMELINE)
+            .then((path) => {
+              if (!path) return;
+              setSaved(path);
+              onNotice(t.preview.exported(path.split(/[\\/]/).pop() ?? path));
+            })
+            .catch((error: Error) => onNotice(systemErrorText(error.message) ?? error.message))
+            .finally(() => setBusy(false));
+        }}
+      >
+        {t.preview.exportImage}
+      </button>
+      {saved && (
+        <button className="link preview-export-reveal" data-testid="preview-export-reveal" onClick={() => void window.frameshell.timeline.revealExport(saved)}>
+          {t.workspace.showInFolder}
+        </button>
+      )}
+    </>
   );
 }
 

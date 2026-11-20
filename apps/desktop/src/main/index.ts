@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -122,6 +122,7 @@ import { type DownloadChoice, chooseDownload } from "./transcription-download.js
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
+import { exportsFolder, imageExportPath } from "./export-paths.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
@@ -723,6 +724,9 @@ async function createFromVideos(
 
 /** Briefs of projects made from an idea, by project folder, until the project's window takes them. */
 const ideas = new Map<string, IdeaBrief>();
+
+/** Files this app exported (images, hand-off files): the ones "Show in folder" may reveal (#749). */
+const written = new Set<string>();
 
 /** Folder new ideas go in unless the person picks another: the OS videos folder. */
 function ideaParent(parent?: string): string {
@@ -1753,6 +1757,10 @@ function registerIpc(): void {
     }),
   );
   registerVoiceoverIpc();
+  // Only a file this app just exported: the renderer never names an arbitrary path to open in the file manager.
+  ipcMain.handle(Channel.exportsReveal, (_event, path: string) => {
+    if (written.has(String(path))) shell.showItemInFolder(String(path));
+  });
   ipcMain.handle(Channel.filesReveal, async (event, path: string) => {
     const { project } = await requireProject(stateOf(event.sender));
     shell.showItemInFolder(projectPathOf(project.dir, path));
@@ -1838,9 +1846,13 @@ function registerIpc(): void {
     outcome(async () => {
       const state = stateOf(event.sender);
       const { project } = await requireProject(state);
-      const out = await pickImageExport(state.window, join(project.dir, "exports", `${projectName(project.name)}.png`));
-      if (!out) return null;
-      return (await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out })).path;
+      const picked = await pickImageExport(state.window, join(await exportsFolder(project.dir), `${projectName(project.name)}.png`));
+      if (!picked) return null;
+      const out = imageExportPath(picked);
+      if (!out) throw new Error(text.app.dialogs.imageExtension(extname(picked)));
+      const { path } = await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out });
+      written.add(path);
+      return path;
     }),
   );
   ipcMain.handle(Channel.timelineExportHandoff, (event, kind: string, timeline: string) =>
@@ -1849,11 +1861,12 @@ function registerIpc(): void {
       const state = stateOf(event.sender);
       const { project } = await requireProject(state);
       const name = String(timeline);
-      const out = await pickHandoffExport(state.window, kind, join(project.dir, "exports", `${name}.${HANDOFFS[kind].extension}`));
+      const out = await pickHandoffExport(state.window, kind, join(await exportsFolder(project.dir), `${name}.${HANDOFFS[kind].extension}`));
       if (!out) return null;
       // The daemon writes the file: the app never writes project files, and OTIO's relative media paths start from the folder picked.
       const params = { cwd: project.dir, timeline: name, out };
       const { path, warnings } = await daemon.request(HANDOFFS[kind].method, params);
+      written.add(path);
       return { path, warnings };
     }),
   );

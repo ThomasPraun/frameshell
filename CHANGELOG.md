@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back ("Deshecho: Mover clip"), and file-system failures (EACCES, EPERM, ENOTDIR, EEXIST, ENOSPC, EROFS, ENOENT) read as
   sentences with their path and stay in the status bar until closed. The idea form's checks, an untitled video's folder
   and an image-from-frame folder use the UI language (#748).
+- Desktop: export notices say where the file went. An OpenTimelineIO or Premiere XML hand-off names what the file
+  leaves out with a "Details" list instead of a CLI command, and stays until closed; it and Export image offer
+  "Show in folder". Save dialogs open in the project's `exports/` folder, made when missing (Windows opened its
+  parent). An image saved without an extension gets `.png`; one the app cannot write is refused by name (#749).
 
 ## [0.19.0] - 2026-11-20
 

@@ -82,6 +82,7 @@ const api: FrameshellApi = {
     cutOut: (timeline, clip, mask) => invokeOutcome(Channel.timelineCutOut, timeline, clip, mask),
     exportImage: (timeline) => invokeOutcome(Channel.timelineExportImage, timeline),
     exportHandoff: (kind, timeline) => invokeOutcome(Channel.timelineExportHandoff, kind, timeline),
+    revealExport: (path) => ipcRenderer.invoke(Channel.exportsReveal, path),
     settle: () => invokeOutcome(Channel.timelineSettle),
     undo: (timeline) => invokeOutcome(Channel.timelineUndo, timeline),
     redo: (timeline) => invokeOutcome(Channel.timelineRedo, timeline),

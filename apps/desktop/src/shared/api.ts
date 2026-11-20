@@ -467,6 +467,8 @@ export interface FrameshellApi {
      * the file leaves out, or null when cancelled. Rejects with the daemon's message (an image project has nothing to export).
      */
     exportHandoff(kind: HandoffKind, timeline: string): Promise<{ path: string; warnings: string[] } | null>;
+    /** Show a file {@link exportImage} or {@link exportHandoff} wrote in Finder / Explorer; any other path is ignored. */
+    revealExport(path: string): Promise<void>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
@@ -1131,6 +1133,7 @@ export const Channel = {
   voiceoverMarkers: "voiceover:markers",
   voiceoverPlace: "voiceover:place",
   filesReveal: "files:reveal",
+  exportsReveal: "exports:reveal",
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
