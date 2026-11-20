@@ -57,6 +57,7 @@ import {
   type TrackRow,
   clampScroll,
   contentWidth,
+  fitContentZoom,
   fitZoom,
   formatDuration,
   formatTimecode,
@@ -101,8 +102,11 @@ const RIPPLE_DELETE_KEY = shortcutLabel("Shift+Delete");
 /** Scroll and zoom, kept outside React state: they change every frame while scrolling. */
 interface ViewState {
   pxPerSecond: number;
-  /** True until the user zooms: the timeline keeps fitting the panel. */
-  fit: boolean;
+  /**
+   * Until the user zooms the timeline keeps fitting the panel: `"panel"` (the start) shows at least a minute,
+   * `"content"` ("Zoom to fit", the 0 key) fits the clips themselves; false once zoomed by hand.
+   */
+  fit: false | "panel" | "content";
   scrollLeft: number;
   scrollTop: number;
   width: number;
@@ -341,6 +345,9 @@ export function TimelinePanel({
 /** Screen-reader summary of the lanes' mouse and keyboard controls. */
 const KEYS_LABEL = t.timeline.keysLabel(isMac);
 
+/** Side of a track header's sound and picture switches, px (styles.css `.track-toggle`). */
+const TOGGLE_SIZE = 18;
+
 function TimelineCanvas({
   layout,
   fps,
@@ -373,7 +380,7 @@ function TimelineCanvas({
   const scroller = useRef<HTMLDivElement>(null);
   const sizer = useRef<HTMLDivElement>(null);
   const heads = useRef<HTMLDivElement>(null);
-  const state = useRef<ViewState>({ pxPerSecond: 10, fit: true, scrollLeft: 0, scrollTop: 0, width: 0, height: 0 });
+  const state = useRef<ViewState>({ pxPerSecond: 10, fit: "panel", scrollLeft: 0, scrollTop: 0, width: 0, height: 0 });
   const frame = useRef(0);
   /** Window whose `requestAnimationFrame` gave {@link frame}: the canvas's own (ADR 0012), so a cancel reaches it. */
   const frameView = useRef<Window>(window);
@@ -478,7 +485,12 @@ function TimelineCanvas({
     const view = state.current;
     const duration = latest.current.layout?.duration ?? 0;
     const limits = zoomLimits(duration, view.width, latest.current.fps);
-    view.pxPerSecond = view.fit ? fitZoom(duration, view.width) : Math.min(limits.max, Math.max(limits.min, view.pxPerSecond));
+    view.pxPerSecond =
+      view.fit === "content"
+        ? fitContentZoom(duration, view.width, latest.current.fps)
+        : view.fit === "panel"
+          ? fitZoom(duration, view.width)
+          : Math.min(limits.max, Math.max(limits.min, view.pxPerSecond));
     const width = contentWidth(duration, view.pxPerSecond, view.width);
     const height = Math.max(latest.current.layout?.height ?? RULER_HEIGHT, view.height);
     if (sizer.current) {
@@ -499,7 +511,9 @@ function TimelineCanvas({
     (factor: number, anchorX = state.current.width / 2) => {
       const view = state.current;
       const duration = latest.current.layout?.duration ?? 0;
-      const next = zoomAround(view, factor, anchorX, zoomLimits(duration, view.width, latest.current.fps));
+      // The native scroller may have moved since its last scroll event: anchor on where it is now.
+      if (scroller.current) view.scrollLeft = scroller.current.scrollLeft;
+      const next = zoomAround(view, factor, anchorX, zoomLimits(duration, view.width, latest.current.fps), duration);
       Object.assign(view, next, { fit: false });
       settle();
     },
@@ -507,7 +521,7 @@ function TimelineCanvas({
   );
 
   const fit = useCallback(() => {
-    Object.assign(state.current, { fit: true, scrollLeft: 0 });
+    Object.assign(state.current, { fit: "content", scrollLeft: 0 });
     settle();
   }, [settle]);
 
@@ -766,6 +780,7 @@ function TimelineCanvas({
     } else if (event.key === "=" || event.key === "+") zoom(ZOOM_STEP);
     else if (event.key === "-") zoom(1 / ZOOM_STEP);
     else if (event.key === "0") fit();
+    else if (event.code === "KeyM" && !event.shiftKey) markPlayhead();
     else if (event.key === "Escape") {
       if (!cancelDrag()) selection.clear();
     } else if (event.code === "KeyS" && !event.shiftKey) command({ kind: "split" });
@@ -1095,9 +1110,12 @@ function TimelineCanvas({
   /** The header's "Add subtitle track" button as a menu entry. */
   const addSubtitlesItem = (): MenuItem => ({
     label: t.timeline.addSubtitleTrack,
-    disabled: !latest.current.layout?.rows.some((row) => row.kind === "video" || row.kind === "audio"),
+    disabled: !latest.current.layout?.rows.some(isClipTrack),
     run: () => addSubtitles(),
   });
+
+  /** Mute or hide a track, or turn it back: the header switches and menu. */
+  const setTrack = (row: TrackRow, change: { muted: boolean } | { hidden: boolean }) => send([{ op: "track.set", args: { track: row.id, ...change } }]);
 
   /** Add a video or audio track on top of the stack. */
   const addTrackItems = (separated: boolean): MenuItem[] => [
@@ -1133,15 +1151,18 @@ function TimelineCanvas({
         ...askItems(),
         { label: t.timeline.renameTrack, separated: true, run: () => setRenaming(row.id) },
         ...(row.kind !== "subtitles" && !image
-          ? [{ label: row.muted ? t.timeline.unmuteTrack : t.timeline.muteTrack, run: () => send([{ op: "track.set", args: { track: row.id, muted: !row.muted } }]) }]
+          ? [{ label: row.muted ? t.timeline.unmuteTrack : t.timeline.muteTrack, run: () => setTrack(row, { muted: !row.muted }) }]
           : []),
         ...(row.kind === "video" || row.kind === "program"
-          ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => send([{ op: "track.set", args: { track: row.id, hidden: !row.hidden } }]) }]
+          ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => setTrack(row, { hidden: !row.hidden }) }]
           : []),
         ...behindItems(row),
         // On a `Music <rank>` track of `music.candidates`: hear every candidate side by side (ADR 0038).
         ...auditionItems(candidateFiles(latest.current.layout?.rows ?? [], row), t.audition.candidatesItem, windowOf(event.target)),
-        ...(clipTrack ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }] : []),
+        // Once a subtitle track follows this one the menu stops offering it; the toolbar still adds a second.
+        ...(clipTrack && unsubtitled(latest.current.layout).includes(row)
+          ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }]
+          : []),
         ...(image ? [] : addTrackItems(true)),
         {
           label: t.timeline.deleteTrack(row.label, clips),
@@ -1166,6 +1187,7 @@ function TimelineCanvas({
     const left = (time: number) => time * state.current.pxPerSecond - state.current.scrollLeft;
     return [
       { label: t.timeline.addMarker, separated: true, run: () => setNaming({ marker: null, at, x: left(at) }) },
+      markPlayheadItem(),
       ...(marker
         ? [
             { label: t.timeline.renameMarker(marker.label), run: () => setNaming({ marker, at: marker.at, x: left(marker.at) }) },
@@ -1179,6 +1201,18 @@ function TimelineCanvas({
         : []),
     ];
   };
+
+  /** The M key: name a new marker at the playhead (on the frame grid), the same input as the ruler menu's. */
+  const markPlayhead = () => {
+    if (image || !latest.current.layout) return;
+    const view = state.current;
+    const at = onGrid(transport.get().time);
+    const x = at * view.pxPerSecond - view.scrollLeft;
+    // Off screen: the input sits at the nearer edge, still naming the marker at the playhead.
+    setNaming({ marker: null, at, x: Math.min(Math.max(0, x), Math.max(0, view.width - 160)) });
+  };
+
+  const markPlayheadItem = (): MenuItem => ({ label: t.timeline.addMarkerAtPlayhead, shortcut: "M", run: markPlayhead });
 
   /** Save the name typed for a marker: a new one at its time, or the renamed one; an empty or unchanged name does nothing. */
   const nameMarker = (typed: string) => {
@@ -1240,7 +1274,7 @@ function TimelineCanvas({
     const onClip = grab && !edge ? grab.clip : null;
     const ids = onClip ? (selected.has(onClip.id) ? selectedClips : [onClip.id]) : [];
     const empty = !edge && !onClip && !scene && !image;
-    openAskMenu(event, edge ? edgeItems(edge) : onClip ? clipItems(onClip, ids) : empty ? [...addTrackItems(true), addSubtitlesItem()] : []);
+    openAskMenu(event, edge ? edgeItems(edge) : onClip ? clipItems(onClip, ids) : empty ? [...addTrackItems(true), addSubtitlesItem(), ...(image ? [] : [markPlayheadItem()])] : []);
   };
 
   return (
@@ -1289,7 +1323,7 @@ function TimelineCanvas({
               className="icon-button"
               aria-label={t.timeline.addSubtitleTrack}
               data-tip={t.timeline.addSubtitleTitle}
-              disabled={!layout?.rows.some((row) => row.kind === "video" || row.kind === "audio")}
+              disabled={!layout?.rows.some(isClipTrack)}
               onClick={() => addSubtitles()}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -1320,7 +1354,7 @@ function TimelineCanvas({
                     <button
                       className={`track-head track-program${selectedTrack === row.id ? " is-selected" : ""}`}
                       style={{ height: row.height }}
-                      data-tip={t.timeline.programHeadTitle(row.id)}
+                      data-tip={t.timeline.programHeadTitle(trackName(row))}
                       aria-pressed={selectedTrack === row.id}
                       data-track={row.id}
                       onClick={() => selection.selectTrack(row.id, "timeline")}
@@ -1328,15 +1362,23 @@ function TimelineCanvas({
                     >
                       <span className="track-id">{row.label}</span>
                       <span className="track-label">{row.name ?? ""}</span>
-                      <TrackState row={row} matte={layout ? matteBadge(layout, row, mattes) : null} />
+                      <TrackState matte={layout ? matteBadge(layout, row, mattes) : null} />
                     </button>
+                  )}
+                  {renaming !== row.id && (
+                    <TrackToggles
+                      row={row}
+                      image={image}
+                      onSet={(change) => setTrack(row, change)}
+                      style={{ top: (row.height - TOGGLE_SIZE) / 2, right: row.angles.length > 0 ? 30 : 6 }}
+                    />
                   )}
                   {row.angles.length > 0 && (
                     <button
                       className={`icon-button turn-lanes-toggle${lanesOpen.has(row.id) ? " on" : ""}`}
                       aria-pressed={lanesOpen.has(row.id)}
                       aria-label={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.showTurnLanes}
-                      data-tip={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.turnLanesTitle(row.id, isMac)}
+                      data-tip={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.turnLanesTitle(trackName(row), isMac)}
                       data-testid="turn-lanes-toggle"
                       data-track={row.id}
                       onClick={() => onToggleLanes(row.id)}
@@ -1368,7 +1410,7 @@ function TimelineCanvas({
                   key={row.id}
                   className={`track-head track-subtitles${selectedTrack === row.id ? " is-selected" : ""}`}
                   style={{ height: row.height }}
-                  data-tip={t.timeline.subtitleHeadTitle(row.id)}
+                  data-tip={t.timeline.subtitleHeadTitle(trackName(row))}
                   aria-pressed={selectedTrack === row.id}
                   data-track={row.id}
                   onClick={() => selection.selectTrack(row.id, "timeline")}
@@ -1382,13 +1424,14 @@ function TimelineCanvas({
                   key={row.id}
                   className={`track-head track-${row.kind}`}
                   style={{ height: row.height }}
-                  title={row.id}
+                  data-tip={trackName(row)}
                   data-track={row.id}
                   onContextMenu={(event) => openTrackMenu(event, row)}
                 >
                   <span className="track-id">{row.label}</span>
                   <span className="track-label">{row.name ?? ""}</span>
-                  <TrackState row={row} matte={layout ? matteBadge(layout, row, mattes) : null} />
+                  <TrackState matte={layout ? matteBadge(layout, row, mattes) : null} />
+                  <TrackToggles row={row} image={image} onSet={(change) => setTrack(row, change)} />
                 </div>
               ),
             )}
@@ -1476,23 +1519,76 @@ function MatteChip({ matte }: { matte: MatteBadge }) {
   );
 }
 
-/** Marks at the end of a track header: muted, hidden, or both, and the matte of a track behind a person; nothing for a plain track. */
-function TrackState({ row, matte }: { row: TrackRow; matte: MatteBadge | null }) {
-  if (!row.muted && !row.hidden && !matte) return null;
+/** Mark at the end of a track header: the matte of a track behind a person; nothing for any other track. */
+function TrackState({ matte }: { matte: MatteBadge | null }) {
+  if (!matte) return null;
   return (
-    <span className="track-state" data-testid="track-state" data-muted={row.muted} data-hidden={row.hidden}>
-      {matte && <MatteChip matte={matte} />}
-      {row.muted && (
-        <svg viewBox="0 0 16 16" role="img" aria-label={t.timeline.trackMuted}>
-          <title>{t.timeline.trackMuted}</title>
-          <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5zM10.5 6l4 4M14.5 6l-4 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-        </svg>
+    <span className="track-state" data-testid="track-state">
+      <MatteChip matte={matte} />
+    </span>
+  );
+}
+
+/**
+ * Sound and picture switches of a track header, always shown: lit while the track is muted or hidden, a click turns
+ * them (`track.set`, the same as the header menu). Sound on every clip track (not in image projects), picture on
+ * video and program tracks.
+ */
+function TrackToggles({
+  row,
+  image,
+  onSet,
+  style,
+}: {
+  row: TrackRow;
+  image: boolean;
+  onSet: (change: { muted: boolean } | { hidden: boolean }) => void;
+  style?: React.CSSProperties;
+}) {
+  const sound = row.kind !== "subtitles" && !image;
+  const picture = row.kind === "video" || row.kind === "program";
+  if (!sound && !picture) return null;
+  return (
+    <span className="track-toggles" style={style} data-testid="track-toggles" data-muted={row.muted} data-hidden={row.hidden}>
+      {sound && (
+        <button
+          type="button"
+          className={`track-toggle${row.muted ? " on" : ""}`}
+          aria-label={t.timeline.muteTrack}
+          aria-pressed={row.muted}
+          data-tip={t.timeline.muteToggle(row.muted)}
+          data-testid="track-mute"
+          onClick={() => onSet({ muted: !row.muted })}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            {row.muted ? (
+              <path d="M10.5 6l4 4M14.5 6l-4 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            ) : (
+              <path d="M10.75 5.75a3.25 3.25 0 0 1 0 4.5M12.75 4a5.75 5.75 0 0 1 0 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            )}
+          </svg>
+        </button>
       )}
-      {row.hidden && (
-        <svg viewBox="0 0 16 16" role="img" aria-label={t.timeline.trackHidden}>
-          <title>{t.timeline.trackHidden}</title>
-          <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM3 13L13 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-        </svg>
+      {picture && (
+        <button
+          type="button"
+          className={`track-toggle${row.hidden ? " on" : ""}`}
+          aria-label={t.timeline.hideTrack}
+          aria-pressed={row.hidden}
+          data-tip={t.timeline.hideToggle(row.hidden)}
+          data-testid="track-hide"
+          onClick={() => onSet({ hidden: !row.hidden })}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            {row.hidden ? (
+              <path d="M3 13L13 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            ) : (
+              <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+            )}
+          </svg>
+        </button>
       )}
     </span>
   );
@@ -1564,17 +1660,31 @@ const OP_LABELS: Record<string, string> = {
 
 /**
  * Track a new subtitle track should follow: the selected clip's track, else
- * the first whose clips have a transcript, else the first video (then audio)
- * track; null when there is no clip track.
+ * the first whose clips have a transcript, else the base video (then audio)
+ * track; tracks without subtitles first, so the toolbar adds a second track of
+ * the same words only once every clip track has one. Null when there is no
+ * clip track.
  */
 function subtitleSource(layout: TimelineLayout | null, selectedClips: readonly string[], subtitles: SubtitlesState): string | null {
-  // Subtitles follow video or audio tracks only.
-  const rows = layout?.rows.filter((row) => row.kind === "video" || row.kind === "audio") ?? [];
+  const open = unsubtitled(layout);
+  const rows = open.length > 0 ? open : (layout?.rows.filter(isClipTrack) ?? []);
   const picked = rows.find((row) => row.clips.some((clip) => selectedClips.includes(clip.id)));
   const transcribed = rows.find((row) => row.clips.some((clip) => clip.asset !== null && subtitles.transcriptOf(clip.asset) !== null));
   // Rows list the top video layer first: the base track is the last video row.
   const base = rows.filter((row) => row.kind === "video").at(-1) ?? rows[0];
   return (picked ?? transcribed ?? base)?.id ?? null;
+}
+
+/** Video and audio tracks: the ones subtitles follow. */
+function isClipTrack(row: TrackRow): boolean {
+  return row.kind === "video" || row.kind === "audio";
+}
+
+/** Clip tracks that no subtitle track follows yet, in row order. */
+function unsubtitled(layout: TimelineLayout | null): TrackRow[] {
+  const rows = layout?.rows ?? [];
+  const followed = new Set(rows.flatMap((row) => (row.kind === "subtitles" && row.follows ? [row.follows] : [])));
+  return rows.filter((row) => isClipTrack(row) && !followed.has(row.id));
 }
 
 /** Why a key did nothing, in the header. */
@@ -1599,12 +1709,23 @@ function ClipTooltip({ hover, fps, formats }: { hover: { row: TrackRow; clip: Cl
         {t.timeline.range(formatTimecode(clip.start, fps), formatTimecode(clip.end, fps))}
       </span>
       <span className="clip-tooltip-faint">
-        {clip.problem ? clip.problem : t.timeline.clipDetail(formatDuration(clip.end - clip.start), row.label, clip.type)}
+        {clip.problem ? clip.problem : t.timeline.clipDetail(formatDuration(clip.end - clip.start), row.label, clipKindName(clip))}
       </span>
       {adjusted.length > 0 && <span data-testid="clip-tooltip-formats">{t.timeline.formatOverrides(adjusted.join(", "))}</span>}
-      <span className="clip-tooltip-faint">{clip.id}</span>
     </div>
   );
+}
+
+/** What a clip is, for its tooltip: nothing for media (the name is its file), the plugin type of a generated clip. */
+function clipKindName(clip: ClipBox): string | null {
+  if (clip.kind === "media") return null;
+  if (clip.kind === "generated") return t.timeline.clipKinds.generated(clip.type);
+  return t.timeline.clipKinds[clip.kind];
+}
+
+/** A track as people see it in tooltips: its label and name (`V1 · Interview`), never its id. */
+function trackName(row: TrackRow): string {
+  return row.name ? `${row.label} · ${row.name}` : row.label;
 }
 
 /** Where the dragged clip or edge would land, next to the pointer. */
