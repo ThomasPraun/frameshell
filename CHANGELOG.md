@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-20
+
 ### Added
 
 - Connect your AI, one panel for connecting the AI apps people already use, desktop apps first: big cards for Claude
@@ -22,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there. An app that looks not installed offers Download (the official pages, claude.ai/download and
   chatgpt.com/download) next to Open, and an Open that does not find the app says so and offers Download. Claude
   Desktop starts through its `claude:` URL protocol; OpenAI documents no URL scheme for the ChatGPT app, so it starts
-  by name (Start menu on Windows, `open -a` on macOS, a `chatgpt` command on Linux, best effort).
+  by name (Start menu on Windows, `open -a` on macOS). Linux has no Open for either: Claude Desktop has no Connect
+  there and the ChatGPT desktop app no Linux build.
 - Connect Codex (and the ChatGPT desktop app, which shares its file) and Gemini CLI: `frameshell setup codex|gemini
   [--status | --remove] [--command path]` add Frameshell's MCP server to `~/.codex/config.toml` (the
   `[mcp_servers.frameshell]` table; `CODEX_HOME` when set) or `~/.gemini/settings.json`, with long tool timeouts for the
@@ -1912,6 +1915,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@frameshell/hyperframes` 0.5.0 renders with `@hyperframes/core` and `@hyperframes/producer` 0.9.30 (was 0.8.92).
   The 0.9 breaking changes touch only distributed rendering (Lambda, Cloud Run), which the plugin does not use.
   Clip render caches are keyed by plugin version, so existing `hyperframes` clips render again once.
+- `@frameshell/remotion` 0.5.0 carries the beat and marker timing binding (`props.timing`). Clip render caches are
+  keyed by plugin version, so existing `remotion` clips render again once.
 - The format owns the frame (ADR 0027): an export preset given to `render` or `frame` whose aspect differs from the
   format rendered is refused (`render --preset vertical-1080x1920` in a 16:9 project now asks to add and render the
   `9x16` format). A vertical project rendered without a preset now exports at its own size, not a letterboxed
@@ -2474,7 +2479,8 @@ Pick and inspect (ADR 0011): point at a pixel of the preview and the agent gets 
 - `@frameshell/protocol`: Zod method registry declaring every daemon method once (params, result, model-facing description). The daemon rejects invalid params with `InvalidParams` naming each field, and `methodJsonSchemas()` exports per-method JSON Schema for MCP tool generation. Daemon startup errors (bad `FRAMESHELL_IDLE_TIMEOUT_MS`, a non-socket file or an over-long unix socket path) now reach the CLI instead of a generic 10 s timeout.
 - Managed native binaries and `frameshell doctor [--install] [--json]`: the daemon downloads pinned GPL static ffmpeg/ffprobe builds (x264, libvpx VP9 encode and decode) for macOS arm64/x64, Linux x64/arm64 and Windows x64 on first use, verifies SHA-256 and installs atomically under the app data dir. `binaries` in `frameshell.json` or the global `config.json` points at system binaries instead. `doctor` reports sources, versions and encoders/decoders (x264, libvpx, VideoToolbox, NVENC, VAAPI, hardware ones test-encoded). New `doctor` daemon method and binary error codes; protocol version 2. Sources and licences: `docs/binaries.md`.
 
-[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/ThomasPraun/frameshell/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.19.0
 [0.18.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.18.0
 [0.17.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.17.0
 [0.16.0]: https://github.com/ThomasPraun/frameshell/releases/tag/v0.16.0

@@ -6,7 +6,7 @@ Website: [frameshell.dev](https://frameshell.dev)
 
 Edit a video by asking for it. You talk to an AI app you already use (Claude Desktop, the ChatGPT desktop app or a coding agent), it edits the project, and you watch every change live in the preview and the multitrack timeline. Fix what you don't like by hand and the AI picks up from your changes.
 
-> **Status: alpha.** Latest release: [v0.18.0](https://github.com/ThomasPraun/frameshell/releases/latest). Expect rough edges, and file an [issue](https://github.com/ThomasPraun/frameshell/issues) when you hit one.
+> **Status: alpha.** Latest release: [v0.19.0](https://github.com/ThomasPraun/frameshell/releases/latest). Expect rough edges, and file an [issue](https://github.com/ThomasPraun/frameshell/issues) when you hit one.
 
 ## Get started
 
