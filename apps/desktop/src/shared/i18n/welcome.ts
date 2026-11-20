@@ -39,7 +39,10 @@ const en = {
   ideaLede: "No footage needed. Tell the agent what you have in mind; it builds the video here.",
   ideaName: "Name of the video",
   formatsLegend: "Formats",
-  formatsHint: "Every format comes from the same edit. The first one listed is the main format.",
+  formatsHint: "Every format comes from the same edit. The main one sets the project's size.",
+  /** Radio beside a ticked format: makes it the main one. */
+  mainFormat: "Main",
+  mainFormatOf: (format: string) => `Make ${format} the main format`,
   /** By built-in format id; the canvas is the one the project gets. */
   formatLabels: {
     "16x9": "Horizontal 16:9 (1920x1080)",
@@ -98,7 +101,9 @@ const es: typeof en = {
   ideaLede: "No necesitas grabaciones. Cuéntale al agente lo que tienes en mente; él arma el video aquí.",
   ideaName: "Nombre del video",
   formatsLegend: "Formatos",
-  formatsHint: "Todos los formatos salen de la misma edición. El primero de la lista es el principal.",
+  formatsHint: "Todos los formatos salen de la misma edición. El principal define el tamaño del proyecto.",
+  mainFormat: "Principal",
+  mainFormatOf: (format) => `Usar ${format} como formato principal`,
   formatLabels: {
     "16x9": "Horizontal 16:9 (1920x1080)",
     "9x16": "Vertical 9:16 (1080x1920)",

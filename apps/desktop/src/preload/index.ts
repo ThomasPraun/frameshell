@@ -37,6 +37,7 @@ const api: FrameshellApi = {
     planIdea: (place) => invokeOutcome(Channel.projectPlanIdea, place),
     fromIdea: (brief, parent) => ipcRenderer.invoke(Channel.projectFromIdea, brief, parent),
     takeIdea: () => ipcRenderer.invoke(Channel.projectTakeIdea),
+    addFormat: (id) => invokeOutcome(Channel.projectAddFormat, id),
     setup: () => ipcRenderer.invoke(Channel.projectSetup),
     onSetup: (listener) => subscribe(Channel.projectSetupChanged, listener),
   },

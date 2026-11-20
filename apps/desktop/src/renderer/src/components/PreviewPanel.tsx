@@ -1,4 +1,5 @@
 import type { ElementAdjust } from "@frameshell/schema";
+import { PLATFORM_IDS, type PlatformId, SAFE_ZONES } from "@frameshell/schema/safe-zones";
 import { IDENTITY_PLACEMENT, type Placement, type Size } from "@frameshell/schema/composite";
 import { type ResolvedFormat, scaledCaptions } from "@frameshell/schema/formats";
 import { type CSSProperties, type MouseEvent, type PointerEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -9,6 +10,7 @@ import { cutOut, pickedCutout } from "../preview/cut-out.js";
 import { holdSettled } from "../preview/element-edit.js";
 import { elementMode, useElementMode } from "../preview/element-mode.js";
 import { liveTarget } from "../preview/live.js";
+import { SAFE_ZONE_KEY, type SafeZoneChoice, addableFormats, formatName, framePlatform, readSafeZoneChoice, safeRect } from "../preview/safe-zone.js";
 import { PreviewPlayer } from "../preview/player.js";
 import { type PlaceholderReason, type PlaceholderSpan, type Program, letterboxOverlay, placeholdersAt } from "../preview/program.js";
 import { dragPlacement, frameBox as placedBox, layerAt, layerBox, layersAt, placementEdit } from "../preview/transform-edit.js";
@@ -121,6 +123,23 @@ export function PreviewPanel({
   const [liveClip, setLiveClip] = useState<LiveShown | null>(null);
   const mode = useElementMode();
   const shownFrame = variant ? shown : resolution;
+  // Safe zones (#750): off until the viewer turns them on; the platform follows the frame unless they picked one.
+  const [safeZone, setSafeZoneState] = useState<SafeZoneChoice>(() => {
+    try {
+      return readSafeZoneChoice(localStorage.getItem(SAFE_ZONE_KEY));
+    } catch {
+      return readSafeZoneChoice(null);
+    }
+  });
+  const setSafeZone = (next: SafeZoneChoice) => {
+    setSafeZoneState(next);
+    try {
+      localStorage.setItem(SAFE_ZONE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage refused (private window): the choice lasts this session.
+    }
+  };
+  const safePlatform = safeZone.platform ?? framePlatform(shownFrame);
 
   // Layout effects, this one and the program's: the engine gets a new program in the commit that shows its
   // placeholders, and `data-shown` (program frame on the canvas, absent while a previous program's picture shows) with it.
@@ -287,8 +306,6 @@ export function PreviewPanel({
             );
           }}
         >
-          <div className="safe-area action" />
-          <div className="safe-area title" />
           {empty && <p className="preview-caption">{still ? t.preview.emptyPicture : t.preview.emptyCaption}</p>}
           {program && <Placeholder program={program} frame={frame} output={shownFrame} />}
           {/* A generated clip still rendering plays its composition live, above the canvas (ADR 0010). */}
@@ -305,6 +322,7 @@ export function PreviewPanel({
           {program && <LetterboxBars program={program} output={shownFrame} />}
           {/* Subtitles read over every picture, the render slates and the letterbox bars. Neither takes a click. */}
           <SubtitleOverlay size={canvasSize} frame={frame} format={shown} mediaUrl={project.mediaUrl} />
+          {safeZone.on && !empty && <SafeZoneOverlay platform={safePlatform} frame={shownFrame} />}
           {program && !playing && !editing && <Handles program={program} frame={frame} frameRef={frameBox} alphaAt={alphaAt} format={variant ? shown : null} />}
           {program && editing && view && !playing && !variant && !pickTool && (
             <ElementLayer program={program} frame={frame} timeline={view.timeline} clip={mode.clip!} elements={elements} onNotice={setNotice} />
@@ -336,6 +354,9 @@ export function PreviewPanel({
           setPickTool(false);
           setFormatId(id);
         }}
+        safeZone={still ? null : safeZone}
+        safePlatform={safePlatform}
+        onSafeZone={setSafeZone}
         onNotice={setNotice}
       />
     </div>
@@ -630,6 +651,128 @@ function samePlacement(a: Placement, b: Placement): boolean {
   return a.x === b.x && a.y === b.y && a.scale === b.scale && a.opacity === b.opacity;
 }
 
+/** Value of an "Add format" entry of the switcher: never a format id, which has no colon. */
+const ADD_FORMAT = "add:";
+
+/**
+ * The format switcher (ADR 0027): the project's formats, the main one first, then the built-ins it lacks under
+ * "Add format" (#750). Adding one goes through the daemon (`format.add`, journaled) and shows it.
+ */
+function FormatSwitcher({
+  formats,
+  format,
+  primary,
+  onFormat,
+  onNotice,
+}: {
+  formats: readonly ResolvedFormat[];
+  format: string;
+  primary: boolean;
+  onFormat: (id: string) => void;
+  onNotice: (notice: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const addable = addableFormats(formats);
+  const add = async (id: string) => {
+    setAdding(true);
+    try {
+      await window.frameshell.project.addFormat(id);
+      onFormat(id);
+      onNotice(t.preview.formatAdded(formatName(id)));
+    } catch (error) {
+      onNotice((error as Error).message);
+    } finally {
+      setAdding(false);
+    }
+  };
+  return (
+    <select
+      className={`clip-field-select preview-format${primary ? "" : " on"}`}
+      aria-label={t.preview.format}
+      data-tip={t.preview.formatHint}
+      data-testid="preview-format"
+      value={format}
+      disabled={adding}
+      onChange={(event) => {
+        const value = event.target.value;
+        if (value.startsWith(ADD_FORMAT)) void add(value.slice(ADD_FORMAT.length));
+        else onFormat(value);
+      }}
+    >
+      {formats.map(({ id, width, height, primary: main }) => (
+        <option key={id} value={id}>
+          {main ? t.preview.formatMain(width, height) : t.preview.formatOption(formatName(id), width, height)}
+        </option>
+      ))}
+      {addable.length > 0 && (
+        <optgroup label={t.preview.addFormatGroup}>
+          {addable.map(({ id, width, height }) => (
+            <option key={id} value={`${ADD_FORMAT}${id}`}>
+              {t.preview.addFormatOption(formatName(id), width, height)}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
+/** The safe-zone switch, and once on, which platform's zone shows (#750). */
+function SafeZoneControl({ choice, platform, onChange }: { choice: SafeZoneChoice; platform: PlatformId; onChange: (choice: SafeZoneChoice) => void }) {
+  return (
+    <>
+      <button
+        className={`icon-button safe-zone-toggle${choice.on ? " on" : ""}`}
+        aria-label={t.preview.safeZones}
+        aria-pressed={choice.on}
+        data-tip={t.preview.safeZonesHint}
+        data-testid="preview-safe-zones"
+        onClick={() => onChange({ ...choice, on: !choice.on })}
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          <rect x="4" y="5" width="8" height="6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2 1.5" />
+        </svg>
+      </button>
+      {choice.on && (
+        <select
+          className="clip-field-select preview-safe-platform"
+          aria-label={t.preview.safeZonePlatform}
+          data-testid="preview-safe-platform"
+          value={platform}
+          onChange={(event) => onChange({ on: true, platform: PLATFORM_IDS.find((id) => id === event.target.value) ?? null })}
+        >
+          {PLATFORM_IDS.map((id) => (
+            <option key={id} value={id}>
+              {t.preview.platforms[id] ?? id}
+            </option>
+          ))}
+        </select>
+      )}
+    </>
+  );
+}
+
+/**
+ * Where `platform`'s app covers the picture, over the frame: the covered edges shaded, the safe rectangle outlined
+ * and named. From `safe-zones.ts` scaled to the frame shown; takes no click.
+ */
+function SafeZoneOverlay({ platform, frame }: { platform: PlatformId; frame: Size }) {
+  const rect = safeRect(platform, frame);
+  const name = t.preview.platforms[platform] ?? platform;
+  const label = t.preview.safeZoneLabel(name, SAFE_ZONES[platform].measured);
+  return (
+    <div className="safe-zone" data-testid="preview-safe-zone" data-platform={platform} aria-hidden="true">
+      <div
+        className="safe-zone-rect"
+        style={{ top: `${rect.top * 100}%`, right: `${rect.right * 100}%`, bottom: `${rect.bottom * 100}%`, left: `${rect.left * 100}%` }}
+      >
+        <span className="safe-zone-label">{rect.sameShape ? label : `${label} · ${t.preview.safeZoneOtherShape(name)}`}</span>
+      </div>
+    </div>
+  );
+}
+
 function TransportBar({
   still,
   playing,
@@ -640,6 +783,9 @@ function TransportBar({
   formats,
   format,
   onFormat,
+  safeZone,
+  safePlatform,
+  onSafeZone,
   onNotice,
 }: {
   /** An image project: the tools stay, the playback buttons go. */
@@ -649,11 +795,16 @@ function TransportBar({
   notice: string | null;
   pickTool: boolean;
   onPickTool: () => void;
-  /** Project formats, primary first; the switcher shows with two or more. */
+  /** Project formats, primary first; the switcher shows in a video project, empty in an image one. */
   formats: readonly ResolvedFormat[];
   /** Id of the format shown. */
   format: string;
   onFormat: (id: string) => void;
+  /** The safe-zone overlay's choice; null where there is none (an image project). */
+  safeZone: SafeZoneChoice | null;
+  /** The platform whose zone shows: the picked one, else the frame's. */
+  safePlatform: PlatformId;
+  onSafeZone: (choice: SafeZoneChoice) => void;
   /** Show a refusal or a result in the bar. */
   onNotice: (notice: string) => void;
 }) {
@@ -674,22 +825,8 @@ function TransportBar({
             <path d="M8 6v4M6 8h4" fill="none" stroke="currentColor" strokeWidth="1.2" />
           </svg>
         </button>
-        {formats.length > 1 && (
-          <select
-            className={`clip-field-select preview-format${primary ? "" : " on"}`}
-            aria-label={t.preview.format}
-            data-tip={t.preview.formatHint}
-            data-testid="preview-format"
-            value={format}
-            onChange={(event) => onFormat(event.target.value)}
-          >
-            {formats.map(({ id, width, height }) => (
-              <option key={id} value={id}>
-                {t.preview.formatOption(id, width, height)}
-              </option>
-            ))}
-          </select>
-        )}
+        {formats.length > 0 && <FormatSwitcher formats={formats} format={format} primary={primary} onFormat={onFormat} onNotice={onNotice} />}
+        {safeZone && <SafeZoneControl choice={safeZone} platform={safePlatform} onChange={onSafeZone} />}
         {!still && <LetterboxControl format={primary ? null : format} onError={onNotice} />}
       </div>
       {!still && (

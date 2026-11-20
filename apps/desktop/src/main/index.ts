@@ -30,6 +30,7 @@ import {
 import { BinaryManager } from "@frameshell/core/binaries";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
+import { BUILTIN_FORMAT_IDS } from "@frameshell/schema/formats";
 import {
   type AssetChange,
   Channel,
@@ -1691,6 +1692,12 @@ function registerIpc(): void {
     outcome(() => planIdeaProject({ parent: ideaParent(place?.parent), name: place?.name ?? "" }, text.welcome.untitledVideo)),
   );
   ipcMain.handle(Channel.projectFromIdea, (event, brief: IdeaBrief, parent?: string) => createFromIdea(stateOf(event.sender), brief, parent));
+  ipcMain.handle(Channel.projectAddFormat, (event, id: unknown) =>
+    outcome(async () => {
+      if (typeof id !== "string" || !BUILTIN_FORMAT_IDS.includes(id)) throw new Error(`Not a built-in format: ${String(id)}`);
+      await daemon.request("format.add", { cwd: (await requireProject(stateOf(event.sender))).project.dir, id });
+    }),
+  );
   ipcMain.handle(Channel.projectTakeIdea, (event) => {
     const dir = stateOf(event.sender).project?.dir;
     const brief = dir ? (ideas.get(dir) ?? null) : null;
