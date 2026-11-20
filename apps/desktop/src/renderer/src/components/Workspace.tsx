@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import type { ProjectSetup, ProjectView } from "../../../shared/api.js";
 import {
@@ -39,6 +39,7 @@ import { teleprompter } from "../teleprompter/store.js";
 import { StatusBar } from "./StatusBar.js";
 import { ConnectAiButton } from "./ConnectAi.js";
 import { type AgentTerminal, TerminalPanel } from "./TerminalPanel.js";
+import { TerminalMark } from "./TerminalMark.js";
 import { TimelinePanel } from "./TimelinePanel.js";
 import { TRANSCRIPT_TAB, type TranscriptFocus } from "./TranscriptView.js";
 import { isTranscriptPath } from "../transcript/useTranscripts.js";
@@ -76,8 +77,6 @@ export function Workspace({ project }: { project: ProjectView }) {
   const dragBase = useRef<Layout | null>(null);
   const centerRow = useRef<HTMLDivElement>(null);
   const terminals = useRef<AgentTerminal>(null);
-  const terminalCollapsed = useRef(false);
-  terminalCollapsed.current = layout?.panels.terminal.collapsed ?? false;
   const [detached, setDetached] = useState<ReadonlySet<DetachablePanel>>(new Set());
   const setPanelDetached = useCallback(
     (panel: DetachablePanel, out: boolean) =>
@@ -163,6 +162,11 @@ export function Workspace({ project }: { project: ProjectView }) {
   }, [layout]);
 
   const toggle = useCallback((id: PanelId) => setLayout((current) => current && togglePanel(current, id)), []);
+  /** Whatever needs a terminal (Chat about this, a film idea) opens the panel; a no-op while it is open. */
+  const revealTerminal = useCallback(
+    () => setLayout((current) => (current?.panels.terminal.collapsed ? togglePanel(current, "terminal") : current)),
+    [],
+  );
 
   useEffect(() => {
     if (!notice) return;
@@ -211,9 +215,6 @@ export function Workspace({ project }: { project: ProjectView }) {
   useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
     let asking = false;
-    const reveal = () => {
-      if (terminalCollapsed.current) toggle("terminal");
-    };
     return askAgent.install({
       targets: () =>
         chatTargets(terminals.current?.agents() ?? [], agentTargets.get().targets, (name) => t.workspace.askExternalTarget(name, project.name)),
@@ -241,7 +242,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             }
             const panel = terminals.current;
             if (panel) {
-              if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, reveal)) panel.type(lines, reveal);
+              if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, revealTerminal)) panel.type(lines, revealTerminal);
               return;
             }
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
@@ -266,7 +267,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           .finally(() => (asking = false));
       },
     });
-  }, [toggle, project.name]);
+  }, [revealTerminal, project.name]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -559,13 +560,23 @@ export function Workspace({ project }: { project: ProjectView }) {
 
         {/* Terminals stay mounted while collapsed: shells and agents keep running. */}
         {!terminal.collapsed && <Splitter orientation="vertical" label={t.workspace.resizeTerminal} {...edge("terminal", -1)} />}
-        {terminal.collapsed && <CollapsedRail side="right" label={t.workspace.showTerminal} shortcut={panelShortcut("terminal")} onExpand={() => toggle("terminal")} />}
+        {terminal.collapsed && (
+          <CollapsedRail
+            side="right"
+            label={t.workspace.showTerminal}
+            shortcut={panelShortcut("terminal")}
+            onExpand={() => toggle("terminal")}
+            mark={<TerminalMark />}
+            text={t.terminal.terminal}
+          />
+        )}
         <div {...slot("terminal")} style={terminal.collapsed ? { display: "none" } : { flexBasis: terminal.size }}>
           <TerminalPanel
             ref={terminals}
             projectName={project.name}
             visible={!terminal.collapsed}
             onCollapse={() => toggle("terminal")}
+            onReveal={revealTerminal}
             onActiveSession={setActiveSession}
           />
         </div>
@@ -578,7 +589,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         notice={notice}
         setup={setup}
         agentTargets={terminal.collapsed ? connectedAgents : []}
-        onShowTerminal={() => toggle("terminal")}
+        onShowTerminal={revealTerminal}
       />
       {sidebarViews(image).filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
@@ -612,12 +623,34 @@ function askKeyApplies(target: EventTarget | null): boolean {
   return isMac || !element.closest(".xterm");
 }
 
-function CollapsedRail({ side, label, shortcut, onExpand }: { side: "left" | "right"; label: string; shortcut: string; onExpand: () => void }) {
+/** A folded panel's edge strip. With `text` it shows `mark` and the name instead of the chevron, for a panel people should find. */
+function CollapsedRail({
+  side,
+  label,
+  shortcut,
+  onExpand,
+  mark,
+  text,
+}: {
+  side: "left" | "right";
+  label: string;
+  shortcut: string;
+  onExpand: () => void;
+  mark?: ReactNode;
+  text?: string;
+}) {
   return (
-    <button className={`rail rail-${side}`} aria-label={label} data-tip={label} data-tip-key={shortcut} onClick={onExpand}>
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d={side === "left" ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5"} fill="none" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
+    <button className={`rail rail-${side}${text ? " rail-labelled" : ""}`} aria-label={label} data-tip={label} data-tip-key={shortcut} onClick={onExpand}>
+      {text ? (
+        <>
+          {mark}
+          <span className="rail-label">{text}</span>
+        </>
+      ) : (
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d={side === "left" ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5"} fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      )}
     </button>
   );
 }

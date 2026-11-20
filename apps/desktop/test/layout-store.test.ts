@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +23,21 @@ describe("LayoutStore", () => {
     const reopened = new LayoutStore(dir);
     expect(await reopened.load("/videos/talk")).toEqual(talk);
     expect(await reopened.load("/videos/promo")).toEqual(promo);
+  });
+
+  it("keeps a project that saved its terminal open open, and a new one folded", async () => {
+    const dir = storeDir();
+    const open = togglePanel(DEFAULT_LAYOUT, "terminal");
+    await new LayoutStore(dir).save("/videos/talk", open);
+    const reopened = new LayoutStore(dir);
+    expect((await reopened.load("/videos/talk")).panels.terminal.collapsed).toBe(false);
+    expect((await reopened.load("/videos/new")).panels.terminal.collapsed).toBe(true);
+  });
+
+  it("names the file as the e2e harness seeds it (sha256 of the project dir, 16 hex characters)", async () => {
+    const dir = storeDir();
+    await new LayoutStore(dir).save("/videos/talk", DEFAULT_LAYOUT);
+    expect(readdirSync(dir)).toEqual([`${createHash("sha256").update("/videos/talk").digest("hex").slice(0, 16)}.json`]);
   });
 
   it("falls back to defaults when the stored file is corrupt", async () => {

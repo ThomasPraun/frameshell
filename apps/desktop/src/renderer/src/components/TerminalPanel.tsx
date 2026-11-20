@@ -99,23 +99,31 @@ interface ViewHandle {
 }
 
 /**
- * Right column: tabs of real shells. Stays mounted while collapsed so agents
- * keep running. Each tab can move to its own window and back (ADR 0012); its
- * pty lives until the tab is closed, whichever window shows it.
+ * Right column: tabs of real shells. Nothing starts until the panel is first
+ * shown (a project opens with it folded); from then on it stays mounted while
+ * collapsed so shells and agents keep running. Each tab can move to its own
+ * window and back (ADR 0012); its pty lives until the tab is closed,
+ * whichever window shows it.
  */
 export function TerminalPanel({
   projectName,
   visible,
   onCollapse,
+  onReveal,
   onActiveSession,
   ref,
 }: {
   projectName: string;
   visible: boolean;
   onCollapse: () => void;
+  /** Ask for the panel to be shown: a film idea waits in the agent guide. */
+  onReveal: () => void;
   onActiveSession: (session: string | null) => void;
   ref?: Ref<AgentTerminal>;
 }) {
+  /** Set the first time the panel is shown and never cleared: views mount then, and stay. */
+  const [opened, setOpened] = useState(visible);
+  if (visible && !opened) setOpened(true);
   const nextKey = useRef(1);
   const [tabs, setTabs] = useState<Tab[]>(() => [{ key: 0, info: null, exitCode: null, detached: false, name: null }]);
   const [active, setActive] = useState(0);
@@ -130,8 +138,11 @@ export function TerminalPanel({
   /** Prompt for the film of a project made from an idea, taken once from main; null when none. */
   const [idea, setIdea] = useState<string | null>(null);
   useEffect(() => {
-    void window.frameshell.project.takeIdea().then((brief) => setIdea(brief ? ideaPrompt(brief) : null));
-  }, []);
+    void window.frameshell.project.takeIdea().then((brief) => {
+      setIdea(brief ? ideaPrompt(brief) : null);
+      if (brief) onReveal();
+    });
+  }, [onReveal]);
   const route = useTerminalRouter();
   /** Attached views by tab key. */
   const views = useRef(new Map<number, ViewHandle>());
@@ -392,7 +403,7 @@ export function TerminalPanel({
           </button>
         </div>
       </PanelHeader>
-      {activeTab && !activeTab.detached && activeTab.exitCode === null && (
+      {opened && activeTab && !activeTab.detached && activeTab.exitCode === null && (
         <AgentGuide
           agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
           compact={used.has(activeTab.key)}
@@ -411,7 +422,7 @@ export function TerminalPanel({
       <div className="terminal-stack">
         {tabs.map((tab, index) =>
           !tab.detached ? (
-            view(tab, visible && tab.key === active)
+            opened && view(tab, visible && tab.key === active)
           ) : (
             tab.key === active && (
               <DockedElsewhere key={tab.key} title={`${t.terminal.terminal} ${label(tab, index)}`} onBringBack={() => setDetached(tab.key, false)} />

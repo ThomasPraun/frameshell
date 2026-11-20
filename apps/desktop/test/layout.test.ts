@@ -31,10 +31,26 @@ describe("layout model", () => {
     expect(resizePanel(DEFAULT_LAYOUT, "timeline", 240).panels.timeline.size).toBe(240);
   });
 
+  it("starts a new project with the terminal folded and the other panels open", () => {
+    expect(DEFAULT_LAYOUT.panels.terminal.collapsed).toBe(true);
+    expect(DEFAULT_LAYOUT.panels.sidebar.collapsed).toBe(false);
+    expect(DEFAULT_LAYOUT.panels.timeline.collapsed).toBe(false);
+  });
+
+  it("one toggle opens the folded terminal at its kept size", () => {
+    expect(togglePanel(DEFAULT_LAYOUT, "terminal").panels.terminal).toEqual({ size: 520, collapsed: false });
+  });
+
+  it("keeps the terminal as a stored layout has it, open or folded", () => {
+    expect(normalizeLayout({ panels: { terminal: { size: 640, collapsed: false } } }).panels.terminal).toEqual({ size: 640, collapsed: false });
+    expect(normalizeLayout({ panels: { terminal: { size: 640, collapsed: true } } }).panels.terminal.collapsed).toBe(true);
+  });
+
   it("resizing a collapsed panel expands it", () => {
-    const collapsed = togglePanel(DEFAULT_LAYOUT, "terminal");
-    expect(collapsed.panels.terminal.collapsed).toBe(true);
-    expect(resizePanel(collapsed, "terminal", 500).panels.terminal).toEqual({ size: 500, collapsed: false });
+    const collapsed = togglePanel(DEFAULT_LAYOUT, "sidebar");
+    expect(collapsed.panels.sidebar.collapsed).toBe(true);
+    expect(resizePanel(collapsed, "sidebar", 300).panels.sidebar).toEqual({ size: 300, collapsed: false });
+    expect(resizePanel(DEFAULT_LAYOUT, "terminal", 500).panels.terminal).toEqual({ size: 500, collapsed: false });
   });
 
   it("toggling keeps the size to restore on expand", () => {
