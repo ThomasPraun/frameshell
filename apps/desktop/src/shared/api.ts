@@ -385,6 +385,8 @@ export interface FrameshellApi {
      */
     attach(id: string): Promise<string | null>;
     write(id: string, data: string): void;
+    /** Whether the system clipboard holds text now (#743): Ctrl+V pastes it, else the program gets its ^V. */
+    clipboardHasText(): Promise<boolean>;
     resize(id: string, cols: number, rows: number): void;
     kill(id: string): void;
     onData(listener: (id: string, data: string) => void): () => void;
@@ -1135,6 +1137,7 @@ export const Channel = {
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
   terminalWrite: "terminal:write",
+  terminalClipboardHasText: "terminal:clipboard-has-text",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",
   terminalData: "terminal:data",

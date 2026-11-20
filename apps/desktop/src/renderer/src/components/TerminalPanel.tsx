@@ -553,7 +553,9 @@ function TerminalView({
     // paste event xterm turns into a (bracketed) paste. With no text on the clipboard (an image), the program gets
     // the ^V it asked for. Ctrl+Shift+V keeps working; macOS pastes with Cmd+V.
     if (!isMac) {
-      const paste = terminalPaste(element, () => started !== null && window.frameshell.terminals.write(started, "\x16"), view);
+      const paste = terminalPaste(element, () => started !== null && window.frameshell.terminals.write(started, "\x16"), () =>
+        window.frameshell.terminals.clipboardHasText(),
+      );
       xterm.attachCustomKeyEventHandler(paste.keyHandler);
       cleanups.push(paste.dispose);
     }
