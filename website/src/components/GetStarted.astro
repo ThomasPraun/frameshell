@@ -17,9 +17,9 @@ const downloads = [
 ] as const;
 
 const plugins = [
-  ["@frameshell/whisper-cpp", t.plugins.whisper],
-  ["@frameshell/hyperframes", t.plugins.hyperframes],
-  ["@frameshell/remotion", t.plugins.remotion],
+  [t.plugins.whisperName, t.plugins.whisper],
+  ["HyperFrames", t.plugins.hyperframes],
+  ["Remotion", t.plugins.remotion],
 ];
 ---
 
@@ -57,7 +57,8 @@ const plugins = [
       <li>
         <h3>{t.connect.title}</h3>
         <p set:html={t.connect.body} />
-        <p class="aside">{t.connect.aside}</p>
+        <p class="aside" set:html={t.connect.aside} />
+        <p class="all"><a href={pathFor((Astro.currentLocale ?? "en") as Lang, "agents")}>{t.connect.more}</a></p>
       </li>
       <li>
         <h3>{t.plugins.title}</h3>

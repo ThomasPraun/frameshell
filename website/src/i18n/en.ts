@@ -277,16 +277,18 @@ export const en = {
     folder: {
       title: "Start a project",
       body: "On the welcome screen choose <strong>New from video, audio or image…</strong> (or drop your files there), or <strong>Open folder…</strong> for a folder you already have.",
-      aside: "If you want a transcript and the transcription tool is not on your computer yet, Frameshell tells you the size and asks first. Other tools it needs (ffmpeg, headless Chrome) download when first used.",
+      aside: "If you tick <strong>Transcribe what is said</strong> and the transcription tool is not on your computer yet, Frameshell tells you the size and asks first; you can skip it. Other tools it needs (ffmpeg, headless Chrome) download when first used.",
     },
     connect: {
       title: "Connect your AI",
-      body: "Click <strong>Connect your AI</strong> in the project window's title bar, then <strong>Connect</strong> on the card of Claude Desktop or the ChatGPT desktop app. Quit and reopen that app once to finish.",
-      aside: "ChatGPT on the web is not supported. For Claude Code, Codex, Gemini CLI, Cursor or VS Code, see the developer tools below.",
+      body: "Install Claude Desktop or the ChatGPT desktop app and open it once. Then in Frameshell click <strong>Connect your AI</strong> in the project window's title bar, and <strong>Connect</strong> on that app's card. Quit and reopen the app once to finish.",
+      aside: "This needs a Frameshell version newer than 0.18. With 0.18, open a project and click <strong>Connect Claude Desktop</strong> above the terminal instead (the ChatGPT desktop app needs the newer version). ChatGPT on the web is not supported. For Cursor or VS Code, copy the snippet from the \"For developers\" group of Connect your AI. Frameshell's Connect button for Claude Desktop is not available on Linux: use that snippet or a developer tool.",
+      more: "Claude Code, Codex and Gemini CLI: how to connect each",
     },
     plugins: {
       title: "Add extras if you want",
       body: "Plugins are optional. Open the <strong>Plugins</strong> view in the sidebar to see what each one needs, costs and downloads, then install it with one click. Your AI can suggest one; nothing is installed without your yes.",
+      whisperName: "whisper.cpp transcription",
       whisper: "Subtitles from speech",
       hyperframes: "HTML titles and animations",
       remotion: "Remotion (React) compositions",
@@ -341,7 +343,7 @@ export const en = {
       head: ["Agent", "You talk to it in", "Account it needs"],
       rows: [
         ["Claude Desktop", "Claude's chat app. No terminal.", "A Claude account"],
-        ["ChatGPT desktop app", "ChatGPT's app for your computer. No terminal.", "A ChatGPT account"],
+        ["ChatGPT desktop app", "ChatGPT's app for your computer. No terminal.", "A ChatGPT account; its MCP use may need a paid plan or its Codex mode (not confirmed)"],
         ["Claude Code", "The terminal inside Frameshell", "Claude Pro, Max, Team or Enterprise, or an Anthropic API key"],
         ["Codex", "The terminal inside Frameshell", "ChatGPT Plus, Pro or Business, or an OpenAI API key"],
         ["Gemini CLI", "The terminal inside Frameshell", "A Gemini API key or a paid Google plan"],
@@ -364,17 +366,17 @@ export const en = {
         steps: [
           {
             title: "Install Claude",
-            body: 'Download it from <a href="https://claude.com/download">claude.com/download</a> and sign in. macOS and Windows; on Linux there is a beta for Ubuntu and Debian.',
+            body: 'Download it from <a href="https://claude.com/download">claude.com/download</a> and sign in. Open it once, so it makes its settings folder: Frameshell offers Connect only after that. macOS and Windows; on Linux there is a beta for Ubuntu and Debian.',
             cmds: [],
           },
           {
             title: "Connect Frameshell to Claude",
-            body: "In Frameshell, open a project and click <strong>Connect your AI</strong> in the window's title bar (or the card on the welcome screen), then <strong>Connect</strong> on the Claude Desktop card. Frameshell adds itself to Claude's settings, keeps everything else there as it is, and saves a copy of the file first. <strong>Disconnect</strong> takes it out again.",
+            body: "In Frameshell, open a project and click <strong>Connect your AI</strong> in the window's title bar (or the card on the welcome screen), then <strong>Connect</strong> on the Claude Desktop card. Frameshell adds itself to Claude's settings, keeps everything else there as it is, and saves a copy of the file first. <strong>Disconnect</strong> takes it out again. This needs a version newer than 0.18; with Frameshell 0.8 to 0.18, click <strong>Connect Claude Desktop</strong> above the terminal instead. Frameshell's Connect button for Claude Desktop is not available on Linux; use the next step there.",
             cmds: [],
           },
           {
             title: "Or add it by hand",
-            body: "On Linux, or with Frameshell 0.18 or earlier (it had a <strong>Connect Claude Desktop</strong> button above the terminal instead): in Frameshell choose <strong>File → Install 'frameshell' Command in PATH</strong> (the .deb package has it already). Then in Claude open <strong>Settings → Developer → Edit Config</strong>, put this in the file, keeping anything already in <code>mcpServers</code>, and save:",
+            body: "On Linux, or with a Frameshell version before 0.8: in Frameshell choose <strong>File → Install 'frameshell' Command in PATH</strong> (the .deb package has it already). Then in Claude open <strong>Settings → Developer → Edit Config</strong>, put this in the file, keeping anything already in <code>mcpServers</code>, and save:",
             cmds: [
               { os: "macOS", cmd: '{ "mcpServers": { "frameshell": { "command": "/usr/local/bin/frameshell", "args": ["mcp"] } } }' },
               { os: "Windows", cmd: '{ "mcpServers": { "frameshell": { "command": "cmd", "args": ["/c", "%LOCALAPPDATA%\\\\Frameshell\\\\desktop\\\\bin\\\\frameshell.cmd", "mcp"] } } }' },
@@ -383,12 +385,12 @@ export const en = {
           },
           {
             title: "Restart Claude",
-            body: "Quit Claude completely and open it again. Frameshell then shows among its connectors. The card's <strong>Open</strong> button starts Claude for you and copies a starter phrase to paste into the chat; <strong>Download</strong> shows when the app looks not installed.",
+            body: "Quit Claude completely and open it again. Frameshell then shows among its connectors.",
             cmds: [],
           },
           {
             title: "Try it",
-            body: "With your project open in Frameshell, ask Claude: <em>“What videos does my Frameshell project have?”</em> Claude works on the project of the Frameshell window you used last. It also reads Frameshell's own guide through the connection, so you do not have to explain the tool, and it offers options before it installs, downloads or spends anything.",
+            body: "With your project open in Frameshell, ask Claude: <em>“What videos does my Frameshell project have?”</em> Claude works on the project of the Frameshell window you used last. It also reads Frameshell's own guide through the connection, so you do not have to explain the tool, and it offers options before it installs, downloads or spends anything. With versions before 0.8, tell it where the project is.",
             cmds: [],
           },
         ],
@@ -398,11 +400,11 @@ export const en = {
         group: "desktop",
         name: "ChatGPT desktop app",
         tag: "",
-        intro: "You chat with ChatGPT in OpenAI's app for your computer. Frameshell adds itself to the MCP servers setting the app shares with Codex.",
+        intro: "You chat with ChatGPT in OpenAI's app for your computer. Frameshell adds itself to the MCP servers setting the app shares with Codex. This needs a Frameshell version newer than 0.18, and we know of no ChatGPT desktop app for Linux; there, use a developer tool below.",
         steps: [
           {
             title: "Install ChatGPT",
-            body: 'Download the app from <a href="https://chatgpt.com/download">chatgpt.com/download</a> and sign in.',
+            body: 'Download the app from <a href="https://chatgpt.com/download">chatgpt.com/download</a>, sign in, and open it once so it makes its settings folder: Frameshell offers Connect only after that.',
             cmds: [],
           },
           {
@@ -412,7 +414,7 @@ export const en = {
           },
           {
             title: "Restart ChatGPT",
-            body: "Quit the app completely and open it again. The card's <strong>Open</strong> button starts it and copies a starter phrase to paste into the chat; <strong>Download</strong> shows when the app looks not installed.",
+            body: "Quit the app completely and open it again.",
             cmds: [],
           },
           {
@@ -564,7 +566,7 @@ export const en = {
       items: [
         "<strong>“frameshell: command not found”</strong> outside Frameshell: choose File → Install 'frameshell' Command in PATH, then open a new terminal.",
         "<strong>The agent does not know Frameshell:</strong> start it from the terminal inside Frameshell, in the project folder, or ask it to read <code>.claude/skills/frameshell/SKILL.md</code>.",
-        "<strong>Claude Desktop or ChatGPT does not list Frameshell:</strong> open Connect your AI and check its card says Connected (if it says Frameshell is set up with another command, choose Connect again), then quit the app completely and open it again. If the card reports an error, the app's settings file is not valid; fix or remove it first.",
+        "<strong>Claude Desktop or ChatGPT does not list Frameshell:</strong> open Connect your AI and check its card says Connected (if it says Frameshell is set up with another command, choose Connect again), then quit the app completely and open it again. If the card says the app's settings file is not valid, fix or remove that file first; if it says it could not change the settings, read the reason it gives.",
         "<strong>Anything else:</strong> run <code>frameshell doctor</code> in the project's terminal and send what it prints in a GitHub issue.",
       ],
       issues: "Open an issue",
