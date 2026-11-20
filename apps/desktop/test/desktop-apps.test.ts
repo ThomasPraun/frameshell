@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type LaunchPlan, type Launcher, launchPlan, openDesktopApp, standInLauncher } from "../src/main/desktop-apps.js";
+import { type LaunchPlan, type Launcher, launchPlan, openDesktopApp, standInLauncher, systemLauncher } from "../src/main/desktop-apps.js";
 
 const recorder = (result: Awaited<ReturnType<Launcher>> = { ok: true }) => {
   const plans: LaunchPlan[] = [];
@@ -21,14 +21,39 @@ describe("launchPlan", () => {
   });
 
   it("starts the ChatGPT desktop app by name, since OpenAI documents no URL scheme", () => {
-    expect(launchPlan("chatgpt", "darwin")).toEqual({ kind: "command", file: "open", args: ["-a", "ChatGPT"], wait: true, missing: 1 });
-    const windows = launchPlan("chatgpt", "win32");
+    const mac = launchPlan("chatgpt", "darwin") as Extract<LaunchPlan, { kind: "command" }>;
+    expect(mac).toMatchObject({ kind: "command", file: "/bin/sh", wait: true, missing: 1 });
+    expect(mac.args[1]).toContain("ChatGPT.app");
+    expect(mac.args[1]).toContain("Chrome");
+    const windows = launchPlan("chatgpt", "win32") as Extract<LaunchPlan, { kind: "command" }>;
     expect(windows).toMatchObject({ kind: "command", file: "powershell.exe", wait: true, missing: 3 });
-    const script = (windows as Extract<LaunchPlan, { kind: "command" }>).args.at(-1);
+    expect(windows.args.slice(0, 3)).toEqual(["-NoProfile", "-NonInteractive", "-EncodedCommand"]);
+    const script = Buffer.from(windows.args[3] ?? "", "base64").toString("utf16le");
     expect(script).toContain("Get-StartApps");
     expect(script).toContain("'ChatGPT'");
     expect(script).toContain("shell:AppsFolder");
-    expect(launchPlan("chatgpt", "linux")).toEqual({ kind: "command", file: "chatgpt", args: [], wait: false });
+    expect(script).toContain("msedge");
+    expect(script).toContain("'*!*'");
+  });
+
+  it("has no ChatGPT plan on Linux, where there is no desktop app", () => {
+    expect(launchPlan("chatgpt", "linux")).toBeNull();
+  });
+});
+
+describe("systemLauncher", () => {
+  it("reports Claude Desktop as not found when no app handles claude:, without opening anything", async () => {
+    const opened: string[] = [];
+    const launch = systemLauncher(async (url) => void opened.push(url), () => "");
+    expect(await launch({ kind: "url", url: "claude://" })).toEqual({ ok: false, problem: { kind: "not-found" } });
+    expect(opened).toEqual([]);
+  });
+
+  it("opens the URL when an app handles it", async () => {
+    const opened: string[] = [];
+    const launch = systemLauncher(async (url) => void opened.push(url), () => "Claude");
+    expect(await launch({ kind: "url", url: "claude://" })).toEqual({ ok: true });
+    expect(opened).toEqual(["claude://"]);
   });
 });
 
@@ -64,6 +89,7 @@ describe("openDesktopApp", () => {
 
   it("reports an app that does not exist on the platform as not found, without launching", async () => {
     const { plans, launch } = recorder();
+    expect(await openDesktopApp("chatgpt", "hi", { platform: "linux", launch, copy: () => {} })).toEqual({ opened: false, problem: { kind: "not-found" } });
     expect(await openDesktopApp("claude-desktop", "hi", { platform: "linux", launch, copy: () => {} })).toEqual({ opened: false, problem: { kind: "not-found" } });
     expect(plans).toEqual([]);
   });

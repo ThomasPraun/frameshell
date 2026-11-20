@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
 
-// "Connect your AI": opened from the welcome card and the project window's title bar, desktop apps first. The apps'
+// "Connect your AI": opened from the welcome card and the project window's title bar, desktop apps first. This spec
+// writes the system clipboard, so do not copy anything you need while it runs. The apps'
 // settings live under FRAMESHELL_TEST_HOME, so nothing of the real user's Claude, ChatGPT or Codex setup is touched.
 const box = sandbox("demo");
 const home = join(box.dataDir, "ai-home");
@@ -93,10 +94,12 @@ const launches = () =>
         .filter(Boolean)
         .map((line) => JSON.parse(line) as Record<string, unknown>)
     : [];
-const chatgptLaunch = process.platform === "win32" ? { file: "powershell.exe" } : process.platform === "darwin" ? { file: "open", args: ["-a", "ChatGPT"] } : { file: "chatgpt" };
+const chatgptLaunch = process.platform === "win32" ? { file: "powershell.exe" } : process.platform === "darwin" ? { file: "/bin/sh" } : null;
 const settingsDir = (root: string) => (process.platform === "win32" ? join(root, "AppData", "Roaming", "Claude") : join(root, "Library", "Application Support", "Claude"));
 
+// The ChatGPT desktop app has no Linux build: Open finds nothing there, which the last test covers.
 test("Open starts the connected desktop apps and copies a starter phrase naming the project", async () => {
+  test.skip(process.platform === "linux", "no ChatGPT desktop app on Linux");
   const connected = join(box.dataDir, "ai-home-open");
   if (claudeDesktop) mkdirSync(settingsDir(connected), { recursive: true });
   mkdirSync(join(connected, ".codex"), { recursive: true });
@@ -119,7 +122,7 @@ test("Open starts the connected desktop apps and copies a starter phrase naming 
     if (claudeDesktop) {
       await card(page, "claude-desktop").getByRole("button", { name: "Connect" }).click();
       await expect(card(page, "claude-desktop")).toHaveAttribute("data-state", "connected");
-      await card(page, "claude-desktop").getByRole("button", { name: "Open Claude" }).click();
+      await card(page, "claude-desktop").getByRole("button", { name: "Open Claude Desktop" }).click();
       await expect(card(page, "claude-desktop").getByTestId("connect-ai-copied")).toHaveText("Copied: paste it in Claude.");
       expect(launches().at(-1)).toEqual({ kind: "url", url: "claude://" });
     }
@@ -131,6 +134,7 @@ test("Open starts the connected desktop apps and copies a starter phrase naming 
 });
 
 test("an app that looks not installed offers Download to the official page and Open, with a general phrase on the welcome screen", async () => {
+  test.skip(process.platform === "linux", "no ChatGPT desktop app on Linux");
   const bare = join(box.dataDir, "ai-home-bare");
   mkdirSync(bare, { recursive: true });
   const empty = join(box.projectDir, "..", "empty-open");
@@ -151,13 +155,15 @@ test("an app that looks not installed offers Download to the official page and O
 });
 
 test("Open on an app that is not there says so, offers Download and leaves the clipboard alone", async () => {
-  const connected = join(box.dataDir, "ai-home-open");
+  const connected = join(box.dataDir, "ai-home-missing");
+  mkdirSync(join(connected, ".codex"), { recursive: true });
   const { app, page } = await launch(box, {
     env: { FRAMESHELL_TEST_HOME: connected, FRAMESHELL_OPEN_APP_STAND_IN: launchLog, FRAMESHELL_OPEN_APP_STAND_IN_MISSING: "1" },
   });
   try {
     await app.evaluate(({ clipboard }) => clipboard.writeText("untouched"));
     await page.locator(".titlebar").getByRole("button", { name: "Connect your AI" }).click();
+    await card(page, "chatgpt").getByRole("button", { name: "Connect" }).click();
     await expect(card(page, "chatgpt")).toHaveAttribute("data-state", "connected");
     await card(page, "chatgpt").getByRole("button", { name: "Open ChatGPT" }).click();
     await expect(card(page, "chatgpt").getByTestId("connect-ai-not-found")).toContainText("was not found on this computer");

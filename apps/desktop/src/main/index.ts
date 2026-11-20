@@ -2179,7 +2179,10 @@ const aiAppsAt = aiAppsPlace(process.env, { command: cliShim, platform: process.
 /** Starts the desktop AI apps; e2e records instead of launching (`FRAMESHELL_OPEN_APP_STAND_IN`, `desktop-apps.ts`). */
 const appLauncher: Launcher = process.env["FRAMESHELL_OPEN_APP_STAND_IN"]
   ? standInLauncher(process.env["FRAMESHELL_OPEN_APP_STAND_IN"], process.env["FRAMESHELL_OPEN_APP_STAND_IN_MISSING"] === "1")
-  : systemLauncher((url) => shell.openExternal(url));
+  : systemLauncher(
+      (url) => shell.openExternal(url),
+      (url) => app.getApplicationNameForProtocol(url),
+    );
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the

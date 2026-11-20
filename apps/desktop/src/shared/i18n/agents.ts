@@ -79,10 +79,11 @@ const en = {
       general: "Use Frameshell to help me edit a video.",
     },
     apps: {
-      claudeDesktop: { name: "Claude Desktop", short: "Claude", about: "Anthropic's Claude app for Mac and Windows." },
+      claudeDesktop: { name: "Claude Desktop", short: "Claude", label: "Claude Desktop", about: "Anthropic's Claude app for Mac and Windows." },
       chatgpt: {
         name: "ChatGPT (desktop app)",
         short: "ChatGPT",
+        label: "ChatGPT",
         about: "OpenAI's ChatGPT app for your computer.",
         note: "Uses the MCP servers setting the app shares with Codex; you may need its Codex mode. ChatGPT on the web is not supported.",
       },
@@ -176,10 +177,11 @@ const es: typeof en = {
       general: "Usa Frameshell para ayudarme a editar un video.",
     },
     apps: {
-      claudeDesktop: { name: "Claude Desktop", short: "Claude", about: "La app de Claude de Anthropic para Mac y Windows." },
+      claudeDesktop: { name: "Claude Desktop", short: "Claude", label: "Claude Desktop", about: "La app de Claude de Anthropic para Mac y Windows." },
       chatgpt: {
         name: "ChatGPT (app de escritorio)",
         short: "ChatGPT",
+        label: "ChatGPT",
         about: "La app de ChatGPT de OpenAI para tu computadora.",
         note: "Usa la opción de servidores MCP que la app comparte con Codex; puede que necesites su modo Codex. ChatGPT en la web no es compatible.",
       },

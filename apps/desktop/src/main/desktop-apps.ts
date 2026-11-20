@@ -17,36 +17,55 @@ export type LaunchPlan =
       missing?: number;
     };
 
-/** The Start menu name(s) the ChatGPT desktop app shows under, best match first (the older app is "ChatGPT Classic"). */
-const CHATGPT_START_NAMES = ["ChatGPT", "ChatGPT Classic"];
+/** The Start menu name the ChatGPT desktop app shows under. */
+const CHATGPT_START_NAME = "ChatGPT";
 
 /** Exit code of the Windows script when no Start menu app has the name. */
 const WINDOWS_MISSING = 3;
 
 /**
- * Looks the app up in the Start menu by name and starts it the way the shell does, so it works for the Store package
- * and for a classic install alike. Names are fixed strings above, never user input.
+ * Looks the app up in the Start menu by name and starts it the way the shell does. Browser-installed web apps (Edge,
+ * Chrome PWAs) show up under the same name, so those AppIDs are skipped; the Store package (AppID has "!") wins over a
+ * classic install. The name is a fixed string, never user input.
  */
-const WINDOWS_START_SCRIPT = `$names = ${CHATGPT_START_NAMES.map((name) => `'${name}'`).join(", ")}
-$apps = Get-StartApps
-foreach ($name in $names) {
-  $app = $apps | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-  if ($app) { Start-Process ('shell:AppsFolder\\' + $app.AppID); exit 0 }
-}
+const WINDOWS_START_SCRIPT = `$apps = @(Get-StartApps | Where-Object { $_.Name -eq '${CHATGPT_START_NAME}' -and $_.AppID -notmatch 'msedge|chrome|brave|vivaldi|opera|firefox' })
+$app = $apps | Where-Object { $_.AppID -like '*!*' } | Select-Object -First 1
+if (-not $app) { $app = $apps | Select-Object -First 1 }
+if ($app) { Start-Process ('shell:AppsFolder\\' + $app.AppID); exit 0 }
 exit ${WINDOWS_MISSING}`;
+
+/** PowerShell `-EncodedCommand` takes the script as UTF-16LE base64. */
+const encodePowerShell = (script: string) => Buffer.from(script, "utf16le").toString("base64");
+
+/** Exit code of the macOS script when no ChatGPT app is installed. */
+const MAC_MISSING = 1;
+
+/**
+ * Finds an application named ChatGPT and opens it, skipping browser-made web apps (Chrome Apps, Edge Apps folders)
+ * that carry the same name.
+ */
+const MAC_START_SCRIPT = `app=$(mdfind 'kMDItemContentType == "com.apple.application-bundle" && kMDItemFSName == "ChatGPT.app"' | grep -v -i -E '/(Chrome|Edge|Brave|Arc) Apps|/Chrome Apps.localized/' | head -n 1)
+[ -n "$app" ] || exit ${MAC_MISSING}
+exec open "$app"`;
 
 /**
  * How `id` starts on `platform`; null where the app does not exist. Claude Desktop registers the `claude:` URL
  * protocol. OpenAI documents no URL scheme for the ChatGPT desktop app, so it is started by its name: Start menu
- * on Windows, `open -a` on macOS, a `chatgpt` command on Linux (best effort).
+ * on Windows, Spotlight lookup then `open` on macOS. It has no Linux build, so Linux has no plan.
  */
 export function launchPlan(id: DesktopAppId, platform: NodeJS.Platform): LaunchPlan | null {
   if (id === "claude-desktop") return platform === "darwin" || platform === "win32" ? { kind: "url", url: "claude://" } : null;
   if (platform === "win32") {
-    return { kind: "command", file: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_START_SCRIPT], wait: true, missing: WINDOWS_MISSING };
+    return {
+      kind: "command",
+      file: "powershell.exe",
+      args: ["-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(WINDOWS_START_SCRIPT)],
+      wait: true,
+      missing: WINDOWS_MISSING,
+    };
   }
-  if (platform === "darwin") return { kind: "command", file: "open", args: ["-a", "ChatGPT"], wait: true, missing: 1 };
-  return { kind: "command", file: "chatgpt", args: [], wait: false };
+  if (platform === "darwin") return { kind: "command", file: "/bin/sh", args: ["-c", MAC_START_SCRIPT], wait: true, missing: MAC_MISSING };
+  return null;
 }
 
 /** What starting a plan came to. */
@@ -58,10 +77,14 @@ export type Launcher = (plan: LaunchPlan) => Promise<LaunchResult>;
 /** How long a waited-for command may take before it counts as failed, ms. */
 const LAUNCH_TIMEOUT_MS = 20_000;
 
-/** The real launcher: `openExternal` for URLs (rejects when no app handles the scheme), a detached child for commands. */
-export function systemLauncher(openExternal: (url: string) => Promise<void>): Launcher {
+/**
+ * The real launcher: `openExternal` for URLs, a detached child for commands. `handlerFor` names the app registered
+ * for a URL (empty: none), checked first because `openExternal` can resolve without any app there.
+ */
+export function systemLauncher(openExternal: (url: string) => Promise<void>, handlerFor: (url: string) => string): Launcher {
   return async (plan) => {
     if (plan.kind === "url") {
+      if (!handlerFor(plan.url)) return { ok: false, problem: { kind: "not-found" } };
       return openExternal(plan.url).then(
         () => ({ ok: true }) as const,
         () => ({ ok: false, problem: { kind: "not-found" } }) as const,

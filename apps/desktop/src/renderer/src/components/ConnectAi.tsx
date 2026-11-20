@@ -9,7 +9,7 @@ import { useModal } from "./modal.js";
 const said = t.agents.connect;
 
 /** Each row's strings. */
-const ROW_TEXT: Record<RowId, { name: string; about: string; note?: string; short?: string }> = {
+const ROW_TEXT: Record<RowId, { name: string; about: string; note?: string; short?: string; label?: string }> = {
   "claude-desktop": said.apps.claudeDesktop,
   chatgpt: said.apps.chatgpt,
   "claude-code": said.apps.claudeCode,
@@ -101,6 +101,7 @@ function AppCard({ row, status, state, big = false }: { row: RowId; status: AiAp
   const desktop = big && isDesktopAppId(row) ? row : null;
   const view = cardView(status, state.working.includes(app), state.last[app], desktop ? state.launched[desktop] : undefined);
   const short = text.short ?? text.name;
+  const label = text.label ?? text.name;
   return (
     <article className={`connect-ai-card${big ? " is-big" : ""}`} aria-label={text.name} data-testid="connect-ai-card" data-row={row} data-state={view.kind}>
       <div className="connect-ai-card-head">
@@ -143,7 +144,7 @@ function AppCard({ row, status, state, big = false }: { row: RowId; status: AiAp
           {view.kind === "working" && <span className="connect-ai-hint">{said.working}</span>}
           {desktop && view.download && (
             <a className="button primary" href={DESKTOP_APP_DOWNLOAD[desktop]} target="_blank" rel="noreferrer" data-testid="connect-ai-download">
-              {said.downloadApp(text.name)}
+              {said.downloadApp(label)}
             </a>
           )}
           {desktop && view.open && (
@@ -153,7 +154,7 @@ function AppCard({ row, status, state, big = false }: { row: RowId; status: AiAp
               disabled={state.launching.includes(desktop)}
               onClick={() => void connectPanel.launch(desktop, starterPhrase(state.project, said.starter))}
             >
-              {said.openApp(short)}
+              {said.openApp(label)}
             </button>
           )}
           {view.connect && (
