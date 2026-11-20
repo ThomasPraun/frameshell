@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Export video from the app: File > Export video… (Cmd/Ctrl+E) and an Export video button in the preview header of a
+  video project ask where to save the MP4, render it in the background with the progress on the button, then name the
+  file, say what the export left out and offer Show file. Before, a film could only be exported with `frameshell render`
+  in a terminal (#738).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -514,10 +514,12 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("job.progress", project.dir, {
       onEvent: ({ job }) => {
         if (job.kind === "clip") send(contents, Channel.clipsJob, job);
+        else if (job.kind === "render") send(contents, Channel.timelineExportJob, job);
         else if (job.kind === "people") send(contents, Channel.peopleScanJob, job);
       },
       onResync: () => {
         send(contents, Channel.clipsJob, null);
+        send(contents, Channel.timelineExportJob, null);
         send(contents, Channel.peopleScanJob, null);
       },
     }),
@@ -663,6 +665,16 @@ async function pickImageExport(window: BrowserWindow, defaultPath: string): Prom
   return result.canceled ? undefined : result.filePath;
 }
 
+/** Where to save an exported video (MP4), starting at `defaultPath`. */
+async function pickVideoExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+  const said = text.app.dialogs;
+  const result = await dialog.showSaveDialog(window, { title: said.exportVideo, defaultPath, filters: [{ name: said.videoFile, extensions: ["mp4"] }] });
+  return result.canceled ? undefined : result.filePath;
+}
+
+/** Files the app's Export video wrote this run: the only ones `timelineRevealExport` shows. */
+const exportedVideos = new Set<string>();
+
 /** Where to save an editor hand-off file of `kind`, starting at `defaultPath`. */
 async function pickHandoffExport(window: BrowserWindow, kind: HandoffKind, defaultPath: string): Promise<string | undefined> {
   const said = text.app.dialogs;
@@ -753,7 +765,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
+const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", "export-video", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -1857,6 +1869,26 @@ function registerIpc(): void {
       return { path, warnings };
     }),
   );
+  // File > Export video… and the preview's Export video button (#738): main asks where, the daemon renders in the background.
+  ipcMain.handle(Channel.timelineExportVideo, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const name = String(timeline);
+      const base = name === "main" ? projectName(project.name) : `${projectName(project.name)}-${name}`;
+      const chosen = await pickVideoExport(state.window, join(project.dir, "exports", `${base}.mp4`));
+      if (!chosen) return null;
+      const out = extname(chosen) ? chosen : `${chosen}.mp4`;
+      const { job, output, warnings } = await daemon.request("render", { cwd: project.dir, timeline: name, out });
+      exportedVideos.add(output);
+      return { job, output, warnings };
+    }),
+  );
+  ipcMain.handle(Channel.timelineRevealExport, (_event, path: string) =>
+    outcome(async () => {
+      if (exportedVideos.has(String(path))) shell.showItemInFolder(String(path));
+    }),
+  );
   ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
     outcome(async () => {
       const state = stateOf(event.sender);
@@ -2085,6 +2117,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+Shift+S",
           click: (_item, focused) => command("imageFromFrame", focused),
         },
+        { id: "export-video", label: said.exportVideo, accelerator: "CmdOrCtrl+E", click: (_item, focused) => command("exportVideo", focused) },
         ...HANDOFF_KINDS.map((kind) => ({
           id: HANDOFFS[kind].menuId,
           label: kind === "otio" ? said.exportOtio : said.exportPremiere,
