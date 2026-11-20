@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentLabelSchema } from "../agents.js";
 import { OpenTransactionSchema } from "../history.js";
 import { ReviewStateSchema } from "../proposals.js";
+import { OFFICIAL_PLUGIN_KINDS, PLUGIN_NEED_KINDS } from "../official-plugins.js";
 import { RejectionRecordSchema } from "../timeline.js";
 import {
   type MethodSpec,
@@ -9,6 +10,7 @@ import {
   DaemonIdentitySchema,
   ProjectSummarySchema,
   BinaryReportSchema,
+  ManagedDownloadSchema,
   CodecReportSchema,
   EncoderReportSchema,
   MachineProfileSchema,
@@ -199,6 +201,12 @@ export const connectionMethods = {
       platform: z.string().describe("`<os>-<arch>` key used to pick pinned builds, e.g. `darwin-arm64`."),
       dataDir: z.string().describe("App data directory holding managed binaries."),
       binaries: z.array(BinaryReportSchema),
+      downloads: z
+        .array(ManagedDownloadSchema)
+        .describe(
+          "Managed downloads on disk (packages and models), each with its bytes, biggest first; empty when nothing was downloaded yet. " +
+            "One the person no longer wants is freed with `binaries.remove`.",
+        ),
       codecs: z
         .array(CodecReportSchema)
         .describe("Empty when ffmpeg is not installed or not runnable."),
@@ -206,6 +214,28 @@ export const connectionMethods = {
       profile: MachineProfileSchema.describe("Speed class and recommended sizes of this machine."),
       problems: z.array(z.string()).describe("Actionable issues; empty when everything needed works."),
       skill: CoreSkillStateSchema.nullable().describe("The project's copy of the agent skill; null when `cwd` is in no project."),
+    }),
+  },
+  "binaries.remove": {
+    mutating: true,
+    description:
+      "Delete a managed download from this machine to free disk: a binary package (`ffmpeg` also covers ffprobe; " +
+      "`whisper-cpp` (its `whisper-cli`), `whisper-server`, `chrome-headless-shell`, `sherpa-onnx`, `onnxruntime-web`, ...) or a pinned model " +
+      "(`ggml-large-v3-turbo-q5_0`, ...), every installed version of it. Names and sizes are in `doctor` `downloads`. " +
+      "It downloads again the next time something needs it. Machine-wide, not per project. Never touches a `binaries` " +
+      "override, a tool Frameshell does not download (Blender) or a model registered with `model.add`. Fails with " +
+      "BinaryInUse while it installs, while jobs or a transcription run, or while the operating system keeps its files " +
+      "open. Remove only on the person's request: it can mean a large download again. Removing what is not on disk " +
+      "succeeds with `removed: false`.",
+    params: z.strictObject({
+      name: z.string().min(1).describe("Package or model name from `doctor` `downloads`."),
+    }),
+    result: z.object({
+      name: z.string(),
+      kind: z.enum(["package", "model"]),
+      removed: z.boolean().describe("False when nothing of it was on disk."),
+      versions: z.array(z.string()).describe("Version directories deleted."),
+      bytes: z.number().describe("Bytes freed."),
     }),
   },
   "skill.update": {
@@ -249,6 +279,60 @@ export const connectionMethods = {
       dir: z.string().describe("Project root."),
       trust: TrustStateSchema,
       plugins: z.array(PluginInfoSchema),
+    }),
+  },
+  "plugin.catalog": {
+    description:
+      "The official Frameshell plugins, each with what it is for, what it needs from the person (their own Blender, " +
+      "their own OpenAI API key, a Remotion project), whether it is paid or sends data off the machine, and what it " +
+      "downloads on first use with the size for this machine and whether that is already on disk. Also whether the " +
+      "enclosing project has it installed, its load status as `plugin.list` reports it and the project's trust state. " +
+      "Untrusted plugin code is never run to answer; plugins a trusted project already pins load and sync as " +
+      "`plugin.list` does. Nothing is installed or downloaded for it, and no key is ever returned: only whether one is set. These are options, not obligations: offer the ones that fit what the " +
+      "person is making, with what they need, what they cost and how much they download, and install nothing " +
+      "(`plugin.install`) without the person's yes. Only official plugins are listed; others are installed from the terminal. " +
+      "Fails with ProjectNotFound.",
+    params: z.strictObject({ cwd: CwdParam }),
+    result: z.object({
+      dir: z.string().describe("Project root."),
+      platform: z.string().describe("`<os>-<arch>` the download sizes are for, e.g. `darwin-arm64`."),
+      trust: TrustStateSchema,
+      plugins: z.array(
+        z.object({
+          name: z.string().describe("npm package name; `plugin.install` takes it as `spec`."),
+          kind: z.enum(OFFICIAL_PLUGIN_KINDS),
+          provides: z.array(z.string()).describe("Clip type (`clip-adapter`) or provider id it contributes, e.g. `hyperframes`, `openai`."),
+          purpose: z.string().describe("One sentence for a person."),
+          need: z.object({
+            kind: z.enum(PLUGIN_NEED_KINDS),
+            text: z.string().describe("What the person must have or do, in words."),
+            met: z
+              .boolean()
+              .nullable()
+              .describe(
+                "True when nothing is needed or it was found (Blender as `doctor` finds it, the key's environment variable set in the daemon's environment); " +
+                  "false when it was not; null when it cannot be told cheaply (a Remotion project).",
+              ),
+          }),
+          paid: z.boolean().describe("The provider charges per use."),
+          cloud: z.boolean().describe("Audio or text leaves the machine."),
+          downloads: z.array(
+            z.object({
+              kind: z.enum(["binary", "model"]),
+              id: z.string().describe("Binary package or model id as `doctor` and `model.list` name them."),
+              what: z.string(),
+              bytes: z.int().nullable().describe("Download size for this machine's platform; null when no build is pinned for it."),
+              onDisk: z.boolean().describe("Already downloaded: using the plugin will not download it again."),
+            }),
+          ),
+          downloadBytes: z.int().describe("Sum of `bytes` of the downloads not yet on disk: what first use would fetch (managed downloads; the plugin's own npm package is not counted). whisper-cpp lists its default model; a project configured for another model downloads that one."),
+          installed: z.boolean().describe("The project pins it in `frameshell.json`."),
+          pin: z.string().nullable().describe("Pinned spec; null when not installed."),
+          status: z.enum(["loaded", "error", "untrusted"]).nullable().describe("As `plugin.list`; null when not installed."),
+          version: z.string().nullable().describe("Manifest version; null unless read (installed and loaded)."),
+          error: z.string().nullable().describe("Why it did not load; null otherwise."),
+        }),
+      ),
     }),
   },
   "plugin.install": {

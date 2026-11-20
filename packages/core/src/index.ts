@@ -179,6 +179,7 @@ export {
   type BinaryManagerOptions,
   type EnsureOptions,
   type InstallProgress,
+  type ManagedDownloadInfo,
   type ModelLocation,
   type ProjectBinaries,
 } from "./binaries/manager.js";

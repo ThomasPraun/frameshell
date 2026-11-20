@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Remove managed downloads to free disk (`PROTOCOL_VERSION` 184): new method `binaries.remove { name }` deletes a binary
+  package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
+  model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with
+  the new error `BinaryInUse` while the package installs, while jobs or a transcription run (the daemon does not know
+  which downloads they use), or while the system keeps its files open (Windows). It never touches a `binaries` override,
+  Blender, or a model registered with `model.add`. `doctor` gains `downloads`: what is on disk with bytes each, still
+  read-only. CLI: `frameshell doctor --remove <name>` (plain `doctor` lists the downloads too); MCP tool
+  `binaries_remove` from the registry; skill `cli.md` row.
+- Official plugin catalog, first part of the opt-in plugins work (`PROTOCOL_VERSION` 183): one table of the official
+  plugins in `packages/protocol/src/official-plugins.ts` (package, what it provides, a one-line purpose, what it needs
+  from the person, paid or cloud, the managed downloads it uses) replaces the three copies the daemon's install hints
+  and the app's transcription setup kept. New read-only method `plugin.catalog` (MCP tool `plugin_catalog`) and
+  `frameshell plugin catalog [--json]` list those plugins for the project: installed or not, load status as
+  `plugin.list` reports it (untrusted code is never run; pinned plugins of a trusted project load and sync as there), trust state, download sizes for this machine and whether each
+  is already on disk, and whether the need is met where it is cheap to tell (Blender found as `doctor` finds it; an
+  `OPENAI_API_KEY` set or not, never the key). A test keeps the table equal to the `plugins/` directories and the
+  binary manifest.
 - Requirements of `review` reach clips inside nested timelines, follow-up of #457 (epic #451; no protocol change,
   `PROTOCOL_VERSION` stays, descriptions only): every per-clip requirement (`appearsBy`, `before`, `keepsMoving`,
   `staysInFrame`) and clip waiver names a clip inside a nested timeline by the id the flattened film gives it,

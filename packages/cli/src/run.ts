@@ -47,6 +47,7 @@ import { FORMAT_FLAGS, FORMAT_USAGE, type FormatInvocation, executeFormat, parse
 import { BATCH_FLAGS, BATCH_USAGE, type BatchCancelInvocation, type BatchInvocation, batchOutcome, batchLabel, canceledLine, canceledRows, describeBatch, describeCancel, onInterrupt, parseBatch, waitReviews, watchCanceled } from "./batch-commands.js";
 import { ANALYZE_FLAGS, ANALYZE_USAGE, type AnalyzeDiffInvocation, type AnalyzeInvocation, executeAnalyze, parseAnalyze } from "./analyze-commands.js";
 import { REVIEW_FLAGS, REVIEW_USAGE, type RequirementsInvocation, type ReviewInvocation, executeRequirements, executeReview, parseReview } from "./review-commands.js";
+import { formatPluginCatalog } from "./plugin-catalog.js";
 import { type PathCliReport, describeCliPackage, inspectPathCli, label } from "./path-cli.js";
 import { resolveAgent, resolveSession } from "./session.js";
 import { FormatIdSchema } from "@frameshell/schema";
@@ -84,6 +85,10 @@ Commands:
                                and disk estimate) and the frameshell on PATH; exit 1 on problems.
                                --install downloads missing managed binaries first; --reprobe tests the
                                encoders again instead of using the answer cached per machine
+  doctor --remove <name> [--json]
+                               Delete a managed download to free disk (a package such as ffmpeg or whisper-cpp,
+                               or a model id; names and sizes are listed under "Downloads" by \`doctor\`). It
+                               downloads again on next use. Refused while it installs or jobs run
   import <file…> [--link] [--wait] [--source-url u --licence id --author name --title t --credit line]
                                Copy files into assets/ and queue proxies, waveforms, thumbnails.
                                --link hard-links instead of copying; --wait blocks until done
@@ -97,6 +102,8 @@ ${CREDITS_USAGE}  plugin install <spec>        Install and pin a plugin: github:
                                an npm name[@version], or a local tarball from npm pack (./name-1.0.0.tgz)
   plugin remove <name>         Unpin and uninstall a plugin
   plugin list                  List the project's plugins and what they contribute
+  plugin catalog               The official plugins: what each is for, what it needs, what it downloads,
+                               and whether this project has it (all optional)
   transcribe <asset>           Write transcripts/<asset>.words.json (word-level, stable word ids).
              [--provider p] [--model m] [--language l] [--yes [--confirmation token]]
                                First run downloads the engine and model (minutes, once). --model: one the
@@ -200,7 +207,7 @@ const NON_TIMELINE_FLAGS = ["install", "reprobe", "link", "wait", "no-skill", "n
 const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   init: ["name", "no-skill", "kind"],
   status: [],
-  doctor: ["install", "reprobe"],
+  doctor: ["install", "reprobe", "remove"],
   import: ["link", "wait", ...PROVENANCE_FLAGS],
   ...CREDITS_FLAGS,
   gc: ["dry-run"],
@@ -208,6 +215,7 @@ const BUILTIN_FLAGS: Record<string, readonly string[]> = {
   "plugin install": [],
   "plugin remove": [],
   "plugin list": [],
+  "plugin catalog": [],
   transcribe: ["verify", "speakers", "people", "timeline", "provider", "model", "language", "yes", "confirmation"],
   render: ["preset", "formats", "quality", "out", "timeline", "cover-frame", "cover-text", "cover-at", "cover-color", "loop", "yes"],
   frame: ["at", "out", "timeline", "preset", "format", "quality", "final", "yes"],
@@ -264,11 +272,13 @@ type Invocation =
   | { kind: "init"; dir: string | undefined; name: string | undefined; skill: false | undefined; projectKind?: "video" | "image" }
   | { kind: "status" }
   | { kind: "doctor"; install: boolean; reprobe: boolean }
+  | { kind: "doctor.remove"; name: string }
   | { kind: "import"; files: string[]; link: boolean; wait: boolean; provenance: ProvenanceInput }
   | { kind: "gc"; dryRun: boolean }
   | { kind: "plugin.install"; spec: string }
   | { kind: "plugin.remove"; name: string }
   | { kind: "plugin.list" }
+  | { kind: "plugin.catalog" }
   | { kind: "plugin.run"; plugin: string; command: string; args: string[] }
   | { kind: "transcribe"; asset: string; provider?: string; model?: string; language?: string; yes?: true; confirmation?: string }
   | { kind: "transcribe.verify"; export: string; timeline?: string; provider?: string; model?: string; language?: string }
@@ -540,6 +550,7 @@ function parseBuiltin(
     quality?: string | undefined;
     install: boolean;
     reprobe: boolean;
+    remove?: boolean | undefined;
     link: boolean;
     wait: boolean;
     "dry-run": boolean;
@@ -824,7 +835,8 @@ function parseBuiltin(
     return { kind: "init", dir: rest[0], name: options.name, skill: options["no-skill"] ? false : undefined, ...(projectKind ? { projectKind } : {}) };
   }
   if (command === "status" && rest.length === 0) return { kind: "status" };
-  if (command === "doctor" && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
+  if (command === "doctor" && options.remove && rest.length === 1 && !options.install && !options.reprobe) return { kind: "doctor.remove", name: rest[0]! };
+  if (command === "doctor" && !options.remove && rest.length === 0) return { kind: "doctor", install: options.install, reprobe: options.reprobe };
   if (command === "import" && rest.length > 0) return { kind: "import", files: rest, link: options.link, wait: options.wait, provenance: provenanceOf(options) };
   if (command === "gc" && rest.length === 0) return { kind: "gc", dryRun: options["dry-run"] };
   if (command !== "plugin") return null;
@@ -833,6 +845,7 @@ function parseBuiltin(
   if (sub === "install" && arg) return { kind: "plugin.install", spec: arg };
   if (sub === "remove" && arg) return { kind: "plugin.remove", name: arg };
   if (sub === "list" && !arg) return { kind: "plugin.list" };
+  if (sub === "catalog" && !arg) return { kind: "plugin.catalog" };
   return null;
 }
 
@@ -876,6 +889,13 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       const command = inspectPathCli(SELF, process.env);
       return flags.json ? json({ ...report, command }) : formatDoctor(report, command);
     }
+    case "doctor.remove": {
+      const result = await conn.request("binaries.remove", { name: inv.name });
+      if (flags.json) return json(result);
+      return result.removed
+        ? `Removed ${result.name}${result.versions.length > 0 ? ` (${result.versions.join(", ")})` : ""}: freed ${formatBytes(result.bytes)}. It downloads again when something needs it.\n`
+        : `${result.name} is not on disk: nothing to remove.\n`;
+    }
     case "import": {
       const files = inv.files.map((file) => resolve(cwd, file));
       const follower = inv.wait ? await followJobs(conn, cwd) : undefined;
@@ -917,6 +937,10 @@ async function execute(conn: DaemonConnection, inv: Invocation, flags: Flags, io
       await settleTrust(conn, flags, io);
       const result = await conn.request("plugin.list", { cwd });
       return flags.json ? json(result) : formatPluginList(result);
+    }
+    case "plugin.catalog": {
+      const result = await conn.request("plugin.catalog", { cwd });
+      return flags.json ? json(result) : formatPluginCatalog(result);
     }
     case "transcribe": {
       await settleTrust(conn, flags, io);
@@ -1715,6 +1739,10 @@ function formatDoctor(report: DoctorResult, command: PathCliReport): string {
       lines.push(`  ${candidate.name.padEnd(20)} ${state}${candidate.name === report.encoders.picked ? "  <- used for renders" : ""}`);
     }
     lines.push(`  tested ${report.encoders.probedAt}${report.encoders.cached ? " (cached; --reprobe tests again)" : ""}`);
+  }
+  if (report.downloads.length > 0) {
+    lines.push("", "Downloads on disk (`frameshell doctor --remove <name>` frees one):");
+    for (const download of report.downloads) lines.push(`  ${download.name.padEnd(32)} ${formatBytes(download.bytes).padStart(10)}  ${download.kind}${download.versions.length > 0 ? ` · ${download.versions.join(", ")}` : ""}`);
   }
   const { profile } = report;
   lines.push(

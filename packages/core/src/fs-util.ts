@@ -1,7 +1,7 @@
-import { appendFile, mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createReadStream, realpathSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -165,4 +165,14 @@ export async function sha256File(path: string, onBytes?: (read: number) => void)
   }
   await pipeline(stream, hash);
   return hash.digest("hex");
+}
+
+/** Bytes of a file, or of every file under a directory; symlinks count as nothing. */
+export async function diskBytes(path: string): Promise<number> {
+  const info = await lstat(path).catch(() => null);
+  if (!info || info.isSymbolicLink()) return 0;
+  if (!info.isDirectory()) return info.size;
+  let total = 0;
+  for (const name of await readdir(path).catch(() => [] as string[])) total += await diskBytes(join(path, name));
+  return total;
 }

@@ -72,7 +72,7 @@ import { BatchService } from "./batch/service.js";
 import { findClip } from "./batch/variant.js";
 import { EventHub, type EventSink } from "./events.js";
 import { canonicalPath, canonicalPathSync, exists, writeJsonAtomic, writeTextAtomic } from "./fs-util.js";
-import { BinaryManager, type ProjectBinaries } from "./binaries/manager.js";
+import { BinaryManager, type ProjectBinaries, inUse } from "./binaries/manager.js";
 import { type JobContext, JobQueue, type JobRequest } from "./jobs/queue.js";
 import { listenCleaningStaleSocket } from "./listen.js";
 import { cleanupLabel, planTimelineCleanup } from "./cleanup/run.js";
@@ -122,6 +122,7 @@ import { type GallerySource, galleryReport, planGallery } from "./multicam/galle
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
 import { ClipVerifier } from "./clips/verify.js";
+import { buildCatalog } from "./plugins/catalog.js";
 import { PluginHost } from "./plugins/host.js";
 import { type FaceScans, PeopleService, type VoicePrinter } from "./people/service.js";
 import { readProjectFaceScans, scanFileFaces, scanProjectFaces } from "./people/scan-run.js";
@@ -1729,6 +1730,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const format = found ? { resolution: found.config.resolution, fps: found.config.fps } : undefined;
       return { ...(await runDoctor(binaries, { project, install, reprobe, encoders: encoderCache, ...(format ? { format } : {}) })), skill: found ? await coreSkillState(found.dir) : null };
     },
+    "binaries.remove": async ({ name }) => {
+      // Jobs and transcriptions do not say which downloads they use, so any of them blocks a removal.
+      if (jobs.busy || clipJobs.busy || transcriptions.size > 0) {
+        throw inUse(name, "busy", "Jobs or a transcription are running or queued and may use it. See `frameshell status`; remove it when they finish (`job cancel` stops one).");
+      }
+      return binaries.remove(name);
+    },
     "skill.update": async ({ cwd, force }) => {
       const dir = await root(cwd);
       if ((await coreSkillState(dir)).state === "absent") {
@@ -1739,6 +1747,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
     "project.trust": async ({ cwd, decision }) => plugins.setTrust(await root(cwd), decision),
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
+    "plugin.catalog": async ({ cwd }) => {
+      const dir = await root(cwd);
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
+    },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);
       const installed = await plugins.install(dir, spec, cwd);

@@ -1,6 +1,7 @@
 import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { GcEntry } from "@frameshell/protocol";
+import { diskBytes } from "./fs-util.js";
 
 /**
  * Temp entries younger than this are never swept, even with no job running:
@@ -68,7 +69,7 @@ export async function sweep(options: SweepOptions): Promise<GcEntry[]> {
     const release = found.key !== null && options.claim ? await options.claim(found.key) : () => {};
     if (!release) continue;
     try {
-      const bytes = await sizeOf(path);
+      const bytes = await diskBytes(path);
       if (!dryRun) {
         const gone = await rm(path, { recursive: isDirectory, force: true }).then(
           () => true,
@@ -82,14 +83,4 @@ export async function sweep(options: SweepOptions): Promise<GcEntry[]> {
     }
   }
   return removed;
-}
-
-/** Bytes of a file, or of every file under a directory; symlinks count as nothing. */
-async function sizeOf(path: string): Promise<number> {
-  const info = await lstat(path).catch(() => null);
-  if (!info || info.isSymbolicLink()) return 0;
-  if (!info.isDirectory()) return info.size;
-  let total = 0;
-  for (const name of await readdir(path).catch(() => [] as string[])) total += await sizeOf(join(path, name));
-  return total;
 }

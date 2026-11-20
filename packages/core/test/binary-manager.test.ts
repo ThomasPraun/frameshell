@@ -5,13 +5,23 @@ import type { AddressInfo } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ErrorCode } from "@frameshell/protocol";
-import { type BinaryPackage, BinaryManager, type PinnedBuild, type StandardPath, buildCandidates, currentPlatform } from "../src/index.js";
+import { type BinaryPackage, BinaryManager, DEFAULT_MODELS, DEFAULT_PACKAGES, type PinnedBuild, type StandardPath, buildCandidates, currentPlatform } from "../src/index.js";
 import { tarGz, zip } from "./archives.js";
 import { tempDir } from "./helpers.js";
 
 // Local fixture server: real HTTP, real hashing, real `tar`; no network.
 const files = new Map<string, Buffer>();
 const hits = new Map<string, number>();
+/** Requests held at the server until released, to keep an install in flight. */
+const holds = new Map<string, { reached: () => void; released: Promise<void> }>();
+/** Hold the next request for `path`: `reached` resolves when it arrives, `release` lets it answer. */
+function holdRequest(path: string) {
+  let reachedNow!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>((resolve) => (reachedNow = resolve));
+  holds.set(path, { reached: reachedNow, released: new Promise<void>((resolve) => (release = resolve)) });
+  return { reached, release };
+}
 let server: Server;
 let base: string;
 
@@ -23,8 +33,16 @@ beforeAll(async () => {
       res.writeHead(404).end();
       return;
     }
+    const hold = holds.get(req.url ?? "");
+    holds.delete(req.url ?? "");
     // Slow first byte so concurrent installs overlap.
-    setTimeout(() => res.writeHead(200, { "content-length": body.length }).end(body), 50);
+    const answer = () => res.writeHead(200, { "content-length": body.length }).end(body);
+    if (hold) {
+      hold.reached();
+      void hold.released.then(answer);
+    } else {
+      setTimeout(answer, 50);
+    }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -603,5 +621,99 @@ describe("BinaryManager models", () => {
 
   it("names the known models when asked for an unknown one", async () => {
     await expect(modelManager(model(modelBytes)).ensureModel("ggml-nope")).rejects.toThrow(/ggml-nope.*ggml-test/);
+  });
+});
+
+describe("BinaryManager removal", () => {
+  const modelBytes = Buffer.from("ggml-model-bytes".repeat(1000));
+
+  it("lists what is on disk with bytes, deletes every version, and downloads again on next use", async () => {
+    const pkg = pinned(goodArchive());
+    const binaries = manager(pkg);
+    expect(await binaries.downloads()).toEqual([]);
+
+    await binaries.ensure("alpha");
+    // An older pin and a failed-candidate marker, as an upgrade and a GPU build that did not start leave them.
+    const old = join(binaries.dataDir, "binaries", "tools", "0.9.0", currentPlatform());
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, "alpha"), "old".repeat(100));
+    writeFileSync(join(binaries.dataDir, "binaries", "tools", "1.2.3", `${currentPlatform()}-cuda.failed.json`), "{}");
+
+    const [listed] = await binaries.downloads();
+    expect(listed).toMatchObject({ name: "tools", kind: "package", tools: ["alpha", "beta"], versions: ["0.9.0", "1.2.3"] });
+    expect(listed!.bytes).toBeGreaterThan(300);
+
+    const removed = await binaries.remove("tools");
+    expect(removed).toEqual({ name: "tools", kind: "package", removed: true, versions: ["0.9.0", "1.2.3"], bytes: listed!.bytes });
+    expect(existsSync(join(binaries.dataDir, "binaries", "tools"))).toBe(false);
+    expect(await binaries.downloads()).toEqual([]);
+    expect(await binaries.locate("alpha")).toMatchObject({ installed: false });
+
+    hits.clear();
+    expect(readFileSync(await binaries.ensure("alpha"), "utf8")).toBe("alpha-bin");
+    expect(hits.size).toBe(1);
+  });
+
+  it("removes a pinned model file and downloads it again on next use", async () => {
+    const path = `/${Math.random().toString(36).slice(2)}/model.bin`;
+    files.set(path, modelBytes);
+    const pin = { id: "ggml-test", version: "abc123", origin: "https://example.test", license: "MIT", urls: [`${base}${path}`], sha256: sha256(modelBytes), size: modelBytes.length, file: "ggml-test.bin" };
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [], models: [pin] });
+    await binaries.ensureModel("ggml-test");
+
+    expect(await binaries.downloads()).toEqual([{ name: "ggml-test", kind: "model", tools: [], versions: ["abc123"], bytes: modelBytes.length }]);
+    expect(await binaries.remove("ggml-test")).toMatchObject({ kind: "model", removed: true, bytes: modelBytes.length });
+    expect((await binaries.locateModel("ggml-test")).installed).toBe(false);
+    expect(readFileSync(await binaries.ensureModel("ggml-test")).equals(modelBytes)).toBe(true);
+  });
+
+  it("never touches a binaries override, and removing what is not on disk is a no-op", async () => {
+    const dir = tempDir();
+    const alpha = join(dir, `alpha${exe}`);
+    writeFileSync(alpha, "mine");
+    const binaries = manager(pinned(goodArchive()));
+    const project = { dir, binaries: { alpha } };
+    await binaries.ensure("beta");
+    expect(await binaries.remove("tools")).toMatchObject({ removed: true });
+    expect(await binaries.locate("alpha", project)).toMatchObject({ source: "project", installed: true, path: alpha });
+    expect(readFileSync(alpha, "utf8")).toBe("mine");
+    expect(await binaries.remove("tools")).toEqual({ name: "tools", kind: "package", removed: false, versions: [], bytes: 0 });
+  });
+
+  it("refuses an unknown name and names what can be removed", async () => {
+    await expect(manager(pinned(goodArchive())).remove("nope")).rejects.toMatchObject({ code: ErrorCode.InvalidParams, message: expect.stringContaining("tools") });
+  });
+
+  it("refuses while the package is installing, then removes it once installed", async () => {
+    const pkg = pinned(goodArchive());
+    const hold = holdRequest([...files.keys()].at(-1)!);
+    const binaries = manager(pkg);
+    const installing = binaries.ensure("alpha");
+    await hold.reached;
+    await expect(binaries.remove("tools")).rejects.toMatchObject({ code: ErrorCode.BinaryInUse, data: { name: "tools", reason: "installing" } });
+    hold.release();
+    await installing;
+    expect(await binaries.remove("tools")).toMatchObject({ removed: true });
+  });
+
+  it("refuses a model only while that exact model installs, not one whose id starts with the same text", async () => {
+    const path = `/${Math.random().toString(36).slice(2)}/model.bin`;
+    files.set(path, modelBytes);
+    const pin = (id: string) => ({ id, version: "abc123", origin: "https://example.test", license: "MIT", urls: [`${base}${path}`], sha256: sha256(modelBytes), size: modelBytes.length, file: `${id}.bin` });
+    const binaries = new BinaryManager({ dataDir: tempDir(), configDir: tempDir(), packages: [], models: [pin("ggml-test"), pin("ggml-test-q5")] });
+    await binaries.ensureModel("ggml-test");
+    const hold = holdRequest(path);
+    const installing = binaries.ensureModel("ggml-test-q5");
+    await hold.reached;
+    expect(await binaries.remove("ggml-test")).toMatchObject({ removed: true });
+    await expect(binaries.remove("ggml-test-q5")).rejects.toMatchObject({ code: ErrorCode.BinaryInUse, data: { reason: "installing" } });
+    hold.release();
+    await installing;
+  });
+
+  it("keeps package names and model ids apart, since one name picks the download", () => {
+    const names = DEFAULT_PACKAGES.map((pkg) => pkg.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(DEFAULT_MODELS.filter((model) => names.includes(model.id))).toEqual([]);
   });
 });

@@ -19,6 +19,17 @@ frameshelld downloads native tools on first use instead of bundling them (SPEC Â
 - On-demand packages (whisper.cpp) are listed by `doctor` but never reported missing and never installed by `doctor --install`: the first transcription installs them.
 - `frameshell doctor` only reports. It downloads only with `--install`. Other features call `BinaryManager.ensure()`, which downloads on first use.
 
+## Removing downloads
+
+Every download is optional disk, so the person can take it back. `binaries.remove { name }` (`frameshell doctor --remove <name>`) deletes one managed package or pinned model from `dataDir` and reports the bytes freed. `doctor` lists what is on disk (`downloads`, with sizes) and stays read-only.
+
+- **What a name covers.** A package name (`ffmpeg` also frees ffprobe) removes `<dataDir>/binaries/<package>/`: every installed version, GPU candidates and `.failed.json` markers. A model id removes `<dataDir>/models/<id>/`, every revision. Package names and model ids never collide (a test checks it). The next `BinaryManager.ensure()` downloads again.
+- **What it never touches.** `binaries` overrides (project or global paths), Blender (the person's own install), and models registered with `model.add` (`model.remove` forgets those and keeps the file).
+- **When it refuses (`BinaryInUse`).** While that package or model installs (`reason: installing`, exact: the manager's in-flight installs). While any job is queued or running, or a transcription runs (`reason: busy`, coarse: jobs do not say which downloads they use). When the system keeps a file open (`reason: files-open`; Windows refuses to delete a running executable). The app's live recognizer runs `whisper-server` in the main process, which the daemon cannot see: a client that removes `whisper-server` should stop live recognition first. The same goes for the app's own `BinaryManager` (live recognizer, transcription setup): its installs are not in the daemon's `installing` list, but they stage under `binaries/.staging` and publish with a rename, so a removal meets a whole install or none.
+- **Atomic.** Removal renames the directory to `.removing-<name>-<id>` next to it, then deletes that. A rename refused because a program runs from the install (Windows) gives `files-open` with every file still in place; nothing is half-deleted. Listings ignore dot-prefixed directories, and a leftover that could not be deleted goes with the next removal of that name.
+- **Queued work only.** The `busy` gate covers the job queues and transcription. A request outside them (frame capture, clip verify, `plugin.run`) can race a removal between `ensure()` and spawn and fail once; running it again downloads the tool.
+- Removal is machine-wide, while plugins and overrides stay per project, so a project that needs the download fetches it again on first use.
+
 ## User directories
 
 One resolver, `resolveAppDirs()` in `packages/protocol/src/app-dirs.ts`, places every piece of per-user state for the daemon, the CLI and the desktop app. It splits it in two:

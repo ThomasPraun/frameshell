@@ -27,7 +27,7 @@ import {
   currentPlatform,
   platformFamily,
 } from "./manifest.js";
-import { renameRetrying } from "../fs-util.js";
+import { diskBytes, renameRetrying } from "../fs-util.js";
 import { GLOBAL_CONFIG_FILE, readGlobalConfig } from "../global-config.js";
 
 /** Override value meaning "use the pinned download". Anything else is a path. */
@@ -110,6 +110,35 @@ export interface ModelLocation {
   installed: boolean;
   pinned: ManagedModel;
 }
+
+/** A managed download on disk: every installed version of a package or of a pinned model. */
+export interface ManagedDownloadInfo {
+  /** Package name or model id: what {@link BinaryManager.remove} takes. */
+  name: string;
+  kind: "package" | "model";
+  /** Tools a package ships; empty for a model. */
+  tools: string[];
+  /** Installed version (model: revision) directory names, sorted by name. */
+  versions: string[];
+  /** Size on disk of everything under the package or model directory. */
+  bytes: number;
+}
+
+/** What {@link BinaryManager.remove} deleted. */
+export interface RemovedDownload {
+  /** Package name or model id that was asked for. */
+  name: string;
+  kind: "package" | "model";
+  /** False when nothing was on disk. */
+  removed: boolean;
+  /** Version (model: revision) directory names that were deleted, sorted by name. */
+  versions: string[];
+  /** Bytes freed. */
+  bytes: number;
+}
+
+/** Prefix of a directory being deleted by {@link BinaryManager.remove}; dot-prefixed so nothing lists it as an install. */
+const REMOVING_PREFIX = ".removing-";
 
 /** In-flight install shared by concurrent callers. */
 interface Install {
@@ -260,6 +289,85 @@ export class BinaryManager {
     if (location.installed) return location.path;
     await this.#shared(`model:${id}`, options, (report) => this.#installModel(location.pinned, location.path, report));
     return location.path;
+  }
+
+  /**
+   * Managed downloads on disk, biggest first. Counts only what this manager installs under `dataDir`: never a
+   * `binaries` override, a user install (Blender) or a model registered with `model.add`.
+   */
+  async downloads(): Promise<ManagedDownloadInfo[]> {
+    const found: ManagedDownloadInfo[] = [];
+    for (const pkg of this.#packages) {
+      if (pkg.userInstall) continue;
+      const entry = await this.#onDisk("package", pkg.name, pkg.tools);
+      if (entry) found.push(entry);
+    }
+    for (const model of this.#models) {
+      const entry = await this.#onDisk("model", model.id, []);
+      if (entry) found.push(entry);
+    }
+    return found.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Delete a managed download (package or pinned model name) with every installed version, including the
+   * `.failed.json` markers of a package; it downloads again on next use. Nothing on disk gives `removed: false`.
+   * Throws `BinaryInUse` while its install runs or the system keeps a file open (Windows), and `InvalidParams`
+   * naming the removable names for an unknown one. Callers that know of running work check it first.
+   *
+   * The directory is renamed away first, then deleted: a refused rename (Windows, a program runs from it) leaves
+   * the install whole, and an install publishing meanwhile never meets a half-deleted directory.
+   */
+  async remove(name: string): Promise<RemovedDownload> {
+    const pkg = this.#packages.find((candidate) => candidate.name === name && !candidate.userInstall);
+    const model = pkg ? undefined : this.#models.find((candidate) => candidate.id === name);
+    if (!pkg && !model) {
+      const names = [...this.#packages.filter((candidate) => !candidate.userInstall).map((candidate) => candidate.name), ...this.#models.map((candidate) => candidate.id)];
+      throw new RpcError(ErrorCode.InvalidParams, `Unknown managed download "${name}". Removable: ${names.join(", ")}.`, {
+        issues: [{ path: ["name"], message: `one of ${names.join(", ")}` }],
+      });
+    }
+    const kind = pkg ? "package" : "model";
+    const installing = (key: string) => (pkg ? key.startsWith(`pkg:${name}:`) : key === `model:${name}`);
+    if ([...this.#installing.keys()].some(installing)) {
+      throw inUse(name, "installing", `${name} is being downloaded right now. Wait for it to finish, then remove it.`);
+    }
+    const entry = await this.#onDisk(kind, name, pkg?.tools ?? []);
+    if (!entry) return { name, kind, removed: false, versions: [], bytes: 0 };
+    const dir = this.#downloadDir(kind, name);
+    const parent = dirname(dir);
+    const trash = join(parent, `${REMOVING_PREFIX}${name}-${randomUUID()}`);
+    try {
+      await renameRetrying(dir, trash);
+    } catch (error) {
+      if (["EBUSY", "EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+        throw inUse(name, "files-open", `The system keeps files of ${name} open (a program still runs from them). Stop it and try again.`);
+      }
+      throw error;
+    }
+    const bytes = await diskBytes(trash);
+    // Best effort: the download is gone for every reader once renamed; a locked leftover goes with the next removal.
+    for (const leftover of await readdir(parent).catch(() => [] as string[])) {
+      if (leftover.startsWith(`${REMOVING_PREFIX}${name}-`)) {
+        await rm(join(parent, leftover), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
+      }
+    }
+    return { name, kind, removed: true, versions: entry.versions, bytes };
+  }
+
+  #downloadDir(kind: "package" | "model", name: string): string {
+    return join(this.dataDir, kind === "package" ? "binaries" : "models", name);
+  }
+
+  /** What is installed under one package or model directory; null when nothing is. */
+  async #onDisk(kind: "package" | "model", name: string, tools: readonly string[]): Promise<ManagedDownloadInfo | null> {
+    const dir = this.#downloadDir(kind, name);
+    const names = await readdir(dir).catch(() => [] as string[]);
+    if (names.length === 0) return null;
+    // Stray files beside the version directories count as bytes, not versions.
+    const versions: string[] = [];
+    for (const entry of names) if ((await stat(join(dir, entry)).catch(() => null))?.isDirectory()) versions.push(entry);
+    return { name, kind, tools: [...tools], versions: versions.sort(), bytes: await diskBytes(dir) };
   }
 
   /** Join the running install for `key` or start one; progress fans out to every waiting caller. */
@@ -526,6 +634,11 @@ function compareVersions(a: string, b: string): number {
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+/** `BinaryInUse`: `binaries.remove` refused. Exported for callers that know of running work. */
+export function inUse(name: string, reason: "installing" | "busy" | "files-open", hint: string): RpcError {
+  return new RpcError(ErrorCode.BinaryInUse, hint, { name, reason, hint });
 }
 
 function megabytes(bytes: number): number {
