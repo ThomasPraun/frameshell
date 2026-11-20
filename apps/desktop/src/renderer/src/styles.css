@@ -3691,6 +3691,15 @@ button.track-head:focus-visible {
   white-space: nowrap;
 }
 
+/* Time a long step has run (#742): digits keep their width while it ticks. */
+.setup-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-slow {
+  color: var(--text-muted);
+}
+
 .status-setup.is-failed {
   color: var(--danger);
 }

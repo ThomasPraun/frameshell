@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- New project from video or audio asks about transcription once: the form's "Transcribe what is said" box now shows
+  the real download size on this computer (or that there is nothing to download), and no native box asks again after
+  Create (#742).
+- A long setup step in the status bar (loading the transcription model, transcribing) shows how long it has run, and
+  after a minute with no percentage says it is slow without a GPU, with a smaller model as the way out (#742).
+- Shoot takes are transcribed in the script's language when the project sets none, guessed from the script's words
+  (Spanish, English, Portuguese, French, German), instead of English by default (#742).
+
+### Fixed
+
+- Native dialogs and the Windows taskbar say "Frameshell" instead of the package name `@frameshell/desktop` (#742).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added

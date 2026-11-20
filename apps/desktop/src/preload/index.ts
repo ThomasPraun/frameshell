@@ -32,6 +32,7 @@ const api: FrameshellApi = {
     chooseParent: () => ipcRenderer.invoke(Channel.projectChooseParent),
     imageFromFrame: (timeline, at) => invokeOutcome(Channel.projectImageFromFrame, timeline, at),
     takeOffered: () => ipcRenderer.invoke(Channel.projectTakeOffered),
+    transcriptionDownload: () => invokeOutcome(Channel.projectTranscriptionDownload),
     onVideosOffered: (listener) => subscribe(Channel.projectVideosOffered, listener),
     fromVideos: (plan, mode, options) => ipcRenderer.invoke(Channel.projectFromVideos, plan, mode, options),
     planIdea: (place) => invokeOutcome(Channel.projectPlanIdea, place),

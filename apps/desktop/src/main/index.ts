@@ -71,7 +71,7 @@ import {
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import { HANDOFF_KINDS, HANDOFFS, isHandoffKind } from "../shared/handoff.js";
-import { downloadSize, sizeText } from "../shared/sizes.js";
+import { sizeText } from "../shared/sizes.js";
 import {
   type CliInstallHost,
   type CliInstallOutcome,
@@ -118,7 +118,6 @@ import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
-import { type DownloadChoice, chooseDownload } from "./transcription-download.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
@@ -133,6 +132,9 @@ import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
 import { UpdatePreferences, updateMode } from "./update-check.js";
 import { Updater } from "./updater.js";
 
+// The app's name in native boxes and the Windows taskbar: the package name otherwise (#742). userData is set
+// explicitly below, so the name does not move it.
+app.setName("Frameshell");
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 // One packaged app per user data dir: a second launch (Open with, a click in Explorer) hands its files to this one
@@ -714,6 +716,9 @@ async function createFromVideos(
     if (transcribe && assets.length > 0 && !plan.imageOnly) {
       const background = plan.audioOnly ? { title: plan.name, size: AUDIO_FRAMES[orientation] } : undefined;
       void setUpTranscription(plan.dir, assets, background);
+    } else if (plan.audioOnly && assets.length > 0) {
+      // Audio without a transcript gets no background or subtitles: say why the picture stays empty.
+      reportSetup(plan.dir, { message: text.app.setup.transcriptionSkippedAudio, detail: null, fraction: null, state: "done" });
     }
     return opened;
   } catch (error) {
@@ -853,6 +858,17 @@ async function ensureTranscriptionPlugin(dir: string): Promise<void> {
   }
 }
 
+/**
+ * Bytes a new project still downloads before it transcribes with the built-in provider: `whisper-cli` and the default
+ * model, from the machine's global binaries (#742). The project form shows it next to its "Transcribe" box.
+ */
+async function newProjectTranscriptionDownload(): Promise<number> {
+  const tool = await binaries.locate("whisper-cli");
+  const toolBytes = tool.installed ? 0 : (tool.pinned?.archives.reduce((total, archive) => total + archive.size, 0) ?? 0);
+  const model = await binaries.locateModel(`ggml-${WHISPER_DEFAULT_MODEL}`).catch(() => null);
+  return toolBytes + (model && !model.installed ? model.pinned.size : 0);
+}
+
 /** Bytes whisper-cpp still downloads in the project at `dir` before it transcribes: `whisper-cli` and its model. */
 async function transcriptionDownload(dir: string): Promise<number> {
   const tool = await binaries.locate("whisper-cli", { dir, binaries: await projectBinaries(dir) });
@@ -896,25 +912,6 @@ async function confirmTranscription(parent: BrowserWindow | null | undefined, as
   return response === 0;
 }
 
-/**
- * Ask in a native box before a new project downloads transcription: the size, and that it runs on this machine. Closing
- * the box skips; nothing is downloaded unless the person chose it.
- */
-async function askDownload(parent: BrowserWindow | null | undefined, bytes: number): Promise<DownloadChoice> {
-  const said = text.app.dialogs;
-  const options: Electron.MessageBoxOptions = {
-    type: "question",
-    message: said.transcribeDownloadTitle,
-    detail: said.transcribeDownloadDetail(downloadSize(bytes)),
-    buttons: [said.transcribeDownloadYes, said.transcribeDownloadSkip],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-  return response === 0 ? "transcribe" : "skip";
-}
-
 /** `transcribe` of `asset` in project `cwd`, asking the person first when the provider is cloud or paid; null when they declined. */
 function transcribeConfirmed(
   cwd: string,
@@ -952,16 +949,8 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
   let failure = said.downloadFailed;
   try {
     running(said.starting);
+    // The form asked already (its "Transcribe" box, with the download size): one question, never a second box (#742).
     const parent = [...windows.values()].find((state) => state.project?.dir === dir)?.window;
-    const choice = await chooseDownload(await transcriptionDownload(dir), (bytes) => {
-      running(said.waitingForDownloadAnswer);
-      return askDownload(parent, bytes);
-    });
-    if (choice === "skip") {
-      reportSetup(dir, { message: background ? said.transcriptionSkippedAudio : said.transcriptionSkipped, detail: null, fraction: null, state: "done" });
-      return;
-    }
-    running(said.starting);
     await ensureTranscriptionPlugin(dir);
     for (const asset of assets) {
       failure = said.transcribeFailed(name(asset));
@@ -1647,6 +1636,7 @@ function registerIpc(): void {
     return openFromWindow(stateOf(event.sender), dir);
   });
 
+  ipcMain.handle(Channel.projectTranscriptionDownload, () => outcome(newProjectTranscriptionDownload));
   ipcMain.handle(Channel.projectTakeOffered, (event) => {
     const state = stateOf(event.sender);
     const plan = state.offered;

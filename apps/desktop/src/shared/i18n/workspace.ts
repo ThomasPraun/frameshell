@@ -72,6 +72,9 @@ const en = {
   hide: "Hide",
   dontShowAgain: "Don't show again for this project",
   activeSessionTitle: "FRAMESHELL_SESSION of the active terminal",
+  setupSlowShort: "slow without a GPU",
+  setupSlow:
+    "On a computer without a GPU, loading the model and transcribing can take several minutes. A smaller model (Transcript view) is faster.",
   connectedAgents: (names: string) => `Agents: ${names}`,
   connectedAgentsTitle: "Agents connected to this project. Show the terminal panel (Cmd/Ctrl+\\).",
   agentSeek: (time: string) => `Agent moved the playhead to ${time}`,
@@ -146,6 +149,9 @@ const es: typeof en = {
   hide: "Ocultar",
   dontShowAgain: "No volver a mostrar para este proyecto",
   activeSessionTitle: "FRAMESHELL_SESSION de la terminal activa",
+  setupSlowShort: "lento sin GPU",
+  setupSlow:
+    "En una computadora sin GPU, cargar el modelo y transcribir puede tardar varios minutos. Un modelo más chico (vista Transcripción) es más rápido.",
   connectedAgents: (names) => `Agentes: ${names}`,
   connectedAgentsTitle: "Agentes conectados a este proyecto. Mostrar el panel de terminal (Cmd/Ctrl+\\).",
   agentSeek: (time) => `El agente movió el cursor de reproducción a ${time}`,
