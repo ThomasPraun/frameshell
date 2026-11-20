@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { cpSync, mkdtempSync, realpathSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ElectronApplication, type Locator, type Page, _electron as electron, expect } from "@playwright/test";
@@ -35,6 +35,19 @@ export function sandbox(fixture: string): Sandbox {
 }
 
 /**
+ * Save the layout a project had before the terminal started folded: terminal open at its default width. Written
+ * where `LayoutStore` keeps it (`<dataDir>/desktop/layouts`), only when the project has none yet, so a relaunch
+ * keeps what the app saved. Specs that drive the terminal rely on it; `freshLayout` skips it.
+ */
+function seedOpenTerminal(box: Sandbox): void {
+  const dir = join(box.dataDir, "desktop", "layouts");
+  const file = join(dir, `${createHash("sha256").update(box.projectDir).digest("hex").slice(0, 16)}.json`);
+  if (existsSync(file)) return;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, JSON.stringify({ projectDir: box.projectDir, layout: { panels: { terminal: { size: 520, collapsed: false } } } }));
+}
+
+/**
  * Daemon cold start plus project open, bounded apart from assertion timeouts: on a starved machine the daemon took
  * 29 s to listen. Matches the app's own daemon start timeout.
  */
@@ -47,6 +60,8 @@ const OPEN_TIMEOUT_MS = 60_000;
  * environment (e.g. a longer `FRAMESHELL_IDLE_TIMEOUT_MS`). `paths` are passed as files to open, like Open with does,
  * instead of `--project`. `lang` is the OS language the app sees (`--lang`); English unless a spec asks, so text
  * selectors hold on any machine. `args` adds Chromium switches, e.g. `--use-fake-device-for-media-stream`.
+ * `freshLayout` opens the project like a new one (terminal folded); by default it opens as one that had the terminal
+ * open, which most specs need.
  */
 export async function launch(
   box: Sandbox,
@@ -56,8 +71,10 @@ export async function launch(
     paths,
     lang = "en",
     args = [],
-  }: { settled?: boolean; env?: Record<string, string>; paths?: string[]; lang?: string; args?: string[] } = {},
+    freshLayout = false,
+  }: { settled?: boolean; env?: Record<string, string>; paths?: string[]; lang?: string; args?: string[]; freshLayout?: boolean } = {},
 ): Promise<{ app: ElectronApplication; page: Page }> {
+  if (!freshLayout && !paths) seedOpenTerminal(box);
   const app = await electron.launch({
     ...(packagedApp ? { executablePath: packagedApp } : {}),
     // Ubuntu runners forbid the unprivileged user namespaces Chromium's sandbox needs.

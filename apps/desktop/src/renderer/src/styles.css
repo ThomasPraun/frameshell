@@ -649,6 +649,26 @@ code {
   background: var(--bg-panel);
 }
 
+/* The terminal's rail names itself: its mark, then the label read top to bottom. */
+.rail-labelled {
+  width: 30px;
+  padding-top: 10px;
+  align-content: start;
+  justify-items: center;
+  gap: 10px;
+}
+
+.rail .terminal-mark {
+  width: 16px;
+  height: 14px;
+}
+
+.rail-label {
+  writing-mode: vertical-rl;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
 /* ---------- Sidebar ---------- */
 
 .view-switch {

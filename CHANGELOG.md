@@ -1677,6 +1677,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Desktop app: the terminal starts folded in a new project, an optional extra. A slim strip at the right edge shows the
+  prompt mark and the word Terminal; one click (or View > Terminal, Cmd/Ctrl+\) opens it at its kept width. No shell
+  starts and the agent guide does not load until the terminal is first shown; after that it stays mounted, so folding it
+  never stops a shell or an agent. Chat about this and a film idea open it when they need it. A project that already
+  saved its layout keeps the terminal as it was.
+
 - A new project made from video or audio asks before downloading transcription (no protocol change,
   `PROTOCOL_VERSION` stays): when the transcription tool or its model is still to be downloaded, a native box states the
   size, says it runs on this machine and nothing is uploaded, and offers "Download and transcribe" (default) or "Skip

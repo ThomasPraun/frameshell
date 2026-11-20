@@ -24,6 +24,15 @@ describe("LayoutStore", () => {
     expect(await reopened.load("/videos/promo")).toEqual(promo);
   });
 
+  it("keeps a project that saved its terminal open open, and a new one folded", async () => {
+    const dir = storeDir();
+    const open = togglePanel(DEFAULT_LAYOUT, "terminal");
+    await new LayoutStore(dir).save("/videos/talk", open);
+    const reopened = new LayoutStore(dir);
+    expect((await reopened.load("/videos/talk")).panels.terminal.collapsed).toBe(false);
+    expect((await reopened.load("/videos/new")).panels.terminal.collapsed).toBe(true);
+  });
+
   it("falls back to defaults when the stored file is corrupt", async () => {
     const dir = storeDir();
     const store = new LayoutStore(dir);

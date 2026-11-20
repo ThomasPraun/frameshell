@@ -53,11 +53,15 @@ export const PANEL_BOUNDS: Record<PanelId, { min: number; max: number }> = {
 const SIDEBAR_VIEWS: readonly SidebarView[] = ["explorer", "history", "plugins", "angles", "people", "shoot", "teleprompter"];
 const CENTER_SPLIT = { min: 0.2, max: 0.8 };
 
-/** Layout of a project opened for the first time. Terminal is wide: the agent lives there. */
+/**
+ * Layout of a project opened for the first time. The terminal starts folded,
+ * an optional extra: most people talk to their AI app outside it. Its size is
+ * what one click on its rail restores.
+ */
 export const DEFAULT_LAYOUT: Layout = Object.freeze({
   panels: {
     sidebar: { size: 240, collapsed: false },
-    terminal: { size: 520, collapsed: false },
+    terminal: { size: 520, collapsed: true },
     timeline: { size: 220, collapsed: false },
   },
   sidebarView: "explorer",
