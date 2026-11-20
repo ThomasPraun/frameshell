@@ -1,12 +1,18 @@
 // The one "Connect your AI" panel's state, outside the view: it opens from the title bar, the welcome screen and the
 // agent guide (which may sit in a detached terminal window), and reads the apps' settings again on every open.
-import type { AiAppChange, AiAppId, AiApps } from "../../../shared/api.js";
-import type { LastChange } from "./model.js";
+import type { AiAppChange, AiAppId, AiApps, DesktopAppId } from "../../../shared/api.js";
+import type { LastChange, LaunchNote } from "./model.js";
 
 /** What the panel shows. */
 export interface ConnectState {
   /** Window the panel shows in: the project window, or a detached panel's (ADR 0012). */
   view: Window;
+  /** Name of the project open in the window that asked; null from the welcome screen. */
+  project: string | null;
+  /** Desktop apps being opened. */
+  launching: readonly DesktopAppId[];
+  /** What the last Open of each desktop app came to. */
+  launched: Partial<Record<DesktopAppId, LaunchNote>>;
   /** Null while reading. */
   apps: AiApps | null;
   /** Apps with a change under way. */
@@ -32,10 +38,10 @@ function read(id: number): void {
 
 /** The panel's actions; {@link connectPanel.get} is what it shows. */
 export const connectPanel = {
-  /** Open the panel in `view`, the window it was asked from, reading every app's settings. */
-  open(view: Window = window): void {
+  /** Open the panel in `view`, the window it was asked from (showing project `project`, if any), reading every app's settings. */
+  open(view: Window = window, project: string | null = null): void {
     const id = ++session;
-    publish({ view, apps: null, working: [], last: {} });
+    publish({ view, project, launching: [], launched: {}, apps: null, working: [], last: {} });
     if (view !== window) view.addEventListener("pagehide", () => id === session && current && publish({ ...current, view: window }), { once: true });
     read(id);
   },
@@ -43,8 +49,24 @@ export const connectPanel = {
   /** Read the settings again ("Check again"), forgetting the notes of earlier changes. */
   refresh(): void {
     if (!current) return;
-    publish({ ...current, apps: null, last: {} });
+    publish({ ...current, apps: null, last: {}, launched: {} });
     read(session);
+  },
+
+  /** Open desktop app `id`, which puts `phrase` on the clipboard once it opened; the card shows how it went. */
+  async launch(id: DesktopAppId, phrase: string): Promise<void> {
+    if (!current || current.launching.includes(id)) return;
+    const mine = session;
+    publish({ ...current, launching: [...current.launching, id] });
+    let note: LaunchNote;
+    try {
+      const result = await window.frameshell.agents.openApp(id, phrase);
+      note = result.opened ? { kind: "opened", copied: result.copied } : result.problem.kind === "not-found" ? { kind: "not-found" } : { kind: "failed", message: result.problem.message };
+    } catch (error) {
+      note = { kind: "failed", message: (error as Error).message ?? String(error) };
+    }
+    if (mine !== session || !current) return;
+    publish({ ...current, launching: current.launching.filter((other) => other !== id), launched: { ...current.launched, [id]: note } });
   },
 
   /** Connect (or disconnect) app `id`; the card shows the state after, and what to do next. */

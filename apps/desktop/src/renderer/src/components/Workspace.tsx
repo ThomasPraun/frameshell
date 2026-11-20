@@ -445,7 +445,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         <span className="titlebar-project">{project.name}</span>
         <span className="titlebar-path">{project.dir}</span>
         <div className="titlebar-actions">
-          <ConnectAiButton className="button titlebar-connect" />
+          <ConnectAiButton className="button titlebar-connect" project={project.name} />
         </div>
       </header>
       {project.synced && <SyncWarning synced={project.synced} />}

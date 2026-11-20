@@ -515,6 +515,11 @@ export interface FrameshellApi {
     connect(id: AiAppId): Promise<AiAppChange>;
     /** Remove Frameshell's entries from app `id`'s settings, and nothing else. */
     disconnect(id: AiAppId): Promise<AiAppChange>;
+    /**
+     * Open desktop AI app `id`; once it opened, `phrase` (the starter text to paste there) goes on the clipboard.
+     * Never rejects for an app that is missing or will not start: that is the result's `problem`.
+     */
+    openApp(id: DesktopAppId, phrase: string): Promise<DesktopAppOpened>;
     /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
     targets(): Promise<AgentTarget[]>;
     /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
@@ -1011,6 +1016,30 @@ export function isAiAppId(value: unknown): value is AiAppId {
   return AI_APP_IDS.some((id) => id === value);
 }
 
+/** The desktop AI apps the panel can open: its two big cards. */
+export const DESKTOP_APP_IDS = ["claude-desktop", "chatgpt"] as const;
+
+/** One of {@link DESKTOP_APP_IDS}. */
+export type DesktopAppId = (typeof DESKTOP_APP_IDS)[number];
+
+/** Whether `value` (from the renderer) names a desktop AI app. */
+export function isDesktopAppId(value: unknown): value is DesktopAppId {
+  return DESKTOP_APP_IDS.some((id) => id === value);
+}
+
+/** The apps' official download pages, which the renderer links to. */
+export const DESKTOP_APP_DOWNLOAD: Readonly<Record<DesktopAppId, string>> = {
+  "claude-desktop": "https://claude.ai/download",
+  chatgpt: "https://chatgpt.com/download",
+};
+
+/** The result of opening a desktop AI app. */
+export type DesktopAppOpened =
+  /** The app was asked to open; `copied` says whether the starter phrase reached the clipboard. */
+  | { opened: true; copied: boolean }
+  /** `not-found`: no such app on this computer. `failed`: it is there but would not start. */
+  | { opened: false; problem: { kind: "not-found" } | { kind: "failed"; message: string } };
+
 /** Why reading or changing an app's settings did not work. */
 export type AiAppProblem =
   /** Connect refused: the app's settings folder does not exist. */
@@ -1065,6 +1094,7 @@ export const Channel = {
   agentsApps: "agents:apps",
   agentsConnect: "agents:connect",
   agentsDisconnect: "agents:disconnect",
+  agentsOpenApp: "agents:open-app",
   agentsTargets: "agents:targets",
   agentsSend: "agents:send",
   agentsTargetsChanged: "agents:targets-changed",

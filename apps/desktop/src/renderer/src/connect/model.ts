@@ -26,9 +26,25 @@ export interface LastChange {
   change: AiAppChange;
 }
 
+/** What the last Open of a desktop app came to, kept until the panel closes or checks again. */
+export type LaunchNote =
+  /** The app was asked to open; `copied`: the starter phrase is on the clipboard. */
+  | { kind: "opened"; copied: boolean }
+  | { kind: "not-found" }
+  | { kind: "failed"; message: string };
+
 /** What a card shows. */
 export interface CardView {
   kind: "loading" | "working" | "unavailable" | "not-installed" | "ready" | "different" | "connected";
+  /**
+   * The Open button (desktop cards only). Shown once connected; and when the app looks not installed, because the
+   * settings folder it is judged by only exists after the app ran once, so Open can still work.
+   */
+  open: boolean;
+  /** The Download button, the official page: the app looks not installed, or Open did not find it. */
+  download: boolean;
+  /** What the last Open came to. */
+  launch: LaunchNote | null;
   /** The Connect button: "again" when Frameshell's entry runs another command; null when none shows. */
   connect: "connect" | "again" | null;
   disconnect: boolean;
@@ -39,20 +55,30 @@ export interface CardView {
   problem: AiAppProblem | null;
 }
 
-/** The card for an app's `status` (undefined while reading), while `working` on a change, after `last`. */
-export function cardView(status: AiAppStatus | undefined, working: boolean, last?: LastChange): CardView {
-  const none = { connect: null, disconnect: false, restart: null, backups: [], problem: null } as const;
+/**
+ * The card for an app's `status` (undefined while reading), while `working` on a change, after `last` and after the
+ * `launch` of its Open.
+ */
+export function cardView(status: AiAppStatus | undefined, working: boolean, last?: LastChange, launch?: LaunchNote): CardView {
+  const none = { open: false, download: false, launch: null, connect: null, disconnect: false, restart: null, backups: [], problem: null } as const;
   if (!status) return { kind: "loading", ...none };
   if (working) return { kind: "working", ...none };
   if (!status.available) return { kind: "unavailable", ...none };
   const problem = last?.change.problem ?? status.problem;
   const after = {
+    launch: launch ?? null,
     restart: last && !last.change.problem ? (last.connect ? "connected" : "disconnected") : null,
     backups: last?.change.backups ?? [],
     problem,
   } as const;
-  if (status.connected) return { kind: "connected", connect: null, disconnect: true, ...after };
-  if (status.different) return { kind: "different", connect: "again", disconnect: true, ...after };
-  if (!status.installed) return { kind: "not-installed", connect: null, disconnect: false, ...after };
-  return { kind: "ready", connect: "connect", disconnect: false, ...after };
+  const missing = launch?.kind === "not-found";
+  if (status.connected) return { kind: "connected", open: true, download: missing, connect: null, disconnect: true, ...after };
+  if (status.different) return { kind: "different", open: false, download: false, connect: "again", disconnect: true, ...after };
+  if (!status.installed) return { kind: "not-installed", open: true, download: true, connect: null, disconnect: false, ...after };
+  return { kind: "ready", open: false, download: false, connect: "connect", disconnect: false, ...after };
+}
+
+/** The text to paste into the AI app after Open: it names the open project, with none it asks in general. */
+export function starterPhrase(project: string | null, said: { project(name: string): string; general: string }): string {
+  return project ? said.project(project) : said.general;
 }

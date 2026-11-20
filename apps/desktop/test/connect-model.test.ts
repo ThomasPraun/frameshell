@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AiAppStatus } from "../src/shared/api.js";
-import { DESKTOP_ROWS, DEVELOPER_ROWS, ROW_APP, cardView } from "../src/renderer/src/connect/model.js";
+import { DESKTOP_ROWS, DEVELOPER_ROWS, ROW_APP, cardView, starterPhrase } from "../src/renderer/src/connect/model.js";
 
 const status = (fields: Partial<AiAppStatus> = {}): AiAppStatus => ({
   id: "claude-desktop",
@@ -22,6 +22,14 @@ describe("Connect your AI rows", () => {
   });
 });
 
+describe("starterPhrase", () => {
+  const said = { project: (name: string) => `Work on ${name}.`, general: "Help me edit." };
+  it("names the open project, or asks in general with none", () => {
+    expect(starterPhrase("Demo", said)).toBe("Work on Demo.");
+    expect(starterPhrase(null, said)).toBe("Help me edit.");
+  });
+});
+
 describe("cardView", () => {
   it("offers nothing while reading, while a change runs, or where the app does not exist", () => {
     expect(cardView(undefined, false)).toMatchObject({ kind: "loading", connect: null, disconnect: false });
@@ -37,6 +45,29 @@ describe("cardView", () => {
   it("offers Disconnect when connected, and Connect again with Disconnect for an entry that runs another command", () => {
     expect(cardView(status({ connected: true }), false)).toMatchObject({ kind: "connected", connect: null, disconnect: true });
     expect(cardView(status({ different: true }), false)).toMatchObject({ kind: "different", connect: "again", disconnect: true });
+  });
+
+  it("offers Open once connected, Connect first while installed but not connected", () => {
+    expect(cardView(status({ connected: true }), false)).toMatchObject({ open: true, download: false });
+    expect(cardView(status(), false)).toMatchObject({ kind: "ready", open: false, download: false });
+    expect(cardView(status({ different: true }), false)).toMatchObject({ open: false, download: false });
+  });
+
+  it("offers Download, and Open for an app that may be installed but never ran, when it looks not installed", () => {
+    expect(cardView(status({ installed: false }), false)).toMatchObject({ kind: "not-installed", open: true, download: true });
+  });
+
+  it("offers nothing to open while reading, working, or where the app does not exist", () => {
+    for (const view of [cardView(undefined, false), cardView(status(), true), cardView(status({ available: false, installed: false }), false)]) {
+      expect(view).toMatchObject({ open: false, download: false, launch: null });
+    }
+  });
+
+  it("adds Download after an Open that did not find the app, and keeps the note of the last Open", () => {
+    const connected = status({ connected: true });
+    expect(cardView(connected, false, undefined, { kind: "not-found" })).toMatchObject({ open: true, download: true, launch: { kind: "not-found" } });
+    expect(cardView(connected, false, undefined, { kind: "opened", copied: true })).toMatchObject({ open: true, download: false, launch: { kind: "opened", copied: true } });
+    expect(cardView(connected, false, undefined, { kind: "failed", message: "x" })).toMatchObject({ download: false, launch: { kind: "failed" } });
   });
 
   it("says to restart the app after a change that worked, with the backups it made", () => {

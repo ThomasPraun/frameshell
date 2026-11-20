@@ -17,7 +17,7 @@ Needs Node >= 22.22 (Astro's minimum), pinned in `.node-version`.
 | File | What |
 |---|---|
 | `src/components/Landing.astro` | Section order; `src/pages/index.astro` (English) and `src/pages/es/index.astro` (Spanish) both render it |
-| `src/components/AgentsPage.astro` | "Connect your agent" page (`/agents/`, `/es/agents/`): install and connect each agent. Its commands and config paths come from each agent's docs and Frameshell's CLI install paths; recheck both when either changes |
+| `src/components/AgentsPage.astro` | "Connect your agent" page (`/agents/`, `/es/agents/`): install and connect each agent, desktop apps first (Claude Desktop, ChatGPT desktop app: one click in the app's Connect your AI panel), then a "For developers" group; each section's `group` in `agents.sections` says which. Its commands and config paths come from each agent's docs and Frameshell's CLI install paths; recheck both when either changes |
 | `src/i18n/en.ts`, `src/i18n/es.ts` | Every visible string, one file per language |
 | `src/components/Showcase.astro`, `src/scripts/showcase.ts` | Hero carousel (one clip, a layer per part) and the project tree it leads into |
 | `src/styles/showcase.css` | Carousel and tree styles, scoped under `.sc` |
