@@ -106,6 +106,7 @@ const api: FrameshellApi = {
     apps: () => ipcRenderer.invoke(Channel.agentsApps),
     connect: (id) => ipcRenderer.invoke(Channel.agentsConnect, id),
     disconnect: (id) => ipcRenderer.invoke(Channel.agentsDisconnect, id),
+    openApp: (id, phrase) => ipcRenderer.invoke(Channel.agentsOpenApp, id, phrase),
     targets: () => invokeOutcome(Channel.agentsTargets),
     send: (id, lines) => invokeOutcome(Channel.agentsSend, id, lines),
     onTargets: (listener) => subscribe(Channel.agentsTargetsChanged, listener),

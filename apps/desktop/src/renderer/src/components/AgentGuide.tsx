@@ -32,10 +32,13 @@ export function AgentGuide({
   agent,
   compact,
   idea,
+  projectName,
   onIdeaDone,
   onRun,
   onType,
 }: {
+  /** Name of the project, for the starter phrase "Connect your AI" copies. */
+  projectName: string;
   /** Label of the agent in the active terminal; null when its shell runs. */
   agent: string | null;
   /** The shell is in use: only the way to open the guide shows, until opened. */
@@ -114,7 +117,7 @@ export function AgentGuide({
       <button
         className="link agent-guide-apps"
         data-testid="agent-guide-connect"
-        onClick={(event) => connectPanel.open(event.currentTarget.ownerDocument.defaultView ?? window)}
+        onClick={(event) => connectPanel.open(event.currentTarget.ownerDocument.defaultView ?? window, projectName)}
       >
         {t.agents.desktopApps}
       </button>

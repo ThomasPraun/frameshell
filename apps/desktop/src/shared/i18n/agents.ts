@@ -68,10 +68,21 @@ const en = {
     desktop: "Desktop apps",
     developers: "For developers",
     developersLede: "Command-line tools and code editors.",
+    openApp: (app: string) => `Open ${app}`,
+    downloadApp: (app: string) => `Download ${app}`,
+    copiedPaste: (app: string) => `Copied: paste it in ${app}.`,
+    notFound: (name: string) => `${name} was not found on this computer. Download it, install it, then try Open again.`,
+    openFailed: (message: string) => `Could not open the app: ${message}`,
+    /** Put on the clipboard when an app opens, to paste as the first message. */
+    starter: {
+      project: (name: string) => `Work on my open Frameshell project: ${name}.`,
+      general: "Use Frameshell to help me edit a video.",
+    },
     apps: {
-      claudeDesktop: { name: "Claude Desktop", about: "Anthropic's Claude app for Mac and Windows." },
+      claudeDesktop: { name: "Claude Desktop", short: "Claude", about: "Anthropic's Claude app for Mac and Windows." },
       chatgpt: {
         name: "ChatGPT (desktop app)",
+        short: "ChatGPT",
         about: "OpenAI's ChatGPT app for your computer.",
         note: "Uses the MCP servers setting the app shares with Codex; you may need its Codex mode. ChatGPT on the web is not supported.",
       },
@@ -155,10 +166,20 @@ const es: typeof en = {
     desktop: "Apps de escritorio",
     developers: "Para desarrolladores",
     developersLede: "Herramientas de línea de comandos y editores de código.",
+    openApp: (app) => `Abrir ${app}`,
+    downloadApp: (app) => `Descargar ${app}`,
+    copiedPaste: (app) => `Copiado: pégalo en ${app}.`,
+    notFound: (name) => `No se encontró ${name} en esta computadora. Descárgalo, instálalo y vuelve a tocar Abrir.`,
+    openFailed: (message) => `No se pudo abrir la app: ${message}`,
+    starter: {
+      project: (name) => `Trabaja en mi proyecto de Frameshell abierto: ${name}.`,
+      general: "Usa Frameshell para ayudarme a editar un video.",
+    },
     apps: {
-      claudeDesktop: { name: "Claude Desktop", about: "La app de Claude de Anthropic para Mac y Windows." },
+      claudeDesktop: { name: "Claude Desktop", short: "Claude", about: "La app de Claude de Anthropic para Mac y Windows." },
       chatgpt: {
         name: "ChatGPT (app de escritorio)",
+        short: "ChatGPT",
         about: "La app de ChatGPT de OpenAI para tu computadora.",
         note: "Usa la opción de servidores MCP que la app comparte con Codex; puede que necesites su modo Codex. ChatGPT en la web no es compatible.",
       },

@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button in the project window's title bar, a card on the welcome screen and a link in the agent guide, which no longer
   has its own connect buttons. Connect and Disconnect work inline (no native dialog): state, "restart the app to
   finish", backups and errors show on each card, and every open reads the apps' settings again. English and Spanish.
+- Open the desktop AI app from Connect your AI (no protocol change): once Claude Desktop or the ChatGPT desktop app
+  is connected its card offers Open, which starts the app and puts a starter phrase on the clipboard ("Work on my open
+  Frameshell project: <name>.", or a general one with no project open; English and Spanish) with a note to paste it
+  there. An app that looks not installed offers Download (the official pages, claude.ai/download and
+  chatgpt.com/download) next to Open, and an Open that does not find the app says so and offers Download. Claude
+  Desktop starts through its `claude:` URL protocol; OpenAI documents no URL scheme for the ChatGPT app, so it starts
+  by name (Start menu on Windows, `open -a` on macOS, a `chatgpt` command on Linux, best effort).
 - Connect Codex (and the ChatGPT desktop app, which shares its file) and Gemini CLI: `frameshell setup codex|gemini
   [--status | --remove] [--command path]` add Frameshell's MCP server to `~/.codex/config.toml` (the
   `[mcp_servers.frameshell]` table; `CODEX_HOME` when set) or `~/.gemini/settings.json`, with long tool timeouts for the

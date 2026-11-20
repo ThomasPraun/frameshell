@@ -408,6 +408,7 @@ export function TerminalPanel({
           agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
           compact={used.has(activeTab.key)}
           idea={idea}
+          projectName={projectName}
           onIdeaDone={() => setIdea(null)}
           onRun={(command) => {
             if (activeTab.info) window.frameshell.terminals.write(activeTab.info.id, `${command}\r`);

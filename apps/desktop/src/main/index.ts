@@ -39,6 +39,7 @@ import {
   type MenuCommand,
   type AgentChoice,
   isAiAppId,
+  isDesktopAppId,
   type HandoffKind,
   type OpenOutcome,
   type Outcome,
@@ -87,6 +88,7 @@ import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
 import { aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
+import { type Launcher, openDesktopApp, standInLauncher, systemLauncher } from "./desktop-apps.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
 import { LayoutStore } from "./layout-store.js";
@@ -1599,6 +1601,14 @@ function registerIpc(): void {
     if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
     return changeAiApp(id, false, aiAppsAt);
   });
+  ipcMain.handle(Channel.agentsOpenApp, (_event, id: unknown, phrase: unknown) => {
+    if (!isDesktopAppId(id)) throw new Error(`not a desktop AI app: ${String(id)}`);
+    return openDesktopApp(id, typeof phrase === "string" ? phrase : "", {
+      platform: process.platform,
+      launch: appLauncher,
+      copy: (text) => clipboard.writeText(text),
+    });
+  });
   ipcMain.handle(Channel.agentsTargets, (event) =>
     outcome(async () => (await daemon.request("target.list", { cwd: (await requireProject(stateOf(event.sender))).project.dir })).targets),
   );
@@ -2166,6 +2176,10 @@ async function findAgents(): Promise<AgentChoice[]> {
 
 /** The AI apps of "Connect your AI", told to run the stable shim so app updates keep them working. */
 const aiAppsAt = aiAppsPlace(process.env, { command: cliShim, platform: process.platform });
+/** Starts the desktop AI apps; e2e records instead of launching (`FRAMESHELL_OPEN_APP_STAND_IN`, `desktop-apps.ts`). */
+const appLauncher: Launcher = process.env["FRAMESHELL_OPEN_APP_STAND_IN"]
+  ? standInLauncher(process.env["FRAMESHELL_OPEN_APP_STAND_IN"], process.env["FRAMESHELL_OPEN_APP_STAND_IN_MISSING"] === "1")
+  : systemLauncher((url) => shell.openExternal(url));
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the
