@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
+import { isImagePath } from "../../../shared/image-files.js";
 import { useFileDrop } from "../file-drop.js";
 import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
@@ -75,10 +76,11 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
     setError(null);
     try {
       const chosen = await window.frameshell.project.chooseVideos();
-      if (chosen) {
-        setPlan(chosen);
+      if (chosen?.plan) {
+        setPlan(chosen.plan);
         setNotProject(null);
       }
+      if (chosen && chosen.refused.length > 0) setError(t.welcome.notVideo(chosen.refused.map(fileName).join(", ")));
     } catch (failure) {
       setError((failure as Error).message);
     }
@@ -270,6 +272,30 @@ function NewFromVideo({
       </div>
 
       {plan.imageOnly && !plan.existing && <p className="welcome-hint">{t.welcome.imageHint}</p>}
+      {plan.imageOnly && !plan.existing && plan.files.length > 1 && (
+        // The order the layers stack in, bottom first: the first one also sets the picture's size (#751).
+        <ol className="welcome-order" aria-label={t.welcome.layerOrder}>
+          {plan.files.map((file, index) => (
+            <li key={file}>
+              <span className="welcome-order-name">{fileName(file)}</span>
+              {index === 0 && <small className="welcome-order-note">{t.welcome.bottomLayer}</small>}
+              <button type="button" className="link" disabled={busy || index === 0} aria-label={t.welcome.layerDown(fileName(file))} onClick={() => onPlan({ ...plan, files: swapped(plan.files, index, index - 1) })}>
+                {t.welcome.down}
+              </button>
+              <button
+                type="button"
+                className="link"
+                disabled={busy || index === plan.files.length - 1}
+                aria-label={t.welcome.layerUp(fileName(file))}
+                onClick={() => onPlan({ ...plan, files: swapped(plan.files, index, index + 1) })}
+              >
+                {t.welcome.up}
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+      {!plan.imageOnly && !plan.existing && plan.files.some(isImagePath) && <p className="welcome-hint">{t.welcome.mixedHint}</p>}
 
       {plan.audioOnly && !plan.existing && (
         <fieldset className="welcome-mode">
@@ -323,6 +349,13 @@ function NewFromVideo({
       </div>
     </form>
   );
+}
+
+/** `files` with the entries at `a` and `b` swapped. */
+function swapped(files: readonly string[], a: number, b: number): string[] {
+  const next = [...files];
+  [next[a], next[b]] = [next[b]!, next[a]!];
+  return next;
 }
 
 function fileName(path: string): string {

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FRAME_IMAGE_SIZES, clockName, imageFromFrame } from "../src/main/frame-image.js";
+import { FRAME_IMAGE_SIZES, clockName, frameImageChoices, imageFromFrame } from "../src/main/frame-image.js";
 import type { ImageLayersDeps } from "../src/main/image-layers.js";
 import { coverScale } from "../src/main/image-layers.js";
 
@@ -30,19 +30,27 @@ describe("imageFromFrame", () => {
   it("captures the frame, makes an image project beside the video's, and covers it with the frame", async () => {
     const parent = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-frame-image-")));
     const source = { dir: join(parent, "interview"), name: "interview" };
-    mkdirSync(join(parent, "interview frame 01-05"));
+    mkdirSync(join(parent, "interview frame 01-05 1080x1080"));
     const { calls, deps } = harness();
 
     const dir = await imageFromFrame(source, "main", 65.4, FRAME_IMAGE_SIZES.square, deps);
 
-    expect(dir).toBe(join(parent, "interview frame 01-05 (2)"));
+    expect(dir).toBe(join(parent, "interview frame 01-05 1080x1080 (2)"));
     const methods = calls.map((call) => call.method);
     expect(methods).toEqual(["frame", "project.init", "asset.import", "tx.begin", "track.add", "clip.add", "tx.commit"]);
     expect(calls[0]?.params).toMatchObject({ cwd: source.dir, timeline: "main", at: 65.4 });
     expect(String(calls[0]?.params["out"])).toMatch(/frame-01-05\.png$/);
-    expect(calls[1]?.params).toEqual({ dir, name: "interview frame 01-05 (2)", kind: "image", resolution: { width: 1080, height: 1080 } });
+    expect(calls[1]?.params).toEqual({ dir, name: "interview frame 01-05 1080x1080 (2)", kind: "image", resolution: { width: 1080, height: 1080 } });
     // A 16:9 frame covering a square: 1.7778 times the fitted size, the sides cropped.
     expect(calls[5]?.params).toMatchObject({ asset: "assets/frame-01-05.png", transform: { scale: 1.7778 } });
+  });
+});
+
+describe("frameImageChoices", () => {
+  it("offers the video's own size unless it is one of the others (#751)", () => {
+    expect(frameImageChoices({ width: 1920, height: 1080 }).map((choice) => choice.kind)).toEqual(["thumbnail", "own", "square", "vertical"]);
+    expect(frameImageChoices({ width: 1280, height: 720 }).map((choice) => choice.kind)).toEqual(["thumbnail", "square", "vertical"]);
+    expect(frameImageChoices({ width: 1080, height: 1920 }).map((choice) => choice.kind)).toEqual(["thumbnail", "square", "vertical"]);
   });
 });
 
@@ -59,5 +67,15 @@ describe("coverScale", () => {
     expect(coverScale({ width: 1920, height: 1080 }, { width: 1080, height: 1920 })).toBe(3.1605);
     expect(coverScale({ width: 1920, height: 1080 }, { width: 1280, height: 720 })).toBe(1);
     expect(coverScale(null, { width: 1280, height: 720 })).toBe(1);
+  });
+});
+
+describe("shownFrameTime", () => {
+  it("asks for the last frame when the playhead is parked at the end (#751)", async () => {
+    const { shownFrameTime } = await import("../src/renderer/src/frame-image.js");
+    expect(shownFrameTime(3, 75, 25)).toBe(74 / 25);
+    expect(shownFrameTime(1.2, 75, 25)).toBe(1.2);
+    expect(shownFrameTime(-1, 75, 25)).toBe(0);
+    expect(shownFrameTime(2, 0, 25)).toBe(2);
   });
 });

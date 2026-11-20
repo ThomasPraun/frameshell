@@ -1,6 +1,7 @@
 // Which files from the OS (dialog, drop, Open with) the app takes as videos, audio, images or project media.
 import { stat } from "node:fs/promises";
 import { extname } from "node:path";
+import { IMAGE_EXTENSIONS } from "../shared/image-files.js";
 
 /** Video extensions, a subset of {@link START_EXTENSIONS}. */
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "mts"] as const;
@@ -8,8 +9,8 @@ export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "mts
 /** Audio extensions: they start a project too (ADR 0015) and a drop on a project imports them. */
 export const AUDIO_EXTENSIONS = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus"] as const;
 
-/** Still images a clip can show; they also start an image project (ADR 0017). */
-export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const;
+/** Still images a clip can show; they also start an image project (ADR 0017). One list with the renderer. */
+export { IMAGE_EXTENSIONS };
 
 /** What starts a project: the Choose dialog, drops on the welcome screen, Open with. */
 export const START_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IMAGE_EXTENSIONS] as const;

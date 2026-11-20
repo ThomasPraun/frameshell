@@ -20,7 +20,7 @@ const en = {
   emptyCaption: "Nothing on the timeline yet",
   /** Image projects (ADR 0017): the monitor shows the picture, not a moment. */
   pictureMonitor: "Picture",
-  emptyPicture: "No layers yet: drop an image here or ask your agent",
+  emptyPicture: "No layers yet: Add image… in Layers, drop a picture here, or ask your agent",
   exportImage: "Export image",
   exportImageHint: "Save the picture as PNG, JPEG or WebP",
   exported: (file: string) => `Saved ${file}`,
@@ -121,7 +121,7 @@ const es: typeof en = {
   monitorAt: (time) => `Monitor de programa en ${time}`,
   emptyCaption: "Todavía no hay nada en la línea de tiempo",
   pictureMonitor: "Imagen",
-  emptyPicture: "Todavía no hay capas: suelta una imagen aquí o pídeselo a tu agente",
+  emptyPicture: "Todavía no hay capas: usa Agregar imagen… en Capas, suelta una imagen aquí o pídeselo a tu agente",
   exportImage: "Exportar imagen",
   exportImageHint: "Guarda la imagen como PNG, JPEG o WebP",
   exported: (file) => `Guardada: ${file}`,

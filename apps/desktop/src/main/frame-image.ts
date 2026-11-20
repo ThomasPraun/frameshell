@@ -13,6 +13,27 @@ export const FRAME_IMAGE_SIZES = {
   vertical: { width: 1080, height: 1920 },
 } as const satisfies Record<string, Size>;
 
+/** One answer of the size question: which size, and how big. */
+export interface FrameImageChoice {
+  kind: "thumbnail" | "own" | "square" | "vertical";
+  size: Size;
+}
+
+/**
+ * The sizes offered for an image from a frame of a video of size `own`: the thumbnail, the video's own, square and
+ * vertical, the video's own left out when it is one of the others (#751: the same size was offered twice).
+ */
+export function frameImageChoices(own: Size): FrameImageChoice[] {
+  const same = (size: Size) => size.width === own.width && size.height === own.height;
+  const presets = Object.values(FRAME_IMAGE_SIZES) as Size[];
+  return [
+    { kind: "thumbnail", size: FRAME_IMAGE_SIZES.thumbnail },
+    ...(presets.some(same) ? [] : [{ kind: "own" as const, size: own }]),
+    { kind: "square", size: FRAME_IMAGE_SIZES.square },
+    { kind: "vertical", size: FRAME_IMAGE_SIZES.vertical },
+  ];
+}
+
 /** What {@link imageFromFrame} needs from the app; replaced in tests. */
 export interface FrameImageDeps {
   /** The app's daemon connection (`ui` author). */
@@ -21,19 +42,20 @@ export interface FrameImageDeps {
   layers: (dir: string) => Promise<ImageLayersDeps>;
   /** Where the capture waits before its import (the OS temp folder). */
   tempDir: string;
-  /** Folder name from the project's name and the frame's time, in the UI language. Default: `<name> frame <time>`. */
-  folderName?: (project: string, stamp: string) => string;
+  /** Folder name from the project's name, the frame's time and the size, in the UI language. Default: `<name> frame <time> <w>x<h>`. */
+  folderName?: (project: string, stamp: string, size: string) => string;
 }
 
 /**
  * Make an image project from the frame of `timeline` showing at `at` seconds in the project at `dir` (ADR 0017):
- * a folder beside that project, named after it and the time (`interview frame 01-05`, then `… (2)`), `size`
+ * a folder beside that project, named after it, the time and the size (`interview frame 01-05 1080x1080`, then `… (2)`), `size`
  * big, with the frame as its only layer covering the picture. The video project is left as it was. Resolves
  * with the new project's folder.
  */
 export async function imageFromFrame(source: { dir: string; name: string }, timeline: string, at: number, size: Size, deps: FrameImageDeps): Promise<string> {
   const stamp = clockName(at);
-  const dir = await freeFolder(dirname(source.dir), projectName(deps.folderName ? deps.folderName(source.name, stamp) : `${source.name} frame ${stamp}`));
+  const sized = `${size.width}x${size.height}`;
+  const dir = await freeFolder(dirname(source.dir), projectName(deps.folderName ? deps.folderName(source.name, stamp, sized) : `${source.name} frame ${stamp} ${sized}`));
   const scratch = await mkdtemp(join(deps.tempDir, "frameshell-frame-"));
   try {
     const capture = join(scratch, `frame-${stamp}.png`);

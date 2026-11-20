@@ -23,9 +23,12 @@ export const SIDEBAR_VIEWS: readonly { id: SidebarView; label: string }[] = [
   { id: "teleprompter", label: t.workspace.teleprompter },
 ];
 
-/** The views an image project (ADR 0017) offers: no one speaks or is recorded in a picture, so no People, Shoot or Teleprompter view. */
+/**
+ * The views an image project (ADR 0017) offers: no one speaks or is recorded in a picture and no cameras cut to
+ * each other, so no Angles, People, Shoot or Teleprompter view.
+ */
 export function sidebarViews(image: boolean): readonly { id: SidebarView; label: string }[] {
-  return image ? SIDEBAR_VIEWS.filter(({ id }) => id !== "people" && id !== "shoot" && id !== "teleprompter") : SIDEBAR_VIEWS;
+  return image ? SIDEBAR_VIEWS.filter(({ id }) => id !== "angles" && id !== "people" && id !== "shoot" && id !== "teleprompter") : SIDEBAR_VIEWS;
 }
 
 /** Name of a sidebar view, as its tab shows it. */

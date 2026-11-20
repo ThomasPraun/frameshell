@@ -27,6 +27,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choice (Instagram Reels, TikTok, YouTube Shorts, YouTube) drawn from `safe-zones.ts`, labelled and shaded, following
   the frame's shape until you pick one. A narrow preview stacks its tools, playback buttons and notice instead of
   letting the notice cover the tools (#750).
+- Desktop, image projects (#751):
+  - New image from this frame at the very end of a video takes the last frame instead of failing after the size
+    question. The size question no longer offers the same size twice, and the folder names the size
+    (`interview frame 00-02 1080x1920`).
+  - GIF and WebP layers come in at their own size: sizes are read from the file header, not Electron's PNG/JPEG
+    reader. A picture bigger than the canvas fits inside it, so it can still be seen and grabbed. Replace image keeps
+    the new picture's own size in an image project.
+  - Scale reads against the picture's own pixels (100 % = each pixel once).
+  - Layers has an "Add image…" button, also in the empty state, and the empty-canvas hint can be read.
+  - A video dropped on an image project is named as staying in `assets/` only.
+  - The new-project form shows the layer order (bottom first, which sets the size) with Up and Down, drops files that
+    are not media (a `.txt`), and explains that pictures among videos become still clips.
+  - The inspector speaks of layers, not clips or track letters.
+  - The Angles tab is gone from image projects.
+  - A layer whose name is cleared shows its file name without the extension.
+  - Pick asks before downloading its photo model (with its size), and a failed download reads as one sentence.
 
 ## [0.19.0] - 2026-11-20
 
