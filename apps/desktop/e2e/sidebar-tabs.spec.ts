@@ -37,13 +37,15 @@ test("a narrow tab strip offers the views out of sight in a menu, and the active
 test("the sidebar keeps its width when hidden and shown again", async () => {
   const sidebar = page.locator('[data-panel="sidebar"]');
   const splitter = page.getByRole("separator", { name: "Resize sidebar" });
+  const before = (await sidebar.boundingBox())!.width;
   const box = (await splitter.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + 200, box.y + box.height / 2, { steps: 5 });
   await page.mouse.up();
   const wide = (await sidebar.boundingBox())!.width;
-  expect(wide).toBeGreaterThan(350);
+  // How far it grows depends on the window (the panels beside it keep their minimum); it grows.
+  expect(wide).toBeGreaterThan(before + 20);
   await page.keyboard.press(`${MOD}+B`);
   await expect(sidebar).toBeHidden();
   await page.keyboard.press(`${MOD}+B`);
