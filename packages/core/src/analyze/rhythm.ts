@@ -14,9 +14,9 @@ export const BIG_CHANGE_SHARE = 0.15;
 export const BIG_CHANGE_LEVEL = 255 * BIG_CHANGE_SHARE;
 /** Times the median change of the frames around it a frame's change must reach to be a big change: 4x. */
 export const BIG_CHANGE_RATIO = 4;
-/** Grey levels below which a change is never big, so noise in a still picture is not 4x of nothing: the floor for visual events. */
+/** Grey levels below which a change is never big, so noise in a still picture is not 4x of nothing. Our choice: no source gives a floor. */
 export const BIG_CHANGE_FLOOR = 1;
-/** Seconds on each side of a frame whose changes are its surroundings. Half a second spans a gesture, not a shot. */
+/** Seconds on each side of a frame whose changes are its surroundings. Our choice (no source gives one): half a second spans a gesture, not a shot. */
 export const BIG_CHANGE_SURROUND_S = 0.5;
 /** Big changes in {@link BURST_WINDOW_S} that make a burst. */
 export const BURST_CHANGES = 3;

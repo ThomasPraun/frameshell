@@ -10,7 +10,7 @@ import {
 } from "./kit.js";
 
 /**
- * Picture-in-picture card (owner decision): a still picture
+ * Picture-in-picture card (owner decision, ADR 0033): a still picture
  * (a screenshot, a product shot, a face) in a rounded card in one corner over
  * the talking head, with an optional caption chip. Image prop only: a live
  * video in a corner stays the multicam picture-in-picture layout. The card

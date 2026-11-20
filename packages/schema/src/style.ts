@@ -255,7 +255,7 @@ export type StyleFile = z.output<typeof StyleFileSchema>;
 // Duration ranges and premium's quick/standard/slow palette are LottieFiles' motion-design numbers;
 // the other palettes take their range's low end, middle and high end. Overshoot ceilings come from the same
 // source (playful: the 20 % of the playful spring). Eases, springs and staggers are starting points
-// (curves, spring presets, stagger budgets), tuned per project in `style.json`.
+// (curves, spring presets, stagger budgets), tuned per project in `style.json`. Sources: ADR 0028.
 /** Motion values of every personality. */
 export const MOTION_PERSONALITIES: Readonly<Record<MotionPersonalityId, StyleMotionValues>> = {
   /** 150-300 ms, a visible bounce. */
