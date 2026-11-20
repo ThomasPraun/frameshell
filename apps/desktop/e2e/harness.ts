@@ -37,7 +37,8 @@ export function sandbox(fixture: string): Sandbox {
 /**
  * Save the layout a project had before the terminal started folded: terminal open at its default width. Written
  * where `LayoutStore` keeps it (`<dataDir>/desktop/layouts`), only when the project has none yet, so a relaunch
- * keeps what the app saved. Specs that drive the terminal rely on it; `freshLayout` skips it.
+ * keeps what the app saved. Specs that drive the terminal rely on it; `freshLayout` skips it. The file name is
+ * pinned to `LayoutStore` by `test/layout-store.test.ts`.
  */
 function seedOpenTerminal(box: Sandbox): void {
   const dir = join(box.dataDir, "desktop", "layouts");
@@ -122,8 +123,11 @@ export async function terminalText(page: Page): Promise<string> {
  * Type a command into the active terminal and press Enter, once the shell drew its prompt (output non-empty and
  * unchanged for 300 ms). Keys typed while a login shell still starts are reordered or lost by its line editor.
  * On Windows the first PowerShell prompt can take about a minute on a loaded runner, so it is awaited first.
+ * A folded terminal (a project made from the Welcome screen starts that way) is shown first.
  */
 export async function runInTerminal(page: Page, command: string): Promise<void> {
+  const rail = page.getByRole("button", { name: "Show terminal" });
+  if (await rail.isVisible()) await rail.click();
   if (isWindows) {
     await expect.poll(async () => /PS .*>/.test(await terminalText(page)), { timeout: 60_000, message: "the shell printed no prompt" }).toBe(true);
   }

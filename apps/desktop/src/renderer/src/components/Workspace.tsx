@@ -585,7 +585,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         notice={notice}
         setup={setup}
         agentTargets={terminal.collapsed ? connectedAgents : []}
-        onShowTerminal={() => toggle("terminal")}
+        onShowTerminal={revealTerminal}
       />
       {sidebarViews(image).filter(({ id }) => detached.has(id)).map(({ id, label }) => (
         <PanelWindow key={id} panel={id} title={t.workspace.windowTitle(label, project.name)} onClosed={() => setPanelDetached(id, false)}>
