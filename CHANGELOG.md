@@ -1882,6 +1882,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removing a managed download (`binaries.remove`) reports only the bytes it really freed (a file the system would not
+  delete is not counted), refuses with `files-open` on Windows only (elsewhere a denied rename says the data directory
+  is not writable), checks again for a concurrent download right before moving the directory, and sweeps every
+  `.removing-*` leftover in `binaries/` and `models/` on each removal, not only those of the same name.
 - Closing a terminal tab whose shell had already exited, with the exit event not yet delivered, no longer calls
   `pty.kill()` on it (it throws or logs on Windows); the close waits for the exit event instead (small fixes 6 of #451).
 - Generated clips: a pass over a timeline (`clip.renders`, `ensure`, `finals`, `check`, `gc`, the background refresh)
