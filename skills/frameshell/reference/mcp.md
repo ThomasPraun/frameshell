@@ -61,4 +61,6 @@ They fail with `UiNotConnected` when no app window shows the project.
 
 ## Resources
 
+The skill itself: `frameshell://skill` is SKILL.md and `frameshell://skill/{path}` every reference file, `path` as its links give it (`reference/cli.md`). Served from the build, with no project open; it is how a client that never loads `.claude/skills` (Claude Desktop) learns the workflows.
+
 Read-only views, same content as the CLI's `--json`: `frameshell://status`, `frameshell://timelines/{timeline}`, `frameshell://timelines/{timeline}/history`, `frameshell://transcripts/{file}`, `frameshell://scripts/{file}/outline`. Subscribed timeline resources update on every change from any client.

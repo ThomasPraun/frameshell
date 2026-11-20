@@ -133,7 +133,7 @@ export interface RemovedDownload {
   removed: boolean;
   /** Version (model: revision) directory names that were deleted, sorted by name. */
   versions: string[];
-  /** Bytes freed. */
+  /** Bytes actually freed; a file the system would not delete is not counted. */
   bytes: number;
 }
 
@@ -167,6 +167,8 @@ export class BinaryManager {
   readonly #standardPaths: boolean;
   /** One in-flight install per package or model (keyed `pkg:` / `model:`); concurrent callers share it. */
   readonly #installing = new Map<string, Install>();
+  /** Directories of removals in progress, so a concurrent sweep leaves them to their own removal. */
+  readonly #trashing = new Set<string>();
   /** Machine probe results, keyed by command line. Hardware does not change under a running daemon. */
   readonly #probes = new Map<string, Promise<boolean>>();
 
@@ -316,7 +318,8 @@ export class BinaryManager {
    * naming the removable names for an unknown one. Callers that know of running work check it first.
    *
    * The directory is renamed away first, then deleted: a refused rename (Windows, a program runs from it) leaves
-   * the install whole, and an install publishing meanwhile never meets a half-deleted directory.
+   * the install whole, and an install publishing meanwhile never meets a half-deleted directory. Leftovers of earlier
+   * removals that could not be deleted (`.removing-*` in `binaries/` and `models/`) are swept first.
    */
   async remove(name: string): Promise<RemovedDownload> {
     const pkg = this.#packages.find((candidate) => candidate.name === name && !candidate.userInstall);
@@ -332,27 +335,49 @@ export class BinaryManager {
     if ([...this.#installing.keys()].some(installing)) {
       throw inUse(name, "installing", `${name} is being downloaded right now. Wait for it to finish, then remove it.`);
     }
+    await this.#sweepRemoved();
     const entry = await this.#onDisk(kind, name, pkg?.tools ?? []);
     if (!entry) return { name, kind, removed: false, versions: [], bytes: 0 };
+    // An install can start while #onDisk reads the directory.
+    if ([...this.#installing.keys()].some(installing)) {
+      throw inUse(name, "installing", `${name} is being downloaded right now. Wait for it to finish, then remove it.`);
+    }
     const dir = this.#downloadDir(kind, name);
-    const parent = dirname(dir);
-    const trash = join(parent, `${REMOVING_PREFIX}${name}-${randomUUID()}`);
+    const trash = join(dirname(dir), `${REMOVING_PREFIX}${name}-${randomUUID()}`);
+    this.#trashing.add(trash);
     try {
-      await renameRetrying(dir, trash);
-    } catch (error) {
-      if (["EBUSY", "EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")) {
-        throw inUse(name, "files-open", `The system keeps files of ${name} open (a program still runs from them). Stop it and try again.`);
+      try {
+        await renameRetrying(dir, trash);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? "";
+        // Only Windows refuses to move a directory a program runs from; elsewhere these codes are plain permissions.
+        if (code === "EBUSY" || (process.platform === "win32" && (code === "EPERM" || code === "EACCES"))) {
+          throw inUse(name, "files-open", `The system keeps files of ${name} open (a program still runs from them). Stop it and try again.`);
+        }
+        if (code === "EPERM" || code === "EACCES") {
+          throw new Error(`Cannot remove ${name}: no permission to change ${dirname(dir)}. Make the data directory writable for this user and try again.`, { cause: error });
+        }
+        throw error;
       }
-      throw error;
+      const before = await diskBytes(trash);
+      // Best effort: the download is gone for every reader once renamed; a locked leftover is swept by a later removal.
+      await rm(trash, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
+      return { name, kind, removed: true, versions: entry.versions, bytes: Math.max(0, before - (await diskBytes(trash))) };
+    } finally {
+      this.#trashing.delete(trash);
     }
-    const bytes = await diskBytes(trash);
-    // Best effort: the download is gone for every reader once renamed; a locked leftover goes with the next removal.
-    for (const leftover of await readdir(parent).catch(() => [] as string[])) {
-      if (leftover.startsWith(`${REMOVING_PREFIX}${name}-`)) {
-        await rm(join(parent, leftover), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
+  }
+
+  /** Delete every `.removing-*` leftover of earlier removals in `binaries/` and `models/`, except removals running now. */
+  async #sweepRemoved(): Promise<void> {
+    for (const group of ["binaries", "models"]) {
+      const parent = join(this.dataDir, group);
+      for (const leftover of await readdir(parent).catch(() => [] as string[])) {
+        const path = join(parent, leftover);
+        if (!leftover.startsWith(REMOVING_PREFIX) || this.#trashing.has(path)) continue;
+        await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
       }
     }
-    return { name, kind, removed: true, versions: entry.versions, bytes };
   }
 
   #downloadDir(kind: "package" | "model", name: string): string {

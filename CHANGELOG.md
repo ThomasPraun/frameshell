@@ -23,6 +23,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a Codex file that does not parse (new dependency `smol-toml`) is refused untouched. The functions (`connectCodex`,
   `codexState`, `connectGemini`, ...) are exported from `@frameshell/cli` for the app. Docs: `docs/mcp.md` "Connect
   other AI apps" (ChatGPT web is not supported).
+- Plugins view in the app (no protocol change): the Plugins sidebar tab, empty until now, lists the official plugins
+  from `plugin.catalog` for the project with what each is for, what it needs (Blender found or not, `OPENAI_API_KEY`
+  set or not: the app never shows or asks for the key), whether it is paid and sends audio or text off the computer,
+  what it downloads on first use and its state (not installed, installed, did not load, off until trusted), with
+  Install (official plugins only) and Remove (confirmed first). A project that declares plugins nobody decided on, or
+  that were refused, shows a banner saying plugins run with full access to the computer, with Trust and Don't trust:
+  `project.trust` is sent only on that click. A Downloads section lists this computer's managed downloads (ffmpeg,
+  whisper.cpp, headless Chrome, models) on disk with their size and total, and what is not downloaded yet, with Remove
+  (`binaries.remove`, confirmed first; a refusal such as BinaryInUse is shown). The Shoot view's transcription notice
+  links to the view, and its install command and the voiceover report's come from the official table. Plugin
+  descriptions in the app are in English and Spanish; the skill's app description names the view. The official
+  plugin table is also exported as the subpath `@frameshell/protocol/official-plugins` (for the app's renderer),
+  with `installCommand(plugin)` for the terminal command.
+- The agent skill over MCP, so a client that never loads `.claude/skills` (Claude Desktop) learns the workflows and the
+  options too: `frameshell://skill` (SKILL.md) and `frameshell://skill/{path}` (every reference file) are listed and
+  readable as `text/markdown` with no project open, served from the skill bundled into core (new export
+  `@frameshell/core/skill`; `createMcpServer({ skill })`). The server instructions say to read it first and to call
+  `plugin_catalog` to see which options exist. The skill gains *Options, not obligations*: the person's request decides
+  the tools; offer the plugins and downloads that fit, with what each needs, costs and takes, from `plugin catalog`;
+  never install, download, trust or spend without a yes; no plugin at all is a plain edit. The reference rows for
+  transcription, voiceover, motion films, HyperFrames and Remotion point to it.
 - Remove managed downloads to free disk (`PROTOCOL_VERSION` 184): new method `binaries.remove { name }` deletes a binary
   package (every installed version and its `.failed.json` markers under `<dataDir>/binaries/<package>/`) or a pinned
   model (`<dataDir>/models/<id>/`) and returns the bytes freed; it downloads again on next use. Machine-wide. Refused with
@@ -1883,6 +1904,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removing a managed download (`binaries.remove`) reports only the bytes it really freed (a file the system would not
+  delete is not counted), refuses with `files-open` on Windows only (elsewhere a denied rename says the data directory
+  is not writable), checks again for a concurrent download right before moving the directory, and sweeps every
+  `.removing-*` leftover in `binaries/` and `models/` on each removal, not only those of the same name.
 - Closing a terminal tab whose shell had already exited, with the exit event not yet delivered, no longer calls
   `pty.kill()` on it (it throws or logs on Windows); the close waits for the exit event instead (small fixes 6 of #451).
 - Generated clips: a pass over a timeline (`clip.renders`, `ensure`, `finals`, `check`, `gc`, the background refresh)

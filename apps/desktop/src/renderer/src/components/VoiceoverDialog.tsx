@@ -1,6 +1,8 @@
+import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
 import { useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n.js";
+import { transcriptionInstallCommand } from "../plugins/install-command.js";
 import { type LineRow, checkNote, differenceText, lineCounts, lineRows, progressText } from "../voiceover/model.js";
 import { type DialogState, type PlaceForm, voiceoverDialog } from "../voiceover/store.js";
 import { useModal } from "./modal.js";
@@ -120,7 +122,7 @@ function RunSection({ state }: { state: DialogState }) {
             {note.kind === "checked"
               ? said.checked(note.misread, note.doubtful)
               : note.kind === "unavailable"
-                ? said.notCheckedUnavailable
+                ? said.notCheckedUnavailable(transcriptionInstallCommand(DEFAULT_TRANSCRIPTION_PROVIDER))
                 : note.kind === "declined"
                   ? said.notCheckedDeclined
                   : said.notCheckedWhy(note.reason)}

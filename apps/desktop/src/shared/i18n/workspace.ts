@@ -60,8 +60,6 @@ const en = {
   teleprompter: "Teleprompter",
   sidebarViews: "Sidebar views",
   inOwnWindow: (view: string) => `${view}, in its own window`,
-  noPlugins:
-    "No plugins yet. Adapters such as HyperFrames and providers such as whisper.cpp will show up here with their trust state.",
   /** `name` is the panel's name as a sentence shows it (lower case in English). */
   dockBack: (name: string) => `Dock ${name} back`,
   openInWindow: (name: string) => `Open ${name} in its own window`,
@@ -139,8 +137,6 @@ const es: typeof en = {
   teleprompter: "Teleprompter",
   sidebarViews: "Vistas de la barra lateral",
   inOwnWindow: (view) => `${view}, en su propia ventana`,
-  noPlugins:
-    "Todavía no hay plugins. Los adaptadores como HyperFrames y los proveedores como whisper.cpp aparecerán aquí con su estado de confianza.",
   dockBack: (name) => `Devolver ${name} a la ventana`,
   openInWindow: (name) => `Abrir ${name} en su propia ventana`,
   dockedElsewhere: "{panel} está en otra ventana",

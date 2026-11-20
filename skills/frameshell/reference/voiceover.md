@@ -1,6 +1,6 @@
 # Voiceover
 
-A narration generated from text: one voiceover script, one spoken take per line, written into the project as audio assets (ADR 0034). Frameshell ships no voice: a speech provider (a plugin, or one built into this machine) says the lines. Commands assume the session rule of [SKILL.md](../SKILL.md).
+A narration generated from text: one voiceover script, one spoken take per line, written into the project as audio assets (ADR 0034). Frameshell ships no voice: a speech provider (a plugin, or one built into this machine) says the lines. Which providers exist, and which are paid, is in `frameshell plugin catalog`; offer them, never choose a paid one for the person ([SKILL.md](../SKILL.md), *Options, not obligations*). Commands assume the session rule of [SKILL.md](../SKILL.md).
 
 ## Format
 

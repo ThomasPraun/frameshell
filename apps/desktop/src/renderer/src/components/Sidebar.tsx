@@ -7,6 +7,7 @@ import { Explorer } from "./Explorer.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { PeoplePanel } from "./PeoplePanel.js";
+import { PluginsPanel } from "./PluginsPanel.js";
 import { ReviewSwitch } from "./ReviewSwitch.js";
 import { ShootPanel } from "./ShootPanel.js";
 import { TeleprompterPanel } from "./TeleprompterPanel.js";
@@ -94,7 +95,7 @@ export function Sidebar({
         {detached.has(view) ? (
           <DockedElsewhere title={sidebarLabel(view)} onBringBack={() => onDetach(view, false)} />
         ) : (
-          <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} mediaUrl={mediaUrl} onShowPeople={() => onView("people")} />
+          <SidebarViewBody view={view} onOpenFile={onOpenFile} activeFile={activeFile} mediaUrl={mediaUrl} onShowPeople={() => onView("people")} onShowPlugins={() => onView("plugins")} />
         )}
       </div>
     </>
@@ -134,6 +135,7 @@ function SidebarViewBody({
   activeFile,
   mediaUrl,
   onShowPeople,
+  onShowPlugins,
 }: {
   view: SidebarView;
   onOpenFile: (path: string) => void;
@@ -141,6 +143,8 @@ function SidebarViewBody({
   mediaUrl: string;
   /** Switch the sidebar to People; absent in a view's own window. */
   onShowPeople?: () => void;
+  /** Switch the sidebar to Plugins; absent in a view's own window. */
+  onShowPlugins?: () => void;
 }) {
   if (view === "explorer") return <Explorer onOpenFile={onOpenFile} activeFile={activeFile} />;
   if (view === "history") {
@@ -153,11 +157,7 @@ function SidebarViewBody({
   }
   if (view === "angles") return <AngleViewer mediaUrl={mediaUrl} />;
   if (view === "people") return <PeoplePanel mediaUrl={mediaUrl} />;
-  if (view === "shoot") return <ShootPanel onShowPeople={onShowPeople} />;
+  if (view === "shoot") return <ShootPanel onShowPeople={onShowPeople} onShowPlugins={onShowPlugins} />;
   if (view === "teleprompter") return <TeleprompterPanel />;
-  return (
-    <p className="empty">
-      {t.workspace.noPlugins}
-    </p>
-  );
+  return <PluginsPanel />;
 }
