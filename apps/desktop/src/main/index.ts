@@ -735,8 +735,8 @@ function ideaParent(parent?: string): string {
  */
 async function createFromIdea(state: WindowState, raw: IdeaBrief, parent?: string): Promise<OpenOutcome> {
   try {
-    const brief = checkIdea(raw);
-    const plan = await planIdeaProject({ parent: ideaParent(parent), name: brief.name });
+    const brief = checkIdea(raw, text.welcome);
+    const plan = await planIdeaProject({ parent: ideaParent(parent), name: brief.name }, text.welcome.untitledVideo);
     const [primary, ...others] = brief.formats;
     await daemon.request("project.init", { dir: plan.dir, name: plan.name, resolution: formatSize(primary ?? "16x9") });
     for (const id of others) await daemon.request("format.add", { cwd: plan.dir, id });
@@ -1684,7 +1684,7 @@ function registerIpc(): void {
       ),
   );
   ipcMain.handle(Channel.projectPlanIdea, (_event, place?: { parent?: string; name?: string }) =>
-    outcome(() => planIdeaProject({ parent: ideaParent(place?.parent), name: place?.name ?? "" })),
+    outcome(() => planIdeaProject({ parent: ideaParent(place?.parent), name: place?.name ?? "" }, text.welcome.untitledVideo)),
   );
   ipcMain.handle(Channel.projectFromIdea, (event, brief: IdeaBrief, parent?: string) => createFromIdea(stateOf(event.sender), brief, parent));
   ipcMain.handle(Channel.projectTakeIdea, (event) => {
@@ -1867,6 +1867,7 @@ function registerIpc(): void {
         request: (method, params) => daemon.request(method, params),
         layers: imageLayerDeps,
         tempDir: app.getPath("temp"),
+        folderName: text.app.dialogs.frameImageFolder,
       });
       createWindow(dir);
       return dir;

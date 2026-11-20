@@ -150,7 +150,7 @@ const es: typeof en = {
   ending: "Guardando…",
   recording: (time) => `Grabando ${time}`,
   failed: (reason) => `El rodaje falló: ${reason}`,
-  saved: (folder, count) => `Se guardó ${count === 1 ? "1 archivo" : `${count} archivos`} en ${folder}.`,
+  saved: (folder, count) => `${count === 1 ? "Se guardó 1 archivo" : `Se guardaron ${count} archivos`} en ${folder}.`,
   grouped: "La sesión es un grupo multicámara en la línea de tiempo principal.",
   noGroup: "No se grabó cámara ni pantalla, así que no se creó un grupo multicámara.",
   recovered: (folder) => `Se recuperó un rodaje interrumpido: ${folder}.`,

@@ -27,7 +27,8 @@ const lanes = () => page.getByTestId("timeline-lanes");
 const clipItems = () => page.getByRole("list", { name: "Timeline clips" }).getByRole("listitem");
 const rows = () => page.locator(".history > .history-item");
 /** History row of the transaction whose title is `title`. */
-const row = (title: string) => rows().filter({ has: page.locator(".history-title", { hasText: title }) });
+// The whole title: a revert's row names the entry it undid ("Revert “tighten intro”").
+const row = (title: string) => rows().filter({ has: page.locator(".history-title", { hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }) });
 
 /** Click the middle of `locator` once it is laid out (slow packaged-app runners). */
 async function clickLaidOut(locator: ReturnType<Page["locator"]>): Promise<void> {
@@ -65,7 +66,9 @@ test("lists the agent's labeled transaction live, by author, with its operation 
 
   const agent = row("tighten intro");
   await expect(agent.locator(".history-count")).toHaveText("2 ops");
-  await expect(agent.locator(".history-author")).toContainText(/^Terminal\s*term-/);
+  // The session's id says nothing to the person: it is in the tooltip only (#748).
+  await expect(agent.locator(".history-author")).toHaveText("Terminal");
+  await expect(agent.locator(".history-author")).toHaveAttribute("title", /^Terminal \(term-/);
   await expect(agent.locator(".history-time")).toHaveText(/\d\d:\d\d:\d\d/);
 });
 
@@ -77,6 +80,8 @@ test("selecting a transaction marks what it did on the timeline and selects the 
   await expect(lanes()).toHaveAttribute("data-diff", "removed:c_two moved:c_three");
   await expect(lanes()).toHaveAttribute("data-selected", "c_three");
   await expect(page.locator(".timeline-diff-legend")).toHaveAttribute("data-history", tx!);
+  // The legend names the entry as History does, never by its id (#748).
+  await expect(page.locator(".timeline-diff-title")).toHaveText("tighten intro");
   await expect(agent.locator(".history-diff")).toHaveText(/1 removed.*1 moved/);
 });
 
@@ -94,7 +99,7 @@ test("a direct file edit shows up as its own entry, by File", async () => {
 test("reverting the agent's transaction is refused while the file edit changed the same clip, naming it", async () => {
   const agent = row("tighten intro");
   await clickLaidOut(agent.locator(".history-main"));
-  await agent.getByRole("button", { name: /^Revert tx_/ }).click();
+  await agent.getByRole("button", { name: "Revert “tighten intro”", exact: true }).click();
   const notice = agent.locator(".history-notice");
   await expect(notice).toContainText("Later changes touch the same clips");
   await expect(notice.locator(".history-conflicts li")).toHaveText([/Direct edit \(File\)\s*c_three/]);
@@ -105,11 +110,11 @@ test("reverting a single operation undoes just it, as a ui revert", async () => 
   const file = row("Direct edit");
   await clickLaidOut(file.locator(".history-expand"));
   const op = file.locator(".history-ops li").first();
-  await op.getByRole("button", { name: /^Revert operation op_/ }).click();
+  await op.getByRole("button", { name: "Revert this step: Direct edit" }).click();
   await expect(lanes()).toHaveAttribute("data-revision", "4", { timeout: 30_000 });
   await expect(page.locator('li[data-clip="c_three"]')).toHaveText(/^V1: titles, 00:00:04:00 to 00:00:07:00/);
   // The revert is listed and selected: the timeline now marks what it changed.
-  await expect(rows().first().locator(".history-title")).toHaveText(/^Revert op_/);
+  await expect(rows().first().locator(".history-title")).toHaveText("Revert “Direct edit”");
   await expect(rows().first()).toHaveAttribute("data-selected", "true");
   await expect(lanes()).toHaveAttribute("data-diff", "moved:c_three");
 });
@@ -117,7 +122,7 @@ test("reverting a single operation undoes just it, as a ui revert", async () => 
 test("then the agent's transaction reverts, restoring the removed clip", async () => {
   const agent = row("tighten intro");
   await clickLaidOut(agent.locator(".history-main"));
-  await agent.getByRole("button", { name: /^Revert tx_/ }).click();
+  await agent.getByRole("button", { name: "Revert “tighten intro”", exact: true }).click();
   await expect(lanes()).toHaveAttribute("data-revision", "5", { timeout: 30_000 });
   await expect(clipItems()).toHaveText([
     "V2: titles, 00:00:20:00 to 00:00:22:00",
@@ -167,7 +172,8 @@ test("names the agent CLI that ran commands in a terminal, on its tab and in His
   }
   await expect(lanes()).toHaveAttribute("data-revision", "6", { timeout: 30_000 });
   const added = row("Add track");
-  await expect(added.locator(".history-author")).toContainText(/^agent: claude\s*term-/);
+  await expect(added.locator(".history-author")).toHaveText("agent: claude");
+  await expect(added.locator(".history-author")).toHaveAttribute("title", /^agent: claude \(term-/);
   expect(journaled().at(-1)).toEqual({ op: "track.add", author: expect.stringMatching(/^agent:claude:term-/) });
   // The agent quit: the tab names the shell again.
   if (!isWindows) await expect(tab).not.toHaveAttribute("data-agent", /.*/, { timeout: 30_000 });
@@ -187,7 +193,7 @@ test("an aborted transaction stays listed, dimmed and marked aborted, without Re
   await expect(aborted.locator(".history-count")).toHaveText("2 ops");
   await expect(aborted.getByRole("button", { name: /^Revert/ })).toHaveCount(0);
   // Other entries keep their Revert.
-  await expect(row("tighten intro").getByRole("button", { name: /^Revert tx_/ })).toHaveCount(1);
+  await expect(row("tighten intro").getByRole("button", { name: "Revert “tighten intro”", exact: true })).toHaveCount(1);
 });
 
 test("right-click on an entry selects it and offers Chat about this, Revert and its operations (#420)", async () => {

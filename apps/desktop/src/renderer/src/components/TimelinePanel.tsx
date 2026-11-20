@@ -18,13 +18,13 @@ import { useGroupsTurns } from "../angles/useTurns.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
 import { candidateFiles } from "../audition/model.js";
 import { auditionItems, revealItem } from "../file-commands.js";
-import { diffCounts } from "../history/model.js";
+import { diffCounts, labelText, undoneTitle } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
 import { isMac, panelShortcut, shortcutLabel } from "../shortcuts.js";
 import { listenEverywhere, windowOf } from "../windows.js";
-import { useHistoryDiff } from "../history/useHistory.js";
-import { showSide } from "../review/store.js";
+import { useEntryTitle, useHistoryDiff } from "../history/useHistory.js";
+import { showSide, useReview } from "../review/store.js";
 import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
@@ -232,6 +232,17 @@ export function TimelinePanel({
         const result = await window.frameshell.timeline[direction](TIMELINE);
         if (!result) setStatus({ tone: "info", text: direction === "undo" ? t.timeline.nothingToUndo : t.timeline.nothingToRedo });
         return result;
+      }, (result) => {
+        // Say what came back or went, as History names it (#748: "Undo saved" said nothing).
+        const target = result?.operation.args["target"];
+        if (typeof target !== "string") return;
+        window.frameshell.history.list(TIMELINE).then(
+          (history) => {
+            const title = undoneTitle(history.transactions, target);
+            if (title) setStatus({ tone: "info", text: direction === "undo" ? t.timeline.undone(title) : t.timeline.redone(title) });
+          },
+          () => {},
+        );
       }),
     [run],
   );
@@ -265,6 +276,8 @@ export function TimelinePanel({
   const { history } = useSelection();
   const { diff } = useHistoryDiff(TIMELINE, history, view?.revision ?? null);
   const proposed = useProposalMarks(TIMELINE);
+  const proposalLabel = useReview().proposal?.label ?? null;
+  const historyTitle = useEntryTitle(TIMELINE, history);
   // A History pick wins over the proposal's marks (After, ADR 0019).
   const marks = history !== null ? (diff?.target === history ? diff.clips : null) : (proposed?.marks ?? null);
 
@@ -289,9 +302,16 @@ export function TimelinePanel({
           {status?.text ?? (turnsError ? t.timeline.turnsFailed(turnsError) : "")}
         </span>
         {history !== null ? (
-          <DiffLegend target={history} marks={marks} />
+          <DiffLegend target={history} title={historyTitle} marks={marks} />
         ) : (
-          proposed && <DiffLegend target={proposed.tx} marks={proposed.marks} onStop={() => showSide("before")} />
+          proposed && (
+            <DiffLegend
+              target={proposed.tx}
+              title={proposalLabel ? labelText(proposalLabel) : t.review.untitled}
+              marks={proposed.marks}
+              onStop={() => showSide("before")}
+            />
+          )
         )}
         {onShowTranscript && (
           <button className="link" aria-label={t.timeline.showTranscript} data-tip={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)} onClick={onShowTranscript}>
@@ -1499,17 +1519,28 @@ function TrackState({ row, matte }: { row: TrackRow; matte: MatteBadge | null })
 }
 
 /** Header chip while a history entry's changes are marked on the lanes: counts by kind, and a way out. */
-function DiffLegend({ target, marks, onStop = () => selection.clear() }: { target: string; marks: readonly ClipDiff[] | null; onStop?: () => void }) {
+function DiffLegend({
+  target,
+  title,
+  marks,
+  onStop = () => selection.clear(),
+}: {
+  target: string;
+  /** The entry in words (History's title); null while it loads: then nothing but the counts shows. */
+  title: string | null;
+  marks: readonly ClipDiff[] | null;
+  onStop?: () => void;
+}) {
   const counts = marks ? diffCounts(marks) : null;
   return (
     <span className="timeline-diff-legend" data-history={target}>
-      <span className="panel-meta" title={t.timeline.changesOf(target)}>
-        {target}
+      <span className="panel-meta timeline-diff-title" title={t.timeline.changesOf(title ?? target, target)}>
+        {title ?? ""}
       </span>
       {counts &&
         (["added", "removed", "moved", "changed"] as const)
           .filter((kind) => counts[kind] > 0)
-          .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{`${counts[kind]} ${t.timeline.diffKinds[kind]}`}</span>)}
+          .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{t.history[kind](counts[kind])}</span>)}
       <button className="icon-button" aria-label={t.timeline.stopShowing} data-tip={t.timeline.stopShowingTitle} onClick={onStop}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />

@@ -17,6 +17,7 @@ import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
+import { systemErrorText } from "../system-error.js";
 import { handoffKindOf, handoffNotice } from "../handoff-notice.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
@@ -69,7 +70,13 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [active, setActive] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // A file-system failure in words stays until dismissed (#748); any other notice clears after NOTICE_MS.
+  const [notice, setNoticeState] = useState<{ text: string; sticky: boolean } | null>(null);
+  const setNotice = useCallback((text: string | null) => setNoticeState(text === null ? null : { text, sticky: false }), []);
+  const showError = useCallback((error: Error) => {
+    const said = systemErrorText(error.message);
+    setNoticeState({ text: said ?? error.message, sticky: said !== null });
+  }, []);
   const setup = useProjectSetup();
   const connectedAgents = useConnectedAgentTargets();
   // An image project (ADR 0017) shows its layers where the timeline goes.
@@ -169,8 +176,8 @@ export function Workspace({ project }: { project: ProjectView }) {
   );
 
   useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    if (!notice || notice.sticky) return;
+    const timer = setTimeout(() => setNoticeState(null), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -184,7 +191,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           if (outcome.kind === "no-shot") setNotice(t.workspace.angleNoShot);
           else if (outcome.kind === "no-angle") setNotice(t.workspace.angleNoAngle(outcome.number, outcome.count));
         },
-        (error: Error) => setNotice(error.message),
+        showError,
       );
     };
     return listenEverywhere("keydown", onKey);
@@ -201,7 +208,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             setNotice(importNotice(imported, refused));
             if (image && imported.length > 0) await window.frameshell.timeline.addLayers(SELECTION_TIMELINE, imported);
           })
-          .catch((error: Error) => setNotice(error.message));
+          .catch(showError);
       },
       [image],
     ),
@@ -248,7 +255,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
             setNotice(t.workspace.askCopied);
           })
-          .catch((error: Error) => setNotice(error.message))
+          .catch(showError)
           .finally(() => (asking = false));
       },
       copy: () => {
@@ -263,7 +270,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             await navigator.clipboard.writeText(lines.join("\n"));
             setNotice(warning ?? t.workspace.referenceCopied);
           })
-          .catch((error: Error) => setNotice(error.message))
+          .catch(showError)
           .finally(() => (asking = false));
       },
     });
@@ -342,7 +349,7 @@ export function Workspace({ project }: { project: ProjectView }) {
     const run = () =>
       void imageFromFrame().then(
         (dir) => dir && setNotice(t.workspace.frameImageOpened(dir.split(/[\\/]/).pop() ?? dir)),
-        (error: Error) => setNotice(error.message),
+        showError,
       );
     const offKeys = listenEverywhere(
       "keydown",
@@ -375,7 +382,7 @@ export function Workspace({ project }: { project: ProjectView }) {
         .exportHandoff(kind, SELECTION_TIMELINE)
         .then(
           (result) => result && setNotice(handoffNotice(result, kind, t.workspace)),
-          (error: Error) => setNotice(error.message),
+          showError,
         )
         .finally(() => {
           running = false;
@@ -586,7 +593,8 @@ export function Workspace({ project }: { project: ProjectView }) {
         project={project}
         activeFile={active === TRANSCRIPT_TAB ? t.workspace.transcript : active}
         session={activeSession}
-        notice={notice}
+        notice={notice?.text ?? null}
+        onDismissNotice={notice?.sticky ? () => setNoticeState(null) : undefined}
         setup={setup}
         agentTargets={terminal.collapsed ? connectedAgents : []}
         onShowTerminal={revealTerminal}
