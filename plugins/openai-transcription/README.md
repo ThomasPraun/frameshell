@@ -1,11 +1,12 @@
 # @frameshell/openai-transcription
 
-Official [Frameshell](https://github.com/ThomasPraun/frameshell) transcription provider (ADR 0046). It transcribes an asset with OpenAI's `whisper-1`, paid by **your own OpenAI account**. The default, whisper.cpp, runs on your machine and costs nothing; this plugin is for when you prefer the service.
+Official [Frameshell](https://github.com/ThomasPraun/frameshell) transcription provider (ADR 0046). It transcribes an asset with OpenAI's `gpt-transcribe`, paid by **your own OpenAI account**, and times its words with whisper.cpp on your machine. The default, whisper.cpp, runs on your machine and costs nothing; this plugin is for when you prefer the service.
 
 ```sh
 frameshell plugin install @frameshell/openai-transcription
+frameshell plugin install @frameshell/whisper-cpp   # times the words; usually installed already
 export OPENAI_API_KEY=...        # see "The key" below
-frameshell transcribe assets/talk.mp4 --provider openai --model whisper-1
+frameshell transcribe assets/talk.mp4 --provider openai --model gpt-transcribe
 ```
 
 Install pins the exact version in the project's `frameshell.json` and links the plugin's agent skill into `.claude/skills/`. A project's plugins load only after you trust the project. Usage for agents: [`skills/openai-transcription/SKILL.md`](skills/openai-transcription/SKILL.md).
@@ -14,12 +15,14 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 - The **audio of the asset** you transcribe is uploaded to OpenAI: the 16 kHz mono WAV Frameshell extracts for transcription, cut into pieces of at most 10 minutes at pauses. Also sent: the language code and, for later pieces, the last words of the piece before. Nothing else: no file names, no project files, no transcripts.
 - Frameshell refuses to transcribe until you confirm, on **every** run: the refusal states that the audio is uploaded, its length and the estimated cost (`--yes` on the CLI). Nothing is remembered between runs.
-- `whisper-1` costs $0.006 a minute of audio. The table is `MODEL_PRICES` in [`src/prices.ts`](https://github.com/ThomasPraun/frameshell/blob/main/plugins/openai-transcription/src/prices.ts), with its source ([OpenAI pricing](https://developers.openai.com/api/docs/pricing)) and the date it was checked; your OpenAI usage page has the real bill. A few seconds around over-long words may be sent again in the same run (not in the estimate).
+- `gpt-transcribe` costs about $0.0045 a minute of audio, `whisper-1` $0.006. The table is `MODEL_PRICES` in [`src/prices.ts`](https://github.com/ThomasPraun/frameshell/blob/main/plugins/openai-transcription/src/prices.ts), with its sources and the date it was checked: [OpenAI pricing](https://developers.openai.com/api/docs/pricing) does not list `gpt-transcribe` yet, so its price comes from an independent guide. Your OpenAI usage page has the real bill. With `gpt-transcribe` the audio is sent once; with `whisper-1`, a few seconds around over-long words may be sent again in the same run (not in the estimate).
 - Other Frameshell checks (`transcribe --verify`, shoot takes, voiceover checks, `analyze`) never use this provider: they need a local one.
 
 ## Word timing
 
-Only `whisper-1` gives word timestamps, so it is the only model this plugin uses (no other model can be chosen). Its word times are coarser than whisper.cpp's alignment; every result says so in its warnings. OpenAI's guide marks `whisper-1` as deprecated, with a shutdown on 2027-02-26. When OpenAI stops serving it (a 404 or 400 with `model_not_found`), the error says so and names the way out: update this plugin or use `--provider whisper-cpp`; nothing is retried.
+OpenAI's `gpt-transcribe` (the default) gives the text without word times. Frameshell transcribes the same audio with whisper.cpp on your machine first, then lays OpenAI's words, spelling and punctuation over whisper.cpp's timed words (ADR 0046 decision 11). So this model needs `@frameshell/whisper-cpp` in the project and its model on the machine, and takes the local transcription time too; without them the run fails before anything is uploaded. The result's warnings say how many words matched whisper.cpp's; the others are timed between their neighbours.
+
+`whisper-1` (`--model whisper-1`) still gives word times from the service, coarser than whisper.cpp's alignment, until OpenAI retires it on 2027-02-26. When OpenAI stops serving a model (a 404 or 400 with `model_not_found`), the error says so and names the way out (`--model gpt-transcribe`, update this plugin, or `--provider whisper-cpp`); nothing is retried. No other model can be chosen.
 
 ## The key
 

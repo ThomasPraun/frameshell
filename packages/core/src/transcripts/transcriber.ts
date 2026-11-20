@@ -1,6 +1,6 @@
 import { mkdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { ModelFormat, TranscribeContext, TranscriptionProvider, TranscriptionResult, UserModel } from "@frameshell/plugin-api";
+import type { ModelFormat, TranscribeContext, TranscribeOptions, TranscriptWord, TranscriptionProvider, TranscriptionResult, UserModel } from "@frameshell/plugin-api";
 import { type AssetInfo, ErrorCode, type Progress, RpcError, type TranscribeResult } from "@frameshell/protocol";
 import { SCHEMA_VERSION, TRANSCRIPT_SCHEMA_URL, type Transcript, parseTranscript } from "@frameshell/schema";
 import { assetFileNames } from "../asset-names.js";
@@ -12,7 +12,8 @@ import { assignWordIds } from "./ids.js";
 import { recoverLongWords } from "./long-words.js";
 import { notRegistered } from "./model-registry.js";
 import { carrySpeakers, nextSpeakerIdOf } from "./speaker-labels.js";
-import { TRANSCRIBE_WINDOW_DIR, readPcmWav, transcribeWindow } from "./window.js";
+import { timeText } from "./text-timing.js";
+import { TRANSCRIBE_WINDOW_DIR, pcmWavSeconds, readPcmWav, transcribeWindow } from "./window.js";
 
 /** Project-relative folder of the 16 kHz WAVs transcription extracts, one per content hash and audio source. */
 export const AUDIO_CACHE_DIR = ".frameshell/cache/audio";
@@ -118,6 +119,19 @@ export interface TranscribeAssetOptions {
   yes?: boolean | undefined;
   /** Token of the `ConfirmationRequired` the person confirmed; absent, `yes` confirms whatever the run costs. */
   confirmation?: string | undefined;
+  /**
+   * The local engine that times the text of a text-only model (ADR 0046 decision 11), loaded only when the chosen
+   * model is one. Absent: a text-only model fails before any audio is sent.
+   */
+  localTiming?: (() => Promise<LocalTiming>) | undefined;
+}
+
+/** The engine that times a text-only model's text on this machine; see {@link TranscribeAssetOptions.localTiming}. */
+export interface LocalTiming {
+  provider: TranscriptionProvider;
+  providerId: string;
+  /** Model for it; absent = its default. */
+  model?: string | undefined;
 }
 
 /**
@@ -139,6 +153,10 @@ export interface TranscribeAssetOptions {
  *
  * A paid, unknown-cost or remote provider gets no audio until the call carries `yes` ({@link confirmTranscription},
  * after extraction, which needs the audio's length); the long-word windows run inside that one confirmed run.
+ *
+ * A model the provider lists as `textOnly` gives text without times (ADR 0046 decision 11): the `localTiming`
+ * engine (whisper.cpp) transcribes the same audio first, long-word recovery included, then the provider's text is
+ * laid over those timed words ({@link timeText}). The provider is asked once; no re-check windows are sent to it.
  *
  * Throws `ConfirmationRequired`, `ConfirmationStale`, `AssetNotFound`, `OutsideProject`, `TranscriptNameTaken`,
  * `InvalidProjectFile`, `TranscriptionFailed` (provider or extraction error),
@@ -174,6 +192,20 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
   }
 
   const transcribeOptions = { ...(options.model ? { model: options.model } : {}), ...(options.language ? { language: options.language } : {}) };
+  const modelId = options.model ?? provider.defaultModel;
+  const textOnly = provider.models?.some((model) => model.id === modelId && model.textOnly === true) === true;
+  let timing: LocalTiming | null = null;
+  if (textOnly) {
+    // Loaded before the ask: a missing local engine must fail before the person confirms an upload that cannot finish.
+    const why = `${modelId} gives no word times, which whisper.cpp adds on this machine`;
+    if (!options.localTiming) failed(new Error(`${why}, and this host cannot run it here`));
+    try {
+      timing = await options.localTiming!();
+    } catch (error) {
+      // An RpcError too (no whisper-cpp installed): its message keeps the install hint, the reason says why it is needed.
+      failed(new Error(`${why}, and it could not load: ${(error as Error)?.message ?? String(error)}`));
+    }
+  }
   try {
     await confirmTranscription({
       provider,
@@ -185,32 +217,49 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
       options: transcribeOptions,
       yes: options.yes === true,
       confirmation: options.confirmation,
+      localTiming: timing?.providerId ?? null,
     });
   } catch (error) {
     return failed(error);
   }
-  const { context, used, warnings } = providerContext(tools, progress);
+  const shared = providerContext(tools, progress);
+  const { used, warnings } = shared;
+  const context: TranscribeContext = { ...shared.context, timesText: true };
+  const windowDir = join(projectDir, ...TRANSCRIBE_WINDOW_DIR.split("/"));
+  const engine = (engineProvider: TranscriptionProvider, engineOptions: TranscribeOptions) =>
+    engineWords({ provider: engineProvider, options: engineOptions, audio, context, windowDir, progress });
+
   let result: TranscriptionResult;
+  let long: { words: TranscriptWord[]; recovered: number; speechInside: boolean[] };
+  const notes: string[] = [];
   try {
-    result = await provider.transcribe(audio, transcribeOptions, context);
+    if (timing) {
+      progress({ message: `Timing words with ${timing.providerId} on this machine`, stage: "local-timing", values: { provider: timing.providerId } });
+      const local = await engine(timing.provider, {
+        ...(timing.model ? { model: timing.model } : {}),
+        ...(options.language ? { language: options.language } : {}),
+      });
+      result = await provider.transcribe(audio, transcribeOptions, context);
+      if (typeof result.text !== "string") throw new Error(`${modelId} answered without its text`);
+      const seconds = (await pcmWavSeconds(audio)) ?? 0;
+      const laid = timeText(result.text, local.long.words, seconds);
+      long = {
+        words: laid.words.map(({ from: _from, ...word }) => word),
+        recovered: 0,
+        speechInside: laid.words.map((word) => word.from.length === 1 && local.long.speechInside[word.from[0]!] === true),
+      };
+      const language = result.language ?? local.result.language;
+      result = { ...result, ...(language ? { language } : {}), ...(local.result.device ? { device: local.result.device } : {}) };
+      notes.push(
+        `Word times come from ${timing.providerId} (${local.result.model}) on this machine, spelling from ${providerId}: ` +
+          `${laid.matched} of ${laid.words.length} words matched its words, the others were timed between them. Check cuts by ear or with \`transcribe --verify\`.`,
+      );
+    } else {
+      ({ result, long } = await engine(provider, transcribeOptions));
+    }
   } catch (error) {
     return failed(error);
   }
-
-  const windowDir = join(projectDir, ...TRANSCRIBE_WINDOW_DIR.split("/"));
-  const long = await recoverLongWords({
-    words: result.words,
-    loadPcm: () => readPcmWav(audio),
-    async transcribeWindow(pcm, from, to, prompt) {
-      progress({
-        message: `Re-transcribing ${round(from)}-${round(to)} s: one word holds more speech`,
-        stage: "retranscribe",
-        values: { from: round(from), to: round(to) },
-      });
-      await mkdir(windowDir, { recursive: true });
-      return transcribeWindow({ pcm, from, to, dir: windowDir, transcribe: (path) => provider.transcribe(path, { ...transcribeOptions, prompt }, context) });
-    },
-  });
 
   // Re-read: the user may have edited it while the engine ran, or another asset's run may have taken the name.
   const previous = await readPrevious(transcriptPath);
@@ -260,8 +309,38 @@ export async function transcribeAsset(options: TranscribeAssetOptions): Promise<
     recoveredWords: long.recovered,
     speechInside,
     seconds: Math.round(performance.now() - started) / 1000,
-    warnings: warnings(result),
+    warnings: [...warnings(result), ...notes],
   };
+}
+
+/**
+ * Timed words of `audio` from `provider`, with long words recovered ({@link recoverLongWords}): what `transcribe`
+ * writes for a timed model, and the times a text-only model's text is laid over. Throws the provider's error.
+ */
+async function engineWords(run: {
+  provider: TranscriptionProvider;
+  options: TranscribeOptions;
+  audio: string;
+  context: TranscribeContext;
+  windowDir: string;
+  progress: (progress: Progress) => void;
+}): Promise<{ result: TranscriptionResult; long: { words: TranscriptWord[]; recovered: number; speechInside: boolean[] } }> {
+  const { provider, options, audio, context, windowDir, progress } = run;
+  const result = await provider.transcribe(audio, options, context);
+  const long = await recoverLongWords({
+    words: result.words,
+    loadPcm: () => readPcmWav(audio),
+    async transcribeWindow(pcm, from, to, prompt) {
+      progress({
+        message: `Re-transcribing ${round(from)}-${round(to)} s: one word holds more speech`,
+        stage: "retranscribe",
+        values: { from: round(from), to: round(to) },
+      });
+      await mkdir(windowDir, { recursive: true });
+      return transcribeWindow({ pcm, from, to, dir: windowDir, transcribe: (path) => provider.transcribe(path, { ...options, prompt }, context) });
+    },
+  });
+  return { result, long };
 }
 
 /** Content hash of an asset and its complete ingest's PCM sidecar, if any; see {@link hashAsset}. */

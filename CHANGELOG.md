@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Cloud transcription after `whisper-1` (#702, ADR 0046 decision 11, decisions 6 and 7 amended; no protocol change,
+  `PROTOCOL_VERSION` stays): `@frameshell/openai-transcription` now defaults to OpenAI's `gpt-transcribe`, which gives
+  text without word times, and keeps `--model whisper-1` until OpenAI retires it on 2027-02-26 (its results say so).
+  For a text-only model, `transcribe` loads `whisper-cpp` with this machine's default model before the ask (a missing
+  engine fails before anything is confirmed or uploaded), transcribes the audio locally first, asks the provider once
+  and lays its text over the local words with one aligner, `timeText` (`packages/core/src/transcripts/text-timing.ts`):
+  spelling, case and punctuation from the cloud, times from whisper.cpp, words that match nothing (`20` heard as
+  `veinte`) timed between their neighbours. `warnings` says where the times come from and how many words matched; the
+  ask says whisper-cpp times the words instead of "plus short re-checks". Plugin API: `ProviderModel.textOnly`,
+  `TranscriptionResult.text` and `TranscribeContext.timesText` (all optional); the plugin refuses `gpt-transcribe` on a
+  host without `timesText` and names `--model whisper-1`. The retired-model error names `--model gpt-transcribe`.
+  `gpt-transcribe` is priced at $0.0045 a minute from an independent guide: OpenAI's pricing page does not list it yet.
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
