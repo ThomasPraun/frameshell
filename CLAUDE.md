@@ -60,7 +60,7 @@ One owner per concept. Export, preview, engine and CLI import it. Change one: ru
 | Captions: presets, layering, face metrics | `packages/schema/src/subtitles.ts` (`captionTokens`, `styleCaptionTokens`: one decision for export + preview), `packages/schema/src/font-file.ts` (`parseFontMetrics`, never copy) | `apps/desktop/test/caption-style.test.ts` |
 | Spoken words + spelled numbers (aligner, take compare, live follower, voiceover) | `packages/schema/src/spoken.ts`, `packages/schema/src/numbers.ts` (`spellNumbersIn`); one source, never copy | |
 | Time references (TimeRef): seconds, markers, `beat:`/`bar:`, `word:` | `packages/core/src/timeline/time-ref.ts` + `TIME_REF_FIELDS` in `packages/protocol/src/timeline.ts`: one table of fields, never a private parser per verb (CLI `when()`, `music fit`, `sound place`, `voiceover place`, scene band planned range `readPlannedRange`) | |
-| Safe zones per platform | `packages/schema/src/safe-zones.ts`: one home, named never copied | |
+| Safe zones per platform | `packages/schema/src/safe-zones.ts`: one home, named never copied; `zoneInsets` = one scaling to a frame (review `safe` sheet + app preview overlay `preview/safe-zone.ts`) | `apps/desktop/test/safe-zone.test.ts` |
 | Cost text of paid runs | ONE `formatCost` in `packages/protocol/src/cost.ts`: core messages + app boxes, never a twin | |
 | JSON config edit keeping other bytes (Claude Desktop, Claude Code setup) | `packages/cli/src/config-file.ts` | |
 

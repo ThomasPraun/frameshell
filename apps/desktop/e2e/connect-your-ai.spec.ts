@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 import { launch, sandbox } from "./harness.js";
@@ -53,7 +53,7 @@ test("the welcome card connects Claude Desktop and the ChatGPT desktop app", asy
     await expect(card(page, "codex-cli")).toHaveAttribute("data-state", "connected");
     expect(readFileSync(codexConfig, "utf8")).toContain("[mcp_servers.frameshell]");
 
-    await panel(page).getByRole("button", { name: "Close" }).click();
+    await panel(page).getByTestId("connect-ai-close").click();
     await expect(panel(page)).toHaveCount(0);
   } finally {
     await app.close();
@@ -169,6 +169,38 @@ test("Open on an app that is not there says so, offers Download and leaves the c
     await expect(card(page, "chatgpt").getByTestId("connect-ai-not-found")).toContainText("was not found on this computer");
     await expect(card(page, "chatgpt").getByTestId("connect-ai-download")).toHaveAttribute("href", "https://chatgpt.com/download");
     expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe("untouched");
+  } finally {
+    await app.close();
+  }
+});
+
+test("a settings file that does not parse blocks Connect and can be shown; Check again sits in a not-installed card", async () => {
+  const geminiDir = join(home, ".gemini");
+  mkdirSync(geminiDir, { recursive: true });
+  const geminiConfig = join(geminiDir, "settings.json");
+  writeFileSync(geminiConfig, "{ not json");
+  const empty = join(box.projectDir, "..", "empty-broken");
+  mkdirSync(empty, { recursive: true });
+  const { app, page } = await launch({ ...box, projectDir: empty }, { env });
+  try {
+    await app.evaluate(({ shell }) => {
+      const shown: string[] = [];
+      (globalThis as { shown?: string[] }).shown = shown;
+      shell.showItemInFolder = (path: string) => void shown.push(path);
+    });
+    await page.getByTestId("welcome-connect").getByRole("button", { name: "Connect your AI" }).click();
+    const gemini = card(page, "gemini");
+    await expect(gemini.getByRole("alert")).toContainText("is not valid, so Frameshell left it alone");
+    await expect(gemini.getByTestId("connect-ai-connect")).toBeDisabled();
+    await gemini.getByTestId("connect-ai-show-file").click();
+    await expect.poll(() => app.evaluate(() => (globalThis as { shown?: string[] }).shown)).toEqual([geminiConfig]);
+    expect(readFileSync(geminiConfig, "utf8")).toBe("{ not json");
+
+    // Claude Code looks not installed: Check again is in its card, not only in the footer.
+    await expect(card(page, "claude-code").getByTestId("connect-ai-check-again")).toBeVisible();
+    // The X at the top closes the panel.
+    await panel(page).getByTestId("connect-ai-x").click();
+    await expect(panel(page)).toHaveCount(0);
   } finally {
     await app.close();
   }

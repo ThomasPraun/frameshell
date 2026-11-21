@@ -1,0 +1,472 @@
+---
+import { render } from "astro:content";
+import Base from "../layouts/Base.astro";
+import Header from "./Header.astro";
+import Footer from "./Footer.astro";
+import { REPO } from "../site";
+import { strings, pathFor, type Lang } from "../i18n";
+import { docsFor, DOC_SECTIONS } from "../docs";
+
+interface Props {
+  /** The page to show; none shows the docs index. */
+  slug?: string;
+}
+const { slug } = Astro.props;
+const lang = (Astro.currentLocale ?? "en") as Lang;
+const t = strings(lang).docs;
+const pages = await docsFor(lang);
+const at = slug ? pages.findIndex((p) => p.slug === slug) : -1;
+const current = at >= 0 ? pages[at] : undefined;
+const prev = at > 0 ? pages[at - 1] : undefined;
+const next = at >= 0 ? pages[at + 1] : pages[0];
+const rendered = current ? await render(current.entry) : undefined;
+const toc = rendered?.headings.filter((h) => h.depth === 2) ?? [];
+const meta = current
+  ? { title: `${current.entry.data.title}: ${t.titleSuffix}`, description: current.entry.data.description }
+  : undefined;
+const groups = DOC_SECTIONS.map((section) => ({ section, pages: pages.filter((p) => p.entry.data.section === section) }));
+---
+
+<Base page="docs" slug={slug} meta={meta}>
+  <Header page="docs" slug={slug} />
+  <main class="wrap docs">
+    <nav class:list={["side", { "on-index": !current }]} aria-label={t.nav}>
+      <details open>
+        <summary>{t.nav}</summary>
+        {
+          groups.map(({ section, pages: list }) => (
+            <div class="group">
+              <p class="group-title">{t.sections[section]}</p>
+              <ul>
+                {list.map((p) => (
+                  <li>
+                    <a href={pathFor(lang, "docs", p.slug)} aria-current={p.slug === slug ? "page" : undefined}>
+                      {p.entry.data.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </details>
+    </nav>
+
+    <article class="body">
+      {
+        current && rendered ? (
+          <Fragment>
+            <p class="kicker">{t.sections[current.entry.data.section]}</p>
+            <h1>{current.entry.data.title}</h1>
+            <p class="lede">{current.entry.data.description}</p>
+            {toc.length > 2 && (
+              <nav class="toc" aria-label={t.onThisPage}>
+                <p>{t.onThisPage}</p>
+                <ul>
+                  {toc.map((h) => (
+                    <li>
+                      <a href={`#${h.slug}`}>{h.text}</a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            )}
+            <div class="prose">
+              <rendered.Content />
+            </div>
+            <p class="edit">
+              <a href={`${REPO}/blob/main/website/src/content/docs/${current.entry.id}.md`}>{t.edit}</a>
+            </p>
+          </Fragment>
+        ) : (
+          <Fragment>
+            <h1 class="display index-title">{t.title}</h1>
+            <p class="lede">{t.lede}</p>
+            {groups.map(({ section, pages: list }) => (
+              <section class="index-group">
+                <h2>{t.sections[section]}</h2>
+                <ul class="cards">
+                  {list.map((p) => (
+                    <li>
+                      <a href={pathFor(lang, "docs", p.slug)}>
+                        <strong>{p.entry.data.title}</strong>
+                        <span>{p.entry.data.description}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </Fragment>
+        )
+      }
+
+      {
+        current && (
+          <nav class="pager" aria-label={`${t.prev} / ${t.next}`}>
+            {prev ? (
+              <a href={pathFor(lang, "docs", prev.slug)} rel="prev">
+                <span>{t.prev}</span>
+                {prev.entry.data.title}
+              </a>
+            ) : (
+              <span />
+            )}
+            {next && (
+              <a class="next" href={pathFor(lang, "docs", next.slug)} rel="next">
+                <span>{t.next}</span>
+                {next.entry.data.title}
+              </a>
+            )}
+          </nav>
+        )
+      }
+    </article>
+  </main>
+  <Footer />
+</Base>
+
+<script>
+  import "../scripts/page";
+</script>
+
+<style>
+  .docs {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: clamp(24px, 4vw, 64px);
+    padding-block: clamp(32px, 5vw, 64px) 72px;
+  }
+
+  .side details {
+    position: sticky;
+    top: 88px;
+    max-height: calc(100vh - 110px);
+    overflow-y: auto;
+  }
+
+  .side summary {
+    display: none;
+  }
+
+  .group + .group {
+    margin-top: 20px;
+  }
+
+  .group-title,
+  .kicker,
+  .toc p {
+    margin: 0 0 6px;
+    color: var(--faint);
+    font: 600 0.72rem/1.4 var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .side ul,
+  .toc ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .side a {
+    display: block;
+    padding: 4px 10px;
+    border-left: 2px solid var(--line-soft);
+    color: var(--muted);
+    font-size: 0.93rem;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+
+  .side a:hover {
+    color: var(--text);
+  }
+
+  .side a[aria-current="page"] {
+    border-left-color: var(--tally);
+    color: var(--text);
+  }
+
+  .body {
+    min-width: 0;
+    max-width: 76ch;
+  }
+
+  h1 {
+    margin: 0 0 14px;
+    font-size: clamp(2rem, 4.4vw, 3rem);
+    font-weight: 800;
+    font-stretch: 118%;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+
+  .index-title {
+    font-size: clamp(2.8rem, 8vw, 6rem);
+    margin-bottom: 20px;
+  }
+
+  .toc {
+    margin: 28px 0 0;
+    padding: 14px 18px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--panel);
+  }
+
+  .toc li a {
+    color: var(--muted);
+    font-size: 0.93rem;
+    text-decoration: none;
+  }
+
+  .toc li a:hover {
+    color: var(--text);
+  }
+
+  .index-group {
+    margin-top: 44px;
+  }
+
+  .index-group h2 {
+    margin: 0 0 14px;
+    font-size: 1.4rem;
+    font-weight: 800;
+    font-stretch: 112%;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .cards a {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+    padding: 16px 18px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--panel);
+    text-decoration: none;
+    transition: border-color 0.2s;
+  }
+
+  .cards a:hover {
+    border-color: var(--tally);
+  }
+
+  .cards span {
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
+  .edit {
+    margin: 48px 0 0;
+    font-size: 0.9rem;
+  }
+
+  .edit a {
+    color: var(--faint);
+  }
+
+  .pager {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .pager a {
+    display: flex;
+    flex-direction: column;
+    max-width: 48%;
+    color: var(--text);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .pager a:hover {
+    color: var(--tally);
+  }
+
+  .pager .next {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  .pager span {
+    color: var(--faint);
+    font: 600 0.72rem/1.6 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* Markdown body. */
+  .prose {
+    margin-top: 32px;
+  }
+
+  .prose :global(h2) {
+    margin: 48px 0 12px;
+    font-size: 1.55rem;
+    font-weight: 800;
+    font-stretch: 112%;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    scroll-margin-top: 88px;
+  }
+
+  .prose :global(h3) {
+    margin: 32px 0 8px;
+    font-size: 1.12rem;
+    font-weight: 700;
+    font-stretch: 108%;
+    scroll-margin-top: 88px;
+  }
+
+  .prose :global(p),
+  .prose :global(li) {
+    color: var(--muted);
+  }
+
+  .prose :global(p) {
+    margin: 0 0 14px;
+  }
+
+  .prose :global(strong) {
+    color: var(--text);
+  }
+
+  .prose :global(a) {
+    color: var(--text);
+    text-decoration-color: var(--tally);
+    text-underline-offset: 3px;
+  }
+
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin: 0 0 16px;
+    padding-left: 1.3em;
+  }
+
+  .prose :global(li + li) {
+    margin-top: 6px;
+  }
+
+  .prose :global(code) {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--raised);
+    color: var(--text);
+  }
+
+  .prose :global(pre) {
+    margin: 0 0 16px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    background: var(--panel) !important;
+    line-height: 1.55;
+  }
+
+  .prose :global(pre code) {
+    padding: 0;
+    background: none;
+  }
+
+  .prose :global(blockquote) {
+    margin: 0 0 16px;
+    padding: 10px 16px;
+    border-left: 3px solid var(--tally);
+    border-radius: 0 6px 6px 0;
+    background: var(--tally-soft);
+  }
+
+  .prose :global(blockquote p) {
+    margin: 0;
+    color: var(--text);
+  }
+
+  .prose :global(table) {
+    display: block;
+    max-width: 100%;
+    margin: 0 0 16px;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.93rem;
+  }
+
+  .prose :global(th),
+  .prose :global(td) {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .prose :global(th) {
+    color: var(--text);
+  }
+
+  .prose :global(td) {
+    color: var(--muted);
+  }
+
+  .prose :global(kbd) {
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  @media (max-width: 860px) {
+    .docs {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 20px;
+    }
+
+    .side details {
+      position: static;
+      max-height: none;
+      padding: 10px 14px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .side summary {
+      display: list-item;
+      color: var(--text);
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .side summary + .group {
+      margin-top: 14px;
+    }
+
+    /* The index lists every page as a card already. */
+    .side.on-index {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  // On narrow screens the page list starts folded, so the page itself comes first.
+  if (matchMedia("(max-width: 860px)").matches) document.querySelector(".side details")?.removeAttribute("open");
+</script>

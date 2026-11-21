@@ -52,6 +52,8 @@ const formatIds = (): string[] => ((JSON.parse(readFileSync(configFile, "utf8"))
 const styleText = (): string => (existsSync(styleFile) ? readFileSync(styleFile, "utf8") : "");
 
 async function click(locator: ReturnType<Page["locator"]>): Promise<void> {
+  // A sidebar tab past the strip's edge (#736: narrower strip on macOS fonts) is scrolled into sight first.
+  await locator.scrollIntoViewIfNeeded();
   const target = await laidOutBox(locator);
   await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
 }
@@ -111,7 +113,7 @@ test("a hand edit that removes the format waits too; Accept lists it by its labe
   await expect(edit.locator(".history-config")).toHaveText("project");
 
   // Your own revert applies at once, even in review mode.
-  await edit.getByRole("button", { name: /^Revert tx_/ }).click();
+  await edit.getByRole("button", { name: "Revert “Edit frameshell.json”" }).click();
   await expect.poll(formatIds, { timeout: 30_000 }).toEqual(["16x9", "9x16"]);
   await expect(bar()).toHaveCount(0);
 });

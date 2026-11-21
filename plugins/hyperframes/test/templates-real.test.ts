@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import { TEMPLATES, createHyperframesAdapter, newComposition } from "../src/index.js";
 import { usesThree } from "../src/templates/index.js";
+import { TEST_CHROME_ARGS } from "./chrome-args.js";
 
 // Opt-in like render-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the templates in managed Chrome. Live pages at the
 // four formats check the per-format layout and cold-vs-reseek determinism; one real render per template checks alpha and speed.
@@ -38,15 +39,17 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
   describe.each(TEMPLATES.map((t) => [t.id, t.overlay] as const))("%s", (template, overlay) => {
     // A light leak is about a second long, clear at its start and just before its end, and see-through at its peak: it is judged at its own times, by any visible pixel, and may leave the frame.
     const leak = template === "light-leak";
+    // An `fx-*` overlay is a burst that lives under a second after its hit (0.2 s by default): judged inside the burst, like the leak, and it may leave the frame.
+    const burst = template.startsWith("fx-");
     // A spotlight is a dim over most of the frame, 0.75 of black by default: judged by the dim it paints and by the pool it leaves clear.
     const dimmer = template === "spotlight";
-    const solid = leak ? 16 : dimmer ? 100 : 200;
+    const solid = leak || burst ? 16 : dimmer ? 100 : 200;
     it(
       "lays out inside the frame in every format and paints the same frames cold and after a reseek (≤ 2/255)",
       async () => {
         const manager = binaries();
         const [chrome, ffmpeg] = await Promise.all([manager.ensure("chrome-headless-shell"), manager.ensure("ffmpeg")]);
-        const browser = await puppeteer.launch({ executablePath: chrome });
+        const browser = await puppeteer.launch({ executablePath: chrome, args: [...TEST_CHROME_ARGS] });
         const scratch = tempDir();
         let n = 0;
         try {
@@ -88,7 +91,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               return page;
             };
             try {
-              const times = leak ? [0.2, 0.45, 0.7, 0.55] : [0.45, 0.9, 1.6, 2.4];
+              const times = leak ? [0.2, 0.45, 0.7, 0.55] : burst ? [0.25, 0.5, 0.8, 0.35] : [0.45, 0.9, 1.6, 2.4];
               const cold: Buffer[] = [];
               for (const t of times) {
                 const page = await open();
@@ -125,7 +128,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
               expect(cold[0]!.equals(cold[3]!), format).toBe(false);
               // An overlay leaves most of the frame unpainted (over footage) and keeps inside it with a margin.
               if (overlay && !dimmer) expect(drawn, format).toBeLessThan(width * height * 0.5);
-              if (overlay && !leak && !dimmer) {
+              if (overlay && !leak && !burst && !dimmer) {
                 expect(minX, format).toBeGreaterThan(width * 0.03);
                 expect(maxX, format).toBeLessThan(width * 0.97);
                 expect(minY, format).toBeGreaterThan(height * 0.03);
@@ -174,7 +177,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         expect(performance.now() - started).toBeLessThan(three ? 120_000 : 40_000);
         const { stdout } = await execFileAsync(
           ffmpeg,
-          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", three || leak ? "0.5" : "1.5", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
+          ["-v", "error", "-c:v", "libvpx-vp9", "-ss", three || leak || burst ? "0.5" : "1.5", "-i", rendered.file, "-frames:v", "1", "-vf", "format=rgba", "-f", "rawvideo", "-"],
           { encoding: "buffer", maxBuffer: 1 << 26 },
         );
         let opaque = 0;
@@ -186,7 +189,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
           if (stdout[p]! > 8) seen++;
         }
         // The light leak crests at its middle (0.5 s of its 1 s) and is see-through there: some of the frame is lit, most of it is clear.
-        if (leak) {
+        if (leak || burst) {
           expect(seen).toBeGreaterThan(480 * 270 * 0.005);
           expect(seen).toBeLessThan(480 * 270 * 0.7);
           return;
@@ -226,7 +229,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
         );
       });
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const browser = await puppeteer.launch({ executablePath: chrome });
+      const browser = await puppeteer.launch({ executablePath: chrome, args: [...TEST_CHROME_ARGS] });
       try {
         const page = await browser.newPage();
         const errors: string[] = [];
@@ -587,6 +590,24 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       expect(hues[0]!.red).toBeGreaterThan(hues[0]!.blue);
       expect(hues[1]!.blue).toBeGreaterThan(hues[1]!.red);
     }, 240_000);
+
+    it.each(["fx-sparks", "fx-confetti", "fx-glow", "fx-shockwave", "fx-rays"])(
+      "%s is clear before its hit and at its last rendered frame, paints on the hit, and paints one frame per time whatever the seek order",
+      async (template) => {
+        const dir = tempDir();
+        await inPage(template, { startAt: 0.4, hits: 2, gap: 0.6 }, undefined, async (page) => {
+          expect(alphaSum(await rgbaAt(page, dir, 0))).toBe(0);
+          expect(alphaSum(await rgbaAt(page, dir, 0.3))).toBe(0);
+          const onHit = await rgbaAt(page, dir, 0.5);
+          expect(alphaSum(onHit)).toBeGreaterThan(0);
+          expect(alphaSum(await rgbaAt(page, dir, 1.1))).toBeGreaterThan(0);
+          expect(alphaSum(await rgbaAt(page, dir, 1.97))).toBe(0);
+          // Back to the same time from later in the clip: the same pixels.
+          expect((await rgbaAt(page, dir, 0.5)).equals(onHit)).toBe(true);
+        });
+      },
+      120_000,
+    );
 
     it("light-leak crests where `peak` says", async () => {
       const dir = tempDir();
@@ -1152,7 +1173,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       );
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const browser = await puppeteer.launch({ executablePath: chrome });
+    const browser = await puppeteer.launch({ executablePath: chrome, args: [...TEST_CHROME_ARGS] });
     try {
       const page = await browser.newPage();
       const errors: string[] = [];

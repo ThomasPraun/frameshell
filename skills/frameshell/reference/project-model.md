@@ -103,6 +103,16 @@ A script with `shoot: true` in its frontmatter is a shoot script: lines, `**Name
 - User styles are the person's saved styles on this machine: `frameshell style list`; `frameshell style apply <name>` copies one in value by value and lists what changed (`--replace` makes the file exactly that style); `style apply premium` (any personality) sets only `motion.personality`. `frameshell style save <name>` keeps the project's style for other projects (`--force` overwrites). A project never follows a user style afterwards: when `style show` says it changed since, ask before applying it again.
 - A `file_write` of `style.json` is journaled too and refuses an invalid file; prefer `style set`, which keeps the rest of the file.
 
+### Making a style your own
+
+When the person wants a saved style, a template's look or a reference film "but ours":
+
+1. **Sort the style into three lists** and show them: what is safe to change (colours inside its contrast, the accent, fonts of the same kind, copy), what changes its character (the motion personality, the type scale, the background, glass, the music genre) and what cannot change (the person's `brand.mustShow`, `banned`, platform safe zones, legibility: `type.minReadable`).
+2. **At most five changes per round**, each one `style set` so it can be reverted alone.
+3. **Test on one frame first:** `frameshell frame --at <s>` on a frame that shows the change, never a full render.
+4. **Show the original next to the new one:** the same frame before and after (`frame --at <s>` once before the change, once after), and say which change each difference comes from.
+5. Ask whether to keep the round before starting the next; changes in the second list need the person's yes one by one.
+
 ## Direct timeline edits
 
 Editing `timelines/*.json` by hand is allowed, as a last resort for a change no command expresses. The daemon accepts the edit only when the file's `revision` equals its current one and the result is valid, and journals it as author `file`. Otherwise it restores its version and keeps yours under `.frameshell/rejected/`; `frameshell status` lists why. Read the file right before editing and keep `revision` as read.

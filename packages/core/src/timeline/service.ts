@@ -47,7 +47,7 @@ import { ToolError } from "../media/ffmpeg.js";
 import { nonMediaError } from "../media/kind.js";
 import { readEnclosingProject } from "../projects.js";
 import { timelineHash } from "../history/hash.js";
-import { type ClipChange, type PlacedClip, planDiff } from "../history/diff.js";
+import { type ClipChange, type PlacedClip, type StatesAround, planDiff, statesAround } from "../history/diff.js";
 import { appendJournal, readHead, readJournal, writeHead } from "../history/journal.js";
 import {
   type TimelineRevertFailure,
@@ -694,6 +694,14 @@ export class TimelineService {
     return this.#turn(root, id, async () => {
       const { timeline, fps } = await this.#current(root, id);
       return this.#placeDiff(root, id, fps, target, planDiff(timeline, await readJournal(root, id), target, id));
+    });
+  }
+
+  /** The timeline right before a transaction or operation and right after it (`history.sound`); see `statesAround`. */
+  statesAround(root: string, id: string, target: string): Promise<StatesAround & { fps: number }> {
+    return this.#turn(root, id, async () => {
+      const { timeline, fps } = await this.#current(root, id);
+      return { ...statesAround(timeline, await readJournal(root, id), target, id), fps };
     });
   }
 

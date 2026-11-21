@@ -1,12 +1,15 @@
 import type { HistoryTransaction } from "@frameshell/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   abortedTransactions,
   authorOf,
   changesConfig,
+  entryTitles,
   historySelection,
+  labelText,
   newestFirst,
   transactionTitle,
+  undoneTitle,
 } from "../src/renderer/src/history/model.js";
 
 // Seam under test: the History panel's pure model (what rows say, what a click selects).
@@ -50,7 +53,7 @@ describe("history rows", () => {
     expect(transactionTitle(tx("tx_00000003", null, [op("op_1", "cut"), op("op_2", "cut"), op("op_3", "clip.trim")]))).toBe(
       "Ripple delete ×2, trim",
     );
-    expect(transactionTitle(tx("tx_00000004", null, [op("op_1", "revert", { target: "tx_00000002" })]))).toBe("Revert tx_00000002");
+    expect(transactionTitle(tx("tx_00000004", null, [op("op_1", "revert", { target: "tx_00000002" })]))).toBe("Revert an earlier change");
     expect(transactionTitle(tx("tx_00000005", null, [op("op_1", "timeline.patch")], "file"))).toBe("Direct edit");
     expect(transactionTitle(tx("tx_00000006", null, [op("op_1", "track.rename")]))).toBe("track.rename");
     expect(transactionTitle(tx("tx_00000007", null, [op("op_1", "shot.set"), op("op_2", "multicam.angle"), op("op_3", "multicam.offset")]))).toBe(
@@ -108,5 +111,45 @@ describe("changesConfig", () => {
     expect(changesConfig(mixed)).toBe(true);
     expect(changesConfig(tx("tx_clip", null, [op("op_7", "clip.move")]))).toBe(false);
     expect(transactionTitle(mixed)).toBe("Move, add format");
+  });
+});
+
+// #748: the app's journal labels are English (agents read them); the UI shows them in its language.
+describe("labelText and entry titles", () => {
+  it("keeps English labels and any agent's label as written", () => {
+    expect(labelText("Move clip")).toBe("Move clip");
+    expect(labelText("Ripple trim 3 clips")).toBe("Ripple trim 3 clips");
+    expect(labelText("tighten intro")).toBe("tighten intro");
+    expect(labelText("toString")).toBe("toString");
+  });
+
+  it("names a revert by the title of what it undid", () => {
+    const list = [tx("tx_00000001", "Move clip", [op("op_1", "clip.move")]), tx("tx_00000002", null, [op("op_2", "revert", { target: "tx_00000001" })])];
+    const titleOf = entryTitles(list);
+    expect(titleOf("tx_00000002")).toBe("Revert “Move clip”");
+    expect(titleOf("op_2")).toBe("Revert “Move clip”");
+    expect(undoneTitle(list, "tx_00000001")).toBe("Move clip");
+    // A redo reverts the undo: it brings back the edit at the end of the chain.
+    expect(undoneTitle(list, "tx_00000002")).toBe("Move clip");
+    expect(undoneTitle(list, "tx_99")).toBeNull();
+  });
+
+  it("shows the app's labels in Spanish in a Spanish window", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", { frameshell: { lang: "es" } });
+    try {
+      const spanish = await import("../src/renderer/src/history/model.js");
+      expect(spanish.labelText("Move clip")).toBe("Mover clip");
+      expect(spanish.labelText("Ripple trim 3 clips")).toBe("Recortar y cerrar hueco 3 clips");
+      expect(spanish.labelText("Delete 2 tracks")).toBe("Eliminar 2 pistas");
+      expect(spanish.labelText("Add layer")).toBe("Añadir capa");
+      expect(spanish.labelText("Apply look")).toBe("Aplicar look");
+      expect(spanish.labelText("Cut to Ana")).toBe("Cortar a Ana");
+      expect(spanish.labelText("Cut to angles")).toBe("Cortar a los ángulos");
+      expect(spanish.labelText("tighten intro")).toBe("tighten intro");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
   });
 });

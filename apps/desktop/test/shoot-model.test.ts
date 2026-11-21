@@ -14,6 +14,7 @@ import {
   pickType,
   silentSince,
   silentTooLong,
+  tooQuiet,
 } from "../src/renderer/src/shoot/model.js";
 
 describe("pickType", () => {
@@ -92,5 +93,14 @@ describe("callSteps", () => {
 
   it("offers nothing without system audio", () => {
     expect(callSteps({ ...finish, system: null })).toEqual({ gallery: false, speakers: false, people: false });
+  });
+});
+
+describe("tooQuiet", () => {
+  it("flags a take whose loudest mic reading stays under -45 dBFS, never one with speech", () => {
+    expect(tooQuiet(LEVEL_FLOOR)).toBe(true);
+    expect(tooQuiet(-52)).toBe(true);
+    expect(tooQuiet(-45)).toBe(false);
+    expect(tooQuiet(-24)).toBe(false);
   });
 });

@@ -78,11 +78,17 @@ export function modelIdFromFile(path: string): string {
 }
 
 /**
- * True when the transcript view offers a Transcribe button for the project's `provider`: any provider but whisper.cpp.
- * whisper.cpp runs from the terminal or the project setup, so the button never starts its unasked download (ADR 0034 decision 18).
+ * True when the transcript view offers a Transcribe button for the project's `provider`: any provider, once read (#756).
+ * For whisper.cpp main asks before its first download, as a new project does, so the button never downloads unasked
+ * (ADR 0034 decision 18); a cloud or paid provider asks before uploading.
  */
 export function offersTranscribe(provider: string | null): provider is string {
-  return provider !== null && provider !== DEFAULT_TRANSCRIPTION_PROVIDER;
+  return provider !== null;
+}
+
+/** True when `provider` transcribes on this computer (whisper.cpp): the button's tip says so instead of upload and cost. */
+export function transcribesLocally(provider: string): boolean {
+  return provider === DEFAULT_TRANSCRIPTION_PROVIDER;
 }
 
 /** File name of an absolute path, for compact labels. */

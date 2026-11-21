@@ -1,11 +1,21 @@
 // Welcome screen and new project from videos, audio or images (renderer/src/components/Welcome.tsx, file-drop.ts).
 
 const en = {
-  lede: "Start from a video, an audio recording or an image. Your agent edits it from the terminal, you review and correct it here.",
+  lede: "Start from a video, an audio recording, an image or just an idea. Your agent edits it, you review and correct it here.",
   dropHere: "Drop video, audio or images to start a project",
   newFromVideo: "New from video, audio or image…",
   openFolder: "Open folder…",
   newFromIdea: "New video from an idea…",
+  /** The whole path from here to a video (#740): shown under the start buttons. */
+  path: {
+    title: "How it goes",
+    steps: [
+      "Connect your AI: Claude Desktop, ChatGPT, or an agent in the terminal.",
+      "Bring your footage, or record yourself in the Shoot view with the teleprompter.",
+      "Ask your AI for a cut in your own words, then correct it on the timeline.",
+      "Ask it to export: the video lands in the project's exports folder.",
+    ],
+  },
   /** Slots: `{dir}`, `{file}`. */
   notProject: "{dir} has no {file} yet.",
   createHere: "Create a project here",
@@ -21,6 +31,15 @@ const en = {
   frameLandscape: "Horizontal, 16:9 (1920x1080)",
   framePortrait: "Vertical, 9:16 (1080x1920)",
   imageHint: "An image project: no timeline, just the picture. Each image is a layer, the first one at the bottom, and the picture takes the size of the first.",
+  /** The pictures of a new image project in stacking order, bottom first, with buttons to reorder them. */
+  layerOrder: "Layers, bottom first",
+  bottomLayer: "bottom layer, sets the picture's size",
+  up: "Up",
+  down: "Down",
+  layerUp: (name: string) => `Move ${name} up`,
+  layerDown: (name: string) => `Move ${name} down`,
+  /** Pictures among videos or audio: they become still clips, not layers. */
+  mixedHint: "Pictures among videos become still clips on the timeline. For a picture made of layers, choose pictures only.",
   projectName: "Project name",
   folder: "Folder",
   change: "Change…",
@@ -30,7 +49,9 @@ const en = {
   modeLink: "Use the files in place (do not move or delete them)",
   copyHint: "Your files stay where they are; the project keeps its own copy.",
   transcribe: "Transcribe what is said",
-  transcribeHint: "The first time, this downloads the transcription engine and model (about 600 MB).",
+  transcribeHint: "Runs on this computer. The first time, it downloads the transcription engine and model.",
+  transcribeDownload: (size: string) => `Runs on this computer. First downloads the transcription engine and model (${size}).`,
+  transcribeReady: "Runs on this computer. Nothing to download.",
   openProject: "Open project",
   creating: "Creating…",
   createProject: "Create project",
@@ -39,7 +60,10 @@ const en = {
   ideaLede: "No footage needed. Tell the agent what you have in mind; it builds the video here.",
   ideaName: "Name of the video",
   formatsLegend: "Formats",
-  formatsHint: "Every format comes from the same edit. The first one listed is the main format.",
+  formatsHint: "Every format comes from the same edit. The main one sets the project's size.",
+  /** Radio beside a ticked format: makes it the main one. */
+  mainFormat: "Main",
+  mainFormatOf: (format: string) => `Make ${format} the main format`,
   /** By built-in format id; the canvas is the one the project gets. */
   formatLabels: {
     "16x9": "Horizontal 16:9 (1920x1080)",
@@ -49,21 +73,35 @@ const en = {
   } as Record<string, string>,
   ideaLength: "Rough length",
   lengthUnknown: "Not sure yet",
-  durationLabel: (seconds: number) =>
-    seconds < 90 ? `About ${seconds} seconds` : `About ${Math.round(seconds / 60)} minutes`,
+  /** Whole minutes from two up, else seconds: 90 s is "About 90 seconds", never rounded to 2 minutes (#752). */
+  durationLabel: (seconds: number) => (seconds >= 120 && seconds % 60 === 0 ? `About ${seconds / 60} minutes` : `About ${seconds} seconds`),
+  ideaAbout: "What is the video about? (optional)",
+  ideaAboutPlaceholder: "A launch film for our spring sale: three products, upbeat, ends on the discount code.",
   ideaUrl: "A web page to start from (optional)",
   ideaUrlHint: "A site, article or product page the video is about.",
   ideaNeedName: "Give the video a name.",
   ideaNeedFormat: "Choose at least one format.",
   ideaBadUrl: "That is not a web address. It starts with https://",
+  ideaBadLength: "The length must be a positive number of seconds.",
+  /** Folder name of a new video whose name has nothing a folder can be called. */
+  untitledVideo: "Untitled video",
 };
 
 const es: typeof en = {
-  lede: "Empieza con un video, una grabación de audio o una imagen. Tu agente lo edita desde la terminal y tú lo revisas y corriges aquí.",
+  lede: "Empieza con un video, una grabación de audio, una imagen o solo una idea. Tu agente lo edita y tú lo revisas y corriges aquí.",
   dropHere: "Suelta video, audio o imágenes para crear un proyecto",
   newFromVideo: "Nuevo desde un video, audio o imagen…",
   openFolder: "Abrir carpeta…",
   newFromIdea: "Nuevo video desde una idea…",
+  path: {
+    title: "Cómo sigue",
+    steps: [
+      "Conecta tu IA: Claude Desktop, ChatGPT o un agente en la terminal.",
+      "Trae tu material o grábate en la vista Rodaje con el teleprompter.",
+      "Pídele a tu IA un corte con tus palabras y corrígelo en la línea de tiempo.",
+      "Pídele que exporte: el video queda en la carpeta exports del proyecto.",
+    ],
+  },
   notProject: "{dir} todavía no tiene {file}.",
   createHere: "Crear un proyecto aquí",
   recent: "Recientes",
@@ -77,6 +115,13 @@ const es: typeof en = {
   frameLandscape: "Horizontal, 16:9 (1920x1080)",
   framePortrait: "Vertical, 9:16 (1080x1920)",
   imageHint: "Un proyecto de imagen: sin línea de tiempo, solo la imagen. Cada imagen es una capa, la primera queda abajo, y la imagen toma el tamaño de la primera.",
+  layerOrder: "Capas, de abajo hacia arriba",
+  bottomLayer: "capa de abajo, define el tamaño de la imagen",
+  up: "Subir",
+  down: "Bajar",
+  layerUp: (name) => `Subir ${name}`,
+  layerDown: (name) => `Bajar ${name}`,
+  mixedHint: "Las imágenes entre videos quedan como clips fijos en la línea de tiempo. Para una imagen hecha de capas, elige solo imágenes.",
   projectName: "Nombre del proyecto",
   folder: "Carpeta",
   change: "Cambiar…",
@@ -86,7 +131,9 @@ const es: typeof en = {
   modeLink: "Usar los archivos donde están (no los muevas ni los borres)",
   copyHint: "Tus archivos se quedan donde están; el proyecto guarda su propia copia.",
   transcribe: "Transcribir lo que se dice",
-  transcribeHint: "La primera vez se descargan el motor de transcripción y el modelo (unos 600 MB).",
+  transcribeHint: "Se hace en esta computadora. La primera vez se descargan el motor de transcripción y el modelo.",
+  transcribeDownload: (size: string) => `Se hace en esta computadora. Antes se descargan el motor de transcripción y el modelo (${size}).`,
+  transcribeReady: "Se hace en esta computadora. No hay nada que descargar.",
   openProject: "Abrir proyecto",
   creating: "Creando…",
   createProject: "Crear proyecto",
@@ -95,7 +142,9 @@ const es: typeof en = {
   ideaLede: "No necesitas grabaciones. Cuéntale al agente lo que tienes en mente; él arma el video aquí.",
   ideaName: "Nombre del video",
   formatsLegend: "Formatos",
-  formatsHint: "Todos los formatos salen de la misma edición. El primero de la lista es el principal.",
+  formatsHint: "Todos los formatos salen de la misma edición. El principal define el tamaño del proyecto.",
+  mainFormat: "Principal",
+  mainFormatOf: (format) => `Usar ${format} como formato principal`,
   formatLabels: {
     "16x9": "Horizontal 16:9 (1920x1080)",
     "9x16": "Vertical 9:16 (1080x1920)",
@@ -104,12 +153,16 @@ const es: typeof en = {
   },
   ideaLength: "Duración aproximada",
   lengthUnknown: "Todavía no lo sé",
-  durationLabel: (seconds) => (seconds < 90 ? `Unos ${seconds} segundos` : `Unos ${Math.round(seconds / 60)} minutos`),
+  durationLabel: (seconds) => (seconds >= 120 && seconds % 60 === 0 ? `Unos ${seconds / 60} minutos` : `Unos ${seconds} segundos`),
+  ideaAbout: "¿De qué trata el video? (opcional)",
+  ideaAboutPlaceholder: "Una película de lanzamiento para la venta de primavera: tres productos, con ritmo, termina con el código de descuento.",
   ideaUrl: "Una página web de la que partir (opcional)",
   ideaUrlHint: "Un sitio, artículo o página de producto sobre el que trata el video.",
   ideaNeedName: "Ponle un nombre al video.",
   ideaNeedFormat: "Elige al menos un formato.",
   ideaBadUrl: "Eso no es una dirección web. Empieza con https://",
+  ideaBadLength: "La duración debe ser un número de segundos mayor que cero.",
+  untitledVideo: "Video sin título",
 };
 
 /** English and Spanish strings of the welcome screen and new project flows. */

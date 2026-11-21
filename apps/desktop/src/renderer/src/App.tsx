@@ -31,7 +31,7 @@ export function App() {
       {project ? <Workspace project={project} /> : <Welcome onOutcome={onOutcome} />}
       <UpdateBanner />
       <ContextMenuHost />
-      <VoiceoverDialogHost />
+      <VoiceoverDialogHost mediaUrl={project?.mediaUrl ?? null} />
       <ConnectAiHost />
       {project && <AuditionDialogHost mediaUrl={project.mediaUrl} />}
       <TooltipHost />

@@ -11,6 +11,7 @@ import puppeteer from "puppeteer-core";
 import { describe, expect, it } from "vitest";
 import { BinaryManager } from "@frameshell/core";
 import { createHyperframesAdapter, newComposition } from "../src/index.js";
+import { TEST_CHROME_ARGS } from "./chrome-args.js";
 
 // Opt-in like templates-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): the UI demo templates in managed Chrome.
 // A page is seeked frame by frame at 30 fps and its elements are read, so each "same frame" is checked on what is painted.
@@ -44,7 +45,7 @@ async function open(template: string, props: Record<string, unknown>, duration?:
     );
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const browser = await puppeteer.launch({ executablePath: chrome });
+  const browser = await puppeteer.launch({ executablePath: chrome, args: [...TEST_CHROME_ARGS] });
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(String(error)));
