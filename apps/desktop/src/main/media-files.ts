@@ -1,7 +1,7 @@
 // Which files from the OS (dialog, drop, Open with) the app takes as videos, audio, images or project media.
 import { stat } from "node:fs/promises";
 import { extname } from "node:path";
-import { IMAGE_EXTENSIONS } from "../shared/image-files.js";
+import { IMAGE_EXTENSIONS, isImagePath } from "../shared/image-files.js";
 
 /** Video extensions, a subset of {@link START_EXTENSIONS}. */
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "mts"] as const;
@@ -18,14 +18,19 @@ export const START_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IM
 /** Media a drop on a project imports into `assets/`: videos, audio, images. */
 export const MEDIA_EXTENSIONS = [...START_EXTENSIONS, "svg"] as const;
 
+/** `file` is a video file by its extension (case-insensitive). */
+export function isVideoFile(file: string): boolean {
+  return (VIDEO_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
+}
+
 /** `file` is an audio file by its extension (case-insensitive). */
 export function isAudioFile(file: string): boolean {
   return (AUDIO_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
 }
 
-/** `file` is a still image by its extension (case-insensitive). */
+/** `file` is a still image by its extension (case-insensitive): the shared {@link isImagePath}. */
 export function isImageFile(file: string): boolean {
-  return (IMAGE_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
+  return isImagePath(file);
 }
 
 /**

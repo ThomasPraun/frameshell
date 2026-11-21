@@ -1,8 +1,17 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { openAskMenu } from "../ask/ask-agent.js";
-import { type TitleOf, abortedTransactions, authorOf, changesConfig, diffCounts, entryTitles, newestFirst, operationTitle } from "../history/model.js";
-import { t } from "../i18n.js";
+import {
+  type TitleOf,
+  abortedTransactions,
+  authorOf,
+  changesConfig,
+  diffCounts,
+  entryTitles,
+  newestFirst,
+  operationTitle,
+} from "../history/model.js";
+import { lang, t } from "../i18n.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -317,7 +326,7 @@ function NoticeBox({ notice, titleOf, onShow }: { notice: Notice; titleOf: Title
 /** Wall-clock time of an ISO instant, with the date when it is not today. */
 function clock(at: string): string {
   const date = new Date(at);
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const time = date.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   if (date.toDateString() === new Date().toDateString()) return time;
-  return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  return `${date.toLocaleDateString(lang, { month: "short", day: "numeric" })} ${time}`;
 }

@@ -7,6 +7,7 @@ import {
   clampScroll,
   clipAt,
   contentWidth,
+  fitContentZoom,
   fitZoom,
   formatDuration,
   formatTimecode,
@@ -244,6 +245,26 @@ describe("zoom and scroll", () => {
     expect(contentWidth(1, 9, 1000)).toBe(1000);
     expect(clampScroll(5000, 100, 9, 1000)).toBe(125);
     expect(clampScroll(-4, 100, 9, 1000)).toBe(0);
+  });
+
+  it("zoom to fit fits the clips of a short timeline, not the minute the panel starts with", () => {
+    // 10 s of clips in 1050 px: 100 px a second (5% room after the end), where the panel fit shows 60 s.
+    expect(fitContentZoom(10, 1050, 30)).toBeCloseTo(100);
+    expect(fitZoom(10, 1050)).toBe(17.5);
+    // Long timelines fit tighter than the panel fit's quarter of room; a frame-long one stops at the frame zoom limit.
+    expect(fitContentZoom(200, 1000, 30)).toBeCloseTo(1000 / 210);
+    expect(fitContentZoom(0.01, 1000, 30)).toBe(500);
+    expect(fitContentZoom(0.01, 100_000, 30)).toBe(30 * 24);
+  });
+
+  it("anchors a zoom past the last clip at the clips' end, so they stay in view", () => {
+    const limits = { min: 1, max: 1200 };
+    // 10 s of clips at 20 px/s, pointer at 50 s (1000 px): zooming in keeps the 10 s mark at 200 px.
+    const next = zoomAround({ pxPerSecond: 20, scrollLeft: 0 }, 4, 1000, limits, 10);
+    expect(next).toEqual({ pxPerSecond: 80, scrollLeft: 600 });
+    expect(10 * next.pxPerSecond - next.scrollLeft).toBe(200);
+    // Over the clips the pointer anchors as before.
+    expect(zoomAround({ pxPerSecond: 20, scrollLeft: 0 }, 2, 100, limits, 10)).toEqual({ pxPerSecond: 40, scrollLeft: 100 });
   });
 });
 

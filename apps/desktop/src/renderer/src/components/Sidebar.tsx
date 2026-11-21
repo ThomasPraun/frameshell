@@ -1,7 +1,11 @@
+import { type MouseEvent, type WheelEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SidebarView } from "../../../shared/layout.js";
 import { t } from "../i18n.js";
 import { panelShortcut } from "../shortcuts.js";
+import { type Overflow, tabOverflow } from "../tab-overflow.js";
+import { windowOf } from "../windows.js";
 import { AngleViewer } from "./AngleViewer.js";
+import { contextMenu } from "./ContextMenu.js";
 import { DetachButton, DockedElsewhere } from "./DetachControls.js";
 import { Explorer } from "./Explorer.js";
 import { HistoryPanel } from "./HistoryPanel.js";
@@ -79,20 +83,7 @@ export function Sidebar({
           <DetachButton name={label} detached={false} disabled={detached.has(view)} onClick={() => onDetach(view, true)} testId="sidebar-detach" />
         }
       >
-        <div className="view-switch" role="tablist" aria-label={t.workspace.sidebarViews}>
-          {views.map(({ id, label: name }) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={view === id}
-              className={`view-tab${view === id ? " is-active" : ""}${detached.has(id) ? " is-detached" : ""}`}
-              data-tip={detached.has(id) ? t.workspace.inOwnWindow(name) : undefined}
-              onClick={() => onView(id)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <ViewTabs views={views} view={view} detached={detached} onView={onView} />
       </PanelHeader>
       <div className="panel-body">
         {detached.has(view) ? (
@@ -102,6 +93,100 @@ export function Sidebar({
         )}
       </div>
     </>
+  );
+}
+
+const NO_OVERFLOW: Overflow = { before: false, after: false, hidden: [] };
+
+/**
+ * The sidebar's view tabs (#736). A strip narrower than its tabs scrolls (wheel or drag), fades at the edge where
+ * tabs are cut off, and ends in a More button listing every view out of sight; the active tab scrolls into view.
+ */
+function ViewTabs({
+  views,
+  view,
+  detached,
+  onView,
+}: {
+  views: readonly { id: SidebarView; label: string }[];
+  view: SidebarView;
+  detached: ReadonlySet<SidebarView>;
+  onView: (view: SidebarView) => void;
+}) {
+  const strip = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState<Overflow>(NO_OVERFLOW);
+  const measure = useCallback(() => {
+    const element = strip.current;
+    if (!element) return;
+    const spans = [...element.children].map((child) => {
+      const tab = child as HTMLElement;
+      return { start: tab.offsetLeft - element.offsetLeft, end: tab.offsetLeft - element.offsetLeft + tab.offsetWidth };
+    });
+    const next = tabOverflow(spans, element.scrollLeft, element.clientWidth);
+    setOverflow((current) =>
+      current.before === next.before && current.after === next.after && current.hidden.join() === next.hidden.join() ? current : next,
+    );
+  }, []);
+  useLayoutEffect(() => {
+    const element = strip.current;
+    if (!element) return;
+    measure();
+    const observer = new (element.ownerDocument.defaultView ?? window).ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [measure, views]);
+  // The active tab is never left out of sight, also when another view or a menu switched to it.
+  useEffect(() => {
+    strip.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [view]);
+  const onWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY === 0 || !strip.current) return;
+    strip.current.scrollLeft += event.deltaY;
+  };
+  const more = (event: MouseEvent<HTMLButtonElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    contextMenu.open(
+      box.left,
+      box.bottom,
+      overflow.hidden.flatMap((index) => {
+        const entry = views[index];
+        return entry ? [{ label: entry.label, run: () => onView(entry.id) }] : [];
+      }),
+      windowOf(event.currentTarget),
+    );
+  };
+  return (
+    <div className={`view-switch-wrap${overflow.before ? " has-before" : ""}${overflow.after ? " has-after" : ""}`}>
+      <div className="view-switch" role="tablist" aria-label={t.workspace.sidebarViews} ref={strip} onScroll={measure} onWheel={onWheel}>
+        {views.map(({ id, label: name }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={view === id}
+            className={`view-tab${view === id ? " is-active" : ""}${detached.has(id) ? " is-detached" : ""}`}
+            data-tip={detached.has(id) ? t.workspace.inOwnWindow(name) : undefined}
+            onClick={() => onView(id)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      {overflow.hidden.length > 0 && (
+        <button
+          className="icon-button view-more"
+          data-testid="sidebar-more-views"
+          aria-label={t.workspace.moreViews(overflow.hidden.length)}
+          data-tip={t.workspace.moreViews(overflow.hidden.length)}
+          aria-haspopup="menu"
+          onClick={more}
+        >
+          <span className="view-more-count">+{overflow.hidden.length}</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M5 6l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 

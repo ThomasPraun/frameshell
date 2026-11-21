@@ -19,6 +19,7 @@ import { teleprompter, useTeleprompter, useTeleprompterSettings } from "../telep
 import { useLiveFollow } from "../teleprompter/follow.js";
 import { live, useLiveStatus } from "../shoot/live.js";
 import { liveWord } from "../shoot/live-state.js";
+import { useShootPhase } from "../shoot/recorder.js";
 import type { LiveStatus } from "../../../shared/api.js";
 import { scriptFiles } from "../timeline/scenes.js";
 import { elementOf, windowOf } from "../windows.js";
@@ -39,6 +40,8 @@ export function TeleprompterPanel() {
   const stream = useMemo(() => (chosen ? promptStream(chosen.script) : null), [chosen]);
   const current = stream && state.position ? stopOf(stream, state.position) : -1;
   const liveStatus = useLiveStatus();
+  const recording = useShootPhase() === "recording";
+  const word = liveWord(liveStatus, recording);
   useLiveFollow(stream, settings.follow);
   const skipped = useMemo(
     () => new Set(stream ? state.skipped.flatMap((mark) => (stopOf(stream, mark) === -1 ? [] : [stream.stops[stopOf(stream, mark)]!.sentence])) : []),
@@ -154,15 +157,15 @@ export function TeleprompterPanel() {
             <input type="checkbox" checked={settings.cues} onChange={(event) => teleprompter.setSettings({ cues: event.target.checked })} />
             {t.teleprompter.cues}
           </label>
-          <label className="teleprompter-check" data-tip={liveNote(liveStatus)} data-testid="teleprompter-follow" data-live={liveStatus.state}>
+          <label className="teleprompter-check" data-tip={liveNote(liveStatus, recording)} data-testid="teleprompter-follow" data-live={liveStatus.state}>
             <input type="checkbox" checked={settings.follow} onChange={(event) => teleprompter.setSettings({ follow: event.target.checked })} />
             {t.teleprompter.follow}
-            {settings.follow && <span className={`teleprompter-live is-${liveStatus.state}`} aria-label={liveNote(liveStatus)} />}
+            {settings.follow && <span className={`teleprompter-live is-${liveStatus.state}`} aria-label={liveNote(liveStatus, recording)} />}
           </label>
           {settings.follow && (
-            <span className="teleprompter-live-state" data-testid="teleprompter-live-state" data-word={liveWord(liveStatus)} title={liveNote(liveStatus)}>
-              {t.teleprompter.liveWord[liveWord(liveStatus)]}
-              {liveWord(liveStatus) === "off" && (
+            <span className="teleprompter-live-state" data-testid="teleprompter-live-state" data-word={word} title={liveNote(liveStatus, recording)}>
+              {t.teleprompter.liveWord[word]}
+              {word === "off" && (
                 <button className="button" data-testid="teleprompter-live-on" onClick={() => live.warm()}>
                   {t.teleprompter.liveTurnOn}
                 </button>
@@ -410,8 +413,8 @@ function struckIn(stream: PromptStream, line: PromptLine, skipped: ReadonlySet<n
 }
 
 /** What the live recognizer is doing, as the follow switch's hint says it. */
-function liveNote(status: LiveStatus): string {
-  if (status.state === "ready") return t.teleprompter.liveReady;
+function liveNote(status: LiveStatus, recording: boolean): string {
+  if (status.state === "ready") return recording ? t.teleprompter.liveReady : t.teleprompter.liveStandby;
   if (status.state === "installing") return t.teleprompter.liveInstalling(status.progress === null ? null : Math.round(status.progress * 100));
   if (status.state === "warming") return t.teleprompter.liveWarming;
   if (status.state === "unavailable") return t.teleprompter.liveUnavailable(status.detail ?? "");
