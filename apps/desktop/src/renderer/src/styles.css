@@ -3935,6 +3935,41 @@ button.track-head:focus-visible {
   text-overflow: ellipsis;
 }
 
+/* Details and Show in folder beside a notice (#749). */
+.status-notice-action {
+  flex: none;
+  font-size: inherit;
+}
+
+.status-details {
+  position: relative;
+  flex: none;
+}
+
+.status-details-list {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: min(520px, 80vw);
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px 12px 8px 26px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 35%);
+  white-space: normal;
+  user-select: text;
+}
+
+.status-details-list li + li {
+  margin-top: 4px;
+}
+
 /* Closes a notice that stays (a file-system failure, #748). */
 .status-dismiss {
   flex: none;

@@ -73,7 +73,8 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
   // A file-system failure in words stays until dismissed (#748); any other notice clears after NOTICE_MS.
-  const [notice, setNoticeState] = useState<{ text: string; sticky: boolean } | null>(null);
+  // An export's notice stays too, with what the file leaves out and a way to its folder (#749).
+  const [notice, setNoticeState] = useState<{ text: string; sticky: boolean; details?: readonly string[]; reveal?: string } | null>(null);
   const setNotice = useCallback((text: string | null) => setNoticeState(text === null ? null : { text, sticky: false }), []);
   const showError = useCallback((error: Error) => {
     const said = systemErrorText(error.message);
@@ -404,7 +405,7 @@ export function Workspace({ project }: { project: ProjectView }) {
       window.frameshell.timeline
         .exportHandoff(kind, SELECTION_TIMELINE)
         .then(
-          (result) => result && setNotice(handoffNotice(result, kind, t.workspace)),
+          (result) => result && setNoticeState({ text: handoffNotice(result, kind, t.workspace), sticky: true, details: result.warnings, reveal: result.path }),
           showError,
         )
         .finally(() => {
@@ -623,6 +624,8 @@ export function Workspace({ project }: { project: ProjectView }) {
         activeFile={active === TRANSCRIPT_TAB ? t.workspace.transcript : active}
         session={activeSession}
         notice={notice?.text ?? null}
+        noticeDetails={notice?.details}
+        onRevealNotice={notice?.reveal ? () => void window.frameshell.timeline.revealExport(notice.reveal!) : undefined}
         onDismissNotice={notice?.sticky ? () => setNoticeState(null) : undefined}
         setup={setup}
         agentTargets={terminal.collapsed ? connectedAgents : []}

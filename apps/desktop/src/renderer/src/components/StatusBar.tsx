@@ -25,6 +25,8 @@ export function StatusBar({
   setup = null,
   agentTargets = [],
   onShowTerminal,
+  noticeDetails,
+  onRevealNotice,
   onDismissNotice,
 }: {
   project: ProjectView;
@@ -36,6 +38,10 @@ export function StatusBar({
   agentTargets?: readonly string[];
   /** Reopens the terminal panel from the agents entry. */
   onShowTerminal?: () => void;
+  /** Lines a "Details" popover of the notice lists (what an export left out); none: no button. */
+  noticeDetails?: readonly string[] | undefined;
+  /** Set for a notice about a file just written: its "Show in folder" button. */
+  onRevealNotice?: (() => void) | undefined;
   /** Set for a notice that stays until dismissed (a file-system failure): its close button. */
   onDismissNotice?: (() => void) | undefined;
 }) {
@@ -86,6 +92,12 @@ export function StatusBar({
       <span className="status-item status-notice" role="status" aria-live="polite" data-testid="status-notice">
         {notice ?? ""}
       </span>
+      {notice && noticeDetails && noticeDetails.length > 0 && <NoticeDetails lines={noticeDetails} />}
+      {notice && onRevealNotice && (
+        <button className="link status-notice-action" data-testid="notice-reveal" onClick={onRevealNotice}>
+          {t.workspace.showInFolder}
+        </button>
+      )}
       {notice && onDismissNotice && (
         <button className="icon-button status-dismiss" aria-label={t.workspace.dismissNotice} data-tip={t.workspace.dismissNotice} onClick={onDismissNotice}>
           <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -119,6 +131,34 @@ export function StatusBar({
         </span>
       )}
     </footer>
+  );
+}
+
+/** "Details" next to a notice: a popover above the status bar listing `lines`, closed by a second click or Escape. */
+function NoticeDetails({ lines }: { lines: readonly string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="status-details">
+      <button
+        className="link status-notice-action"
+        aria-expanded={open}
+        data-testid="notice-details"
+        data-tip={t.workspace.noticeDetailsTitle}
+        onClick={() => setOpen((was) => !was)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setOpen(false);
+        }}
+      >
+        {t.workspace.noticeDetails}
+      </button>
+      {open && (
+        <ul className="status-details-list" role="list" data-testid="notice-details-list">
+          {lines.map((line, index) => (
+            <li key={index}>{line}</li>
+          ))}
+        </ul>
+      )}
+    </span>
   );
 }
 

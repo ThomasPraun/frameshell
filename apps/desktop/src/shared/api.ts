@@ -515,7 +515,10 @@ export interface FrameshellApi {
     exportVideo(timeline: string): Promise<{ job: JobInfo; output: string; warnings: string[] } | null>;
     /** Called on every change of a video export job of the project (daemon `job.progress`, kind `render`); `null` after a daemon reconnect. */
     onExportJob(listener: (job: JobInfo | null) => void): () => void;
-    /** Show a file this window exported with {@link exportVideo} in Finder / Explorer / the file manager. */
+    /**
+     * Show a file {@link exportVideo}, {@link exportImage} or {@link exportHandoff} wrote this run in Finder / Explorer /
+     * the file manager; any other path is ignored.
+     */
     revealExport(path: string): Promise<void>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
@@ -1195,6 +1198,7 @@ export const Channel = {
   voiceoverMarkers: "voiceover:markers",
   voiceoverPlace: "voiceover:place",
   filesReveal: "files:reveal",
+  exportsReveal: "exports:reveal",
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
@@ -1222,7 +1226,6 @@ export const Channel = {
   timelineExportHandoff: "timeline:export-handoff",
   timelineExportVideo: "timeline:export-video",
   timelineExportJob: "timeline:export-job",
-  timelineRevealExport: "timeline:reveal-export",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
