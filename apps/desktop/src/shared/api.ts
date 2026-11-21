@@ -107,7 +107,7 @@ export type AudioOrientation = "landscape" | "portrait";
 export interface IdeaBrief {
   /** Name of the video; also the project's name. */
   name: string;
-  /** Built-in format ids (`16x9`, `9x16`, `1x1`, `4x5`); the first of the built-in list becomes the project's own size. */
+  /** Built-in format ids (`16x9`, `9x16`, `1x1`, `4x5`); the first is the main format and becomes the project's own size. */
   formats: string[];
   /** Rough length in seconds; null when unsure. */
   seconds: number | null;
@@ -375,6 +375,11 @@ export interface FrameshellApi {
     fromIdea(brief: IdeaBrief, parent?: string): Promise<OpenOutcome>;
     /** The brief this window's project was made from, once: null when it was not made from an idea or already taken. */
     takeIdea(): Promise<IdeaBrief | null>;
+    /**
+     * Add built-in format `id` (`1x1`, `4x5`, `9x16`, `16x9`) to this window's project, after the others: daemon
+     * `format.add`, journaled like any format change (ADR 0027, 0036). Rejects with the daemon's message.
+     */
+    addFormat(id: string): Promise<void>;
     /**
      * Setup still running, or just ended, for this window's project;
      * null when none. With `transcribe`, {@link fromVideos} installs the
@@ -1178,6 +1183,7 @@ export const Channel = {
   projectPlanIdea: "project:plan-idea",
   projectFromIdea: "project:from-idea",
   projectTakeIdea: "project:take-idea",
+  projectAddFormat: "project:add-format",
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",

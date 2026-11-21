@@ -47,9 +47,28 @@ const en = {
   pickHint: "Pick what you mean to ask the agent about: click an element, drag a region (I)",
   /** Format switcher (ADR 0027): the project formats of `frameshell.json`. */
   format: "Format",
-  formatHint: "Show the frame as this format exports it; handles, picking and live pages work in the primary format",
-  /** One format in the switcher: its id and frame size. */
-  formatOption: (id: string, width: number, height: number) => `${id} · ${width}×${height}`,
+  formatHint: "Show the frame as this format exports it, or add one; handles, picking and live pages work in the main format",
+  /** The main format in the switcher (the project's own size). */
+  formatMain: (width: number, height: number) => `Main · ${width}×${height}`,
+  /** Another format in the switcher: its name (a built-in's aspect, else its id) and frame size. */
+  formatOption: (name: string, width: number, height: number) => `${name} · ${width}×${height}`,
+  /** Built-in formats the project does not have yet, under the formats. */
+  addFormatGroup: "Add format",
+  addFormatOption: (name: string, width: number, height: number) => `Add ${name} · ${width}×${height}`,
+  formatAdded: (name: string) => `Added ${name}. Every export can render it from the same edit.`,
+  /** Safe-zone overlay: where a platform's UI covers the picture (`safe-zones.ts`). */
+  safeZones: "Safe zones",
+  safeZonesHint: "Show where a platform's buttons and captions cover the picture: keep text and faces inside the frame",
+  safeZonePlatform: "Platform of the safe zones",
+  platforms: {
+    "instagram-reels": "Instagram Reels",
+    tiktok: "TikTok",
+    "youtube-shorts": "YouTube Shorts",
+    youtube: "YouTube",
+  } as Record<string, string>,
+  /** The overlay's caption: whose zone it is, and whether it was measured. */
+  safeZoneLabel: (platform: string, measured: boolean) => (measured ? `${platform} safe zone` : `${platform} safe zone (from editing guides)`),
+  safeZoneOtherShape: (platform: string) => `${platform} is made for another frame shape: its zone is stretched to this one`,
   /** Letterbox menu next to the format switcher (ADR 0043): black bars over the finished picture. */
   letterbox: "Letterbox",
   letterboxHint: "Black bars over the whole picture, under the captions, so it keeps the aspect you pick",
@@ -135,8 +154,23 @@ const es: typeof en = {
   pick: "Elegir",
   pickHint: "Elige sobre qué preguntar al agente: haz clic en un elemento o arrastra una región (I)",
   format: "Formato",
-  formatHint: "Muestra el cuadro como lo exporta este formato; los controles, la selección y las páginas en vivo funcionan en el formato principal",
-  formatOption: (id, width, height) => `${id} · ${width}×${height}`,
+  formatHint: "Muestra el cuadro como lo exporta este formato, o añade uno; los controles, la selección y las páginas en vivo funcionan en el formato principal",
+  formatMain: (width, height) => `Principal · ${width}×${height}`,
+  formatOption: (name, width, height) => `${name} · ${width}×${height}`,
+  addFormatGroup: "Añadir formato",
+  addFormatOption: (name, width, height) => `Añadir ${name} · ${width}×${height}`,
+  formatAdded: (name) => `Se añadió ${name}. Cada exportación puede generarlo desde la misma edición.`,
+  safeZones: "Zonas seguras",
+  safeZonesHint: "Muestra dónde los botones y textos de una plataforma tapan la imagen: deja los textos y las caras dentro del recuadro",
+  safeZonePlatform: "Plataforma de las zonas seguras",
+  platforms: {
+    "instagram-reels": "Instagram Reels",
+    tiktok: "TikTok",
+    "youtube-shorts": "YouTube Shorts",
+    youtube: "YouTube",
+  },
+  safeZoneLabel: (platform, measured) => (measured ? `Zona segura de ${platform}` : `Zona segura de ${platform} (según guías de edición)`),
+  safeZoneOtherShape: (platform) => `${platform} es para otra forma de cuadro: su zona se estira a esta`,
   letterbox: "Bandas negras",
   letterboxHint: "Bandas negras sobre toda la imagen, bajo los subtítulos, para que conserve la proporción que elijas",
   letterboxHintFormat: (format) => `Bandas negras sobre toda la imagen solo en ${format}, bajo los subtítulos; el formato principal conserva las suyas`,

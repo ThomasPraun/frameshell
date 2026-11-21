@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves out with a "Details" list instead of a CLI command, and stays until closed; it and Export image offer
   "Show in folder". Save dialogs open in the project's `exports/` folder, made when missing (Windows opened its
   parent). An image saved without an extension gets `.png`; one the app cannot write is refused by name (#749).
+- Desktop: formats and safe zones from the app. The preview's format switcher is always there: the main format reads
+  "Main · 1920×1080", others by aspect ("9:16 · 1080×1920"), and "Add format" adds a built-in one through the daemon
+  (journaled like `format add`). The idea form lets you mark which ticked format is the main one; before, the first in
+  the fixed list always won. The two unlabelled dashed rectangles gave way to a "Safe zones" switch with a platform
+  choice (Instagram Reels, TikTok, YouTube Shorts, YouTube) drawn from `safe-zones.ts`, labelled and shaded, following
+  the frame's shape until you pick one. A narrow preview stacks its tools, playback buttons and notice instead of
+  letting the notice cover the tools (#750).
 
 - A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
   frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field

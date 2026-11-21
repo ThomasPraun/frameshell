@@ -26,6 +26,8 @@ export function NewFromIdea({
 }) {
   const [name, setName] = useState("");
   const [formats, setFormats] = useState<string[]>(["16x9"]);
+  /** The main format: the project's own size, first in the brief. */
+  const [main, setMain] = useState("16x9");
   const [length, setLength] = useState(UNKNOWN);
   const [url, setUrl] = useState("");
   const [plan, setPlan] = useState<IdeaProjectPlan | null>(null);
@@ -54,7 +56,12 @@ export function NewFromIdea({
     await replan({ parent: chosen });
   };
 
-  const toggle = (id: string, on: boolean) => setFormats((now) => (on ? [...now, id] : now.filter((other) => other !== id)));
+  const toggle = (id: string, on: boolean) => {
+    const next = on ? [...formats, id] : formats.filter((other) => other !== id);
+    setFormats(next);
+    // The main format stays ticked: the first ticked one in the list takes over, the first ticked becomes it.
+    if (!next.includes(main)) setMain(BUILTIN_FORMAT_IDS.find((other) => next.includes(other)) ?? id);
+  };
 
   const submit = () => {
     const bad = name.trim() === "" ? t.welcome.ideaNeedName : formats.length === 0 ? t.welcome.ideaNeedFormat : badUrl(url);
@@ -63,7 +70,7 @@ export function NewFromIdea({
       return;
     }
     onError(null);
-    onCreate({ name, formats, seconds: length === UNKNOWN ? null : Number(length), url: url.trim() === "" ? null : url.trim() }, parent);
+    onCreate({ name, formats: [main, ...formats.filter((id) => id !== main)], seconds: length === UNKNOWN ? null : Number(length), url: url.trim() === "" ? null : url.trim() }, parent);
   };
 
   return (
@@ -93,12 +100,24 @@ export function NewFromIdea({
       </div>
       <fieldset className="welcome-mode">
         <legend>{t.welcome.formatsLegend}</legend>
-        {BUILTIN_FORMAT_IDS.map((id) => (
-          <label key={id}>
-            <input type="checkbox" checked={formats.includes(id)} disabled={busy} onChange={(event) => toggle(id, event.target.checked)} />
-            {t.welcome.formatLabels[id] ?? id}
-          </label>
-        ))}
+        {BUILTIN_FORMAT_IDS.map((id) => {
+          const label = t.welcome.formatLabels[id] ?? id;
+          const ticked = formats.includes(id);
+          return (
+            <div key={id} className="welcome-format">
+              <label>
+                <input type="checkbox" checked={ticked} disabled={busy} onChange={(event) => toggle(id, event.target.checked)} />
+                {label}
+              </label>
+              {ticked && formats.length > 1 && (
+                <label className="welcome-format-main">
+                  <input type="radio" name="idea-main-format" checked={main === id} disabled={busy} aria-label={t.welcome.mainFormatOf(label)} onChange={() => setMain(id)} />
+                  {t.welcome.mainFormat}
+                </label>
+              )}
+            </div>
+          );
+        })}
         <p className="welcome-hint">{t.welcome.formatsHint}</p>
       </fieldset>
       <label className="welcome-field">
