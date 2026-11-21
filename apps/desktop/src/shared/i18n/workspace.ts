@@ -60,6 +60,7 @@ const en = {
   shoot: "Shoot",
   teleprompter: "Teleprompter",
   sidebarViews: "Sidebar views",
+  moreViews: (count: number) => `${count} more ${count === 1 ? "view" : "views"}`,
   inOwnWindow: (view: string) => `${view}, in its own window`,
   /** `name` is the panel's name as a sentence shows it (lower case in English). */
   dockBack: (name: string) => `Dock ${name} back`,
@@ -138,6 +139,7 @@ const es: typeof en = {
   shoot: "Rodaje",
   teleprompter: "Teleprompter",
   sidebarViews: "Vistas de la barra lateral",
+  moreViews: (count) => (count === 1 ? "1 vista más" : `${count} vistas más`),
   inOwnWindow: (view) => `${view}, en su propia ventana`,
   dockBack: (name) => `Devolver ${name} a la ventana`,
   openInWindow: (name) => `Abrir ${name} en su propia ventana`,

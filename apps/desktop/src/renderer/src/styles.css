@@ -671,12 +671,59 @@ code {
 
 /* ---------- Sidebar ---------- */
 
+.view-switch-wrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .view-switch {
   display: flex;
   gap: 0;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* Tabs cut off at an edge fade out there: the strip says it goes on (#736). */
+.view-switch-wrap.has-after .view-switch {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+.view-switch-wrap.has-before .view-switch {
+  mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+}
+
+.view-switch-wrap.has-before.has-after .view-switch {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+.view-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 11px;
+}
+
+.view-more-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.view-more svg {
+  width: 12px;
+  height: 12px;
+}
+
+.view-more {
+  width: auto;
+  padding: 0 4px;
+  color: var(--text-muted);
+}
+
+.view-more:hover {
+  color: var(--text);
 }
 
 .view-tab {

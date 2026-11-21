@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Sidebar view tabs that do not fit are no longer cut off without a sign (#736): the strip fades at the edge where
+  tabs go on, scrolls with the mouse wheel, keeps the active tab in sight, and ends in a "+N" button whose menu lists
+  every view out of sight (English and Spanish).
+
 - Changing the language (View > Language) no longer kills the terminal (#754): the reloaded window shows the shells
   it had, with their output, and an agent running in one goes on. The same holds for any reload of the window.
 
