@@ -131,6 +131,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The welcome lede mentions starting from an idea.
   - An empty idea project talks about its brief instead of footage: the timeline hint, the transcript hint, and its
     own agent suggestions. Plugins lists HyperFrames first, and the suggestion chips wrap instead of being cut off.
+- Face search no longer crashes on small videos. A 320x180 clip reached the face detector at its own size, which YuNet
+  refuses (sides must be multiples of 32: "failed to call OrtRun()… broadcast… 10 by 11"); every frame now goes to it
+  at the detector's size, scaled up when smaller (#753).
+- Desktop, People (#753):
+  - Links and choices read files by name: "Ben in camera-a", "All of camera-a", "Face in talk at 0:04", and a recorded
+    take "mic (recorded 15:44)" instead of `shoot/20261120-154402/mic.words.json`.
+  - With nobody in People yet, the voices your transcripts name are listed with "Add as person" (and play), instead of
+    an empty panel with linking hidden behind a right-click.
+  - A face search that finds nothing new says so. A long failure wraps under the button instead of widening the
+    sidebar, and the Speaks / On screen switch no longer overlaps its neighbour.
+- Desktop, Plugins (#753):
+  - Downloads keep their names readable in a narrow sidebar: size and Remove wrap under the name. Each says what it is
+    for ("Model for transcribing speech", "Program for reading and exporting video"), and programs not downloaded yet
+    show their download size. `doctor` reports each pinned build's download size (`pinned.bytes`).
+  - A plugin error shows its first line, the rest under "Details". A plugin from a terminal that never ran reads
+    "Declared, not run until you trust this project" instead of claiming it is installed.
+- Desktop, Connect your AI (#753): an X at the top and a footer that stays in view; "Check again" also sits in the card
+  of an app that looks not installed. A settings file that does not parse disables Connect and offers "Show the file".
 
 - A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
   frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field
