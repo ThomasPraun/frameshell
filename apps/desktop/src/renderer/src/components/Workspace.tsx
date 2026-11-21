@@ -12,6 +12,7 @@ import {
 } from "../../../shared/layout.js";
 import { askAgent, composeReference } from "../ask/ask-agent.js";
 import { useConnectedAgentTargets } from "../ask/connected-targets.js";
+import { connectPanel } from "../connect/store.js";
 import { agentTargets } from "../ask/agent-targets.js";
 import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
@@ -209,9 +210,14 @@ export function Workspace({ project }: { project: ProjectView }) {
     { ignore: ".terminal-view" },
   );
 
+  /** The terminal panel is on screen, docked open or in its own window: someone is using a terminal. */
+  const terminalShown = useRef(false);
+  terminalShown.current = (layout !== null && !layout.panels.terminal.collapsed) || detached.has("terminal");
+
   // "Chat about this" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
   // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
-  // agent anywhere it is typed into the last focused terminal, and with no terminal it goes to the clipboard.
+  // agent anywhere it is typed into the last focused terminal while the terminal is on screen. Otherwise (#791) it goes
+  // to the clipboard and Connect your AI opens, so someone who does not code is never left in a shell.
   // "Copy reference" puts the same lines on the clipboard.
   useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
@@ -242,11 +248,16 @@ export function Workspace({ project }: { project: ProjectView }) {
               return;
             }
             const panel = terminals.current;
-            if (panel) {
+            if (panel && (target !== null || terminalShown.current)) {
               if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, revealTerminal)) panel.type(lines, revealTerminal);
               return;
             }
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
+            if (panel) {
+              setNotice(warning ?? t.workspace.askConnect);
+              connectPanel.open(window, project.name);
+              return;
+            }
             setNotice(t.workspace.askCopied);
           })
           .catch((error: Error) => setNotice(error.message))

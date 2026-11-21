@@ -56,7 +56,7 @@ test("a project whose terminal was opened keeps it open on the next start", asyn
   await app.close();
 });
 
-test("Chat about this with no agent opens the folded terminal and types the reference there", async () => {
+test("Chat about this with no agent and the terminal folded opens Connect your AI with the reference copied", async () => {
   ({ app, page } = await launch(other, { freshLayout: true }));
   await expect(panel()).toBeHidden();
   const file = page.getByRole("treeitem", { name: FILE, exact: true });
@@ -65,6 +65,20 @@ test("Chat about this with no agent opens the folded terminal and types the refe
   if ((await file.count()) === 0) await folder.click();
   await file.getByRole("button").first().click({ button: "right" });
   await page.getByRole("menuitem", { name: /Chat about this/ }).click();
+  await expect(page.getByTestId("connect-ai")).toBeVisible();
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toContain(`[frameshell] file ${FILE}`);
+  await expect(panel()).toBeHidden();
+  await expect(page.locator(".terminal-view")).toHaveCount(0);
+});
+
+test("with the terminal shown, Chat about this with no agent still types the reference there", async () => {
+  await page.getByTestId("connect-ai-close").click();
+  await expect(page.getByTestId("connect-ai")).toBeHidden();
+  await rail().click();
   await expect(panel()).toBeVisible();
+  await expect(page.getByTestId("active-session")).toBeVisible({ timeout: 30_000 });
+  const file = page.getByRole("treeitem", { name: FILE, exact: true });
+  await file.getByRole("button").first().click({ button: "right" });
+  await page.getByRole("menuitem", { name: /Chat about this/ }).click();
   await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain(`[frameshell] file ${FILE}`);
 });
