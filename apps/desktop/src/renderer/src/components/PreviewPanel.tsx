@@ -784,14 +784,19 @@ function ExportVideoButton({ disabled }: { disabled: boolean }) {
         </span>
       )}
       <button
-        className="button preview-export"
+        className={busy ? "button preview-export" : "button preview-export is-idle"}
         data-tip={t.preview.exportVideoHint(EXPORT_VIDEO_SHORTCUT)}
+        aria-label={label}
         disabled={disabled || busy}
         aria-busy={busy || undefined}
         data-testid="preview-export-video"
         onClick={() => void videoExport.start()}
       >
-        {label}
+        {/* A narrow preview shows the icon alone, so the duration keeps its room (#745). */}
+        <svg className="preview-export-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+        <span className="preview-export-text">{label}</span>
       </button>
     </>
   );
