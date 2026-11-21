@@ -1,7 +1,7 @@
 import type { TimelineView } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
 import { layoutTimeline } from "../src/renderer/src/timeline/layout.js";
-import { DEFAULT_THEME, type MediaLookup, type Paint2D, paintTimeline } from "../src/renderer/src/timeline/paint.js";
+import { clipBadges, DEFAULT_THEME, gainY, type MediaLookup, type Paint2D, paintTimeline } from "../src/renderer/src/timeline/paint.js";
 
 // Seam under test: `paintTimeline` against a recording 2D context, the way the panel calls it each frame.
 
@@ -219,6 +219,19 @@ describe("paintTimeline", () => {
     const muted = tallest({ gain: -6, muted: true });
     expect(muted.height).toBe(1);
     expect(muted.texts.some((text) => text.includes("muted"))).toBe(true);
+  });
+
+  it("badges a clip that ducks under the voice, and places gain keys on a line from +12 dB down to -40 dB", () => {
+    const view = longTimeline(1);
+    view.tracks = [{ ...view.tracks[1]!, clips: [{ ...view.tracks[1]!.clips[0]!, duck: { under: "voice" } } as never] }];
+    const clip = layoutTimeline(view).rows[0]!.clips[0]!;
+    expect(clip.ducked).toBe(true);
+    expect(clipBadges(clip)).toContain("ducked");
+    expect(clipBadges({ ...clip, muted: true })).toEqual(["muted"]);
+    expect(gainY(12, 52)).toBe(0);
+    expect(gainY(-40, 52)).toBe(52);
+    expect(gainY(-90, 52)).toBe(52);
+    expect(gainY(0, 52)).toBeCloseTo(12);
   });
 
   it("stays cheap with 250 clips on screen", () => {

@@ -112,7 +112,15 @@ const en = {
   /** Canvas label of a clip whose end cannot be derived. */
   lengthUnknownShort: "length unknown",
   lengthUnknown: "Length unknown",
+  /** The timeline file does not read (#757); the daemon's message goes under Details. */
+  unreadable: (file: string) => `${file} could not be read, so the timeline is not shown. Fix the file, or go back to an earlier version in History.`,
+  notShown: "The timeline could not be shown.",
+  details: "Details",
+  openTimelineFile: "Open the file",
+  showHistory: "Show History",
   muted: "muted",
+  /** A clip whose volume dips under other tracks (`track.duck`, #757). */
+  ducked: "ducked",
   opacity: (percent: number) => `${percent}% opacity`,
   /** Shot layouts (ADR 0016), by stored value. */
   layouts: { solo: "Solo", "two-up": "Two-up", grid: "Grid", screen: "Screen", pip: "Screen + inset" },
@@ -266,7 +274,13 @@ const es: typeof en = {
     `Escena ${title}, de ${from} a ${to}, ${planned ? "planificada, " : ""}${clips === 0 ? "sin clips todavía" : `${clips} ${clips === 1 ? "clip" : "clips"}`}${selected ? ", seleccionada" : ""}`,
   lengthUnknownShort: "duración desconocida",
   lengthUnknown: "Duración desconocida",
+  unreadable: (file) => `No se pudo leer ${file}, así que la línea de tiempo no se muestra. Corrige el archivo o vuelve a una versión anterior en Historial.`,
+  notShown: "No se pudo mostrar la línea de tiempo.",
+  details: "Detalles",
+  openTimelineFile: "Abrir el archivo",
+  showHistory: "Mostrar Historial",
   muted: "silenciado",
+  ducked: "atenuada bajo la voz",
   opacity: (percent) => `${percent}% de opacidad`,
   layouts: { solo: "Individual", "two-up": "A dos", grid: "Cuadrícula", screen: "Pantalla", pip: "Pantalla + recuadro" },
   doubtful: (percent) => `${percent}% de certeza`,
