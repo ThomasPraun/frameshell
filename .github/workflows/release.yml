@@ -162,11 +162,14 @@ jobs:
         run: |
           prerelease=""
           if [[ "$TAG" == *-* ]]; then prerelease="--prerelease"; fi
+          # One download per OS on top (#740); --generate-notes appends the changes after it.
+          node apps/desktop/scripts/release/downloads.mjs dist "$GITHUB_REPOSITORY" "$TAG" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --draft $prerelease \
             --verify-tag \
             --title "Frameshell ${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             --generate-notes
 
   # Official plugins on npm (SPEC §8.3). Every run packs them and runs `npm publish --dry-run`; only a

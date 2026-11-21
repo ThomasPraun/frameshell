@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type AssetInfo, type DaemonConnection, ErrorCode, type Progress, connectToDaemon, methods } from "@frameshell/protocol";
+import { type AssetInfo, type DaemonConnection, ErrorCode, type EventParams, type Progress, connectToDaemon, methods } from "@frameshell/protocol";
 import { parseTranscript } from "@frameshell/schema";
 import { type AudioExtractor, type AudioInput, BinaryManager, type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
@@ -55,6 +55,11 @@ describe.skipIf(process.platform === "win32")("transcribe method with @frameshel
     async () => {
       const dir = await projectWithAsset();
       await conn.request("plugin.install", { cwd: dir, spec: whisper.spec });
+      // Another client (the app) follows the run it did not start (#742).
+      const watcher = await connectToDaemon(daemon.socketPath, { client: "desktop/watch" });
+      const announced: EventParams<"transcription.progress">[] = [];
+      await watcher.request("events.subscribe", { cwd: dir, events: ["transcription.progress"] });
+      watcher.on("transcription.progress", (params) => announced.push(params));
 
       const progress: Progress[] = [];
       const result = await conn.request(
@@ -62,6 +67,11 @@ describe.skipIf(process.platform === "win32")("transcribe method with @frameshel
         { cwd: join(dir, "assets"), asset: "raw-01.mp4", language: "es" },
         { onProgress: (p) => progress.push(p) },
       );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      watcher.close();
+      expect(announced.at(-1)).toMatchObject({ asset: "assets/raw-01.mp4", state: "done" });
+      expect(announced.map((a) => a.stage)).toEqual(expect.arrayContaining(["model-load", "transcribe"]));
+      expect(new Set(announced.map((a) => a.id)).size).toBe(1);
 
       expect(methods.transcribe.result.parse(result)).toEqual(result);
       expect(result).toMatchObject({
