@@ -310,6 +310,8 @@ export const en = {
     changelog: ["Changelog", "What changed in each version."],
   },
   footer: {
+    docs: "Docs",
+    faq: "FAQ",
     nav: "Footer",
     spec: "Specification",
     mcp: "MCP server",
@@ -571,6 +573,29 @@ export const en = {
       ],
       issues: "Open an issue",
     },
+  },
+  docs: {
+    meta: {
+      title: "Docs: Frameshell",
+      description:
+        "How to do everything in Frameshell: install it, connect your AI, make your first edit, and guides for subtitles, shorts, multicam, music, voiceover, colour, export and more. Plus answers to common questions.",
+    },
+    marker: "Docs",
+    title: "Docs.",
+    lede: "Everything you can do in Frameshell, in the order you will need it. You ask your AI for the edit in your own words; these pages tell you what to ask and where to look in the app.",
+    nav: "Docs pages",
+    onThisPage: "On this page",
+    sections: {
+      start: "Getting started",
+      concepts: "How it works",
+      guides: "Guides",
+      reference: "Reference",
+      help: "Help",
+    },
+    prev: "Previous",
+    next: "Next",
+    edit: "Edit this page on GitHub",
+    titleSuffix: "Frameshell docs",
   },
   runtime: {
     copy: "Copy",
