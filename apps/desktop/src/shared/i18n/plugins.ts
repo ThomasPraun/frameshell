@@ -65,6 +65,9 @@ const en = {
   version: (version: string) => `version ${version}`,
   install: "Install",
   installing: "Installing…",
+  /** While an install runs (#740: ~45 s with nothing moving): how long so far, and why it takes a while. */
+  installingFor: (seconds: number) => `Installing… ${seconds} s`,
+  installingNote: "Frameshell downloads the plugin and what it needs with npm. The first install can take a minute or two.",
   remove: "Remove",
   removing: "Removing…",
   installTrusts: "Installing a plugin also trusts this project's plugin list: plugins run with full access to this computer.",
@@ -182,6 +185,8 @@ const es: typeof en = {
   version: (version) => `versión ${version}`,
   install: "Instalar",
   installing: "Instalando…",
+  installingFor: (seconds) => `Instalando… ${seconds} s`,
+  installingNote: "Frameshell descarga el plugin y lo que necesita con npm. La primera instalación puede tardar uno o dos minutos.",
   remove: "Quitar",
   removing: "Quitando…",
   installTrusts: "Instalar un plugin también da confianza a la lista de plugins de este proyecto: los plugins tienen acceso total a esta computadora.",

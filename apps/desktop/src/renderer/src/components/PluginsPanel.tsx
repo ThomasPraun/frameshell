@@ -222,6 +222,11 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
       <p className="plugins-meta">{row.cost === "free" ? t.plugins.free : row.cost === "cloud-audio" ? t.plugins.paidAudio : t.plugins.paidText}</p>
       <p className="plugins-meta">{downloadText(row)}</p>
       {row.error && <PluginError text={row.error} />}
+      {busy === `install:${row.name}` && (
+        <p className="plugins-meta" role="status" data-testid="plugin-installing">
+          {t.plugins.installingNote}
+        </p>
+      )}
       <div className="plugins-actions">
         {row.install && (
           <button
@@ -230,7 +235,7 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
             data-tip={row.installBlocked ? t.plugins.installNeedsTrust : undefined}
             onClick={onInstall}
           >
-            {busy === `install:${row.name}` ? t.plugins.installing : t.plugins.install}
+            {busy === `install:${row.name}` ? <Elapsed /> : t.plugins.install}
           </button>
         )}
         {row.remove && (
@@ -241,6 +246,19 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
       </div>
     </li>
   );
+}
+
+/** "Installing… 12 s": the seconds of an install so far, so a long npm run shows it is still going (#740). */
+function Elapsed() {
+  const [seconds, setSeconds] = useState(0);
+  const own = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const view = own.current?.ownerDocument.defaultView ?? window;
+    const started = Date.now();
+    const timer = view.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => view.clearInterval(timer);
+  }, []);
+  return <span ref={own}>{seconds === 0 ? t.plugins.installing : t.plugins.installingFor(seconds)}</span>;
 }
 
 /**

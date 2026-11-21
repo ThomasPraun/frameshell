@@ -6,6 +6,16 @@ const en = {
   newFromVideo: "New from video, audio or image…",
   openFolder: "Open folder…",
   newFromIdea: "New video from an idea…",
+  /** The whole path from here to a video (#740): shown under the start buttons. */
+  path: {
+    title: "How it goes",
+    steps: [
+      "Connect your AI: Claude Desktop, ChatGPT, or an agent in the terminal.",
+      "Bring your footage, or record yourself in the Shoot view with the teleprompter.",
+      "Ask your AI for a cut in your own words, then correct it on the timeline.",
+      "Ask it to export: the video lands in the project's exports folder.",
+    ],
+  },
   /** Slots: `{dir}`, `{file}`. */
   notProject: "{dir} has no {file} yet.",
   createHere: "Create a project here",
@@ -83,6 +93,15 @@ const es: typeof en = {
   newFromVideo: "Nuevo desde un video, audio o imagen…",
   openFolder: "Abrir carpeta…",
   newFromIdea: "Nuevo video desde una idea…",
+  path: {
+    title: "Cómo sigue",
+    steps: [
+      "Conecta tu IA: Claude Desktop, ChatGPT o un agente en la terminal.",
+      "Trae tu material o grábate en la vista Rodaje con el teleprompter.",
+      "Pídele a tu IA un corte con tus palabras y corrígelo en la línea de tiempo.",
+      "Pídele que exporte: el video queda en la carpeta exports del proyecto.",
+    ],
+  },
   notProject: "{dir} todavía no tiene {file}.",
   createHere: "Crear un proyecto aquí",
   recent: "Recientes",
