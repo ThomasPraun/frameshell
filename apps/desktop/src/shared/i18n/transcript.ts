@@ -7,10 +7,12 @@ const en = {
   /** A video made from an idea: no recording yet (#752). */
   noMediaIdea: "A voiceover or a recording you add later shows its spoken words here.",
   /** Slots: `{command}`. */
-  notTranscribed: "Not transcribed yet. Run {command} in the terminal.",
+  notTranscribed: "Not transcribed yet. Transcribe it here, or run {command} in a terminal.",
   /** Button of a not-transcribed asset when the project's provider is not whisper.cpp. */
   transcribe: "Transcribe",
   transcribeTip: (provider: string) => `Transcribe with ${provider}. Asks before anything is uploaded or paid.`,
+  /** whisper.cpp: runs on this computer (#756). */
+  transcribeLocalTip: "Transcribe on this computer. Asks before downloading the transcription tools the first time.",
   transcribingAsset: (asset: string) => `Transcribing ${asset}…`,
   transcribedAsset: (asset: string) => `Transcribed ${asset}.`,
   transcribeDeclined: (asset: string) => `${asset} was not transcribed: nothing was sent.`,
@@ -70,9 +72,10 @@ const es: typeof en = {
   noMedia: "Todavía no hay medios en la línea de tiempo.",
   noMediaHint: "Los clips de assets/ muestran aquí sus palabras habladas una vez transcritos.",
   noMediaIdea: "Una voz en off o una grabación que agregues después muestran aquí sus palabras habladas.",
-  notTranscribed: "Todavía no está transcrito. Ejecuta {command} en la terminal.",
+  notTranscribed: "Todavía no está transcrito. Transcríbelo aquí o ejecuta {command} en una terminal.",
   transcribe: "Transcribir",
   transcribeTip: (provider) => `Transcribir con ${provider}. Pregunta antes de subir o pagar nada.`,
+  transcribeLocalTip: "Transcribir en esta computadora. Pregunta antes de descargar las herramientas de transcripción la primera vez.",
   transcribingAsset: (asset) => `Transcribiendo ${asset}…`,
   transcribedAsset: (asset) => `Se transcribió ${asset}.`,
   transcribeDeclined: (asset) => `No se transcribió ${asset}: no se envió nada.`,

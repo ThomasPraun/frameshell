@@ -710,7 +710,7 @@ export interface FrameshellApi {
      * main sends `yes` only after the person confirms. Progress arrives through {@link FrameshellApi.voiceover}`.onProgress`.
      * Rejects with the daemon's message when it fails.
      */
-    generate(path: string, verify: boolean): Promise<VoiceoverRun>;
+    generate(path: string, verify: boolean, provider?: string): Promise<VoiceoverRun>;
     /**
      * Stop the generations the app has running in the window's project (daemon `voiceover.cancel`, never an agent's
      * run); the takes finished stay. Resolves false when there was none to stop.
@@ -723,9 +723,10 @@ export interface FrameshellApi {
     /**
      * Place the takes of a project-relative voiceover script on the main timeline (daemon `voiceover.place`, one
      * transaction). `start` is what the person typed: seconds, a marker, `beat:N` or `bar:N`; empty = after the
-     * voice track's last clip. `replace` removes the clips already playing these takes first. Rejects with the daemon's message.
+     * voice track's last clip (a decimal comma is a decimal point). `replace` removes the clips already playing these takes
+     * first. A refusal the person can act on resolves as `refused`; anything else rejects with the daemon's message.
      */
-    place(path: string, start: string, replace: boolean): Promise<VoiceoverPlaceResult>;
+    place(path: string, start: string, replace: boolean): Promise<VoiceoverPlaceRun>;
   };
   transcript: {
     /**
@@ -1022,7 +1023,23 @@ export type VoiceoverVerifyPlan = { kind: "ready" } | { kind: "download"; bytes:
 export type VoiceoverRun =
   | { status: "done"; result: VoiceoverGenerateResult }
   | { status: "declined" }
-  | { status: "canceled"; kept: number };
+  | { status: "canceled"; kept: number }
+  /** No voice to say it (#756): the script names no provider (`missing` null) or one not in this project; `available` can be picked. */
+  | { status: "no-voice"; missing: string | null; available: VoiceChoice[] };
+
+/** A speech provider the voiceover dialog can offer: its id and the name to show. */
+export interface VoiceChoice {
+  id: string;
+  name: string;
+}
+
+/** What placing the takes came to: placed, or refused for a reason the dialog words (#756). */
+export type VoiceoverPlaceRun =
+  | { status: "placed"; result: VoiceoverPlaceResult }
+  | {
+      status: "refused";
+      reason: { kind: "replace" } | { kind: "before-zero" } | { kind: "no-tempo" } | { kind: "unknown-time"; value: string } | { kind: "other"; message: string };
+    };
 
 /** What the Plugins view reads about the window's project: the official catalog and every plugin it declares. */
 export interface PluginsView {
@@ -1053,6 +1070,8 @@ export interface VoiceoverProgress {
   stage: "confirm" | "speak" | "verify" | "download";
   line: string | null;
   fraction: number | null;
+  /** Which line of how many, 1-based, when the daemon says it (#756). */
+  place: { index: number; total: number } | null;
 }
 
 /** A generated clip's live page as the renderer gets it: never its HTML, only where to load it. */

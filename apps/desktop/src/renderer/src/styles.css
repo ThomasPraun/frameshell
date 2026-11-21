@@ -3419,7 +3419,7 @@ button.track-head:focus-visible {
 
 .voiceover-line-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 
@@ -3484,6 +3484,20 @@ button.track-head:focus-visible {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Place was refused because these takes are already placed: the box that answers it stands out (#756). */
+.voiceover-check.is-asked {
+  padding: 2px 6px;
+  border-radius: 4px;
+  outline: 1px solid var(--danger);
+}
+
+.voiceover-line-number {
+  flex: none;
+  min-width: 1.5em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Audition dialog (ADR 0038): the voiceover dialog's frame, wider, one row per sound. */

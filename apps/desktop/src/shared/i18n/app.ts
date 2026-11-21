@@ -133,6 +133,11 @@ const en = {
     transcribeAskChanged: "The file or the price changed since you confirmed, so nothing was sent.",
     transcribeUpload: "Upload and transcribe",
     transcribeNotStarted: "Transcription was not started.",
+    transcribeDownloadTitle: "Transcribe what is said?",
+    transcribeDownloadDetail: (size: string) =>
+      `Transcription runs on this machine: nothing is uploaded. It first downloads ${size} (the transcription tool and its speech model), once. Without it the project is made as usual, and you can ask the agent to transcribe later.`,
+    transcribeDownloadYes: "Download and transcribe",
+    transcribeDownloadSkip: "Skip transcription",
     /** Pick in a photo (ADR 0022): its model downloads once, asked first (#751). */
     pickDownloadTitle: "Download the photo model for Pick?",
     pickDownloadDetail: (size: string) =>
@@ -331,6 +336,11 @@ const es: typeof en = {
     transcribeAskChanged: "El archivo o el precio cambiaron desde que confirmaste, así que no se envió nada.",
     transcribeUpload: "Subir y transcribir",
     transcribeNotStarted: "No se inició la transcripción.",
+    transcribeDownloadTitle: "¿Transcribir lo que se dice?",
+    transcribeDownloadDetail: (size) =>
+      `La transcripción se ejecuta en este equipo: no se sube nada. Primero descarga ${size} (la herramienta de transcripción y su modelo de voz), una sola vez. Sin ella el proyecto se crea igual, y luego puedes pedirle al agente que transcriba.`,
+    transcribeDownloadYes: "Descargar y transcribir",
+    transcribeDownloadSkip: "Omitir la transcripción",
     pickDownloadTitle: "¿Descargar el modelo de fotos para Elegir?",
     pickDownloadDetail: (size) =>
       `Elegir encuentra los objetos de tus imágenes con un modelo que corre en esta computadora. Pesa ${size} y se descarga una vez desde Hugging Face; tus imágenes nunca salen de esta computadora.`,
