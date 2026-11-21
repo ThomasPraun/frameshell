@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -18,6 +18,7 @@ import {
   app,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   protocol,
@@ -28,6 +29,8 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
+import { showsDevItems, windowListItems } from "./window-menu.js";
+import { createShootShortcut } from "./shoot-shortcut.js";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
@@ -67,6 +70,7 @@ import {
   type AudioOrientation,
   type IdeaBrief,
   type VideoProjectPlan,
+  type WelcomeStart,
 } from "../shared/api.js";
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
@@ -122,6 +126,7 @@ import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, star
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { type TimelineMediaDeps, addMediaClips } from "./timeline-media.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
@@ -258,6 +263,8 @@ interface WindowState {
   startDir: string | undefined;
   /** Videos the OS asked to open, waiting for the welcome screen to take them; null when none. */
   offered: VideoProjectPlan | null;
+  /** A File menu "New …" the welcome screen still has to start (#740); null when none. */
+  welcomeStart: WelcomeStart | null;
   /**
    * The project window is closing or reloading: its panel windows close
    * with it but stay detached, so they open again with the project.
@@ -314,6 +321,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     panels: new Map(),
     startDir: projectDir,
     offered: null,
+    welcomeStart: null,
     closingPanels: false,
     shoot: null,
     recoveredShoots: [],
@@ -329,6 +337,8 @@ function createWindow(projectDir?: string): BrowserWindow {
     }),
   };
   windows.set(contents.id, state);
+  rebuildMenuSoon();
+  window.on("focus", rebuildMenuSoon);
 
   // Links (xterm web links) open in the browser; the app window never navigates away. The one popup allowed is a
   // detached panel's blank window (ADR 0012), sandboxed like this one, without a preload.
@@ -366,6 +376,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     revokeLive(state);
     ui.detach(String(contents.id));
     windows.delete(contents.id);
+    rebuildMenuSoon();
   });
 
   const fail = (error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error));
@@ -516,10 +527,12 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("job.progress", project.dir, {
       onEvent: ({ job }) => {
         if (job.kind === "clip") send(contents, Channel.clipsJob, job);
+        else if (job.kind === "render") send(contents, Channel.timelineExportJob, job);
         else if (job.kind === "people") send(contents, Channel.peopleScanJob, job);
       },
       onResync: () => {
         send(contents, Channel.clipsJob, null);
+        send(contents, Channel.timelineExportJob, null);
         send(contents, Channel.peopleScanJob, null);
       },
     }),
@@ -550,6 +563,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   state.project = project;
   state.recoveredShoots = [];
   state.window.setTitle(`${project.name} — Frameshell`);
+  rebuildMenuSoon();
   void recoverShoots(state, project.dir);
   if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
   void readReview(project.dir).then(() => BrowserWindow.getFocusedWindow() === state.window && syncReviewMenu(state));
@@ -665,6 +679,16 @@ async function pickImageExport(window: BrowserWindow, defaultPath: string): Prom
   return result.canceled ? undefined : result.filePath;
 }
 
+/** Where to save an exported video (MP4), starting at `defaultPath`. */
+async function pickVideoExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+  const said = text.app.dialogs;
+  const result = await dialog.showSaveDialog(window, { title: said.exportVideo, defaultPath, filters: [{ name: said.videoFile, extensions: ["mp4"] }] });
+  return result.canceled ? undefined : result.filePath;
+}
+
+/** Files the app's Export video wrote this run: the only ones `timelineRevealExport` shows. */
+const exportedVideos = new Set<string>();
+
 /** Where to save an editor hand-off file of `kind`, starting at `defaultPath`. */
 async function pickHandoffExport(window: BrowserWindow, kind: HandoffKind, defaultPath: string): Promise<string | undefined> {
   const said = text.app.dialogs;
@@ -758,7 +782,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
+const VIDEO_MENU_ITEMS = ["view-transcript", "view-shoot", "view-teleprompter", "image-from-frame", "export-video", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -1004,7 +1028,22 @@ function showProject(dir: string): void {
 
 /** A window on the welcome screen with nothing pending: where what the OS opens goes first. */
 function welcomeWindow(): WindowState | undefined {
-  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered);
+  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered && !state.welcomeStart);
+}
+
+/**
+ * Show the welcome screen (#740): in a window already on it, else a new one; with `start`, it begins that way of
+ * making a project at once (File > New Project from Video…, New Video from an Idea…).
+ */
+function showWelcome(start: WelcomeStart | null): void {
+  const target = welcomeWindow() ?? windows.get(createWindow().webContents.id);
+  if (!target) return;
+  if (start) {
+    target.welcomeStart = start;
+    send(target.window.webContents, Channel.projectStartOffered);
+  }
+  if (target.window.isMinimized()) target.window.restore();
+  target.window.focus();
 }
 
 /**
@@ -1292,6 +1331,9 @@ function shootDeps(root: string) {
 }
 
 /** Keep the project window and its panel windows out of screen captures while it records (ADR 0024 decision 7). */
+/** The global End shortcut, held while a window records (#744). */
+const shootShortcut = createShootShortcut(globalShortcut);
+
 function protectShoot(state: WindowState, on: boolean): void {
   for (const window of [state.window, ...state.panels.keys()]) if (!window.isDestroyed()) window.setContentProtection(on);
 }
@@ -1302,6 +1344,7 @@ function abandonShoot(state: WindowState): void {
   if (!shoot) return;
   state.shoot = null;
   protectShoot(state, false);
+  shootShortcut.release(state);
   void shootChunks
     .flushed()
     .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
@@ -1477,12 +1520,17 @@ function registerShootIpc(): void {
   );
   ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
     outcome(async () => {
-      const shoot = shootOf(stateOf(event.sender), id);
+      const state = stateOf(event.sender);
+      const shoot = shootOf(state, id);
       await markStarted(shoot.root, shoot.session.id, starts ?? {});
       for (const source of shoot.session.sources) {
         const start = starts?.[source.role];
         if (typeof start === "number" && Number.isFinite(start)) source.start = start;
       }
+      // Ends the session from any app, even with Frameshell's windows hidden from captures.
+      return shootShortcut.hold(state, () => {
+        if (!state.window.isDestroyed()) send(state.window.webContents, Channel.shootEndRequested);
+      });
     }),
   );
   ipcMain.handle(Channel.shootChunk, (event, id: unknown, role: ShootRole, data: Uint8Array) =>
@@ -1498,6 +1546,7 @@ function registerShootIpc(): void {
       const shoot = shootOf(state, id);
       state.shoot = null;
       protectShoot(state, false);
+      shootShortcut.release(state);
       try {
         await shootChunks.flushed();
         return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
@@ -1637,6 +1686,12 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(Channel.projectTranscriptionDownload, () => outcome(newProjectTranscriptionDownload));
+  ipcMain.handle(Channel.projectTakeStart, (event) => {
+    const state = stateOf(event.sender);
+    const start = state.welcomeStart;
+    state.welcomeStart = null;
+    return start;
+  });
   ipcMain.handle(Channel.projectTakeOffered, (event) => {
     const state = stateOf(event.sender);
     const plan = state.offered;
@@ -1769,7 +1824,9 @@ function registerIpc(): void {
     return { id, session, shell: shellName };
   });
   ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
+  ipcMain.handle(Channel.terminalList, (event) => stateOf(event.sender).terminals.list());
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
+  ipcMain.handle(Channel.terminalClipboardHasText, async () => (await clipboard.readText()) !== "");
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
     stateOf(event.sender).terminals.resize(id, cols, rows),
   );
@@ -1817,6 +1874,14 @@ function registerIpc(): void {
       return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
     }),
   );
+  ipcMain.handle(Channel.timelineAddMedia, (event, timeline: string, assets: string[], target?: { track: string; start: number }) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const aim = target && typeof target.track === "string" && Number.isFinite(target.start) ? { track: target.track, start: Math.max(0, target.start) } : undefined;
+      const deps: TimelineMediaDeps = { request: (method, params) => daemon.request(method, params), alone: (work) => editor.alone(work) };
+      return addMediaClips(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], deps, aim);
+    }),
+  );
   ipcMain.handle(Channel.timelineCutOut, (event, timeline: string, clip: string, mask: string) =>
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
@@ -1845,6 +1910,26 @@ function registerIpc(): void {
       const params = { cwd: project.dir, timeline: name, out };
       const { path, warnings } = await daemon.request(HANDOFFS[kind].method, params);
       return { path, warnings };
+    }),
+  );
+  // File > Export video… and the preview's Export video button (#738): main asks where, the daemon renders in the background.
+  ipcMain.handle(Channel.timelineExportVideo, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const name = String(timeline);
+      const base = name === "main" ? projectName(project.name) : `${projectName(project.name)}-${name}`;
+      const chosen = await pickVideoExport(state.window, join(project.dir, "exports", `${base}.mp4`));
+      if (!chosen) return null;
+      const out = extname(chosen) ? chosen : `${chosen}.mp4`;
+      const { job, output, warnings } = await daemon.request("render", { cwd: project.dir, timeline: name, out });
+      exportedVideos.add(output);
+      return { job, output, warnings };
+    }),
+  );
+  ipcMain.handle(Channel.timelineRevealExport, (_event, path: string) =>
+    outcome(async () => {
+      if (exportedVideos.has(String(path))) shell.showItemInFolder(String(path));
     }),
   );
   ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
@@ -2067,6 +2152,8 @@ function buildMenu(): void {
       label: said.file,
       submenu: [
         { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+        { id: "new-from-video", label: said.newFromVideo, accelerator: "CmdOrCtrl+N", click: () => showWelcome("video") },
+        { id: "new-from-idea", label: said.newFromIdea, click: () => showWelcome("idea") },
         { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
         {
@@ -2075,6 +2162,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+Shift+S",
           click: (_item, focused) => command("imageFromFrame", focused),
         },
+        { id: "export-video", label: said.exportVideo, accelerator: "CmdOrCtrl+E", click: (_item, focused) => command("exportVideo", focused) },
         ...HANDOFF_KINDS.map((kind) => ({
           id: HANDOFFS[kind].menuId,
           label: kind === "otio" ? said.exportOtio : said.exportPremiere,
@@ -2098,6 +2186,8 @@ function buildMenu(): void {
       label: said.view,
       submenu: [
         { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-shoot", label: said.shoot, accelerator: "CmdOrCtrl+Alt+R", click: (_item, focused) => command("showShoot", focused) },
+        { id: "view-teleprompter", label: said.teleprompter, accelerator: "CmdOrCtrl+Alt+P", click: (_item, focused) => command("showTeleprompter", focused) },
         { id: "view-terminal", label: said.terminal, accelerator: "CmdOrCtrl+\\", registerAccelerator: false, click: (_item, focused) => command("toggleTerminal", focused) },
         { type: "separator" },
         {
@@ -2114,10 +2204,14 @@ function buildMenu(): void {
           ],
         },
         { type: "separator" },
-        { role: "reload", label: said.reload },
-        { role: "forceReload", label: said.forceReload },
-        { role: "toggleDevTools", label: said.devTools },
-        { type: "separator" },
+        ...(showsDevItems(app.isPackaged, process.env)
+          ? [
+              { role: "reload" as const, label: said.reload },
+              { role: "forceReload" as const, label: said.forceReload },
+              { role: "toggleDevTools" as const, label: said.devTools },
+              { type: "separator" as const },
+            ]
+          : []),
         { role: "resetZoom", label: said.resetZoom },
         { role: "zoomIn", label: said.zoomIn },
         { role: "zoomOut", label: said.zoomOut },
@@ -2132,12 +2226,15 @@ function buildMenu(): void {
         { role: "minimize", label: said.minimize },
         { role: "zoom", label: said.zoom },
         ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
+        // macOS lists the windows itself.
+        ...(mac ? [] : windowListItems(listedWindows(), focusWindow)),
       ],
     },
     {
       ...(mac ? { role: "help" as const } : {}),
       label: said.help,
       submenu: [
+        { id: "help-welcome", label: said.welcome, click: () => showWelcome(null) },
         { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
         { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
         // macOS has them in the app menu.
@@ -2148,6 +2245,32 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
   syncReviewMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
+}
+
+/** Open project windows for the Window menu, in opening order. */
+function listedWindows() {
+  const focused = BrowserWindow.getFocusedWindow();
+  return [...windows.entries()]
+    .filter(([, state]) => !state.window.isDestroyed())
+    .map(([id, state]) => ({ id, name: state.project?.name ?? state.window.getTitle(), focused: state.window === focused }));
+}
+
+/** Bring window `id` (its `webContents.id`) to the front. */
+function focusWindow(id: number): void {
+  const window = windows.get(id)?.window;
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
+/** Rebuild the menu once the current event is done: the Window menu follows windows opening, closing and focusing. */
+let menuRebuild: NodeJS.Immediate | undefined;
+function rebuildMenuSoon(): void {
+  if (menuRebuild || !app.isReady()) return;
+  menuRebuild = setImmediate(() => {
+    menuRebuild = undefined;
+    buildMenu();
+  });
 }
 
 /**
@@ -2176,7 +2299,8 @@ const appLauncher: Launcher = process.env["FRAMESHELL_OPEN_APP_STAND_IN"]
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the
- * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
+ * renderer reads the new language. Terminals outlive the reload (ADR 0012): the reloaded terminal panel shows them
+ * again (`terminals.list`), agents in them still running; panel windows reopen with their project.
  */
 async function setLanguage(choice: LanguageChoice): Promise<void> {
   languageChoice = choice;

@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { coreVersion } from "./version.js";
 import {
   type ConfigDoc,
   ErrorCode,
@@ -203,9 +204,8 @@ import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
-/** Package version reported in the handshake. */
-export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
-  .version;
+/** Version reported in the handshake: the core package's, or the packaged app's release version ({@link coreVersion}). */
+export const DAEMON_VERSION: string = coreVersion(dirname(createRequire(import.meta.url).resolve("../package.json")));
 
 /** Five minutes: long enough to span an agent's think time between CLI calls. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;

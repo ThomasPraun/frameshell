@@ -1,6 +1,7 @@
 import type { ClipDiff, MatteStateInfo, OperationResult } from "@frameshell/protocol";
 import { type Clip, MARKER_LABEL_MAX } from "@frameshell/schema";
 import {
+  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -72,7 +73,8 @@ import { type MatteBadge, matteBadge, plateChoices } from "../timeline/matte.js"
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
-import { type EdgeHit, edgeAt } from "../timeline/transitions.js";
+import { type EdgeHit, edgeAt, transitionRemove, transitionSet } from "../timeline/transitions.js";
+import { addToTimeline, carriesMedia, droppedMedia, onMediaAdded } from "../timeline/media-drag.js";
 import { type PaintMode, clearEdit, laneAt, paintEdits, shotSpans, unpaintEdits } from "../timeline/turn-lanes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
@@ -173,6 +175,7 @@ export function TimelinePanel({
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   const scenes = useSceneSpans(TIMELINE, view?.revision ?? null);
   const [status, setStatus] = useState<Status | null>(null);
+  useEffect(() => onMediaAdded((line) => setStatus(line.text ? { tone: line.error ? "error" : "info", text: line.text } : null)), []);
   // Program tracks whose turn lanes are open, and the turns they draw (measured again when anything they hear changes).
   const [lanesOpen, setLanesOpen] = useState<ReadonlySet<string>>(new Set());
   const { sources, hashes } = useTranscripts();
@@ -265,7 +268,14 @@ export function TimelinePanel({
   const { history } = useSelection();
   const { diff } = useHistoryDiff(TIMELINE, history, view?.revision ?? null);
   const proposed = useProposalMarks(TIMELINE);
-  // A History pick wins over the proposal's marks (After, ADR 0019).
+  // A History pick wins over the proposal's marks (After, ADR 0019); a proposal that arrives after the pick clears it,
+  // so the agent's new changes are what the lanes mark (#754).
+  const proposalTx = proposed?.tx ?? null;
+  const seenProposal = useRef<string | null>(null);
+  useEffect(() => {
+    if (proposalTx !== null && proposalTx !== seenProposal.current && selection.get().history !== null) selection.clear();
+    seenProposal.current = proposalTx;
+  }, [proposalTx]);
   const marks = history !== null ? (diff?.target === history ? diff.clips : null) : (proposed?.marks ?? null);
 
   useEffect(() => {
@@ -802,17 +812,40 @@ function TimelineCanvas({
 
   const timeAt = (x: number) => (x + state.current.scrollLeft) / state.current.pxPerSecond;
 
+  /** Media dragged from Files (#738): the timeline takes it, unless this is an image project (layers, not time). */
+  const onMediaDragOver = (event: DragEvent) => {
+    if (image || !carriesMedia(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  /** Media dropped from Files: on the video or audio track under the pointer from the time there, else where it goes by kind. */
+  const onMediaDrop = (event: DragEvent) => {
+    if (image || !carriesMedia(event.dataTransfer)) return;
+    event.preventDefault();
+    const paths = droppedMedia(event.dataTransfer);
+    const box = scroller.current;
+    const layout = latest.current.layout;
+    if (paths.length === 0 || !box || !layout) return;
+    const rect = box.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const contentY = event.clientY - rect.top + state.current.scrollTop;
+    const row = layout.rows.find((candidate) => contentY >= candidate.top && contentY < candidate.top + candidate.height);
+    const target = row && (row.kind === "video" || row.kind === "audio") ? { track: row.id, start: onGrid(timeAt(x)) } : undefined;
+    void addToTimeline(paths, target);
+  };
+
   /** On the frame grid, as a stroke on a turn lane names frames the agent can address. */
   const onGrid = (time: number) => Math.max(0, Math.round(time * latest.current.fps) / latest.current.fps);
 
   /** What a stroke does by the keys held: Alt marks the angle silent, Shift keeps the others, else it takes the floor. */
   const paintMode = (event: { altKey: boolean; shiftKey: boolean }): PaintMode => (event.altKey ? "silent" : event.shiftKey ? "add" : "only");
 
-  /** Right-click on a clip edge: add a dissolve or fade there, or take the transition away (every track with an edge at that time). */
+  /** Right-click on a clip edge: add a dissolve or fade there, or take the transition away (on that edge's track only). */
   const edgeItems = (edge: EdgeHit): MenuItem[] => [
-    { label: t.timeline.addDissolve, run: () => send([{ op: "transition.set", args: { at: edge.at, kind: "dissolve" } }], undefined, { label: "Add dissolve" }) },
-    { label: t.timeline.addFade, run: () => send([{ op: "transition.set", args: { at: edge.at, kind: "fade" } }], undefined, { label: "Add fade" }) },
-    { label: t.timeline.removeTransition, disabled: !edge.hasTransition, run: () => send([{ op: "transition.remove", args: { at: edge.at } }], undefined, { label: "Remove transition" }) },
+    { label: t.timeline.addDissolve, run: () => send([transitionSet(edge.row, edge.at, { kind: "dissolve" })], undefined, { label: "Add dissolve" }) },
+    { label: t.timeline.addFade, run: () => send([transitionSet(edge.row, edge.at, { kind: "fade" })], undefined, { label: "Add fade" }) },
+    { label: t.timeline.removeTransition, disabled: !edge.hasTransition, run: () => send([transitionRemove(edge.row, edge.at)], undefined, { label: "Remove transition" }) },
   ];
 
   /** Right-click on a turn lane: take what was painted there back to the measured turns. */
@@ -1424,6 +1457,8 @@ function TimelineCanvas({
           onLostPointerCapture={onPointerCancel}
           onContextMenu={onContextMenu}
           onPointerLeave={() => setHover(null)}
+          onDragOver={onMediaDragOver}
+          onDrop={onMediaDrop}
         >
           <div ref={sizer} className="timeline-sizer" />
         </div>
