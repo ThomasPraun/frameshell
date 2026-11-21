@@ -10,7 +10,6 @@ import {
   entryTitles,
   newestFirst,
   operationTitle,
-  transactionTitle,
 } from "../history/model.js";
 import { lang, t } from "../i18n.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
