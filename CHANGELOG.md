@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Shoot view after End (#744): "Saving…" now shows how long the files have been saving; the finished message names
+  the timeline the multicam group went to (the shoot's own, e.g. `timelines/<script>.json`, or main) instead of always
+  saying main; Spanish "Se guardaron N archivos". A take's "N differences, review below" is a link to its rows, and
+  differences the scene view does not show (speech outside every scene, another scene) are listed under the last take,
+  each with Accept. A take, or a whole session, whose microphone stayed nearly silent (loudest 100 ms window under
+  -45 dBFS) is flagged right after it is cut or ended. The teleprompter's voice following hears the microphone only
+  while a shoot records: before Start and after End it reads "Ready" and the mic is left alone.
+
 - Built-in terminal on Windows and Linux: Ctrl+V pastes the clipboard's text into any program, Claude Code included,
   which read it as "paste an image" before. With no text on the clipboard (an image), the program still gets its ^V.
   Ctrl+Shift+V keeps working (#743).

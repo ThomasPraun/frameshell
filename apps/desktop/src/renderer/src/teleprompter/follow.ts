@@ -1,10 +1,10 @@
-// Live following (ADR 0024 decisions 5 and 6): while a teleprompter shows a script, follow is on and recognition is
-// ready, the Shoot view's mic (and system audio) goes to the recognizer, and each window of heard words moves the
+// Live following (ADR 0024 decisions 5 and 6): while a teleprompter shows a script, follow is on, recognition is
+// ready and a shoot records, the Shoot view's mic (and system audio) goes to the recognizer, and each window of heard words moves the
 // teleprompter through the pure follower. The person's keys resync it; a hold makes it wait.
 import { type NumberLanguage, numberLanguage } from "@frameshell/schema";
 import { useEffect } from "react";
 import { live } from "../shoot/live.js";
-import { shouldWake } from "../shoot/live-state.js";
+import { shouldListen, shouldWake } from "../shoot/live-state.js";
 import { shoot } from "../shoot/recorder.js";
 import { type FollowScript, type FollowState, follow, followAt, followScript, followStop } from "./follower.js";
 import { type PromptPosition, type PromptStream, positionOf, stopOf } from "./model.js";
@@ -66,10 +66,11 @@ export function useLiveFollow(stream: PromptStream | null, on: boolean): void {
       if (kept.length !== skipped.length) teleprompter.setSkipped(kept);
     });
 
-    // Off after main stopped the idle server: start it again (never downloads).
+    // Off after main stopped the idle server: start it again (never downloads). The mic goes to the recognizer only
+    // while a session records: End stops the listening, also with the teleprompter still open.
     const feed = () => {
       if (shouldWake(live.status(), true)) live.warm();
-      live.listen(live.status().state === "ready" ? shoot.audioTracks() : []);
+      live.listen(shouldListen(live.status(), shoot.get().phase === "recording") ? shoot.audioTracks() : []);
     };
     const offStatus = live.subscribe(feed);
     const offShoot = shoot.subscribe(feed);
