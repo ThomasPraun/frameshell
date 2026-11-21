@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A first-run checklist in the status bar of a video project (#787): "Getting started 1/4" opens the four steps from a
+  new project to an exported video (connect your AI, bring footage or record, ask for a cut and correct it, export),
+  each ticked from what the project shows, with Connect… and a "How" link to its page on frameshell.dev. It goes away
+  for good in that project once closed or once every step is done.
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
