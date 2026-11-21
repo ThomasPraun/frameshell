@@ -3221,6 +3221,16 @@ button.track-head:focus-visible {
     display: none;
   }
 
+  /* Timecode and duration a little smaller and closer, so the whole duration fits on every platform's metrics. */
+  .preview-body > .panel-header .panel-header-content {
+    gap: 6px;
+  }
+
+  .preview-body > .panel-header .timecode,
+  .preview-body > .panel-header .preview-duration {
+    font-size: 11px;
+  }
+
   /* Export video folds to its icon (the name stays in its label and tooltip), so the duration shows whole. */
   .preview-body .preview-export.is-idle {
     display: inline-grid;
