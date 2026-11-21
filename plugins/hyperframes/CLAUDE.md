@@ -10,6 +10,7 @@
 
 ## Rules
 
+- `fx-*` overlays (#802) share `src/templates/fx-kit.ts` (props, hit schedule via `stepTimes`, one canvas cleared per frame, end fade): an effect adds only its `draw` body. Real tests open Chrome with `test/chrome-args.ts`.
 - Code windows share `src/templates/code-kit.ts` (tokenizer, `align`, layout): never copy.
 - Checklist `onBeats` = the reference for beat-driven templates; step times clamped to `D - OUT - 0.2` via `stepTimes` `last` in `templates/kit.ts` (ADR 0029 d8).
 - three.js: pinned bundle `pnpm gen:three` + drift test; copied only by `ThreeTemplate`s; `__hf.buildReady` gates assets (`buildReady`); VSM shadows; check skips the bundle; renders pinned to SwiftShader (`PRODUCER_BROWSER_GPU_MODE=software`). Templates `product-shot`, `logo-3d`.
