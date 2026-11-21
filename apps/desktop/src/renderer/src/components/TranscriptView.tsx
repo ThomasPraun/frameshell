@@ -25,7 +25,7 @@ import {
   withWordText,
   wordAt,
 } from "../transcript/model.js";
-import { offersTranscribe } from "../transcript/model-choice.js";
+import { offersTranscribe, transcribesLocally } from "../transcript/model-choice.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import type { MenuItem } from "./ContextMenu.js";
 import { ModelPicker, type ModelStatus } from "./ModelPicker.js";
@@ -427,7 +427,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
               <button
                 className="link transcript-transcribe"
                 disabled={transcribing.has(asset)}
-                data-tip={t.transcript.transcribeTip(provider)}
+                data-tip={transcribesLocally(provider) ? t.transcript.transcribeLocalTip : t.transcript.transcribeTip(provider)}
                 onClick={() => void transcribe(asset)}
               >
                 {t.transcript.transcribe}

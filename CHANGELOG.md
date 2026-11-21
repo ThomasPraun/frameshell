@@ -77,6 +77,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     "Declared, not run until you trust this project" instead of claiming it is installed.
 - Desktop, Connect your AI (#753): an X at the top and a footer that stays in view; "Check again" also sits in the card
   of an app that looks not installed. A settings file that does not parse disables Connect and offers "Show the file".
+- Desktop, voiceover without the terminal (#756):
+  - A script that names no voice opens "No voice yet" instead of a CLI message: pick one of the voices there are and
+    Generate, or, with none, "Open Plugins". `voiceover.generate`'s missing-provider refusal carries `available`.
+  - Place says why it refused in the dialog's language: Replace is the answer (the box is highlighted), a start before
+    0, a timeline with no tempo for `beat:`, or a time that is not one. "2,5" is 2.5 seconds.
+  - The report plays each line's take (▶), lines are numbered, and progress reads "Saying line 2 of 3" instead of the
+    line's id (progress `values` carry `index` and `total`). After Stop, "Continue" goes on, reusing the takes made.
+  - The cost box names an official provider by its plugin's name.
+- Desktop: the transcript view's Transcribe button also works with whisper.cpp, asking before the first download as a
+  new project does; the hint no longer sends you to the terminal (#756).
 
 ## [0.19.0] - 2026-11-20
 

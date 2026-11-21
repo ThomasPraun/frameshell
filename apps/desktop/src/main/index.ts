@@ -48,6 +48,7 @@ import {
   type TranscribeProgress,
   type TranscribeRun,
   type VoiceoverProgress,
+  type VoiceoverPlaceRun,
   type VoiceoverRun,
   type PeopleChange,
   type PersonTarget,
@@ -119,7 +120,7 @@ import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
 import { type DownloadChoice, chooseDownload } from "./transcription-download.js";
-import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
+import { APP_TRANSCRIPTION_PROVIDER, canceledRun, missingVoice, placeRefusal, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { frameImageChoices, imageFromFrame } from "./frame-image.js";
 import { exportsFolder, imageExportPath } from "./export-paths.js";
@@ -1097,6 +1098,12 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   }
 }
 
+/** A speech provider as the person reads it: the official plugin's title when one provides it, else its id. */
+function speechProviderName(id: string): string {
+  const official = officialPluginProviding("speech-provider", id);
+  return (official && text.plugins.about[official.name]?.title) || id;
+}
+
 /**
  * Voiceover in the app (ADR 0034 decisions 20 and 22): generate with progress and Cancel, the misread check only where it
  * needs no download nobody agreed to, and place the takes on the main timeline. The renderer shows it all; the cost
@@ -1115,7 +1122,7 @@ function registerVoiceoverIpc(): void {
       return verifyPlanOf({ provider, pluginInstalled, bytes });
     }),
   );
-  ipcMain.handle(Channel.voiceoverGenerate, (event, path: string, verify: boolean) =>
+  ipcMain.handle(Channel.voiceoverGenerate, (event, path: string, verify: boolean, provider: unknown) =>
     outcome(async (): Promise<VoiceoverRun> => {
       const dir = await dirOf(event.sender);
       const said = text.app.dialogs;
@@ -1126,14 +1133,21 @@ function registerVoiceoverIpc(): void {
           (confirmed) =>
             daemon.request(
               "voiceover.generate",
-              { cwd: dir, script: path, yes: confirmed !== null, ...(confirmed ? { confirmation: confirmed.confirmation } : {}), verify },
+              {
+                cwd: dir,
+                script: path,
+                yes: confirmed !== null,
+                ...(confirmed ? { confirmation: confirmed.confirmation } : {}),
+                verify,
+                ...(typeof provider === "string" && provider !== "" ? { provider } : {}),
+              },
               { onProgress: (update) => send(event.sender, Channel.voiceoverProgress, progressOf(update)) },
             ),
           async (ask) => {
-            send(event.sender, Channel.voiceoverProgress, { stage: "confirm", line: null, fraction: null } satisfies VoiceoverProgress);
+            send(event.sender, Channel.voiceoverProgress, { stage: "confirm", line: null, fraction: null, place: null } satisfies VoiceoverProgress);
             const { response } = await box({
               type: "warning",
-              message: said.voiceoverCostTitle(ask.provider, ask.lines),
+              message: said.voiceoverCostTitle(speechProviderName(ask.provider), ask.lines),
               detail: `${ask.changed ? `${said.voiceoverCostChanged}\n\n` : ""}${ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost)}`,
               buttons: [said.voiceoverGenerate, said.cancel],
               defaultId: 1,
@@ -1147,6 +1161,8 @@ function registerVoiceoverIpc(): void {
       } catch (error) {
         const stopped = canceledRun(error);
         if (stopped) return { status: "canceled", kept: stopped.kept };
+        const voice = missingVoice(error);
+        if (voice) return { status: "no-voice", missing: voice.missing, available: voice.available.map((id) => ({ id, name: speechProviderName(id) })) };
         throw error;
       }
     }),
@@ -1161,7 +1177,14 @@ function registerVoiceoverIpc(): void {
   ipcMain.handle(Channel.voiceoverPlace, (event, path: string, start: string, replace: boolean) =>
     outcome(async () => {
       const at = startOf(start);
-      return daemon.request("voiceover.place", { cwd: await dirOf(event.sender), timeline: "main", script: path, ...(at !== undefined ? { start: at } : {}), replace });
+      try {
+        const result = await daemon.request("voiceover.place", { cwd: await dirOf(event.sender), timeline: "main", script: path, ...(at !== undefined ? { start: at } : {}), replace });
+        return { status: "placed", result } satisfies VoiceoverPlaceRun;
+      } catch (error) {
+        const reason = placeRefusal(error);
+        if (reason.kind === "other") throw error;
+        return { status: "refused", reason } satisfies VoiceoverPlaceRun;
+      }
     }),
   );
 }
@@ -1170,11 +1193,19 @@ function registerVoiceoverIpc(): void {
 function registerModelIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
   ipcMain.handle(Channel.modelsList, (event) => outcome(async () => daemon.request("model.list", { cwd: await dirOf(event.sender) })));
-  // The transcript view's Transcribe button (only for a provider other than whisper.cpp): asks in a native box first.
+  // The transcript view's Transcribe button: whisper.cpp asks before its first download (as a new project does, #756),
+  // a cloud or paid provider asks before uploading, both in a native box.
   ipcMain.handle(Channel.transcribeRun, (event, asset: string) =>
     outcome(async (): Promise<TranscribeRun> => {
       const cwd = await dirOf(event.sender);
-      const done = await transcribeConfirmed(cwd, asset, BrowserWindow.fromWebContents(event.sender), (update) =>
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const { project } = await daemon.request("model.list", { cwd });
+      if ((project?.provider ?? APP_TRANSCRIPTION_PROVIDER) === APP_TRANSCRIPTION_PROVIDER) {
+        const choice = await chooseDownload(await transcriptionDownload(cwd), (bytes) => askDownload(parent, bytes));
+        if (choice === "skip") return { status: "declined" };
+        await ensureTranscriptionPlugin(cwd);
+      }
+      const done = await transcribeConfirmed(cwd, asset, parent, (update) =>
         send(event.sender, Channel.transcribeProgress, { asset, message: describeProgress(update, text.app.setup.progress), fraction: update.fraction ?? null } satisfies TranscribeProgress),
       );
       return done ? { status: "done" } : { status: "declined" };

@@ -35,6 +35,7 @@ import { PreviewPanel } from "./PreviewPanel.js";
 import { ProposalBar } from "./ProposalBar.js";
 import { reviewState, setReviewEnabled, startReview } from "../review/store.js";
 import { PanelWindow } from "./PanelWindow.js";
+import { onSidebarView } from "../sidebar-request.js";
 import { Sidebar, SidebarWindow, sidebarViews } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
 import { teleprompter } from "../teleprompter/store.js";
@@ -398,6 +399,18 @@ export function Workspace({ project }: { project: ProjectView }) {
   const editorState = useRef({ active, tabs });
   editorState.current = { active, tabs };
   useEffect(() => uiLink.changed(), [active, tabs]);
+  // A dialog asked for a sidebar view (the voiceover dialog's "Open Plugins").
+  useEffect(
+    () =>
+      onSidebarView((view) =>
+        setLayout((current) => {
+          if (!current) return current;
+          const shown = current.panels.sidebar.collapsed ? togglePanel(current, "sidebar") : current;
+          return { ...shown, sidebarView: view };
+        }),
+      ),
+    [],
+  );
   const host = useMemo<UiHost>(
     () => ({
       editor: () => editorState.current,

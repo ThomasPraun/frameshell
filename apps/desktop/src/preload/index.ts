@@ -151,7 +151,7 @@ const api: FrameshellApi = {
   },
   voiceover: {
     verifyPlan: () => invokeOutcome(Channel.voiceoverVerifyPlan),
-    generate: (path, verify) => invokeOutcome(Channel.voiceoverGenerate, path, verify),
+    generate: (path, verify, provider) => invokeOutcome(Channel.voiceoverGenerate, path, verify, provider),
     cancel: () => invokeOutcome(Channel.voiceoverCancel),
     onProgress: (listener) => subscribe(Channel.voiceoverProgress, listener),
     markers: () => invokeOutcome(Channel.voiceoverMarkers),
