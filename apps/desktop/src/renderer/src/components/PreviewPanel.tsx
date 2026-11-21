@@ -260,7 +260,7 @@ export function PreviewPanel({
               {formatTimecode(time, fps)}
             </span>
             <span className="panel-meta preview-duration" aria-label={t.preview.duration}>
-              {formatTimecode(frames / fps, fps)}
+              <DurationText timecode={formatTimecode(frames / fps, fps)} />
             </span>
           </>
         )}
@@ -734,6 +734,17 @@ function TransportBar({
         </span>
       )}
     </div>
+  );
+}
+
+/** The duration with its frames in their own span, which a narrow preview leaves out to show the rest whole (#745). */
+function DurationText({ timecode }: { timecode: string }) {
+  const cut = timecode.length - 3;
+  return (
+    <>
+      {timecode.slice(0, cut)}
+      <span className="preview-duration-frames">{timecode.slice(cut)}</span>
+    </>
   );
 }
 
