@@ -6,6 +6,7 @@ import { takes, useTakes } from "../shoot/takes.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 import { TakeStatus } from "./TakeStatus.js";
+import { WriteScript } from "./WriteScript.js";
 
 /**
  * The Shoot view's takes (ADR 0023, 0024): the shoot script, its scenes with their state, and the current scene's
@@ -27,7 +28,14 @@ export function ShootTakes() {
   const pending = deviations.filter((deviation) => !deviation.accepted);
 
   if (state.scripts === null) return null;
-  if (state.scripts.length === 0) return <p className="shoot-note">{t.shoot.noScript}</p>;
+  if (state.scripts.length === 0) {
+    return (
+      <div className="shoot-no-script">
+        <p className="shoot-note">{t.shoot.noScript}</p>
+        <WriteScript />
+      </div>
+    );
+  }
 
   return (
     <section className="shoot-takes" data-testid="shoot-takes">

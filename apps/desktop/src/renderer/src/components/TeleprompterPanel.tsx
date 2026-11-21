@@ -23,6 +23,7 @@ import type { LiveStatus } from "../../../shared/api.js";
 import { scriptFiles } from "../timeline/scenes.js";
 import { elementOf, windowOf } from "../windows.js";
 import { TakeStatus } from "./TakeStatus.js";
+import { WriteScript } from "./WriteScript.js";
 
 /**
  * Teleprompter (ADR 0024 decision 6): a shoot script with the word being said held on a focus line in the middle,
@@ -180,7 +181,10 @@ export function TeleprompterPanel() {
       {scripts.error ? (
         <p className="empty">{t.teleprompter.unreadable(scripts.error)}</p>
       ) : scripts.list && !chosen ? (
-        <p className="empty">{t.teleprompter.noScripts}</p>
+        <div className="teleprompter-none">
+          <p className="empty">{t.teleprompter.noScripts}</p>
+          <WriteScript />
+        </div>
       ) : stream && stream.stops.length === 0 ? (
         <p className="empty">{t.teleprompter.empty}</p>
       ) : (
