@@ -86,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Plugins view, `frameshell plugin catalog` and the MCP catalog size the speech model the project transcribes
+  with (its model, else this machine's default) instead of always whisper-cpp's default; a model added with
+  `model add` counts as already on disk (#789).
 - Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads
   "Revertir «Mover clip»", the timeline's change legend names the entry and gives way to the counts, and a terminal
   session's id moves to the author's tooltip. The app's own journal labels ("Move clip", "Apply look", "Delete 2 clips")

@@ -12,6 +12,11 @@ export interface CatalogInputs {
   project: ProjectBinaries;
   /** The project's plugins as `plugin.list` reports them. */
   listed: MethodResult<"plugin.list">;
+  /**
+   * Model the project transcribes with for `provider` (its `transcription.model` when it uses that provider, else this
+   * machine's default), with `registered` true for a file added with `model add`; undefined when none is chosen.
+   */
+  chosenModel?: (provider: string) => Promise<{ id: string; registered: boolean } | undefined>;
   /** Environment the OpenAI key is looked for in; default `process.env`. */
   env?: Readonly<Record<string, string | undefined>>;
 }
@@ -20,10 +25,10 @@ export interface CatalogInputs {
  * The official plugins with their state in one project and on this machine. Reads only: nothing is downloaded,
  * installed or loaded, and the OpenAI key is reduced to set or not.
  */
-export async function buildCatalog({ binaries, project, listed, env = process.env }: CatalogInputs): Promise<Catalog> {
+export async function buildCatalog({ binaries, project, listed, chosenModel, env = process.env }: CatalogInputs): Promise<Catalog> {
   const plugins: CatalogEntry[] = [];
   for (const plugin of OFFICIAL_PLUGINS) {
-    const downloads = await Promise.all(plugin.downloads.map((download) => downloadState(binaries, project, download)));
+    const downloads = await Promise.all(plugin.downloads.map((download) => downloadState(binaries, project, download, chosenModel)));
     const info = listed.plugins.find((candidate) => candidate.name === plugin.name);
     plugins.push({
       name: plugin.name,
@@ -45,11 +50,22 @@ export async function buildCatalog({ binaries, project, listed, env = process.en
   return { dir: listed.dir, platform: binaries.platform, trust: listed.trust, plugins };
 }
 
-async function downloadState(binaries: BinaryManager, project: ProjectBinaries, download: OfficialDownload): Promise<CatalogEntry["downloads"][number]> {
+async function downloadState(
+  binaries: BinaryManager,
+  project: ProjectBinaries,
+  download: OfficialDownload,
+  chosenModel: CatalogInputs["chosenModel"],
+): Promise<CatalogEntry["downloads"][number]> {
   const { kind, id, what } = download;
   if (kind === "model") {
-    const model = await binaries.locateModel(id);
-    return { kind, id, what, bytes: model.pinned.size, onDisk: model.installed };
+    const chosen = download.chosenModel ? await chosenModel?.(download.chosenModel.provider) : undefined;
+    // A file registered with `model add` is already on this machine: nothing to download.
+    if (chosen?.registered) return { kind, id: chosen.id, what: `Speech model ${chosen.id}, a file on this machine`, bytes: null, onDisk: true };
+    const managed = chosen ? `${download.chosenModel!.prefix}${chosen.id}` : id;
+    const model = await binaries.locateModel(managed).catch(() => null);
+    // An id the manager does not pin: the provider refuses it when it runs, so there is nothing to size.
+    if (!model) return { kind, id: managed, what: `Speech model ${chosen!.id}`, bytes: null, onDisk: false };
+    return { kind, id: managed, what: managed === id ? what : `Speech model ${chosen!.id}`, bytes: model.pinned.size, onDisk: model.installed };
   }
   // Any tool of the package answers for it: its tools install together.
   const tool = binaries.tools().find((name) => binaries.packageOf(name).name === id);
