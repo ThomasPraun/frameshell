@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { MachineDownloads, PluginsView } from "../src/shared/api.js";
 import { plugins as strings } from "../src/shared/i18n/plugins.js";
 import { transcriptionInstallCommand } from "../src/renderer/src/plugins/install-command.js";
-import { type CatalogPlugin, downloadRows, otherPlugins, pluginRows, pluginState, trustPrompt } from "../src/renderer/src/plugins/model.js";
+import { type CatalogPlugin, downloadRows, downloadUse, errorParts, otherPlugins, pluginRows, pluginState, trustPrompt } from "../src/renderer/src/plugins/model.js";
 
 type Catalog = PluginsView["catalog"];
 
@@ -38,7 +38,7 @@ const binary = (name: string, pkg: string, overrides: Partial<MachineDownloads["
   path: `/data/binaries/${pkg}/${name}`,
   installed: false,
   version: null,
-  pinned: { version: "1", origin: "", license: "MIT", accelerator: null },
+  pinned: { version: "1", origin: "", license: "MIT", accelerator: null, bytes: 0 },
   ...overrides,
 });
 
@@ -123,7 +123,7 @@ describe("downloadRows", () => {
       binaries: [
         binary("ffmpeg", "ffmpeg", { installed: true }),
         binary("chrome-headless-shell", "chrome-headless-shell"),
-        binary("whisper-server", "whisper-server"),
+        binary("whisper-server", "whisper-server", { pinned: { version: "1", origin: "", license: "MIT", accelerator: null, bytes: 3_000_000 } }),
         binary("sherpa", "sherpa-onnx", { pinned: null, path: null }),
         binary("blender", "blender", { source: "system", installed: false, pinned: null }),
       ],
@@ -135,7 +135,7 @@ describe("downloadRows", () => {
       { name: "ggml-large-v3-turbo-q5_0", kind: "model", bytes: 574_000_000, onDisk: true },
       { name: "ffmpeg", kind: "package", bytes: 120_000_000, onDisk: true },
       { name: "chrome-headless-shell", kind: "package", bytes: 90_000_000, onDisk: false },
-      { name: "whisper-server", kind: "package", bytes: null, onDisk: false },
+      { name: "whisper-server", kind: "package", bytes: 3_000_000, onDisk: false },
     ]);
     expect(totalBytes).toBe(694_000_000);
   });
@@ -145,6 +145,27 @@ describe("downloadRows", () => {
       rows: [{ name: "ffmpeg", kind: "package", bytes: null, onDisk: false }],
       totalBytes: 0,
     });
+  });
+});
+
+describe("errorParts", () => {
+  it("keeps a short error whole and folds the lines after the first", () => {
+    expect(errorParts("Missing key.")).toEqual({ head: "Missing key.", rest: null });
+    expect(errorParts("OPENAI_API_KEY is not set.\n  at load (index.js:1)\n  at run")).toEqual({ head: "OPENAI_API_KEY is not set.", rest: "at load (index.js:1)\n  at run" });
+  });
+
+  it("cuts a long first line at its first sentence", () => {
+    const long = `The plugin could not start. ${"x".repeat(200)}`;
+    expect(errorParts(long)).toEqual({ head: "The plugin could not start.", rest: "x".repeat(200) });
+  });
+});
+
+describe("downloadUse", () => {
+  it("says what each managed package and pinned model is for", () => {
+    const names = ["ffmpeg", "whisper-cpp", "ggml-large-v3-turbo-q5_0", "whisper-server", "ggml-small-q5_1", "chrome-headless-shell", "sherpa-onnx", "pyannote-segmentation-3-0", "3dspeaker-campplus-en-voxceleb", "onnxruntime-web", "yunet-2026may", "sface-2021dec", "mobilesam-encoder", "mediapipe-selfie"];
+    expect(names.map(downloadUse)).toEqual(["video", "transcription", "transcription", "live", "live", "chrome", "voices", "voices", "voices", "faces", "faces", "faces", "pick", "matte"]);
+    expect(downloadUse("something-new")).toBeNull();
+    for (const lang of ["en", "es"] as const) expect(Object.keys(strings[lang].downloads.use).sort()).toEqual(["chrome", "faces", "live", "matte", "pick", "transcription", "video", "voices"]);
   });
 });
 

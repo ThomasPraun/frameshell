@@ -16,7 +16,7 @@ import {
   readProjectFaceScans,
   scanFrameSize,
   scanPeopleFaces,
-  shrinkFrame,
+  resizeFrame,
   similarityTransform,
   writeFaceScan,
 } from "../src/index.js";
@@ -117,12 +117,16 @@ describe("similarityTransform and alignFace", () => {
   });
 });
 
-describe("shrinkFrame and scanFrameSize", () => {
-  it("averages the pixels each target pixel covers and never scales up", () => {
+describe("resizeFrame and scanFrameSize", () => {
+  it("averages the pixels each target pixel covers and repeats them when scaling up", () => {
     const frame: BgrFrame = { width: 4, height: 2, data: Uint8Array.from([0, 0, 0, 100, 100, 100, 200, 200, 200, 40, 40, 40, 0, 0, 0, 100, 100, 100, 200, 200, 200, 40, 40, 40]) };
-    const small = shrinkFrame(frame, 2, 1);
+    const small = resizeFrame(frame, 2, 1);
     expect([small.width, small.height, ...small.data]).toEqual([2, 1, 50, 50, 50, 120, 120, 120]);
-    expect(shrinkFrame(frame, 8, 4)).toBe(frame);
+    expect(resizeFrame(frame, 4, 2)).toBe(frame);
+    // A 320x180 clip goes to YuNet at 320x192: the taller target repeats rows, never keeps the odd size.
+    const taller = resizeFrame(frame, 4, 3);
+    expect([taller.width, taller.height, taller.data.length]).toEqual([4, 3, 4 * 3 * 3]);
+    expect([...taller.data.slice(0, 12)]).toEqual([0, 0, 0, 100, 100, 100, 200, 200, 200, 40, 40, 40]);
   });
 
   it("decodes at most 1280 wide with even sides, rounding to the nearest", () => {

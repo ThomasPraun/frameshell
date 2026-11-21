@@ -69,6 +69,9 @@ const en = {
     lede: "Connect an AI app you already use, then ask it in your own words to edit the video open here. Frameshell adds itself to the app's settings; everything else there stays as it is, and a copy is kept first.",
     close: "Close",
     checkAgain: "Check again",
+    /** Reveals an AI app's settings file that does not parse (#753). */
+    showFile: "Show the file",
+    fixFileFirst: "Fix or remove the settings file first",
     connect: "Connect",
     connectAgain: "Connect again",
     disconnect: "Disconnect",
@@ -182,6 +185,8 @@ const es: typeof en = {
     lede: "Conecta una app de IA que ya usas y pídele con tus palabras que edite el video abierto aquí. Frameshell se agrega a la configuración de la app; todo lo demás queda como está y antes se guarda una copia.",
     close: "Cerrar",
     checkAgain: "Volver a buscar",
+    showFile: "Mostrar el archivo",
+    fixFileFirst: "Primero corrige o borra el archivo de configuración",
     connect: "Conectar",
     connectAgain: "Volver a conectar",
     disconnect: "Desconectar",
