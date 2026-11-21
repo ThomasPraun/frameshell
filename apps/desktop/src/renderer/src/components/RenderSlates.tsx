@@ -1,4 +1,5 @@
 import { type Program, type VideoSpan, programAt } from "../preview/program.js";
+import { untrustedRender } from "../generated-status.js";
 import { rich, t } from "../i18n.js";
 
 type GeneratedSpan = Extract<VideoSpan, { kind: "generated" }>;
@@ -55,8 +56,9 @@ function Slate({ span }: { span: GeneratedSpan }) {
         </div>
       )}
       {render?.error && (
+        // Untrusted plugins: the fix is the Plugins view, not a CLI command (#746).
         <p className="preview-layer-error" title={render.error}>
-          {render.error}
+          {untrustedRender(render.state, render.error) ? t.inspector.untrustedHint : render.error}
         </p>
       )}
     </div>

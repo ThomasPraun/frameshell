@@ -2,7 +2,7 @@
 // the Shoot view switches tabs or moves to its own window (ADR 0012). Main appends the chunks and finishes the session.
 import { useSyncExternalStore } from "react";
 import type { ShootFinish, ShootRole, ShootScreenSource, ShootSourceSpec, ShootSupport } from "../../../shared/api.js";
-import { LEVEL_FLOOR, capSize, heldLevel, levelDb, meterWindow, pickType, silentSince, silentTooLong } from "./model.js";
+import { LEVEL_FLOOR, capSize, heldLevel, levelDb, meterWindow, pickType, silentSince, silentTooLong, tooQuiet } from "./model.js";
 
 /** A camera or microphone. */
 export interface ShootDevice {
@@ -41,12 +41,38 @@ export interface ShootState {
   phase: ShootPhase;
   /** `performance.now()` when recording began. */
   startedAt: number | null;
+  /** The global End shortcut is held for the session recording now (another app may own the keys). */
+  endShortcut: boolean;
+  /** `performance.now()` when End was pressed, while the session is saved; null otherwise. */
+  endingAt: number | null;
+  /** The session finished last here had its microphone nearly silent the whole time ({@link tooQuiet}). */
+  quiet: boolean;
   error: string | null;
   /** The session finished last here: by End, or recovered after a crash. */
   finished: ShootFinish | null;
 }
 
 const LEVEL_MS = 100;
+/** Where the microphone picked last is kept, per machine (this browser profile). */
+const DEVICES_KEY = "frameshell.shoot.devices";
+
+/** The devices picked last on this machine; nothing when storage is unavailable. */
+function remembered(): { mic?: string } {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(DEVICES_KEY) ?? "{}");
+    return typeof value === "object" && value !== null && typeof (value as { mic?: unknown }).mic === "string" ? { mic: (value as { mic: string }).mic } : {};
+  } catch {
+    return {};
+  }
+}
+
+function remember(next: { mic: string }): void {
+  try {
+    localStorage.setItem(DEVICES_KEY, JSON.stringify({ ...remembered(), ...next }));
+  } catch {
+    // Storage off: the first microphone is picked next time.
+  }
+}
 
 /**
  * Create a recorder store. The app has one ({@link shoot}); it needs the
@@ -73,6 +99,9 @@ export function createShootRecorder() {
     systemSilent: false,
     phase: "idle",
     startedAt: null,
+    endShortcut: false,
+    endingAt: null,
+    quiet: false,
     error: null,
     finished: null,
   };
@@ -88,6 +117,12 @@ export function createShootRecorder() {
   /** `performance.now()` of the first recorder's start: 0 on the session clock (the group clock). */
   let origin: number | null = null;
   let beforeEnd: (() => Promise<void>) | null = null;
+  /** The sources picked when the last Shoot view went away and the devices were freed; null when none were. */
+  let released: { camera: string | null; mic: string | null; screen: ShootScreenSource | null; systemAudio: boolean } | null = null;
+  /** Open level watches ({@link store.watchLevel}), each holding the loudest raw mic reading since it began, dBFS. */
+  const watches = new Set<{ loudest: number }>();
+  /** The watch of the session recording now. */
+  let sessionWatch: (() => number) | null = null;
 
   const set = (next: Partial<ShootState>) => {
     state = { ...state, ...next };
@@ -105,7 +140,11 @@ export function createShootRecorder() {
     const mics = list("audioinput");
     const access = devices.some((device) => device.label !== "");
     set({ cameras, mics, access });
-    if (access && state.mic === null && mics.length > 0 && !busy()) await store.selectMic(mics[0]!.id);
+    // The microphone picked last on this machine, when it is still there; else the first one.
+    if (access && state.mic === null && released === null && mics.length > 0 && !busy()) {
+      const last = remembered().mic;
+      await store.selectMic(mics.some((mic) => mic.id === last) ? last! : mics[0]!.id);
+    }
   }
 
   function meter(kind: "mic" | "system", stream: MediaStream | null): void {
@@ -140,6 +179,7 @@ export function createShootRecorder() {
     const mic = level("mic");
     const system = level("system");
     const now = performance.now();
+    if (meters.has("mic")) for (const watch of watches) watch.loudest = Math.max(watch.loudest, mic);
     // The silence check reads the level as it is; the meters hold peaks so a short sound is seen.
     silence = state.systemAudio && meters.has("system") ? silentSince(silence, system, now) : null;
     set({
@@ -173,6 +213,10 @@ export function createShootRecorder() {
     meter("system", state.systemAudio ? stream : null);
   }
 
+  /**
+   * Free the devices once no Shoot view shows. The choices stay (#737): the next view opens the same camera,
+   * microphone, screen and system audio again ({@link reopen}).
+   */
   function releaseAll(): void {
     stopStream(micStream);
     micStream = null;
@@ -180,7 +224,23 @@ export function createShootRecorder() {
     stopStream(state.screenStream);
     meter("mic", null);
     meter("system", null);
+    released = { camera: state.camera, mic: state.mic, screen: state.screen, systemAudio: state.systemAudio };
     set({ cameraStream: null, screenStream: null, camera: null, mic: null, screen: null, systemAudio: false });
+  }
+
+  /** Open again what {@link releaseAll} let go, as the person had picked it. */
+  async function reopen(): Promise<void> {
+    const kept = released;
+    released = null;
+    if (!kept || busy()) return;
+    await Promise.all([
+      kept.mic ? store.selectMic(kept.mic) : Promise.resolve(),
+      kept.camera ? store.selectCamera(kept.camera) : Promise.resolve(),
+    ]);
+    if (kept.screen || kept.systemAudio) {
+      set({ screen: kept.screen, systemAudio: kept.systemAudio && state.support === "available" });
+      await openDisplay().catch((error: unknown) => set({ screen: null, systemAudio: false, error: message(error) }));
+    }
   }
 
   const store = {
@@ -196,6 +256,18 @@ export function createShootRecorder() {
       const mic = micStream?.getAudioTracks()[0];
       const system = state.systemAudio ? state.screenStream?.getAudioTracks()[0] : undefined;
       return [mic, system].filter((track): track is MediaStreamTrack => track !== undefined && track.readyState === "live");
+    },
+    /**
+     * Start watching the microphone level. Returns a function giving the loudest reading since this call, dBFS, and
+     * ending the watch (later calls give the same value): the takes store flags a nearly silent take with it.
+     */
+    watchLevel(): () => number {
+      const watch = { loudest: LEVEL_FLOOR };
+      watches.add(watch);
+      return () => {
+        watches.delete(watch);
+        return watch.loudest;
+      };
     },
     /** Run `work` when End is pressed, before the recorders stop (the takes store cuts an open take). */
     setBeforeEnd(work: (() => Promise<void>) | null): void {
@@ -228,7 +300,9 @@ export function createShootRecorder() {
           .recovered()
           .then((list) => list.at(-1) && set({ finished: list.at(-1)! }), () => undefined);
         api().onRecovered((finish) => set({ finished: finish }));
-      }
+        // The global End shortcut, pressed in any app while this window records.
+        api().onEndRequested(() => void store.end());
+      } else void reopen();
       return () => {
         mounted--;
         if (mounted > 0) return;
@@ -279,6 +353,7 @@ export function createShootRecorder() {
           audio: { deviceId: { exact: id }, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         });
         if (state.mic !== id) return stopStream(stream);
+        remember({ mic: id });
         micStream = stream;
         meter("mic", stream);
       } catch (error) {
@@ -350,8 +425,9 @@ export function createShootRecorder() {
           recorder.start(1000);
         }
         origin = Math.min(...Object.values(starts));
-        set({ phase: "recording", startedAt: performance.now() });
-        await api().started(opened, starts);
+        sessionWatch = store.watchLevel();
+        set({ phase: "recording", startedAt: performance.now(), quiet: false });
+        set({ endShortcut: await api().started(opened, starts) });
       } catch (error) {
         set({ error: message(error) });
         if (session) await store.end();
@@ -369,7 +445,9 @@ export function createShootRecorder() {
       if (!current || state.phase === "ending") return;
       // An open take is cut first, while the session clock still runs.
       await beforeEnd?.().catch((error: unknown) => set({ error: message(error) }));
-      set({ phase: "ending" });
+      const loudest = sessionWatch?.() ?? 0;
+      sessionWatch = null;
+      set({ phase: "ending", endingAt: performance.now(), quiet: tooQuiet(loudest) });
       await Promise.all(
         current.recorders.map(
           ({ recorder }) =>
@@ -385,9 +463,9 @@ export function createShootRecorder() {
       session = null;
       try {
         const finished = await api().end(current.id);
-        set({ phase: "idle", startedAt: null, finished });
+        set({ phase: "idle", startedAt: null, endingAt: null, endShortcut: false, finished });
       } catch (error) {
-        set({ phase: "idle", startedAt: null, error: message(error) });
+        set({ phase: "idle", startedAt: null, endingAt: null, endShortcut: false, error: message(error) });
       }
       if (mounted === 0) releaseAll();
     },
@@ -419,4 +497,9 @@ export function useShoot(): ShootState {
 /** True while a session records (or is starting or saving): the preview keeps quiet then (ADR 0024 decision 7). */
 export function useShootRecording(): boolean {
   return useSyncExternalStore(shoot.subscribe, () => shoot.get().phase !== "idle");
+}
+
+/** The recorder's phase, re-rendering only when it changes (not on every level reading). */
+export function useShootPhase(): ShootPhase {
+  return useSyncExternalStore(shoot.subscribe, () => shoot.get().phase);
 }
