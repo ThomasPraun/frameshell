@@ -74,6 +74,8 @@ test("Chat about this from the detached preview types into the last focused term
   await expect(tabs()).toHaveCount(2);
   await runInTerminal(page, `node "${FAKE_AGENT}"`);
   await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");
+  // Chat about this types only at a detected agent (ADR 0048): wait for the detection.
+  await expect(tabs().nth(1)).toHaveAttribute("data-agent", "fake", { timeout: 15_000 });
   const opened = panelWindow(app, "terminal");
   await page.getByTestId("terminal-detach").click();
   agentWindow = await opened;

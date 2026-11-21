@@ -671,12 +671,59 @@ code {
 
 /* ---------- Sidebar ---------- */
 
+.view-switch-wrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .view-switch {
   display: flex;
   gap: 0;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* Tabs cut off at an edge fade out there: the strip says it goes on (#736). */
+.view-switch-wrap.has-after .view-switch {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+.view-switch-wrap.has-before .view-switch {
+  mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+}
+
+.view-switch-wrap.has-before.has-after .view-switch {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+.view-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 11px;
+}
+
+.view-more-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.view-more svg {
+  width: 12px;
+  height: 12px;
+}
+
+.view-more {
+  width: auto;
+  padding: 0 4px;
+  color: var(--text-muted);
+}
+
+.view-more:hover {
+  color: var(--text);
 }
 
 .view-tab {
@@ -1905,22 +1952,34 @@ code {
   gap: 16px;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 4px;
   padding: 6px 16px;
   border-bottom: 1px solid var(--line-soft);
   font-size: 11.5px;
   color: var(--text-faint);
 }
 
+/* Wraps instead of cutting off (#741): it is the only place that says how to cut and restore. */
 .transcript-toolbar .hint {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  order: 1;
+  flex: 1 0 100%;
 }
 
-.transcript-toolbar .timeline-status {
+.transcript-toolbar .transcript-cut {
   flex: none;
-  max-width: 60%;
+  font-size: 11.5px;
+}
+
+/* A row of its own, one line high whatever it says (the whole text in its tooltip): a status arriving while the
+   pointer is over a word never moves the words (#741: macOS lost clicks to the reflow). */
+.transcript-toolbar .timeline-status {
+  order: 2;
+  flex: 1 0 100%;
+  min-height: 1lh;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .transcript-scroll {
@@ -2094,7 +2153,21 @@ code {
 
 .transcript-toolbar .transcript-restore-marked {
   flex: none;
+  display: inline-grid;
   font-size: 11.5px;
+}
+
+.transcript-restore-marked > span {
+  grid-area: 1 / 1;
+}
+
+.transcript-restore-marked > .transcript-restore-sizer {
+  visibility: hidden;
+}
+
+/* Nothing struck selected: holds its place unseen, so the toolbar never reflows mid-drag (#741). */
+.transcript-toolbar .transcript-restore-marked.is-idle {
+  visibility: hidden;
 }
 
 /* Transcription model picker (#427), with the inline form that registers a model file. */
@@ -4952,8 +5025,24 @@ button.track-head:focus-visible {
 }
 
 .take-status-outcome.is-failed,
-.take-status-outcome.is-short {
+.take-status-outcome.is-short,
+.take-status-outcome.is-quiet {
   color: var(--danger);
+}
+
+.take-status-outcome.is-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.shoot-last {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 @keyframes take-status-arrive {

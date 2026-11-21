@@ -4,6 +4,7 @@ import type { MethodResult, ShootStatusResult } from "@frameshell/protocol";
 import { useSyncExternalStore } from "react";
 import type { FileNode } from "../../../shared/api.js";
 import { listenEverywhere } from "../windows.js";
+import { tooQuiet } from "./model.js";
 import { shoot } from "./recorder.js";
 import { type CutTake, type OpenTake, currentScene, nextTakeNumber, sceneAfter, takeKey } from "./takes-model.js";
 
@@ -34,6 +35,8 @@ export function createTakes() {
   let initialized = false;
   let refreshTimer: number | undefined;
   let assembleWanted = false;
+  /** Ends the level watch of the open take, giving its loudest mic level. */
+  let takeLevel: (() => number) | null = null;
   const set = (next: Partial<TakesState>) => {
     state = { ...state, ...next };
     for (const listener of listeners) listener();
@@ -142,6 +145,7 @@ export function createTakes() {
       if (!clock) return;
       const last = state.last?.session === clock.session ? state.last : null;
       // The scene stays current once recorded, also when it is done: only Next scene or a click moves on.
+      takeLevel = shoot.watchLevel();
       set({ open: { start: clock.seconds, scene, number: nextTakeNumber(state.status, scene, last) }, last, picked: scene });
     },
 
@@ -151,7 +155,10 @@ export function createTakes() {
       const clock = shoot.clock();
       const script = state.script;
       if (!open || !clock || !script) return;
-      const cut: CutTake = { id: null, session: clock.session, scene: open.scene, number: open.number, short: clock.seconds - open.start < 0.5, error: null };
+      const loudest = takeLevel?.() ?? 0;
+      takeLevel = null;
+      const short = clock.seconds - open.start < 0.5;
+      const cut: CutTake = { id: null, session: clock.session, scene: open.scene, number: open.number, short, quiet: !short && tooQuiet(loudest), error: null };
       set({ open: null, last: cut });
       if (cut.short) return;
       const settle = (next: Partial<CutTake>) => state.last === cut && set({ last: { ...cut, ...next } });
