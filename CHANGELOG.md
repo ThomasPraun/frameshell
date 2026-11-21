@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Export video from the app: File > Export video… (Cmd/Ctrl+E) and an Export video button in the preview header of a
+  video project ask where to save the MP4, render it in the background with the progress on the button, then name the
+  file, say what the export left out and offer Show file. Before, a film could only be exported with `frameshell render`
+  in a terminal (#738).
+
 - Put media on the timeline without an agent: right-click a video, sound or picture in `assets/` in Files and choose
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
