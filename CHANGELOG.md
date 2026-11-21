@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
+  ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
+  person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
+  waits, and a status line entry. Read-only: proposals are still accepted in the app (#798).
+
 - Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
   toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
   each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of
