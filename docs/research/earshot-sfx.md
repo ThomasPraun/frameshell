@@ -5,7 +5,7 @@ plugin and as a ranking for Audition. This note is a **desk review of the source
 version 1.0.0): what it is, what a plugin would look like in Frameshell, and the go rule for a hands-on spike. Nothing
 was installed or run: the spike installs third-party Python and runs it, which is a step for the owner's machine.
 
-**Status: proposal.** Two decisions are the owner's (end of note).
+**Status: decided 2026-11-21.** The owner took both recommendations: Python is acceptable for an opt-in plugin that uses the person's own Python, and the spike below runs first, on the Lenovo.
 
 ## What earshot is (from its README, `pyproject.toml` and `docs/`)
 
