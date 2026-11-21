@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
 
+- `frameshell history sound <tx|op>` (MCP `history_sound`) proves a sound edit touched only what it meant to: per
+  track, the time ranges where the level moved 1 dB or more between right before and right after the transaction,
+  whether sound came in, went or changed level, and by how many dB. Measured like the sound review, from each clip's
+  envelope with its gain and fades, never mixed (#803).
+
 ### Fixed
 
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's

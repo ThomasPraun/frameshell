@@ -114,3 +114,38 @@ function unavailable(target: string, timeline: string, why: string): RpcError {
     { target, timeline, hint: "The journal cannot replay changes it did not record; read the timeline as it is now." },
   );
 }
+
+/** The timeline right before a target's first operation and right after its last; see {@link statesAround}. */
+export interface StatesAround {
+  before: Timeline;
+  after: Timeline;
+}
+
+/**
+ * The states of `timeline` right before a transaction's (or operation's) first operation and right after its last,
+ * rewound from `current` through the stored inverses like {@link planDiff}. Later operations do not change them.
+ *
+ * Throws HistoryNotFound when no entry matches, and HistoryUnavailable when the file changed outside the journal since
+ * the target.
+ */
+export function statesAround(current: Timeline, entries: JournalEntry[], target: string, timeline: string): StatesAround {
+  const inTarget = (entry: JournalEntry) => entry.id === target || entry.tx === target;
+  const first = entries.findIndex(inTarget);
+  if (first === -1) throw historyNotFound(target, timeline);
+  const tail = entries.slice(first);
+  const gap = journalGap(current, tail);
+  if (gap !== null) throw unavailable(target, timeline, `changed outside the journal ${gap}`);
+  let state = current;
+  let after: Timeline | null = null;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const entry = tail[i]!;
+    if (after === null && inTarget(entry)) after = state;
+    try {
+      state = applyPatch(state, entry.inverse.args);
+    } catch (error) {
+      throw unavailable(target, timeline, `no longer matches the file at ${entry.id} (${(error as Error).message})`);
+    }
+  }
+  // `tail` starts at the target's first entry, so `state` is now the timeline right before it.
+  return { before: state, after: after ?? state };
+}
