@@ -86,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
+  it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
+  disappear under a running ffmpeg or Chrome (#790).
 - The Plugins view, `frameshell plugin catalog` and the MCP catalog size the speech model the project transcribes
   with (its model, else this machine's default) instead of always whisper-cpp's default; a model added with
   `model add` counts as already on disk (#789).
