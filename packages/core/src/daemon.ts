@@ -1749,7 +1749,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
     "plugin.catalog": async ({ cwd }) => {
       const dir = await root(cwd);
-      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
+      const config = (await readEnclosingProject(dir))?.config;
+      const registered = new Set((await models.list()).models.map((model) => model.id));
+      const chosenModel = async (provider: string) => {
+        const own = (config?.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER) === provider ? config?.transcription?.model : undefined;
+        const id = own ?? (await models.defaultFor(provider));
+        return id === undefined ? undefined : { id, registered: registered.has(id) };
+      };
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir), chosenModel });
     },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);

@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Plugins view, `frameshell plugin catalog` and the MCP catalog size the speech model the project transcribes
+  with (its model, else this machine's default) instead of always whisper-cpp's default; a model added with
+  `model add` counts as already on disk (#789).
+
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
   track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
   saying so (#755).
