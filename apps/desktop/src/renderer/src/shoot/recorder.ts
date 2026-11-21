@@ -2,7 +2,7 @@
 // the Shoot view switches tabs or moves to its own window (ADR 0012). Main appends the chunks and finishes the session.
 import { useSyncExternalStore } from "react";
 import type { ShootFinish, ShootRole, ShootScreenSource, ShootSourceSpec, ShootSupport } from "../../../shared/api.js";
-import { LEVEL_FLOOR, capSize, heldLevel, levelDb, meterWindow, pickType, silentSince, silentTooLong } from "./model.js";
+import { LEVEL_FLOOR, capSize, heldLevel, levelDb, meterWindow, pickType, silentSince, silentTooLong, tooQuiet } from "./model.js";
 
 /** A camera or microphone. */
 export interface ShootDevice {
@@ -41,6 +41,12 @@ export interface ShootState {
   phase: ShootPhase;
   /** `performance.now()` when recording began. */
   startedAt: number | null;
+  /** The global End shortcut is held for the session recording now (another app may own the keys). */
+  endShortcut: boolean;
+  /** `performance.now()` when End was pressed, while the session is saved; null otherwise. */
+  endingAt: number | null;
+  /** The session finished last here had its microphone nearly silent the whole time ({@link tooQuiet}). */
+  quiet: boolean;
   error: string | null;
   /** The session finished last here: by End, or recovered after a crash. */
   finished: ShootFinish | null;
@@ -73,6 +79,9 @@ export function createShootRecorder() {
     systemSilent: false,
     phase: "idle",
     startedAt: null,
+    endShortcut: false,
+    endingAt: null,
+    quiet: false,
     error: null,
     finished: null,
   };
@@ -88,6 +97,10 @@ export function createShootRecorder() {
   /** `performance.now()` of the first recorder's start: 0 on the session clock (the group clock). */
   let origin: number | null = null;
   let beforeEnd: (() => Promise<void>) | null = null;
+  /** Open level watches ({@link store.watchLevel}), each holding the loudest raw mic reading since it began, dBFS. */
+  const watches = new Set<{ loudest: number }>();
+  /** The watch of the session recording now. */
+  let sessionWatch: (() => number) | null = null;
 
   const set = (next: Partial<ShootState>) => {
     state = { ...state, ...next };
@@ -140,6 +153,7 @@ export function createShootRecorder() {
     const mic = level("mic");
     const system = level("system");
     const now = performance.now();
+    if (meters.has("mic")) for (const watch of watches) watch.loudest = Math.max(watch.loudest, mic);
     // The silence check reads the level as it is; the meters hold peaks so a short sound is seen.
     silence = state.systemAudio && meters.has("system") ? silentSince(silence, system, now) : null;
     set({
@@ -197,6 +211,18 @@ export function createShootRecorder() {
       const system = state.systemAudio ? state.screenStream?.getAudioTracks()[0] : undefined;
       return [mic, system].filter((track): track is MediaStreamTrack => track !== undefined && track.readyState === "live");
     },
+    /**
+     * Start watching the microphone level. Returns a function giving the loudest reading since this call, dBFS, and
+     * ending the watch (later calls give the same value): the takes store flags a nearly silent take with it.
+     */
+    watchLevel(): () => number {
+      const watch = { loudest: LEVEL_FLOOR };
+      watches.add(watch);
+      return () => {
+        watches.delete(watch);
+        return watch.loudest;
+      };
+    },
     /** Run `work` when End is pressed, before the recorders stop (the takes store cuts an open take). */
     setBeforeEnd(work: (() => Promise<void>) | null): void {
       beforeEnd = work;
@@ -228,6 +254,8 @@ export function createShootRecorder() {
           .recovered()
           .then((list) => list.at(-1) && set({ finished: list.at(-1)! }), () => undefined);
         api().onRecovered((finish) => set({ finished: finish }));
+        // The global End shortcut, pressed in any app while this window records.
+        api().onEndRequested(() => void store.end());
       }
       return () => {
         mounted--;
@@ -350,8 +378,9 @@ export function createShootRecorder() {
           recorder.start(1000);
         }
         origin = Math.min(...Object.values(starts));
-        set({ phase: "recording", startedAt: performance.now() });
-        await api().started(opened, starts);
+        sessionWatch = store.watchLevel();
+        set({ phase: "recording", startedAt: performance.now(), quiet: false });
+        set({ endShortcut: await api().started(opened, starts) });
       } catch (error) {
         set({ error: message(error) });
         if (session) await store.end();
@@ -369,7 +398,9 @@ export function createShootRecorder() {
       if (!current || state.phase === "ending") return;
       // An open take is cut first, while the session clock still runs.
       await beforeEnd?.().catch((error: unknown) => set({ error: message(error) }));
-      set({ phase: "ending" });
+      const loudest = sessionWatch?.() ?? 0;
+      sessionWatch = null;
+      set({ phase: "ending", endingAt: performance.now(), quiet: tooQuiet(loudest) });
       await Promise.all(
         current.recorders.map(
           ({ recorder }) =>
@@ -385,9 +416,9 @@ export function createShootRecorder() {
       session = null;
       try {
         const finished = await api().end(current.id);
-        set({ phase: "idle", startedAt: null, finished });
+        set({ phase: "idle", startedAt: null, endingAt: null, endShortcut: false, finished });
       } catch (error) {
-        set({ phase: "idle", startedAt: null, error: message(error) });
+        set({ phase: "idle", startedAt: null, endingAt: null, endShortcut: false, error: message(error) });
       }
       if (mounted === 0) releaseAll();
     },
@@ -419,4 +450,9 @@ export function useShoot(): ShootState {
 /** True while a session records (or is starting or saving): the preview keeps quiet then (ADR 0024 decision 7). */
 export function useShootRecording(): boolean {
   return useSyncExternalStore(shoot.subscribe, () => shoot.get().phase !== "idle");
+}
+
+/** The recorder's phase, re-rendering only when it changes (not on every level reading). */
+export function useShootPhase(): ShootPhase {
+  return useSyncExternalStore(shoot.subscribe, () => shoot.get().phase);
 }
