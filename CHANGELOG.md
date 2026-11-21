@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
+  toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
+  each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of
+  being cut off (#741).
+
 - Export video from the app: File > Export video… (Cmd/Ctrl+E) and an Export video button in the preview header of a
   video project ask where to save the MP4, render it in the background with the progress on the button, then name the
   file, say what the export left out and offer Show file. Before, a film could only be exported with `frameshell render`
