@@ -189,6 +189,21 @@ describe("TerminalManager", () => {
     await expect.poll(() => agents.get(id) ?? [], { timeout: 5_000 }).toEqual([["term-late", "claude"]]);
   });
 
+  it("with probeEveryPoll (Windows) looks on every poll, the shell's name in the foreground or not", async () => {
+    // node-pty's foreground name is the shell's for good on Windows: the agent is read from the process table.
+    let running = false;
+    const { manager, output, agents, launch } = setup({ detectAgent: async () => (running ? "claude" : null), agentPollMs: 50, probeEveryPoll: true });
+    const { id } = manager.create(launch("term-table"), { cols: 80, rows: 24 });
+    await waitForPrompt(output, id);
+    running = true;
+    await expect.poll(() => agents.get(id) ?? [], { timeout: 5_000 }).toEqual([["term-table", "claude"]]);
+    running = false;
+    await expect.poll(() => agents.get(id) ?? [], { timeout: 5_000 }).toEqual([
+      ["term-table", "claude"],
+      ["term-table", null],
+    ]);
+  });
+
   it.skipIf(process.platform === "win32")("untags a terminal closed while its agent runs", async () => {
     const { manager, output, agents, launch } = setup();
     const { id } = manager.create(launch("term-gone"), { cols: 80, rows: 24 });

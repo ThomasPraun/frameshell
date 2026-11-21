@@ -1793,6 +1793,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
+  ipcMain.handle(Channel.terminalClipboardHasText, async () => (await clipboard.readText()) !== "");
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
     stateOf(event.sender).terminals.resize(id, cols, rows),
   );
