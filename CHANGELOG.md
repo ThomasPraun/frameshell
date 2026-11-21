@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Timeline by hand (#747): track headers show sound and picture switches that mute and hide the track with one
+  click (lit while on; the header menu still has them); "Zoom to fit" and the 0 key fit the clips themselves, so a
+  10 s video fills the panel instead of a sixth of it (the panel still opens on at least a minute); Ctrl+wheel past
+  the last clip zooms around the clips' end, so they stay in view; `M` names a new marker at the playhead, also in the
+  ruler and empty-lane menus; tooltips name tracks and clips (`V1 · Interview`, "generated (titles)") and never show
+  their ids; a track's menu stops offering "Add subtitles of V1" once V1 has a subtitle track, and the toolbar's
+  subtitle button picks a track without subtitles first.
+
 - The timeline hatches a generated clip only until its render is ready, and marks a failed render red with the
   reason in its tooltip (#746).
 
