@@ -19,7 +19,7 @@ async function openPoster(): Promise<{ app: ElectronApplication; page: Page }> {
   mkdirSync(folder, { recursive: true });
   const photo = join(folder, "poster.png");
   await ffmpegRun(await testFfmpeg(), ["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=navy:s=800x600", "-frames:v", "1", photo]);
-  const { app, page } = await launch({ ...box, projectDir: folder }, { env: { FRAMESHELL_SEGMENT_STAND_IN: "1" } });
+  const { app, page } = await launch({ ...box, projectDir: folder }, { env: { FRAMESHELL_SEGMENT_STAND_IN: "1", FRAMESHELL_AGENT_COMMANDS: "fake-agent=fake" } });
   await app.evaluate(({ dialog }, files) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
   }, [photo]);
@@ -36,6 +36,8 @@ test("Pick in a photo outlines the part under the click, up and down change its 
   try {
     await runInTerminal(page, `node "${FAKE_AGENT}"`);
     await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");
+    // Detected as an agent before anything is sent to it (ADR 0048).
+    await expect(page.locator('[role="tab"][data-agent="fake"]')).toHaveCount(1, { timeout: 15_000 });
 
     await page.getByRole("button", { name: "Pick" }).click();
     const frame = await laidOutBox(page.getByTestId("preview-frame"));

@@ -10,6 +10,7 @@ import {
   sceneAfter,
   sceneTitle,
   takeKey,
+  unshownDeviations,
 } from "../src/renderer/src/shoot/takes-model.js";
 
 const status = (next: string | null) =>
@@ -86,7 +87,7 @@ describe("take feedback", () => {
   const take = (id: string, scene: string, extra: Partial<Take> = {}) =>
     ({ id, scene, discarded: false, state: "analyzed", problem: null, deviations: [], ...extra }) as unknown as Take;
   const withTakes = (takes: Take[]) => ({ scenes: [{ slug: "hook", title: "Hook" }], takes, next: "hook" }) as unknown as ShootStatusResult;
-  const cut = (extra: Partial<CutTake> = {}): CutTake => ({ id: "t2", session: "s", scene: "hook", number: 2, short: false, error: null, ...extra });
+  const cut = (extra: Partial<CutTake> = {}): CutTake => ({ id: "t2", session: "s", scene: "hook", number: 2, short: false, quiet: false, error: null, ...extra });
 
   it("numbers a scene's takes, counting a cut on its way and leaving out discarded and short ones", () => {
     const status = withTakes([take("t1", "hook"), take("t0", "hook", { discarded: true }), take("t9", "problem")]);
@@ -110,5 +111,15 @@ describe("take feedback", () => {
     expect(cutOutcome(withTakes([]), cut({ id: null, short: true }))).toEqual({ kind: "short" });
     expect(sceneTitle(withTakes([]), "hook")).toBe("Hook");
     expect(sceneTitle(null, "hook")).toBe("hook");
+  });
+
+  it("lists the deviations the scene view leaves out, so every counted difference has a row", () => {
+    const hook = deviation("missing", null, "a", "");
+    const outside = { ...deviation("added", null, "", "hello"), id: "d_out", scene: null };
+    const other = { ...deviation("changed", null, "b", "c"), id: "d_other", scene: "problem" };
+    const taken = { id: "t2", deviations: [hook, outside, other] };
+    expect(unshownDeviations(taken, "t2", "hook").map((d) => d.id)).toEqual(["d_out", "d_other"]);
+    expect(unshownDeviations(taken, "t1", "hook").map((d) => d.id)).toEqual(["d_missing", "d_out", "d_other"]);
+    expect(unshownDeviations({ id: "t2", deviations: [hook] }, "t2", "hook")).toEqual([]);
   });
 });

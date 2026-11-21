@@ -18,6 +18,7 @@ import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
 import { handoffKindOf, handoffNotice } from "../handoff-notice.js";
+import { videoExport } from "../export/store.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
@@ -210,7 +211,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
   // "Chat about this" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
   // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
-  // agent anywhere it is typed into the last focused terminal, and with no terminal it goes to the clipboard.
+  // agent anywhere it goes to the clipboard and the status bar says to start one (ADR 0048), never to a bare shell.
   // "Copy reference" puts the same lines on the clipboard.
   useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
@@ -241,12 +242,17 @@ export function Workspace({ project }: { project: ProjectView }) {
               return;
             }
             const panel = terminals.current;
-            if (panel) {
+            // Only an agent's terminal gets it typed (ADR 0048): at a bare shell prompt Enter would run it as a command.
+            if (panel && (target?.kind === "terminal" || panel.agents().length > 0)) {
               if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, revealTerminal)) panel.type(lines, revealTerminal);
               return;
             }
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
-            setNotice(t.workspace.askCopied);
+            if (panel) {
+              // The terminal shows the agent guide, where one starts.
+              revealTerminal();
+              setNotice(t.workspace.askCopiedNoAgent);
+            } else setNotice(t.workspace.askCopied);
           })
           .catch((error: Error) => setNotice(error.message))
           .finally(() => (asking = false));
@@ -368,6 +374,8 @@ export function Workspace({ project }: { project: ProjectView }) {
     if (image) return;
     let running = false;
     return window.frameshell.menu.onCommand((command) => {
+      // File > Export video… (#738): the same export as the preview's button, which shows its progress.
+      if (command === "exportVideo") return void videoExport.start();
       const kind = handoffKindOf(command);
       if (kind === undefined || running) return;
       running = true;

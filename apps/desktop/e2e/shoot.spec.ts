@@ -65,7 +65,7 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test("records camera, screen and mic into one session, then makes it a multicam group with the screen marked", async () => {
+test("records camera, screen and mic into one session, ended by the global shortcut, then makes it a multicam group with the screen marked", async () => {
   test.setTimeout(120_000);
   await setUp();
   await page.getByTestId("shoot-start").click();
@@ -76,12 +76,18 @@ test("records camera, screen and mic into one session, then makes it a multicam 
   await expect(page.getByTestId("shoot-protect-note")).toContainText(protects ? "hides its windows" : "cannot hide its windows");
   // While recording the sources are locked.
   await expect(page.getByTestId("shoot-camera")).toBeDisabled();
+  // The global End shortcut is held while recording, and the view says so.
+  const held = () => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered("CommandOrControl+Alt+Shift+S"));
+  expect(await held()).toBe(true);
+  await expect(page.getByTestId("shoot-end-shortcut")).toHaveText(`${process.platform === "darwin" ? "⌘⌥⇧S" : "Ctrl+Alt+Shift+S"} ends the shoot from any app.`);
   await page.waitForTimeout(5000);
-  await page.getByTestId("shoot-end").click();
+  // A press reaches the window as this message: it ends the shoot as End does.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.send("shoot:end-requested"));
   const finished = page.getByTestId("shoot-finished");
   await expect(finished).toContainText("Saved 3 files to assets/shoot/", { timeout: 60_000 });
   await expect(finished).toContainText("multicam group");
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isContentProtected())).toBe(false);
+  expect(await held()).toBe(false);
 
   const [session] = readdirSync(shootDir);
   const files = readdirSync(join(shootDir, session!)).sort();

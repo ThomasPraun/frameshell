@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -18,6 +18,7 @@ import {
   app,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   protocol,
@@ -29,6 +30,7 @@ import {
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
 import { showsDevItems, windowListItems } from "./window-menu.js";
+import { createShootShortcut } from "./shoot-shortcut.js";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
@@ -124,6 +126,7 @@ import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, star
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { type TimelineMediaDeps, addMediaClips } from "./timeline-media.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
@@ -518,10 +521,12 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("job.progress", project.dir, {
       onEvent: ({ job }) => {
         if (job.kind === "clip") send(contents, Channel.clipsJob, job);
+        else if (job.kind === "render") send(contents, Channel.timelineExportJob, job);
         else if (job.kind === "people") send(contents, Channel.peopleScanJob, job);
       },
       onResync: () => {
         send(contents, Channel.clipsJob, null);
+        send(contents, Channel.timelineExportJob, null);
         send(contents, Channel.peopleScanJob, null);
       },
     }),
@@ -668,6 +673,16 @@ async function pickImageExport(window: BrowserWindow, defaultPath: string): Prom
   return result.canceled ? undefined : result.filePath;
 }
 
+/** Where to save an exported video (MP4), starting at `defaultPath`. */
+async function pickVideoExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+  const said = text.app.dialogs;
+  const result = await dialog.showSaveDialog(window, { title: said.exportVideo, defaultPath, filters: [{ name: said.videoFile, extensions: ["mp4"] }] });
+  return result.canceled ? undefined : result.filePath;
+}
+
+/** Files the app's Export video wrote this run: the only ones `timelineRevealExport` shows. */
+const exportedVideos = new Set<string>();
+
 /** Where to save an editor hand-off file of `kind`, starting at `defaultPath`. */
 async function pickHandoffExport(window: BrowserWindow, kind: HandoffKind, defaultPath: string): Promise<string | undefined> {
   const said = text.app.dialogs;
@@ -758,7 +773,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
+const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", "export-video", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -1308,6 +1323,9 @@ function shootDeps(root: string) {
 }
 
 /** Keep the project window and its panel windows out of screen captures while it records (ADR 0024 decision 7). */
+/** The global End shortcut, held while a window records (#744). */
+const shootShortcut = createShootShortcut(globalShortcut);
+
 function protectShoot(state: WindowState, on: boolean): void {
   for (const window of [state.window, ...state.panels.keys()]) if (!window.isDestroyed()) window.setContentProtection(on);
 }
@@ -1318,6 +1336,7 @@ function abandonShoot(state: WindowState): void {
   if (!shoot) return;
   state.shoot = null;
   protectShoot(state, false);
+  shootShortcut.release(state);
   void shootChunks
     .flushed()
     .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
@@ -1493,12 +1512,17 @@ function registerShootIpc(): void {
   );
   ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
     outcome(async () => {
-      const shoot = shootOf(stateOf(event.sender), id);
+      const state = stateOf(event.sender);
+      const shoot = shootOf(state, id);
       await markStarted(shoot.root, shoot.session.id, starts ?? {});
       for (const source of shoot.session.sources) {
         const start = starts?.[source.role];
         if (typeof start === "number" && Number.isFinite(start)) source.start = start;
       }
+      // Ends the session from any app, even with Frameshell's windows hidden from captures.
+      return shootShortcut.hold(state, () => {
+        if (!state.window.isDestroyed()) send(state.window.webContents, Channel.shootEndRequested);
+      });
     }),
   );
   ipcMain.handle(Channel.shootChunk, (event, id: unknown, role: ShootRole, data: Uint8Array) =>
@@ -1514,6 +1538,7 @@ function registerShootIpc(): void {
       const shoot = shootOf(state, id);
       state.shoot = null;
       protectShoot(state, false);
+      shootShortcut.release(state);
       try {
         await shootChunks.flushed();
         return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
@@ -1786,6 +1811,7 @@ function registerIpc(): void {
   ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
   ipcMain.handle(Channel.terminalList, (event) => stateOf(event.sender).terminals.list());
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
+  ipcMain.handle(Channel.terminalClipboardHasText, async () => (await clipboard.readText()) !== "");
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
     stateOf(event.sender).terminals.resize(id, cols, rows),
   );
@@ -1833,6 +1859,14 @@ function registerIpc(): void {
       return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
     }),
   );
+  ipcMain.handle(Channel.timelineAddMedia, (event, timeline: string, assets: string[], target?: { track: string; start: number }) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const aim = target && typeof target.track === "string" && Number.isFinite(target.start) ? { track: target.track, start: Math.max(0, target.start) } : undefined;
+      const deps: TimelineMediaDeps = { request: (method, params) => daemon.request(method, params), alone: (work) => editor.alone(work) };
+      return addMediaClips(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], deps, aim);
+    }),
+  );
   ipcMain.handle(Channel.timelineCutOut, (event, timeline: string, clip: string, mask: string) =>
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
@@ -1861,6 +1895,26 @@ function registerIpc(): void {
       const params = { cwd: project.dir, timeline: name, out };
       const { path, warnings } = await daemon.request(HANDOFFS[kind].method, params);
       return { path, warnings };
+    }),
+  );
+  // File > Export video… and the preview's Export video button (#738): main asks where, the daemon renders in the background.
+  ipcMain.handle(Channel.timelineExportVideo, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const name = String(timeline);
+      const base = name === "main" ? projectName(project.name) : `${projectName(project.name)}-${name}`;
+      const chosen = await pickVideoExport(state.window, join(project.dir, "exports", `${base}.mp4`));
+      if (!chosen) return null;
+      const out = extname(chosen) ? chosen : `${chosen}.mp4`;
+      const { job, output, warnings } = await daemon.request("render", { cwd: project.dir, timeline: name, out });
+      exportedVideos.add(output);
+      return { job, output, warnings };
+    }),
+  );
+  ipcMain.handle(Channel.timelineRevealExport, (_event, path: string) =>
+    outcome(async () => {
+      if (exportedVideos.has(String(path))) shell.showItemInFolder(String(path));
     }),
   );
   ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
@@ -2091,6 +2145,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+Shift+S",
           click: (_item, focused) => command("imageFromFrame", focused),
         },
+        { id: "export-video", label: said.exportVideo, accelerator: "CmdOrCtrl+E", click: (_item, focused) => command("exportVideo", focused) },
         ...HANDOFF_KINDS.map((kind) => ({
           id: HANDOFFS[kind].menuId,
           label: kind === "otio" ? said.exportOtio : said.exportPremiere,
