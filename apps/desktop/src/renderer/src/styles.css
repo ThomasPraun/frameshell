@@ -5108,7 +5108,10 @@ button.track-head:focus-visible {
 
 /* Colour grade of a media clip: a head row, five sliders, then the LUT and its mix. */
 .colour-grade {
-  flex: 1 0 100%;
+  /* Its own row, never wider than the inspector (#745: 27 px past the edge on macOS). */
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  max-width: 100%;
   min-width: 0;
   flex-direction: column;
   align-items: stretch;

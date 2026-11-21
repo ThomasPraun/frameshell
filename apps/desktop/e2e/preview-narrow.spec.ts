@@ -76,7 +76,10 @@ const sideways = () =>
         const past = [...element.querySelectorAll("*")]
           .filter((inner) => inner.getBoundingClientRect().right > edge + 1 && ![...inner.children].some((child) => child.getBoundingClientRect().right > edge + 1))
           .map((inner) => `${inner.tagName.toLowerCase()}.${inner.className} +${Math.round(inner.getBoundingClientRect().right - edge)}`);
-        return past.length > 0 ? `${element.className}: ${past.slice(0, 6).join(", ")}` : element.className;
+        // Its width and each direct child's, to tell a child too wide from a box laid out too wide.
+        const sizes = [element, ...element.children].map((each) => `${each.className.split(" ").pop()} ${Math.round(each.getBoundingClientRect().width)}`);
+        const box = `client ${element.clientWidth}; ${sizes.join(", ")}`;
+        return past.length > 0 ? `${element.className}: ${past.slice(0, 6).join(", ")} (${box})` : element.className;
       }),
   );
 
