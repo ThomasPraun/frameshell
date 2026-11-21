@@ -62,12 +62,22 @@ async function within(inner: string, outer: string): Promise<boolean> {
   );
 }
 
-/** Elements of the preview panel scrolled sideways, or wider than they show. */
+/**
+ * Elements of the preview panel scrolled sideways, or wider than they show. A box wider than it shows names the
+ * deepest elements that reach past its right edge, with by how many pixels, so a failure on another platform's
+ * fonts and native controls says which field to fix.
+ */
 const sideways = () =>
   page.evaluate(() =>
     [document.querySelector(".preview-body")!, ...document.querySelectorAll(".preview-body *")]
       .filter((element) => element.scrollLeft > 0 || (element.matches(".preview-body, .preview-transport, .clip-inspector") && element.scrollWidth > element.clientWidth + 1))
-      .map((element) => element.className),
+      .map((element) => {
+        const edge = element.getBoundingClientRect().left + element.clientWidth;
+        const past = [...element.querySelectorAll("*")]
+          .filter((inner) => inner.getBoundingClientRect().right > edge + 1 && ![...inner.children].some((child) => child.getBoundingClientRect().right > edge + 1))
+          .map((inner) => `${inner.tagName.toLowerCase()}.${inner.className} +${Math.round(inner.getBoundingClientRect().right - edge)}`);
+        return past.length > 0 ? `${element.className}: ${past.slice(0, 6).join(", ")}` : element.className;
+      }),
   );
 
 test("a narrow preview with formats keeps every transport button and the whole duration", async () => {

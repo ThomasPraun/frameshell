@@ -5129,6 +5129,18 @@ button.track-head:focus-visible {
   min-width: 0;
 }
 
+/* #745: a field never reaches past the inspector; its menu gives way first (macOS draws native menus wider). */
+.clip-inspector .clip-field {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clip-inspector .clip-field-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .colour-slider-input {
   flex: 0 1 96px;
   width: 96px;
