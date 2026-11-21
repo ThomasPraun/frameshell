@@ -267,3 +267,18 @@ function range(start: number, end: number): number[] {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
+
+/**
+ * A shoot script made from text written or pasted in the app (#737): `scripts/shoot.md` (or `shoot-2.md`, … when
+ * `taken` has it) with `shoot: true`. Text with no `## ` heading becomes one scene named `title`, so every line is
+ * read and compared.
+ */
+export function newShootScript(text: string, title: string, taken: readonly string[]): { path: string; content: string } {
+  const used = new Set(taken);
+  let path = "scripts/shoot.md";
+  for (let n = 2; used.has(path); n++) path = `scripts/shoot-${n}.md`;
+  const body = text.replace(/\r\n?/g, "\n").trim();
+  const scened = /^## /m.test(body) ? body : `## ${title}\n${body}`;
+  const name = title.replace(/[\r\n"]/g, " ").trim();
+  return { path, content: `---\ntitle: "${name}"\nshoot: true\n---\n${scened}\n` };
+}

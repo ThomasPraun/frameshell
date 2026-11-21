@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ImageLayersDeps, addImageLayers, nativeScale } from "../src/main/image-layers.js";
+import { type ImageLayersDeps, addImageLayers, layerScale, nativeScale } from "../src/main/image-layers.js";
 
 // Seam under test: how main stacks pictures as the layers of an image project (ADR 0017), against a recording
 // stand-in for the daemon.
@@ -13,7 +13,7 @@ function harness(options: { failAt?: string } = {}) {
     return method === "track.add" ? { changes: { added: [`t_${++next}`] } } : {};
   }) as unknown as ImageLayersDeps["request"];
   const sizes: Record<string, { width: number; height: number }> = { "assets/back.jpg": { width: 1920, height: 1080 }, "assets/logo.png": { width: 384, height: 108 } };
-  const deps: ImageLayersDeps = { request, alone: (work) => work(), resolution: { width: 1920, height: 1080 }, imageSize: (asset) => sizes[asset] ?? null };
+  const deps: ImageLayersDeps = { request, alone: (work) => work(), resolution: { width: 1920, height: 1080 }, imageSize: async (asset) => sizes[asset] ?? null };
   return { calls, deps, methods: () => calls.map((call) => call.method) };
 }
 
@@ -23,6 +23,13 @@ describe("nativeScale", () => {
     expect(nativeScale({ width: 3840, height: 2160 }, { width: 1920, height: 1080 })).toBe(2);
     expect(nativeScale({ width: 1920, height: 1080 }, { width: 1920, height: 1080 })).toBe(1);
     expect(nativeScale(null, { width: 1920, height: 1080 })).toBe(1);
+  });
+
+  it("fits a layer bigger than the frame inside it (#751)", () => {
+    expect(layerScale({ width: 320, height: 200 }, { width: 1280, height: 720 })).toBe(0.2778);
+    expect(layerScale({ width: 3840, height: 2160 }, { width: 1920, height: 1080 })).toBe(1);
+    // Taller than the frame only: still fitted.
+    expect(layerScale({ width: 1000, height: 2000 }, { width: 1920, height: 1080 })).toBe(1);
   });
 });
 

@@ -15,8 +15,10 @@ import { useConnectedAgentTargets } from "../ask/connected-targets.js";
 import { agentTargets } from "../ask/agent-targets.js";
 import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
+import { isImagePath } from "../../../shared/image-files.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
+import { systemErrorText } from "../system-error.js";
 import { handoffKindOf, handoffNotice } from "../handoff-notice.js";
 import { videoExport } from "../export/store.js";
 import { usePanelWindow } from "../panel-window.js";
@@ -28,12 +30,14 @@ import { angleKey } from "../timeline/angle-keys.js";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
 import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
+import { registerEditorOpener } from "../editor-opener.js";
 import { EditorArea } from "./EditorArea.js";
 import { LayersPanel } from "./LayersPanel.js";
 import { PreviewPanel } from "./PreviewPanel.js";
 import { ProposalBar } from "./ProposalBar.js";
 import { reviewState, setReviewEnabled, startReview } from "../review/store.js";
 import { PanelWindow } from "./PanelWindow.js";
+import { onSidebarView } from "../sidebar-request.js";
 import { Sidebar, SidebarWindow, sidebarViews } from "./Sidebar.js";
 import { Splitter } from "./Splitter.js";
 import { teleprompter } from "../teleprompter/store.js";
@@ -70,7 +74,14 @@ export function Workspace({ project }: { project: ProjectView }) {
   const [active, setActive] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [transcriptFocus, setTranscriptFocus] = useState<TranscriptFocus | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // A file-system failure in words stays until dismissed (#748); any other notice clears after NOTICE_MS.
+  // An export's notice stays too, with what the file leaves out and a way to its folder (#749).
+  const [notice, setNoticeState] = useState<{ text: string; sticky: boolean; details?: readonly string[]; reveal?: string } | null>(null);
+  const setNotice = useCallback((text: string | null) => setNoticeState(text === null ? null : { text, sticky: false }), []);
+  const showError = useCallback((error: Error) => {
+    const said = systemErrorText(error.message);
+    setNoticeState({ text: said ?? error.message, sticky: said !== null });
+  }, []);
   const setup = useProjectSetup();
   const connectedAgents = useConnectedAgentTargets();
   // An image project (ADR 0017) shows its layers where the timeline goes.
@@ -170,8 +181,8 @@ export function Workspace({ project }: { project: ProjectView }) {
   );
 
   useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    if (!notice || notice.sticky) return;
+    const timer = setTimeout(() => setNoticeState(null), NOTICE_MS);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -185,7 +196,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           if (outcome.kind === "no-shot") setNotice(t.workspace.angleNoShot);
           else if (outcome.kind === "no-angle") setNotice(t.workspace.angleNoAngle(outcome.number, outcome.count));
         },
-        (error: Error) => setNotice(error.message),
+        showError,
       );
     };
     return listenEverywhere("keydown", onKey);
@@ -199,10 +210,11 @@ export function Workspace({ project }: { project: ProjectView }) {
         void window.frameshell.media
           .import(paths)
           .then(async ({ imported, refused }) => {
-            setNotice(importNotice(imported, refused));
+            // An image project stacks pictures only: say which imports are no layer (#751).
+            setNotice(importNotice(imported, refused, image ? imported.filter((path) => !isImagePath(path)) : []));
             if (image && imported.length > 0) await window.frameshell.timeline.addLayers(SELECTION_TIMELINE, imported);
           })
-          .catch((error: Error) => setNotice(error.message));
+          .catch(showError);
       },
       [image],
     ),
@@ -211,7 +223,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
   // "Chat about this" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
   // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
-  // agent anywhere it is typed into the last focused terminal, and with no terminal it goes to the clipboard.
+  // agent anywhere it goes to the clipboard and the status bar says to start one (ADR 0048), never to a bare shell.
   // "Copy reference" puts the same lines on the clipboard.
   useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
@@ -242,14 +254,19 @@ export function Workspace({ project }: { project: ProjectView }) {
               return;
             }
             const panel = terminals.current;
-            if (panel) {
+            // Only an agent's terminal gets it typed (ADR 0048): at a bare shell prompt Enter would run it as a command.
+            if (panel && (target?.kind === "terminal" || panel.agents().length > 0)) {
               if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, revealTerminal)) panel.type(lines, revealTerminal);
               return;
             }
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
-            setNotice(t.workspace.askCopied);
+            if (panel) {
+              // The terminal shows the agent guide, where one starts.
+              revealTerminal();
+              setNotice(t.workspace.askCopiedNoAgent);
+            } else setNotice(t.workspace.askCopied);
           })
-          .catch((error: Error) => setNotice(error.message))
+          .catch(showError)
           .finally(() => (asking = false));
       },
       copy: () => {
@@ -264,7 +281,7 @@ export function Workspace({ project }: { project: ProjectView }) {
             await navigator.clipboard.writeText(lines.join("\n"));
             setNotice(warning ?? t.workspace.referenceCopied);
           })
-          .catch((error: Error) => setNotice(error.message))
+          .catch(showError)
           .finally(() => (asking = false));
       },
     });
@@ -337,13 +354,27 @@ export function Workspace({ project }: { project: ProjectView }) {
     };
   }, [showTranscript, image]);
 
+  // View > Shoot and View > Teleprompter (#737): the sidebar opens on that view, also when it was hidden.
+  useEffect(() => {
+    if (image) return;
+    return window.frameshell.menu.onCommand((command) => {
+      if (command !== "showShoot" && command !== "showTeleprompter") return;
+      const sidebarView = command === "showShoot" ? "shoot" : "teleprompter";
+      setLayout((current) => {
+        if (!current) return current;
+        const shown = current.panels.sidebar.collapsed ? togglePanel(current, "sidebar") : current;
+        return { ...shown, sidebarView };
+      });
+    });
+  }, [image]);
+
   // New image from the frame at the playhead (ADR 0017): Mod+Shift+S or File > New Image from Frame; a video project's only.
   useEffect(() => {
     if (image) return;
     const run = () =>
       void imageFromFrame().then(
         (dir) => dir && setNotice(t.workspace.frameImageOpened(dir.split(/[\\/]/).pop() ?? dir)),
-        (error: Error) => setNotice(error.message),
+        showError,
       );
     const offKeys = listenEverywhere(
       "keydown",
@@ -377,8 +408,8 @@ export function Workspace({ project }: { project: ProjectView }) {
       window.frameshell.timeline
         .exportHandoff(kind, SELECTION_TIMELINE)
         .then(
-          (result) => result && setNotice(handoffNotice(result, kind, t.workspace)),
-          (error: Error) => setNotice(error.message),
+          (result) => result && setNoticeState({ text: handoffNotice(result, kind, t.workspace), sticky: true, details: result.warnings, reveal: result.path }),
+          showError,
         )
         .finally(() => {
           running = false;
@@ -386,11 +417,29 @@ export function Workspace({ project }: { project: ProjectView }) {
     });
   }, [image]);
 
+  // Panels open project files in this window's editor through one opener (#746: a generated clip's composition).
+  useEffect(() => {
+    registerEditorOpener(browseFile);
+    return () => registerEditorOpener(null);
+  }, [browseFile]);
+
   // What the agent sees of this window (`ui_state`) and how it navigates it. Commands commit synchronously,
   // so the state the agent gets back already shows the opened tab or panel.
   const editorState = useRef({ active, tabs });
   editorState.current = { active, tabs };
   useEffect(() => uiLink.changed(), [active, tabs]);
+  // A dialog asked for a sidebar view (the voiceover dialog's "Open Plugins").
+  useEffect(
+    () =>
+      onSidebarView((view) =>
+        setLayout((current) => {
+          if (!current) return current;
+          const shown = current.panels.sidebar.collapsed ? togglePanel(current, "sidebar") : current;
+          return { ...shown, sidebarView: view };
+        }),
+      ),
+    [],
+  );
   const host = useMemo<UiHost>(
     () => ({
       editor: () => editorState.current,
@@ -542,6 +591,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                     onToggle={() => toggle("timeline")}
                     onShowTranscript={showTranscript}
                     onDetach={() => setPanelDetached("timeline", true)}
+                    onOpenFile={browseFile}
                   />
                 )}
               </div>
@@ -554,7 +604,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                 {image ? (
                   <LayersPanel mediaUrl={project.mediaUrl} collapsed={false} detached onDetach={() => setPanelDetached("timeline", false)} />
                 ) : (
-                  <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} />
+                  <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} onOpenFile={browseFile} />
                 )}
               </div>
             </PanelWindow>
@@ -577,6 +627,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           <TerminalPanel
             ref={terminals}
             projectName={project.name}
+            projectDir={project.dir}
             visible={!terminal.collapsed}
             onCollapse={() => toggle("terminal")}
             onReveal={revealTerminal}
@@ -589,7 +640,10 @@ export function Workspace({ project }: { project: ProjectView }) {
         project={project}
         activeFile={active === TRANSCRIPT_TAB ? t.workspace.transcript : active}
         session={activeSession}
-        notice={notice}
+        notice={notice?.text ?? null}
+        noticeDetails={notice?.details}
+        onRevealNotice={notice?.reveal ? () => void window.frameshell.timeline.revealExport(notice.reveal!) : undefined}
+        onDismissNotice={notice?.sticky ? () => setNoticeState(null) : undefined}
         setup={setup}
         agentTargets={terminal.collapsed ? connectedAgents : []}
         onShowTerminal={revealTerminal}

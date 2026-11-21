@@ -34,6 +34,42 @@ function writeTimeline(clips: unknown[]): void {
   writeFileSync(mainFile, JSON.stringify(timeline, null, 2));
 }
 
+/**
+ * Hover the clip `id` (on the first track, from `start` to `end` s) until its tooltip shows, and return the point.
+ * The lane's middle comes from the first track head; the x is swept across the clip, so a scroll or a zoom a test
+ * before left behind cannot put the pointer beside it.
+ */
+async function hoverClip(id: string, start: number, end: number): Promise<{ x: number; y: number }> {
+  const scroller = page.locator(".timeline-scroller");
+  await scroller.evaluate((element) => (element.scrollLeft = 0));
+  const rect = await laidOutBox(scroller);
+  const head = await laidOutBox(page.locator(".track-head").first());
+  const y = head.y + head.height / 2;
+  const tooltip = page.locator(".clip-tooltip");
+  const tried: string[] = [];
+  for (let step = 1; step < 10; step++) {
+    const { scrollLeft, pxPerSecond } = await scroller.evaluate((element) => ({ scrollLeft: element.scrollLeft, pxPerSecond: element.scrollWidth / 60 }));
+    const x = rect.x + (start + ((end - start) * step) / 10) * pxPerSecond - scrollLeft;
+    // From outside the lanes first, so every point is a fresh hover.
+    await page.mouse.move(rect.x + 2, rect.y + 2);
+    await page.mouse.move(x, y, { steps: 2 });
+    const shown = await tooltip.waitFor({ timeout: 1_000 }).then(
+      () => true,
+      () => false,
+    );
+    const name = shown ? await tooltip.locator("strong").textContent() : null;
+    tried.push(`${Math.round(x)},${Math.round(y)}:${name ?? "-"}`);
+    if (name === null) continue;
+    // A click tells which clip is under the point; the selection is the test's next step anyway.
+    await page.mouse.click(x, y);
+    if ((await page.getByTestId("timeline-lanes").getAttribute("data-selected")) === id) {
+      await page.mouse.move(x + 1, y);
+      return { x, y };
+    }
+  }
+  throw new Error(`no point over ${id} showed its tooltip: ${tried.join(" ")}`);
+}
+
 const playhead = () => page.getByTestId("playhead");
 const frame = () => page.getByTestId("preview-frame");
 const frameOfTimecode = (text: string) => {
@@ -164,4 +200,32 @@ test("reflects a timeline change made during playback without restarting it", as
   expect(third.length).toBeGreaterThan(10);
   expect(third.every((f) => f < 30), `third clip shows its new source range, saw ${third.join(",")}`).toBe(true);
   await expect(playhead()).toHaveText("00:00:04:00");
+});
+
+test("a generated clip's inspector says its render state and why, opens its composition, and toggles motion blur (#746)", async () => {
+  const { x, y } = await hoverClip("c_gen", 3, 4);
+  // The lane marks the clip that cannot render, with the reason in its tooltip.
+  await expect(page.locator(".clip-tooltip")).toContainText("Render failed:");
+  await page.mouse.click(x, y);
+  await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-selected", "c_gen");
+  const generated = page.getByTestId("generated-control");
+  await expect(page.getByTestId("generated-state")).toHaveText("Cannot render");
+  await expect(page.getByTestId("generated-error")).toContainText("@frameshell/hyperframes");
+  await expect(generated).toContainText("compositions/hyperframes/intro/index.html");
+  // A generated clip has no image to replace.
+  await expect(page.getByRole("button", { name: /Replace image|Use an image instead/ })).toHaveCount(0);
+  // The switch sends `clip.set motionBlur: {}`; with no plugin for the type the daemon refuses it, and says so.
+  await expect(generated.getByRole("button", { name: "Motion blur" })).toHaveAttribute("aria-pressed", "false");
+  await generated.getByRole("button", { name: "Motion blur" }).click();
+  await expect(page.locator(".clip-inspector-error")).toContainText('clip type "hyperframes" is not registered');
+  await generated.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "compositions/hyperframes/intro/index.html" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("a video clip offers an image in its place, not to replace an image (#746)", async () => {
+  await hoverClip("c_a", 0, 1);
+  await expect(page.getByRole("button", { name: "Use an image instead…" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace image…" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Keyframes" })).toContainText("Keyframes");
+  await expect(page.getByRole("group", { name: "Transitions" })).toContainText("Transitions");
 });

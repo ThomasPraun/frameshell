@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useReview } from "../review/store.js";
 import { type SelectionOrigin, selection } from "../selection.js";
 import { timelineState, useTimelineView, watchTimeline } from "../timeline/useTimelineView.js";
-import { historySelection } from "./model.js";
+import { entryTitles, historySelection } from "./model.js";
 
 /** Diffs asked for, by timeline, target and the revision asked at; both panels asking share one request. */
 const diffs = new Map<string, Promise<HistoryDiffResult>>();
@@ -129,4 +129,24 @@ export function useHistoryDiff(
     };
   }, [timeline, target, revision]);
   return state;
+}
+
+/**
+ * Title of history entry `target` of `timeline` (as the History panel words it), for places that name the entry
+ * outside the panel, such as the timeline's change legend. Null until read, or when the journal does not hold it.
+ */
+export function useEntryTitle(timeline: string, target: string | null): string | null {
+  const [title, setTitle] = useState<{ target: string; title: string | null } | null>(null);
+  useEffect(() => {
+    if (target === null) return;
+    let live = true;
+    window.frameshell.history.list(timeline).then(
+      (history) => live && setTitle({ target, title: entryTitles(history.transactions)(target) ?? null }),
+      () => live && setTitle({ target, title: null }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [timeline, target]);
+  return title !== null && title.target === target ? title.title : null;
 }

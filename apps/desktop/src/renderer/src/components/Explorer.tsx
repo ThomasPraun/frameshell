@@ -110,8 +110,8 @@ function Nodes({
       return;
     }
     if (!picked.has(node.path)) selection.selectFiles([node.path], "explorer");
-    // Several sound files selected (Cmd/Ctrl-click) and this one among them: they can be heard side by side.
-    const audition = picked.has(node.path) ? auditionItems([...picked], t.audition.explorerItem, windowOf(event.target)) : [];
+    // This sound file, or several selected (Cmd/Ctrl-click) with this one among them: heard alone or side by side.
+    const audition = auditionItems(picked.has(node.path) ? [...picked] : [node.path], t.audition.explorerItem, windowOf(event.target), 1);
     const media = video ? mediaOf(node) : [];
     const items = (voiceover: readonly MenuItem[]): MenuItem[] => [
       { label: t.editor.open, run: () => onOpenFile(node.path) },

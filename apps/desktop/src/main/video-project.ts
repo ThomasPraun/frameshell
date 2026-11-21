@@ -12,12 +12,12 @@ export const ASK_COPY_BYTES = 2 * 1024 ** 3;
 /** Characters no folder name may hold on any OS Frameshell runs on. Control characters are removed separately. */
 const UNSAFE_NAME = /[\\/:*?"<>|]/g;
 
-/** Folder name from what the user typed or the video's file name; never empty. */
-export function projectName(raw: string): string {
+/** Folder name from what the user typed or the video's file name; never empty: `untitled` (in the UI language) then. */
+export function projectName(raw: string, untitled = "Untitled video"): string {
   // Windows drops trailing dots and spaces from folder names, which would make the planned path a lie.
   const printable = [...raw].filter((char) => char.charCodeAt(0) >= 0x20).join("");
   const name = printable.replace(UNSAFE_NAME, "-").trim().replace(/[. ]+$/, "");
-  return name === "" || name === "." || name === ".." ? "Untitled video" : name;
+  return name === "" || name === "." || name === ".." ? untitled : name;
 }
 
 /** File name without its extension: `interview.mp4` → `interview`. */
