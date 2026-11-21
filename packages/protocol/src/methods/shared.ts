@@ -99,6 +99,7 @@ export const BinaryReportSchema = z.object({
         .enum(["metal", "cuda", "vulkan"])
         .nullable()
         .describe("GPU backend of the build; null = CPU only."),
+      bytes: z.number().describe("Download size of the build's archives, bytes."),
     })
     .nullable()
     .describe(

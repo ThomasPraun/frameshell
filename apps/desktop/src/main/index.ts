@@ -87,7 +87,7 @@ import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
-import { aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
+import { aiAppStatus, aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
 import { type Launcher, openDesktopApp, standInLauncher, systemLauncher } from "./desktop-apps.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
@@ -1608,6 +1608,12 @@ function registerIpc(): void {
   ipcMain.handle(Channel.agentsDisconnect, (_event, id: unknown) => {
     if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
     return changeAiApp(id, false, aiAppsAt);
+  });
+  ipcMain.handle(Channel.agentsShowFile, async (_event, id: unknown, file: unknown) => {
+    if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
+    // Only a settings file the app's own status names: the renderer never picks a path to reveal.
+    const status = await aiAppStatus(id, aiAppsAt);
+    if (typeof file === "string" && status.files.includes(file)) shell.showItemInFolder(file);
   });
   ipcMain.handle(Channel.agentsOpenApp, (_event, id: unknown, phrase: unknown) => {
     if (!isDesktopAppId(id)) throw new Error(`not a desktop AI app: ${String(id)}`);

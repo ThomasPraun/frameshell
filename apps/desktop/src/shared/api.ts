@@ -538,6 +538,8 @@ export interface FrameshellApi {
      * Never rejects for an app that is missing or will not start: that is the result's `problem`.
      */
     openApp(id: DesktopAppId, phrase: string): Promise<DesktopAppOpened>;
+    /** Show settings file `file` of app `id` in the system's file manager (#753); only a file that app's status lists. */
+    showFile(id: AiAppId, file: string): Promise<void>;
     /** Agent targets of the window's project outside its terminals (`target.list`, ADR 0025): MCP clients, `frameshell ask --wait`. */
     targets(): Promise<AgentTarget[]>;
     /** Queue `lines` for target `id` (`inbox.put`) until it reads them. Rejects with the daemon's message. */
@@ -1113,6 +1115,7 @@ export const Channel = {
   agentsConnect: "agents:connect",
   agentsDisconnect: "agents:disconnect",
   agentsOpenApp: "agents:open-app",
+  agentsShowFile: "agents:show-file",
   agentsTargets: "agents:targets",
   agentsSend: "agents:send",
   agentsTargetsChanged: "agents:targets-changed",

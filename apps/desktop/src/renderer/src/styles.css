@@ -4140,6 +4140,21 @@ button.track-head:focus-visible {
   gap: 6px;
 }
 
+/* A long failure (an engine's raw message) wraps under the button instead of widening the sidebar. */
+.people-scan {
+  flex-wrap: wrap;
+}
+
+.people-panel {
+  overflow-x: hidden;
+}
+
+.people-notice,
+.people-scan-state {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .people-add .people-input {
   flex: 1;
   min-width: 0;
@@ -4307,18 +4322,22 @@ button.track-head:focus-visible {
 
 .person-pick {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
 }
 
 .person-toggle {
   display: flex;
+  flex: none;
   border: 1px solid var(--line);
   border-radius: 4px;
   overflow: hidden;
 }
 
 .person-toggle button {
+  flex: none;
+  white-space: nowrap;
   padding: 2px 8px;
   background: none;
   border: 0;
@@ -5289,6 +5308,23 @@ button.track-head:focus-visible {
   width: min(720px, 100%);
 }
 
+.connect-ai-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Close and Check again stay in reach below the long developer list (#753). */
+.connect-ai-footer {
+  position: sticky;
+  bottom: -16px;
+  margin: 0 -20px -16px;
+  padding: 10px 20px 16px;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--line-soft);
+}
+
 .connect-ai-lede {
   margin: 0;
   color: var(--text-muted);
@@ -5448,6 +5484,23 @@ button.track-head:focus-visible {
   color: var(--danger);
 }
 
+.plugins-error p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.plugin-error-details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.plugin-error-details pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
 .plugins-trust {
   display: flex;
   flex-direction: column;
@@ -5519,14 +5572,21 @@ button.track-head:focus-visible {
 
 .download {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   font-size: 12px;
 }
 
+/* The name keeps a readable width; size and Remove wrap under it in a narrow sidebar (#753). */
 .download-name {
-  flex: 1;
+  display: flex;
+  flex: 1 1 12em;
+  flex-direction: column;
   min-width: 0;
+}
+
+.download-title {
   overflow-wrap: anywhere;
 }
 

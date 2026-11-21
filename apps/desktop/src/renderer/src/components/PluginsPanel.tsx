@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MachineDownloads, PluginsView } from "../../../shared/api.js";
 import { downloadSize, sizeText } from "../../../shared/sizes.js";
 import { t } from "../i18n.js";
-import { type DownloadRow, type PluginRow, downloadRows, otherPlugins, pluginRows, trustPrompt } from "../plugins/model.js";
+import { type DownloadRow, type PluginRow, downloadRows, downloadUse, errorParts, otherPlugins, pluginRows, trustPrompt } from "../plugins/model.js";
 import { useIdea } from "../idea.js";
 
 /** What a video made from an idea needs first: a generator of motion clips (#752). */
@@ -158,9 +158,9 @@ export function PluginsPanel() {
                 <li key={plugin.name} className="plugin" data-testid="plugin" data-name={plugin.name} data-state={plugin.status}>
                   <div className="plugin-head">
                     <span className="plugin-title">{plugin.name}</span>
-                    <span className={`plugin-state is-${plugin.status}`}>{stateText(plugin.status)}</span>
+                    <span className={`plugin-state is-${plugin.status}`}>{plugin.status === "untrusted" ? t.plugins.state.declared : stateText(plugin.status)}</span>
                   </div>
-                  {plugin.error && <p className="plugins-error">{plugin.error}</p>}
+                  {plugin.error && <PluginError text={plugin.error} />}
                   <div className="plugins-actions">
                     <button className="button" disabled={busy !== null} onClick={() => void remove(plugin)}>
                       {busy === `remove:${plugin.name}` ? t.plugins.removing : t.plugins.remove}
@@ -186,7 +186,10 @@ export function PluginsPanel() {
           {downloads?.rows.map((row) => (
             <li key={row.name} className="download" data-testid="download" data-name={row.name} data-on-disk={row.onDisk}>
               <span className="download-name">
-                {row.name} <span className="plugins-meta">{row.kind === "model" ? t.plugins.downloads.model : t.plugins.downloads.program}</span>
+                <span className="download-title">{row.name}</span>
+                <span className="plugins-meta" data-testid="download-use">
+                  {usedFor(row)}
+                </span>
               </span>
               <span className="download-size">
                 {row.onDisk ? sizeText(row.bytes ?? 0) : row.bytes ? t.plugins.downloads.notYetSized(downloadSize(row.bytes)) : t.plugins.downloads.notYet}
@@ -218,7 +221,7 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
       <p className={`plugins-meta${row.need.met === false ? " is-unmet" : ""}`}>{needText(row)}</p>
       <p className="plugins-meta">{row.cost === "free" ? t.plugins.free : row.cost === "cloud-audio" ? t.plugins.paidAudio : t.plugins.paidText}</p>
       <p className="plugins-meta">{downloadText(row)}</p>
-      {row.error && <p className="plugins-error">{row.error}</p>}
+      {row.error && <PluginError text={row.error} />}
       <div className="plugins-actions">
         {row.install && (
           <button
@@ -237,6 +240,25 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
         )}
       </div>
     </li>
+  );
+}
+
+/**
+ * A plugin's load error, short: its first line (first sentence of a long one) shows, the rest folds under
+ * Details, so a missing key does not fill the card with red lines (#753).
+ */
+function PluginError({ text }: { text: string }) {
+  const { head, rest } = errorParts(text);
+  return (
+    <div className="plugins-error" data-testid="plugin-error">
+      <p>{head}</p>
+      {rest && (
+        <details className="plugin-error-details">
+          <summary>{t.plugins.errorDetails}</summary>
+          <pre>{rest}</pre>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -265,6 +287,14 @@ function needText(row: PluginRow): string {
     case "remotion-project":
       return said.remotion;
   }
+}
+
+/** A download's kind, and what it is for when this app knows. */
+function usedFor(row: DownloadRow): string {
+  const said = t.plugins.downloads;
+  const kind = row.kind === "model" ? said.model : said.program;
+  const use = downloadUse(row.name);
+  return use ? said.usedFor(kind, said.use[use]) : kind;
 }
 
 function downloadText(row: PluginRow): string {
