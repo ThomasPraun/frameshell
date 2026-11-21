@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
 
+### Fixed
+
+- A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
+  track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
+  saying so (#755).
+
 ## [0.19.0] - 2026-11-20
 
 ### Added
