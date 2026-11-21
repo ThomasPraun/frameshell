@@ -11,8 +11,8 @@ import { NewFromIdea } from "./NewFromIdea.js";
 
 /**
  * First screen of a window with no project: start from a video, audio or image file, or from an idea with no footage,
- * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project; and
- * "Connect your AI".
+ * open a folder, reopen a recent one (right-click: Open, Reveal, Remove from Recent), or create a project;
+ * "Connect your AI", and the steps from there to an exported video (#740).
  */
 export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => void }) {
   const [recent, setRecent] = useState<string[]>([]);
@@ -159,6 +159,17 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
               <p>{t.agents.connect.welcome.body}</p>
             </div>
             <ConnectAiButton className="button primary" />
+          </section>
+        )}
+
+        {!plan && !idea && (
+          <section className="welcome-path" aria-label={t.welcome.path.title} data-testid="welcome-path">
+            <h2>{t.welcome.path.title}</h2>
+            <ol>
+              {t.welcome.path.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
           </section>
         )}
 

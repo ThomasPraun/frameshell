@@ -5375,6 +5375,25 @@ button.track-head:focus-visible {
   flex: none;
 }
 
+/* The path from a new project to an exported video (#740). */
+.welcome-path {
+  margin-top: 20px;
+}
+
+.welcome-path h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.welcome-path ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
 .connect-ai {
   width: min(720px, 100%);
 }

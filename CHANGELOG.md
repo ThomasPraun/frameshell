@@ -87,6 +87,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The cost box names an official provider by its plugin's name.
 - Desktop: the transcript view's Transcribe button also works with whisper.cpp, asking before the first download as a
   new project does; the hint no longer sends you to the terminal (#756).
+- Desktop, first run (#740):
+  - The welcome screen shows the steps from a new project to an exported video.
+  - The terminal's agent guide leads with "Connect Claude Desktop or ChatGPT" as the main button, with the
+    terminal agents after it.
+  - Installing a plugin shows the seconds so far and says that npm downloads it, which can take a minute or two.
 - Desktop, audio editing you can see and hear (#757):
   - Gain keys draw the volume they play as a line across the clip; a muted clip is dimmed, and a clip that ducks
     under the voice says "ducked". The inspector's mute button reads "Muted" while on, with a hint on the gain box.
