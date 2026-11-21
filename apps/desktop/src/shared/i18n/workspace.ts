@@ -3,13 +3,6 @@
 
 import { HANDOFFS, type HandoffKind } from "../handoff.js";
 
-/** The CLI command that writes the file of `kind` and lists what it leaves out; `placeholder` is the language's word for "file". */
-function handoffCommand(kind: HandoffKind, placeholder = "file"): string {
-  // The dictionary parity test calls this with a sample string, not a kind.
-  const { cli, extension } = HANDOFFS[kind] ?? HANDOFFS.otio;
-  return `frameshell export ${cli} --out <${placeholder}>.${extension}`;
-}
-
 const en = {
   imported: (names: string) => `Imported ${names} into assets/.`,
   notMedia: (names: string) => `Not media: ${names}.`,
@@ -18,7 +11,12 @@ const en = {
   /** The timeline saved as an editor hand-off file (ADR 0045, 0047), and how many things the file leaves out. */
   handoffExported: (name: string) => `Exported ${name}.`,
   handoffExportedWith: (name: string, count: number, kind: HandoffKind) =>
-    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the file: run ${handoffCommand(kind)} in a terminal to list ${count === 1 ? "it" : "them"}.`,
+    `Exported ${name}. ${count} ${count === 1 ? "thing is" : "things are"} not in the ${HANDOFFS[kind]?.app ?? "editor"} file.`,
+  /** Opens the list of what an export left out (#749). */
+  noticeDetails: "Details",
+  noticeDetailsTitle: "What the file leaves out, one line each",
+  /** Shows a file the app just wrote in Finder / Explorer. */
+  showInFolder: "Show in folder",
   dropToImport: "Drop to import into assets/",
   angleNoShot: "No shot at the playhead to cut.",
   angleNoAngle: (number: number, count: number) => `No angle ${number}: the group has ${count}.`,
@@ -112,7 +110,10 @@ const es: typeof en = {
   frameImageOpened: (name) => `${name} se abrió en una ventana nueva.`,
   handoffExported: (name) => `Se exportó ${name}.`,
   handoffExportedWith: (name, count, kind) =>
-    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo: ejecuta ${handoffCommand(kind, "archivo")} en una terminal para ${count === 1 ? "verla" : "verlas"}.`,
+    `Se exportó ${name}. ${count === 1 ? "Hay 1 cosa que no está" : `Hay ${count} cosas que no están`} en el archivo de ${HANDOFFS[kind]?.app ?? "el editor"}.`,
+  noticeDetails: "Ver detalles",
+  noticeDetailsTitle: "Lo que el archivo deja fuera, una línea por cosa",
+  showInFolder: "Mostrar en la carpeta",
   dropToImport: "Suelta para importar a assets/",
   angleNoShot: "No hay un plano bajo el cabezal para cortar.",
   angleNoAngle: (number: number, count: number) => `No hay ángulo ${number}: el grupo tiene ${count}.`,

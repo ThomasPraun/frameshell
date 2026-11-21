@@ -105,6 +105,14 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await expect(page.locator(".preview-notice")).toHaveText("Saved poster.jpg", { timeout: 60_000 });
     expect(existsSync(out)).toBe(true);
     expect([...readFileSync(out).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    // A way to the saved image's folder (#749): main reveals only what it wrote.
+    await app.evaluate(({ shell }) => {
+      const shown: string[] = [];
+      (globalThis as { shown?: string[] }).shown = shown;
+      shell.showItemInFolder = (path: string) => void shown.push(path);
+    });
+    await page.getByTestId("preview-export-reveal").click();
+    await expect.poll(() => app.evaluate(() => (globalThis as { shown?: string[] }).shown)).toEqual([out]);
 
     // Delete a layer.
     await layers.locator(".layers-row", { hasText: "Brand" }).click();
