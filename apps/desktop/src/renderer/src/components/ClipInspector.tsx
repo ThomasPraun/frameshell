@@ -215,9 +215,15 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
             aria-pressed={clip.muted}
             data-tip={clip.muted ? t.inspector.unmuteTitle : t.inspector.muteTitle}
             onClick={() => send({ op: "clip.set", args: { clip: clip.id, muted: !clip.muted } })}
+            data-testid="clip-mute"
           >
-            {t.inspector.mute}
+            {clip.muted ? t.inspector.muted : t.inspector.mute}
           </button>
+          {clip.muted && (
+            <p className="clip-inspector-hint" data-testid="clip-gain-muted">
+              {t.inspector.gainMutedHint}
+            </p>
+          )}
         </div>
       )}
       {audible && <VoiceControl clip={clip.id} effects={clip.audioEffects} onSend={send} onError={setError} />}

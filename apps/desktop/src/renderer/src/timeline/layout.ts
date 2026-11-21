@@ -85,6 +85,8 @@ export interface ClipBox {
   gain: number;
   /** `audio.muted`. */
   muted: boolean;
+  /** Its gain keys are a duck under other tracks (`track.duck` stored its settings on the clip, ADR 0037). */
+  ducked: boolean;
   /** Stored `audio.effects` of a media clip (ADR 0031) with every number filled, in processing order; empty without any. */
   audioEffects: NormalizedAudioEffect[];
   /** Stored `transform` with defaults filled; null when the clip has none. */
@@ -406,6 +408,7 @@ function clipBox(clip: ClipView, nextStart: number | undefined, problem: string 
     problem: clip.end === null ? (problem ?? t.timeline.lengthUnknown) : null,
     gain: typeof audio.gain === "number" ? audio.gain : 0,
     muted: audio.muted === true,
+    ducked: fields["duck"] !== undefined && fields["duck"] !== null,
     audioEffects: normalizeAudioEffects(audioEffectsOf(clip) ?? []),
     transform: transform ? { x: part("x", 0), y: part("y", 0), scale: part("scale", 1), opacity: part("opacity", 1) } : null,
     shot,

@@ -2,8 +2,8 @@
 // player, a spectrogram and their loudness, opened from the Explorer and from music candidate tracks.
 
 const en = {
-  title: (count: number) => `Audition ${count} sounds`,
-  explorerItem: (count: number) => `Audition ${count} sounds…`,
+  title: (count: number) => (count === 1 ? "Listen" : `Audition ${count} sounds`),
+  explorerItem: (count: number) => (count === 1 ? "Listen…" : `Audition ${count} sounds…`),
   folderItem: (count: number) => `Audition the ${count} sounds here…`,
   candidatesItem: (count: number) => `Audition the ${count} music candidates…`,
   reading: "Reading the sounds…",
@@ -23,15 +23,17 @@ const en = {
   sfxTake: (kind: string, variant: number, seed: number) => `${kind} · variant ${variant} · seed ${seed}`,
   musicTake: (preset: string, bpm: number, seed: number) => `${preset} · ${bpm} BPM · seed ${seed}`,
   spectrogram: (name: string) => `Spectrogram of ${name}`,
-  use: "Use this",
+  /** Selects the file in the Explorer: named for what it does (#757: "Use this" placed nothing). */
+  use: "Show in Explorer",
   useHint: "Selects the file in the Explorer and closes the dialog",
+  seekHint: "Click to play from here",
   skipped: (name: string, reason: string) => `${name} was left out: ${reason}`,
   close: "Close",
 };
 
 const es: typeof en = {
-  title: (count) => `Escuchar ${count} sonidos`,
-  explorerItem: (count) => `Escuchar ${count} sonidos…`,
+  title: (count) => (count === 1 ? "Escuchar" : `Escuchar ${count} sonidos`),
+  explorerItem: (count) => (count === 1 ? "Escuchar…" : `Escuchar ${count} sonidos…`),
   folderItem: (count) => `Escuchar los ${count} sonidos de aquí…`,
   candidatesItem: (count) => `Escuchar las ${count} músicas candidatas…`,
   reading: "Leyendo los sonidos…",
@@ -51,8 +53,9 @@ const es: typeof en = {
   sfxTake: (kind, variant, seed) => `${kind} · variante ${variant} · semilla ${seed}`,
   musicTake: (preset, bpm, seed) => `${preset} · ${bpm} BPM · semilla ${seed}`,
   spectrogram: (name) => `Espectrograma de ${name}`,
-  use: "Usar este",
+  use: "Mostrar en el Explorador",
   useHint: "Selecciona el archivo en el Explorador y cierra el diálogo",
+  seekHint: "Haz clic para reproducir desde aquí",
   skipped: (name, reason) => `${name} quedó fuera: ${reason}`,
   close: "Cerrar",
 };

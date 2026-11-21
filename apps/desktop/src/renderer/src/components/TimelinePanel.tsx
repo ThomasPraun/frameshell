@@ -87,6 +87,7 @@ import { type MenuItem, contextMenu } from "./ContextMenu.js";
 import { DetachButton } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { TRANSCRIPT_SHORTCUT } from "./TranscriptView.js";
+import { showSidebarView } from "../sidebar-request.js";
 import { useIdea } from "../idea.js";
 
 /** Timeline the panel follows: the one selections name, the project's `main` until timelines can be switched. */
@@ -169,6 +170,7 @@ export function TimelinePanel({
   onShowTranscript,
   detached = false,
   onDetach,
+  onOpenFile,
 }: {
   collapsed: boolean;
   /** Collapse or expand; absent in the timeline's own window, which does not collapse. */
@@ -179,6 +181,8 @@ export function TimelinePanel({
   detached?: boolean;
   /** Move the panel to its own window, or dock it back while `detached`. */
   onDetach?: () => void;
+  /** Open a project file in the editor: the timeline's own file when it cannot be read (#757). */
+  onOpenFile?: (path: string) => void;
 }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
   /** A video made from an idea: its empty state speaks of the brief, not of footage (#752). */
@@ -371,7 +375,7 @@ export function TimelinePanel({
           mattes={mattes}
           overlay={
             error && !view ? (
-              <p className="timeline-error">{error}</p>
+              <TimelineUnreadable error={error} onOpenFile={onOpenFile} />
             ) : empty || (layout && layout.rows.length === 0) ? (
               <p>{idea ? rich(t.timeline.emptyIdea, { brief: <code>brief.md</code> }) : rich(t.timeline.emptyHint, { assets: <code>assets/</code> })}</p>
             ) : null
@@ -379,6 +383,37 @@ export function TimelinePanel({
         />
       )}
     </>
+  );
+}
+
+/** Project-relative file of the timeline this panel shows. */
+const TIMELINE_FILE = `timelines/${TIMELINE}.json`;
+
+/**
+ * The timeline could not be read (#757): a sentence instead of the daemon's validation dump (kept under Details), and
+ * the ways out: open the file to fix it, or History to go back to an earlier version.
+ */
+function TimelineUnreadable({ error, onOpenFile }: { error: string; onOpenFile: ((path: string) => void) | undefined }) {
+  // The daemon names the file by its full path, with backslashes on Windows.
+  const file = error.replaceAll("\\", "/").includes(TIMELINE_FILE);
+  return (
+    <div className="timeline-error" role="alert" data-testid="timeline-unreadable">
+      <p>{file ? t.timeline.unreadable(TIMELINE_FILE) : t.timeline.notShown}</p>
+      <details>
+        <summary>{t.timeline.details}</summary>
+        <pre>{error}</pre>
+      </details>
+      <div className="timeline-error-actions">
+        {file && onOpenFile && (
+          <button className="button" data-testid="timeline-open-file" onClick={() => onOpenFile(TIMELINE_FILE)}>
+            {t.timeline.openTimelineFile}
+          </button>
+        )}
+        <button className="button" data-testid="timeline-show-history" onClick={() => showSidebarView("history")}>
+          {t.timeline.showHistory}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1206,8 +1241,11 @@ function TimelineCanvas({
   /** Right-click on a track header: rename it, add subtitles of it or another track, delete it (with its clips). */
   const openTrackMenu = (event: MouseEvent, row: TrackRow) => {
     event.preventDefault();
-    selection.selectTrack(row.id, "timeline");
+    // Selected clips stay selected (#757): the menu acts on the track by id, and Chat about this then speaks of them.
+    if (selection.get().clips.length === 0) selection.selectTrack(row.id, "timeline");
     const clipTrack = row.kind === "video" || row.kind === "audio";
+    // The track as the person named it; the A1 / V1 label only when it has no name (#757).
+    const title = row.name ?? row.label;
     const clips = row.kind === "subtitles" ? 0 : row.clips.length;
     contextMenu.open(
       event.clientX,
@@ -1226,11 +1264,11 @@ function TimelineCanvas({
         ...auditionItems(candidateFiles(latest.current.layout?.rows ?? [], row), t.audition.candidatesItem, windowOf(event.target)),
         // Once a subtitle track follows this one the menu stops offering it; the toolbar still adds a second.
         ...(clipTrack && unsubtitled(latest.current.layout).includes(row)
-          ? [{ label: t.timeline.addSubtitlesOf(row.label), run: () => addSubtitles(row.id) }]
+          ? [{ label: t.timeline.addSubtitlesOf(title), run: () => addSubtitles(row.id) }]
           : []),
         ...(image ? [] : addTrackItems(true)),
         {
-          label: t.timeline.deleteTrack(row.label, clips),
+          label: t.timeline.deleteTrack(title, clips),
           separated: true,
           danger: true,
           run: () => send([{ op: "track.remove", args: { track: row.id, ...(clips > 0 ? { force: true } : {}) } }]),

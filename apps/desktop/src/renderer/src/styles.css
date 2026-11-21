@@ -1582,6 +1582,12 @@ code {
   row-gap: 6px;
 }
 
+/* Why a control in the row is off (a muted clip's gain, #757): its own line under the row. */
+.clip-inspector-group > .clip-inspector-hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .clip-field {
   display: flex;
   align-items: center;
@@ -1652,7 +1658,9 @@ code {
 
 .clip-inspector-mute.on {
   border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
+  font-weight: 600;
 }
 
 .clip-inspector-screen.on {
@@ -2832,12 +2840,40 @@ button.track-head:focus-visible {
 }
 
 .timeline-empty .timeline-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 70ch;
+  padding: 8px 12px;
+  background: #1f2023;
+  color: var(--text);
+  text-align: left;
+  pointer-events: auto;
+  user-select: text;
+}
+
+.timeline-empty .timeline-error p {
+  padding: 0;
+}
+
+.timeline-error details summary {
+  cursor: pointer;
+  color: var(--text-faint);
+}
+
+.timeline-error pre {
+  margin: 4px 0 0;
+  max-height: 120px;
+  overflow: auto;
   color: var(--danger);
   white-space: pre-wrap;
-  text-align: left;
   font-family: var(--font-mono);
   font-size: 11.5px;
-  user-select: text;
+}
+
+.timeline-error-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .clip-tooltip {
@@ -3573,6 +3609,27 @@ button.track-head:focus-visible {
 .audition-gain {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+}
+
+.audition-duration {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The spectrogram is the scrub bar: click to play from there, a line where it plays (#757). */
+.audition-scrub {
+  position: relative;
+  cursor: pointer;
+}
+
+.audition-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 .audition-spectrogram {
