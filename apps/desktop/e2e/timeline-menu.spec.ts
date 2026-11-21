@@ -127,7 +127,7 @@ const head = (track: string) => page.locator(`.track-head[data-track="${track}"]
 
 test("a track header's menu renames the track in place", async () => {
   await head("v2").click({ button: "right" });
-  await expect(menu().getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename track", "Mute track", "Hide track", "Add subtitles of V2", "Add video track", "Add audio track", "Delete track V2 and its clip"]);
+  await expect(menu().getByRole("menuitem")).toHaveText([/Chat about this/, "Copy reference", "Rename track", "Mute track", "Hide track", "Add subtitles of Cards", "Add video track", "Add audio track", "Delete track Cards and its clip"]);
   await menu().getByRole("menuitem", { name: "Rename track" }).click();
   const input = page.getByTestId("track-rename-input");
   await expect(input).toBeFocused();
@@ -187,13 +187,15 @@ test("empty lane space adds tracks, and a header deletes a track with its clips"
   await expect.poll(() => savedTracks().filter((track) => track.kind === "audio")).toHaveLength(1);
 
   await head("v2").click({ button: "right" });
-  await menu().getByRole("menuitem", { name: "Delete track V2 and its clip" }).click();
+  // Named in the earlier test: the menu calls the track by its name (#757).
+  await menu().getByRole("menuitem", { name: "Delete track Logos and its clip" }).click();
   await expect.poll(() => savedTracks().map((track) => track.id)).not.toContain("v2");
 });
 
 test("a track's menu offers its subtitles once; the toolbar adds them to a track that has none first", async () => {
+  // V1 was renamed Titles above: the menu names the track as the person named it (#757).
   await head("v1").click({ button: "right" });
-  await menu().getByRole("menuitem", { name: "Add subtitles of V1" }).click();
+  await menu().getByRole("menuitem", { name: "Add subtitles of Titles" }).click();
   await expect.poll(() => savedTracks().filter((track) => track.kind === "subtitles")).toHaveLength(1);
   await head("v1").click({ button: "right" });
   await expect(menu().getByRole("menuitem", { name: /^Add subtitles of/ })).toHaveCount(0);

@@ -15,6 +15,9 @@ const en = {
   reset: "Reset",
   resetTitle: "Center, fit and make opaque again",
   mute: "Mute",
+  /** The Mute button while the clip is muted (#757). */
+  muted: "Muted",
+  gainMutedHint: "Unmute the clip to change its gain",
   unmuteTitle: "Unmute this clip",
   muteTitle: "Mute this clip",
   nothingToAdjust: "Nothing to adjust on this clip",
@@ -303,6 +306,8 @@ const es: typeof en = {
   reset: "Restablecer",
   resetTitle: "Centrar, ajustar al cuadro y volver a hacer opaco",
   mute: "Silenciar",
+  muted: "Silenciado",
+  gainMutedHint: "Quita el silencio del clip para cambiar su ganancia",
   unmuteTitle: "Quitar el silencio de este clip",
   muteTitle: "Silenciar este clip",
   nothingToAdjust: "Nada que ajustar en este clip",

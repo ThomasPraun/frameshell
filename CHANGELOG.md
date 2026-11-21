@@ -159,6 +159,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The cost box names an official provider by its plugin's name.
 - Desktop: the transcript view's Transcribe button also works with whisper.cpp, asking before the first download as a
   new project does; the hint no longer sends you to the terminal (#756).
+- Desktop, audio editing you can see and hear (#757):
+  - Gain keys draw the volume they play as a line across the clip; a muted clip is dimmed, and a clip that ducks
+    under the voice says "ducked". The inspector's mute button reads "Muted" while on, with a hint on the gain box.
+  - A track's header menu keeps the clips you selected, and names the track by its name ("Delete track Logos").
+  - Audition: one file opens "Listen", the rows show their length, a click on the spectrogram plays from there with
+    a playhead, and "Use this" is "Show in Explorer", which is what it does.
+  - A timeline that cannot be read says which file, keeps the validation details folded, and offers to open the file
+    or go to History.
 
 - A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
   frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field

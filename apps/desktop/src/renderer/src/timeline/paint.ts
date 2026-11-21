@@ -1,6 +1,7 @@
 // Draws the timeline lanes, clips, ruler and playhead onto a 2D canvas. Pure apart from the context it is given.
 import type { ClipDiff } from "@frameshell/protocol";
 import type { MarkerColor, TransitionShape } from "@frameshell/schema";
+import { keyedValueAt } from "@frameshell/schema/composite";
 import { irisCentre, shapeOrigin, shapeStep } from "@frameshell/schema/transitions";
 import { t } from "../i18n.js";
 import type { CueBox } from "../subtitles/model.js";
@@ -16,7 +17,7 @@ import {
   rulerTicks,
   visibleClips,
 } from "./layout.js";
-import { keyTimes } from "./transitions.js";
+import { clipClock, keyTimes } from "./transitions.js";
 import type { PaintMode, Span } from "./turn-lanes.js";
 
 /**
@@ -413,6 +414,12 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, clip.muted || row.muted ? theme.textFaint : kind.edge);
   // A generated clip is hatched until its render is ready (#746): rendering, ready and failed no longer look alike.
   if ((clip.kind === "generated" && clip.render !== "ready") || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem || clip.render === "failed" ? colors.dangerFill : kind.hatch);
+  // A muted clip is shaded over its whole body (#757): the label badge alone was easy to miss.
+  if (clip.muted) {
+    ctx.fillStyle = withAlpha(theme.lane, MUTED_ALPHA);
+    ctx.fillRect(left, y, w, h);
+  }
+  if (!clip.muted && clip.keys.gain && clip.keys.gain.length > 0) paintGainCurve(ctx, input, clip, left, right, y, h);
   ctx.restore();
 
   if (clip.kind === "timeline" && w > 6) {
@@ -468,6 +475,40 @@ function paintFormatMark<Img>(ctx: Paint2D<Img>, right: number, y: number, theme
   ctx.strokeStyle = theme.text;
   ctx.lineWidth = 1;
   ctx.strokeRect(x, top, FORMAT_MARK.width, FORMAT_MARK.height);
+}
+
+/** How much a muted clip is shaded with the lane colour, 0..1. */
+const MUTED_ALPHA = 0.55;
+/** Loudest gain the curve draws, dB: its top edge. Quieter than {@link GAIN_FLOOR_DB} sits on the bottom edge. */
+const GAIN_CEIL_DB = 12;
+const GAIN_FLOOR_DB = -40;
+/** Spacing of the curve's samples, px. */
+const GAIN_STEP_PX = 3;
+
+/** Height of a gain in dB inside a clip of height `h`, from its top: 0 dB a quarter down, louder above, quieter below. */
+export function gainY(db: number, h: number): number {
+  const clamped = Math.min(GAIN_CEIL_DB, Math.max(GAIN_FLOOR_DB, db));
+  return ((GAIN_CEIL_DB - clamped) / (GAIN_CEIL_DB - GAIN_FLOOR_DB)) * h;
+}
+
+/**
+ * The volume a clip's gain keys play, as a line across it (#757): the keys were only diamonds, so a duck or a fade
+ * made with keys did not read as a volume change. Between keys it follows the shared evaluator `keyedValueAt`.
+ */
+function paintGainCurve<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, clip: ClipBox, left: number, right: number, y: number, h: number): void {
+  const { pxPerSecond, scrollLeft } = input.viewport;
+  const keys = clip.keys.gain ?? [];
+  ctx.beginPath();
+  for (let x = left; x <= right + GAIN_STEP_PX; x += GAIN_STEP_PX) {
+    const at = Math.min(x, right);
+    const db = keyedValueAt(keys, clipClock(clip, (at + scrollLeft) / pxPerSecond)) ?? clip.gain;
+    const cy = y + gainY(db, h);
+    if (x === left) ctx.moveTo(at, cy);
+    else ctx.lineTo(at, cy);
+  }
+  ctx.strokeStyle = input.theme.accent;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 }
 
 /** Diamonds at the times a clip's properties have keys, along its bottom edge. */
@@ -798,6 +839,7 @@ function paintThumbnails<Img>(
 export function clipBadges(clip: ClipBox): string[] {
   const badges: string[] = [];
   if (clip.muted) badges.push(t.timeline.muted);
+  else if (clip.ducked) badges.push(t.timeline.ducked);
   else if (clip.gain !== 0) badges.push(`${clip.gain > 0 ? "+" : ""}${Number(clip.gain.toFixed(1))} dB`);
   const tr = clip.transform;
   if (tr && (tr.x !== 0 || tr.y !== 0 || tr.scale !== 1)) badges.push(`${Math.round(tr.scale * 100)}%`);

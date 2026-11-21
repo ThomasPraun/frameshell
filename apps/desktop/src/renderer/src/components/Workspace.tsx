@@ -591,6 +591,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                     onToggle={() => toggle("timeline")}
                     onShowTranscript={showTranscript}
                     onDetach={() => setPanelDetached("timeline", true)}
+                    onOpenFile={browseFile}
                   />
                 )}
               </div>
@@ -603,7 +604,7 @@ export function Workspace({ project }: { project: ProjectView }) {
                 {image ? (
                   <LayersPanel mediaUrl={project.mediaUrl} collapsed={false} detached onDetach={() => setPanelDetached("timeline", false)} />
                 ) : (
-                  <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} />
+                  <TimelinePanel collapsed={false} onShowTranscript={showTranscript} detached onDetach={() => setPanelDetached("timeline", false)} onOpenFile={browseFile} />
                 )}
               </div>
             </PanelWindow>
