@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Audition dialog, opened on music candidates (a `Music n` track's menu): **Play in the mix** plays the timeline from
+  the playhead, or from where the music starts, with only that candidate heard under the picture and the voice. The
+  other candidates are silenced in the preview only; the timeline's mutes are not changed (#803).
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
