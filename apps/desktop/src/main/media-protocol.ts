@@ -11,8 +11,8 @@ export const MEDIA_SCHEME = "frameshell-media";
 /**
  * What is served: daemon-derived proxies and sidecars (SPEC §5.1), baked
  * audio effects (ADR 0031), cached renders of generated clips (§6.5), subject mattes (ADR 0032), still images under
- * `assets/` (no proxy is built for stills; the preview draws the file), and caption fonts under `assets/fonts/`
- * (ADR 0028). `types` limits a folder to those extensions; null allows any.
+ * `assets/` (no proxy is built for stills; the preview draws the file), caption fonts under `assets/fonts/`
+ * (ADR 0028) and voiceover takes under `assets/voiceover/` (the report plays them). `types` limits a folder to those extensions; null allows any.
  */
 const SERVED: readonly { dir: string; types: ReadonlySet<string> | null }[] = [
   { dir: ".frameshell/proxies/", types: null },
@@ -21,6 +21,8 @@ const SERVED: readonly { dir: string; types: ReadonlySet<string> | null }[] = [
   { dir: ".frameshell/cache/mattes/", types: new Set(["mp4"]) },
   { dir: "assets/", types: new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]) },
   { dir: "assets/fonts/", types: new Set(["ttf", "otf"]) },
+  // Voiceover takes, played one by one in the voiceover report (#756).
+  { dir: "assets/voiceover/", types: new Set(["wav"]) },
 ];
 
 const TYPES: Record<string, string> = {
@@ -35,6 +37,7 @@ const TYPES: Record<string, string> = {
   bmp: "image/bmp",
   ttf: "font/ttf",
   otf: "font/otf",
+  wav: "audio/wav",
 };
 
 /** Renderer workers run on the page's `file://` origin: every reply allows it to read. */
