@@ -2100,7 +2100,21 @@ code {
 
 .transcript-toolbar .transcript-restore-marked {
   flex: none;
+  display: inline-grid;
   font-size: 11.5px;
+}
+
+.transcript-restore-marked > span {
+  grid-area: 1 / 1;
+}
+
+.transcript-restore-marked > .transcript-restore-sizer {
+  visibility: hidden;
+}
+
+/* Nothing struck selected: holds its place unseen, so the toolbar never reflows mid-drag (#741). */
+.transcript-toolbar .transcript-restore-marked.is-idle {
+  visibility: hidden;
 }
 
 /* Transcription model picker (#427), with the inline form that registers a model file. */

@@ -482,11 +482,21 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
         >
           {t.transcript.cutSelected}
         </button>
-        {markedStruck.length > 0 && (
-          <button className="link transcript-restore-marked" disabled={restoring.size > 0} onClick={() => void restore(markedStruck.map((word) => word.key))}>
-            {t.transcript.restoreCut(markedStruck.length)}
-          </button>
-        )}
+        {/* Keeps its place while nothing struck is selected: a drag over a cut word showing it must not reflow the
+            toolbar and move the words under the pointer (#741: on macOS the row wrapped mid-drag). */}
+        <button
+          className={`link transcript-restore-marked${markedStruck.length === 0 ? " is-idle" : ""}`}
+          disabled={markedStruck.length === 0 || restoring.size > 0}
+          aria-hidden={markedStruck.length === 0 || undefined}
+          tabIndex={markedStruck.length === 0 ? -1 : undefined}
+          onClick={() => void restore(markedStruck.map((word) => word.key))}
+        >
+          {/* Sized by its longest label, so a count going from 2 to 1 does not re-wrap the row either. */}
+          <span className="transcript-restore-sizer" aria-hidden="true">
+            {t.transcript.restoreCut(88)}
+          </span>
+          <span>{t.transcript.restoreCut(markedStruck.length || 2)}</span>
+        </button>
         {/* A row of its own under the buttons: it wraps instead of being cut off, and never moves when they change. */}
         <span className="hint">{t.transcript.hint}</span>
         {/* Always there once a transcript is shown, off until the selection is in one asset: selecting never reflows the toolbar (#741). */}

@@ -168,6 +168,8 @@ test("dragging across words selects them and their timeline range, skipping the 
   await page.mouse.up();
   await expect(page.locator(".tw.is-selected")).toHaveCount(3);
   await expect(word(3)).not.toHaveClass(/is-selected/);
+  // Selecting the cut word in between never reflowed the toolbar: the words stayed under the pointer (#741).
+  expect(await middle(4)).toEqual(five);
   // "two" starts at 1.2 s, "five" ends at 2.9 + (4.7 - 3.9) = 3.7 s.
   await expect(lanes()).toHaveAttribute("data-range", "1.2-3.7");
   await expect(lanes()).toHaveAttribute("data-playhead", "1.2");
@@ -273,12 +275,12 @@ test("struck words inside a drag selection restore with the toolbar button, as o
   await page.mouse.move(four.x, four.y, { steps: 8 });
   await page.mouse.up();
   const restore = page.locator(".transcript-restore-marked");
-  await expect(restore).toHaveText("Restore 2 cut words");
+  await expect(restore).toHaveAccessibleName("Restore 2 cut words");
   const before = journaled().length;
   await restore.click();
   for (const k of [1, 2]) await expect(word(k)).toHaveAttribute("data-state", "kept");
   expect(journaled().slice(before)).toEqual([{ op: "clip.trim", author: "ui" }]);
-  await expect(restore).toHaveCount(0);
+  await expect(restore).toBeHidden();
 });
 
 test("double-clicking a word corrects its text as a transcript edit", async () => {
