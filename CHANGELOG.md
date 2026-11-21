@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The status bar, `frameshell status` and Help > Copy diagnostics name the release version of the daemon
+  (`frameshelld 0.19.0`) instead of `0.0.0` (#739): inside a packaged app the daemon reports the app's stamped
+  version, since the workspace packages stay at `0.0.0`.
+
 - The Shoot view keeps the picked camera, microphone, screen and system audio when another view shows (#737): the
   devices are still freed a second after the view goes, and opened again as picked when it comes back. The microphone
   picked last is remembered on the machine and picked first next time when it is still connected.
