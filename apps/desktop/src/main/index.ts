@@ -21,6 +21,7 @@ import {
   globalShortcut,
   ipcMain,
   protocol,
+  safeStorage,
   screen,
   session,
   shell,
@@ -91,6 +92,7 @@ import { captureContextFrame } from "./context-frames.js";
 import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import { OpenAiKeyStore, STAND_IN_CIPHER } from "./openai-key.js";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
 import { aiAppStatus, aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
 import { type Launcher, openDesktopApp, standInLauncher, systemLauncher } from "./desktop-apps.js";
@@ -155,8 +157,21 @@ const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
 // Spawning the daemon reuses process.execPath (Electron): run it as plain Node. Spawned from a utility process so it
 // never holds this process's stdio handles.
+// ADR 0048: the OpenAI key typed in Plugins, encrypted by the OS; e2e has no keyring and uses a stand-in.
+const openAiKey = new OpenAiKeyStore(
+  join(resolveAppDirs(process.env).configDir, "openai-key.bin"),
+  () => (process.env.FRAMESHELL_KEYCHAIN_STAND_IN === "1" ? STAND_IN_CIPHER : safeStorage),
+  process.env,
+  () => text.plugins.key,
+);
 const daemon = new DaemonLink({
   socketPath,
+  // Every new connection (a restarted daemon too) gets the saved key, in memory only; the environment wins.
+  onConnected: async (conn) => {
+    await app.whenReady();
+    const key = await openAiKey.read();
+    if (key !== null) await conn.request("credentials.provide", { name: "OPENAI_API_KEY", value: key });
+  },
   client: `desktop/${APP_VERSION}`,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   launch: helperDaemonLauncher(() =>
@@ -1357,6 +1372,23 @@ function registerPluginsIpc(): void {
     outcome(async (): Promise<MachineDownloads> => {
       const { dataDir, downloads, binaries } = await daemon.request("doctor", { cwd: await dirOf(event.sender) });
       return { dataDir, downloads, binaries };
+    }),
+  );
+  ipcMain.handle(Channel.pluginsKeyState, () => outcome(() => openAiKey.state()));
+  ipcMain.handle(Channel.pluginsSaveKey, (_event, key: unknown) =>
+    outcome(async () => {
+      if (typeof key !== "string") throw new Error(text.plugins.key.empty);
+      await openAiKey.save(key);
+      const saved = await openAiKey.read();
+      if (saved !== null) await daemon.request("credentials.provide", { name: "OPENAI_API_KEY", value: saved });
+      return openAiKey.state();
+    }),
+  );
+  ipcMain.handle(Channel.pluginsRemoveKey, () =>
+    outcome(async () => {
+      await openAiKey.remove();
+      await daemon.request("credentials.provide", { name: "OPENAI_API_KEY", value: null });
+      return openAiKey.state();
     }),
   );
   ipcMain.handle(Channel.pluginsRemoveDownload, (event, name: string, bytes: number) =>

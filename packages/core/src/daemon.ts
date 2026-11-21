@@ -204,6 +204,7 @@ import { scriptLanguage } from "./shoot/language.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
+import { ProvidedCredentials } from "./credentials.js";
 
 /** Version reported in the handshake: the core package's, or the packaged app's release version ({@link coreVersion}). */
 export const DAEMON_VERSION: string = coreVersion(dirname(createRequire(import.meta.url).resolve("../package.json")));
@@ -273,6 +274,11 @@ export interface DaemonOptions {
   txIdleGapMs?: number;
   /** Transaction clock in epoch ms (idle gaps, auto-commit deadlines). Default `Date.now`. Tests skew it to pass deadlines without waiting. */
   txNow?: () => number;
+  /**
+   * Environment `credentials.provide` writes secrets into and the plugins read them from (ADR 0048). Default
+   * `process.env`; tests pass a plain object so daemons in one process stay apart.
+   */
+  env?: Record<string, string | undefined>;
 }
 
 /** Running daemon handle. */
@@ -1526,6 +1532,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   };
   /** Agent tags the app set per terminal session (`session.tag`), each with the connection that set it. */
   const sessionTags = new Map<string, { agent: string; owner: Caller }>();
+  /** Secrets the app handed over (`credentials.provide`), each with the connection that gave it. */
+  const credentials = new ProvidedCredentials<Caller>(options.env ?? process.env);
   /** Agent `caller`'s operations run under now: the one it named itself, else the app's tag of its session. */
   const agentOf = (caller: Caller): string | null => {
     if (caller.agent !== undefined) return caller.agent;
@@ -1689,6 +1697,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       else sessionTags.set(session, { agent, owner: caller });
       return {};
     },
+    "credentials.provide": async ({ name, value }, caller) => ({ source: credentials.provide(name, value, caller) }),
     status: async ({ cwd }, caller) => {
       const project = await projects.openEnclosing(cwd);
       let trust = null;
@@ -1754,7 +1763,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
     "plugin.catalog": async ({ cwd }) => {
       const dir = await root(cwd);
-      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir), env: options.env ?? process.env });
     },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);
@@ -3748,6 +3757,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       closedConnection.abort();
       events.drop(sink);
       for (const [session, tag] of sessionTags) if (tag.owner === caller) sessionTags.delete(session);
+      credentials.drop(caller);
       targets.drop(caller);
       ui.drop(sink);
       clients.delete(socket);

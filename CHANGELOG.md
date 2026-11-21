@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Desktop: the OpenAI plugins take your key in the Plugins view. Paste it under OpenAI transcription or OpenAI
+  voiceover and Save: the app encrypts it with the system keychain (Windows DPAPI, macOS Keychain, Linux Secret
+  Service), keeps it in its settings folder, and hands it to its own daemon in memory only while the app is open; the
+  CLI in the app's terminals uses it too. An `OPENAI_API_KEY` in the environment still wins. Where the system cannot
+  really encrypt (Linux without a keyring) nothing is kept and the view says to set the variable. New internal daemon
+  method `credentials.provide`; `PROTOCOL_VERSION` 186 (ADR 0048, #740).
+
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
@@ -88,10 +95,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back ("Deshecho: Mover clip"), and file-system failures (EACCES, EPERM, ENOTDIR, EEXIST, ENOSPC, EROFS, ENOENT) read as
   sentences with their path and stay in the status bar until closed. The idea form's checks, an untitled video's folder
   and an image-from-frame folder use the UI language (#748).
+
 - Desktop: export notices say where the file went. An OpenTimelineIO or Premiere XML hand-off names what the file
   leaves out with a "Details" list instead of a CLI command, and stays until closed; it and Export image offer
   "Show in folder". Save dialogs open in the project's `exports/` folder, made when missing (Windows opened its
   parent). An image saved without an extension gets `.png`; one the app cannot write is refused by name (#749).
+
 - Desktop: formats and safe zones from the app. The preview's format switcher is always there: the main format reads
   "Main · 1920×1080", others by aspect ("9:16 · 1080×1920"), and "Add format" adds a built-in one through the daemon
   (journaled like `format add`). The idea form lets you mark which ticked format is the main one; before, the first in
@@ -99,6 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choice (Instagram Reels, TikTok, YouTube Shorts, YouTube) drawn from `safe-zones.ts`, labelled and shaded, following
   the frame's shape until you pick one. A narrow preview stacks its tools, playback buttons and notice instead of
   letting the notice cover the tools (#750).
+
 - Desktop, image projects (#751):
   - New image from this frame at the very end of a video takes the last frame instead of failing after the size
     question. The size question no longer offers the same size twice, and the folder names the size
@@ -115,6 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The Angles tab is gone from image projects.
   - A layer whose name is cleared shows its file name without the extension.
   - Pick asks before downloading its photo model (with its size), and a failed download reads as one sentence.
+
 - Desktop, new video from an idea (#752, #740):
   - The brief is kept in the project as `brief.md`, so the agent can read it and it survives a restart. Before, it
     lived only in the app's memory.
@@ -131,9 +142,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The welcome lede mentions starting from an idea.
   - An empty idea project talks about its brief instead of footage: the timeline hint, the transcript hint, and its
     own agent suggestions. Plugins lists HyperFrames first, and the suggestion chips wrap instead of being cut off.
+
 - Face search no longer crashes on small videos. A 320x180 clip reached the face detector at its own size, which YuNet
   refuses (sides must be multiples of 32: "failed to call OrtRun()… broadcast… 10 by 11"); every frame now goes to it
   at the detector's size, scaled up when smaller (#753).
+
 - Desktop, People (#753):
   - Links and choices read files by name: "Ben in camera-a", "All of camera-a", "Face in talk at 0:04", and a recorded
     take "mic (recorded 15:44)" instead of `shoot/20261120-154402/mic.words.json`.
@@ -141,14 +154,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     an empty panel with linking hidden behind a right-click.
   - A face search that finds nothing new says so. A long failure wraps under the button instead of widening the
     sidebar, and the Speaks / On screen switch no longer overlaps its neighbour.
+
 - Desktop, Plugins (#753):
   - Downloads keep their names readable in a narrow sidebar: size and Remove wrap under the name. Each says what it is
     for ("Model for transcribing speech", "Program for reading and exporting video"), and programs not downloaded yet
     show their download size. `doctor` reports each pinned build's download size (`pinned.bytes`).
   - A plugin error shows its first line, the rest under "Details". A plugin from a terminal that never ran reads
     "Declared, not run until you trust this project" instead of claiming it is installed.
+
 - Desktop, Connect your AI (#753): an X at the top and a footer that stays in view; "Check again" also sits in the card
   of an app that looks not installed. A settings file that does not parse disables Connect and offers "Show the file".
+
 - Desktop, voiceover without the terminal (#756):
   - A script that names no voice opens "No voice yet" instead of a CLI message: pick one of the voices there are and
     Generate, or, with none, "Open Plugins". `voiceover.generate`'s missing-provider refusal carries `available`.
@@ -157,15 +173,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The report plays each line's take (▶), lines are numbered, and progress reads "Saying line 2 of 3" instead of the
     line's id (progress `values` carry `index` and `total`). After Stop, "Continue" goes on, reusing the takes made.
   - The cost box names an official provider by its plugin's name.
+
 - Desktop: the transcript view's Transcribe button also works with whisper.cpp, asking before the first download as a
   new project does; the hint no longer sends you to the terminal (#756).
+
 - Desktop: with no shoot script yet, the teleprompter and the Shoot view offer a box to write or paste one.
   It is saved as `scripts/shoot.md` with `shoot: true` and read at once (#737).
+
 - Desktop, first run (#740):
   - The welcome screen shows the steps from a new project to an exported video.
   - The terminal's agent guide leads with "Connect Claude Desktop or ChatGPT" as the main button, with the
     terminal agents after it.
   - Installing a plugin shows the seconds so far and says that npm downloads it, which can take a minute or two.
+
 - Desktop, audio editing you can see and hear (#757):
   - Gain keys draw the volume they play as a line across the clip; a muted clip is dimmed, and a clip that ducks
     under the voice says "ducked". The inspector's mute button reads "Muted" while on, with a hint on the gain box.

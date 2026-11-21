@@ -5953,6 +5953,45 @@ button.track-head:focus-visible {
   flex-wrap: wrap;
 }
 
+.plugins-actions .link {
+  align-self: center;
+  font-size: 12px;
+}
+
+.plugin-key {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plugin-key-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.plugin-key-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: 11.5px var(--font-mono);
+  user-select: text;
+}
+
+.plugin-key-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .download {
   display: flex;
   flex-wrap: wrap;

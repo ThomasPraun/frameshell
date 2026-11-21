@@ -30,6 +30,11 @@ export interface DaemonLinkOptions {
   daemonEntry?: string;
   /** Starts a daemon process. Default: spawn from this process. The app passes `helperDaemonLauncher`. */
   launch?: DaemonLauncher;
+  /**
+   * Per-connection setup run on every new connection before any request uses it, e.g. handing the daemon the saved
+   * OpenAI key (`credentials.provide`, ADR 0048). A failure is swallowed: the connection is still used.
+   */
+  onConnected?: (conn: DaemonConnection) => Promise<void>;
 }
 
 /**
@@ -187,7 +192,11 @@ export class DaemonLink {
 
   #connect(): Promise<DaemonConnection> {
     if (!this.#connection) {
-      const connection = connectOrStartDaemon({ startTimeoutMs: DAEMON_START_TIMEOUT_MS, ...this.options });
+      const { onConnected } = this.options;
+      const connection = connectOrStartDaemon({ startTimeoutMs: DAEMON_START_TIMEOUT_MS, ...this.options }).then(async (conn) => {
+        if (onConnected) await onConnected(conn).catch(() => undefined);
+        return conn;
+      });
       this.#connection = connection;
       // A failed connect must not be cached: the next request tries again.
       connection.then(
