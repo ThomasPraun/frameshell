@@ -84,11 +84,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table, as macOS and Linux do from the foreground process, so Chat about this types at it without Connect Claude Code
   (ADR 0048, #743).
 
+- The agent skill has rules for talking to the person: say what was measured, never "I listened" or "I watched"; ask
+  whether a note is a wish or a complaint before changing anything; ask the goal, references, format and length before
+  any new kind of film; show the storyboard before any paid run. `project-model.md` adds how to make a style your own:
+  three lists (safe to change, changes its character, cannot change), at most five changes a round, one frame first,
+  before next to after (#803).
+
 ### Fixed
 
 - Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
   instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
   agent there, as ADR 0048 says (#791).
+- Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
+  it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
+  disappear under a running ffmpeg or Chrome (#790).
+- The Plugins view, `frameshell plugin catalog` and the MCP catalog size the speech model the project transcribes
+  with (its model, else this machine's default) instead of always whisper-cpp's default; a model added with
+  `model add` counts as already on disk (#789).
 - Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads
   "Revertir «Mover clip»", the timeline's change legend names the entry and gives way to the counts, and a terminal
   session's id moves to the author's tooltip. The app's own journal labels ("Move clip", "Apply look", "Delete 2 clips")
