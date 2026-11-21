@@ -171,8 +171,14 @@ describe("analyze method", () => {
       shots: { look: { grid: string[] } }[];
     };
     const { tempo, shots, ...rest } = manifest;
-    const { tempo: shown, shots: shownShots, ...expected } = result;
+    // The card and the layers describe the files, so the manifest holds everything but them (#801).
+    const { tempo: shown, shots: shownShots, card, layers, ...expected } = result;
     expect(rest).toEqual(expected);
+    expect(readFileSync(join(result.dir, "card.md"), "utf8")).toBe(card);
+    expect(layers.map((entry) => [entry.file, entry.bytes])).toEqual([
+      ["shots.md", readFileSync(join(result.dir, "shots.md")).length],
+      ["analysis.json", readFileSync(join(result.dir, "analysis.json")).length],
+    ]);
     // The shots carry their colour grid in the file only.
     expect(shots.map(({ look: { grid: _grid, ...look } }) => look)).toEqual(shownShots.map((shot) => shot.look));
     expect(shots.map((shot) => shot.look.grid)).toHaveLength(3);

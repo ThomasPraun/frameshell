@@ -2,7 +2,7 @@ import { ANALYSIS_NAME_PATTERN, ANALYZE_CUT_KINDS, ANALYZE_EVENT_KINDS, type Ana
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `analyze`, in `frameshell --help`. */
-export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--no-speech] [--no-faces]
+export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--no-speech] [--no-faces] [--full]
                                Measure a reference video: shot table (cuts, cuts per minute, shot lengths), contact sheet
                                at 2 frames a second and a frame per shot, dominant colours and look (brightness, contrast,
                                saturation, warmth, colour grid) per shot and overall, rhythm (shot-length spread, still
@@ -16,6 +16,8 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--
                                new run replaces it; project files untouched). Times are frame / fps, rounded down. Every
                                value is labelled MEASURED, ESTIMATED or DECISION (--json: "labels"). Prints style.json
                                suggestions it never applies: style apply --from-analysis <name> takes them.
+                               Prints the card (card.md: about 300 tokens, then the layers shots.md and analysis.json
+                               with their size); --full prints every value.
                                --threshold: scene score that opens a shot (0.05 to 0.95; lower finds softer cuts)
                                --no-speech: skip recognising the speech (the slow part; no sentences or effects)
                                --no-faces: skip finding the faces for the mouth sync (the slow part; may download the face
@@ -31,7 +33,7 @@ export const ANALYZE_USAGE = `  analyze <video> [--name n] [--threshold 0.3] [--
 
 /** Flags `analyze` takes besides the global ones. */
 export const ANALYZE_FLAGS: Record<string, readonly string[]> = {
-  analyze: ["name", "threshold", "no-speech", "no-faces", "lag", "max-lag", "every", "snapshots"],
+  analyze: ["name", "threshold", "no-speech", "no-faces", "full", "lag", "max-lag", "every", "snapshots"],
 };
 
 /** A parsed `analyze` command. */
@@ -42,6 +44,8 @@ export interface AnalyzeInvocation {
   threshold?: number;
   speech?: false;
   faces?: false;
+  /** Print every value instead of the card (CLI only; the daemon writes every layer either way). */
+  full?: true;
 }
 
 /** A parsed `analyze diff` command. */
@@ -66,6 +70,7 @@ export interface AnalyzeOptions {
   snapshots?: string | undefined;
   "no-speech"?: boolean | undefined;
   "no-faces"?: boolean | undefined;
+  full?: boolean | undefined;
 }
 
 
@@ -85,6 +90,7 @@ function parseDiff(files: string[], options: AnalyzeOptions): AnalyzeDiffInvocat
   if (options.threshold !== undefined) throw new UsageError("`frameshell analyze diff` does not take --threshold (it cuts no shots).");
   if (options["no-speech"]) throw new UsageError("`frameshell analyze diff` does not take --no-speech (it recognises no speech).");
   if (options["no-faces"]) throw new UsageError("`frameshell analyze diff` does not take --no-faces (it reads no mouth sync).");
+  if (options.full) throw new UsageError("`frameshell analyze diff` does not take --full (it prints every value already).");
   if (options.name !== undefined && !ANALYSIS_NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
@@ -120,7 +126,7 @@ export function parseAnalyze(rest: string[], options: AnalyzeOptions): AnalyzeIn
   if (options.name !== undefined && !ANALYSIS_NAME_PATTERN.test(options.name)) {
     throw new UsageError(`--name takes letters, digits, ".", "_" and "-" (at most 64, starting with a letter or digit); got "${options.name}".`);
   }
-  return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(options["no-speech"] ? { speech: false as const } : {}), ...(options["no-faces"] ? { faces: false as const } : {}) };
+  return { kind: "analyze", file: rest[0]!, ...(options.name ? { name: options.name } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(options["no-speech"] ? { speech: false as const } : {}), ...(options["no-faces"] ? { faces: false as const } : {}), ...(options.full ? { full: true as const } : {}) };
 }
 
 /** Run a parsed `analyze` or `analyze diff`; human output unless `json`. */
@@ -130,9 +136,11 @@ export async function executeAnalyze(conn: DaemonConnection, inv: AnalyzeInvocat
     const result = await conn.request("analyze.diff", { cwd, ...params });
     return json ? `${JSON.stringify(result, null, 2)}\n` : formatDiff(result);
   }
-  const { kind: _kind, ...params } = inv;
+  const { kind: _kind, full, ...params } = inv;
   const result = await conn.request("analyze", { cwd, ...params });
-  return json ? `${JSON.stringify(result, null, 2)}\n` : formatAnalyze(result);
+  if (json) return `${JSON.stringify(result, null, 2)}\n`;
+  // The card first (#801): the full text only when asked, the layers say where the rest is.
+  return full ? formatAnalyze(result) : `${result.card}\nFolder: ${result.dir} (--full prints every value)\n`;
 }
 
 /** `[MEASURED]`, `[ESTIMATED]` or `[DECISION]` for the value at `path` of a result. */
