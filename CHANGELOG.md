@@ -23,7 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
 
+- Five particle and light overlays for HyperFrames clips, `fx-sparks`, `fx-confetti`, `fx-glow`, `fx-shockwave` and
+  `fx-rays` (`frameshell hyperframes new <name> --template fx-sparks`): seeded, drawn as a pure function of time on a
+  transparent canvas, coloured by the style's accent and ink, with hits at set times or on the music's beats
+  (`onBeats`), so a sound placed on the same beat lands on the same frame (#802).
+
 ### Fixed
+
+- The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
+  cloud container), as the producer's renders already do; before, they failed there before drawing anything.
 
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
   track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
