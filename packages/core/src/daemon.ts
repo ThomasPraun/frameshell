@@ -171,6 +171,7 @@ import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
 import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
 import { readTimelineWords } from "./transcripts/timeline-words.js";
+import { announceTranscription } from "./transcripts/announce.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -1036,6 +1037,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
+  /** Runs of `transcribe` so far, for the ids of `transcription.progress`. */
+  let transcriptionRuns = 0;
   const transcribing = async <T>(dir: string, work: () => Promise<T>): Promise<T> => {
     const key = canonicalPathSync(dir);
     transcriptions.set(key, (transcriptions.get(key) ?? 0) + 1);
@@ -1923,6 +1926,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const providerId = provider ?? config.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER;
       const overrides = { dir, binaries: config.binaries };
       const chosenModel = model ?? (await configuredModel(config, providerId));
+      // Every subscriber of the project sees this run, not only its caller (#742: a CLI run was invisible in the app).
+      const announcer = announceTranscription(
+        `t_${++transcriptionRuns}`,
+        relative(dir, resolve(cwd, asset)).split(sep).join("/"),
+        (update) => publishFor("transcription.progress", dir, { project: dir, ...update }),
+        request.progress,
+      );
       return transcribing(dir, () => transcribeAsset({
         projectDir: dir,
         asset: resolve(cwd, asset),
@@ -1933,10 +1943,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         tools: transcriberTools(overrides),
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
-        progress: request.progress,
+        progress: announcer.progress,
         yes,
         confirmation,
-      }));
+      })).then(
+        (result) => {
+          announcer.end();
+          return result;
+        },
+        (error: unknown) => {
+          announcer.end(error);
+          throw error;
+        },
+      );
     },
     "transcribe.speakers": async ({ cwd, asset, speakers }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
