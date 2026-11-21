@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Put media on the timeline without an agent: right-click a video, sound or picture in `assets/` in Files and choose
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
+- Website: a docs section at frameshell.dev/docs (and /es/docs), in English and Spanish. Getting started (install,
+  connect your AI, your first video), how it works, editing by hand, history and review, a guide per kind of video
+  (cutting by words, subtitles, shorts, multicam, shoot, video from audio or from an idea, titles, transitions, colour,
+  music, sound, voiceover, images, brand, people, reference video, variants, export), plugins, CLI and MCP, a FAQ and
+  troubleshooting. The header's Docs link goes there instead of the specification.
 
 ### Fixed
 

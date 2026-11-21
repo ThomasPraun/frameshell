@@ -5,8 +5,10 @@ import { strings, pathFor, type Lang, type Page } from "../i18n";
 
 interface Props {
   page?: Page;
+  /** Docs page slug, so the language link goes to the same page in the other language. */
+  slug?: string;
 }
-const { page = "home" } = Astro.props;
+const { page = "home", slug } = Astro.props;
 const lang = (Astro.currentLocale ?? "en") as Lang;
 const home = pathFor(lang);
 const t = strings(lang).header;
@@ -23,7 +25,7 @@ const other: Lang = lang === "en" ? "es" : "en";
       <a class="wide-only" href={page === "home" ? "#features" : `${home}#features`}>{t.features}</a>
       <a class="wide-only" href={page === "home" ? "#start" : `${home}#start`}>{t.start}</a>
       <a href={pathFor(lang, "agents")} aria-current={page === "agents" ? "page" : undefined}>{t.agents}</a>
-      <a class="wide-only" href={`${REPO}/blob/main/docs/SPEC.md`}>{t.docs}</a>
+      <a href={pathFor(lang, "docs")} aria-current={page === "docs" ? "page" : undefined}>{t.docs}</a>
       <a href={REPO} class="gh">
         <svg viewBox="0 0 16 16" aria-hidden="true"
           ><path
@@ -33,7 +35,7 @@ const other: Lang = lang === "en" ? "es" : "en";
         >
         <span>GitHub</span>
       </a>
-      <a class="lang" href={pathFor(other, page)} hreflang={other} lang={other} aria-label={t.switchAria} data-lang={other}
+      <a class="lang" href={pathFor(other, page, slug)} hreflang={other} lang={other} aria-label={t.switchAria} data-lang={other}
         >{t.switchLabel}</a
       >
       <a class="btn btn-primary btn-sm" href={RELEASES} data-download>{t.download}</a>
@@ -123,9 +125,14 @@ const other: Lang = lang === "en" ? "es" : "en";
     }
   }
 
-  /* Phones keep Agents, the language and Download; GitHub stays in the footer. */
+  /* Phones keep Agents, Docs, the language and Download; GitHub stays in the footer, the name beside the logo goes. */
   @media (max-width: 420px) {
-    .gh {
+    nav {
+      gap: 16px;
+    }
+
+    .gh,
+    .brand span {
       display: none;
     }
   }
