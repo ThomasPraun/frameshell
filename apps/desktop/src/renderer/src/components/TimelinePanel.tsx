@@ -373,7 +373,8 @@ const TIMELINE_FILE = `timelines/${TIMELINE}.json`;
  * the ways out: open the file to fix it, or History to go back to an earlier version.
  */
 function TimelineUnreadable({ error, onOpenFile }: { error: string; onOpenFile: ((path: string) => void) | undefined }) {
-  const file = error.includes(TIMELINE_FILE);
+  // The daemon names the file by its full path, with backslashes on Windows.
+  const file = error.replaceAll("\\", "/").includes(TIMELINE_FILE);
   return (
     <div className="timeline-error" role="alert" data-testid="timeline-unreadable">
       <p>{file ? t.timeline.unreadable(TIMELINE_FILE) : t.timeline.notShown}</p>
