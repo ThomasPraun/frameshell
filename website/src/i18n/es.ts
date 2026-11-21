@@ -309,6 +309,8 @@ export const es: Dict = {
     changelog: ["Changelog", "Qué cambió en cada versión."],
   },
   footer: {
+    docs: "Docs",
+    faq: "Preguntas frecuentes",
     nav: "Pie de página",
     spec: "Especificación",
     mcp: "Servidor MCP",
@@ -569,6 +571,29 @@ export const es: Dict = {
       ],
       issues: "Abrir un issue",
     },
+  },
+  docs: {
+    meta: {
+      title: "Docs: Frameshell",
+      description:
+        "Cómo hacer todo en Frameshell: instalarlo, conectar tu IA, hacer tu primera edición y guías de subtítulos, shorts, multicámara, música, voz en off, color, exportación y más. Y respuestas a las preguntas frecuentes.",
+    },
+    marker: "Docs",
+    title: "Docs.",
+    lede: "Todo lo que puedes hacer en Frameshell, en el orden en que lo vas a necesitar. Le pides la edición a tu IA con tus propias palabras; estas páginas te dicen qué pedirle y dónde mirar en la app.",
+    nav: "Páginas de la documentación",
+    onThisPage: "En esta página",
+    sections: {
+      start: "Primeros pasos",
+      concepts: "Cómo funciona",
+      guides: "Guías",
+      reference: "Referencia",
+      help: "Ayuda",
+    },
+    prev: "Anterior",
+    next: "Siguiente",
+    edit: "Editar esta página en GitHub",
+    titleSuffix: "Docs de Frameshell",
   },
   runtime: {
     copy: "Copiar",
