@@ -72,8 +72,15 @@ export interface ClipBox {
   in: number;
   /** Source seconds per timeline second. */
   speed: number;
-  /** Why the length is unknown (daemon's message); null when it is known. */
+  /** Why the length is unknown (daemon's message), or why a generated clip's render failed; null otherwise. */
   problem: string | null;
+  /** Generated clips: their render once `clip.renders` told it (`withRenders`, #746); absent until then and for others. */
+  render?: "ready" | "pending" | "failed";
+  /**
+   * Generated clips whose render failed: why, for the tooltip (`withRenders`). Never {@link ClipBox.problem}, which
+   * means an unknown length and turns off trimming and snapping on the clip.
+   */
+  renderError?: string;
   /** `audio.gain`, dB; 0 when unset. */
   gain: number;
   /** `audio.muted`. */

@@ -21,13 +21,16 @@ import { askAgent } from "../ask/ask-agent.js";
 import { filled, fragileSelector, idRequest } from "../preview/element-edit.js";
 import { useElementMode } from "../preview/element-mode.js";
 import { useTransport } from "../preview/transport.js";
-import { useProjectKind } from "../preview/useProgram.js";
+import { useClipRenders } from "../preview/useClipRenders.js";
+import { useNestedViews, useProjectKind } from "../preview/useProgram.js";
+import { isImagePath } from "../../../shared/media-kinds.js";
+import { GeneratedControl } from "./GeneratedControl.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
 import { ColourControl } from "./ColourControl.js";
 import { FinishControl } from "./FinishControl.js";
 import { VoiceControl } from "./VoiceControl.js";
 import { type ClipBox, type TrackRow, layoutTimeline } from "../timeline/layout.js";
-import { type EdgeState, KEY_PROPS, type KeyBox, type KeyProp, clipClock, edgeState, keyAt } from "../timeline/transitions.js";
+import { type EdgeState, KEY_PROPS, type KeyBox, type KeyProp, type TransitionSetArgs, clipClock, edgeState, keyAt, transitionRemove, transitionSet } from "../timeline/transitions.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { projectStyle } from "../project-style.js";
 import { t } from "../i18n.js";
@@ -64,6 +67,7 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
   const [error, setError] = useState<string | null>(null);
   const target = clips.length === 1 && layout ? find(layout.rows, clips[0]!) : null;
+  const renders = useClipRenders(stored, useNestedViews(stored));
 
   useEffect(() => setError(null), [target?.clip.id]);
 
@@ -96,6 +100,8 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
   const override = format !== null ? storedOverride(stored, clip.id, format) : null;
   // An image project has no sound (ADR 0017).
   const audible = clip.kind === "media" && !image;
+  // The same action reads per what the clip shows (#746): a video clip takes an image in its place.
+  const replacesVideo = clip.asset !== null && !isImagePath(clip.asset);
   const moved = fill === null && (transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1);
 
   return (
@@ -104,6 +110,16 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
         <span className={`clip-inspector-track track-${row.kind}`}>{row.label}</span>
         {clip.name}
       </span>
+      {clip.kind === "generated" && (
+        <GeneratedControl
+          clip={clip.id}
+          type={clip.type}
+          source={clip.source}
+          render={renders.get(clip.id)}
+          motionBlur={storedClip(stored, clip.id)?.["motionBlur"] != null}
+          onSend={send}
+        />
+      )}
       {placed && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.placement}>
           {(["x", "y", "scale", "opacity"] as const).map((name) => (
@@ -145,13 +161,13 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
           {clip.type === "media" && (
             <button
               className="clip-inspector-button clip-inspector-replace"
-              data-tip={t.inspector.replaceImageTitle}
+              data-tip={replacesVideo ? t.inspector.replaceVideoWithImageTitle : t.inspector.replaceImageTitle}
               onClick={() => {
                 setError(null);
                 window.frameshell.timeline.replaceImage(SELECTION_TIMELINE, clip.id).catch((failure: unknown) => setError((failure as Error).message));
               }}
             >
-              {t.inspector.replaceImage}
+              {replacesVideo ? t.inspector.replaceVideoWithImage : t.inspector.replaceImage}
             </button>
           )}
         </div>
@@ -177,6 +193,7 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
       {audible && <VoiceControl clip={clip.id} effects={clip.audioEffects} onSend={send} onError={setError} />}
       {!image && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.transitions}>
+          <span className="key-control-label clip-inspector-heading">{t.inspector.transitions}</span>
           {(["in", "out"] as const).map((side) => (
             <TransitionEdge key={side} side={side} row={row} state={edgeState(row, clip, side)} onSend={send} />
           ))}
@@ -184,6 +201,7 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
       )}
       {!image && (placed || audible) && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.keyframes}>
+          <span className="key-control-label clip-inspector-heading">{t.inspector.keyframes}</span>
           {KEY_PROPS.filter((prop) => (prop === "gain" ? audible : placed)).map((prop) => (
             <KeyControl
               key={prop}
@@ -218,6 +236,11 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
       )}
     </div>
   );
+}
+
+/** Clip `id` as stored on `view`'s tracks (top level only); undefined when absent. */
+function storedClip(view: TimelineView | null, id: string): Record<string, unknown> | undefined {
+  return view?.tracks.flatMap((track) => track.clips).find((clip) => clip.id === id) as Record<string, unknown> | undefined;
 }
 
 function find(rows: readonly TrackRow[], id: string): { row: TrackRow; clip: ClipBox } | null {
@@ -266,8 +289,7 @@ const SHAPE_LABELS: Record<TransitionShapeKind, () => string> = {
 /**
  * One edge's transition: kind and length, a wipe's, push's or slats' direction and a slats' or grid's count. Where
  * clips meet it can dissolve or take any shape (on video tracks) or, on the bottom video track, dip cut; any edge can
- * fade. The daemon applies it to every video and audio track with an edge at that time, as `transition.set` does
- * without `tracks`. An iris or zoom keeps the `origin` it has (the agent sets it, from `inspect.point`); one chosen
+ * fade. It changes the clip's own track only: another track with an edge at the same time keeps its own (#755). An iris or zoom keeps the `origin` it has (the agent sets it, from `inspect.point`); one chosen
  * here opens from the frame's centre (an iris) or dives into the middle half (a zoom).
  */
 function TransitionEdge({
@@ -292,15 +314,15 @@ function TransitionEdge({
     ...((state.butted && row.bottom) || state.kind === "dip-cut" ? [{ id: "dip-cut" as const, label: t.inspector.transitionDipCut }] : []),
   ];
   const length = state.length > 0 ? state.length : DEFAULT_TRANSITION_S;
-  const set = (args: Record<string, unknown>, label: string) => onSend({ op: "transition.set", args: { at: state.at, ...args } }, { label });
+  const set = (args: TransitionSetArgs, label: string) => onSend(transitionSet(row, state.at, args), { label });
   const choose = (choice: EdgeChoice) => {
-    if (choice === "none") onSend({ op: "transition.remove", args: { at: state.at } }, { label: "Remove transition" });
+    if (choice === "none") onSend(transitionRemove(row, state.at), { label: "Remove transition" });
     else if (choice === "dip-cut") set({ kind: choice }, "Add dip cut");
     else if (choice === "iris" || choice === "zoom" || choice === "grid") set({ kind: choice, duration: length }, `Add ${choice}`);
     else if (choice === "wipe" || choice === "push" || choice === "slats") set({ kind: choice, duration: length, direction: state.shape?.direction ?? "left" }, `Add ${choice}`);
     else set({ kind: choice, duration: length }, choice === "dissolve" ? "Add dissolve" : "Add fade");
   };
-  const { shape } = state;
+  const { shape, kind: stored } = state;
   return (
     <span className="transition-edge" data-edge={side}>
       <select
@@ -338,13 +360,13 @@ function TransitionEdge({
           onCommit={(value) => set({ ...shape, count: value, duration: state.length }, "Change transition count")}
         />
       )}
-      {state.kind && state.kind !== "dip-cut" && (
+      {stored && stored !== "dip-cut" && (
         <NumberField
           name="length"
           stored={state.length}
           onCommit={(value) =>
             // A shaped dissolve keeps its shape (an iris its origin).
-            set({ ...(shape ?? { kind: state.kind }), duration: value }, "Change transition length")
+            set({ ...(shape ?? { kind: stored }), duration: value }, "Change transition length")
           }
         />
       )}
