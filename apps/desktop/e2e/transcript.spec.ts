@@ -97,6 +97,8 @@ const transcript = () => page.getByTestId("transcript");
 
 /** Middle of a word, once laid out. */
 async function middle(k: number): Promise<{ x: number; y: number }> {
+  // In view first: on a smaller screen or larger font the word can sit below the fold, where a click hits the timeline.
+  await word(k).scrollIntoViewIfNeeded();
   const { x, y, width, height } = await laidOutBox(word(k));
   return { x: x + width / 2, y: y + height / 2 };
 }
@@ -168,6 +170,8 @@ test("dragging across words selects them and their timeline range, skipping the 
   await page.mouse.up();
   await expect(page.locator(".tw.is-selected")).toHaveCount(3);
   await expect(word(3)).not.toHaveClass(/is-selected/);
+  // Selecting the cut word in between never reflowed the toolbar: the words stayed under the pointer (#741).
+  expect(await middle(4)).toEqual(five);
   // "two" starts at 1.2 s, "five" ends at 2.9 + (4.7 - 3.9) = 3.7 s.
   await expect(lanes()).toHaveAttribute("data-range", "1.2-3.7");
   await expect(lanes()).toHaveAttribute("data-playhead", "1.2");
@@ -273,12 +277,12 @@ test("struck words inside a drag selection restore with the toolbar button, as o
   await page.mouse.move(four.x, four.y, { steps: 8 });
   await page.mouse.up();
   const restore = page.locator(".transcript-restore-marked");
-  await expect(restore).toHaveText("Restore 2 cut words");
+  await expect(restore).toHaveAccessibleName("Restore 2 cut words");
   const before = journaled().length;
   await restore.click();
   for (const k of [1, 2]) await expect(word(k)).toHaveAttribute("data-state", "kept");
   expect(journaled().slice(before)).toEqual([{ op: "clip.trim", author: "ui" }]);
-  await expect(restore).toHaveCount(0);
+  await expect(restore).toBeHidden();
 });
 
 test("double-clicking a word corrects its text as a transcript edit", async () => {
@@ -291,6 +295,25 @@ test("double-clicking a word corrects its text as a transcript edit", async () =
   expect(saved.edits).toEqual({ [id(4)]: { text: "fyve" } });
   expect(saved.words[4].text).toBe("five");
   await expect(status()).toContainText("Corrected “five” to “fyve”");
+});
+
+test("Delete cuts the selected words from the timeline as one ui cut, and undo brings them back (#741)", async () => {
+  const before = journaled().length;
+  const clips = savedClips();
+  const six = await middle(5);
+  await page.mouse.click(six.x, six.y);
+  await expect(word(5)).toHaveClass(/is-selected/);
+  await expect(page.locator(".transcript-cut")).toBeEnabled();
+  await transcript().press("Delete");
+  await expect(word(5)).toHaveAttribute("data-state", "struck");
+  expect(journaled().slice(before)).toEqual([{ op: "cut", author: "ui" }]);
+  await expect(status()).toContainText("Cut “six”. Undo brings it back.");
+  // Its neighbours keep every syllable.
+  for (const k of [4, 6]) await expect(word(k)).toHaveAttribute("data-state", "kept");
+  await page.locator(".timeline-scroller").focus();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(word(5)).toHaveAttribute("data-state", "kept");
+  expect(savedClips()).toEqual(clips);
 });
 
 test("found speakers name each paragraph, and the context menu says who says a word, as a transcript edit", async () => {
