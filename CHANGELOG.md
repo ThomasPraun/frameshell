@@ -115,6 +115,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The Angles tab is gone from image projects.
   - A layer whose name is cleared shows its file name without the extension.
   - Pick asks before downloading its photo model (with its size), and a failed download reads as one sentence.
+- Desktop, new video from an idea (#752, #740):
+  - The brief is kept in the project as `brief.md`, so the agent can read it and it survives a restart. Before, it
+    lived only in the app's memory.
+  - The agent guide shows the film's prompt with "Copy prompt" even with no agent running, for Claude Desktop or
+    ChatGPT. Hiding it or using it no longer loses it: one link offers it again.
+  - The form asks what the video is about (optional), and that goes into the brief and the prompt.
+  - 90 seconds reads "About 90 seconds", not 2 minutes.
+  - The form:
+    - fits a 1280x720 window, scrolling;
+    - shows its error above the buttons, and the error goes once you edit;
+    - plans the folder as you type;
+    - takes `www.example.com`;
+    - keeps the draft on Cancel and closes on Escape.
+  - The welcome lede mentions starting from an idea.
+  - An empty idea project talks about its brief instead of footage: the timeline hint, the transcript hint, and its
+    own agent suggestions. Plugins lists HyperFrames first, and the suggestion chips wrap instead of being cut off.
 
 - A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
   frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field

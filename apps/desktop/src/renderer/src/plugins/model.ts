@@ -47,9 +47,13 @@ export function pluginState(plugin: Pick<CatalogPlugin, "installed" | "status">)
   return plugin.status;
 }
 
-/** The official plugins of `catalog` as rows, in catalog order. */
-export function pluginRows(catalog: PluginsView["catalog"]): PluginRow[] {
-  return catalog.plugins.map((plugin) => {
+/**
+ * The official plugins of `catalog` as rows, in catalog order but `first` (plugin names) ahead: a video made from an
+ * idea needs a generator before a transcriber (#752).
+ */
+export function pluginRows(catalog: PluginsView["catalog"], first: readonly string[] = []): PluginRow[] {
+  const ahead = (name: string) => (first.includes(name) ? 0 : 1);
+  return [...catalog.plugins].sort((a, b) => ahead(a.name) - ahead(b.name)).map((plugin) => {
     const state = pluginState(plugin);
     const missing = plugin.downloads.filter((download) => !download.onDisk);
     const download: PluginDownload =

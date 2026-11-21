@@ -111,7 +111,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
       <div className="welcome-card no-drag">
         <FrameMark />
         <h1>Frameshell</h1>
-        <p className="welcome-lede">{t.welcome.lede}</p>
+        {!idea && <p className="welcome-lede">{t.welcome.lede}</p>}
         {dragging && <p className="welcome-drop">{t.welcome.dropHere}</p>}
 
         {plan ? (
@@ -128,6 +128,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
         ) : idea ? (
           <NewFromIdea
             busy={busy}
+            error={error}
             onError={setError}
             onCancel={() => {
               setIdea(false);
@@ -165,7 +166,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
             </button>
           </div>
         )}
-        {error && (
+        {error && !idea && (
           <p className="welcome-error" role="alert">
             {error}
           </p>

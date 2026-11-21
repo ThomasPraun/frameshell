@@ -177,7 +177,11 @@ code {
 .welcome {
   height: 100%;
   display: grid;
-  place-items: center;
+  /* A tall form (the idea form at 1280x720) scrolls from its top instead of being cut at both ends (#752). */
+  place-items: safe center;
+  overflow-y: auto;
+  padding: 24px 0;
+  box-sizing: border-box;
   background: var(--bg-app);
 }
 
@@ -264,7 +268,8 @@ code {
 }
 
 .welcome-field input,
-.welcome-field select {
+.welcome-field select,
+.welcome-field textarea {
   font: inherit;
   color: var(--text);
   background: var(--bg-panel);
@@ -274,7 +279,8 @@ code {
 }
 
 .welcome-field input:focus-visible,
-.welcome-field select:focus-visible {
+.welcome-field select:focus-visible,
+.welcome-field textarea:focus-visible {
   outline: none;
   border-color: var(--accent);
 }
@@ -325,6 +331,11 @@ code {
 
 .welcome-mode input {
   accent-color: var(--accent);
+}
+
+.welcome-field textarea {
+  resize: vertical;
+  min-height: 3.5em;
 }
 
 /* A format of the idea form: its tick, then "Main" when it is one of several ticked. */
@@ -4253,9 +4264,9 @@ button.track-head:focus-visible {
   flex: 1;
   min-width: 0;
   display: flex;
+  /* Wrap rather than hide chips past the edge (#752). */
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
 .chip {
@@ -5885,4 +5896,30 @@ button.track-head:focus-visible {
 .track-toggle.on {
   opacity: 1;
   color: var(--danger);
+}
+
+/* The prompt of a video made from an idea, readable and copyable without an agent running (#752). */
+.agent-guide-idea {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.agent-guide-idea-text {
+  margin: 0;
+  max-height: 7.5em;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.agent-guide-idea-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }

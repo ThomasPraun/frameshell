@@ -4,6 +4,8 @@ const en = {
   reading: "Reading the timeline…",
   noMedia: "No media on the timeline yet.",
   noMediaHint: "Clips from assets/ show their spoken words here once transcribed.",
+  /** A video made from an idea: no recording yet (#752). */
+  noMediaIdea: "A voiceover or a recording you add later shows its spoken words here.",
   /** Slots: `{command}`. */
   notTranscribed: "Not transcribed yet. Run {command} in the terminal.",
   /** Button of a not-transcribed asset when the project's provider is not whisper.cpp. */
@@ -67,6 +69,7 @@ const es: typeof en = {
   reading: "Leyendo la línea de tiempo…",
   noMedia: "Todavía no hay medios en la línea de tiempo.",
   noMediaHint: "Los clips de assets/ muestran aquí sus palabras habladas una vez transcritos.",
+  noMediaIdea: "Una voz en off o una grabación que agregues después muestran aquí sus palabras habladas.",
   notTranscribed: "Todavía no está transcrito. Ejecuta {command} en la terminal.",
   transcribe: "Transcribir",
   transcribeTip: (provider) => `Transcribir con ${provider}. Pregunta antes de subir o pagar nada.`,
