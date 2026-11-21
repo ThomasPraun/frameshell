@@ -122,6 +122,7 @@ import { SEGMENT_MODEL_PIN, SegmentService } from "./segment/service.js";
 import { type GallerySource, galleryReport, planGallery } from "./multicam/gallery-plan.js";
 import { projectFormat, type ProjectFormat } from "./media/format.js";
 import { ClipRenderer, listTimelineIds } from "./clips/renderer.js";
+import { TextFitChecker } from "./clips/text-fit.js";
 import { ClipVerifier } from "./clips/verify.js";
 import { buildCatalog } from "./plugins/catalog.js";
 import { PluginHost } from "./plugins/host.js";
@@ -1034,6 +1035,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
     chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
     ffmpeg: async (dir) => binaries.ensure("ffmpeg", await projectBinaries(dir)),
+  });
+  const textFit = new TextFitChecker({
+    timeline: async (dir, id) => {
+      const { timeline, fps } = await timelines.load(dir, id);
+      return { timeline: await resolveNested(dir, timeline, undefined, fps), fps };
+    },
+    live: (dir, timeline, clip, props) => clips.live(clipRoot(dir), timeline, clip, props),
+    declaredProps: (dir, clip) => timelines.declaredProps(dir, clip),
+    resolution: async (dir) => (await readEnclosingProject(dir))?.config.resolution ?? { width: 1920, height: 1080 },
+    chrome: async (dir) => binaries.ensure("chrome-headless-shell", await projectBinaries(dir)),
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
@@ -2091,6 +2102,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return clips.status(clipRoot(dir), timeline, found === formats[0] ? undefined : found);
     },
     "clip.live": async ({ cwd, timeline, clip }) => clips.live(clipRoot(await root(cwd)), timeline, clip),
+    "clip.textFit": async ({ cwd, timeline, clip, props, at }) =>
+      textFit.check(clipRoot(await root(cwd)), { timeline, clip, ...(props ? { props } : {}), ...(at ? { at } : {}) }),
     "clip.verify": async ({ cwd, timeline, clip, probes, tolerance }) => clipVerifier.verify(clipRoot(await root(cwd)), { timeline, clip, probes, tolerance }),
     "grade.analyze": async ({ cwd, timeline, clip, at, from, to, samples, view }, caller) => {
       const dir = await root(cwd);

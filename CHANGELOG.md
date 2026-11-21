@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell clip text-fit <clip> [--props json] [--at s,...]` and daemon method `clip.textFit` (MCP
+  `clip_text_fit`, protocol 188): checks in headless Chrome that every line of text of a generated clip fits its box
+  and the frame, at settled times, with props tried over the clip's own for the check only (another language). Exit 1
+  names the element, its text, side and pixels. The batch skill checks each language's texts with it first (#803).
+
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).

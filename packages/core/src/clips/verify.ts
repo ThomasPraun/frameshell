@@ -195,7 +195,7 @@ function round(value: number): number {
 }
 
 /** Make `page` show composition time `seconds`. */
-async function seek(page: ChromePage, seconds: number): Promise<void> {
+export async function seek(page: ChromePage, seconds: number): Promise<void> {
   await page.evaluate<boolean>(
     `(async () => { const live = window.frameshellLive;` +
       ` if (!live || typeof live.seek !== "function") throw new Error("The live page defines no window.frameshellLive with a seek function.");` +
