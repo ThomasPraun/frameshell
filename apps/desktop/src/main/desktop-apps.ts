@@ -41,17 +41,25 @@ const encodePowerShell = (script: string) => Buffer.from(script, "utf16le").toSt
 const MAC_MISSING = 1;
 
 /**
- * Finds an application named ChatGPT and opens it, skipping browser-made web apps (Chrome Apps, Edge Apps folders)
- * that carry the same name.
+ * Bundle ids of OpenAI's ChatGPT desktop app on macOS, current first. On 9 July 2026 OpenAI merged its Codex app into
+ * ChatGPT, and the merged ChatGPT.app took Codex's id; ChatGPT.app from before the merger has `com.openai.chat`. A
+ * standalone Codex.app (not updated yet) shares the first id, so the lookup also asks for the name ChatGPT.app.
  */
-const MAC_START_SCRIPT = `app=$(mdfind 'kMDItemContentType == "com.apple.application-bundle" && kMDItemFSName == "ChatGPT.app"' | grep -v -i -E '/(Chrome|Edge|Brave|Arc) Apps|/Chrome Apps.localized/' | head -n 1)
+export const CHATGPT_MAC_BUNDLE_IDS = ["com.openai.codex", "com.openai.chat"] as const;
+
+/**
+ * Finds OpenAI's ChatGPT.app by its bundle id and opens it. When none matches (an id OpenAI changed again), any
+ * application named ChatGPT will do, skipping browser-made web apps (Chrome Apps, Edge Apps folders) of that name.
+ */
+const MAC_START_SCRIPT = `app=$(mdfind '(${CHATGPT_MAC_BUNDLE_IDS.map((id) => `kMDItemCFBundleIdentifier == "${id}"`).join(" || ")}) && kMDItemFSName == "ChatGPT.app"' | head -n 1)
+[ -n "$app" ] || app=$(mdfind 'kMDItemContentType == "com.apple.application-bundle" && kMDItemFSName == "ChatGPT.app"' | grep -v -i -E '/(Chrome|Edge|Brave|Arc) Apps|/Chrome Apps.localized/' | head -n 1)
 [ -n "$app" ] || exit ${MAC_MISSING}
 exec open "$app"`;
 
 /**
  * How `id` starts on `platform`; null where the app does not exist. Claude Desktop registers the `claude:` URL
  * protocol. OpenAI documents no URL scheme for the ChatGPT desktop app, so it is started by its name: Start menu
- * on Windows, Spotlight lookup then `open` on macOS. It has no Linux build, so Linux has no plan.
+ * on Windows, Spotlight lookup by bundle id (else name) then `open` on macOS. It has no Linux build, so Linux has no plan.
  */
 export function launchPlan(id: DesktopAppId, platform: NodeJS.Platform): LaunchPlan | null {
   if (id === "claude-desktop") return platform === "darwin" || platform === "win32" ? { kind: "url", url: "claude://" } : null;

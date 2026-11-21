@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Open ChatGPT in Connect your AI on a Mac finds OpenAI's ChatGPT.app by its bundle id (`com.openai.codex` since
+  OpenAI merged Codex into it, `com.openai.chat` before), and only then by name, so a browser web app or another
+  app named ChatGPT is not opened by mistake (#795).
+
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
   track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
   saying so (#755).
