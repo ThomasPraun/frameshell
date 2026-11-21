@@ -100,3 +100,41 @@ describe("binaries.remove while jobs run", () => {
     }
   });
 });
+
+describe("binaries.remove while a one-off request runs", () => {
+  it("refuses with BinaryInUse until the request is over", async () => {
+    // `project.init --like` parked on ffprobe stands for any one-off request (a frame capture, a clip check).
+    let release!: () => void;
+    const parked = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const waiting = new Promise<void>((resolve) => (reached = resolve));
+    class ParkedManager extends BinaryManager {
+      override async ensure(...args: Parameters<BinaryManager["ensure"]>): Promise<string> {
+        if (args[0] !== "ffprobe") return super.ensure(...args);
+        reached();
+        await parked;
+        throw new Error("no ffprobe in this test");
+      }
+    }
+    const dirs = { dataDir: tempDir(), configDir: tempDir() };
+    const busy = await startDaemon({ socketPath: uniqueSocketPath(), dirs, binaries: new ParkedManager({ ...dirs, packages: [FFMPEG_PACKAGE] }), idleTimeoutMs: Infinity });
+    const link = await connectToDaemon(busy.socketPath, { client: "test" });
+    const other = await connectToDaemon(busy.socketPath, { client: "test" });
+    try {
+      const like = join(tempDir(), "like.mp4");
+      writeFileSync(like, "not a real video");
+      const init = other.request("project.init", { dir: tempDir(), like }).catch((error: unknown) => error);
+      await waiting;
+
+      await expect(link.request("binaries.remove", { name: "ffmpeg" })).rejects.toMatchObject({ code: ErrorCode.BinaryInUse, data: { name: "ffmpeg", reason: "busy" } });
+      release();
+      await init;
+      expect(await link.request("binaries.remove", { name: "ffmpeg" })).toMatchObject({ removed: false });
+    } finally {
+      release();
+      link.close();
+      other.close();
+      await busy.close();
+    }
+  });
+});

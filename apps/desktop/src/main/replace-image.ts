@@ -9,6 +9,11 @@ export interface ReplaceImageDeps {
   request: DaemonLink["request"];
   /** Applies `edits` in order as one labelled undoable step (`TimelineEditor.apply`). */
   apply: (edits: TimelineEdit[], label: string) => Promise<unknown>;
+  /**
+   * The scale the new picture at `file` shows at (an image project's layer: its own pixels, ADR 0017); the clip's
+   * position and opacity stay. Absent: the clip keeps its whole placement, scale included.
+   */
+  scaleOf?: (file: string) => Promise<number>;
 }
 
 /**
@@ -31,7 +36,8 @@ export async function replaceClipImage(dir: string, timeline: string, clipId: st
   const { imported } = await deps.request("asset.import", { cwd: dir, files: [file], mode: "copy" });
   const asset = imported[0]?.asset;
   if (!asset) throw new Error("The image could not be imported.");
-  const transform = clip["transform"] as Extract<TimelineEdit, { op: "clip.add" }>["args"]["transform"];
+  const kept = clip["transform"] as Extract<TimelineEdit, { op: "clip.add" }>["args"]["transform"];
+  const transform = deps.scaleOf ? { ...(kept ?? { x: 0, y: 0, opacity: 1 }), scale: await deps.scaleOf(file) } : kept;
   await deps.apply(
     [
       { op: "clip.remove", args: { clip: clipId } },

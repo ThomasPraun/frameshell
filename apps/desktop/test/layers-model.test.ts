@@ -31,6 +31,9 @@ describe("layersOf", () => {
     ]);
     expect(layers.map(layerLabel)).toEqual([null, "card.html", "Background"]);
     expect(layers[2]).toMatchObject({ asset: "assets/back.jpg", type: "media" });
+    // A layer whose name was cleared: its file's name as a new layer gets it, without the extension (#751).
+    expect(layerLabel({ ...layers[2]!, name: null })).toBe("back");
+    expect(layerLabel({ ...layers[2]!, name: "", asset: "assets/.hidden" })).toBe(".hidden");
   });
 });
 
@@ -47,5 +50,14 @@ describe("moveLayer", () => {
     expect(moveLayer(tracks, "t_c", 1)).toBeNull();
     expect(moveLayer(tracks, "t_a", -1)).toBeNull();
     expect(moveLayer(tracks, "t_x", 1)).toBeNull();
+  });
+});
+
+describe("fitOf", () => {
+  it("is how big an untransformed picture shows against its own pixels (#751)", async () => {
+    const { fitOf } = await import("../src/renderer/src/layers/model.js");
+    expect(fitOf({ width: 3840, height: 2160 }, { width: 1920, height: 1080 })).toBe(0.5);
+    expect(fitOf({ width: 384, height: 108 }, { width: 1920, height: 1080 })).toBe(5);
+    expect(fitOf(null, { width: 1920, height: 1080 })).toBeNull();
   });
 });

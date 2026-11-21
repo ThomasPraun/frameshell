@@ -430,6 +430,7 @@ the app detects in its terminal (agent:<label>:<session>); FRAMESHELL_AGENT=<lab
   tx commit | tx abort         Keep, or undo, the open transaction's changes. Abort undoes every timeline or,
                                on any conflict, none (listing every conflict)
   history [--since <tx>]       Operations grouped by transaction; --since: only what came after <tx>
+  history sound <tx|op>        Per track, where its sound changed and by how many dB, right before vs right after
   revert <tx|op>               Undo a transaction or one operation, as a new operation
 `;
 
@@ -790,7 +791,7 @@ const ARITY: Record<string, [number, number]> = {
   "tx begin": [1, 1],
   "tx commit": [0, 0],
   "tx abort": [0, 0],
-  "history ": [0, 0],
+  "history ": [0, 2],
   "revert ": [1, 1],
 };
 
@@ -1613,6 +1614,14 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       break;
     }
     case "history ":
+      if (args[0] === "sound") {
+        if (args.length !== 2) throw new UsageError("`frameshell history sound` takes one argument: the transaction or operation id.");
+        if (values["since"] !== undefined) throw new UsageError("`frameshell history sound` does not take --since.");
+        method = "history.sound";
+        params["target"] = args[1];
+        break;
+      }
+      if (args.length > 0) throw new UsageError(`\`frameshell history\` takes no argument, got "${args[0]}" (\`history sound <tx|op>\` compares the sound around one).`);
       method = "history";
       params["since"] = str("since");
       break;
@@ -1674,6 +1683,7 @@ export async function executeTimeline(
   if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
   if (inv.method === "tempo.show") return formatTempo(result as MethodResult<"tempo.show">);
   if (inv.method === "history") return formatHistory(result as HistoryResult);
+  if (inv.method === "history.sound") return formatHistorySound(result as MethodResult<"history.sound">);
   if (inv.method === "tx.begin") {
     const { tx, label } = result as MethodResult<"tx.begin">;
     return `Began ${tx} "${label}"\n`;
@@ -2153,4 +2163,21 @@ function formatTimeline(view: TimelineView): string {
     if (override.letterbox) lines.push(`Letterbox in ${id}: ${Number(override.letterbox.aspect.toFixed(4))}:1`);
   }
   return `${[...lines, ...formatProblems(view.problems)].join("\n")}\n`;
+}
+
+/** `history sound`: one line per changed range, tracks in id order, then what did not change or could not be read. */
+function formatHistorySound(result: MethodResult<"history.sound">): string {
+  const lines: string[] = [];
+  if (result.tracks.length === 0) lines.push(`${result.target} changed no sound on ${result.timeline}.`);
+  for (const track of result.tracks) {
+    lines.push(`${track.name} (${track.track})`);
+    for (const range of track.ranges) {
+      const what = range.kind === "added" ? "sound added" : range.kind === "removed" ? "sound removed" : `${range.change > 0 ? "+" : ""}${range.change} dB`;
+      lines.push(`  ${range.from}-${range.to} s  ${what} (largest ${range.largest > 0 ? "+" : ""}${range.largest} dB)`);
+    }
+    if (track.more > 0) lines.push(`  …and ${track.more} more`);
+  }
+  if (result.unchanged.length > 0) lines.push(`Unchanged: ${result.unchanged.join(", ")}`);
+  if (result.unheard.length > 0) lines.push(`Not decoded, not compared: ${result.unheard.join(", ")}`);
+  return `${lines.join("\n")}\n`;
 }

@@ -92,15 +92,18 @@ test.afterAll(async () => {
 });
 
 test("an angle suggestion adds the person behind the angle with its voice in one confirmation", async () => {
+  // Nobody in People yet: the transcript's voices are offered as people, named by the file, not its path (#753).
+  await expect(page.getByTestId("people-voice").locator(".suggestion-text")).toHaveText([/^Ana in talk$/, /^Ben in talk$/]);
   const row = page.locator('[data-testid="suggestion"][data-kind="angle"]');
   await expect(row).toContainText("The angle Ben shows someone not in People yet");
-  await expect(row.getByTestId("suggestion-also")).toHaveText("Confirm also links Ben in talk.words.json.");
+  await expect(row.getByTestId("suggestion-also")).toHaveText("Confirm also links Ben in talk.");
   await expect(row.getByTestId("suggestion-name")).toHaveValue("Ben");
   await row.getByTestId("suggestion-confirm").click();
   await expect(person("Ben")).toBeVisible();
   await expect(person("Ben").locator('[data-testid="person-link"][data-kind="angle"]')).toHaveCount(1);
   await expect(person("Ben").locator('[data-testid="person-link"][data-kind="voice"]')).toHaveCount(1);
   await expect(row).toHaveCount(0);
+  await expect(page.getByTestId("people-voices")).toHaveCount(0);
 });
 
 test("with a voice linked, the panel offers the voice model with its size instead of downloading it", async () => {
@@ -115,7 +118,7 @@ test("each person shows their seconds, and a linked voice plays a stretch of tha
   await expect(person("Ben").getByTestId("person-totals")).toHaveText(/^Speaks 0:0[1-9] · on screen /);
   const play = person("Ben").getByTestId("voice-play");
   await expect(play).toBeEnabled();
-  await expect(play).toHaveAttribute("aria-label", "Play Ben in talk.words.json");
+  await expect(play).toHaveAttribute("aria-label", "Play Ben in talk");
   await play.click();
   await expect(play).toHaveAttribute("data-playing", "true");
   await play.click();

@@ -217,6 +217,9 @@ test("an audio clip shows its gain; the inspector changes it and mutes it", asyn
   await inspector().getByRole("button", { name: "Mute" }).click();
   await expect.poll(() => saved("c_tone").audio).toEqual({ gain: -6, muted: true });
   await expect(page.locator('li[data-clip="c_tone"]')).toContainText("muted");
+  // The button says the clip is muted, and the gain box says why it cannot be typed in.
+  await expect(inspector().getByTestId("clip-mute")).toHaveText("Muted");
+  await expect(inspector().getByTestId("clip-gain-muted")).toBeVisible();
   // No placement on an audio track.
   await expect(inspector().getByRole("group", { name: "Placement" })).toHaveCount(0);
 });
