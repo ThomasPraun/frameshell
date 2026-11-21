@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
+  frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field
+  no longer scrolls the panel sideways, an open inspector leaves the picture about half the panel and scrolls instead
+  of adding a sideways bar, long inspector hints wrap, and render slates stay inside a small frame (#745).
+
 - Native dialogs and the Windows taskbar say "Frameshell" instead of the package name `@frameshell/desktop` (#742).
 
 - The status bar, `frameshell status` and Help > Copy diagnostics name the release version of the daemon
