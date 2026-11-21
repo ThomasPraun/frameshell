@@ -33,17 +33,20 @@ export async function addImageLayers(
 ): Promise<string[]> {
   const images = assets.filter(isImageFile);
   if (images.length === 0) return [];
+  // Measured first: a probe between `track.add` and `clip.add` would show an empty named layer meanwhile, and a
+  // click on it then selects the track instead of the picture.
+  const sizes = await Promise.all(images.map((asset) => deps.imageSize(asset)));
   return deps.alone(async () => {
     await deps.request("tx.begin", { label: images.length === 1 ? "Add layer" : `Add ${images.length} layers`, autoCommitAfter: 30 });
     const tracks: string[] = [];
     try {
-      for (const asset of images) {
+      for (const [index, asset] of images.entries()) {
         const name = basename(asset, extname(asset)) || asset;
         const added = await deps.request("track.add", { cwd: dir, timeline, kind: "video", name });
         const track = added.changes.added[0];
         if (!track) continue;
         tracks.push(track);
-        const size = await deps.imageSize(asset);
+        const size = sizes[index] ?? null;
         const scale = fit === "cover" ? coverScale(size, deps.resolution) : layerScale(size, deps.resolution);
         await deps.request("clip.add", { cwd: dir, timeline, track, asset, start: 0, ...(scale !== 1 ? { transform: { scale } } : {}) });
       }
