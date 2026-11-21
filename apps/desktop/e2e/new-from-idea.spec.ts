@@ -83,7 +83,8 @@ test("the form creates an empty project with its formats and offers the film pro
     await guide.getByRole("button", { name: "Start Gemini CLI" }).click();
     await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");
     await guide.getByTestId("agent-guide-idea").click();
-    await expect.poll(async () => (await terminalText(page)).replace(/\s/g, "")).toContain("threestorylines");
+    // The prompt is typed in chunks: wait for its last words before reading it whole.
+    await expect.poll(async () => (await terminalText(page)).replace(/\s/g, "")).toContain("freealternative");
     // Rows wrap the long line anywhere: compare without spaces.
     const typed = (await terminalText(page)).replace(/\s/g, "");
     expect(typed).toContain('"Springreel"');

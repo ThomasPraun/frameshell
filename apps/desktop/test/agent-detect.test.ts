@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentCommands, agentOfCommand } from "@frameshell/protocol";
+import { descendantCommands, parseProcessRows, splitCommandLine } from "../src/main/agent-detect.js";
 
 // Seam: the pure matcher from a foreground command line (as `ps` reports it) to an agent label.
 describe("agentOfCommand", () => {
@@ -46,5 +47,43 @@ describe("agentCommands", () => {
     const commands = agentCommands({ FRAMESHELL_AGENT_COMMANDS: "my-agent=Mine, llm ,claude=cc,codex=" });
     expect(commands).toMatchObject({ "my-agent": "mine", llm: "llm", claude: "cc", gemini: "gemini" });
     expect(commands).not.toHaveProperty("codex");
+  });
+});
+
+// Windows (ADR 0048): no foreground process group, so the agent is found among the commands under the shell.
+describe("Windows process table", () => {
+  it("splits a command line at spaces outside quotes", () => {
+    expect(splitCommandLine(String.raw`"C:\Program Files\nodejs\node.exe" "D:\a\frameshell\e2e\fake-agent.mjs"`)).toEqual([
+      String.raw`C:\Program Files\nodejs\node.exe`,
+      String.raw`D:\a\frameshell\e2e\fake-agent.mjs`,
+    ]);
+    expect(splitCommandLine(String.raw`C:\Users\ana\.local\bin\claude.exe  --resume`)).toEqual([String.raw`C:\Users\ana\.local\bin\claude.exe`, "--resume"]);
+    expect(splitCommandLine(`node "" x`)).toEqual(["node", "", "x"]);
+    expect(splitCommandLine("")).toEqual([]);
+  });
+
+  it("reads the rows PowerShell prints, skipping blank and broken lines", () => {
+    const text = "4\t0\t\r\n120\t4\tpowershell.exe -NoLogo\r\n\r\n130\t120\tnode cli.js\twith a tab\r\nnot a row\r\n";
+    expect(parseProcessRows(text)).toEqual([
+      { pid: 4, parent: 0, command: "" },
+      { pid: 120, parent: 4, command: "powershell.exe -NoLogo" },
+      { pid: 130, parent: 120, command: "node cli.js\twith a tab" },
+    ]);
+  });
+
+  it("lists the commands under the shell, nearest first, never the shell or an unrelated process", () => {
+    const rows = [
+      { pid: 100, parent: 1, command: "pwsh.exe" },
+      { pid: 101, parent: 100, command: "conhost.exe 0x4" },
+      { pid: 102, parent: 100, command: String.raw`"C:\Program Files\nodejs\node.exe" C:\npm\node_modules\@anthropic-ai\claude-code\cli.js` },
+      { pid: 103, parent: 102, command: String.raw`"C:\Program Files\Git\bin\bash.exe" -c ls` },
+      { pid: 200, parent: 1, command: "codex.exe" },
+      { pid: 300, parent: 300, command: "loop.exe" },
+      { pid: 104, parent: 100, command: "" },
+    ];
+    const found = descendantCommands(rows, 100);
+    expect(found.map((argv) => argv[0])).toEqual(["conhost.exe", String.raw`C:\Program Files\nodejs\node.exe`, String.raw`C:\Program Files\Git\bin\bash.exe`]);
+    expect(found.map((argv) => agentOfCommand(argv, agentCommands({ FRAMESHELL_AGENT_COMMANDS: "cli=claude" }))).find(Boolean)).toBe("claude");
+    expect(descendantCommands(rows, 999)).toEqual([]);
   });
 });

@@ -137,15 +137,15 @@ test("a track header's menu renames the track in place", async () => {
   await expect(head("v2")).toContainText("Logos");
 });
 
-test("a track header's menu mutes and hides the track, the header marks it, and the menu turns it back", async () => {
+test("a track header's menu mutes and hides the track, the header switches show it, and the menu turns it back", async () => {
   await head("v1").click({ button: "right" });
   await menu().getByRole("menuitem", { name: "Mute track" }).click();
   await expect.poll(() => savedTracks().find((track) => track.id === "v1")).toMatchObject({ muted: true });
   await head("v1").click({ button: "right" });
   await menu().getByRole("menuitem", { name: "Hide track" }).click();
   await expect.poll(() => savedTracks().find((track) => track.id === "v1")).toMatchObject({ muted: true, hidden: true });
-  await expect(head("v1").getByTestId("track-state")).toHaveAttribute("data-hidden", "true");
-  await expect(head("v1").getByRole("img", { name: /^Muted/ })).toBeVisible();
+  await expect(head("v1").getByTestId("track-mute")).toHaveAttribute("aria-pressed", "true");
+  await expect(head("v1").getByTestId("track-hide")).toHaveAttribute("aria-pressed", "true");
 
   await head("v1").click({ button: "right" });
   await menu().getByRole("menuitem", { name: "Unmute track" }).click();
@@ -153,7 +153,32 @@ test("a track header's menu mutes and hides the track, the header marks it, and 
   await head("v1").click({ button: "right" });
   await menu().getByRole("menuitem", { name: "Show track" }).click();
   await expect.poll(() => savedTracks().find((track) => track.id === "v1")).not.toHaveProperty("hidden");
-  await expect(head("v1").getByTestId("track-state")).toHaveCount(0);
+  await expect(head("v1").getByTestId("track-mute")).toHaveAttribute("aria-pressed", "false");
+  await expect(head("v1").getByTestId("track-hide")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the header's sound and picture switches mute and hide the track with one click", async () => {
+  await head("v2").getByRole("button", { name: "Mute track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v2")).toMatchObject({ muted: true });
+  await expect(head("v2").getByTestId("track-mute")).toHaveAttribute("aria-pressed", "true");
+  await head("v2").getByRole("button", { name: "Hide track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v2")).toMatchObject({ muted: true, hidden: true });
+  await head("v2").getByRole("button", { name: "Mute track" }).click();
+  await head("v2").getByRole("button", { name: "Hide track" }).click();
+  await expect.poll(() => savedTracks().find((track) => track.id === "v2")).not.toHaveProperty("hidden");
+  expect(savedTracks().find((track) => track.id === "v2")).not.toHaveProperty("muted");
+});
+
+test("tooltips name tracks and clips, never their ids", async () => {
+  await expect(head("v1")).toHaveAttribute("data-tip", "V1 · Titles");
+  // c_card plays 20 to 22 s on V2.
+  const point = await at(21, "v2");
+  await page.mouse.move(point.x, point.y);
+  const tooltip = page.locator(".clip-tooltip");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText("on V2, generated (titles)");
+  await expect(tooltip).not.toContainText(/c_\w+|t_\w+/);
+  await page.mouse.move(point.x, point.y - 200);
 });
 
 test("empty lane space adds tracks, and a header deletes a track with its clips", async () => {
@@ -165,4 +190,19 @@ test("empty lane space adds tracks, and a header deletes a track with its clips"
   // Named in the earlier test: the menu calls the track by its name (#757).
   await menu().getByRole("menuitem", { name: "Delete track Logos and its clip" }).click();
   await expect.poll(() => savedTracks().map((track) => track.id)).not.toContain("v2");
+});
+
+test("a track's menu offers its subtitles once; the toolbar adds them to a track that has none first", async () => {
+  await head("v1").click({ button: "right" });
+  await menu().getByRole("menuitem", { name: "Add subtitles of V1" }).click();
+  await expect.poll(() => savedTracks().filter((track) => track.kind === "subtitles")).toHaveLength(1);
+  await head("v1").click({ button: "right" });
+  await expect(menu().getByRole("menuitem", { name: /^Add subtitles of/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // The audio track added above has none yet: the toolbar button picks it over V1.
+  const audio = savedTracks().find((track) => track.kind === "audio")!.id;
+  await page.getByRole("button", { name: "Add subtitle track" }).click();
+  await expect
+    .poll(() => savedTracks().flatMap((track) => (track.kind === "subtitles" ? [(track as { follows?: string }).follows] : [])))
+    .toEqual(["v1", audio]);
 });

@@ -113,3 +113,29 @@ test("the marker's menu renames it and deletes it", async () => {
   await expect(page.getByTestId("marker-lane-head")).toHaveCount(0);
   expect(savedMarkers()).toEqual([]);
 });
+
+test("M names a new marker at the playhead", async () => {
+  const { x, top } = await geometry(8);
+  // A click on the ruler puts the playhead there and focuses the lanes.
+  await page.mouse.click(x, top + RULER / 2);
+  const playhead = Number(await lanes().getAttribute("data-playhead"));
+  await page.keyboard.press("m");
+  const input = page.getByTestId("marker-name-input");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("");
+  await input.fill("beat");
+  await input.press("Enter");
+  await expect(markerItems()).toHaveCount(1);
+  const [marker] = savedMarkers();
+  expect(marker).toMatchObject({ label: "beat" });
+  expect(Math.abs(marker!.at - playhead)).toBeLessThan(0.05);
+});
+
+test("Zoom to fit fits the clips of a short timeline, not the panel's minute", async () => {
+  const end = savedStart("c_card") + 2;
+  await page.getByRole("button", { name: "Zoom to fit" }).click();
+  // The scroller still spans the panel's 60 s; the last clip now ends just inside the visible width.
+  const endAt = () => scroller().evaluate((element, end) => ((end * element.scrollWidth) / 60 - element.scrollLeft) / element.clientWidth, end);
+  await expect.poll(endAt).toBeGreaterThan(0.9);
+  expect(await endAt()).toBeLessThanOrEqual(1);
+});

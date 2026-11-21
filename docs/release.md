@@ -17,7 +17,7 @@ Each OS job:
 2. Runs the Playwright smoke suite (`apps/desktop/e2e`) against the **packaged** app (`FRAMESHELL_E2E_APP`). The suite runs `frameshell status` in the integrated terminal, so it fails if the bundled CLI or daemon is broken.
 3. On macOS, when notarized: `stapler validate` and `spctl --assess` on each app.
 
-The draft release is published by hand after review. A tag with a `-` (for example `v0.1.0-beta.1`) is marked as a prerelease.
+The draft release's notes start with one installer per OS (`apps/desktop/scripts/release/downloads.mjs`), then the generated list of changes. The draft release is published by hand after review. A tag with a `-` (for example `v0.1.0-beta.1`) is marked as a prerelease.
 
 Before drafting, the publish job checks the ffmpeg mirror: the GitHub release named in the manifest must exist, and its `SHA256SUMS.txt` must match every pinned archive and source. The app release itself attaches no ffmpeg binary. The mirror is its own release, published by `.github/workflows/binaries-mirror.yml` together with the corresponding source, a written offer and the licence (see `docs/binaries.md`, "Mirror and licence obligations"). If the check fails, run **Actions → Binary mirror → Run workflow** on `main`, then re-run the release.
 
