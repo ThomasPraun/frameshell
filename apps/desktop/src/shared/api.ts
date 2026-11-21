@@ -451,6 +451,12 @@ export interface FrameshellApi {
      */
     addLayers(timeline: string, assets: string[]): Promise<string[]>;
     /**
+     * Put media among `assets` (project-relative videos, sounds, stills) on `timeline` as one undoable step (#738): with
+     * `target`, from that time on that track (the drop point of a drag from Files); otherwise at the end of the first
+     * track of its kind, adding one when there is none. Resolves with the new clip ids and what the daemon refused.
+     */
+    addMedia(timeline: string, assets: string[], target?: { track: string; start: number }): Promise<{ clips: string[]; refused: { asset: string; message: string }[] }>;
+    /**
      * Cut the part of a photo that `mask` (project-relative grayscale PNG, from a Pick) marks out as a new layer
      * right above it (`image.cutout`, ADR 0022), as one undoable step. Resolves with the new clip id.
      */
@@ -1160,6 +1166,7 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
+  timelineAddMedia: "timeline:add-media",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
   timelineExportHandoff: "timeline:export-handoff",

@@ -123,6 +123,7 @@ import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, star
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { type TimelineMediaDeps, addMediaClips } from "./timeline-media.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
@@ -1837,6 +1838,14 @@ function registerIpc(): void {
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
       return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
+    }),
+  );
+  ipcMain.handle(Channel.timelineAddMedia, (event, timeline: string, assets: string[], target?: { track: string; start: number }) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const aim = target && typeof target.track === "string" && Number.isFinite(target.start) ? { track: target.track, start: Math.max(0, target.start) } : undefined;
+      const deps: TimelineMediaDeps = { request: (method, params) => daemon.request(method, params), alone: (work) => editor.alone(work) };
+      return addMediaClips(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], deps, aim);
     }),
   );
   ipcMain.handle(Channel.timelineCutOut, (event, timeline: string, clip: string, mask: string) =>
