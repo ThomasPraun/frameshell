@@ -383,6 +383,48 @@ export function restorePlan(view: TimelineView, model: TranscriptModel, keys: re
   };
 }
 
+/** Edits that cut several kept words at once (#741): one `ui` transaction, so one undo step. */
+export interface CutPlan {
+  /** `cut` ops, latest on the timeline first, so no step moves where a later one cuts. */
+  edits: TimelineEdit[];
+  /** Keys of the kept words the edits cut. */
+  keys: string[];
+}
+
+/**
+ * Cut every kept word among `keys` (a selection in the transcript view; struck and unknown keys are skipped) wherever
+ * the timeline plays it. Placements next to each other on the timeline, with no other word between them, go as one
+ * `cut` of every track, as the agent's `cut` keeps them in sync. Each edge sits mid-gap between the cut word and the
+ * word next to it, so neither neighbour loses a syllable and the pause left reads like the ones around it; with no
+ * neighbour (or one overlapping on another track) the edge is the word's own. Edges are not moved into pauses: a short
+ * gap between words is often under a pause, so a snapped edge could cut into a neighbour. Null when no key names a kept word.
+ */
+export function cutPlan(model: TranscriptModel, keys: readonly string[]): CutPlan | null {
+  const wanted = new Set(keys);
+  const all = model.timeline;
+  const ranges: { from: number; to: number }[] = [];
+  const cut = new Set<string>();
+  let first = -1;
+  all.forEach((entry, index) => {
+    const take = wanted.has(entry.key);
+    if (take) cut.add(entry.key);
+    if (take && first === -1) first = index;
+    if (take && !wanted.has(all[index + 1]?.key ?? "")) {
+      const head = all[first]!;
+      const previous = all[first - 1];
+      const next = all[index + 1];
+      const tail = all.slice(first, index + 1).reduce((end, item) => Math.max(end, item.to), head.to);
+      const from = previous && previous.to <= head.from ? round((previous.to + head.from) / 2) : head.from;
+      const to = next && next.from >= tail ? round((tail + next.from) / 2) : tail;
+      ranges.push({ from, to });
+      first = -1;
+    }
+  });
+  if (ranges.length === 0) return null;
+  ranges.sort((a, b) => b.from - a.from);
+  return { edits: ranges.map(({ from, to }) => ({ op: "cut", args: { from, to, snap: false } })), keys: [...cut] };
+}
+
 /** Whether timeline `view` keeps word `key` (some clip plays its midpoint); false for an unknown key. */
 export function isKept(view: TimelineView, sources: readonly TranscriptSource[], key: string): boolean {
   const model = buildTranscriptModel(view, sources);
