@@ -334,6 +334,8 @@ export interface FrameshellApi {
      * a video file; `plan` is null when nothing is.
      */
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
+    /** Bytes a new project downloads before it can transcribe (the tool and model, once per machine); 0 when ready. */
+    transcriptionDownload(): Promise<number>;
     /** Videos or audio the OS asked to open in this window (Open with), once: null when none or already taken. */
     takeOffered(): Promise<VideoProjectPlan | null>;
     /** How File > New … asked this welcome screen to start, once: null when not asked or already taken. */
@@ -1176,6 +1178,7 @@ export const Channel = {
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",
+  projectTranscriptionDownload: "project:transcription-download",
   projectTakeStart: "project:take-start",
   projectStartOffered: "project:start-offered",
   projectVideosOffered: "project:videos-offered",

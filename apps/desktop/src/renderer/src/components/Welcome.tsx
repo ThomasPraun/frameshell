@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AudioOrientation, OpenOutcome, VideoProjectPlan } from "../../../shared/api.js";
+import { downloadSize } from "../../../shared/sizes.js";
 import { useFileDrop } from "../file-drop.js";
 import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
@@ -231,6 +232,18 @@ function NewFromVideo({
   const [mode, setMode] = useState<"copy" | "link">("copy");
   const [transcribe, setTranscribe] = useState(true);
   const [orientation, setOrientation] = useState<AudioOrientation>("landscape");
+  // What "Transcribe" still downloads on this machine (#742): null while unknown, so the hint stays general.
+  const [download, setDownload] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    window.frameshell.project
+      .transcriptionDownload()
+      .then((bytes) => live && setDownload(bytes))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
   // Replans only for the latest edit: a slow answer for an older name must not overwrite a newer one.
   const latest = useRef(0);
 
@@ -326,7 +339,13 @@ function NewFromVideo({
           <input type="checkbox" checked={transcribe} onChange={(event) => setTranscribe(event.target.checked)} />
           <span>
             {t.welcome.transcribe}
-            <small>{t.welcome.transcribeHint}</small>
+            <small>
+              {download === null
+                ? t.welcome.transcribeHint
+                : download > 0
+                  ? t.welcome.transcribeDownload(downloadSize(download))
+                  : t.welcome.transcribeReady}
+            </small>
           </span>
         </label>
       )}

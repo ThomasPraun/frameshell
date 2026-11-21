@@ -128,11 +128,6 @@ const en = {
     transcribeAskChanged: "The file or the price changed since you confirmed, so nothing was sent.",
     transcribeUpload: "Upload and transcribe",
     transcribeNotStarted: "Transcription was not started.",
-    transcribeDownloadTitle: "Transcribe what is said?",
-    transcribeDownloadDetail: (size: string) =>
-      `Transcription runs on this machine: nothing is uploaded. It first downloads ${size} (the transcription tool and its speech model), once. Without it the project is made as usual, and you can ask the agent to transcribe later.`,
-    transcribeDownloadYes: "Download and transcribe",
-    transcribeDownloadSkip: "Skip transcription",
     ok: "OK",
   },
   setup: {
@@ -144,8 +139,6 @@ const en = {
     transcribed: (names: string) => `Transcribed ${names}.`,
     waitingForAnswer: (name: string) => `Waiting for your answer to transcribe ${name}…`,
     transcribeDeclined: (name: string) => `${name} was not transcribed: you chose not to send it. Ask the agent to transcribe it when you want.`,
-    waitingForDownloadAnswer: "Waiting for your answer about transcription…",
-    transcriptionSkipped: "Transcription was skipped. Ask the agent to transcribe when you want.",
     transcriptionSkippedAudio:
       "Transcription was skipped, so the project has only the audio, without background or subtitles. Ask the agent to transcribe when you want.",
     addingBackground: "Adding the background and subtitles…",
@@ -323,11 +316,6 @@ const es: typeof en = {
     transcribeAskChanged: "El archivo o el precio cambiaron desde que confirmaste, así que no se envió nada.",
     transcribeUpload: "Subir y transcribir",
     transcribeNotStarted: "No se inició la transcripción.",
-    transcribeDownloadTitle: "¿Transcribir lo que se dice?",
-    transcribeDownloadDetail: (size) =>
-      `La transcripción se ejecuta en este equipo: no se sube nada. Primero descarga ${size} (la herramienta de transcripción y su modelo de voz), una sola vez. Sin ella el proyecto se crea igual, y luego puedes pedirle al agente que transcriba.`,
-    transcribeDownloadYes: "Descargar y transcribir",
-    transcribeDownloadSkip: "Omitir la transcripción",
     ok: "Aceptar",
   },
   setup: {
@@ -339,8 +327,6 @@ const es: typeof en = {
     transcribed: (names) => `Se transcribió ${names}.`,
     waitingForAnswer: (name) => `Esperando tu respuesta para transcribir ${name}…`,
     transcribeDeclined: (name) => `No se transcribió ${name}: elegiste no enviarlo. Pídele al agente que lo transcriba cuando quieras.`,
-    waitingForDownloadAnswer: "Esperando tu respuesta sobre la transcripción…",
-    transcriptionSkipped: "Se omitió la transcripción. Pídele al agente que transcriba cuando quieras.",
     transcriptionSkippedAudio:
       "Se omitió la transcripción, así que el proyecto solo tiene el audio, sin fondo ni subtítulos. Pídele al agente que transcriba cuando quieras.",
     addingBackground: "Agregando el fondo y los subtítulos…",

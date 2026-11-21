@@ -199,6 +199,7 @@ import { requirementsConfigDocument, requirementsFromState, requirementsState } 
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
+import { scriptLanguage } from "./shoot/language.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
@@ -1076,7 +1077,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             providerId,
             provider,
             model: await configuredModel(config, providerId),
-            language: config.transcription?.language,
+            // The project's language when set; else the script's own (#742), so whisper does not guess from a few seconds.
+            language: config.transcription?.language ?? scriptLanguage(await shoots.script(dir, script)) ?? undefined,
             context: providerContext(transcriberTools(overrides), () => {}).context,
           });
           takeRuns.delete(key);

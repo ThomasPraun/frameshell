@@ -40,6 +40,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- New project from video or audio asks about transcription once: the form's "Transcribe what is said" box now shows
+  the real download size on this computer (or that there is nothing to download), and no native box asks again after
+  Create (#742).
+
+- A long setup step in the status bar (loading the transcription model, transcribing) shows how long it has run, and
+  after a minute with no percentage says it is slow without a GPU, with a smaller model as the way out (#742).
+
+- Shoot takes are transcribed in the script's language when the project sets none, guessed from the script's words
+  (Spanish, English, Portuguese, French, German), instead of English by default (#742).
+
 - "Chat about this" with no agent running copies the reference to the clipboard, shows the terminal and says to start
   an agent, instead of typing it at a shell prompt where Enter would run it (ADR 0048, #743).
 
@@ -48,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ADR 0048, #743).
 
 ### Fixed
+
+- Native dialogs and the Windows taskbar say "Frameshell" instead of the package name `@frameshell/desktop` (#742).
 
 - The status bar, `frameshell status` and Help > Copy diagnostics name the release version of the daemon
   (`frameshelld 0.19.0`) instead of `0.0.0` (#739): inside a packaged app the daemon reports the app's stamped
