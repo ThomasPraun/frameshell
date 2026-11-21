@@ -42,3 +42,20 @@ export function lookGrade(name: string): Grade | undefined {
   const look = findLook(name);
   return look ? { ...look.grade } : undefined;
 }
+
+/**
+ * The built-in look whose five correction numbers `grade` carries exactly (a LUT may sit on top), so a UI can show
+ * which look a clip took (#746); undefined once a number was adjusted after it, or for no grade.
+ */
+export function lookOf(grade: Pick<Grade, "exposure" | "temperature" | "tint" | "contrast" | "saturation"> | null | undefined): BuiltInLook | undefined {
+  if (!grade) return undefined;
+  const near = (a: number | undefined, b: number | undefined) => a !== undefined && b !== undefined && Math.abs(a - b) < 1e-6;
+  return GRADE_LOOKS.find(
+    ({ grade: look }) =>
+      near(grade.exposure, look.exposure) &&
+      near(grade.temperature, look.temperature) &&
+      near(grade.tint, look.tint) &&
+      near(grade.contrast, look.contrast) &&
+      near(grade.saturation, look.saturation),
+  );
+}

@@ -325,7 +325,7 @@ export const connectionMethods = {
               onDisk: z.boolean().describe("Already downloaded: using the plugin will not download it again."),
             }),
           ),
-          downloadBytes: z.int().describe("Sum of `bytes` of the downloads not yet on disk: what first use would fetch (managed downloads; the plugin's own npm package is not counted). whisper-cpp lists its default model; a project configured for another model downloads that one."),
+          downloadBytes: z.int().describe("Sum of `bytes` of the downloads not yet on disk: what first use would fetch (managed downloads; the plugin's own npm package is not counted). whisper-cpp lists the model the project transcribes with: its `transcription.model`, else this machine's default, else the plugin's default (a model registered with `model.add` is on disk)."),
           installed: z.boolean().describe("The project pins it in `frameshell.json`."),
           pin: z.string().nullable().describe("Pinned spec; null when not installed."),
           status: z.enum(["loaded", "error", "untrusted"]).nullable().describe("As `plugin.list`; null when not installed."),

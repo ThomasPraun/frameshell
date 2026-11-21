@@ -2,7 +2,7 @@ import { ErrorCode, type MethodResult, RpcError } from "@frameshell/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { Confirmed } from "../src/main/confirmation.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribeAsk, transcribePrice } from "../src/main/transcribe-ask.js";
-import { offersTranscribe } from "../src/renderer/src/transcript/model-choice.js";
+import { offersTranscribe, transcribesLocally } from "../src/renderer/src/transcript/model-choice.js";
 import { strings } from "../src/shared/i18n/index.js";
 
 const result = { asset: "assets/a.mp4" } as unknown as MethodResult<"transcribe">;
@@ -138,10 +138,12 @@ describe("formatLength", () => {
 });
 
 describe("offersTranscribe", () => {
-  it("is false for whisper.cpp and before the provider is known, true for any other", () => {
+  it("is false before the provider is known, true for any, whisper.cpp included (#756)", () => {
     expect(offersTranscribe(null)).toBe(false);
-    expect(offersTranscribe("whisper-cpp")).toBe(false);
+    expect(offersTranscribe("whisper-cpp")).toBe(true);
     expect(offersTranscribe("openai")).toBe(true);
+    expect(transcribesLocally("whisper-cpp")).toBe(true);
+    expect(transcribesLocally("openai")).toBe(false);
   });
 });
 

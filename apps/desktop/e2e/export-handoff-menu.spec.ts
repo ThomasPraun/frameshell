@@ -37,20 +37,44 @@ test("both menu items are on in a video project; a cancelled dialog writes nothi
   const otio = join(box.projectDir, "exports", "handoff.otio");
   const xml = join(box.projectDir, "exports", "handoff.xml");
   await app.evaluate(({ dialog }) => {
-    dialog.showSaveDialog = async () => ({ canceled: true, filePath: "" });
+    const asked = ((globalThis as { asked?: string[] }).asked = [] as string[]);
+    dialog.showSaveDialog = (async (...args: unknown[]) => {
+      asked.push(String((args.at(-1) as { defaultPath?: string }).defaultPath));
+      return { canceled: true, filePath: "" };
+    }) as typeof dialog.showSaveDialog;
   });
+  const asked = () => app.evaluate(() => (globalThis as { asked?: string[] }).asked);
   await clickMenu(app, "export-otio");
+  await expect.poll(async () => (await asked())?.length).toBe(1);
   await clickMenu(app, "export-premiere");
+  await expect.poll(async () => (await asked())?.length).toBe(2);
   await page.waitForTimeout(500);
   expect(existsSync(otio)).toBe(false);
   expect(existsSync(xml)).toBe(false);
+  // Both dialogs start in exports/, made for them (#749: Windows opened the parent of a missing folder).
+  expect(await asked()).toEqual([
+    join(box.projectDir, "exports", "main.otio"),
+    join(box.projectDir, "exports", "main.xml"),
+  ]);
+  expect(existsSync(join(box.projectDir, "exports"))).toBe(true);
 
   await app.evaluate(({ dialog }, path) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, otio);
   await clickMenu(app, "export-otio");
   // Four generated clips, each a missing-media warning: the notice counts them.
-  await expect(page.locator(".statusbar")).toContainText("Exported handoff.otio. 4 things are not in the file: run frameshell export otio", { timeout: 60_000 });
+  await expect(page.locator(".statusbar")).toContainText("Exported handoff.otio. 4 things are not in the OpenTimelineIO file.", { timeout: 60_000 });
+  // What it leaves out is one click away, never a terminal command (#749).
+  await page.getByTestId("notice-details").click();
+  await expect(page.getByTestId("notice-details-list").locator("li")).toHaveCount(4);
+  await page.getByTestId("notice-details").click();
+  await expect(page.getByTestId("notice-details-list")).toHaveCount(0);
+  await app.evaluate(({ shell }) => {
+    const shown = ((globalThis as { shown?: string[] }).shown = [] as string[]);
+    shell.showItemInFolder = (path: string) => void shown.push(path);
+  });
+  await page.getByTestId("notice-reveal").click();
+  await expect.poll(() => app.evaluate(() => (globalThis as { shown?: string[] }).shown)).toEqual([otio]);
   const timeline = JSON.parse(readFileSync(otio, "utf8"));
   expect(timeline.OTIO_SCHEMA).toBe("Timeline.1");
   expect(timeline.tracks.children).toHaveLength(2);
@@ -59,7 +83,7 @@ test("both menu items are on in a video project; a cancelled dialog writes nothi
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, xml);
   await clickMenu(app, "export-premiere");
-  await expect(page.locator(".statusbar")).toContainText("Exported handoff.xml. 4 things are not in the file: run frameshell export premiere", { timeout: 60_000 });
+  await expect(page.locator(".statusbar")).toContainText("Exported handoff.xml. 4 things are not in the Premiere file.", { timeout: 60_000 });
   const premiere = readFileSync(xml, "utf8");
   expect(premiere).toContain('<xmeml version="4">');
   expect(premiere).toContain("<sequence");

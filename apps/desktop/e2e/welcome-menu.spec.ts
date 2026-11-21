@@ -33,6 +33,13 @@ test.afterAll(async () => {
 const recent = () => page.getByRole("region", { name: "Recent projects" }).getByRole("button");
 const menu = () => page.getByRole("menu");
 
+test("the welcome screen shows the steps from a new project to an exported video (#740)", async () => {
+  const path = page.getByTestId("welcome-path");
+  await expect(path.getByRole("heading", { name: "How it goes" })).toBeVisible();
+  await expect(path.getByRole("listitem")).toHaveCount(4);
+  await expect(path.getByRole("listitem").first()).toContainText("Connect your AI");
+});
+
 test("a recent project's menu reveals its folder and removes it from the list", async () => {
   await expect(recent()).toHaveCount(2);
   await recent().filter({ hasText: "old-cut" }).click({ button: "right" });

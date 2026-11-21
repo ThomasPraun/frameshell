@@ -54,6 +54,12 @@ export function LayersPanel({
     }
   }, []);
 
+  /** Pictures picked in the OS dialog, each a new layer on top: one undoable step. */
+  const addImages = () => {
+    setStatus(null);
+    window.frameshell.timeline.addImages(TIMELINE).catch((error: Error) => setStatus(t.layers.failed(error.message)));
+  };
+
   // Undo and redo, as the timeline panel takes them when it is shown.
   useEffect(() => {
     const undoRedo = (direction: HistoryCommand) =>
@@ -113,7 +119,14 @@ export function LayersPanel({
   return (
     <div className="layers-panel" data-testid="layers-panel">
       <PanelHeader
-        actions={onDetach && <DetachButton name={t.workspace.layers.toLowerCase()} detached={detached} onClick={onDetach} testId="layers-detach" />}
+        actions={
+          <>
+            <button className="panel-action layers-add" data-tip={t.layers.addImageTip} data-testid="layers-add-image" onClick={addImages}>
+              {t.layers.addImage}
+            </button>
+            {onDetach && <DetachButton name={t.workspace.layers.toLowerCase()} detached={detached} onClick={onDetach} testId="layers-detach" />}
+          </>
+        }
         onCollapse={onToggle}
         collapseLabel={collapsed ? t.layers.show : t.layers.hide}
         collapseKey={panelShortcut("timeline")}
@@ -127,7 +140,12 @@ export function LayersPanel({
       {!collapsed && (
         <div className="panel-body layers-body">
           {view && layers.length === 0 ? (
-            <p className="layers-empty">{t.layers.empty}</p>
+            <div className="layers-empty">
+              <p>{t.layers.empty}</p>
+              <button className="layers-empty-add" data-testid="layers-empty-add" onClick={addImages}>
+                {t.layers.addImage}
+              </button>
+            </div>
           ) : (
             <ul className="layers-list" aria-label={t.layers.list}>
               {layers.map((layer) => {
