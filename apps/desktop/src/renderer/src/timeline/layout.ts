@@ -72,8 +72,15 @@ export interface ClipBox {
   in: number;
   /** Source seconds per timeline second. */
   speed: number;
-  /** Why the length is unknown (daemon's message); null when it is known. */
+  /** Why the length is unknown (daemon's message), or why a generated clip's render failed; null otherwise. */
   problem: string | null;
+  /** Generated clips: their render once `clip.renders` told it (`withRenders`, #746); absent until then and for others. */
+  render?: "ready" | "pending" | "failed";
+  /**
+   * Generated clips whose render failed: why, for the tooltip (`withRenders`). Never {@link ClipBox.problem}, which
+   * means an unknown length and turns off trimming and snapping on the clip.
+   */
+  renderError?: string;
   /** `audio.gain`, dB; 0 when unset. */
   gain: number;
   /** `audio.muted`. */
@@ -163,6 +170,8 @@ export interface TrackRow {
   /** Short label, numbered per kind from the bottom layer: `V1`, `P1`, `A2`, `S1`. */
   label: string;
   name: string | null;
+  /** Subtitle tracks: id of the followed track; null otherwise. */
+  follows: string | null;
   /** Subtitle tracks: label of the followed track; null otherwise. */
   followsLabel: string | null;
   /** Program tracks: id of the multicam group they show; null otherwise. */
@@ -318,6 +327,7 @@ export function layoutTimeline(
       kind: track.kind,
       label: labels.get(track.id)!,
       name: track.name,
+      follows: track.follows ?? null,
       followsLabel: track.follows ? (labels.get(track.follows) ?? track.follows) : null,
       group: track.kind === "program" ? (track.group ?? null) : null,
       muted: track.muted === true,
@@ -469,6 +479,19 @@ export function fitZoom(duration: number, width: number): number {
   return width / span(duration);
 }
 
+/** Shortest span {@link fitContentZoom} fits, seconds: a clip of a frame still leaves room around it. */
+export const FIT_CONTENT_MIN_SECONDS = 2;
+
+/**
+ * Zoom (px per second) that fits the clips themselves in `width` px, with a little room after the last one: what
+ * "Zoom to fit" picks, so a 10 s timeline fills the panel instead of the first sixth of the {@link fitZoom} view.
+ * Kept inside {@link zoomLimits}.
+ */
+export function fitContentZoom(duration: number, width: number, fps: number): number {
+  const { min, max } = zoomLimits(duration, width, fps);
+  return Math.min(max, Math.max(min, width / Math.max(duration * 1.05, FIT_CONTENT_MIN_SECONDS)));
+}
+
 /** Zoom range: from the whole timeline in view to one frame {@link FRAME_PX_MAX} px wide. */
 export function zoomLimits(duration: number, width: number, fps: number): { min: number; max: number } {
   return { min: fitZoom(duration, width), max: fps * FRAME_PX_MAX };
@@ -486,18 +509,23 @@ export function clampScroll(scrollLeft: number, duration: number, pxPerSecond: n
 
 /**
  * Zoom by `factor` around `anchorX` (px from the lanes' left edge): the time
- * under the anchor stays under it. Scroll is clamped at the start only; the
- * caller clamps the end once the new content width is known.
+ * under the anchor stays under it. An anchor past `end` (the last clip's end,
+ * seconds) anchors at `end`, so zooming in over empty space keeps the clips in
+ * view. Scroll is clamped at the start only; the caller clamps the end once the
+ * new content width is known.
  */
 export function zoomAround(
   viewport: { pxPerSecond: number; scrollLeft: number },
   factor: number,
   anchorX: number,
   limits: { min: number; max: number },
+  end = Infinity,
 ): { pxPerSecond: number; scrollLeft: number } {
-  const time = (viewport.scrollLeft + anchorX) / viewport.pxPerSecond;
+  const pointed = (viewport.scrollLeft + anchorX) / viewport.pxPerSecond;
+  const time = Math.min(pointed, Math.max(0, end));
+  const x = time * viewport.pxPerSecond - viewport.scrollLeft;
   const pxPerSecond = Math.min(limits.max, Math.max(limits.min, viewport.pxPerSecond * factor));
-  return { pxPerSecond, scrollLeft: Math.max(0, time * pxPerSecond - anchorX) };
+  return { pxPerSecond, scrollLeft: Math.max(0, time * pxPerSecond - x) };
 }
 
 /** One labeled ruler tick. */

@@ -76,3 +76,27 @@ test("a closed terminal panel stays closed when the project reopens", async () =
   await rail().click();
   await expect(panel()).toBeVisible();
 });
+
+test("Ctrl+V pastes the clipboard's text into the terminal once; with no text the program gets its ^V (#743)", async () => {
+  test.skip(process.platform === "darwin", "macOS pastes with Cmd+V");
+  if (!(await panel().isVisible())) await rail().click();
+  await runInTerminal(page, "clear");
+  await app.evaluate(({ clipboard }) => clipboard.writeText("echo pasted-once"));
+  await page.locator(".terminal-view:not([hidden])").click();
+  await page.keyboard.press("Control+v");
+  await page.keyboard.press("Enter");
+  // The command line and its output: twice, never three or four times.
+  await expect.poll(async () => (await terminalText(page)).split("pasted-once").length - 1).toBe(2);
+
+  // The tty's own ^V (quote the next key) is turned off, so `cat -v` shows the one it gets.
+  // The keys below must reach `cat`, not the shell's line editor (where ^V quotes the Enter after it): wait for the
+  // line to run. The marker is printed in two halves, so the echoed command line never contains it whole.
+  await runInTerminal(page, "stty lnext undef; printf 'cat-%s\\n' started; cat -v");
+  await expect.poll(() => terminalText(page)).toContain("cat-started");
+  // No text on the clipboard, as with a screenshot copied for Claude Code.
+  await app.evaluate(({ clipboard }) => clipboard.clear());
+  await page.keyboard.press("Control+v");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => terminalText(page)).toContain("^V");
+  await page.keyboard.press("Control+c");
+});

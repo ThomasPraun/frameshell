@@ -115,6 +115,9 @@ export interface IdeaBrief {
   url: string | null;
 }
 
+/** A way of making a project the File menu starts on the welcome screen: from video files, or from an idea. */
+export type WelcomeStart = "video" | "idea";
+
 /** Folder a project made from an idea goes in, as main planned it: `parent`/`name`, numbered when the name is taken. */
 export interface IdeaProjectPlan {
   /** Folder the project folder goes in. */
@@ -131,6 +134,14 @@ export interface TerminalInfo {
   session: string;
   /** Shell executable name for the tab title, e.g. `zsh`. */
   shell: string;
+}
+
+/** A terminal of the window that outlived its view, as {@link FrameshellApi.terminals} `list` reports it. */
+export interface TerminalSurvivor extends TerminalInfo {
+  /** Its shell's exit code once it exited; null while it runs. */
+  exitCode: number | null;
+  /** Agent CLI running in it now, e.g. `claude`; null when none or unknown. */
+  agent: string | null;
 }
 
 /**
@@ -276,8 +287,18 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * OpenTimelineIO, ADR 0045) or a Premiere Pro XML file (File > Export Premiere XML, ADR 0047).
  * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
+ * `showShoot`, `showTeleprompter`: show the sidebar on the Shoot or Teleprompter view (View > Shoot, View > Teleprompter).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportOtio" | "exportPremiere" | "toggleReview" | "toggleTerminal";
+export type MenuCommand =
+  | "showTranscript"
+  | "imageFromFrame"
+  | "exportVideo"
+  | "exportOtio"
+  | "exportPremiere"
+  | "toggleReview"
+  | "toggleTerminal"
+  | "showShoot"
+  | "showTeleprompter";
 
 export type { HandoffKind };
 
@@ -317,8 +338,14 @@ export interface FrameshellApi {
      * a video file; `plan` is null when nothing is.
      */
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
+    /** Bytes a new project downloads before it can transcribe (the tool and model, once per machine); 0 when ready. */
+    transcriptionDownload(): Promise<number>;
     /** Videos or audio the OS asked to open in this window (Open with), once: null when none or already taken. */
     takeOffered(): Promise<VideoProjectPlan | null>;
+    /** How File > New … asked this welcome screen to start, once: null when not asked or already taken. */
+    takeStart(): Promise<WelcomeStart | null>;
+    /** Called when File > New … asks this window to start; take it with {@link takeStart}. Returns an unsubscribe function. */
+    onStartOffered(listener: () => void): () => void;
     /** Called when the OS offers videos to this window; take them with {@link takeOffered}. Returns an unsubscribe function. */
     onVideosOffered(listener: () => void): () => void;
     /** Pick the folder a new project goes in; null when cancelled. */
@@ -388,12 +415,19 @@ export interface FrameshellApi {
   terminals: {
     create(size: { cols: number; rows: number }): Promise<TerminalInfo>;
     /**
+     * The window's terminals not closed yet, oldest first. After a reload (a language change, Ctrl+R) the panel
+     * shows these again, so the shells and agents in them go on; empty in a fresh window.
+     */
+    list(): Promise<TerminalSurvivor[]>;
+    /**
      * Output to feed a view mounting on terminal `id` (ADR 0012): its recent
      * output, about 10,000 lines. Data events sent before the reply are in
      * it; later ones are not. Null once the terminal was killed.
      */
     attach(id: string): Promise<string | null>;
     write(id: string, data: string): void;
+    /** Whether the system clipboard holds text now (#743): Ctrl+V pastes it, else the program gets its ^V. */
+    clipboardHasText(): Promise<boolean>;
     resize(id: string, cols: number, rows: number): void;
     kill(id: string): void;
     onData(listener: (id: string, data: string) => void): () => void;
@@ -465,6 +499,12 @@ export interface FrameshellApi {
      */
     addImages(timeline: string): Promise<string[] | null>;
     /**
+     * Put media among `assets` (project-relative videos, sounds, stills) on `timeline` as one undoable step (#738): with
+     * `target`, from that time on that track (the drop point of a drag from Files); otherwise at the end of the first
+     * track of its kind, adding one when there is none. Resolves with the new clip ids and what the daemon refused.
+     */
+    addMedia(timeline: string, assets: string[], target?: { track: string; start: number }): Promise<{ clips: string[]; refused: { asset: string; message: string }[] }>;
+    /**
      * Cut the part of a photo that `mask` (project-relative grayscale PNG, from a Pick) marks out as a new layer
      * right above it (`image.cutout`, ADR 0022), as one undoable step. Resolves with the new clip id.
      */
@@ -481,7 +521,18 @@ export interface FrameshellApi {
      * the file leaves out, or null when cancelled. Rejects with the daemon's message (an image project has nothing to export).
      */
     exportHandoff(kind: HandoffKind, timeline: string): Promise<{ path: string; warnings: string[] } | null>;
-    /** Show a file {@link exportImage} or {@link exportHandoff} wrote in Finder / Explorer; any other path is ignored. */
+    /**
+     * Export `timeline` as an MP4 where the user picks in the OS dialog (#738): the daemon's `render`, a background job.
+     * Resolves with the job as it started, the file it writes and what the export leaves out, or null when cancelled.
+     * Rejects with the daemon's message (an empty timeline, clips it cannot render).
+     */
+    exportVideo(timeline: string): Promise<{ job: JobInfo; output: string; warnings: string[] } | null>;
+    /** Called on every change of a video export job of the project (daemon `job.progress`, kind `render`); `null` after a daemon reconnect. */
+    onExportJob(listener: (job: JobInfo | null) => void): () => void;
+    /**
+     * Show a file {@link exportVideo}, {@link exportImage} or {@link exportHandoff} wrote this run in Finder / Explorer /
+     * the file manager; any other path is ignored.
+     */
     revealExport(path: string): Promise<void>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
@@ -771,8 +822,13 @@ export interface FrameshellApi {
      * Resolves with the session id. Rejects when a session is already recording in this window.
      */
     begin(sources: ShootSourceSpec[]): Promise<string>;
-    /** Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. */
-    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<void>;
+    /**
+     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. Resolves with
+     * whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when another app owns it.
+     */
+    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<boolean>;
+    /** Called when the global End shortcut is pressed while this window records. Returns an unsubscribe function. */
+    onEndRequested(listener: () => void): () => void;
     /** Append one recorded chunk of `role` to its file, in call order per role. */
     chunk(id: string, role: ShootRole, data: Uint8Array): Promise<void>;
     /**
@@ -1102,6 +1158,12 @@ export interface AiAppChange {
   problem: AiAppProblem | null;
 }
 
+/**
+ * The global shortcut that ends a recording shoot from any app (#744), `Mod` standing for ⌘ on macOS and Ctrl
+ * elsewhere. Main registers it only while a session records.
+ */
+export const SHOOT_END_KEYS = "Mod+Alt+Shift+S";
+
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
   lang: "app:lang",
@@ -1134,6 +1196,9 @@ export const Channel = {
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",
+  projectTranscriptionDownload: "project:transcription-download",
+  projectTakeStart: "project:take-start",
+  projectStartOffered: "project:start-offered",
   projectVideosOffered: "project:videos-offered",
   mediaImport: "media:import",
   filesTree: "files:tree",
@@ -1152,7 +1217,9 @@ export const Channel = {
   filesCopyPath: "files:copy-path",
   terminalCreate: "terminal:create",
   terminalAttach: "terminal:attach",
+  terminalList: "terminal:list",
   terminalWrite: "terminal:write",
+  terminalClipboardHasText: "terminal:clipboard-has-text",
   terminalResize: "terminal:resize",
   terminalKill: "terminal:kill",
   terminalData: "terminal:data",
@@ -1169,9 +1236,12 @@ export const Channel = {
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
   timelineAddImages: "timeline:add-images",
+  timelineAddMedia: "timeline:add-media",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
   timelineExportHandoff: "timeline:export-handoff",
+  timelineExportVideo: "timeline:export-video",
+  timelineExportJob: "timeline:export-job",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",
@@ -1239,6 +1309,7 @@ export const Channel = {
   shootEnd: "shoot:end",
   shootRecovered: "shoot:recovered",
   shootRecoveredChanged: "shoot:recovered-changed",
+  shootEndRequested: "shoot:end-requested",
   shootCut: "shoot:cut",
   shootCheck: "shoot:check",
   shootStatus: "shoot:status",

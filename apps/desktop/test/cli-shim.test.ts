@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { writeCliShim } from "../src/main/cli-shim.js";
+import { gitBashShim, writeCliShim } from "../src/main/cli-shim.js";
 
 // The built CLI: `pnpm test` runs `tsc -b` first.
 const cliEntry = fileURLToPath(import.meta.resolve("@frameshell/cli/frameshell"));
@@ -25,6 +25,17 @@ describe("writeCliShim", () => {
         : spawnSync(shim, ["--version"], { encoding: "utf8" });
     expect(result.stderr).toBe("");
     expect(result.stdout.trim()).toBe(cliVersion);
+  });
+
+  it("writes an sh twin beside the .cmd on Windows, for the Git Bash agents run commands in (#743)", async () => {
+    const binDir = mkdtempSync(join(tmpdir(), "frameshell-shim-"));
+    const target = { runtime: "C:\\Program Files\\Frameshell\\Frameshell.exe", cliEntry: "C:\\Program Files\\Frameshell\\resources\\cli.js" };
+    const shim = await writeCliShim(binDir, target, "win32");
+    expect(shim).toBe(join(binDir, "frameshell.cmd"));
+    expect(readFileSync(join(binDir, "frameshell"), "utf8")).toBe(
+      "#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec 'C:/Program Files/Frameshell/Frameshell.exe' 'C:/Program Files/Frameshell/resources/cli.js' \"$@\"\n",
+    );
+    expect(gitBashShim({ runtime: "/usr/bin/node", cliEntry: "/opt/cli.js" })).toContain("exec '/usr/bin/node' '/opt/cli.js'");
   });
 
   it("is idempotent", async () => {

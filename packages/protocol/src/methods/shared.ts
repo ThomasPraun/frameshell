@@ -553,7 +553,7 @@ export const AssetSchema = z.object({
 
 /** Events a connection can subscribe to with `events.subscribe`; each is a {@link notifications} entry. */
 export const EventNameSchema = z
-  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed", "target.changed", "beats.changed"])
+  .enum(["timeline.changed", "timeline.rejected", "asset.changed", "job.progress", "proposal.changed", "people.changed", "shoot.changed", "target.changed", "beats.changed", "transcription.progress"])
   .describe(
     "`timeline.changed`: a timeline file of the project was changed by an operation (any client, or a direct file edit). " +
       "`timeline.rejected`: a direct edit of a timeline file was refused and the daemon's version restored. " +
@@ -566,7 +566,8 @@ export const EventNameSchema = z
       "`beats.changed`: a beats file (`beats/*.beats.json`, ADR 0029) was written, edited by hand, deleted or became invalid, so " +
       "a timeline's beat grid may have changed. " +
       "`asset.changed`: an asset's ingest state or derived media changed, or the asset was deleted. " +
-      "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished.",
+      "`job.progress`: a background job (ingest, render, clip) was queued, advanced or finished. " +
+      "`transcription.progress`: a `transcribe` request of the project, from any client, started, advanced or ended.",
   );
 
 /** Params of `events.subscribe` and `events.unsubscribe`. */

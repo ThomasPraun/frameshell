@@ -684,12 +684,59 @@ code {
 
 /* ---------- Sidebar ---------- */
 
+.view-switch-wrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .view-switch {
   display: flex;
   gap: 0;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* Tabs cut off at an edge fade out there: the strip says it goes on (#736). */
+.view-switch-wrap.has-after .view-switch {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+.view-switch-wrap.has-before .view-switch {
+  mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent);
+}
+
+.view-switch-wrap.has-before.has-after .view-switch {
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+.view-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 11px;
+}
+
+.view-more-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.view-more svg {
+  width: 12px;
+  height: 12px;
+}
+
+.view-more {
+  width: auto;
+  padding: 0 4px;
+  color: var(--text-muted);
+}
+
+.view-more:hover {
+  color: var(--text);
 }
 
 .view-tab {
@@ -1117,7 +1164,8 @@ code {
 
 .preview-stage {
   flex: 1;
-  min-height: 0;
+  /* #745: an open inspector never squeezes the picture below about half the panel; the inspector scrolls. */
+  min-height: 45%;
   display: grid;
   place-items: center;
   padding: 14px;
@@ -1196,9 +1244,28 @@ code {
   bottom: 12%;
   transform: translateX(-50%);
   width: min(72%, 360px);
+  /* Never past the top of a small frame (#745): the oldest slates give way at the top. */
+  max-height: 80%;
+  overflow: hidden;
   display: grid;
+  align-content: end;
   gap: 6px;
   pointer-events: none;
+}
+
+/* A small preview (#745: two slates overflowed it): tighter slates. */
+@container (max-height: 260px) {
+  .preview-render-slates {
+    bottom: 6%;
+    width: 86%;
+    gap: 3px;
+  }
+
+  .preview-layer-pending {
+    gap: 3px;
+    padding: 3px 6px;
+    font-size: 10.5px;
+  }
 }
 
 .preview-layer-pending {
@@ -1288,10 +1355,11 @@ code {
   flex: none;
   min-height: 32px;
   display: grid;
-  /* The tools never shrink under the notice: a long notice gives way, ellipsised. */
-  grid-template-columns: minmax(max-content, 1fr) auto minmax(0, 1fr);
+  /* minmax(0, …): wide frame tools shrink instead of pushing the buttons out (#745); a long notice gives way, ellipsised. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   column-gap: 8px;
   container-type: inline-size;
+  overflow: clip;
   align-items: center;
   padding: 0 8px;
   border-top: 1px solid var(--line-soft);
@@ -1448,10 +1516,12 @@ code {
 /* Wraps into rows when the preview column is narrow: every field stays reachable. */
 /* Capped so a tall inspector (many wrapped groups in a short window) scrolls instead of squeezing the picture to 0. */
 .clip-inspector {
-  flex: none;
+  flex: 0 1 auto;
   min-height: 32px;
   max-height: 50%;
   overflow-y: auto;
+  /* Rows wrap to the width; never a second, sideways scrollbar (#745). */
+  overflow-x: hidden;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1642,8 +1712,11 @@ code {
 }
 
 .clip-inspector-hint {
+  min-width: 0;
   color: var(--text-faint);
   font-size: 11.5px;
+  /* Long hints wrap instead of widening the inspector (#745: "Los efectos se a…"). */
+  white-space: normal;
 }
 
 /* Edits go to one format only (ADR 0027): marked like the format switcher when it shows another format. */
@@ -1712,6 +1785,59 @@ code {
 
 .key-control-label {
   color: var(--text-faint);
+}
+
+/* A group's visible heading (#746): Transitions, Keyframes. */
+.clip-inspector-heading {
+  flex: 1 0 100%;
+}
+
+/* A generated clip's section (#746): type and render state on top, then the error, the composition, motion blur. */
+.generated-control {
+  flex: 1 0 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.generated-type {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.generated-state[data-state="failed"],
+.generated-state[data-state="unavailable"] {
+  color: var(--danger);
+}
+
+.generated-state[data-state="ready"] {
+  color: var(--text-muted);
+}
+
+.generated-error {
+  margin: 0;
+  padding-left: 6px;
+  border-left: 2px solid var(--danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 11.5px;
+}
+
+.generated-source,
+.generated-blur {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.generated-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .key-control.is-keyed .key-control-label {
@@ -1941,22 +2067,34 @@ code {
   gap: 16px;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 4px;
   padding: 6px 16px;
   border-bottom: 1px solid var(--line-soft);
   font-size: 11.5px;
   color: var(--text-faint);
 }
 
+/* Wraps instead of cutting off (#741): it is the only place that says how to cut and restore. */
 .transcript-toolbar .hint {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  order: 1;
+  flex: 1 0 100%;
 }
 
-.transcript-toolbar .timeline-status {
+.transcript-toolbar .transcript-cut {
   flex: none;
-  max-width: 60%;
+  font-size: 11.5px;
+}
+
+/* A row of its own, one line high whatever it says (the whole text in its tooltip): a status arriving while the
+   pointer is over a word never moves the words (#741: macOS lost clicks to the reflow). */
+.transcript-toolbar .timeline-status {
+  order: 2;
+  flex: 1 0 100%;
+  min-height: 1lh;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .transcript-scroll {
@@ -2130,7 +2268,21 @@ code {
 
 .transcript-toolbar .transcript-restore-marked {
   flex: none;
+  display: inline-grid;
   font-size: 11.5px;
+}
+
+.transcript-restore-marked > span {
+  grid-area: 1 / 1;
+}
+
+.transcript-restore-marked > .transcript-restore-sizer {
+  visibility: hidden;
+}
+
+/* Nothing struck selected: holds its place unseen, so the toolbar never reflows mid-drag (#741). */
+.transcript-toolbar .transcript-restore-marked.is-idle {
+  visibility: hidden;
 }
 
 /* Transcription model picker (#427), with the inline form that registers a model file. */
@@ -3020,6 +3172,48 @@ button.track-head:focus-visible {
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
+  /* #745: the transport and header fold by the panel's own width; clip (not hidden) so a focused field never
+     scrolls the panel sideways. */
+  container: preview / inline-size;
+  overflow: clip;
+}
+
+/* #745: a narrow preview (default layout at 1280 px, inspector open) keeps Play: buttons on their own row, the
+   frame tools under them, the notice last. The panel title gives way to the timecode and duration. */
+@container preview (max-width: 760px) {
+  .preview-body .preview-transport {
+    height: auto;
+    min-height: 32px;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+    padding: 3px 8px;
+  }
+
+  .preview-body .preview-transport-buttons {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: center;
+  }
+
+  .preview-body .preview-transport-tools {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: center;
+    justify-content: center;
+  }
+
+  .preview-body .preview-notice {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: center;
+    max-width: 100%;
+  }
+}
+
+@container preview (max-width: 400px) {
+  .preview-body > .panel-header .panel-title {
+    display: none;
+  }
 }
 
 /* F: the picture alone on black; the transport shows while the pointer is over it. */
@@ -3442,9 +3636,15 @@ button.track-head:focus-visible {
   grid-column: 1;
   grid-row: 1;
   justify-self: start;
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.preview-transport-tools select {
+  min-width: 0;
 }
 
 .preview-format {
@@ -3844,6 +4044,15 @@ button.track-head:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Time a long step has run (#742): digits keep their width while it ticks. */
+.setup-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-slow {
+  color: var(--text-muted);
 }
 
 .status-setup.is-failed {
@@ -5107,8 +5316,24 @@ button.track-head:focus-visible {
 }
 
 .take-status-outcome.is-failed,
-.take-status-outcome.is-short {
+.take-status-outcome.is-short,
+.take-status-outcome.is-quiet {
   color: var(--danger);
+}
+
+.take-status-outcome.is-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.shoot-last {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 @keyframes take-status-arrive {
@@ -5188,7 +5413,11 @@ button.track-head:focus-visible {
 
 /* Colour grade of a media clip: a head row, five sliders, then the LUT and its mix. */
 .colour-grade {
-  flex: 1 0 100%;
+  /* Its own row, never wider than the inspector (#745: 27 px past the edge on macOS). */
+  flex: 1 1 100%;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
@@ -5197,14 +5426,37 @@ button.track-head:focus-visible {
 .colour-grade-head,
 .colour-grade-sliders,
 .colour-grade-lut {
+  /* Each row as wide as the group, never the widest slider (#745: 213 px rows in a 175 px group). */
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px 14px;
   flex-wrap: wrap;
 }
 
+/* A slider row narrower than the inspector gives way in the slider, never past the edge (#745: larger macOS font). */
+.colour-slider {
+  min-width: 0;
+}
+
+/* #745: a field never reaches past the inspector; its menu gives way first (macOS draws native menus wider). */
+.clip-inspector .clip-field {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clip-inspector .clip-field-select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .colour-slider-input {
+  flex: 0 1 96px;
   width: 96px;
+  min-width: 40px;
   height: 16px;
   margin: 0;
   accent-color: var(--accent);
@@ -5545,4 +5797,49 @@ button.track-head:focus-visible {
 
 .welcome-order-note {
   color: var(--text-muted);
+/* Sound and picture switches of a track header (TrackToggles): dim until hovered, lit while muted or hidden. */
+.track-toggles {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+  flex: none;
+}
+
+.program-head > .track-toggles {
+  position: absolute;
+}
+
+.program-head > button.track-head {
+  padding-right: 52px;
+}
+
+.track-toggle {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-faint);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.track-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+
+.track-toggle:hover,
+.track-toggle:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.track-toggle.on {
+  opacity: 1;
+  color: var(--danger);
 }
