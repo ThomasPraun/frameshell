@@ -199,6 +199,8 @@ test("deleting two selected clips is one undo step", async () => {
   await page.keyboard.press(`${modifier}+z`);
   await expect(lanes()).toHaveAttribute("data-clips", clipsBefore!);
   await expect(clipItems().nth(1)).toHaveText("V1: titles, 00:00:00:00 to 00:00:03:00");
+  // The status says what came back, as History names it (#748).
+  await expect(page.locator(".timeline-status")).toHaveText("Undone: Delete 2 clips");
   await expect(clipItems().nth(2)).toHaveText("V1: titles, 00:00:03:00 to 00:00:06:00");
   const lines = readFileSync(journal, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
   const [first, second, undo] = lines.slice(-3);

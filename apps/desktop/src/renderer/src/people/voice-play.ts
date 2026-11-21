@@ -8,6 +8,8 @@ interface Playing {
   key: string;
   stop: () => void;
   gain: (db: number) => void;
+  /** Source second playing now; null until the sound starts. */
+  position: () => number | null;
 }
 
 /** The sound playing now, one at a time across the app (People voices, Audition rows). */
@@ -43,6 +45,11 @@ export function stopVoice(): void {
   current.stop();
 }
 
+/** Source second `key` plays now (an Audition row's playhead); null when it is not what plays, or not started yet. */
+export function voicePosition(key: string): number | null {
+  return playing?.key === key ? playing.position() : null;
+}
+
 /** Set the level of what plays now to `db` (0 = as recorded), when `key` started it; otherwise nothing. */
 export function setVoiceGain(key: string, db: number): void {
   if (playing?.key === key) playing.gain(db);
@@ -71,7 +78,8 @@ export async function playVoice(
   let gain = (db: number) => {
     level = db;
   };
-  const claim: Playing = { key, stop: () => stop(), gain: (db) => gain(db) };
+  let position = (): number | null => null;
+  const claim: Playing = { key, stop: () => stop(), gain: (db) => gain(db), position: () => position() };
   publish(claim);
   try {
     const frame = sidecar.channels * 2;
@@ -108,6 +116,8 @@ export async function playVoice(
       if (playing === claim) stopVoice();
     };
     source.start();
+    const began = context.currentTime;
+    position = () => stretch.start + (context.currentTime - began);
   } catch (error) {
     if (playing === claim) publish(null);
     throw error;

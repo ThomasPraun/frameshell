@@ -57,6 +57,11 @@ describe("cardView", () => {
     expect(cardView(status({ installed: false }), false)).toMatchObject({ kind: "not-installed", open: true, download: true });
   });
 
+  it("puts Check again in the card of an app that looks not installed, and only there", () => {
+    expect(cardView(status({ installed: false }), false)).toMatchObject({ checkAgain: true });
+    for (const view of [cardView(status(), false), cardView(status({ connected: true }), false), cardView(undefined, false)]) expect(view.checkAgain).toBe(false);
+  });
+
   it("offers nothing to open while reading, working, or where the app does not exist", () => {
     for (const view of [cardView(undefined, false), cardView(status(), true), cardView(status({ available: false, installed: false }), false)]) {
       expect(view).toMatchObject({ open: false, download: false, launch: null });
@@ -83,5 +88,12 @@ describe("cardView", () => {
     const failed = cardView(status(), false, { connect: true, change: { status: status(), backups: [], problem } });
     expect(failed).toMatchObject({ kind: "ready", restart: null, problem });
     expect(cardView(status({ problem }), false)).toMatchObject({ kind: "ready", problem });
+  });
+
+  it("blocks Connect and offers the file while a settings file does not parse", () => {
+    const problem = { kind: "invalid", file: "/home/ana/claude.json" } as const;
+    expect(cardView(status({ problem }), false)).toMatchObject({ connect: "connect", connectBlocked: true, showFile: "/home/ana/claude.json" });
+    const failed = { kind: "failed", message: "disk full" } as const;
+    expect(cardView(status({ problem: failed }), false)).toMatchObject({ connect: "connect", connectBlocked: false, showFile: null });
   });
 });

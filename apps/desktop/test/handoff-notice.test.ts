@@ -13,14 +13,14 @@ describe("handoffKindOf", () => {
 });
 
 describe("handoffNotice", () => {
-  it("OpenTimelineIO: names the file, with the count of what it leaves out only when there is something", () => {
+  it("OpenTimelineIO: names the file, with the count of what it leaves out only when there is something (the list is in Details, #749)", () => {
     const said = strings("en").workspace;
     expect(handoffNotice({ path: "C:\\p\\exports\\main.otio", warnings: [] }, "otio", said)).toBe("Exported main.otio.");
     expect(handoffNotice({ path: "/p/exports/main.otio", warnings: ["a"] }, "otio", said)).toBe(
-      "Exported main.otio. 1 thing is not in the file: run frameshell export otio --out <file>.otio in a terminal to list it.",
+      "Exported main.otio. 1 thing is not in the OpenTimelineIO file.",
     );
     expect(handoffNotice({ path: "/p/exports/main.otio", warnings: ["a", "b", "c"] }, "otio", said)).toBe(
-      "Exported main.otio. 3 things are not in the file: run frameshell export otio --out <file>.otio in a terminal to list them.",
+      "Exported main.otio. 3 things are not in the OpenTimelineIO file.",
     );
   });
 
@@ -28,23 +28,23 @@ describe("handoffNotice", () => {
     const said = strings("es").workspace;
     expect(handoffNotice({ path: "/p/main.otio", warnings: [] }, "otio", said)).toBe("Se exportó main.otio.");
     expect(handoffNotice({ path: "/p/main.otio", warnings: ["a", "b"] }, "otio", said)).toBe(
-      "Se exportó main.otio. Hay 2 cosas que no están en el archivo: ejecuta frameshell export otio --out <archivo>.otio en una terminal para verlas.",
+      "Se exportó main.otio. Hay 2 cosas que no están en el archivo de OpenTimelineIO.",
     );
     expect(handoffNotice({ path: "/p/main.otio", warnings: ["a"] }, "otio", said)).toBe(
-      "Se exportó main.otio. Hay 1 cosa que no está en el archivo: ejecuta frameshell export otio --out <archivo>.otio en una terminal para verla.",
+      "Se exportó main.otio. Hay 1 cosa que no está en el archivo de OpenTimelineIO.",
     );
   });
 
-  it("Premiere XML names its own command", () => {
+  it("Premiere XML names its own editor", () => {
     const en = strings("en").workspace;
     expect(handoffNotice({ path: "C:\\p\\exports\\main.xml", warnings: [] }, "premiere", en)).toBe("Exported main.xml.");
     expect(handoffNotice({ path: "/p/exports/main.xml", warnings: ["a", "b"] }, "premiere", en)).toBe(
-      "Exported main.xml. 2 things are not in the file: run frameshell export premiere --out <file>.xml in a terminal to list them.",
+      "Exported main.xml. 2 things are not in the Premiere file.",
     );
     const es = strings("es").workspace;
     expect(handoffNotice({ path: "/p/main.xml", warnings: [] }, "premiere", es)).toBe("Se exportó main.xml.");
     expect(handoffNotice({ path: "/p/main.xml", warnings: ["a"] }, "premiere", es)).toBe(
-      "Se exportó main.xml. Hay 1 cosa que no está en el archivo: ejecuta frameshell export premiere --out <archivo>.xml en una terminal para verla.",
+      "Se exportó main.xml. Hay 1 cosa que no está en el archivo de Premiere.",
     );
   });
 });

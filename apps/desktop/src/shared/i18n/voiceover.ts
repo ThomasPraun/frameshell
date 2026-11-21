@@ -7,8 +7,9 @@ const en = {
   cancel: "Cancel",
   getting: "Getting ready…",
   confirmWait: "Waiting for you to confirm the cost…",
-  saying: (line: string) => `Saying ${line}…`,
-  checking: (line: string) => `Checking ${line} against the script…`,
+  /** Progress by line number, never the line's id (#756). */
+  saying: (index: number, total: number) => `Saying line ${index} of ${total}…`,
+  checking: (index: number, total: number) => `Checking line ${index} of ${total} against the script…`,
   checkingAll: "Checking the takes against the script…",
   downloading: "Downloading the transcription tools, once…",
   working: "Working…",
@@ -18,6 +19,20 @@ const en = {
   stopped: (kept: number) =>
     kept === 0 ? "Stopped. Nothing was generated." : `Stopped. ${kept === 1 ? "1 take was" : `${kept} takes were`} saved and ${kept === 1 ? "is" : "are"} kept.`,
   failed: "The voiceover could not be generated",
+  /** No speech provider to say the lines (#756). */
+  noVoiceTitle: "No voice yet",
+  noVoiceBody:
+    "A voiceover needs a voice: a speech plugin such as OpenAI Speech (paid, uses your OpenAI key). Add one in the Plugins view, then generate again.",
+  noVoiceMissing: (name: string) => `This script asks for the voice ${name}, which this project does not have.`,
+  chooseVoice: "Pick the voice that says the lines.",
+  voiceLabel: "Voice",
+  generate: "Generate",
+  openPlugins: "Open Plugins",
+  /** After Stop: generate the rest, reusing the takes already made. */
+  continueRun: "Continue",
+  continueHint: "The takes already made are kept and not paid for again.",
+  playLine: (line: number) => `Play line ${line}`,
+  stopLine: (line: number) => `Stop line ${line}`,
   chooseTitle: "Check the takes against the script?",
   chooseBody: (megabytes: number) =>
     `Checking transcribes each take and compares it with its line, to catch what the voice misread. Transcription is not on this computer yet: it downloads about ${megabytes} MB, once.`,
@@ -59,6 +74,13 @@ const en = {
   placed: (phrases: number, lines: number, track: string) =>
     `Placed ${phrases === 1 ? "1 phrase" : `${phrases} phrases`} of ${lines === 1 ? "1 line" : `${lines} lines`} on ${track}.`,
   placeFailed: "Could not place the voiceover",
+  /** Why placing was refused, in the dialog's words (#756). */
+  refused: {
+    replace: "Clips already play these takes. Tick “Replace clips already placed” to place them again.",
+    beforeZero: "Start at 0 seconds or later.",
+    noTempo: "This timeline has no tempo, so beat: and bar: have nothing to count. Use seconds or a marker.",
+    unknownTime: (value: string) => `“${value}” is not a time or a marker of this timeline. Use seconds (2.5), a marker's name, or beat:N.`,
+  },
 };
 
 const es: typeof en = {
@@ -67,8 +89,8 @@ const es: typeof en = {
   cancel: "Cancelar",
   getting: "Preparando…",
   confirmWait: "Esperando que confirmes el costo…",
-  saying: (line) => `Diciendo ${line}…`,
-  checking: (line) => `Comprobando ${line} contra el guion…`,
+  saying: (index, total) => `Diciendo la línea ${index} de ${total}…`,
+  checking: (index, total) => `Comprobando la línea ${index} de ${total} contra el guion…`,
   checkingAll: "Comprobando las tomas contra el guion…",
   downloading: "Descargando las herramientas de transcripción, una sola vez…",
   working: "Trabajando…",
@@ -78,6 +100,18 @@ const es: typeof en = {
   stopped: (kept) =>
     kept === 0 ? "Detenido. No se generó nada." : `Detenido. ${kept === 1 ? "1 toma se guardó" : `${kept} tomas se guardaron`} y ${kept === 1 ? "se conserva" : "se conservan"}.`,
   failed: "No se pudo generar la voz en off",
+  noVoiceTitle: "Todavía no hay voz",
+  noVoiceBody:
+    "Una voz en off necesita una voz: un plugin de habla como OpenAI Speech (de pago, usa tu clave de OpenAI). Agrégalo en la vista Plugins y vuelve a generar.",
+  noVoiceMissing: (name) => `Este guion pide la voz ${name}, que este proyecto no tiene.`,
+  chooseVoice: "Elige la voz que dice las líneas.",
+  voiceLabel: "Voz",
+  generate: "Generar",
+  openPlugins: "Abrir Plugins",
+  continueRun: "Continuar",
+  continueHint: "Las tomas ya hechas se conservan y no se vuelven a pagar.",
+  playLine: (line) => `Reproducir la línea ${line}`,
+  stopLine: (line) => `Detener la línea ${line}`,
   chooseTitle: "¿Comprobar las tomas contra el guion?",
   chooseBody: (megabytes) =>
     `La comprobación transcribe cada toma y la compara con su línea, para detectar lo que la voz leyó mal. La transcripción aún no está en este equipo: se descargan unos ${megabytes} MB, una sola vez.`,
@@ -111,7 +145,7 @@ const es: typeof en = {
   placeHeading: "Colocar en la línea de tiempo",
   placeHelp: "Pone las frases de cada línea en la pista Voiceover de la línea de tiempo principal, en un paso que puedes deshacer.",
   startLabel: "Empezar en",
-  startPlaceholder: "segundos, un marcador o beat:9",
+  startPlaceholder: "segundos (2,5), un marcador o beat:9",
   startHint: "Vacío: justo después del último clip de voz. Segundos, el nombre de un marcador, beat:N o bar:N (un nombre hecho solo de dígitos cuenta como segundos).",
   replaceLabel: "Reemplazar los clips ya colocados con estas tomas",
   place: "Colocar",
@@ -119,6 +153,12 @@ const es: typeof en = {
   placed: (phrases, lines, track) =>
     `Se ${phrases === 1 ? "colocó 1 frase" : `colocaron ${phrases} frases`} de ${lines === 1 ? "1 línea" : `${lines} líneas`} en ${track}.`,
   placeFailed: "No se pudo colocar la voz en off",
+  refused: {
+    replace: "Ya hay clips que usan estas tomas. Marca “Reemplazar los clips ya colocados” para colocarlas de nuevo.",
+    beforeZero: "Empieza en 0 segundos o después.",
+    noTempo: "Esta línea de tiempo no tiene tempo, así que beat: y bar: no tienen qué contar. Usa segundos o un marcador.",
+    unknownTime: (value) => `“${value}” no es un tiempo ni un marcador de esta línea de tiempo. Usa segundos (2,5), el nombre de un marcador o beat:N.`,
+  },
 };
 
 /** English and Spanish strings of the voiceover dialog. */

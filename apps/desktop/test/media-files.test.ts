@@ -53,4 +53,10 @@ describe("importNotice", () => {
     expect(importNotice(["assets/a.mp4"], ["/home/ana/notes.pdf"])).toBe("Imported a.mp4 into assets/. Not media: notes.pdf.");
     expect(importNotice([], ["C:\\Users\\ana\\notes.pdf"])).toBe("Not media: notes.pdf.");
   });
+
+  it("says which imports an image project cannot stack (#751)", () => {
+    expect(importNotice(["assets/a.png", "assets/b.mp4"], [], ["assets/b.mp4"])).toBe(
+      "Imported a.png, b.mp4 into assets/. b.mp4 stays in assets/ only: an image project stacks pictures (PNG, JPEG, GIF, WebP).",
+    );
+  });
 });

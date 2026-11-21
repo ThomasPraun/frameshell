@@ -82,9 +82,15 @@ test("the switcher shows the declared formats; 9:16 covers the frame with the cl
   test.setTimeout(120_000);
   const frame = page.getByTestId("preview-frame");
   await expect(frame).toHaveAttribute("data-shown", "0");
-  // One format (the resolution): no switcher.
-  await expect(page.getByTestId("preview-format")).toHaveCount(0);
+  // One format (the resolution): the switcher names it the main one and offers the built-ins (#750).
+  const switcher = page.getByTestId("preview-format");
+  await expect(switcher.locator("option")).toHaveText(["Main · 960×540", "Add 16:9 · 1920×1080", "Add 1:1 · 1080×1080", "Add 4:5 · 1080×1350", "Add 9:16 · 1080×1920"]);
   await expect.poll(() => colours(0.5)).toBe("RG");
+  // Adding one goes through the daemon into `frameshell.json` and shows it.
+  await switcher.selectOption("add:1x1");
+  await expect(frame).toHaveAttribute("data-format", "1x1");
+  await expect(page.locator(".preview-notice")).toHaveText("Added 1:1. Every export can render it from the same edit.");
+  expect(JSON.parse(readFileSync(configFile, "utf8")).formats.map((format: { id: string }) => format.id)).toEqual(["960x540", "1x1"]);
 
   // Declared by hand while the project is open: the switcher follows `frameshell.json`.
   const config = JSON.parse(readFileSync(configFile, "utf8"));
@@ -93,9 +99,7 @@ test("the switcher shows the declared formats; 9:16 covers the frame with the cl
     { id: "9x16", width: 1080, height: 1920 },
   ];
   writeFileSync(configFile, JSON.stringify(config, null, 2));
-  const switcher = page.getByTestId("preview-format");
-  await expect(switcher).toBeVisible();
-  await expect(switcher.locator("option")).toHaveText(["landscape · 960×540", "9x16 · 1080×1920"]);
+  await expect(switcher.locator("option")).toHaveText(["Main · 960×540", "9:16 · 1080×1920", "Add 16:9 · 1920×1080", "Add 1:1 · 1080×1080", "Add 4:5 · 1080×1350"]);
   await expect(frame).toHaveAttribute("data-format", "landscape");
 
   await switcher.selectOption("9x16");
@@ -107,6 +111,16 @@ test("the switcher shows the declared formats; 9:16 covers the frame with the cl
   await expect.poll(() => colours(0.05)).toBe("RG");
   // Picking works in the primary format only.
   await expect(page.getByRole("button", { name: "Pick" })).toBeDisabled();
+
+  // Safe zones (#750): off at first, then the vertical frame's platform, then the one picked.
+  await expect(page.getByTestId("preview-safe-zone")).toHaveCount(0);
+  await page.getByTestId("preview-safe-zones").click();
+  await expect(page.getByTestId("preview-safe-zone")).toHaveAttribute("data-platform", "instagram-reels");
+  await expect(page.locator(".safe-zone-label")).toHaveText("Instagram Reels safe zone");
+  await page.getByTestId("preview-safe-platform").selectOption("tiktok");
+  await expect(page.locator(".safe-zone-label")).toHaveText("TikTok safe zone (from editing guides)");
+  await page.getByTestId("preview-safe-zones").click();
+  await expect(page.getByTestId("preview-safe-zone")).toHaveCount(0);
 
   await switcher.selectOption("landscape");
   await expect(frame).not.toHaveAttribute("data-variant");

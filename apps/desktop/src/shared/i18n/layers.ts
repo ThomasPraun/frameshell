@@ -4,7 +4,10 @@ const en = {
   list: "Layers, top first",
   show: "Show layers",
   hide: "Hide layers",
-  empty: "No layers yet. Drop an image anywhere in the window, or ask your agent to add one.",
+  empty: "No layers yet. Add a picture, drop one anywhere in the window, or ask your agent to add one.",
+  /** Header and empty-state button: pick pictures with the OS dialog, each a new layer on top (#751). */
+  addImage: "Add image…",
+  addImageTip: "Add pictures from your computer as new layers on top (PNG, JPEG, GIF, WebP)",
   emptyLayer: "Empty layer",
   /** A layer whose clip is a generated composition; slot: the clip type, e.g. `hyperframes`. */
   generated: (type: string) => `${type} composition`,
@@ -21,7 +24,9 @@ const es: typeof en = {
   list: "Capas, la de arriba primero",
   show: "Mostrar las capas",
   hide: "Ocultar las capas",
-  empty: "Todavía no hay capas. Suelta una imagen en cualquier parte de la ventana o pídele a tu agente que agregue una.",
+  empty: "Todavía no hay capas. Agrega una imagen, suéltala en cualquier parte de la ventana o pídele a tu agente que agregue una.",
+  addImage: "Agregar imagen…",
+  addImageTip: "Agrega imágenes de tu computadora como capas nuevas arriba (PNG, JPEG, GIF, WebP)",
   emptyLayer: "Capa vacía",
   generated: (type) => `Composición ${type}`,
   nestedTimeline: "Línea de tiempo anidada",

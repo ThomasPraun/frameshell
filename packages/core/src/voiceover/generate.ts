@@ -83,7 +83,9 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   const providerId = request.provider ?? script.voiceover.provider;
   if (!providerId) {
     const available = await request.speechProviders();
-    throw invalidParam("provider", `Name a speech provider: \`--provider <id>\` or \`provider:\` in ${path}'s frontmatter (available: ${available.join(", ") || "none"}).`);
+    const message = `Name a speech provider: \`--provider <id>\` or \`provider:\` in ${path}'s frontmatter (available: ${available.join(", ") || "none"}).`;
+    // `available` lets a caller offer the providers there are (the app's voice picker) without parsing the message.
+    throw new RpcError(ErrorCode.InvalidParams, message, { issues: [{ path: ["provider"], message }], available });
   }
   const provider = await request.speechProvider(providerId);
   const voices = await providerCall(provider, null, () => provider.voices());
@@ -199,10 +201,10 @@ export async function generateVoiceover(request: VoiceoverRequest): Promise<Voic
   };
   for (const [index, plan] of toSay.entries()) {
     if (request.signal.aborted) await stopped(plan.line.id);
-    request.progress({ message: `Saying ${plan.line.id} (${index + 1}/${toSay.length})`, fraction: index / toSay.length, stage: "speak", values: { line: plan.line.id } });
+    request.progress({ message: `Saying ${plan.line.id} (${index + 1}/${toSay.length})`, fraction: index / toSay.length, stage: "speak", values: { line: plan.line.id, index: index + 1, total: toSay.length } });
     let take;
     try {
-      take = await say(provider, plan, voice, options, request, (within) => (index + within) / toSay.length);
+      take = await say(provider, plan, voice, options, request, (within) => (index + within) / toSay.length, { index: index + 1, total: toSay.length });
     } catch (error) {
       if (request.signal.aborted) await stopped(plan.line.id);
       const imported = written.length > 0 ? await request.importAssets(written.map((file) => join(root, ...file.split("/")))) : null;
@@ -339,6 +341,8 @@ async function say(
   request: VoiceoverRequest,
   /** The fraction of the whole `speak` stage when the provider is `within` (0..1) of this line. */
   overall: (within: number) => number,
+  /** This line's place among the lines said now, 1-based, for progress `values`. */
+  place: { index: number; total: number },
 ) {
   const outDir = await mkdtemp(join(tmpdir(), "frameshell-speech-"));
   try {
@@ -347,7 +351,7 @@ async function say(
       signal: request.signal,
       ensureBinary: request.ensureBinary,
       progress: ({ message, fraction }) =>
-        request.progress({ message, ...(fraction !== undefined ? { fraction: overall(Math.min(1, Math.max(0, fraction))) } : {}), stage: "speak", values: { line: plan.line.id } }),
+        request.progress({ message, ...(fraction !== undefined ? { fraction: overall(Math.min(1, Math.max(0, fraction))) } : {}), stage: "speak", values: { line: plan.line.id, ...place } }),
     });
     const inside = relative(outDir, result.file);
     if (!isAbsolute(result.file) || inside === "" || inside.startsWith("..") || isAbsolute(inside)) {

@@ -1,12 +1,12 @@
 import type { VoiceoverGenerateResult } from "@frameshell/protocol";
 import { describe, expect, it } from "vitest";
-import { checkNote, differenceText, lineCounts, lineRows, progressText } from "../src/renderer/src/voiceover/model.js";
+import { checkNote, differenceText, lineCounts, lineRows, progressText, refusalText } from "../src/renderer/src/voiceover/model.js";
 import { strings } from "../src/shared/i18n/index.js";
 
 const said = strings("en").voiceover;
 
 const verification = (extra: Record<string, unknown>) => ({ status: "skipped", provider: null, model: null, reason: "Verification was not asked for.", misread: 0, doubtful: 0, ...extra });
-const line = (id: string, state: "generated" | "cached" | "copied", check: unknown = null) => ({ id, display: `Line ${id}`, state, check });
+const line = (id: string, state: "generated" | "cached" | "copied", check: unknown = null) => ({ id, display: `Line ${id}`, file: `assets/voiceover/vo/${id}.wav`, state, check });
 const resultOf = (lines: unknown[], checks: Record<string, unknown> = {}) => ({ lines, verification: verification(checks), warnings: [] }) as unknown as VoiceoverGenerateResult;
 
 describe("lineRows", () => {
@@ -21,9 +21,9 @@ describe("lineRows", () => {
       line("end-1", "copied"),
     ]);
     expect(lineRows(result)).toEqual([
-      { id: "hook-1", display: "Line hook-1", state: "generated", status: "clean", misreads: [] },
-      { id: "fix-1", display: "Line fix-1", state: "cached", status: "misread", misreads: [{ kind: "missing", expected: "all", heard: "", maybeTranscription: false }] },
-      { id: "end-1", display: "Line end-1", state: "copied", status: "none", misreads: [] },
+      { id: "hook-1", number: 1, file: "assets/voiceover/vo/hook-1.wav", display: "Line hook-1", state: "generated", status: "clean", misreads: [] },
+      { id: "fix-1", number: 2, file: "assets/voiceover/vo/fix-1.wav", display: "Line fix-1", state: "cached", status: "misread", misreads: [{ kind: "missing", expected: "all", heard: "", maybeTranscription: false }] },
+      { id: "end-1", number: 3, file: "assets/voiceover/vo/end-1.wav", display: "Line end-1", state: "copied", status: "none", misreads: [] },
     ]);
   });
 });
@@ -47,13 +47,24 @@ describe("checkNote", () => {
 });
 
 describe("progressText", () => {
-  it("names what is going on", () => {
+  it("names what is going on, a line by its number and never its id", () => {
     expect(progressText(null, said)).toBe(said.working);
-    expect(progressText({ stage: "speak", line: "hook-1", fraction: 0 }, said)).toBe("Saying hook-1…");
-    expect(progressText({ stage: "verify", line: "fix-1", fraction: 0.5 }, said)).toBe("Checking fix-1 against the script…");
-    expect(progressText({ stage: "verify", line: null, fraction: null }, said)).toBe(said.checkingAll);
-    expect(progressText({ stage: "download", line: null, fraction: 0.1 }, said)).toBe(said.downloading);
-    expect(progressText({ stage: "confirm", line: null, fraction: null }, said)).toBe(said.confirmWait);
+    expect(progressText({ stage: "speak", line: "hook-1", fraction: 0, place: { index: 1, total: 3 } }, said)).toBe("Saying line 1 of 3…");
+    expect(progressText({ stage: "speak", line: "hook-1", fraction: 0, place: null }, said)).toBe(said.working);
+    expect(progressText({ stage: "verify", line: "fix-1", fraction: 0.5, place: { index: 2, total: 2 } }, said)).toBe("Checking line 2 of 2 against the script…");
+    expect(progressText({ stage: "verify", line: "fix-1", fraction: null, place: null }, said)).toBe(said.checkingAll);
+    expect(progressText({ stage: "download", line: null, fraction: 0.1, place: null }, said)).toBe(said.downloading);
+    expect(progressText({ stage: "confirm", line: null, fraction: null, place: null }, said)).toBe(said.confirmWait);
+  });
+});
+
+describe("refusalText", () => {
+  it("words each refusal of Place, and keeps any other message", () => {
+    expect(refusalText({ kind: "replace" }, said)).toContain("Replace clips already placed");
+    expect(refusalText({ kind: "before-zero" }, said)).toBe("Start at 0 seconds or later.");
+    expect(refusalText({ kind: "no-tempo" }, said)).toContain("no tempo");
+    expect(refusalText({ kind: "unknown-time", value: "intro" }, said)).toContain("“intro”");
+    expect(refusalText({ kind: "other", message: "disk full" }, said)).toBe("disk full");
   });
 });
 

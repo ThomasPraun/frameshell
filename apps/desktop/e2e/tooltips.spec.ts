@@ -62,7 +62,7 @@ test("a detached panel shows tooltips in its own window", async () => {
 
   const zoomFit = child.getByRole("button", { name: "Zoom to fit", exact: true });
   await zoomFit.focus();
-  await expect(child.getByTestId("tooltip")).toHaveText("Zoom to fit (0)");
+  await expect(child.getByTestId("tooltip")).toHaveText("Zoom to fit the clips (0)");
   await child.keyboard.press("Escape");
   await expect(child.getByTestId("tooltip")).toHaveCount(0);
 
