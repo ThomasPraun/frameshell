@@ -12,11 +12,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - View > Shoot (Ctrl+Alt+R, ⌘⌥R on macOS) and View > Teleprompter (Ctrl+Alt+P) open those sidebar views, showing a
   hidden sidebar first (#737). Disabled in image projects.
 
+- A global shortcut ends a recording shoot from any app (#744): Ctrl+Alt+Shift+S (⌘⌥⇧S on macOS), held only while
+  a session records, so remote help or a person in a call app can stop it while Frameshell's windows are hidden from
+  captures. The Shoot view says so while recording; when another app owns the keys, End stays the only way and no
+  hint shows.
+
+- Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
+  toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
+  each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of
+  being cut off (#741).
+
+- Export video from the app: File > Export video… (Cmd/Ctrl+E) and an Export video button in the preview header of a
+  video project ask where to save the MP4, render it in the background with the progress on the button, then name the
+  file, say what the export left out and offer Show file. Before, a film could only be exported with `frameshell render`
+  in a terminal (#738).
+
+- Put media on the timeline without an agent: right-click a video, sound or picture in `assets/` in Files and choose
+  Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
+  none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
+
+### Changed
+
+- "Chat about this" with no agent running copies the reference to the clipboard, shows the terminal and says to start
+  an agent, instead of typing it at a shell prompt where Enter would run it (ADR 0048, #743).
+
+- Desktop: on Windows the app's terminals detect the agent running in them (Claude Code, Codex, ...) from the process
+  table, as macOS and Linux do from the foreground process, so Chat about this types at it without Connect Claude Code
+  (ADR 0048, #743).
+
 ### Fixed
 
 - The Shoot view keeps the picked camera, microphone, screen and system audio when another view shows (#737): the
   devices are still freed a second after the view goes, and opened again as picked when it comes back. The microphone
   picked last is remembered on the machine and picked first next time when it is still connected.
+
+- Sidebar view tabs that do not fit are no longer cut off without a sign (#736): the strip fades at the edge where
+  tabs go on, scrolls with the mouse wheel, keeps the active tab in sight, and ends in a "+N" button whose menu lists
+  every view out of sight (English and Spanish).
+
+- Changing the language (View > Language) no longer kills the terminal (#754): the reloaded window shows the shells
+  it had, with their output, and an agent running in one goes on. The same holds for any reload of the window.
+
+- Window menu lists the open project windows on Windows and Linux, to switch between projects (macOS lists them
+  itself) (#754).
+
+- Release builds leave Reload, Force Reload and Developer Tools out of View, so Ctrl+R no longer reloads the window
+  by accident; `FRAMESHELL_DEVTOOLS=1` brings them back (#754).
+
+- A new agent proposal clears a History pick, so its diff shows on the lanes instead of the old entry's marks (#754).
+
+- Take and History times follow the UI language instead of the system's (#754).
+
+- Shoot view after End (#744): "Saving…" now shows how long the files have been saving; the finished message names
+  the timeline the multicam group went to (the shoot's own, e.g. `timelines/<script>.json`, or main) instead of always
+  saying main; Spanish "Se guardaron N archivos". A take's "N differences, review below" is a link to its rows, and
+  differences the scene view does not show (speech outside every scene, another scene) are listed under the last take,
+  each with Accept. A take, or a whole session, whose microphone stayed nearly silent (loudest 100 ms window under
+  -45 dBFS) is flagged right after it is cut or ended. The teleprompter's voice following hears the microphone only
+  while a shoot records: before Start and after End it reads "Ready" and the mic is left alone.
+
+- Built-in terminal on Windows and Linux: Ctrl+V pastes the clipboard's text into any program, Claude Code included,
+  which read it as "paste an image" before. With no text on the clipboard (an image), the program still gets its ^V.
+  Ctrl+Shift+V keeps working (#743).
+
+- Starting an agent from the agent guide puts the keyboard in its terminal, so its first question (folder trust) can be
+  answered without a click (#743).
+
+- Agents on Windows find `frameshell` from Git Bash (Claude Code runs its commands there): the app writes an `sh` twin
+  of its `frameshell.cmd`, so the bare name works and matches the project's `Bash(frameshell *)` permission (#743).
+
+- A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
+  track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
+  saying so (#755).
 
 ## [0.19.0] - 2026-11-20
 

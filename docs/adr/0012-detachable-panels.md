@@ -63,7 +63,7 @@ The preview and terminals ship first; the others follow in the same mechanism. A
 - Sessions still die with the project window. Persistent sessions across app restarts stay on the v1.0 roadmap.
 
 **5. Ask agent's target.**
-- The target is the last focused terminal whose foreground program is an agent, in any window of the project; if no terminal runs an agent, the last focused terminal.
+- The target is the last focused terminal whose foreground program is an agent, in any window of the project; if no terminal runs an agent, nothing is typed: the reference goes to the clipboard (ADR 0048).
 - The target terminal's tab flashes briefly, so the user sees where the reference went.
 - If its window is behind, it is not raised; the user keeps their focus.
 
