@@ -115,4 +115,8 @@ test("selecting a clip keeps the picture about half the panel; the inspector scr
   expect(stage!).toBeGreaterThanOrEqual(body! * 0.44);
   expect(await sideways()).toEqual([]);
   await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  // Narrower still, the way macOS lays out 1280 px (an inspector of 210 px with a scrollbar): the colour rows
+  // stay inside it.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1180, 720));
+  await expect.poll(sideways).toEqual([]);
 });
