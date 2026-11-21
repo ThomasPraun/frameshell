@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
 
+- `frameshell analyze` prints a short card first (`card.md`, about 300 tokens): every headline number with its
+  MEASURED, ESTIMATED or DECISION label, then the layers to open next with their size (`shots.md`, one line per shot;
+  `analysis.json`, every value). `--full` prints every value as before; the result gains `card` and `layers` (#801).
+
 ### Fixed
 
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
