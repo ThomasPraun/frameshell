@@ -29,6 +29,7 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
+import { showsDevItems, windowListItems } from "./window-menu.js";
 import { createShootShortcut } from "./shoot-shortcut.js";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
@@ -172,6 +173,7 @@ const ui = new UiBridge({
 daemon.on("ui.command", (params) => ui.command(params));
 // ADR 0014: the window focused last is the project MCP calls without `cwd` act on; a panel window counts as its project's.
 app.on("browser-window-focus", (_event, focused) => {
+  lastFocused = focused;
   const state = projectWindowOf(focused);
   if (state) ui.focus(String(state.window.webContents.id));
   void syncKindMenu(state);
@@ -330,6 +332,8 @@ function createWindow(projectDir?: string): BrowserWindow {
     }),
   };
   windows.set(contents.id, state);
+  rebuildMenuSoon();
+  window.on("focus", rebuildMenuSoon);
 
   // Links (xterm web links) open in the browser; the app window never navigates away. The one popup allowed is a
   // detached panel's blank window (ADR 0012), sandboxed like this one, without a preload.
@@ -367,6 +371,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     revokeLive(state);
     ui.detach(String(contents.id));
     windows.delete(contents.id);
+    rebuildMenuSoon();
   });
 
   const fail = (error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error));
@@ -553,6 +558,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   state.project = project;
   state.recoveredShoots = [];
   state.window.setTitle(`${project.name} — Frameshell`);
+  rebuildMenuSoon();
   void recoverShoots(state, project.dir);
   if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
   void readReview(project.dir).then(() => BrowserWindow.getFocusedWindow() === state.window && syncReviewMenu(state));
@@ -1804,6 +1810,7 @@ function registerIpc(): void {
     return { id, session, shell: shellName };
   });
   ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
+  ipcMain.handle(Channel.terminalList, (event) => stateOf(event.sender).terminals.list());
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
   ipcMain.handle(Channel.terminalClipboardHasText, async () => (await clipboard.readText()) !== "");
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
@@ -2179,10 +2186,14 @@ function buildMenu(): void {
           ],
         },
         { type: "separator" },
-        { role: "reload", label: said.reload },
-        { role: "forceReload", label: said.forceReload },
-        { role: "toggleDevTools", label: said.devTools },
-        { type: "separator" },
+        ...(showsDevItems(app.isPackaged, process.env)
+          ? [
+              { role: "reload" as const, label: said.reload },
+              { role: "forceReload" as const, label: said.forceReload },
+              { role: "toggleDevTools" as const, label: said.devTools },
+              { type: "separator" as const },
+            ]
+          : []),
         { role: "resetZoom", label: said.resetZoom },
         { role: "zoomIn", label: said.zoomIn },
         { role: "zoomOut", label: said.zoomOut },
@@ -2197,6 +2208,8 @@ function buildMenu(): void {
         { role: "minimize", label: said.minimize },
         { role: "zoom", label: said.zoom },
         ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
+        // macOS lists the windows itself.
+        ...(mac ? [] : windowListItems(listedWindows(), focusWindow)),
       ],
     },
     {
@@ -2211,8 +2224,45 @@ function buildMenu(): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-  void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
-  syncReviewMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
+  void syncKindMenu(projectWindowOf(menuWindow()));
+  syncReviewMenu(projectWindowOf(menuWindow()));
+}
+
+/** The window the focus event named last; set before `getFocusedWindow()` says so on some window managers. */
+let lastFocused: BrowserWindow | undefined;
+
+/**
+ * The window the menu follows: the one focused last, else the one Electron reports focused. A rebuild right after a
+ * focus event must not read the window that just lost focus (#754: the video-only items followed the wrong window).
+ */
+function menuWindow(): BrowserWindow | null {
+  return lastFocused && !lastFocused.isDestroyed() ? lastFocused : BrowserWindow.getFocusedWindow();
+}
+
+/** Open project windows for the Window menu, in opening order. */
+function listedWindows() {
+  const focused = menuWindow();
+  return [...windows.entries()]
+    .filter(([, state]) => !state.window.isDestroyed())
+    .map(([id, state]) => ({ id, name: state.project?.name ?? state.window.getTitle(), focused: state.window === focused }));
+}
+
+/** Bring window `id` (its `webContents.id`) to the front. */
+function focusWindow(id: number): void {
+  const window = windows.get(id)?.window;
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
+/** Rebuild the menu once the current event is done: the Window menu follows windows opening, closing and focusing. */
+let menuRebuild: NodeJS.Immediate | undefined;
+function rebuildMenuSoon(): void {
+  if (menuRebuild || !app.isReady()) return;
+  menuRebuild = setImmediate(() => {
+    menuRebuild = undefined;
+    buildMenu();
+  });
 }
 
 /**
@@ -2241,7 +2291,8 @@ const appLauncher: Launcher = process.env["FRAMESHELL_OPEN_APP_STAND_IN"]
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the
- * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
+ * renderer reads the new language. Terminals outlive the reload (ADR 0012): the reloaded terminal panel shows them
+ * again (`terminals.list`), agents in them still running; panel windows reopen with their project.
  */
 async function setLanguage(choice: LanguageChoice): Promise<void> {
   languageChoice = choice;

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { t } from "../i18n.js";
+import { lang, t } from "../i18n.js";
 import { useShoot } from "../shoot/recorder.js";
 import { type DeviationInfo, currentScene, lineMarks, sceneTitle, unshownDeviations } from "../shoot/takes-model.js";
 import { takes, useTakes } from "../shoot/takes.js";
@@ -217,5 +217,5 @@ function takeLabel(sceneTakes: readonly { id: string; recordedAt: string }[], id
 function time(iso: string | undefined): string {
   if (!iso) return "";
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

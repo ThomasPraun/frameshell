@@ -117,6 +117,8 @@ export class TerminalManager {
   readonly #terminals = new Map<string, Entry>();
   /** Recent output per terminal, kept after its shell exits until the terminal is killed. */
   readonly #output = new Map<string, OutputRing>();
+  /** What a view needs to show each terminal not killed yet, in creation order: {@link TerminalManager.list}. */
+  readonly #listed = new Map<string, { session: string; shell: string; exitCode: number | null }>();
   readonly #detect: ((shellPid: number) => Promise<string | null>) | null;
   readonly #pollMs: number;
   /** Look up the agent on every poll: node-pty's foreground name is the shell's for good on Windows. */
@@ -175,6 +177,8 @@ export class TerminalManager {
     });
     proc.onExit(({ exitCode }) => {
       markExited();
+      const listed = this.#listed.get(id);
+      if (listed) listed.exitCode = exitCode;
       entry.flush();
       this.#terminals.delete(id);
       this.#stopWatching(id, entry);
@@ -182,8 +186,18 @@ export class TerminalManager {
     });
     this.#terminals.set(id, entry);
     this.#output.set(id, output);
+    this.#listed.set(id, { session: entry.session ?? "", shell, exitCode: null });
     if (this.#detect) entry.poll = setInterval(() => void this.#watch(id, entry), this.#pollMs);
     return { id, shell };
+  }
+
+  /**
+   * Terminals not killed yet, oldest first: running ones, and exited ones whose output is still kept. A reloaded
+   * window (a language change, Ctrl+R) shows them again instead of starting new shells, so an agent running in one
+   * goes on (ADR 0012).
+   */
+  list(): { id: string; session: string; shell: string; exitCode: number | null; agent: string | null }[] {
+    return [...this.#listed].map(([id, listed]) => ({ id, ...listed, agent: this.#terminals.get(id)?.agent ?? null }));
   }
 
   /** Sessions whose terminal runs an agent now, with its label: to tag them again in a restarted daemon. */
@@ -291,6 +305,7 @@ export class TerminalManager {
   async killAll(): Promise<void> {
     const exits = [...this.#terminals.keys()].map((id) => this.#kill(id));
     this.#output.clear();
+    this.#listed.clear();
     let timer: NodeJS.Timeout | undefined;
     const bound = new Promise<void>((resolve) => (timer = setTimeout(resolve, EXIT_WAIT_MS)));
     await Promise.race([Promise.all(exits), bound]);
@@ -300,6 +315,7 @@ export class TerminalManager {
   /** Settles when the shell has exited; at once when unknown or already gone. An exited shell is not killed again. */
   #kill(id: string): Promise<void> {
     this.#output.delete(id);
+    this.#listed.delete(id);
     const entry = this.#terminals.get(id);
     if (!entry) return Promise.resolve();
     this.#terminals.delete(id);

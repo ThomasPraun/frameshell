@@ -13,6 +13,7 @@ import { ideaPrompt } from "../idea.js";
 import { usePanelWindow } from "../panel-window.js";
 import { isMac, panelShortcut } from "../shortcuts.js";
 import { terminalPaste } from "../terminal-paste.js";
+import { restoredTabs } from "../terminal-restore.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 import { AgentGuide } from "./AgentGuide.js";
@@ -146,6 +147,33 @@ export function TerminalPanel({
       if (brief) onReveal();
     });
   }, [onReveal]);
+  /**
+   * The window's terminals were listed: after a reload (a language change, Ctrl+R) the tabs come back on the shells
+   * still running, so no view starts a new one before then.
+   */
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void window.frameshell.terminals
+      .list()
+      .catch(() => [])
+      .then((survivors) => {
+        if (!live) return;
+        if (survivors.length > 0) {
+          const kept = restoredTabs(survivors);
+          for (const tab of kept) starts.current.set(tab.key, Promise.resolve(tab.info));
+          nextKey.current = kept.length;
+          setTabs(kept);
+          setActive(kept.find((tab) => tab.exitCode === null)?.key ?? 0);
+          setAgents(new Map(survivors.flatMap((survivor) => (survivor.agent ? [[survivor.id, survivor.agent] as const] : []))));
+          setUsed(new Set(kept.map((tab) => tab.key)));
+        }
+        setRestored(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   const route = useTerminalRouter();
   /** Attached views by tab key. */
   const views = useRef(new Map<number, ViewHandle>());
@@ -406,7 +434,7 @@ export function TerminalPanel({
           </button>
         </div>
       </PanelHeader>
-      {opened && activeTab && !activeTab.detached && activeTab.exitCode === null && (
+      {opened && restored && activeTab && !activeTab.detached && activeTab.exitCode === null && (
         <AgentGuide
           agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
           compact={used.has(activeTab.key)}
@@ -428,7 +456,7 @@ export function TerminalPanel({
       <div className="terminal-stack">
         {tabs.map((tab, index) =>
           !tab.detached ? (
-            opened && view(tab, visible && tab.key === active)
+            opened && restored && view(tab, visible && tab.key === active)
           ) : (
             tab.key === active && (
               <DockedElsewhere key={tab.key} title={`${t.terminal.terminal} ${label(tab, index)}`} onBringBack={() => setDetached(tab.key, false)} />
