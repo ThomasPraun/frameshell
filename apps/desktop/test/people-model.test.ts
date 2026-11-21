@@ -6,6 +6,7 @@ import {
   confirmedBy,
   faceViewBox,
   inverseOf,
+  fileLabel,
   linkChoices,
   linkedPerson,
   personColour,
@@ -154,6 +155,11 @@ describe("linkChoices", () => {
     ]);
   });
 
+  it("names a whole transcript by its file name without folder or extension", () => {
+    expect(linkChoices(sources as never, null, []).find((choice) => choice.key === "voice:transcripts/mic.words.json")?.label).toBe("mic");
+    expect(linkChoices(sources as never, null, [], (path) => `<${path}>`).find((choice) => choice.key === "voice:transcripts/mic.words.json")?.label).toBe("<transcripts/mic.words.json>");
+  });
+
   it("offers nothing of a transcript someone holds whole", () => {
     const whole = [person("p_1", "Juan", { speakers: [speaker("transcripts/ep1.words.json")] })];
     expect(linkChoices(sources as never, null, whole).map((choice) => choice.key)).toEqual(["voice:transcripts/mic.words.json"]);
@@ -217,5 +223,15 @@ describe("voiceStretch", () => {
     const words = [word(1, 0, 4, "s1"), word(2, 4.2, 9, "s1"), word(3, 9.1, 12, "s1")];
     expect(voiceStretch({ words, edits: { w_000002: { speaker: "s2" } } }, "s1")).toEqual({ start: 0, end: 4 });
     expect(voiceStretch({ words, edits: {} }, undefined)).toEqual({ start: 0, end: 8 });
+  });
+});
+
+describe("fileLabel", () => {
+  it("reads a file without folder or extensions, and a take with the time its shoot started", () => {
+    expect(fileLabel("transcripts/camera-a.words.json")).toEqual({ name: "camera-a", recorded: null });
+    expect(fileLabel("assets/talk.mp4")).toEqual({ name: "talk", recorded: null });
+    expect(fileLabel("shoot/20261120-154402/mic.words.json")).toEqual({ name: "mic", recorded: "15:44" });
+    expect(fileLabel("assets/shoot/20261120-090105/camera.webm")).toEqual({ name: "camera", recorded: "09:01" });
+    expect(fileLabel(".env")).toEqual({ name: ".env", recorded: null });
   });
 });

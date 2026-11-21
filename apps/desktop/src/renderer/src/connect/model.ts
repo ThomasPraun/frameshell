@@ -48,6 +48,12 @@ export interface CardView {
   launch: LaunchNote | null;
   /** The Connect button: "again" when Frameshell's entry runs another command; null when none shows. */
   connect: "connect" | "again" | null;
+  /** Connect shows but cannot work: a settings file does not parse, so Frameshell will not touch it (#753). */
+  connectBlocked: boolean;
+  /** The settings file to show in the file manager: the one that does not parse; null otherwise. */
+  showFile: string | null;
+  /** A "Check again" in the card: the app looks not installed, so installing it is the next step (#753). */
+  checkAgain: boolean;
   disconnect: boolean;
   /** The last change worked: the app must be restarted to see it. */
   restart: "connected" | "disconnected" | null;
@@ -61,12 +67,15 @@ export interface CardView {
  * `launch` of its Open.
  */
 export function cardView(status: AiAppStatus | undefined, working: boolean, last?: LastChange, launch?: LaunchNote): CardView {
-  const none = { open: false, download: false, launch: null, connect: null, disconnect: false, restart: null, backups: [], problem: null } as const;
+  const none = { open: false, download: false, launch: null, connect: null, connectBlocked: false, showFile: null, checkAgain: false, disconnect: false, restart: null, backups: [], problem: null } as const;
   if (!status) return { kind: "loading", ...none };
   if (working) return { kind: "working", ...none };
   if (!status.available) return { kind: "unavailable", ...none };
   const problem = last?.change.problem ?? status.problem;
   const after = {
+    connectBlocked: problem?.kind === "invalid",
+    showFile: problem?.kind === "invalid" ? problem.file : null,
+    checkAgain: false,
     launch: launch ?? null,
     restart: last && !last.change.problem ? (last.connect ? "connected" : "disconnected") : null,
     backups: last?.change.backups ?? [],
@@ -76,8 +85,8 @@ export function cardView(status: AiAppStatus | undefined, working: boolean, last
   if (status.connected) return { kind: "connected", open: true, download: missing, connect: null, disconnect: true, ...after };
   if (status.different) return { kind: "different", open: false, download: false, connect: "again", disconnect: true, ...after };
   // Open found the app, so the card never says it is not installed (#735); Check again reads the settings once it has started.
-  if (!status.installed && launch?.kind === "opened") return { kind: "no-settings", open: true, download: false, connect: null, disconnect: false, ...after };
-  if (!status.installed) return { kind: "not-installed", open: true, download: true, connect: null, disconnect: false, ...after };
+  if (!status.installed && launch?.kind === "opened") return { kind: "no-settings", open: true, download: false, connect: null, disconnect: false, ...after, checkAgain: true };
+  if (!status.installed) return { kind: "not-installed", open: true, download: true, connect: null, disconnect: false, ...after, checkAgain: true };
   return { kind: "ready", open: false, download: false, connect: "connect", disconnect: false, ...after };
 }
 

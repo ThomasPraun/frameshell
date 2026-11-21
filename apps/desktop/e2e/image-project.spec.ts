@@ -42,6 +42,9 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     const form = page.getByRole("form", { name: "New project from video, audio or image" });
     await expect(form.getByText("An image project: no timeline, just the picture.")).toBeVisible();
     await expect(form.getByLabel("Transcribe what is said")).toHaveCount(0);
+    // The stacking order, bottom first; the first sets the size (#751).
+    await expect(form.getByRole("list", { name: "Layers, bottom first" }).locator(".welcome-order-name")).toHaveText(["poster.png", "logo.png"]);
+    await expect(form.getByText("bottom layer, sets the picture's size")).toBeVisible();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("poster", { timeout: 60_000 });
 
@@ -56,6 +59,8 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await expect(page.getByTestId("preview-size")).toHaveText("801×601");
     await expect(page.getByRole("button", { name: "Play" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Pick" })).toBeVisible();
+    // No cameras to cut between (#751).
+    await expect(page.getByRole("tab", { name: "Angles" })).toHaveCount(0);
     // Thumbnails load from the project's media URL.
     await expect
       .poll(() => layers.locator(".layers-thumb img").evaluateAll((images) => images.map((image) => (image as HTMLImageElement).naturalWidth > 0)))
@@ -68,6 +73,20 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await expect(page.locator(".editor-empty")).toContainText("Open a script or JSON file from the explorer.");
     await focusWindow(app, "poster");
     await expect.poll(() => videoMenu(app)).toEqual([false, false, false, false]);
+
+    // Add image… picks pictures as new layers on top; a GIF shows at its own size, and Scale reads its own pixels (#751).
+    const badge = join(folder, "badge.gif");
+    await picture(ffmpeg, badge, "green", "200x100");
+    await app.evaluate(({ dialog }, files) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: files });
+    }, [badge]);
+    await page.getByTestId("layers-add-image").click();
+    await expect(layers.locator(".layers-label")).toHaveText(["badge", "logo", "poster"], { timeout: 30_000 });
+    await layers.locator(".layers-row", { hasText: "badge" }).click();
+    await expect(page.locator(".clip-inspector-name")).toHaveText("badge");
+    await expect(page.getByLabel("Scale (%)")).toHaveValue("100", { timeout: 30_000 });
+    await layers.locator(".layers-row", { hasText: "badge" }).getByRole("button", { name: "Delete layer" }).click();
+    await expect(layers.locator(".layers-label")).toHaveText(["logo", "poster"]);
 
     // Move the logo under the poster, then undo: one history step each. Row buttons show on the selected row.
     await layers.locator(".layers-row", { hasText: "logo" }).click();
@@ -105,6 +124,14 @@ test("pictures start an image project: layers instead of the timeline, no playhe
     await expect(page.locator(".preview-notice")).toHaveText("Saved poster.jpg", { timeout: 60_000 });
     expect(existsSync(out)).toBe(true);
     expect([...readFileSync(out).subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+    // A way to the saved image's folder (#749): main reveals only what it wrote.
+    await app.evaluate(({ shell }) => {
+      const shown: string[] = [];
+      (globalThis as { shown?: string[] }).shown = shown;
+      shell.showItemInFolder = (path: string) => void shown.push(path);
+    });
+    await page.getByTestId("preview-export-reveal").click();
+    await expect.poll(() => app.evaluate(() => (globalThis as { shown?: string[] }).shown)).toEqual([out]);
 
     // Delete a layer.
     await layers.locator(".layers-row", { hasText: "Brand" }).click();
@@ -143,20 +170,26 @@ test("Mod+Shift+S makes an image project from the frame at the playhead, beside 
     const opened = app.waitForEvent("window");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+s" : "Control+Shift+s");
     const second = await opened;
-    const dir = join(folder, "interview frame 00-00");
-    await expect(second.locator(".titlebar-project")).toHaveText("interview frame 00-00", { timeout: 60_000 });
+    const dir = join(folder, "interview frame 00-00 1280x720");
+    await expect(second.locator(".titlebar-project")).toHaveText("interview frame 00-00 1280x720", { timeout: 60_000 });
     expect(JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8"))).toMatchObject({ kind: "image", resolution: { width: 1280, height: 720 } });
     await expect(second.getByTestId("layers-panel").locator(".layers-label")).toHaveText(["frame-00-00"], { timeout: 30_000 });
     // One press, one project: the key and the File menu's accelerator never both run it.
-    expect(existsSync(join(folder, "interview frame 00-00 (2)"))).toBe(false);
+    expect(existsSync(join(folder, "interview frame 00-00 1280x720 (2)"))).toBe(false);
     // The video project is unchanged and still open.
     await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
-    await expect(page.locator(".statusbar")).toContainText("Opened interview frame 00-00 in a new window.");
+    await expect(page.locator(".statusbar")).toContainText("Opened interview frame 00-00 1280x720 in a new window.");
     // The video-only menu items follow the focused window's kind.
-    await focusWindow(app, "interview frame 00-00");
+    await focusWindow(app, "interview frame 00-00 1280x720");
     await expect.poll(() => videoMenu(app)).toEqual([false, false, false, false]);
     await focusWindow(app, "interview");
     await expect.poll(() => videoMenu(app)).toEqual([true, true, true, true]);
+
+    // At the very end the last frame is taken, not an error after the size question (#751).
+    await page.getByRole("button", { name: "Go to end" }).click();
+    const third = app.waitForEvent("window");
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+s" : "Control+Shift+s");
+    await expect((await third).locator(".titlebar-project")).toHaveText("interview frame 00-01 1280x720", { timeout: 60_000 });
   } finally {
     await app.close();
   }

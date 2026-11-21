@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GRADE_LIMITS, GRADE_LOOKS, GradeSchema, applyGradeTable, findLook, gradeTable, isIdentityGrade, lookGrade, lookNames, normalizeGrade } from "../src/index.js";
+import { GRADE_LIMITS, GRADE_LOOKS, GradeSchema, applyGradeTable, findLook, gradeTable, isIdentityGrade, lookGrade, lookNames, lookOf, normalizeGrade } from "../src/index.js";
+import type { Grade } from "../src/index.js";
 
 describe("built-in looks (ADR 0031 decision 8)", () => {
   it("lists the six looks of the table once each, lower case", () => {
@@ -50,5 +51,13 @@ describe("built-in looks (ADR 0031 decision 8)", () => {
     expect(Math.max(...mono) - Math.min(...mono)).toBeLessThan(2);
     expect(lookGrade("punchy")!.contrast!).toBeGreaterThan(lookGrade("faded")!.contrast!);
     expect(lookGrade("punchy")!.saturation!).toBeGreaterThan(lookGrade("faded")!.saturation!);
+  });
+});
+
+describe("lookOf", () => {
+  it("names the look a grade carries, and none once a number moved", () => {
+    expect(lookOf({ ...lookGrade("mono")!, lut: "luts/x.cube" } as Grade)?.name).toBe("mono");
+    expect(lookOf({ ...lookGrade("warm")!, saturation: 1.2 } as Grade)).toBeUndefined();
+    expect(lookOf(null)).toBeUndefined();
   });
 });

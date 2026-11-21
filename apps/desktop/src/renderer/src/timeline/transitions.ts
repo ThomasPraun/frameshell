@@ -1,6 +1,7 @@
 // Transition marks, key diamonds and edge hit testing for the timeline panel (ADR 0018 decision 12): pure, DOM-free.
 import type { Clip, KeyEase, TransitionShape } from "@frameshell/schema";
 import { DIP_FRAMES, type TransitionContext, dipKeyIndexes, edgeTransitions, playedShape } from "@frameshell/schema/transitions";
+import type { TimelineEdit } from "../../../shared/api.js";
 import type { ClipBox, LaneViewport, TimelineLayout, TrackRow } from "./layout.js";
 
 /** Properties a clip can keyframe; audio tracks take only `gain`. */
@@ -199,4 +200,21 @@ export function edgeAt(layout: TimelineLayout, viewport: LaneViewport, x: number
     (clip) => (near(clip.start, at) && (clip.dissolve !== null || clip.fadeIn !== null)) || (!clip.problem && near(clip.end, at) && clip.fadeOut !== null),
   );
   return { row, at, hasTransition };
+}
+
+/** Args of a `transition.set` edit made from the app, minus `at` and `tracks`, which {@link transitionSet} fills in. */
+export type TransitionSetArgs = Omit<Extract<TimelineEdit, { op: "transition.set" }>["args"], "at" | "tracks">;
+
+/**
+ * A `transition.set` on one row's edge at `at`. It names that row's track, so the other tracks with an edge at the same
+ * time keep theirs: a fade on the music must not fade the picture too (#755). The daemon's default (every track with an
+ * edge at `at`) stays for the agent, which says so on purpose.
+ */
+export function transitionSet(row: Pick<TrackRow, "id">, at: number, args: TransitionSetArgs): TimelineEdit {
+  return { op: "transition.set", args: { ...args, at, tracks: [row.id] } };
+}
+
+/** A `transition.remove` on one row's edge at `at`, that row's track only (see {@link transitionSet}). */
+export function transitionRemove(row: Pick<TrackRow, "id">, at: number): TimelineEdit {
+  return { op: "transition.remove", args: { at, tracks: [row.id] } };
 }

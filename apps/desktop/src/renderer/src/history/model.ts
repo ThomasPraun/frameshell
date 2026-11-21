@@ -63,27 +63,65 @@ const VERBS: Record<string, string> = {
   "format.remove": t.history.verbs.removeFormat,
 };
 
-/** One operation in words: its verb, `Revert <target>` for reverts. */
-export function operationTitle(op: { op: string; args: Record<string, unknown> }): string {
+/** Title of a history entry by id (`tx_…`, `op_…`), or undefined when the list does not hold it. */
+export type TitleOf = (id: string) => string | undefined;
+
+/**
+ * One operation in words: its verb; for a revert, `Revert “<title>”` of what it undid, `Revert an earlier change`
+ * when `titleOf` does not know it (its id is in the row's tooltip).
+ */
+export function operationTitle(op: { op: string; args: Record<string, unknown> }, titleOf: TitleOf = () => undefined): string {
   const target = op.args["target"];
-  if (op.op === "revert") return typeof target === "string" ? t.history.revertTarget(target) : t.history.revert;
-  return VERBS[op.op] ?? op.op;
+  if (op.op !== "revert") return VERBS[op.op] ?? op.op;
+  const title = typeof target === "string" ? titleOf(target) : undefined;
+  return title === undefined ? t.history.revertEarlier : t.history.revertTarget(title);
+}
+
+/**
+ * A journal label in the UI language. The app writes its labels in English (agents read the journal); known ones
+ * and the composed kind (`Move clip`, `Ripple trim 3 clips`, `Add 2 layers`) are shown translated, any other label
+ * (an agent's `tx begin`) as written.
+ */
+export function labelText(label: string): string {
+  const fixed = own(t.history.labels, label);
+  if (fixed !== undefined) return fixed;
+  const one = /^(.+) ([a-z]+)$/.exec(label);
+  const many = /^(.+) (\d+) ([a-z]+)s$/.exec(label);
+  if (many) {
+    const [, verb = "", count = "", noun = ""] = many;
+    const verbText = own(t.history.editVerbs, verb);
+    const nouns = own(t.history.editNouns, noun);
+    if (verbText !== undefined && nouns !== undefined) return `${verbText} ${count} ${nouns[1]}`;
+  }
+  if (one) {
+    const [, verb = "", noun = ""] = one;
+    const verbText = own(t.history.editVerbs, verb);
+    const nouns = own(t.history.editNouns, noun);
+    if (verbText !== undefined && nouns !== undefined) return `${verbText} ${nouns[0]}`;
+  }
+  const angle = /^Cut to (.+)$/.exec(label);
+  return angle ? t.history.cutToAngle(angle[1]!) : label;
+}
+
+/** `record[key]` when it is the record's own entry (never `toString` and the like). */
+function own<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
 /**
  * Row title: the `tx begin` label, else what its operations did, in order of
  * first use with repeat counts ("Ripple delete ×2, trim").
  */
-export function transactionTitle(tx: HistoryTransaction): string {
-  if (tx.label) return tx.label;
+export function transactionTitle(tx: HistoryTransaction, titleOf: TitleOf = () => undefined): string {
+  if (tx.label) return labelText(tx.label);
   const counts = new Map<string, number>();
   for (const op of tx.operations) {
-    const title = operationTitle(op);
+    const title = operationTitle(op, titleOf);
     counts.set(title, (counts.get(title) ?? 0) + 1);
   }
   const parts = [...counts].map(([title, count], index) => {
-    // Later verbs read as a list: lowercase unless an id or op name.
-    const word = index === 0 || /[._]/.test(title) ? title : title[0]!.toLowerCase() + title.slice(1);
+    // Later verbs read as a list: lowercase unless an id, an op name or a quoted title.
+    const word = index === 0 || /[._“«]/.test(title) ? title : title[0]!.toLowerCase() + title.slice(1);
     return count > 1 ? `${word} ×${count}` : word;
   });
   return parts.join(", ") || t.history.empty;
@@ -134,6 +172,38 @@ export function historySelection(
   if (shown?.after) return { clips, reveal: { clip: shown.clip, place: shown.after } };
   const removed = diff.find((mark) => mark.before && !mark.after);
   return { clips, reveal: removed?.before ? { clip: removed.clip, place: removed.before } : null };
+}
+
+/**
+ * Titles of every entry of `transactions`, by id: transactions and their operations. A revert's title names what it
+ * undid by its title too, so `Revert “Move clip”`, not `Revert tx_…`.
+ */
+export function entryTitles(transactions: readonly HistoryTransaction[]): TitleOf {
+  const titles = new Map<string, string>();
+  const titleOf: TitleOf = (id) => titles.get(id);
+  // Oldest first: a revert names an earlier entry, already titled.
+  for (const tx of transactions) {
+    for (const op of tx.operations) titles.set(op.id, operationTitle(op, titleOf));
+    if (!titles.has(tx.tx)) titles.set(tx.tx, transactionTitle(tx, titleOf));
+  }
+  return titleOf;
+}
+
+/**
+ * What an undo or redo of entry `target` brings back or takes away, in words: the title of the entry at the end of
+ * its chain of reverts (a redo reverts the undo, which reverted the edit). Null when the journal does not hold it.
+ */
+export function undoneTitle(transactions: readonly HistoryTransaction[], target: string): string | null {
+  const titleOf = entryTitles(transactions);
+  let id = target;
+  for (let hops = 0; hops < 64; hops++) {
+    const tx = transactions.find((each) => each.tx === id);
+    const only = tx?.operations.length === 1 ? tx.operations[0] : undefined;
+    const next = only?.op === "revert" ? only.args["target"] : undefined;
+    if (typeof next !== "string") break;
+    id = next;
+  }
+  return titleOf(id) ?? null;
 }
 
 /** Counts of each change kind, for the row of the selected entry. */

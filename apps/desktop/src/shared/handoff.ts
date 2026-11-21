@@ -19,12 +19,14 @@ export interface HandoffInfo {
   method: "export.otio" | "export.premiereXml";
   /** The `frameshell export <cli>` subcommand that writes the same file and lists what it leaves out. */
   cli: string;
+  /** What the file is, as the notice names it (a product name: the same in every language). */
+  app: string;
 }
 
 /** The hand-off kinds, one entry each. */
 export const HANDOFFS: Record<HandoffKind, HandoffInfo> = {
-  otio: { command: "exportOtio", menuId: "export-otio", extension: "otio", method: "export.otio", cli: "otio" },
-  premiere: { command: "exportPremiere", menuId: "export-premiere", extension: "xml", method: "export.premiereXml", cli: "premiere" },
+  otio: { command: "exportOtio", menuId: "export-otio", extension: "otio", method: "export.otio", cli: "otio", app: "OpenTimelineIO" },
+  premiere: { command: "exportPremiere", menuId: "export-premiere", extension: "xml", method: "export.premiereXml", cli: "premiere", app: "Premiere" },
 };
 
 /** True when `value` names a hand-off kind (an IPC argument is untyped at runtime). */

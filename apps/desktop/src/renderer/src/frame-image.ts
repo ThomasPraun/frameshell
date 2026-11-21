@@ -11,6 +11,15 @@ export function isFrameImageKey(event: { key: string; metaKey: boolean; ctrlKey:
   return (mac ? event.metaKey : event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === "s";
 }
 
+/**
+ * The time of the frame shown at `time`: a playhead parked at the very end (`frames / fps`) shows the last frame,
+ * which starts one frame earlier (#751: asking for the end failed after the size question).
+ */
+export function shownFrameTime(time: number, frames: number, fps: number): number {
+  if (frames <= 0 || fps <= 0) return Math.max(0, time);
+  return Math.min(Math.max(0, time), (frames - 1) / fps);
+}
+
 let running = false;
 
 /**
@@ -22,7 +31,8 @@ export async function imageFromFrame(): Promise<string | null> {
   running = true;
   try {
     transport.pause();
-    return await window.frameshell.project.imageFromFrame(SELECTION_TIMELINE, transport.get().time);
+    const { time, frames, fps } = transport.get();
+    return await window.frameshell.project.imageFromFrame(SELECTION_TIMELINE, shownFrameTime(time, frames, fps));
   } finally {
     running = false;
   }

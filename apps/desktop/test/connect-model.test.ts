@@ -59,8 +59,13 @@ describe("cardView", () => {
 
   it("never says not installed once Open found the app; it waits for its settings instead (#735)", () => {
     const opened = { kind: "opened", copied: true } as const;
-    expect(cardView(status({ installed: false }), false, undefined, opened)).toMatchObject({ kind: "no-settings", open: true, download: false, connect: null });
+    expect(cardView(status({ installed: false }), false, undefined, opened)).toMatchObject({ kind: "no-settings", open: true, download: false, connect: null, checkAgain: true });
     expect(cardView(status({ installed: false }), false, undefined, { kind: "not-found" })).toMatchObject({ kind: "not-installed", download: true });
+  });
+
+  it("puts Check again in the card of an app that looks not installed, and only there", () => {
+    expect(cardView(status({ installed: false }), false)).toMatchObject({ checkAgain: true });
+    for (const view of [cardView(status(), false), cardView(status({ connected: true }), false), cardView(undefined, false)]) expect(view.checkAgain).toBe(false);
   });
 
   it("offers nothing to open while reading, working, or where the app does not exist", () => {
@@ -89,5 +94,12 @@ describe("cardView", () => {
     const failed = cardView(status(), false, { connect: true, change: { status: status(), backups: [], problem } });
     expect(failed).toMatchObject({ kind: "ready", restart: null, problem });
     expect(cardView(status({ problem }), false)).toMatchObject({ kind: "ready", problem });
+  });
+
+  it("blocks Connect and offers the file while a settings file does not parse", () => {
+    const problem = { kind: "invalid", file: "/home/ana/claude.json" } as const;
+    expect(cardView(status({ problem }), false)).toMatchObject({ connect: "connect", connectBlocked: true, showFile: "/home/ana/claude.json" });
+    const failed = { kind: "failed", message: "disk full" } as const;
+    expect(cardView(status({ problem: failed }), false)).toMatchObject({ connect: "connect", connectBlocked: false, showFile: null });
   });
 });
