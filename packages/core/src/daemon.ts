@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { coreVersion } from "./version.js";
 import {
   type ConfigDoc,
   ErrorCode,
@@ -199,13 +200,13 @@ import { requirementsConfigDocument, requirementsFromState, requirementsState } 
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
+import { scriptLanguage } from "./shoot/language.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
-/** Package version reported in the handshake. */
-export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
-  .version;
+/** Version reported in the handshake: the core package's, or the packaged app's release version ({@link coreVersion}). */
+export const DAEMON_VERSION: string = coreVersion(dirname(createRequire(import.meta.url).resolve("../package.json")));
 
 /** Five minutes: long enough to span an agent's think time between CLI calls. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
@@ -1079,7 +1080,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             providerId,
             provider,
             model: await configuredModel(config, providerId),
-            language: config.transcription?.language,
+            // The project's language when set; else the script's own (#742), so whisper does not guess from a few seconds.
+            language: config.transcription?.language ?? scriptLanguage(await shoots.script(dir, script)) ?? undefined,
             context: providerContext(transcriberTools(overrides), () => {}).context,
           });
           takeRuns.delete(key);

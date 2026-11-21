@@ -68,7 +68,8 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   test.setTimeout(240_000);
   await writeTake();
-  ({ app, page } = await launch(box));
+  // The stand-in agent counts as an agent (ADR 0048: only an agent's terminal gets the reference typed).
+  ({ app, page } = await launch(box, { env: { FRAMESHELL_AGENT_COMMANDS: "fake-agent=fake" } }));
   await waitForIngest(page, ASSET);
   const timeline = JSON.parse(readFileSync(mainFile, "utf8"));
   // Current revision: the daemon journals the edit as author `file` (SPEC §6.4).
@@ -77,6 +78,8 @@ test.beforeAll(async () => {
   await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-clips", "1");
   await runInTerminal(page, `node "${FAKE_AGENT}"`);
   await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");
+  // Detected as an agent before anything is sent to it (ADR 0048).
+  await expect(page.locator('[role="tab"][data-agent="fake"]')).toHaveCount(1, { timeout: 15_000 });
 });
 
 test.afterAll(async () => {

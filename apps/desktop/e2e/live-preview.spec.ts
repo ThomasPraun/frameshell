@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ElectronApplication, type Page, expect, test } from "@playwright/test";
 import { blockMean, previewPixels } from "./frames.js";
-import { laidOutBox, launch, sandbox, terminalText } from "./harness.js";
+import { laidOutBox, launch, runInTerminal, sandbox, terminalText } from "./harness.js";
 import { testFfmpeg } from "./media.js";
 
 // Live preview (ADR 0010): a generated clip whose render is not ready plays its composition in a sandboxed frame from
@@ -70,8 +70,13 @@ test.beforeAll(async () => {
   test.setTimeout(120_000);
   installTrustedPlugin();
   writeFileSync(join(box.configDir, "config.json"), JSON.stringify({ binaries: { ffmpeg: await testFfmpeg() } }));
-  ({ app, page } = await launch(box));
+  // The stand-in agent counts as an agent (ADR 0048: only an agent's terminal gets the reference typed).
+  ({ app, page } = await launch(box, { env: { FRAMESHELL_AGENT_COMMANDS: "fake-agent=fake" } }));
   await expect(page.getByTestId("preview-frame")).toBeVisible();
+  await runInTerminal(page, `node "${fileURLToPath(new URL("./fake-agent.mjs", import.meta.url))}"`);
+  await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");
+  // Detected as an agent before anything is sent to it (ADR 0048).
+  await expect(page.locator('[role="tab"][data-agent="fake"]')).toHaveCount(1, { timeout: 15_000 });
 });
 
 test.afterAll(async () => {
