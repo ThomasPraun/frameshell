@@ -1,8 +1,17 @@
 import type { ClipDiff, HistoryTransaction, RevertConflict } from "@frameshell/protocol";
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { openAskMenu } from "../ask/ask-agent.js";
-import { abortedTransactions, authorOf, changesConfig, diffCounts, newestFirst, operationTitle, transactionTitle } from "../history/model.js";
-import { t } from "../i18n.js";
+import {
+  type TitleOf,
+  abortedTransactions,
+  authorOf,
+  changesConfig,
+  diffCounts,
+  entryTitles,
+  newestFirst,
+  operationTitle,
+} from "../history/model.js";
+import { lang, t } from "../i18n.js";
 import { selectHistoryEntry, useHistoryDiff, useTimelineHistory } from "../history/useHistory.js";
 import { SELECTION_TIMELINE, selection, useSelection } from "../selection.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
@@ -86,7 +95,7 @@ export function HistoryPanel() {
         });
         return;
       }
-      setNotice({ target, tone: "info", text: t.history.reverted(outcome.result.operation.id), conflicts: [] });
+      setNotice({ target, tone: "info", text: t.history.reverted, conflicts: [] });
       // A config-only revert leaves the timeline revision as it was: nothing else re-reads the list.
       reload();
       // Show what the revert itself changed.
@@ -113,6 +122,7 @@ export function HistoryPanel() {
   }
 
   const rows = newestFirst(history.transactions);
+  const titleOf = entryTitles(history.transactions);
   const aborted = abortedTransactions(history.transactions);
   const selectedOpTx = selected?.startsWith("op_")
     ? history.transactions.find((tx) => tx.operations.some((op) => op.id === selected))?.tx
@@ -140,6 +150,7 @@ export function HistoryPanel() {
           >
             <TransactionRow
               tx={tx}
+              title={titleOf(tx.tx) ?? tx.tx}
               active={active}
               aborted={isAborted}
               open={open}
@@ -150,9 +161,9 @@ export function HistoryPanel() {
               onRevert={() => void revert(tx.tx)}
               onMenu={(event) => void openMenu(event, tx.tx, { aborted: isAborted, toggle: { open, run: () => toggle(key) } })}
             />
-            {notice && notice.target === tx.tx && <NoticeBox notice={notice} onShow={(id) => void select(id)} />}
+            {notice && notice.target === tx.tx && <NoticeBox notice={notice} titleOf={titleOf} onShow={(id) => void select(id)} />}
             {open && (
-              <ul className="history-ops" aria-label={t.history.opsLabel(tx.tx)}>
+              <ul className="history-ops" aria-label={t.history.opsLabel(titleOf(tx.tx) ?? tx.tx)}>
                 {tx.operations.map((op) => (
                   <li key={op.id} data-op={op.id} data-selected={selected === op.id || undefined}>
                     <div
@@ -160,7 +171,7 @@ export function HistoryPanel() {
                       onContextMenu={(event) => void openMenu(event, op.id, { aborted: isAborted })}
                     >
                       <button className="history-op-main" onClick={() => void select(op.id)} data-tip={t.history.opTitle(op.id, op.revision)}>
-                        <span className="history-op-title">{operationTitle(op)}</span>
+                        <span className="history-op-title">{titleOf(op.id) ?? operationTitle(op, titleOf)}</span>
                         <span className="history-op-touched">{op.touched.join(" ")}</span>
                       </button>
                       {!isAborted && (
@@ -168,15 +179,15 @@ export function HistoryPanel() {
                           className="history-revert"
                           disabled={busy !== null}
                           onClick={() => void revert(op.id)}
-                          aria-label={t.history.revertOp(op.id)}
-                          data-tip={t.history.revertOp(op.id)}
+                          aria-label={t.history.revertOp(titleOf(op.id) ?? op.id)}
+                          data-tip={t.history.revertOp(titleOf(op.id) ?? op.id)}
                         >
                           {t.history.revert}
                         </button>
                       )}
                     </div>
                     {selected === op.id && diff && <DiffSummary diff={diff.clips} />}
-                    {notice && notice.target === op.id && <NoticeBox notice={notice} onShow={(id) => void select(id)} />}
+                    {notice && notice.target === op.id && <NoticeBox notice={notice} titleOf={titleOf} onShow={(id) => void select(id)} />}
                   </li>
                 ))}
               </ul>
@@ -190,6 +201,7 @@ export function HistoryPanel() {
 
 function TransactionRow({
   tx,
+  title,
   active,
   aborted,
   open,
@@ -201,6 +213,8 @@ function TransactionRow({
   onMenu,
 }: {
   tx: HistoryTransaction;
+  /** In words; the id shows in the tooltip only. */
+  title: string;
   active: boolean;
   /** Changed nothing (see {@link abortedTransactions}): dimmed, marked, no Revert. */
   aborted: boolean;
@@ -227,11 +241,12 @@ function TransactionRow({
           <span className={`tree-glyph ${open ? "dir-open" : "dir"}`} />
         </button>
         <button className="history-main" onClick={onSelect} data-tip={tx.tx}>
-          <span className="history-title">{transactionTitle(tx)}</span>
+          <span className="history-title">{title}</span>
           <span className="history-meta">
-            <span className={`history-author author-${author.kind}`} title={tx.author}>
+            {/* A terminal session's id says nothing to the person: tooltip only. A plugin's name shows. */}
+            <span className={`history-author author-${author.kind}`} title={author.detail ? t.history.authorTitle(author.name, author.detail) : author.name}>
               {author.name}
-              {author.detail && <span className="history-author-detail">{author.detail}</span>}
+              {author.kind === "plugin" && author.detail && <span className="history-author-detail">{author.detail}</span>}
             </span>
             <span className="history-count">{t.history.opCount(count)}</span>
             {changesConfig(tx) && (
@@ -251,7 +266,7 @@ function TransactionRow({
             {clock(tx.at)}
           </time>
           {!aborted && (
-            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={t.history.revertTx(tx.tx)} data-tip={t.history.revertTx(tx.tx)}>
+            <button className="history-revert" disabled={busy !== null} onClick={onRevert} aria-label={t.history.revertTx(title)} data-tip={t.history.revertTx(title)}>
               {busy === tx.tx ? t.history.reverting : t.history.revert}
             </button>
           )}
@@ -281,14 +296,14 @@ function DiffSummary({ diff }: { diff: readonly ClipDiff[] }) {
           <span className="diff-glyph" aria-hidden="true">
             {glyph}
           </span>
-          {`${counts[kind]} ${word}`}
+          {word(counts[kind])}
         </span>
       ))}
     </p>
   );
 }
 
-function NoticeBox({ notice, onShow }: { notice: Notice; onShow: (id: string) => void }) {
+function NoticeBox({ notice, titleOf, onShow }: { notice: Notice; titleOf: TitleOf; onShow: (id: string) => void }) {
   return (
     <div className={`history-notice${notice.tone === "error" ? " is-error" : ""}`} role={notice.tone === "error" ? "alert" : "status"}>
       <span>{notice.text}</span>
@@ -296,8 +311,8 @@ function NoticeBox({ notice, onShow }: { notice: Notice; onShow: (id: string) =>
         <ul className="history-conflicts" aria-label={t.history.conflictsLabel}>
           {notice.conflicts.map((conflict) => (
             <li key={conflict.id} data-conflict={conflict.id}>
-              <button className="link" onClick={() => onShow(conflict.id)} data-tip={t.history.showOnTimeline(conflict.id)}>
-                {`${operationTitle({ op: conflict.op, args: {} })} (${authorOf(conflict.author).name})`}
+              <button className="link" onClick={() => onShow(conflict.id)} data-tip={t.history.showOnTimeline(titleOf(conflict.id) ?? conflict.id)}>
+                {`${titleOf(conflict.id) ?? operationTitle({ op: conflict.op, args: {} }, titleOf)} (${authorOf(conflict.author).name})`}
               </button>
               <span className="history-conflict-ids">{conflict.ids.join(" ")}</span>
             </li>
@@ -311,7 +326,7 @@ function NoticeBox({ notice, onShow }: { notice: Notice; onShow: (id: string) =>
 /** Wall-clock time of an ISO instant, with the date when it is not today. */
 function clock(at: string): string {
   const date = new Date(at);
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const time = date.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   if (date.toDateString() === new Date().toDateString()) return time;
-  return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  return `${date.toLocaleDateString(lang, { month: "short", day: "numeric" })} ${time}`;
 }

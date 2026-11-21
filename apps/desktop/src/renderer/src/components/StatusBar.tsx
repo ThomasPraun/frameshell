@@ -4,6 +4,7 @@ import { useAgentTargets } from "../ask/agent-targets.js";
 import { pendingTargets } from "../ask/chat-targets.js";
 import { t } from "../i18n.js";
 import { useAgentNotice } from "../ui-link.js";
+import { setupTiming } from "../setup-elapsed.js";
 
 /** How long the last agent navigation, and an agent having read a reference, stay in the status bar. */
 const AGENT_NOTICE_MS = 6_000;
@@ -24,6 +25,9 @@ export function StatusBar({
   setup = null,
   agentTargets = [],
   onShowTerminal,
+  noticeDetails,
+  onRevealNotice,
+  onDismissNotice,
 }: {
   project: ProjectView;
   activeFile: string | null;
@@ -34,6 +38,12 @@ export function StatusBar({
   agentTargets?: readonly string[];
   /** Reopens the terminal panel from the agents entry. */
   onShowTerminal?: () => void;
+  /** Lines a "Details" popover of the notice lists (what an export left out); none: no button. */
+  noticeDetails?: readonly string[] | undefined;
+  /** Set for a notice about a file just written: its "Show in folder" button. */
+  onRevealNotice?: (() => void) | undefined;
+  /** Set for a notice that stays until dismissed (a file-system failure): its close button. */
+  onDismissNotice?: (() => void) | undefined;
 }) {
   const agent = useAgentNotice();
   const [shown, setShown] = useState(agent);
@@ -52,6 +62,7 @@ export function StatusBar({
     return () => clearTimeout(timer);
   }, [delivery]);
   const pending = pendingTargets(targets);
+  const timing = useSetupTiming(setup);
   return (
     <footer className="statusbar">
       <span className="status-item" title={project.daemon.socketPath}>
@@ -61,7 +72,12 @@ export function StatusBar({
       {activeFile && <span className="status-item">{activeFile}</span>}
       <span className="status-spacer" />
       {setup && (
-        <span className={`status-item status-setup is-${setup.state}`} role="status" data-testid="project-setup" title={setup.detail ?? setup.message}>
+        <span
+          className={`status-item status-setup is-${setup.state}`}
+          role="status"
+          data-testid="project-setup"
+          title={timing?.slow ? `${setup.message}. ${t.workspace.setupSlow}` : (setup.detail ?? setup.message)}
+        >
           {setup.state === "running" && (
             <span className="setup-bar" aria-hidden="true">
               <span style={{ width: setup.fraction === null ? undefined : `${Math.round(setup.fraction * 100)}%` }} className={setup.fraction === null ? "is-indeterminate" : ""} />
@@ -69,11 +85,26 @@ export function StatusBar({
           )}
           {setup.message}
           {setup.state === "running" && setup.fraction !== null && ` ${Math.round(setup.fraction * 100)}%`}
+          {timing?.elapsed && <span className="setup-elapsed" data-testid="project-setup-elapsed">{` · ${timing.elapsed}`}</span>}
+          {timing?.slow && <span className="setup-slow">{` · ${t.workspace.setupSlowShort}`}</span>}
         </span>
       )}
       <span className="status-item status-notice" role="status" aria-live="polite" data-testid="status-notice">
         {notice ?? ""}
       </span>
+      {notice && noticeDetails && noticeDetails.length > 0 && <NoticeDetails lines={noticeDetails} />}
+      {notice && onRevealNotice && (
+        <button className="link status-notice-action" data-testid="notice-reveal" onClick={onRevealNotice}>
+          {t.workspace.showInFolder}
+        </button>
+      )}
+      {notice && onDismissNotice && (
+        <button className="icon-button status-dismiss" aria-label={t.workspace.dismissNotice} data-tip={t.workspace.dismissNotice} onClick={onDismissNotice}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+      )}
       {shown && (
         <span className="status-item status-agent" data-testid="agent-notice" role="status" key={shown.at}>
           {shown.text}
@@ -101,4 +132,51 @@ export function StatusBar({
       )}
     </footer>
   );
+}
+
+/** "Details" next to a notice: a popover above the status bar listing `lines`, closed by a second click or Escape. */
+function NoticeDetails({ lines }: { lines: readonly string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="status-details">
+      <button
+        className="link status-notice-action"
+        aria-expanded={open}
+        data-testid="notice-details"
+        data-tip={t.workspace.noticeDetailsTitle}
+        onClick={() => setOpen((was) => !was)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setOpen(false);
+        }}
+      >
+        {t.workspace.noticeDetails}
+      </button>
+      {open && (
+        <ul className="status-details-list" role="list" data-testid="notice-details-list">
+          {lines.map((line, index) => (
+            <li key={index}>{line}</li>
+          ))}
+        </ul>
+      )}
+    </span>
+  );
+}
+
+/**
+ * How long the running step of `setup` has run, ticking each second: a step = one message, so a model load that
+ * takes minutes shows its time instead of looking hung (#742). Null when nothing runs.
+ */
+function useSetupTiming(setup: ProjectSetup | null): ReturnType<typeof setupTiming> | null {
+  const running = setup?.state === "running" ? setup.message : null;
+  const [since, setSince] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (running === null) return;
+    const start = Date.now();
+    setSince(start);
+    setNow(start);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return running === null ? null : setupTiming(since, now, setup?.fraction ?? null);
 }

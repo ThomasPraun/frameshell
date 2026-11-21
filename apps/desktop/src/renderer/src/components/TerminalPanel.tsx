@@ -9,9 +9,11 @@ import { askTarget } from "../ask/ask-target.js";
 import type { TerminalAgent } from "../ask/chat-targets.js";
 import { agentInput } from "../ask/reference.js";
 import { t } from "../i18n.js";
-import { ideaPrompt } from "../idea.js";
+import { ideaPrompt, ideaUsed, setIdeaUsed, useIdea } from "../idea.js";
 import { usePanelWindow } from "../panel-window.js";
-import { panelShortcut } from "../shortcuts.js";
+import { isMac, panelShortcut } from "../shortcuts.js";
+import { terminalPaste } from "../terminal-paste.js";
+import { restoredTabs } from "../terminal-restore.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 import { AgentGuide } from "./AgentGuide.js";
@@ -96,6 +98,8 @@ export interface AgentTerminal {
 /** A started xterm, as the panel drives it. */
 interface ViewHandle {
   type(lines: readonly string[]): void;
+  /** Put the keyboard in this terminal. */
+  focus(): void;
 }
 
 /**
@@ -107,6 +111,7 @@ interface ViewHandle {
  */
 export function TerminalPanel({
   projectName,
+  projectDir,
   visible,
   onCollapse,
   onReveal,
@@ -114,6 +119,8 @@ export function TerminalPanel({
   ref,
 }: {
   projectName: string;
+  /** The project's folder: what this viewer did with an idea's prompt is kept per project. */
+  projectDir: string;
   visible: boolean;
   onCollapse: () => void;
   /** Ask for the panel to be shown: a film idea waits in the agent guide. */
@@ -135,14 +142,41 @@ export function TerminalPanel({
   /** Tabs whose shell the user ran something in: the agent guide shrinks there to leave the terminal its rows. */
   const [used, setUsed] = useState<ReadonlySet<number>>(() => new Set());
   const markUsed = useCallback((key: number) => setUsed((current) => (current.has(key) ? current : new Set(current).add(key))), []);
-  /** Prompt for the film of a project made from an idea, taken once from main; null when none. */
-  const [idea, setIdea] = useState<string | null>(null);
+  /** Prompt for the film of a project made from an idea (its `brief.md`); null when none. */
+  const brief = useIdea();
+  const idea = brief ? ideaPrompt(brief) : null;
+  const [ideaDone, setIdeaDone] = useState(() => ideaUsed(projectDir));
+  // A prompt still on offer brings the terminal into view, once.
   useEffect(() => {
-    void window.frameshell.project.takeIdea().then((brief) => {
-      setIdea(brief ? ideaPrompt(brief) : null);
-      if (brief) onReveal();
-    });
-  }, [onReveal]);
+    if (brief && !ideaUsed(projectDir)) onReveal();
+  }, [brief, projectDir, onReveal]);
+  /**
+   * The window's terminals were listed: after a reload (a language change, Ctrl+R) the tabs come back on the shells
+   * still running, so no view starts a new one before then.
+   */
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void window.frameshell.terminals
+      .list()
+      .catch(() => [])
+      .then((survivors) => {
+        if (!live) return;
+        if (survivors.length > 0) {
+          const kept = restoredTabs(survivors);
+          for (const tab of kept) starts.current.set(tab.key, Promise.resolve(tab.info));
+          nextKey.current = kept.length;
+          setTabs(kept);
+          setActive(kept.find((tab) => tab.exitCode === null)?.key ?? 0);
+          setAgents(new Map(survivors.flatMap((survivor) => (survivor.agent ? [[survivor.id, survivor.agent] as const] : []))));
+          setUsed(new Set(kept.map((tab) => tab.key)));
+        }
+        setRestored(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   const route = useTerminalRouter();
   /** Attached views by tab key. */
   const views = useRef(new Map<number, ViewHandle>());
@@ -403,15 +437,21 @@ export function TerminalPanel({
           </button>
         </div>
       </PanelHeader>
-      {opened && activeTab && !activeTab.detached && activeTab.exitCode === null && (
+      {opened && restored && activeTab && !activeTab.detached && activeTab.exitCode === null && (
         <AgentGuide
           agent={activeTab.info ? (agents.get(activeTab.info.id) ?? null) : null}
           compact={used.has(activeTab.key)}
           idea={idea}
+          ideaUsed={ideaDone}
           projectName={projectName}
-          onIdeaDone={() => setIdea(null)}
+          onIdeaUsed={(used) => {
+            setIdeaUsed(projectDir, used);
+            setIdeaDone(used);
+          }}
           onRun={(command) => {
             if (activeTab.info) window.frameshell.terminals.write(activeTab.info.id, `${command}\r`);
+            // The agent's first screen asks something (folder trust): the keys must reach it without a click first (#743).
+            views.current.get(activeTab.key)?.focus();
           }}
           onType={(text) => {
             const view = views.current.get(activeTab.key);
@@ -423,7 +463,7 @@ export function TerminalPanel({
       <div className="terminal-stack">
         {tabs.map((tab, index) =>
           !tab.detached ? (
-            opened && view(tab, visible && tab.key === active)
+            opened && restored && view(tab, visible && tab.key === active)
           ) : (
             tab.key === active && (
               <DockedElsewhere key={tab.key} title={`${t.terminal.terminal} ${label(tab, index)}`} onBringBack={() => setDetached(tab.key, false)} />
@@ -531,6 +571,8 @@ function TerminalView({
     const doc = element.ownerDocument;
     const view = doc.defaultView ?? window;
     let disposed = false;
+    /** The pty this view shows, once started. */
+    let started: string | null = null;
     const cleanups: (() => void)[] = [];
     const xterm = new Terminal({
       fontFamily: FONT_FAMILY,
@@ -541,6 +583,17 @@ function TerminalView({
       allowProposedApi: true,
       theme: THEME,
     });
+    // Ctrl+V pastes text on Windows and Linux, as in other terminals there (#743). xterm would send ^V, which Claude Code
+    // reads as "paste an image" and a shell as "insert the next key literally": leave the key to the browser, whose
+    // paste event xterm turns into a (bracketed) paste. With no text on the clipboard (an image), the program gets
+    // the ^V it asked for. Ctrl+Shift+V keeps working; macOS pastes with Cmd+V.
+    if (!isMac) {
+      const paste = terminalPaste(element, () => started !== null && window.frameshell.terminals.write(started, "\x16"), () =>
+        window.frameshell.terminals.clipboardHasText(),
+      );
+      xterm.attachCustomKeyEventHandler(paste.keyHandler);
+      cleanups.push(paste.dispose);
+    }
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.loadAddon(new Unicode11Addon());
@@ -558,6 +611,7 @@ function TerminalView({
       fitAddon.fit();
       const info = await start(tabKey, { cols: xterm.cols, rows: xterm.rows });
       if (!info || disposed) return;
+      started = info.id;
       // Output sent before the replay is in it: drop it until then, so nothing shows twice.
       let live = false;
       cleanups.push(route(info.id, (data) => live && xterm.write(data)));
@@ -579,6 +633,9 @@ function TerminalView({
           type(lines) {
             // paste(): what a user's paste does, wrapped in bracketed-paste marks when the program asked for them.
             xterm.paste(agentInput(lines, xterm.modes.bracketedPasteMode));
+            xterm.focus();
+          },
+          focus() {
             xterm.focus();
           },
         }),

@@ -45,6 +45,10 @@
       "types": "./dist/finish.d.ts",
       "default": "./dist/finish.js"
     },
+    "./safe-zones": {
+      "types": "./dist/safe-zones.d.ts",
+      "default": "./dist/safe-zones.js"
+    },
     "./json-schema/*": "./json-schema/*"
   },
   "files": [

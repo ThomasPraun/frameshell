@@ -1,9 +1,10 @@
 ---
 import Logo from "./Logo.astro";
 import { REPO } from "../site";
-import { strings } from "../i18n";
+import { strings, pathFor, type Lang } from "../i18n";
 
-const t = strings(Astro.currentLocale).footer;
+const lang = (Astro.currentLocale ?? "en") as Lang;
+const t = strings(lang).footer;
 ---
 
 <footer class="footer">
@@ -13,6 +14,8 @@ const t = strings(Astro.currentLocale).footer;
       <span>frameshell</span>
     </div>
     <nav aria-label={t.nav}>
+      <a href={pathFor(lang, "docs")}>{t.docs}</a>
+      <a href={pathFor(lang, "docs", "faq")}>{t.faq}</a>
       <a href={REPO}>GitHub</a>
       <a href={`${REPO}/blob/main/docs/SPEC.md`}>{t.spec}</a>
       <a href={`${REPO}/blob/main/docs/mcp.md`}>{t.mcp}</a>

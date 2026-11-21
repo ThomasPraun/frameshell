@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { ShootFinish, ShootScreenSource } from "../../../shared/api.js";
+import { SHOOT_END_KEYS, type ShootFinish, type ShootScreenSource } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { callSteps, elapsedLabel, meterFill } from "../shoot/model.js";
 import { live, useLiveStatus } from "../shoot/live.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
+import { shortcutLabel } from "../shortcuts.js";
 import { teleprompter } from "../teleprompter/store.js";
 import { ShootTakes } from "./ShootTakes.js";
 import { TranscriptionNotice } from "./TranscriptionNotice.js";
@@ -204,6 +205,14 @@ export function ShootPanel({
           </button>
         )}
         {recording && state.startedAt !== null && <Elapsed since={state.startedAt} />}
+        {recording && state.endShortcut && (
+          <span className="shoot-note" data-testid="shoot-end-shortcut">
+            {t.shoot.endShortcut(shortcutLabel(SHOOT_END_KEYS))}
+          </span>
+        )}
+        {state.phase === "ending" && state.endingAt !== null && (
+          <Elapsed since={state.endingAt} saving />
+        )}
       </div>
 
       <ShootTakes />
@@ -217,9 +226,14 @@ export function ShootPanel({
         <div className="shoot-done" role="status" data-testid="shoot-finished" data-group={state.finished.group ?? ""}>
           <p>{state.finished.recovered ? t.shoot.recovered(state.finished.folder) : t.shoot.saved(state.finished.folder, state.finished.files.length)}</p>
           {state.finished.group ? (
-            <p>{t.shoot.grouped}</p>
+            <p data-testid="shoot-grouped">{t.shoot.grouped(state.finished.timeline ?? "main")}</p>
           ) : (
             !state.finished.files.some((file) => /\/(camera|screen)\.\w+$/.test(file)) && <p>{t.shoot.noGroup}</p>
+          )}
+          {state.quiet && (
+            <p className="shoot-warning" role="alert" data-testid="shoot-quiet">
+              {t.shoot.sessionQuiet}
+            </p>
           )}
           {state.finished.warnings.map((warning) => (
             <p key={warning} className="shoot-note">
@@ -376,7 +390,8 @@ function Meter({ db, label, testId }: { db: number; label: string; testId: strin
 }
 
 /** Recording time, ticking on the timers of the window that shows it (ADR 0012). */
-function Elapsed({ since }: { since: number }) {
+/** Time since `since` (`performance.now()`), ticking: recording time, or with `saving` how long End has been saving. */
+function Elapsed({ since, saving = false }: { since: number; saving?: boolean }) {
   const span = useRef<HTMLSpanElement>(null);
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
@@ -385,9 +400,9 @@ function Elapsed({ since }: { since: number }) {
     return () => view.clearInterval(timer);
   }, []);
   return (
-    <span ref={span} className="shoot-elapsed" data-testid="shoot-elapsed">
-      <span className="shoot-dot" aria-hidden="true" />
-      {t.shoot.recording(elapsedLabel(now - since))}
+    <span ref={span} className={saving ? "shoot-elapsed is-saving" : "shoot-elapsed"} data-testid={saving ? "shoot-saving" : "shoot-elapsed"} role={saving ? "status" : undefined}>
+      {!saving && <span className="shoot-dot" aria-hidden="true" />}
+      {saving ? t.shoot.savingFor(elapsedLabel(now - since)) : t.shoot.recording(elapsedLabel(now - since))}
     </span>
   );
 }

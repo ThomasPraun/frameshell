@@ -1,5 +1,5 @@
 import { type ReviewFinding, type ReviewSafeFlag, SAFE_SUBJECTS, type ZoneEdge } from "@frameshell/protocol";
-import { type FontMetrics, type ResolvedSubtitleTrack, type SafeZone, type Size, type SubtitleCue, type SubtitleStyle, cueTokens, subtitleLayout } from "@frameshell/schema";
+import { type FontMetrics, type ResolvedSubtitleTrack, type Size, type SubtitleCue, type SubtitleStyle, type ZoneInsets, cueTokens, sameOrientation, subtitleLayout, zoneInsets } from "@frameshell/schema";
 
 // Where a platform's UI covers the picture and which captions reach into it. Pure: the `safe` sheet of `review`.
 // The zones are the numbers of `@frameshell/schema` `safe-zones.ts`, never copied here.
@@ -8,12 +8,7 @@ import { type FontMetrics, type ResolvedSubtitleTrack, type SafeZone, type Size,
 type SizingMetrics = Pick<FontMetrics, "capHeight" | "width">;
 
 /** Pixels each edge's zone covers. */
-export interface Insets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
+export type Insets = ZoneInsets;
 
 /** A rectangle in frame pixels, `x0 < x1` and `y0 < y1`. */
 export interface Box {
@@ -28,17 +23,11 @@ const DESCENT_EM = 0.2;
 /** Characters of the bundled face that hang below the baseline. */
 const DESCENDERS = /[gjpqyQ,;]/;
 
-/** The edges of `zone` in pixels of a `frame`-sized picture: the platform's reference numbers scaled per axis, rounded. */
-export function filmInsets(zone: Pick<SafeZone, "width" | "height" | "top" | "right" | "bottom" | "left">, frame: Size): Insets {
-  const x = frame.width / zone.width;
-  const y = frame.height / zone.height;
-  return { top: Math.round(zone.top * y), right: Math.round(zone.right * x), bottom: Math.round(zone.bottom * y), left: Math.round(zone.left * x) };
-}
+/** The edges of a zone in pixels of a frame: `zoneInsets` of `@frameshell/schema`, shared with the app's preview. */
+export const filmInsets = zoneInsets;
 
-/** Whether the platform's reference frame and a `frame` are both vertical or both not (square counts as not vertical). */
-export function sameOrientation(zone: Pick<SafeZone, "width" | "height">, frame: Size): boolean {
-  return zone.height > zone.width === frame.height > frame.width;
-}
+/** Whether a platform's reference frame and a frame are both vertical or both not: `@frameshell/schema`'s. */
+export { sameOrientation };
 
 /** The zone of each edge as a rectangle of the frame; edges that cover nothing are left out. */
 export function zoneBoxes(insets: Insets, frame: Size): { edge: ZoneEdge; box: Box }[] {
