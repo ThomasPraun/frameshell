@@ -83,6 +83,16 @@ Found while looking for why motion-blurred renders were not repeatable (owner de
 - **0.5.0 (ADR 0029 decision 8, owner decision 2026-11-17).** Adds the beat helpers `beats`, `beatAt`, `beatTime`, `sinceBeat`, `springOnBeat`, `markers`, `hasBeats` and `frameshellTiming`: pure functions of `t` over `window.frameshellTiming`, with a nominal-BPM (or clip-seconds) fallback when the page has no usable grid. Nothing that 0.4.0 exports changes, so a frozen 0.4.0 copy renders as it did and keeps its cache key; `hyperframes update` lists the move to 0.5.0 like any other, and only a clip that is refreshed and whose composition calls the helpers (today the `checklist` `onBeats` prop, with the timing meta tag added by hand) can look different.
 - **0.6.0 (ADR 0029 decision 8, owner decision 2026-11-19).** Adds `words()`: the page's `frameshellTiming.words` list or `[]`, nothing remembered, no nominal fallback. Nothing 0.5.0 exports changes, so a frozen copy renders as it did and keeps its cache key.
 
+### Templates settled by the owner
+
+Owner decisions on single templates, taken in the template PRs of #466; the file header of each template points here.
+
+- **`freeze-cut`** (2026-11-16, PR #650): a template over an `image` prop, never a freeze-frame operation on the timeline. The still drifts and sways, then on the beat stops dead with a punch-in toward a focus point, a white flash (plain opacity, no blend mode) and an optional label. To freeze a moment of a video, export that frame (`frame`) and name the file.
+- **`pip-card`** (2026-11-16, PR #658): a still `image` in a rounded corner card with an optional caption chip, sliding in from its own edge. Image prop only: a live video in a corner stays the multicam picture-in-picture layout.
+- **`work-cards`** (PR #658): `items` are `title:status` lines, staggered in, pulsing as each starts, no icons, one shared progress curve that every started card's bar follows.
+- **`light-leak`** (2026-11-16, PR #658): an overlay clip over a cut, never a timeline operation, so the cut keeps its length; no `mix-blend-mode` (one rendered a whole film white).
+- **`lean-in`** (Q3 on #466, PR #673): a headline or quote card that slides in with a heavy spring, tilts and leans back, then holds a slow lean (scale 1 to 1.06, rotation 1 to 2 degrees). `rotate` and a uniform `scale` only (no 3D transform), no matte.
+
 ### Slices
 
 1. Spike, pure math in `packages/schema`, `packages/motion` with `bind` and `write`, the bundle in the plugin, and an opt-in real render test (12 probes cold vs reseek, element CSS on a sprung element).
