@@ -199,7 +199,9 @@ test("the Look menu writes a built-in look's five numbers in one ui clip.set, ke
   await select(1.5, "c_plain");
   await expect.poll(() => saved(0)).toMatchObject({ exposure: 0.5 });
   const look = colour().getByRole("combobox", { name: "Look", exact: true });
-  await expect(look.locator("option")).toHaveText(["Choose a look…", "Warm", "Cool", "Filmic", "Punchy", "Faded", "Mono"]);
+  // Exposure moved by hand: the menu says the grade is adjusted (#746).
+  await expect(look.locator("option")).toHaveText(["Choose a look…", "Adjusted", "Warm", "Cool", "Filmic", "Punchy", "Faded", "Mono"]);
+  await expect(look).toHaveValue("custom");
   await colour().getByRole("combobox", { name: "LUT" }).selectOption(LUT);
   await expect.poll(() => saved(0)).toMatchObject({ lut: LUT });
   const before = journaled().length;
@@ -207,7 +209,8 @@ test("the Look menu writes a built-in look's five numbers in one ui clip.set, ke
   await expect.poll(() => saved(0)).toMatchObject({ exposure: -0.05, temperature: 0.08, tint: 0, contrast: 0.92, saturation: 0.88, lut: LUT });
   await expect.poll(() => journaled().slice(before)).toEqual([{ op: "clip.set", author: "ui" }]);
   await expect(slider("Contrast")).toHaveValue("0.92");
-  await expect(look).toHaveValue("");
+  // The look the clip took stays shown (#746), not "Choose a look…".
+  await expect(look).toHaveValue("filmic");
 
   await page.keyboard.press(`${modifier}+z`);
   await expect.poll(() => saved(0)).toMatchObject({ exposure: 0.5, lut: LUT });
