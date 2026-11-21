@@ -29,6 +29,7 @@ import { offersTranscribe } from "../transcript/model-choice.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import type { MenuItem } from "./ContextMenu.js";
 import { ModelPicker, type ModelStatus } from "./ModelPicker.js";
+import { useIdea } from "../idea.js";
 
 /** Pseudo path of the transcript editor tab: never a project file (`:` is not in project paths). */
 export const TRANSCRIPT_TAB = "frameshell:transcript";
@@ -91,6 +92,7 @@ interface Marked {
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {
   const { view, error } = useTimelineView(SELECTION_TIMELINE);
+  const idea = useIdea();
   const { sources, broken, hashes } = useTranscripts();
   const model = useMemo(() => (view ? buildTranscriptModel(view, sources) : null), [view, sources]);
   const { words: selectedWords, origin } = useSelection();
@@ -382,7 +384,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     body = (
       <div className="empty editor-empty">
         <p>{t.transcript.noMedia}</p>
-        <p className="hint">{t.transcript.noMediaHint}</p>
+        <p className="hint">{idea ? t.transcript.noMediaIdea : t.transcript.noMediaHint}</p>
       </div>
     );
   } else {

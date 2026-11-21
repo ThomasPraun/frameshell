@@ -11,6 +11,8 @@ const en = {
   dismiss: "Dismiss",
   /** Slot: `{assets}`, the `assets/` folder name. */
   emptyHint: "Ask the agent in the terminal to cut your footage, or drop media into {assets}.",
+  /** A video made from an idea, still empty: no footage to cut (#752). */
+  emptyIdea: "Nothing here yet. Ask your agent to make the film from your brief ({brief}); its clips appear here as it builds them.",
   keysLabel: (mac: boolean) => {
     const mod = mac ? "Command" : "Control";
     return (
@@ -171,6 +173,7 @@ const es: typeof en = {
     `Tu versión se conserva en ${preserved}.\n${message}`,
   dismiss: "Descartar",
   emptyHint: "Pídele al agente en la terminal que corte tu material, o suelta archivos multimedia en {assets}.",
+  emptyIdea: "Todavía no hay nada. Pídele a tu agente que haga la película a partir de tu brief ({brief}); sus clips aparecen aquí a medida que los arma.",
   keysLabel: (mac) => {
     const mod = mac ? "Comando" : "Control";
     return (

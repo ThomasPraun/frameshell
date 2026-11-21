@@ -27,16 +27,33 @@ const en = {
     "Make a vertical short from the best moment",
     "Add my logo in a corner",
   ],
+  /** Suggestions in a project made from an idea, with no footage to cut (#752). */
+  ideaPrompts: [
+    "Show me the storylines again",
+    "Add music that fits the film",
+    "Add a voiceover",
+    "Check that the vertical version reads well",
+    "Export a draft",
+  ],
   suggestionTitle: "Types it into the agent's prompt; press Enter to send",
   /** The brief of a video made from an idea, offered above the terminals until used or hidden. */
   idea: {
     chip: "Make my film",
-    ready: "Your project is ready, with its formats. Start an agent, then use the suggested prompt for your film.",
-    /** Typed into the agent's prompt, unsent. `length` and `url` are empty when not given. Names no command: the agent finds the tools in the project's skill. */
-    prompt: (name: string, formats: string, length: string, url: string) =>
+    ready: "Your project is ready, with its formats. Copy the prompt into your AI app, or start an agent here and use it.",
+    /** The prompt shown in the guide, with or without an agent running (#752). */
+    promptLabel: "Prompt for your film",
+    copy: "Copy prompt",
+    copied: "Copied",
+    /** The prompt was used or put away: one line brings it back; the brief stays in brief.md. */
+    showAgain: "Show the prompt for your film",
+    putAway: "Done with it",
+    /** Typed into the agent's prompt, unsent. `length`, `url` and `about` are empty when not given. Names no command: the agent finds the tools in the project's skill. */
+    prompt: (name: string, formats: string, length: string, url: string, about: string) =>
       `I want a motion film made from scratch, with no footage. It is called "${name}". Formats: ${formats}.` +
+      (about ? ` What it is about: ${about}` + (/[.!?]$/.test(about) ? "" : ".") : "") +
       (length ? ` Length: ${length.toLowerCase()}.` : "") +
       (url ? ` Start from this page: ${url}.` : "") +
+      " The brief is in brief.md." +
       " This Frameshell project is empty and its formats are already set; use the project's Frameshell skill and tools." +
       " First write three storylines, each in a different world, with a different device and form, and recommend one." +
       " Wait for my choice before building anything. Then list your assumptions, and put a free alternative next to every paid item (tools, stock, music, voices, fonts).",
@@ -130,14 +147,28 @@ const es: typeof en = {
     "Haz un short vertical con el mejor momento",
     "Agrega mi logo en una esquina",
   ],
+  ideaPrompts: [
+    "Muéstrame de nuevo las historias",
+    "Agrega música que vaya con la película",
+    "Agrega una voz en off",
+    "Revisa que la versión vertical se lea bien",
+    "Exporta un borrador",
+  ],
   suggestionTitle: "Lo escribe en el prompt del agente; presiona Enter para enviarlo",
   idea: {
     chip: "Hacer mi película",
-    ready: "Tu proyecto está listo, con sus formatos. Abre un agente y usa el prompt sugerido para tu película.",
-    prompt: (name, formats, length, url) =>
+    ready: "Tu proyecto está listo, con sus formatos. Copia el prompt en tu app de IA, o abre un agente aquí y úsalo.",
+    promptLabel: "Prompt para tu película",
+    copy: "Copiar prompt",
+    copied: "Copiado",
+    showAgain: "Mostrar el prompt de tu película",
+    putAway: "Ya lo usé",
+    prompt: (name, formats, length, url, about) =>
       `Quiero una película de motion graphics hecha desde cero, sin grabaciones. Se llama "${name}". Formatos: ${formats}.` +
+      (about ? ` De qué trata: ${about}` + (/[.!?]$/.test(about) ? "" : ".") : "") +
       (length ? ` Duración: ${length.toLowerCase()}.` : "") +
       (url ? ` Parte de esta página: ${url}.` : "") +
+      " El brief está en brief.md." +
       " Este proyecto de Frameshell está vacío y sus formatos ya están definidos; usa la skill y las herramientas de Frameshell del proyecto." +
       " Primero escribe tres historias, cada una en un mundo distinto, con otro dispositivo y otra forma, y recomienda una." +
       " Espera mi elección antes de construir nada. Después enumera tus supuestos y pon una alternativa gratuita junto a cada elemento de pago (herramientas, stock, música, voces, tipografías).",

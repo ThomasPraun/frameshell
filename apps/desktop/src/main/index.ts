@@ -127,7 +127,7 @@ import { type ImageLayersDeps, addImageLayers, layerScale } from "./image-layers
 import { imageFileSize } from "./image-size.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
-import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
+import { BRIEF_FILE, briefMarkdown, checkIdea, formatSize, parseBrief, planIdeaProject } from "./idea-project.js";
 import { planVideoProject, projectName } from "./video-project.js";
 import { replaceClipImage } from "./replace-image.js";
 import { type FrameSize, addAudioBackground, renderBackgroundTo } from "./audio-background.js";
@@ -718,9 +718,6 @@ async function createFromVideos(
   }
 }
 
-/** Briefs of projects made from an idea, by project folder, until the project's window takes them. */
-const ideas = new Map<string, IdeaBrief>();
-
 /** Files this app exported (images, hand-off files): the ones "Show in folder" may reveal (#749). */
 const written = new Set<string>();
 
@@ -731,7 +728,8 @@ function ideaParent(parent?: string): string {
 
 /**
  * Create the empty project of an idea and open it. The first format sets the project's size, the other
- * ones go in with `format.add`, so they are journaled like any format change (ADR 0027, 0036).
+ * ones go in with `format.add`, so they are journaled like any format change (ADR 0027, 0036). The brief is
+ * kept in the project as {@link BRIEF_FILE} (#752), written by the daemon: it outlives a restart, and the agent reads it.
  */
 async function createFromIdea(state: WindowState, raw: IdeaBrief, parent?: string): Promise<OpenOutcome> {
   try {
@@ -740,7 +738,7 @@ async function createFromIdea(state: WindowState, raw: IdeaBrief, parent?: strin
     const [primary, ...others] = brief.formats;
     await daemon.request("project.init", { dir: plan.dir, name: plan.name, resolution: formatSize(primary ?? "16x9") });
     for (const id of others) await daemon.request("format.add", { cwd: plan.dir, id });
-    ideas.set(plan.dir, brief);
+    await daemon.request("file.write", { path: join(plan.dir, BRIEF_FILE), content: briefMarkdown(brief) });
     return await openFromWindow(state, plan.dir);
   } catch (error) {
     return { status: "error", message: (error as Error).message };
@@ -1705,11 +1703,11 @@ function registerIpc(): void {
       await daemon.request("format.add", { cwd: (await requireProject(stateOf(event.sender))).project.dir, id });
     }),
   );
-  ipcMain.handle(Channel.projectTakeIdea, (event) => {
+  ipcMain.handle(Channel.projectReadIdea, async (event) => {
     const dir = stateOf(event.sender).project?.dir;
-    const brief = dir ? (ideas.get(dir) ?? null) : null;
-    if (dir) ideas.delete(dir);
-    return brief;
+    if (!dir) return null;
+    const content = await readFile(join(dir, BRIEF_FILE), "utf8").catch(() => null);
+    return content === null ? null : parseBrief(content);
   });
   ipcMain.handle(Channel.projectSetup, async (event) => {
     const { project } = await requireProject(stateOf(event.sender));

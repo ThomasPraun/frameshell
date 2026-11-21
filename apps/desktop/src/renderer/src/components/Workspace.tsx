@@ -584,6 +584,7 @@ export function Workspace({ project }: { project: ProjectView }) {
           <TerminalPanel
             ref={terminals}
             projectName={project.name}
+            projectDir={project.dir}
             visible={!terminal.collapsed}
             onCollapse={() => toggle("terminal")}
             onReveal={revealTerminal}

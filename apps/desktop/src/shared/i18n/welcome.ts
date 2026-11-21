@@ -1,7 +1,7 @@
 // Welcome screen and new project from videos, audio or images (renderer/src/components/Welcome.tsx, file-drop.ts).
 
 const en = {
-  lede: "Start from a video, an audio recording or an image. Your agent edits it from the terminal, you review and correct it here.",
+  lede: "Start from a video, an audio recording, an image or just an idea. Your agent edits it, you review and correct it here.",
   dropHere: "Drop video, audio or images to start a project",
   newFromVideo: "New from video, audio or image…",
   openFolder: "Open folder…",
@@ -61,8 +61,10 @@ const en = {
   } as Record<string, string>,
   ideaLength: "Rough length",
   lengthUnknown: "Not sure yet",
-  durationLabel: (seconds: number) =>
-    seconds < 90 ? `About ${seconds} seconds` : `About ${Math.round(seconds / 60)} minutes`,
+  /** Whole minutes from two up, else seconds: 90 s is "About 90 seconds", never rounded to 2 minutes (#752). */
+  durationLabel: (seconds: number) => (seconds >= 120 && seconds % 60 === 0 ? `About ${seconds / 60} minutes` : `About ${seconds} seconds`),
+  ideaAbout: "What is the video about? (optional)",
+  ideaAboutPlaceholder: "A launch film for our spring sale: three products, upbeat, ends on the discount code.",
   ideaUrl: "A web page to start from (optional)",
   ideaUrlHint: "A site, article or product page the video is about.",
   ideaNeedName: "Give the video a name.",
@@ -74,7 +76,7 @@ const en = {
 };
 
 const es: typeof en = {
-  lede: "Empieza con un video, una grabación de audio o una imagen. Tu agente lo edita desde la terminal y tú lo revisas y corriges aquí.",
+  lede: "Empieza con un video, una grabación de audio, una imagen o solo una idea. Tu agente lo edita y tú lo revisas y corriges aquí.",
   dropHere: "Suelta video, audio o imágenes para crear un proyecto",
   newFromVideo: "Nuevo desde un video, audio o imagen…",
   openFolder: "Abrir carpeta…",
@@ -128,7 +130,9 @@ const es: typeof en = {
   },
   ideaLength: "Duración aproximada",
   lengthUnknown: "Todavía no lo sé",
-  durationLabel: (seconds) => (seconds < 90 ? `Unos ${seconds} segundos` : `Unos ${Math.round(seconds / 60)} minutos`),
+  durationLabel: (seconds) => (seconds >= 120 && seconds % 60 === 0 ? `Unos ${seconds / 60} minutos` : `Unos ${seconds} segundos`),
+  ideaAbout: "¿De qué trata el video? (opcional)",
+  ideaAboutPlaceholder: "Una película de lanzamiento para la venta de primavera: tres productos, con ritmo, termina con el código de descuento.",
   ideaUrl: "Una página web de la que partir (opcional)",
   ideaUrlHint: "Un sitio, artículo o página de producto sobre el que trata el video.",
   ideaNeedName: "Ponle un nombre al video.",

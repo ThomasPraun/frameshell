@@ -53,7 +53,9 @@ test("the form creates an empty project with its formats and offers the film pro
     await expect(page.getByRole("alert")).toContainText("not a web address");
     expect(existsSync(join(ideas, "Spring reel"))).toBe(false);
 
-    await form.getByLabel("A web page to start from (optional)").fill("https://example.com/spring");
+    // A bare host gets https:// (#752); what the video is about goes into the brief.
+    await form.getByLabel("A web page to start from (optional)").fill("example.com/spring");
+    await form.getByLabel("What is the video about? (optional)").fill("Three spring products");
     await form.getByLabel("Rough length").selectOption({ label: "About 30 seconds" });
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("Spring reel", { timeout: 60_000 });
@@ -70,7 +72,14 @@ test("the form creates an empty project with its formats and offers the film pro
 
     // With no agent running the guide says what to do; with one running, the film is its first suggestion, unsent.
     const guide = page.getByTestId("agent-guide");
-    await expect(guide.getByText("Your project is ready, with its formats.")).toBeVisible();
+    await expect(guide.getByText("Your project is ready, with its formats.", { exact: false })).toBeVisible();
+    // The brief lives in the project (#752), and its prompt can be copied with no agent running.
+    const written = readFileSync(join(dir, "brief.md"), "utf8");
+    expect(written).toContain("# Spring reel");
+    expect(written).toContain("- Formats: 9x16 (main), 16x9");
+    expect(written).toContain("Three spring products");
+    await expect(guide.locator(".agent-guide-idea-text")).toContainText('"Spring reel"');
+    await expect(guide.getByTestId("agent-guide-idea-copy")).toBeVisible();
     await guide.getByRole("button", { name: "Start Gemini CLI" }).click();
     await expect.poll(() => terminalText(page), { timeout: 30_000 }).toContain("fake-agent ready");
     await guide.getByTestId("agent-guide-idea").click();
@@ -81,6 +90,10 @@ test("the form creates an empty project with its formats and offers the film pro
     expect(typed).toContain("https://example.com/spring");
     expect(typed).toContain("freealternative");
     expect(typed).not.toContain("SUBMITTED");
+    expect(typed).toContain("Threespringproducts");
+    // Used once: the chip goes, the suggestions are the idea project's own, and one link offers the prompt again.
+    await expect(guide.getByTestId("agent-guide-idea")).toHaveCount(0);
+    await expect(guide.getByRole("button", { name: "Export a draft" })).toBeVisible();
   } finally {
     await app.close();
   }

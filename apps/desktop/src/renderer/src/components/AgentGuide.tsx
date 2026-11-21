@@ -26,14 +26,16 @@ function writeHidden(hidden: boolean): void {
  * How to talk to an agent, above the docked terminals. With no agent in the active terminal: first the way to
  * "Connect your AI" (desktop apps), then the agents found, each with Start, the others with their official installer
  * typed into the terminal for the user to run. With an agent running: prompt suggestions it types there, unsent. A video made from
- * an idea adds its prompt as the first suggestion and keeps the guide open until it is hidden.
+ * an idea shows its prompt with Copy (for an AI app outside) and as the first suggestion, and keeps the guide open until
+ * the prompt is used or put away (#752); then one link offers it again, and the brief stays in `brief.md`.
  */
 export function AgentGuide({
   agent,
   compact,
   idea,
+  ideaUsed,
   projectName,
-  onIdeaDone,
+  onIdeaUsed,
   onRun,
   onType,
 }: {
@@ -43,10 +45,12 @@ export function AgentGuide({
   agent: string | null;
   /** The shell is in use: only the way to open the guide shows, until opened. */
   compact: boolean;
-  /** The prompt for the film of the project's idea; null when the project was not made from one, or it was dismissed. */
+  /** The prompt for the film of the project's idea; null when the project was not made from one. */
   idea: string | null;
-  /** The person hid the guide while an idea was offered: forget the idea, keep the guide's own hidden setting. */
-  onIdeaDone: () => void;
+  /** The prompt was typed into an agent or put away: the guide only offers it again. */
+  ideaUsed: boolean;
+  /** The prompt was used or put away (`true`), or asked for again (`false`). */
+  onIdeaUsed: (used: boolean) => void;
   /** Run `command` in the active terminal (typed, then Enter). */
   onRun: (command: string) => void;
   /** Type `text` at the active terminal's prompt without sending it. */
@@ -56,6 +60,9 @@ export function AgentGuide({
   const [choices, setChoices] = useState<AgentChoice[] | null>(null);
   const [installTyped, setInstallTyped] = useState(false);
   const [opened, setOpened] = useState(false);
+  const [copied, setCopied] = useState(false);
+  /** The idea's prompt is on offer: shown, and the guide stays open for it. */
+  const offered = idea !== null && !ideaUsed;
 
   const detect = useCallback(() => {
     void window.frameshell.agents.detect().then(setChoices);
@@ -68,9 +75,9 @@ export function AgentGuide({
     writeHidden(value);
   };
 
-  const dismiss = () => (idea ? onIdeaDone() : hide(true));
+  const dismiss = () => (offered ? onIdeaUsed(true) : hide(true));
 
-  if (!idea && (hidden || (compact && !agent && !opened))) {
+  if (!offered && (hidden || (compact && !agent && !opened))) {
     return (
       <div className="agent-guide is-hidden">
         <button className="link" onClick={() => (hidden ? hide(false) : setOpened(true))} data-testid="agent-guide-show">
@@ -85,12 +92,21 @@ export function AgentGuide({
       <div className="agent-guide is-running" role="region" aria-label={t.agents.suggestions} data-testid="agent-guide">
         <span className="agent-guide-label">{t.agents.suggestions}</span>
         <div className="agent-guide-prompts">
-          {idea && (
-            <button className="chip" data-tip={t.agents.suggestionTitle} data-testid="agent-guide-idea" onClick={() => onType(idea)}>
+          {offered && (
+            <button
+              className="chip"
+              data-tip={t.agents.suggestionTitle}
+              data-testid="agent-guide-idea"
+              onClick={() => {
+                onType(idea);
+                onIdeaUsed(true);
+              }}
+            >
               {t.agents.idea.chip}
             </button>
           )}
-          {t.agents.prompts.map((prompt) => (
+          {/* A project made from an idea has no footage to cut: its own suggestions (#752). */}
+          {(idea !== null ? t.agents.ideaPrompts : t.agents.prompts).map((prompt) => (
             <button key={prompt} className="chip" data-tip={t.agents.suggestionTitle} onClick={() => onType(prompt)}>
               {prompt}
             </button>
@@ -121,10 +137,31 @@ export function AgentGuide({
       >
         {t.agents.desktopApps}
       </button>
-      {idea && (
-        <p className="agent-guide-hint" role="status">
-          {t.agents.idea.ready}
-        </p>
+      {offered && (
+        <div className="agent-guide-idea" data-testid="agent-guide-idea-prompt">
+          <p className="agent-guide-hint" role="status">
+            {t.agents.idea.ready}
+          </p>
+          <span className="agent-guide-label">{t.agents.idea.promptLabel}</span>
+          <p className="agent-guide-idea-text">{idea}</p>
+          <div className="agent-guide-idea-actions">
+            <button
+              className="button"
+              data-testid="agent-guide-idea-copy"
+              onClick={() => void navigator.clipboard.writeText(idea).then(() => setCopied(true), () => undefined)}
+            >
+              {copied ? t.agents.idea.copied : t.agents.idea.copy}
+            </button>
+            <button className="link" onClick={() => onIdeaUsed(true)}>
+              {t.agents.idea.putAway}
+            </button>
+          </div>
+        </div>
+      )}
+      {idea !== null && !offered && (
+        <button className="link" data-testid="agent-guide-idea-again" onClick={() => onIdeaUsed(false)}>
+          {t.agents.idea.showAgain}
+        </button>
       )}
       {found.length > 0 && (
         <ul className="agent-guide-list" aria-label={t.agents.found}>

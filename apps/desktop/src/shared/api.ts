@@ -113,6 +113,8 @@ export interface IdeaBrief {
   seconds: number | null;
   /** A page to take the idea from (http or https); null when none. */
   url: string | null;
+  /** What the video is about, in the person's words; null when not said. Absent in briefs from before it existed. */
+  about?: string | null;
 }
 
 /** Folder a project made from an idea goes in, as main planned it: `parent`/`name`, numbered when the name is taken. */
@@ -347,11 +349,11 @@ export interface FrameshellApi {
     /**
      * Create an empty project for `brief`, without footage, and open it in this window: `project.init` at the
      * size of the first format, then `format.add` for each other one, through the daemon. `parent` is the folder
-     * it goes in (default the videos folder). The brief is kept for {@link takeIdea}.
+     * it goes in (default the videos folder). The brief is kept in the project's `brief.md`, for {@link readIdea}.
      */
     fromIdea(brief: IdeaBrief, parent?: string): Promise<OpenOutcome>;
-    /** The brief this window's project was made from, once: null when it was not made from an idea or already taken. */
-    takeIdea(): Promise<IdeaBrief | null>;
+    /** The brief this window's project was made from (its `brief.md`, #752): null when it was not made from an idea. */
+    readIdea(): Promise<IdeaBrief | null>;
     /**
      * Add built-in format `id` (`1x1`, `4x5`, `9x16`, `16x9`) to this window's project, after the others: daemon
      * `format.add`, journaled like any format change (ADR 0027, 0036). Rejects with the daemon's message.
@@ -1129,7 +1131,7 @@ export const Channel = {
   projectFromVideos: "project:from-videos",
   projectPlanIdea: "project:plan-idea",
   projectFromIdea: "project:from-idea",
-  projectTakeIdea: "project:take-idea",
+  projectReadIdea: "project:read-idea",
   projectAddFormat: "project:add-format",
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",

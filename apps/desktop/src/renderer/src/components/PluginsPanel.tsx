@@ -4,6 +4,10 @@ import type { MachineDownloads, PluginsView } from "../../../shared/api.js";
 import { downloadSize, sizeText } from "../../../shared/sizes.js";
 import { t } from "../i18n.js";
 import { type DownloadRow, type PluginRow, downloadRows, otherPlugins, pluginRows, trustPrompt } from "../plugins/model.js";
+import { useIdea } from "../idea.js";
+
+/** What a video made from an idea needs first: a generator of motion clips (#752). */
+const IDEA_PLUGINS = ["@frameshell/hyperframes"];
 
 /** Notice line above the sections: what the last action did or why it failed. */
 type Notice = { text: string; error: boolean };
@@ -104,7 +108,8 @@ export function PluginsPanel() {
     );
 
   const prompt = view ? trustPrompt(view.catalog.trust) : null;
-  const rows = view ? pluginRows(view.catalog) : [];
+  const idea = useIdea();
+  const rows = view ? pluginRows(view.catalog, idea ? IDEA_PLUGINS : []) : [];
   const others = view ? otherPlugins(view) : [];
   const downloads = machine ? downloadRows(machine, view?.catalog ?? null) : null;
   const installOpen = view !== null && (view.catalog.trust === "not-required" || view.catalog.trust === "trusted");
