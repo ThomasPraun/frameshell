@@ -2468,6 +2468,12 @@ code {
   font-size: 12px;
 }
 
+.preview-export-icon {
+  display: none;
+  width: 14px;
+  height: 14px;
+}
+
 /* ---------- Timeline ---------- */
 
 .timeline-body {
@@ -3127,6 +3133,21 @@ button.track-head:focus-visible {
 
 @container preview (max-width: 400px) {
   .preview-body > .panel-header .panel-title {
+    display: none;
+  }
+
+  /* Export video folds to its icon (the name stays in its label and tooltip), so the duration shows whole. */
+  .preview-body .preview-export.is-idle {
+    display: inline-grid;
+    place-items: center;
+    padding: 2px 6px;
+  }
+
+  .preview-body .preview-export.is-idle .preview-export-icon {
+    display: block;
+  }
+
+  .preview-body .preview-export.is-idle .preview-export-text {
     display: none;
   }
 }
