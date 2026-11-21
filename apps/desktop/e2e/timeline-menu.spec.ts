@@ -193,8 +193,9 @@ test("empty lane space adds tracks, and a header deletes a track with its clips"
 });
 
 test("a track's menu offers its subtitles once; the toolbar adds them to a track that has none first", async () => {
+  // V1 was renamed Titles above: the menu names the track as the person named it (#757).
   await head("v1").click({ button: "right" });
-  await menu().getByRole("menuitem", { name: "Add subtitles of V1" }).click();
+  await menu().getByRole("menuitem", { name: "Add subtitles of Titles" }).click();
   await expect.poll(() => savedTracks().filter((track) => track.kind === "subtitles")).toHaveLength(1);
   await head("v1").click({ button: "right" });
   await expect(menu().getByRole("menuitem", { name: /^Add subtitles of/ })).toHaveCount(0);
