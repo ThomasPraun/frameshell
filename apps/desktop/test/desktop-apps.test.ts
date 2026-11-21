@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type LaunchPlan, type Launcher, launchPlan, openDesktopApp, standInLauncher, systemLauncher } from "../src/main/desktop-apps.js";
+import { CHATGPT_MAC_BUNDLE_IDS, type LaunchPlan, type Launcher, launchPlan, openDesktopApp, standInLauncher, systemLauncher } from "../src/main/desktop-apps.js";
 
 const recorder = (result: Awaited<ReturnType<Launcher>> = { ok: true }) => {
   const plans: LaunchPlan[] = [];
@@ -20,7 +21,7 @@ describe("launchPlan", () => {
     expect(launchPlan("claude-desktop", "linux")).toBeNull();
   });
 
-  it("starts the ChatGPT desktop app by name, since OpenAI documents no URL scheme", () => {
+  it("starts the ChatGPT desktop app by bundle id or name, since OpenAI documents no URL scheme", () => {
     const mac = launchPlan("chatgpt", "darwin") as Extract<LaunchPlan, { kind: "command" }>;
     expect(mac).toMatchObject({ kind: "command", file: "/bin/sh", wait: true, missing: 1 });
     expect(mac.args[1]).toContain("ChatGPT.app");
@@ -34,6 +35,30 @@ describe("launchPlan", () => {
     expect(script).toContain("shell:AppsFolder");
     expect(script).toContain("msedge");
     expect(script).toContain("'*!*'");
+  });
+
+  it.skipIf(process.platform === "win32")("finds ChatGPT on macOS by its bundle ids first, else by name, and says when there is none", async () => {
+    expect(CHATGPT_MAC_BUNDLE_IDS).toEqual(["com.openai.codex", "com.openai.chat"]);
+    const script = (launchPlan("chatgpt", "darwin") as Extract<LaunchPlan, { kind: "command" }>).args[1]!;
+    const bin = await mkdtemp(join(tmpdir(), "chatgpt-mac-"));
+    try {
+      // Stand-ins: mdfind answers by query kind, open records what it was given.
+      await writeFile(join(bin, "mdfind"), '#!/bin/sh\ncase "$1" in *kMDItemCFBundleIdentifier*) printf "%s" "$BY_ID";; *) printf "%s" "$BY_NAME";; esac\n');
+      await writeFile(join(bin, "open"), '#!/bin/sh\nprintf "%s" "$1" > "$OPENED"\n');
+      await chmod(join(bin, "mdfind"), 0o755);
+      await chmod(join(bin, "open"), 0o755);
+      const opened = join(bin, "opened");
+      const run = (byId: string, byName: string) => {
+        execFileSync("/bin/sh", ["-c", script], { env: { PATH: `${bin}:/usr/bin:/bin`, BY_ID: byId, BY_NAME: byName, OPENED: opened } });
+        return readFile(opened, "utf8");
+      };
+      expect(script).toContain('kMDItemCFBundleIdentifier == "com.openai.codex" || kMDItemCFBundleIdentifier == "com.openai.chat"');
+      expect(await run("/Applications/ChatGPT.app\n", "/Users/me/Applications/Chrome Apps/ChatGPT.app\n")).toBe("/Applications/ChatGPT.app");
+      expect(await run("", "/Users/me/Applications/Chrome Apps.localized/ChatGPT.app\n/Applications/Tools/ChatGPT.app\n")).toBe("/Applications/Tools/ChatGPT.app");
+      expect(() => run("", "/Users/me/Applications/Edge Apps/ChatGPT.app\n")).toThrow(expect.objectContaining({ status: 1 }));
+    } finally {
+      await rm(bin, { recursive: true, force: true });
+    }
   });
 
   it("has no ChatGPT plan on Linux, where there is no desktop app", () => {
