@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table, as macOS and Linux do from the foreground process, so Chat about this types at it without Connect Claude Code
   (ADR 0048, #743).
 
+- The agent skill has rules for talking to the person: say what was measured, never "I listened" or "I watched"; ask
+  whether a note is a wish or a complaint before changing anything; ask the goal, references, format and length before
+  any new kind of film; show the storyboard before any paid run. `project-model.md` adds how to make a style your own:
+  three lists (safe to change, changes its character, cannot change), at most five changes a round, one frame first,
+  before next to after (#803).
+
 ### Fixed
 
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
