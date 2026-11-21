@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
 
+### Changed
+
+- HyperFrames generated clips render with HyperFrames 0.9.72 (was 0.9.30). It is a version older than a day, so
+  installs keep npm's minimum release age with no exceptions for HyperFrames (#800).
+
 ### Fixed
 
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
