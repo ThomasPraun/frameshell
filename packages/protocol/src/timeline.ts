@@ -1290,6 +1290,24 @@ export const ClipReframeResultSchema = z.object({
 /** See {@link ClipReframeResultSchema}. */
 export type ClipReframeResult = z.output<typeof ClipReframeResultSchema>;
 
+/** Result of `clip.zoom`: the pointer's rests found and the keys that zoom on them. */
+export const ClipZoomResultSchema = z.object({
+  timeline: z.string(),
+  revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
+  clip: z.string(),
+  pointer: z.string().describe("Project-relative pointer track read (ADR 0048)."),
+  scale: z.number().describe("Zoom factor over the clip's own scale."),
+  rests: z.int().describe("Spots the pointer rested on, within the clip's stretch of its file."),
+  zooms: z.int().describe("Zooms written: each pushes in once and eases back out once; rests close together share one zoom that glides between them."),
+  keys: z.int().describe("Keys written per property (`scale`, `x`, `y` move together); 0 when nothing was written."),
+  operations: z.array(z.string()).describe("Ids of the operations written, in order; empty when none was."),
+  tx: z.string().nullable().describe("Transaction of the writes, revertible as one; null when nothing was written."),
+  warnings: z.array(z.string()).describe("No rest found, the clip's own placement replaced. Empty when none."),
+});
+
+/** See {@link ClipZoomResultSchema}. */
+export type ClipZoomResult = z.output<typeof ClipZoomResultSchema>;
+
 /** Clip as stored plus derived timing. */
 const ClipViewSchema = z
   .looseObject({

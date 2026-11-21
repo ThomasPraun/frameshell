@@ -771,8 +771,11 @@ export interface FrameshellApi {
      * Resolves with the session id. Rejects when a session is already recording in this window.
      */
     begin(sources: ShootSourceSpec[]): Promise<string>;
-    /** Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. */
-    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<void>;
+    /**
+     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. `origin` is the
+     * renderer's `performance.timeOrigin`, so main can put the screen's start on the clock of its pointer track.
+     */
+    started(id: string, starts: Partial<Record<ShootRole, number>>, origin?: number): Promise<void>;
     /** Append one recorded chunk of `role` to its file, in call order per role. */
     chunk(id: string, role: ShootRole, data: Uint8Array): Promise<void>;
     /**

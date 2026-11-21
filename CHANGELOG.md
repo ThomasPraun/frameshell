@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Zoom a screen recording to where the action is: Shoot now records the mouse pointer's position while it records a
+  whole screen (a hidden `.screen.pointer.json` next to the screen file), and `frameshell clip zoom <clip> --follow
+  pointer` (MCP `clip_zoom`) pushes in where the pointer rests and eases back out when it moves on, as `scale`, `x`
+  and `y` keys in one transaction. Only the position is recorded, not clicks (ADR 0048, #797).
+
 - Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
   toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
   each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of

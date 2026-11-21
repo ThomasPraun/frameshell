@@ -54,7 +54,9 @@ import {
   parseProjectConfig,
   parseRequirementsFile,
   parseStyleFile,
+  parsePointerTrack,
   parseTimeline,
+  pointerFileOf,
   projectFormats,
   resolveStyle,
   sameAspect,
@@ -100,6 +102,7 @@ import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
 import { planReframe, reframeTarget } from "./reframe.js";
+import { ZOOM, planZoom } from "./zoom.js";
 import {
   FACE_DETECTION_MODEL,
   FACE_RECOGNITION_MODEL,
@@ -3141,6 +3144,98 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         operations: written,
         tx: tx.id,
       };
+    },
+    "clip.zoom": async ({ cwd, timeline, clip: clipId, scale: factor, pointer: pointerArg }, caller) => {
+      const dir = await root(cwd);
+      const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `clip.zoom: ${reason}`, { op: "clip.zoom", reason, field });
+      const { timeline: loaded } = await loadFor(dir, timeline, caller);
+      const clip = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips : [])).find((candidate) => candidate.id === clipId);
+      if (!clip) {
+        throw new RpcError(ErrorCode.ClipNotFound, `clip.zoom: no clip "${clipId}" on a video track of timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+      }
+      if (!isMediaClip(clip)) throw invalid(`clip ${clipId} is not a media clip: only screen recordings are zoomed.`, "clip");
+      const probe = await media.probe(dir, clip.asset);
+      if (!probe.video || probe.video.still) throw invalid(`${clip.asset} has no moving picture to zoom.`, "clip");
+      if (!probe.video.width || !probe.video.height) throw invalid(`${clip.asset} has no readable picture size.`, "clip");
+      const pointerFile = pointerArg === undefined ? join(dir, ...pointerFileOf(clip.asset).split("/")) : resolve(cwd, pointerArg);
+      let pointerRel: string;
+      try {
+        pointerRel = (await resolveAsset(dir, pointerFile)).rel;
+      } catch (error) {
+        if (!(error instanceof RpcError) || error.code !== ErrorCode.AssetNotFound) throw error;
+        throw invalid(
+          pointerArg === undefined
+            ? `${clip.asset} has no pointer track (${pointerFileOf(clip.asset)}): only screens recorded in Shoot have one. Pass \`pointer\` to read another file of the same shape.`
+            : `${pointerArg} does not exist.`,
+          "pointer",
+        );
+      }
+      const parsed = parsePointerTrack(await readFile(join(dir, ...pointerRel.split("/")), "utf8").then((text) => JSON.parse(text) as unknown, () => null));
+      if (!parsed.ok) throw invalid(`${pointerRel} is not a pointer track: ${parsed.error}`, "pointer");
+      const speed = clip.speed ?? 1;
+      const config = (await readEnclosingProject(dir))?.config;
+      const project = config?.resolution ?? { width: 1920, height: 1080 };
+      const scale = factor ?? ZOOM.scale;
+      const base = { scale: clip.transform?.scale ?? 1, x: clip.transform?.x ?? 0, y: clip.transform?.y ?? 0 };
+      const plan = planZoom(
+        { source: { width: probe.video.width, height: probe.video.height }, project },
+        parsed.value.samples,
+        { from: clip.in, to: clip.out, toTimeline: (source) => clip.start + (source - clip.in) / speed },
+        { scale, base },
+      );
+      const warnings: string[] = [];
+      const nothing = (): MethodResult<"clip.zoom"> => ({
+        timeline,
+        revision: loaded.revision,
+        clip: clip.id,
+        pointer: pointerRel,
+        scale,
+        rests: plan.rests,
+        zooms: 0,
+        keys: 0,
+        operations: [],
+        tx: null,
+        warnings,
+      });
+      if (plan.keys.length === 0) {
+        warnings.push(
+          plan.rests === 0
+            ? `The pointer never rests in ${clip.id} (0.8 s or more in one spot), so it keeps its framing.`
+            : `The pointer rests only at the clip's edges, too briefly to zoom, so ${clip.id} keeps its framing.`,
+        );
+        return nothing();
+      }
+      if (clip.keys?.x || clip.keys?.y || clip.keys?.scale) warnings.push(`${clip.id} had its own x, y or scale keys: replaced.`);
+      // Every write joins one transaction, so one revert undoes the zoom even from a sessionless client.
+      const key = authorOf(caller);
+      const next = transactions.next(key, { standalone: true });
+      const tx = transactions.isOpen(key, next) ? next : { id: next.id, label: `Zoom ${basename(clip.asset, extname(clip.asset))}` };
+      const author = journalAuthorOf(caller);
+      const written: string[] = [];
+      let revision = loaded.revision;
+      const apply = async (op: OperationRequest) => {
+        const result = await timelines.apply({ root: dir, cwd, timeline, request: op, author, tx });
+        await transactions.applied(key, tx);
+        written.push(result.operation.id);
+        revision = result.revision;
+      };
+      await transactions.touching(key, tx, { root: dir, timeline });
+      try {
+        for (const prop of ["x", "y", "scale"] as const) {
+          if (clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: clip.id, prop, clear: true } } as OperationRequest);
+        }
+        for (const prop of ["scale", "x", "y"] as const) {
+          for (const point of plan.keys) {
+            await apply({ op: "clip.key", args: { clip: clip.id, prop, time: point.time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
+          }
+        }
+      } catch (error) {
+        // All or nothing: take back what was written, in the same transaction.
+        for (const id of written.reverse()) await timelines.revert({ root: dir, cwd, timeline, author, tx, target: id }).catch(() => undefined);
+        throw error;
+      }
+      await settle(key, tx);
+      return { ...nothing(), revision, zooms: plan.zooms, keys: plan.keys.length, operations: written, tx: tx.id };
     },
     "multicam.turns": async ({ cwd, timeline, group }, caller) => {
       const dir = await root(cwd);
