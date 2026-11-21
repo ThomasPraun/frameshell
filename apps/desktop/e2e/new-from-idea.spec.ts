@@ -40,11 +40,14 @@ test("the form creates an empty project with its formats and offers the film pro
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.getByRole("alert")).toHaveText("Give the video a name.");
     await form.getByLabel("Name of the video").fill("Spring reel");
-    await form.getByLabel("Horizontal 16:9 (1920x1080)").uncheck();
+    await form.getByLabel("Horizontal 16:9 (1920x1080)", { exact: true }).uncheck();
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.getByRole("alert")).toHaveText("Choose at least one format.");
-    await form.getByLabel("Horizontal 16:9 (1920x1080)").check();
-    await form.getByLabel("Vertical 9:16 (1080x1920)").check();
+    await form.getByLabel("Horizontal 16:9 (1920x1080)", { exact: true }).check();
+    await form.getByLabel("Vertical 9:16 (1080x1920)", { exact: true }).check();
+    // With two ticked, either can be the main format (#750): the vertical one here.
+    await expect(form.getByLabel("Make Horizontal 16:9 (1920x1080) the main format")).toBeChecked();
+    await form.getByLabel("Make Vertical 9:16 (1080x1920) the main format").check();
     await form.getByLabel("A web page to start from (optional)").fill("spring sale");
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.getByRole("alert")).toContainText("not a web address");
@@ -55,13 +58,13 @@ test("the form creates an empty project with its formats and offers the film pro
     await form.getByRole("button", { name: "Create project" }).click();
     await expect(page.locator(".titlebar-project")).toHaveText("Spring reel", { timeout: 60_000 });
 
-    // The formats went in through the daemon: the first of the list is the project's size, the other is added.
+    // The formats went in through the daemon: the main one is the project's size, the other is added.
     const dir = join(ideas, "Spring reel");
     const config = JSON.parse(readFileSync(join(dir, "frameshell.json"), "utf8"));
-    expect(config).toMatchObject({ resolution: { width: 1920, height: 1080 } });
-    expect(config.formats.map((format: { id: string }) => format.id)).toEqual(["16x9", "9x16"]);
+    expect(config).toMatchObject({ resolution: { width: 1080, height: 1920 } });
+    expect(config.formats.map((format: { id: string }) => format.id)).toEqual(["9x16", "16x9"]);
     const journal = readFileSync(join(dir, ".frameshell", "history", "project.config.jsonl"), "utf8");
-    expect(journal).toContain("format:9x16");
+    expect(journal).toContain("format:16x9");
     // No footage: the timeline has no clips.
     expect(JSON.parse(readFileSync(join(dir, "timelines", "main.json"), "utf8")).tracks.flatMap((track: { clips: unknown[] }) => track.clips)).toEqual([]);
 

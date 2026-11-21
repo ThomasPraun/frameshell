@@ -36,14 +36,16 @@ const ENGLISH: IdeaMessages = {
 };
 
 /**
- * The brief cleaned up: name trimmed, formats kept in the order of the built-in list (the first becomes the
- * project's own size), the address normalised. Throws with a message for the person (`said`, the welcome screen's
+ * The brief cleaned up: name trimmed, the main format (the first given, which becomes the project's own size) first
+ * and the others in the order of the built-in list, the address normalised. Throws with a message for the person (`said`, the welcome screen's
  * own words) when no project can be made of it.
  */
 export function checkIdea(raw: IdeaBrief, said: IdeaMessages = ENGLISH): IdeaBrief {
   const name = raw.name.trim();
   if (name === "") throw new Error(said.ideaNeedName);
-  const formats = BUILTIN_FORMAT_IDS.filter((id) => raw.formats.includes(id));
+  const given = BUILTIN_FORMAT_IDS.filter((id) => raw.formats.includes(id));
+  const main = given.find((id) => id === raw.formats[0]) ?? given[0];
+  const formats = main === undefined ? [] : [main, ...given.filter((id) => id !== main)];
   if (formats.length === 0) throw new Error(said.ideaNeedFormat);
   const seconds = raw.seconds;
   if (seconds !== null && !(Number.isFinite(seconds) && seconds > 0)) throw new Error(said.ideaBadLength);

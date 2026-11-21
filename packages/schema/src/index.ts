@@ -246,7 +246,7 @@ export {
   staysInFrameMargin,
 } from "./requirements.js";
 export { STYLE_TOKEN_PREFIX, type StyleTokenFace, styleTokenCss } from "./style-tokens.js";
-export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, type PlatformId, type SafeZone } from "./safe-zones.js";
+export { PLATFORM_IDS, SAFE_ZONES, SafeZoneSchema, sameOrientation, zoneInsets, type PlatformId, type SafeZone, type ZoneInsets } from "./safe-zones.js";
 export {
   CREDITS_FILE,
   CREDITS_SCHEMA_URL,

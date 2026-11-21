@@ -28,8 +28,11 @@ describe("planIdeaProject", () => {
 describe("checkIdea", () => {
   const brief = { name: "  Reel  ", formats: ["9x16", "16x9"], seconds: 30, url: " https://example.com/a " };
 
-  it("trims, orders the formats like the built-in list and normalises the address", () => {
-    expect(checkIdea(brief)).toEqual({ name: "Reel", formats: ["16x9", "9x16"], seconds: 30, url: "https://example.com/a" });
+  it("trims, keeps the main format first and the others in built-in order, and normalises the address", () => {
+    expect(checkIdea(brief)).toEqual({ name: "Reel", formats: ["9x16", "16x9"], seconds: 30, url: "https://example.com/a" });
+    expect(checkIdea({ ...brief, formats: ["1x1", "9x16", "16x9", "4x5"] }).formats).toEqual(["1x1", "16x9", "4x5", "9x16"]);
+    // An unknown first id: the first known one in built-in order is the main format.
+    expect(checkIdea({ ...brief, formats: ["nope", "9x16", "16x9"] }).formats).toEqual(["16x9", "9x16"]);
   });
 
   it("accepts no length and no address", () => {
