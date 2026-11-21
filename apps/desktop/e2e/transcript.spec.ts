@@ -97,6 +97,8 @@ const transcript = () => page.getByTestId("transcript");
 
 /** Middle of a word, once laid out. */
 async function middle(k: number): Promise<{ x: number; y: number }> {
+  // In view first: on a smaller screen or larger font the word can sit below the fold, where a click hits the timeline.
+  await word(k).scrollIntoViewIfNeeded();
   const { x, y, width, height } = await laidOutBox(word(k));
   return { x: x + width / 2, y: y + height / 2 };
 }
