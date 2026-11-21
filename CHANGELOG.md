@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
+  failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
+  the blurred render's state. The clip's context menu has "Open composition" (#746).
+
+- Daemon event `transcription.progress` (protocol 185): every `transcribe` run of a project, from any client, announces
+  its steps and its end to subscribers. The app shows a transcription started from the CLI or by the agent in the
+  status bar, as it does for its own (#742).
+
+- File > New Project from Video… (Ctrl+N, ⌘N on macOS) and File > New Video from an Idea… start a project from any
+  window: they open the welcome screen (a window already on it, else a new one) already choosing videos or showing
+  the idea form (#740). Help > Welcome Screen shows the welcome screen again.
+
+- Release notes start with one download per OS (Windows, macOS Apple silicon and Intel, Linux AppImage and deb) above
+  the generated changes (#740).
+
+- View > Shoot (Ctrl+Alt+R, ⌘⌥R on macOS) and View > Teleprompter (Ctrl+Alt+P) open those sidebar views, showing a
+  hidden sidebar first (#737). Disabled in image projects.
+
+- A global shortcut ends a recording shoot from any app (#744): Ctrl+Alt+Shift+S (⌘⌥⇧S on macOS), held only while
+  a session records, so remote help or a person in a call app can stop it while Frameshell's windows are hidden from
+  captures. The Shoot view says so while recording; when another app owns the keys, End stays the only way and no
+  hint shows.
+
+- Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
+  toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
+  each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of
+  being cut off (#741).
+
+- Export video from the app: File > Export video… (Cmd/Ctrl+E) and an Export video button in the preview header of a
+  video project ask where to save the MP4, render it in the background with the progress on the button, then name the
+  file, say what the export left out and offer Show file. Before, a film could only be exported with `frameshell render`
+  in a terminal (#738).
+
+- Put media on the timeline without an agent: right-click a video, sound or picture in `assets/` in Files and choose
+  Add to timeline (it goes at the end of the first track of its kind, a Video or Audio track is added when there is
+  none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
+
+### Changed
+
+- Timeline by hand (#747): track headers show sound and picture switches that mute and hide the track with one
+  click (lit while on; the header menu still has them); "Zoom to fit" and the 0 key fit the clips themselves, so a
+  10 s video fills the panel instead of a sixth of it (the panel still opens on at least a minute); Ctrl+wheel past
+  the last clip zooms around the clips' end, so they stay in view; `M` names a new marker at the playhead, also in the
+  ruler and empty-lane menus; tooltips name tracks and clips (`V1 · Interview`, "generated (titles)") and never show
+  their ids; a track's menu stops offering "Add subtitles of V1" once V1 has a subtitle track, and the toolbar's
+  subtitle button picks a track without subtitles first.
+
+- The timeline hatches a generated clip only until its render is ready, and marks a failed render red with the
+  reason in its tooltip (#746).
+
+- Clip inspector wording per clip: a video clip offers "Use an image instead…", not "Replace image…"; Transitions
+  and Keyframes have visible headings; the Look menu shows the look a clip took, or "Adjusted" (#746).
+
+- New project from video or audio asks about transcription once: the form's "Transcribe what is said" box now shows
+  the real download size on this computer (or that there is nothing to download), and no native box asks again after
+  Create (#742).
+
+- A long setup step in the status bar (loading the transcription model, transcribing) shows how long it has run, and
+  after a minute with no percentage says it is slow without a GPU, with a smaller model as the way out (#742).
+
+- Shoot takes are transcribed in the script's language when the project sets none, guessed from the script's words
+  (Spanish, English, Portuguese, French, German), instead of English by default (#742).
+
+- "Chat about this" with no agent running copies the reference to the clipboard, shows the terminal and says to start
+  an agent, instead of typing it at a shell prompt where Enter would run it (ADR 0048, #743).
+
+- Desktop: on Windows the app's terminals detect the agent running in them (Claude Code, Codex, ...) from the process
+  table, as macOS and Linux do from the foreground process, so Chat about this types at it without Connect Claude Code
+  (ADR 0048, #743).
+
 ### Fixed
 
 - Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads
@@ -100,6 +172,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a playhead, and "Use this" is "Show in Explorer", which is what it does.
   - A timeline that cannot be read says which file, keeps the validation details folded, and offers to open the file
     or go to History.
+
+- A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
+  frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field
+  no longer scrolls the panel sideways, an open inspector leaves the picture about half the panel and scrolls instead
+  of adding a sideways bar, long inspector hints wrap, and render slates stay inside a small frame (#745).
+
+- Native dialogs and the Windows taskbar say "Frameshell" instead of the package name `@frameshell/desktop` (#742).
+
+- The status bar, `frameshell status` and Help > Copy diagnostics name the release version of the daemon
+  (`frameshelld 0.19.0`) instead of `0.0.0` (#739): inside a packaged app the daemon reports the app's stamped
+  version, since the workspace packages stay at `0.0.0`.
+
+- The Shoot view keeps the picked camera, microphone, screen and system audio when another view shows (#737): the
+  devices are still freed a second after the view goes, and opened again as picked when it comes back. The microphone
+  picked last is remembered on the machine and picked first next time when it is still connected.
+
+- Sidebar view tabs that do not fit are no longer cut off without a sign (#736): the strip fades at the edge where
+  tabs go on, scrolls with the mouse wheel, keeps the active tab in sight, and ends in a "+N" button whose menu lists
+  every view out of sight (English and Spanish).
+
+- Changing the language (View > Language) no longer kills the terminal (#754): the reloaded window shows the shells
+  it had, with their output, and an agent running in one goes on. The same holds for any reload of the window.
+
+- Window menu lists the open project windows on Windows and Linux, to switch between projects (macOS lists them
+  itself) (#754).
+
+- Release builds leave Reload, Force Reload and Developer Tools out of View, so Ctrl+R no longer reloads the window
+  by accident; `FRAMESHELL_DEVTOOLS=1` brings them back (#754).
+
+- A new agent proposal clears a History pick, so its diff shows on the lanes instead of the old entry's marks (#754).
+
+- Take and History times follow the UI language instead of the system's (#754).
+
+- Shoot view after End (#744): "Saving…" now shows how long the files have been saving; the finished message names
+  the timeline the multicam group went to (the shoot's own, e.g. `timelines/<script>.json`, or main) instead of always
+  saying main; Spanish "Se guardaron N archivos". A take's "N differences, review below" is a link to its rows, and
+  differences the scene view does not show (speech outside every scene, another scene) are listed under the last take,
+  each with Accept. A take, or a whole session, whose microphone stayed nearly silent (loudest 100 ms window under
+  -45 dBFS) is flagged right after it is cut or ended. The teleprompter's voice following hears the microphone only
+  while a shoot records: before Start and after End it reads "Ready" and the mic is left alone.
+
+- Built-in terminal on Windows and Linux: Ctrl+V pastes the clipboard's text into any program, Claude Code included,
+  which read it as "paste an image" before. With no text on the clipboard (an image), the program still gets its ^V.
+  Ctrl+Shift+V keeps working (#743).
+
+- Starting an agent from the agent guide puts the keyboard in its terminal, so its first question (folder trust) can be
+  answered without a click (#743).
+
+- Agents on Windows find `frameshell` from Git Bash (Claude Code runs its commands there): the app writes an `sh` twin
+  of its `frameshell.cmd`, so the bare name works and matches the project's `Bash(frameshell *)` permission (#743).
+
+- A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
+  track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
+  saying so (#755).
 
 ## [0.19.0] - 2026-11-20
 

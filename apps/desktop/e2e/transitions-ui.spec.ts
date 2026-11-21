@@ -123,6 +123,8 @@ test("the inspector picks a wipe and its direction, an iris, and a dip cut at a 
   await kind.selectOption("slats");
   await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "left" });
   await direction.selectOption("down");
+  // The count edit builds on the saved shape: wait for the direction to land first, or it can send the old one.
+  await expect.poll(() => saved("c_two")["shape"]).toEqual({ kind: "slats", direction: "down" });
   const count = inspector().getByRole("textbox", { name: "Count" });
   await count.fill("6");
   await count.press("Enter");

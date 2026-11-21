@@ -50,6 +50,8 @@ const fileClips = (): string[] =>
   JSON.parse(readFileSync(mainFile, "utf8")).tracks.flatMap((track: { clips: { id: string }[] }) => track.clips.map((entry) => entry.id));
 
 async function click(locator: ReturnType<Page["locator"]>): Promise<void> {
+  // A sidebar tab past the strip's edge (#736: narrower strip on macOS fonts) is scrolled into sight first.
+  await locator.scrollIntoViewIfNeeded();
   const target = await laidOutBox(locator);
   await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
 }
