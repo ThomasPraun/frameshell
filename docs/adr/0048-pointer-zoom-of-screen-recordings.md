@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Pointer zoom of screen recordings: Shoot records the pointer's position, `clip zoom` pushes in where it rests
@@ -10,7 +10,7 @@ key` on `scale`, `x`, `y`; the inspector; `clip reframe` for faces), but the age
 action is, and a Shoot screen recording kept no pointer or click positions. The issue left two questions to the
 owner: build it at all, and record clicks (a global input hook, an extra permission) or the position only. On
 2026-11-21 the owner asked for every pending proposal to be implemented; this ADR records the choices made so they can
-be reviewed in the PR. **Status `proposed` until the owner accepts it.**
+be reviewed in the PR. **Accepted by the owner on 2026-11-21: position only, no clicks.**
 
 ## Decision
 
