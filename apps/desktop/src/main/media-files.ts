@@ -17,6 +17,11 @@ export const START_EXTENSIONS = [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS, ...IM
 /** Media a drop on a project imports into `assets/`: videos, audio, images. */
 export const MEDIA_EXTENSIONS = [...START_EXTENSIONS, "svg"] as const;
 
+/** `file` is a video file by its extension (case-insensitive). */
+export function isVideoFile(file: string): boolean {
+  return (VIDEO_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
+}
+
 /** `file` is an audio file by its extension (case-insensitive). */
 export function isAudioFile(file: string): boolean {
   return (AUDIO_EXTENSIONS as readonly string[]).includes(extname(file).slice(1).toLowerCase());
