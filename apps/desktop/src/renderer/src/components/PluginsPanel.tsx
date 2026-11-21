@@ -1,6 +1,6 @@
 import { officialPlugin } from "@frameshell/protocol/official-plugins";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MachineDownloads, PluginsView } from "../../../shared/api.js";
+import type { MachineDownloads, OpenAiKeyState, PluginsView } from "../../../shared/api.js";
 import { downloadSize, sizeText } from "../../../shared/sizes.js";
 import { t } from "../i18n.js";
 import { type DownloadRow, type PluginRow, downloadRows, downloadUse, errorParts, otherPlugins, pluginRows, trustPrompt } from "../plugins/model.js";
@@ -8,6 +8,9 @@ import { useIdea } from "../idea.js";
 
 /** What a video made from an idea needs first: a generator of motion clips (#752). */
 const IDEA_PLUGINS = ["@frameshell/hyperframes"];
+
+/** Where people get an OpenAI API key. */
+const OPENAI_KEYS_URL = "https://platform.openai.com/api-keys";
 
 /** Notice line above the sections: what the last action did or why it failed. */
 type Notice = { text: string; error: boolean };
@@ -28,10 +31,13 @@ export function PluginsPanel() {
   /** Key of the action running (`install:<name>`, `remove:<name>`, `trust`, `download:<name>`); one at a time. */
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [key, setKey] = useState<OpenAiKeyState | null>(null);
 
   const readPlugins = useCallback(async () => {
     try {
-      setView(await window.frameshell.plugins.read());
+      const [read, keyState] = await Promise.all([window.frameshell.plugins.read(), window.frameshell.plugins.keyState()]);
+      setView(read);
+      setKey(keyState);
       setReadError(null);
     } catch (error) {
       setReadError((error as Error).message);
@@ -97,6 +103,29 @@ export function PluginsPanel() {
       },
       t.plugins.trust.failed,
     );
+  /** Resolves true when the key was saved, so the field can forget what was typed. */
+  const saveKey = async (value: string) => {
+    let saved = false;
+    await act(
+      "key",
+      async () => {
+        await window.frameshell.plugins.saveKey(value);
+        saved = true;
+        return t.plugins.key.saved;
+      },
+      t.plugins.key.saveFailed,
+    );
+    return saved;
+  };
+  const removeKey = () =>
+    act(
+      "key",
+      async () => {
+        await window.frameshell.plugins.removeKey();
+        return t.plugins.key.removed;
+      },
+      t.plugins.key.removeFailed,
+    );
   const removeDownload = (row: DownloadRow) =>
     act(
       `download:${row.name}`,
@@ -146,7 +175,16 @@ export function PluginsPanel() {
         {readError && <p className="plugins-error">{t.plugins.cannotRead(readError)}</p>}
         <ul className="plugins-list">
           {rows.map((row) => (
-            <PluginItem key={row.name} row={row} busy={busy} onInstall={() => void install(row)} onRemove={() => void remove(row)} />
+            <PluginItem
+              key={row.name}
+              row={row}
+              busy={busy}
+              keyState={key}
+              onInstall={() => void install(row)}
+              onRemove={() => void remove(row)}
+              onSaveKey={saveKey}
+              onRemoveKey={() => void removeKey()}
+            />
           ))}
         </ul>
         {others.length > 0 && (
@@ -207,7 +245,18 @@ export function PluginsPanel() {
   );
 }
 
-function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: string | null; onInstall: () => void; onRemove: () => void }) {
+interface PluginItemProps {
+  row: PluginRow;
+  busy: string | null;
+  /** Where the OpenAI key comes from; null until read. */
+  keyState: OpenAiKeyState | null;
+  onInstall: () => void;
+  onRemove: () => void;
+  onSaveKey: (value: string) => Promise<boolean>;
+  onRemoveKey: () => void;
+}
+
+function PluginItem({ row, busy, keyState, onInstall, onRemove, onSaveKey, onRemoveKey }: PluginItemProps) {
   return (
     <li className="plugin" data-testid="plugin" data-name={row.name} data-state={row.state}>
       <div className="plugin-head">
@@ -218,7 +267,12 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
         </span>
       </div>
       <p className="plugin-purpose">{t.plugins.about[row.name]?.purpose ?? row.name}</p>
-      <p className={`plugins-meta${row.need.met === false ? " is-unmet" : ""}`}>{needText(row)}</p>
+      <p className={`plugins-meta${row.need.met === false ? " is-unmet" : ""}`} data-testid="plugin-need">
+        {needText(row, keyState)}
+      </p>
+      {row.need.kind === "openai-key" && keyState && (
+        <OpenAiKeyField state={keyState} met={row.need.met === true} busy={busy} onSave={onSaveKey} onRemove={onRemoveKey} />
+      )}
       <p className="plugins-meta">{row.cost === "free" ? t.plugins.free : row.cost === "cloud-audio" ? t.plugins.paidAudio : t.plugins.paidText}</p>
       <p className="plugins-meta">{downloadText(row)}</p>
       {row.error && <PluginError text={row.error} />}
@@ -245,6 +299,75 @@ function PluginItem({ row, busy, onInstall, onRemove }: { row: PluginRow; busy: 
         )}
       </div>
     </li>
+  );
+}
+
+/**
+ * The OpenAI key field (ADR 0048): a password input with Save while no key is set and this computer can encrypt one,
+ * Remove once one is saved here, nothing when the key comes from the environment. What was typed is dropped after a
+ * save; the saved key never comes back to this view.
+ */
+function OpenAiKeyField({
+  state,
+  met,
+  busy,
+  onSave,
+  onRemove,
+}: {
+  state: OpenAiKeyState;
+  met: boolean;
+  busy: string | null;
+  onSave: (value: string) => Promise<boolean>;
+  onRemove: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const said = t.plugins.key;
+  if (state.source === "environment") return null;
+  if (state.source === "app") {
+    return (
+      <div className="plugins-actions">
+        <button className="button" disabled={busy !== null} onClick={onRemove} data-testid="openai-key-remove">
+          {busy === "key" ? t.plugins.removing : said.remove}
+        </button>
+      </div>
+    );
+  }
+  // Set in the engine's own environment (started from a terminal), or nowhere to keep one: nothing to type here.
+  if (met || !state.storable) return null;
+  const save = async () => {
+    if (await onSave(draft)) setDraft("");
+  };
+  return (
+    <form
+      className="plugin-key"
+      data-testid="openai-key-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <label className="plugin-key-label">
+        <span>{said.label}</span>
+        <input
+          type="password"
+          className="plugin-key-input"
+          value={draft}
+          placeholder={said.placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          data-testid="openai-key-input"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </label>
+      <div className="plugins-actions">
+        <button type="submit" className="button primary" disabled={busy !== null || draft.trim() === ""} data-testid="openai-key-save">
+          {busy === "key" ? said.saving : said.save}
+        </button>
+        <a className="link" href={OPENAI_KEYS_URL} target="_blank" rel="noreferrer">
+          {said.getOne}
+        </a>
+      </div>
+    </form>
   );
 }
 
@@ -290,8 +413,11 @@ function stateText(state: PluginRow["state"]): string {
   return state === "loaded" ? said.loaded : state === "error" ? said.error : state === "untrusted" ? said.untrusted : said.notInstalled;
 }
 
-/** What the plugin needs, and whether this machine has it. The key's value is never read here: only set or not. */
-function needText(row: PluginRow): string {
+/**
+ * What the plugin needs, and whether this machine has it. The key's value is never read here: only where it comes
+ * from (`key`, ADR 0048) and whether the engine has one (`need.met`).
+ */
+function needText(row: PluginRow, key: OpenAiKeyState | null): string {
   const said = t.plugins.need;
   switch (row.need.kind) {
     case "none":
@@ -300,7 +426,17 @@ function needText(row: PluginRow): string {
       return `${said.blender} ${row.need.met ? said.blenderFound : said.blenderMissing}`;
     case "openai-key": {
       const variable = officialPlugin(row.name)?.need.variable ?? "";
-      return `${said.openaiKey(variable)} ${row.need.met ? said.keySet : said.keyMissing(variable)}`;
+      const where =
+        key?.source === "environment"
+          ? said.keyFromEnvironment(variable)
+          : key?.source === "app"
+            ? said.keySaved
+            : row.need.met
+              ? said.keySet
+              : key && !key.storable
+                ? said.keyNotStorable(variable)
+                : said.keyMissing;
+      return `${said.openaiKey} ${where}`;
     }
     case "remotion-project":
       return said.remotion;

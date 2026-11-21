@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: the OpenAI plugins take your key in the Plugins view. Paste it under OpenAI transcription or OpenAI
+  voiceover and Save: the app encrypts it with the system keychain (Windows DPAPI, macOS Keychain, Linux Secret
+  Service), keeps it in its settings folder, and hands it to its own daemon in memory only while the app is open; the
+  CLI in the app's terminals uses it too. An `OPENAI_API_KEY` in the environment still wins. Where the system cannot
+  really encrypt (Linux without a keyring) nothing is kept and the view says to set the variable. New internal daemon
+  method `credentials.provide`; `PROTOCOL_VERSION` 186 (ADR 0048, #740).
+
 ### Fixed
 
 - Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads

@@ -174,6 +174,9 @@ const api: FrameshellApi = {
     trust: (decision) => invokeOutcome(Channel.pluginsTrust, decision),
     downloads: () => invokeOutcome(Channel.pluginsDownloads),
     removeDownload: (name, bytes) => invokeOutcome(Channel.pluginsRemoveDownload, name, bytes),
+    keyState: () => invokeOutcome(Channel.pluginsKeyState),
+    saveKey: (key) => invokeOutcome(Channel.pluginsSaveKey, key),
+    removeKey: () => invokeOutcome(Channel.pluginsRemoveKey),
   },
   people: {
     list: () => invokeOutcome(Channel.peopleList),
