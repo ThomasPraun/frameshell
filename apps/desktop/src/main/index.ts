@@ -70,6 +70,7 @@ import {
   type AudioOrientation,
   type IdeaBrief,
   type VideoProjectPlan,
+  type WelcomeStart,
 } from "../shared/api.js";
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
@@ -261,6 +262,8 @@ interface WindowState {
   startDir: string | undefined;
   /** Videos the OS asked to open, waiting for the welcome screen to take them; null when none. */
   offered: VideoProjectPlan | null;
+  /** A File menu "New …" the welcome screen still has to start (#740); null when none. */
+  welcomeStart: WelcomeStart | null;
   /**
    * The project window is closing or reloading: its panel windows close
    * with it but stay detached, so they open again with the project.
@@ -317,6 +320,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     panels: new Map(),
     startDir: projectDir,
     offered: null,
+    welcomeStart: null,
     closingPanels: false,
     shoot: null,
     recoveredShoots: [],
@@ -1036,7 +1040,22 @@ function showProject(dir: string): void {
 
 /** A window on the welcome screen with nothing pending: where what the OS opens goes first. */
 function welcomeWindow(): WindowState | undefined {
-  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered);
+  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered && !state.welcomeStart);
+}
+
+/**
+ * Show the welcome screen (#740): in a window already on it, else a new one; with `start`, it begins that way of
+ * making a project at once (File > New Project from Video…, New Video from an Idea…).
+ */
+function showWelcome(start: WelcomeStart | null): void {
+  const target = welcomeWindow() ?? windows.get(createWindow().webContents.id);
+  if (!target) return;
+  if (start) {
+    target.welcomeStart = start;
+    send(target.window.webContents, Channel.projectStartOffered);
+  }
+  if (target.window.isMinimized()) target.window.restore();
+  target.window.focus();
 }
 
 /**
@@ -1678,6 +1697,12 @@ function registerIpc(): void {
     return openFromWindow(stateOf(event.sender), dir);
   });
 
+  ipcMain.handle(Channel.projectTakeStart, (event) => {
+    const state = stateOf(event.sender);
+    const start = state.welcomeStart;
+    state.welcomeStart = null;
+    return start;
+  });
   ipcMain.handle(Channel.projectTakeOffered, (event) => {
     const state = stateOf(event.sender);
     const plan = state.offered;
@@ -2138,6 +2163,8 @@ function buildMenu(): void {
       label: said.file,
       submenu: [
         { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+        { id: "new-from-video", label: said.newFromVideo, accelerator: "CmdOrCtrl+N", click: () => showWelcome("video") },
+        { id: "new-from-idea", label: said.newFromIdea, click: () => showWelcome("idea") },
         { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
         {
@@ -2218,6 +2245,7 @@ function buildMenu(): void {
       ...(mac ? { role: "help" as const } : {}),
       label: said.help,
       submenu: [
+        { id: "help-welcome", label: said.welcome, click: () => showWelcome(null) },
         { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
         { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
         // macOS has them in the app menu.

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- File > New Project from Video… (Ctrl+N, ⌘N on macOS) and File > New Video from an Idea… start a project from any
+  window: they open the welcome screen (a window already on it, else a new one) already choosing videos or showing
+  the idea form (#740). Help > Welcome Screen shows the welcome screen again.
+
+- Release notes start with one download per OS (Windows, macOS Apple silicon and Intel, Linux AppImage and deb) above
+  the generated changes (#740).
+
 - View > Shoot (Ctrl+Alt+R, ⌘⌥R on macOS) and View > Teleprompter (Ctrl+Alt+P) open those sidebar views, showing a
   hidden sidebar first (#737). Disabled in image projects.
 

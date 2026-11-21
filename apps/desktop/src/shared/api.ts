@@ -115,6 +115,9 @@ export interface IdeaBrief {
   url: string | null;
 }
 
+/** A way of making a project the File menu starts on the welcome screen: from video files, or from an idea. */
+export type WelcomeStart = "video" | "idea";
+
 /** Folder a project made from an idea goes in, as main planned it: `parent`/`name`, numbered when the name is taken. */
 export interface IdeaProjectPlan {
   /** Folder the project folder goes in. */
@@ -333,6 +336,10 @@ export interface FrameshellApi {
     planVideos(files: string[], place?: { parent?: string; name?: string }): Promise<{ plan: VideoProjectPlan | null; refused: string[] }>;
     /** Videos or audio the OS asked to open in this window (Open with), once: null when none or already taken. */
     takeOffered(): Promise<VideoProjectPlan | null>;
+    /** How File > New … asked this welcome screen to start, once: null when not asked or already taken. */
+    takeStart(): Promise<WelcomeStart | null>;
+    /** Called when File > New … asks this window to start; take it with {@link takeStart}. Returns an unsubscribe function. */
+    onStartOffered(listener: () => void): () => void;
     /** Called when the OS offers videos to this window; take them with {@link takeOffered}. Returns an unsubscribe function. */
     onVideosOffered(listener: () => void): () => void;
     /** Pick the folder a new project goes in; null when cancelled. */
@@ -1169,6 +1176,8 @@ export const Channel = {
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
   projectTakeOffered: "project:take-offered",
+  projectTakeStart: "project:take-start",
+  projectStartOffered: "project:start-offered",
   projectVideosOffered: "project:videos-offered",
   mediaImport: "media:import",
   filesTree: "files:tree",
