@@ -5868,6 +5868,8 @@ button.track-head:focus-visible {
 
 .welcome-order-note {
   color: var(--text-muted);
+}
+
 /* Sound and picture switches of a track header (TrackToggles): dim until hovered, lit while muted or hidden. */
 .track-toggles {
   display: flex;
