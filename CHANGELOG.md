@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- View > Shoot (Ctrl+Alt+R, ⌘⌥R on macOS) and View > Teleprompter (Ctrl+Alt+P) open those sidebar views, showing a
+  hidden sidebar first (#737). Disabled in image projects.
+
 - A global shortcut ends a recording shoot from any app (#744): Ctrl+Alt+Shift+S (⌘⌥⇧S on macOS), held only while
   a session records, so remote help or a person in a call app can stop it while Frameshell's windows are hidden from
   captures. The Shoot view says so while recording; when another app owns the keys, End stays the only way and no
@@ -38,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ADR 0048, #743).
 
 ### Fixed
+
+- The Shoot view keeps the picked camera, microphone, screen and system audio when another view shows (#737): the
+  devices are still freed a second after the view goes, and opened again as picked when it comes back. The microphone
+  picked last is remembered on the machine and picked first next time when it is still connected.
 
 - Sidebar view tabs that do not fit are no longer cut off without a sign (#736): the strip fades at the edge where
   tabs go on, scrolls with the mouse wheel, keeps the active tab in sight, and ends in a "+N" button whose menu lists
