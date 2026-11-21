@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
+  failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
+  the blurred render's state. The clip's context menu has "Open composition" (#746).
+
 - Daemon event `transcription.progress` (protocol 185): every `transcribe` run of a project, from any client, announces
   its steps and its end to subscribers. The app shows a transcription started from the CLI or by the agent in the
   status bar, as it does for its own (#742).
@@ -43,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   none), or drag it from Files onto a track to place it there. One undo takes it off. The empty timeline says so (#738).
 
 ### Changed
+
+- The timeline hatches a generated clip only until its render is ready, and marks a failed render red with the
+  reason in its tooltip (#746).
+
+- Clip inspector wording per clip: a video clip offers "Use an image instead…", not "Replace image…"; Transitions
+  and Keyframes have visible headings; the Look menu shows the look a clip took, or "Adjusted" (#746).
 
 - New project from video or audio asks about transcription once: the form's "Transcribe what is said" box now shows
   the real download size on this computer (or that there is nothing to download), and no native box asks again after

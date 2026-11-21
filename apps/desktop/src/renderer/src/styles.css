@@ -1752,6 +1752,59 @@ code {
   color: var(--text-faint);
 }
 
+/* A group's visible heading (#746): Transitions, Keyframes. */
+.clip-inspector-heading {
+  flex: 1 0 100%;
+}
+
+/* A generated clip's section (#746): type and render state on top, then the error, the composition, motion blur. */
+.generated-control {
+  flex: 1 0 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.generated-type {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.generated-state[data-state="failed"],
+.generated-state[data-state="unavailable"] {
+  color: var(--danger);
+}
+
+.generated-state[data-state="ready"] {
+  color: var(--text-muted);
+}
+
+.generated-error {
+  margin: 0;
+  padding-left: 6px;
+  border-left: 2px solid var(--danger);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 11.5px;
+}
+
+.generated-source,
+.generated-blur {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.generated-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .key-control.is-keyed .key-control-label {
   color: var(--text-muted);
 }
