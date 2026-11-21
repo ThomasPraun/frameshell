@@ -3,7 +3,7 @@
 
 const en = {
   title: "Talk to an agent",
-  lede: "An AI agent edits this project from the terminal. Start one and ask in your own words.",
+  lede: "An AI edits this project for you: connect an app you already use, or start an agent in this terminal. Then ask in your own words.",
   start: (name: string) => `Start ${name}`,
   found: "Installed",
   notFound: "Not installed yet. Install one:",
@@ -58,8 +58,8 @@ const en = {
       " First write three storylines, each in a different world, with a different device and form, and recommend one." +
       " Wait for my choice before building anything. Then list your assumptions, and put a free alternative next to every paid item (tools, stock, music, voices, fonts).",
   },
-  /** Opens "Connect your AI" from the guide, before the terminal agents. */
-  desktopApps: "Prefer an app? Connect Claude Desktop or ChatGPT",
+  /** Opens "Connect your AI" from the guide: the first button, before the terminal agents (#740). */
+  desktopApps: "Connect Claude Desktop or ChatGPT",
   installCli: "Install the 'frameshell' command for other terminals",
   /** "Connect your AI" (renderer/src/components/ConnectAi.tsx): desktop apps first, developer tools after. */
   connect: {
@@ -129,7 +129,7 @@ const en = {
 
 const es: typeof en = {
   title: "Habla con un agente",
-  lede: "Un agente de IA edita este proyecto desde la terminal. Abre uno y pídele lo que quieras con tus palabras.",
+  lede: "Una IA edita este proyecto por ti: conecta una app que ya usas o abre un agente en esta terminal. Después pídele lo que quieras con tus palabras.",
   start: (name) => `Abrir ${name}`,
   found: "Instalado",
   notFound: "Todavía no tienes ninguno. Instala uno:",
@@ -176,7 +176,7 @@ const es: typeof en = {
       " Primero escribe tres historias, cada una en un mundo distinto, con otro dispositivo y otra forma, y recomienda una." +
       " Espera mi elección antes de construir nada. Después enumera tus supuestos y pon una alternativa gratuita junto a cada elemento de pago (herramientas, stock, música, voces, tipografías).",
   },
-  desktopApps: "¿Prefieres una app? Conecta Claude Desktop o ChatGPT",
+  desktopApps: "Conectar Claude Desktop o ChatGPT",
   installCli: "Instalar el comando 'frameshell' para otras terminales",
   connect: {
     open: "Conecta tu IA",

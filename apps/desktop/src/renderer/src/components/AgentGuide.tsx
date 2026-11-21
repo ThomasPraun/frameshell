@@ -24,7 +24,7 @@ function writeHidden(hidden: boolean): void {
 
 /**
  * How to talk to an agent, above the docked terminals. With no agent in the active terminal: first the way to
- * "Connect your AI" (desktop apps), then the agents found, each with Start, the others with their official installer
+ * "Connect your AI" (desktop apps, the main button), then the agents found, each with Start, the others with their official installer
  * typed into the terminal for the user to run. With an agent running: prompt suggestions it types there, unsent. A video made from
  * an idea shows its prompt with Copy (for an AI app outside) and as the first suggestion, and keeps the guide open until
  * the prompt is used or put away (#752); then one link offers it again, and the brief stays in `brief.md`.
@@ -130,8 +130,9 @@ export function AgentGuide({
         </button>
       </header>
       <p className="agent-guide-lede">{t.agents.lede}</p>
+      {/* The way for someone who came without a terminal, so it leads (#740); the terminal agents follow. */}
       <button
-        className="link agent-guide-apps"
+        className="button primary agent-guide-apps"
         data-testid="agent-guide-connect"
         onClick={(event) => connectPanel.open(event.currentTarget.ownerDocument.defaultView ?? window, projectName)}
       >
@@ -167,7 +168,7 @@ export function AgentGuide({
         <ul className="agent-guide-list" aria-label={t.agents.found}>
           {found.map((choice) => (
             <li key={choice.id}>
-              <button className="button primary" onClick={() => onRun(choice.command)}>
+              <button className="button" onClick={() => onRun(choice.command)}>
                 {t.agents.start(choice.name)}
               </button>
               {choice.unattended && <span className="agent-guide-warning">{t.agents.unattended}</span>}
