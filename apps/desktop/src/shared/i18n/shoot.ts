@@ -159,7 +159,7 @@ const es: typeof en = {
   recording: (time) => `Grabando ${time}`,
   endShortcut: (keys) => `${keys} termina el rodaje desde cualquier app.`,
   failed: (reason) => `El rodaje falló: ${reason}`,
-  saved: (folder, count) => (count === 1 ? `Se guardó 1 archivo en ${folder}.` : `Se guardaron ${count} archivos en ${folder}.`),
+  saved: (folder, count) => `${count === 1 ? "Se guardó 1 archivo" : `Se guardaron ${count} archivos`} en ${folder}.`,
   grouped: (timeline) =>
     timeline === "main"
       ? "La sesión es un grupo multicámara en la línea de tiempo principal."

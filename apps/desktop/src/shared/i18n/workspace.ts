@@ -93,6 +93,17 @@ const en = {
   nothing: "nothing",
   /** Joins the last two items of a list: "a, b and c". */
   and: "and",
+  /** A file-system failure, in words (#748); `path` may be empty. */
+  systemErrors: {
+    EACCES: (path: string) => `Frameshell may not write there${path ? `: ${path}` : ""}. Pick another folder or check its permissions.`,
+    EPERM: (path: string) => `Frameshell may not change that${path ? `: ${path}` : ""}. Pick another folder or check its permissions.`,
+    ENOTDIR: (path: string) => `Part of the path is a file, not a folder${path ? `: ${path}` : ""}. Pick a folder.`,
+    EEXIST: (path: string) => `Something with that name is already there${path ? `: ${path}` : ""}. Pick another name or folder.`,
+    ENOSPC: () => "The disk is full. Free some space, then try again.",
+    EROFS: (path: string) => `That disk is read-only${path ? `: ${path}` : ""}. Pick a folder on another disk.`,
+    ENOENT: (path: string) => `Not found${path ? `: ${path}` : ""}. It may have been moved or deleted.`,
+  },
+  dismissNotice: "Dismiss",
 };
 
 const es: typeof en = {
@@ -171,6 +182,16 @@ const es: typeof en = {
   timeRange: "un rango de tiempo",
   nothing: "nada",
   and: "y",
+  systemErrors: {
+    EACCES: (path) => `Frameshell no tiene permiso para escribir ahí${path ? `: ${path}` : ""}. Elige otra carpeta o revisa sus permisos.`,
+    EPERM: (path) => `Frameshell no tiene permiso para cambiar eso${path ? `: ${path}` : ""}. Elige otra carpeta o revisa sus permisos.`,
+    ENOTDIR: (path) => `Una parte de la ruta es un archivo, no una carpeta${path ? `: ${path}` : ""}. Elige una carpeta.`,
+    EEXIST: (path) => `Ya hay algo con ese nombre${path ? `: ${path}` : ""}. Elige otro nombre u otra carpeta.`,
+    ENOSPC: () => "El disco está lleno. Libera espacio y vuelve a intentarlo.",
+    EROFS: (path) => `Ese disco es de solo lectura${path ? `: ${path}` : ""}. Elige una carpeta en otro disco.`,
+    ENOENT: (path) => `No se encontró${path ? `: ${path}` : ""}. Puede que se haya movido o borrado.`,
+  },
+  dismissNotice: "Cerrar",
 };
 
 /** English and Spanish strings of the project window shell: status bar, sidebar, detached panels, drops. */

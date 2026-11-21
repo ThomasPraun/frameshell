@@ -81,6 +81,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads
+  "Revertir «Mover clip»", the timeline's change legend names the entry and gives way to the counts, and a terminal
+  session's id moves to the author's tooltip. The app's own journal labels ("Move clip", "Apply look", "Delete 2 clips")
+  are shown translated; the journal stays English. Counts agree in number ("1 eliminado"), undo and redo say what came
+  back ("Deshecho: Mover clip"), and file-system failures (EACCES, EPERM, ENOTDIR, EEXIST, ENOSPC, EROFS, ENOENT) read as
+  sentences with their path and stay in the status bar until closed. The idea form's checks, an untitled video's folder
+  and an image-from-frame folder use the UI language (#748).
+
 - A narrow preview (1280 px window, terminal open, a project with formats) keeps Play and every transport button: the
   frame tools fold under the buttons, the panel title gives way to the timecode and duration, a custom letterbox field
   no longer scrolls the panel sideways, an open inspector leaves the picture about half the panel and scrolls instead

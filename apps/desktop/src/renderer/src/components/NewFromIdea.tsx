@@ -3,6 +3,7 @@ import { BUILTIN_FORMAT_IDS } from "@frameshell/schema";
 import type { IdeaBrief, IdeaProjectPlan } from "../../../shared/api.js";
 import { IDEA_LENGTHS } from "../idea.js";
 import { t } from "../i18n.js";
+import { systemErrorText } from "../system-error.js";
 
 /** Value of the length menu for "not sure". */
 const UNKNOWN = "";
@@ -38,7 +39,7 @@ export function NewFromIdea({
       const next = await window.frameshell.project.planIdea({ ...(parent && { parent }), name, ...place });
       if (ticket === latest.current) setPlan(next);
     } catch (failure) {
-      if (ticket === latest.current) onError((failure as Error).message);
+      if (ticket === latest.current) onError(systemErrorText((failure as Error).message) ?? (failure as Error).message);
     }
   };
   // Once: the default folder.

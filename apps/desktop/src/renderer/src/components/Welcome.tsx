@@ -4,6 +4,7 @@ import { downloadSize } from "../../../shared/sizes.js";
 import { useFileDrop } from "../file-drop.js";
 import { revealLabel } from "../file-commands.js";
 import { rich, t } from "../i18n.js";
+import { systemErrorText } from "../system-error.js";
 import { ConnectAiButton } from "./ConnectAi.js";
 import { contextMenu } from "./ContextMenu.js";
 import { NewFromIdea } from "./NewFromIdea.js";
@@ -60,7 +61,7 @@ export function Welcome({ onOutcome }: { onOutcome: (outcome: OpenOutcome) => vo
     try {
       const outcome = await action();
       if (outcome.status === "not-a-project") setNotProject(outcome.dir);
-      else if (outcome.status === "error") setError(outcome.message);
+      else if (outcome.status === "error") setError(systemErrorText(outcome.message) ?? outcome.message);
       else setNotProject(null);
       onOutcome(outcome);
     } finally {

@@ -58,6 +58,9 @@ const en = {
   ideaNeedName: "Give the video a name.",
   ideaNeedFormat: "Choose at least one format.",
   ideaBadUrl: "That is not a web address. It starts with https://",
+  ideaBadLength: "The length must be a positive number of seconds.",
+  /** Folder name of a new video whose name has nothing a folder can be called. */
+  untitledVideo: "Untitled video",
 };
 
 const es: typeof en = {
@@ -114,6 +117,8 @@ const es: typeof en = {
   ideaNeedName: "Ponle un nombre al video.",
   ideaNeedFormat: "Elige al menos un formato.",
   ideaBadUrl: "Eso no es una dirección web. Empieza con https://",
+  ideaBadLength: "La duración debe ser un número de segundos mayor que cero.",
+  untitledVideo: "Video sin título",
 };
 
 /** English and Spanish strings of the welcome screen and new project flows. */

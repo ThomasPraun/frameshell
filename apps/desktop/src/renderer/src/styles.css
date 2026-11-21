@@ -2822,6 +2822,19 @@ button.track-head:focus-visible {
   font-size: 11.5px;
 }
 
+/* The entry's title gives way first, so the counts and the close button stay (#748). */
+.timeline-diff-legend .timeline-diff-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-diff-legend .diff-count {
+  flex: none;
+}
+
 .snap-toggle.on {
   color: var(--accent);
 }
@@ -3920,6 +3933,13 @@ button.track-head:focus-visible {
   color: var(--accent);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Closes a notice that stays (a file-system failure, #748). */
+.status-dismiss {
+  flex: none;
+  width: 18px;
+  height: 18px;
 }
 
 /* Background setup of a new project (#188): transcription plugin, downloads, transcribing. */

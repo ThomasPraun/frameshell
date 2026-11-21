@@ -21,6 +21,8 @@ export interface FrameImageDeps {
   layers: (dir: string) => Promise<ImageLayersDeps>;
   /** Where the capture waits before its import (the OS temp folder). */
   tempDir: string;
+  /** Folder name from the project's name and the frame's time, in the UI language. Default: `<name> frame <time>`. */
+  folderName?: (project: string, stamp: string) => string;
 }
 
 /**
@@ -31,7 +33,7 @@ export interface FrameImageDeps {
  */
 export async function imageFromFrame(source: { dir: string; name: string }, timeline: string, at: number, size: Size, deps: FrameImageDeps): Promise<string> {
   const stamp = clockName(at);
-  const dir = await freeFolder(dirname(source.dir), projectName(`${source.name} frame ${stamp}`));
+  const dir = await freeFolder(dirname(source.dir), projectName(deps.folderName ? deps.folderName(source.name, stamp) : `${source.name} frame ${stamp}`));
   const scratch = await mkdtemp(join(deps.tempDir, "frameshell-frame-"));
   try {
     const capture = join(scratch, `frame-${stamp}.png`);

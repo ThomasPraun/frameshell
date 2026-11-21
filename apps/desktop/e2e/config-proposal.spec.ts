@@ -113,7 +113,7 @@ test("a hand edit that removes the format waits too; Accept lists it by its labe
   await expect(edit.locator(".history-config")).toHaveText("project");
 
   // Your own revert applies at once, even in review mode.
-  await edit.getByRole("button", { name: /^Revert tx_/ }).click();
+  await edit.getByRole("button", { name: "Revert “Edit frameshell.json”" }).click();
   await expect.poll(formatIds, { timeout: 30_000 }).toEqual(["16x9", "9x16"]);
   await expect(bar()).toHaveCount(0);
 });

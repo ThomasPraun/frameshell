@@ -25,6 +25,7 @@ export function StatusBar({
   setup = null,
   agentTargets = [],
   onShowTerminal,
+  onDismissNotice,
 }: {
   project: ProjectView;
   activeFile: string | null;
@@ -35,6 +36,8 @@ export function StatusBar({
   agentTargets?: readonly string[];
   /** Reopens the terminal panel from the agents entry. */
   onShowTerminal?: () => void;
+  /** Set for a notice that stays until dismissed (a file-system failure): its close button. */
+  onDismissNotice?: (() => void) | undefined;
 }) {
   const agent = useAgentNotice();
   const [shown, setShown] = useState(agent);
@@ -83,6 +86,13 @@ export function StatusBar({
       <span className="status-item status-notice" role="status" aria-live="polite" data-testid="status-notice">
         {notice ?? ""}
       </span>
+      {notice && onDismissNotice && (
+        <button className="icon-button status-dismiss" aria-label={t.workspace.dismissNotice} data-tip={t.workspace.dismissNotice} onClick={onDismissNotice}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
+      )}
       {shown && (
         <span className="status-item status-agent" data-testid="agent-notice" role="status" key={shown.at}>
           {shown.text}

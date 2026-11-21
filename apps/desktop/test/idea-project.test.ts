@@ -21,6 +21,7 @@ describe("planIdeaProject", () => {
   it("makes the name safe for a folder and never empty", async () => {
     expect((await planIdeaProject({ parent, name: "a/b: c?" })).name).toBe("a-b- c-");
     expect((await planIdeaProject({ parent, name: "" })).name).toBe("Untitled video");
+    expect((await planIdeaProject({ parent, name: "" }, "Video sin título")).name).toBe("Video sin título");
   });
 });
 
@@ -42,6 +43,10 @@ describe("checkIdea", () => {
     expect(() => checkIdea({ ...brief, seconds: 0 })).toThrow(/length/);
     expect(() => checkIdea({ ...brief, url: "file:///etc/passwd" })).toThrow(/web address/);
     expect(() => checkIdea({ ...brief, url: "not a url" })).toThrow(/web address/);
+    // The welcome screen's words, in the UI language.
+    const said = { ideaNeedName: "Ponle un nombre.", ideaNeedFormat: "Elige un formato.", ideaBadLength: "Duración mala.", ideaBadUrl: "No es una dirección web." };
+    expect(() => checkIdea({ ...brief, name: " " }, said)).toThrow("Ponle un nombre.");
+    expect(() => checkIdea({ ...brief, url: "nope" }, said)).toThrow("No es una dirección web.");
   });
 });
 

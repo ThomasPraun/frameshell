@@ -96,6 +96,8 @@ const en = {
     premiereFile: "Premiere Pro XML file",
     imageFromFrame: "New image from this frame",
     imageFromFrameDetail: "Makes an image project beside this one, with this frame as its background layer, and opens it in a new window. The video is not changed.",
+    /** Folder of an image made from a frame: the project's name and the frame's time. */
+    frameImageFolder: (project: string, stamp: string) => `${project} frame ${stamp}`,
     thumbnailSize: "YouTube thumbnail (1280x720)",
     videoSize: (width: number, height: number) => `Video size (${width}x${height})`,
     squareSize: "Square (1080x1080)",
@@ -284,6 +286,7 @@ const es: typeof en = {
     premiereFile: "Archivo XML de Premiere",
     imageFromFrame: "Nueva imagen desde este fotograma",
     imageFromFrameDetail: "Crea un proyecto de imagen al lado de este, con este fotograma como capa de fondo, y lo abre en una ventana nueva. El video no cambia.",
+    frameImageFolder: (project, stamp) => `${project} fotograma ${stamp}`,
     thumbnailSize: "Miniatura de YouTube (1280x720)",
     videoSize: (width, height) => `Tamaño del video (${width}x${height})`,
     squareSize: "Cuadrada (1080x1080)",
