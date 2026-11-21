@@ -513,6 +513,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
           className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : status?.tone === "warning" ? " timeline-status-warning" : ""}`}
           role="status"
           aria-live="polite"
+          data-tip={status?.text || undefined}
         >
           {status?.text ?? ""}
         </span>

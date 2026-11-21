@@ -1924,9 +1924,15 @@ code {
   font-size: 11.5px;
 }
 
+/* A row of its own, one line high whatever it says (the whole text in its tooltip): a status arriving while the
+   pointer is over a word never moves the words (#741: macOS lost clicks to the reflow). */
 .transcript-toolbar .timeline-status {
-  flex: none;
-  max-width: 60%;
+  order: 2;
+  flex: 1 0 100%;
+  min-height: 1lh;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .transcript-scroll {
