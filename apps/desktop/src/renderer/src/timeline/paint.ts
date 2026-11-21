@@ -412,7 +412,8 @@ function paintClip<Img>(ctx: Paint2D<Img>, input: PaintInput<Img>, row: TrackRow
   let media = false;
   if (clip.asset && row.kind === "video") media = paintThumbnails(ctx, input, clip, x0, left, right, y, h);
   if (clip.asset && row.kind === "audio") media = paintWaveform(ctx, input, clip, left, right, y, h, clip.muted || row.muted ? theme.textFaint : kind.edge);
-  if (clip.kind === "generated" || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem ? colors.dangerFill : kind.hatch);
+  // A generated clip is hatched until its render is ready (#746): rendering, ready and failed no longer look alike.
+  if ((clip.kind === "generated" && clip.render !== "ready") || clip.problem) paintHatch(ctx, left, right, y, h, clip.problem || clip.render === "failed" ? colors.dangerFill : kind.hatch);
   // A muted clip is shaded over its whole body (#757): the label badge alone was easy to miss.
   if (clip.muted) {
     ctx.fillStyle = withAlpha(theme.lane, MUTED_ALPHA);
