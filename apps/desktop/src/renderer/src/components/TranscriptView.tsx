@@ -17,6 +17,7 @@ import {
   isKept,
   paragraphs,
   restorePlan,
+  cutPlan,
   selectedWordIds,
   struckRun,
   withNewSpeaker,
@@ -25,10 +26,11 @@ import {
   withWordText,
   wordAt,
 } from "../transcript/model.js";
-import { offersTranscribe } from "../transcript/model-choice.js";
+import { offersTranscribe, transcribesLocally } from "../transcript/model-choice.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import type { MenuItem } from "./ContextMenu.js";
 import { ModelPicker, type ModelStatus } from "./ModelPicker.js";
+import { useIdea } from "../idea.js";
 
 /** Pseudo path of the transcript editor tab: never a project file (`:` is not in project paths). */
 export const TRANSCRIPT_TAB = "frameshell:transcript";
@@ -76,6 +78,10 @@ interface Marked {
  * - Clicking or dragging over kept words selects them in the shared
  *   selection store with their timeline range, which the timeline highlights
  *   and the playhead jumps to, also while playing.
+ * - Delete (Backspace too), the toolbar's "Cut selected words" and the context
+ *   menu cut the selected words from the timeline (#741): one `cut` per stretch
+ *   the timeline plays, edges mid-gap to the neighbour words (see `cutPlan`), one
+ *   transaction, one undo step.
  * - Double-click, F2 on one selected word, or the context menu edit a word's
  *   text: saved as a transcript `edits` entry, which subtitles show.
  * - Once speakers were found (`transcribe --speakers`), each paragraph names
@@ -91,6 +97,7 @@ interface Marked {
  */
 export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: string) => void; focus: TranscriptFocus | null }) {
   const { view, error } = useTimelineView(SELECTION_TIMELINE);
+  const idea = useIdea();
   const { sources, broken, hashes } = useTranscripts();
   const model = useMemo(() => (view ? buildTranscriptModel(view, sources) : null), [view, sources]);
   const { words: selectedWords, origin } = useSelection();
@@ -226,6 +233,25 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     }
   };
 
+  /** Cut the kept words among `keys` from the timeline as one transaction (#741); reported on the toolbar. */
+  const cutWords = async (keys: readonly string[]) => {
+    const current = latest.current;
+    if (!current.model || restoring.size > 0) return;
+    const plan = cutPlan(current.model, keys);
+    if (!plan) return;
+    const texts = plan.keys.map((key) => textOf(current.model!, key));
+    const what = texts.length === 1 ? `“${texts[0]}”` : t.transcript.words(texts.length);
+    try {
+      await window.frameshell.timeline.edit(SELECTION_TIMELINE, plan.edits, { label: texts.length === 1 ? "Cut word" : `Cut ${texts.length} words` });
+      selection.clear();
+      setMarked(null);
+      setStatus({ tone: "info", text: t.transcript.cutDone(what) });
+    } catch (failure) {
+      setStatus({ tone: "error", text: t.transcript.notCut(what, (failure as Error).message) });
+    }
+  };
+  const selectedKeys = selectedWords.map((word) => `${word.transcript}#${word.word}`);
+
   /** Save `text` as word `word`'s correction in transcript `path` (null: cancelled). */
   const saveText = async (path: string, word: TranscriptWord, text: string | null) => {
     setEditing(null);
@@ -348,6 +374,10 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
       const run = struckRun(asset.words, index);
       items.push({ label: t.transcript.restoreWord(word.text), run: () => void restore([word.key]) });
       if (run.length > 1) items.push({ label: t.transcript.restorePassage(run.length), run: () => void restore(run) });
+    } else {
+      // The selection when this word is in it (selectRange above made it so otherwise): every word of it goes.
+      const keys = selected.has(word.key) ? selectedKeys : [word.key];
+      items.push({ label: t.transcript.cutWords(keys.length), shortcut: shortcutLabel("Delete"), run: () => void cutWords(keys) });
     }
     items.push({ label: t.transcript.editText, shortcut: "F2", run: () => setEditing(word.key) });
     const chosen = inMarked || selected.has(word.key) ? speakerTargets(asset) : [word.id];
@@ -382,7 +412,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
     body = (
       <div className="empty editor-empty">
         <p>{t.transcript.noMedia}</p>
-        <p className="hint">{t.transcript.noMediaHint}</p>
+        <p className="hint">{idea ? t.transcript.noMediaIdea : t.transcript.noMediaHint}</p>
       </div>
     );
   } else {
@@ -425,7 +455,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
               <button
                 className="link transcript-transcribe"
                 disabled={transcribing.has(asset)}
-                data-tip={t.transcript.transcribeTip(provider)}
+                data-tip={transcribesLocally(provider) ? t.transcript.transcribeLocalTip : t.transcript.transcribeTip(provider)}
                 onClick={() => void transcribe(asset)}
               >
                 {t.transcript.transcribe}
@@ -445,19 +475,38 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
   return (
     <div className="transcript-view">
       <div className="transcript-toolbar">
-        {markedStruck.length > 0 ? (
-          <button className="link transcript-restore-marked" disabled={restoring.size > 0} onClick={() => void restore(markedStruck.map((word) => word.key))}>
-            {t.transcript.restoreCut(markedStruck.length)}
-          </button>
-        ) : (
-          <span className="hint">
-            {t.transcript.hint}
+        {/* Always there, so selecting a word never moves the words under the pointer (#741). */}
+        <button
+          className="link transcript-cut"
+          data-tip={t.transcript.cutWordsTitle}
+          disabled={selectedKeys.length === 0 || restoring.size > 0}
+          onClick={() => void cutWords(selectedKeys)}
+        >
+          {t.transcript.cutSelected}
+        </button>
+        {/* Keeps its place while nothing struck is selected: a drag over a cut word showing it must not reflow the
+            toolbar and move the words under the pointer (#741: on macOS the row wrapped mid-drag). */}
+        <button
+          className={`link transcript-restore-marked${markedStruck.length === 0 ? " is-idle" : ""}`}
+          disabled={markedStruck.length === 0 || restoring.size > 0}
+          aria-hidden={markedStruck.length === 0 || undefined}
+          tabIndex={markedStruck.length === 0 ? -1 : undefined}
+          onClick={() => void restore(markedStruck.map((word) => word.key))}
+        >
+          {/* Sized by its longest label, so a count going from 2 to 1 does not re-wrap the row either. */}
+          <span className="transcript-restore-sizer" aria-hidden="true">
+            {t.transcript.restoreCut(88)}
           </span>
-        )}
-        {pickerAssets.length === 1 && (
+          <span>{t.transcript.restoreCut(markedStruck.length || 2)}</span>
+        </button>
+        {/* A row of its own under the buttons: it wraps instead of being cut off, and never moves when they change. */}
+        <span className="hint">{t.transcript.hint}</span>
+        {/* Always there once a transcript is shown, off until the selection is in one asset: selecting never reflows the toolbar (#741). */}
+        {model && model.assets.length > 0 && (
           <SpeakerPicker
-            asset={pickerAssets[0]!}
-            count={speakerTargets(pickerAssets[0]!).length}
+            asset={pickerAssets.length === 1 ? pickerAssets[0]! : model.assets[0]!}
+            count={pickerAssets.length === 1 ? speakerTargets(pickerAssets[0]!).length : 0}
+            disabled={pickerAssets.length !== 1}
             onPick={(speaker) => void saveSpeaker(pickerAssets[0]!.path, speakerTargets(pickerAssets[0]!), speaker)}
           />
         )}
@@ -466,6 +515,7 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
           className={`timeline-status${status?.tone === "error" ? " timeline-status-error" : status?.tone === "warning" ? " timeline-status-warning" : ""}`}
           role="status"
           aria-live="polite"
+          data-tip={status?.text || undefined}
         >
           {status?.text ?? ""}
         </span>
@@ -482,6 +532,10 @@ export function TranscriptView({ onOpenFile, focus }: { onOpenFile: (path: strin
           if (event.key === "Escape") {
             selection.clear();
             setMarked(null);
+          } else if ((event.key === "Delete" || event.key === "Backspace") && selectedKeys.length > 0 && !editing) {
+            // #741: Delete (Backspace on a Mac keyboard) cuts the selected words, one undo step.
+            event.preventDefault();
+            void cutWords(selectedKeys);
           } else if (event.key === "F2" && selectedWords.length === 1 && !editing) {
             const [only] = selectedWords;
             setEditing(`${only!.transcript}#${only!.word}`);
@@ -721,15 +775,27 @@ function WordEditor({
 }
 
 /**
- * Who says the selected words: a speaker of the transcript, or a new one. Offered while the selection (marked here
- * or made anywhere) sits in one transcript; a pick saves at once and the box goes back to its prompt.
+ * Who says the selected words: a speaker of the transcript, or a new one. Always shown, so a selection never reflows
+ * the toolbar; enabled while the selection (marked here or made anywhere) sits in one transcript. A pick saves at once
+ * and the box goes back to its prompt.
  */
-function SpeakerPicker({ asset, count, onPick }: { asset: AssetTranscript; count: number; onPick: (speaker: { id: string; name: string } | null) => void }) {
+function SpeakerPicker({
+  asset,
+  count,
+  disabled,
+  onPick,
+}: {
+  asset: AssetTranscript;
+  count: number;
+  disabled: boolean;
+  onPick: (speaker: { id: string; name: string } | null) => void;
+}) {
   return (
     <select
       className="clip-field-select transcript-speaker-picker"
+      disabled={disabled}
       aria-label={t.transcript.saidByLabel}
-      data-tip={t.transcript.saidByTitle(count)}
+      data-tip={disabled ? t.transcript.saidByIdle : t.transcript.saidByTitle(count)}
       data-testid="speaker-picker"
       value=""
       onChange={(event) => {

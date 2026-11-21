@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { t } from "../i18n.js";
 import { dbText, matchGains, matchTarget, spectrogramColour } from "../audition/model.js";
 import { type AuditionResult, type AuditionState, auditionDialog, playKey } from "../audition/store.js";
-import { playVoice, stopVoice, usePlayingVoice } from "../people/voice-play.js";
+import { playVoice, stopVoice, usePlayingVoice, voicePosition } from "../people/voice-play.js";
 import { useAssets } from "../preview/useProgram.js";
 import { useModal } from "./modal.js";
 
@@ -107,6 +107,14 @@ function AuditionDialog({ state, mediaUrl }: { state: AuditionState; mediaUrl: s
 
 const nameOf = (path: string) => path.split("/").pop() ?? path;
 
+/** Seconds as `M:SS.s`, a sound's length and playhead. */
+function clockText(seconds: number): string {
+  const tenths = Math.max(0, Math.round(seconds * 10));
+  const minutes = Math.floor(tenths / 600);
+  const rest = (tenths % 600) / 10;
+  return `${minutes}:${rest < 10 ? "0" : ""}${rest.toFixed(1)}`;
+}
+
 function Row({
   item,
   gain,
@@ -129,8 +137,34 @@ function Row({
   const ready = Boolean(asset?.sidecar);
   const label = playing ? said.stop(name) : said.play(name);
   const { take } = item;
+  const duration = item.duration;
+  const row = useRef<HTMLLIElement>(null);
+  /** Source second playing, for the playhead; null while this row is silent. */
+  const [at, setAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!playing) {
+      setAt(null);
+      return;
+    }
+    // rAF of the window the row is in: the dialog may be in a detached panel's window (ADR 0012).
+    const view = row.current?.ownerDocument.defaultView ?? window;
+    let frame = 0;
+    const tick = () => {
+      setAt(voicePosition(key));
+      frame = view.requestAnimationFrame(tick);
+    };
+    frame = view.requestAnimationFrame(tick);
+    return () => view.cancelAnimationFrame(frame);
+  }, [playing, key]);
+  /** Play from source second `start`, stopping what plays. */
+  const play = (start: number, view: Window) => {
+    if (!asset) return;
+    onFailed(null);
+    // Without a known length the range runs to the end of the sidecar (the server clamps it).
+    playVoice(key, asset, { start, end: duration ?? 3600 }, mediaUrl, view as typeof window, gain).catch((error: Error) => onFailed(said.notPlayed(error.message)));
+  };
   return (
-    <li className="audition-row" data-testid="audition-row" data-asset={item.asset}>
+    <li ref={row} className="audition-row" data-testid="audition-row" data-asset={item.asset}>
       <button
         className="icon-button audition-play"
         data-testid="audition-play"
@@ -140,11 +174,7 @@ function Row({
         data-tip={ready ? label : said.preparing}
         onClick={(event) => {
           if (playing) return stopVoice();
-          if (!asset) return;
-          onFailed(null);
-          const view = event.currentTarget.ownerDocument.defaultView ?? window;
-          // Without a known length the range runs to the end of the sidecar (the server clamps it).
-          playVoice(key, asset, { start: 0, end: item.duration ?? 3600 }, mediaUrl, view, gain).catch((error: Error) => onFailed(said.notPlayed(error.message)));
+          play(0, event.currentTarget.ownerDocument.defaultView ?? window);
         }}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -165,13 +195,36 @@ function Row({
             {item.lufs === null ? said.silent : said.lufs(dbText(item.lufs))}
             {item.truePeak !== null && ` · ${said.peak(dbText(item.truePeak))}`}
           </span>
+          {duration !== null && (
+            <span className="audition-duration" data-testid="audition-duration">
+              {at !== null ? `${clockText(Math.min(at, duration))} / ${clockText(duration)}` : clockText(duration)}
+            </span>
+          )}
           {matched && (
             <span className="audition-gain" data-testid="audition-gain">
               {said.gain(dbText(gain))}
             </span>
           )}
         </div>
-        {item.spectrogram && <SpectrogramView picture={item.spectrogram} label={said.spectrogram(name)} />}
+        {item.spectrogram && (
+          // Click to play from there (#757); the line shows where it plays.
+          <div
+            className="audition-scrub"
+            data-testid="audition-scrub"
+            data-tip={ready && duration ? said.seekHint : undefined}
+            onClick={(event) => {
+              if (!ready || !duration) return;
+              const box = event.currentTarget.getBoundingClientRect();
+              const fraction = Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(1, box.width)));
+              play(fraction * duration, event.currentTarget.ownerDocument.defaultView ?? window);
+            }}
+          >
+            <SpectrogramView picture={item.spectrogram} label={said.spectrogram(name)} />
+            {at !== null && duration ? (
+              <span className="audition-playhead" data-testid="audition-playhead" style={{ left: `${Math.min(100, (at / duration) * 100)}%` }} />
+            ) : null}
+          </div>
+        )}
       </div>
       <button className="button" data-testid="audition-use" data-tip={said.useHint} onClick={() => auditionDialog.use(item.asset)}>
         {said.use}

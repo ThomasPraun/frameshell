@@ -1,7 +1,7 @@
 import { ErrorCode, RpcError, type VoiceoverGenerateResult } from "@frameshell/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { Confirmed } from "../src/main/confirmation.js";
-import { type CostAsk, canceledRun, costAsk, progressOf, runVoiceover, startOf, verifyPlanOf } from "../src/main/voiceover.js";
+import { type CostAsk, canceledRun, costAsk, missingVoice, placeRefusal, progressOf, runVoiceover, startOf, verifyPlanOf } from "../src/main/voiceover.js";
 import { strings } from "../src/shared/i18n/index.js";
 
 const result = { lines: [] } as unknown as VoiceoverGenerateResult;
@@ -111,17 +111,22 @@ describe("the dialog strings", () => {
 
 describe("progressOf", () => {
   it("names the line being said or checked and the step's fraction", () => {
-    expect(progressOf({ message: "Saying hook-1 (1/2)", fraction: 0.5, stage: "speak", values: { line: "hook-1" } })).toEqual({ stage: "speak", line: "hook-1", fraction: 0.5 });
-    expect(progressOf({ message: "Checking fix-1 (2/2)", stage: "verify", values: { line: "fix-1" } })).toEqual({ stage: "verify", line: "fix-1", fraction: null });
+    expect(progressOf({ message: "Saying hook-1 (1/2)", fraction: 0.5, stage: "speak", values: { line: "hook-1", index: 1, total: 2 } })).toEqual({
+      stage: "speak",
+      line: "hook-1",
+      fraction: 0.5,
+      place: { index: 1, total: 2 },
+    });
+    expect(progressOf({ message: "Checking fix-1 (2/2)", stage: "verify", values: { line: "fix-1" } })).toEqual({ stage: "verify", line: "fix-1", fraction: null, place: null });
   });
 
   it("reports a download of the transcription tools as one", () => {
-    expect(progressOf({ message: "Downloading whisper-cli", fraction: 0.2, stage: "binary-download" })).toEqual({ stage: "download", line: null, fraction: 0.2 });
+    expect(progressOf({ message: "Downloading whisper-cli", fraction: 0.2, stage: "binary-download" })).toEqual({ stage: "download", line: null, fraction: 0.2, place: null });
     expect(progressOf({ message: "Downloading model", stage: "model-download" })).toMatchObject({ stage: "download" });
   });
 
   it("calls any other step of the provider a check", () => {
-    expect(progressOf({ message: "Transcribing" })).toEqual({ stage: "verify", line: null, fraction: null });
+    expect(progressOf({ message: "Transcribing" })).toEqual({ stage: "verify", line: null, fraction: null, place: null });
   });
 });
 
@@ -162,8 +167,45 @@ describe("startOf", () => {
     expect(startOf("beat:9")).toBe("beat:9");
   });
 
+  it("reads a decimal comma as a decimal point", () => {
+    expect(startOf("2,5")).toBe(2.5);
+    expect(startOf("intro,2")).toBe("intro,2");
+  });
+
   it("starts after the voice track's last clip when nothing is typed", () => {
     expect(startOf("")).toBeUndefined();
     expect(startOf("   ")).toBeUndefined();
+  });
+});
+
+describe("missingVoice", () => {
+  it("reads a script that names no voice, with the voices there are", () => {
+    const error = new RpcError(ErrorCode.InvalidParams, "Name a speech provider", { issues: [{ path: ["provider"], message: "x" }], available: ["openai"] });
+    expect(missingVoice(error)).toEqual({ missing: null, available: ["openai"] });
+  });
+
+  it("reads a voice this project does not have", () => {
+    const error = new RpcError(ErrorCode.SpeechProviderNotFound, "No speech provider", { provider: "openai", available: [] });
+    expect(missingVoice(error)).toEqual({ missing: "openai", available: [] });
+  });
+
+  it("is null for any other error", () => {
+    expect(missingVoice(new RpcError(ErrorCode.InvalidParams, "bad voice", { issues: [{ path: ["voice"], message: "x" }] }))).toBeNull();
+    expect(missingVoice(new Error("x"))).toBeNull();
+  });
+});
+
+describe("placeRefusal", () => {
+  const invalid = (data: Record<string, unknown>) => new RpcError(ErrorCode.InvalidOperation, "voiceover.place: …", { op: "voiceover.place", ...data });
+  it("tells apart Replace, a negative start, a missing tempo and an unknown time", () => {
+    expect(placeRefusal(invalid({ field: "replace", reason: "clips already play these takes" }))).toEqual({ kind: "replace" });
+    expect(placeRefusal(new RpcError(ErrorCode.InvalidParams, "params.start: Too small", { issues: [{ path: ["start"], message: "Too small" }] }))).toEqual({ kind: "before-zero" });
+    expect(placeRefusal(invalid({ field: "start", reason: '"beat:4": the timeline has no tempo.', hint: "Set one with `tempo.set`", value: "beat:4" }))).toEqual({ kind: "no-tempo" });
+    expect(placeRefusal(invalid({ field: "start", reason: 'no marker "intro"', value: "intro" }))).toEqual({ kind: "unknown-time", value: "intro" });
+  });
+
+  it("keeps any other message", () => {
+    expect(placeRefusal(invalid({ field: "track", reason: "x" }))).toEqual({ kind: "other", message: "voiceover.place: …" });
+    expect(placeRefusal(new Error("socket closed"))).toEqual({ kind: "other", message: "socket closed" });
   });
 });

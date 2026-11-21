@@ -247,6 +247,12 @@ export const peopleActions = {
     await window.frameshell.people.add(name);
     await settleNow?.();
   },
+  /** Add a person named `name` and link `target` (a voice) to them. */
+  async addWith(name: string, target: PersonTarget): Promise<void> {
+    const { person } = await window.frameshell.people.add(name);
+    await window.frameshell.people.link(person.id, target);
+    await settleNow?.();
+  },
   async rename(person: string, name: string): Promise<void> {
     await window.frameshell.people.rename(person, name);
     await settleNow?.();
@@ -274,16 +280,24 @@ export const peopleActions = {
     answered(suggestion);
     await settleNow?.();
   },
-  /** Scan every video for faces; progress is in {@link PeopleState.scan}. */
-  async scan(): Promise<void> {
+  /**
+   * Scan every video for faces; progress is in {@link PeopleState.scan}. Resolves with the number of face
+   * suggestions once they are asked for again, null when the scan failed.
+   */
+  async scan(): Promise<number | null> {
     publish({ scan: { running: true, progress: 0, error: null } });
+    let ok = true;
     try {
       await window.frameshell.people.scan();
       publish({ scan: { running: false, progress: 1, error: null } });
     } catch (error) {
+      ok = false;
       publish({ scan: { running: false, progress: 0, error: (error as Error).message } });
     }
     await settleNow?.();
+    if (!ok) return null;
+    await suggestNow?.();
+    return state.suggestions.filter((suggestion) => suggestion.face).length;
   },
   /** Download the voice model (the person agreed to, see {@link PeopleState.voices}) and compare voices with it. */
   async findVoiceMatches(): Promise<void> {
