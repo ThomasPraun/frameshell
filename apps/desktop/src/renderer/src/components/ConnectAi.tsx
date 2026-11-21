@@ -60,9 +60,16 @@ function ConnectAi({ state }: { state: ConnectState }) {
         data-testid="connect-ai"
         onKeyDown={onKeyDown}
       >
-        <h2 id={title} className="voiceover-title">
-          {said.title}
-        </h2>
+        <div className="connect-ai-top">
+          <h2 id={title} className="voiceover-title">
+            {said.title}
+          </h2>
+          <button className="icon-button" aria-label={said.close} data-tip={said.close} data-testid="connect-ai-x" onClick={() => connectPanel.close()}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M4 4L12 12M12 4L4 12" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            </svg>
+          </button>
+        </div>
         <p className="connect-ai-lede">{said.lede}</p>
 
         <section className="connect-ai-desktop" aria-label={said.desktop} data-testid="connect-ai-desktop">
@@ -82,7 +89,7 @@ function ConnectAi({ state }: { state: ConnectState }) {
           {state.apps && <Snippets snippets={state.apps.snippets} />}
         </section>
 
-        <div className="voiceover-actions">
+        <div className="voiceover-actions connect-ai-footer">
           <button className="link" onClick={() => connectPanel.refresh()}>
             {said.checkAgain}
           </button>
@@ -139,7 +146,7 @@ function AppCard({ row, status, state, big = false }: { row: RowId; status: AiAp
           {said.openFailed(view.launch.message)}
         </p>
       )}
-      {(view.connect || view.disconnect || (desktop && (view.open || view.download)) || view.kind === "working") && (
+      {(view.connect || view.disconnect || view.checkAgain || view.showFile || (desktop && (view.open || view.download)) || view.kind === "working") && (
         <div className="connect-ai-buttons">
           {view.kind === "working" && <span className="connect-ai-hint">{said.working}</span>}
           {desktop && view.download && (
@@ -158,8 +165,24 @@ function AppCard({ row, status, state, big = false }: { row: RowId; status: AiAp
             </button>
           )}
           {view.connect && (
-            <button className={big ? "button primary" : "button"} onClick={() => void connectPanel.change(app, true)}>
+            <button
+              className={big ? "button primary" : "button"}
+              disabled={view.connectBlocked}
+              data-testid="connect-ai-connect"
+              data-tip={view.connectBlocked ? said.fixFileFirst : undefined}
+              onClick={() => void connectPanel.change(app, true)}
+            >
               {view.connect === "again" ? said.connectAgain : said.connect}
+            </button>
+          )}
+          {view.showFile && (
+            <button className="button" data-testid="connect-ai-show-file" onClick={() => void window.frameshell.agents.showFile(app, view.showFile!)}>
+              {said.showFile}
+            </button>
+          )}
+          {view.checkAgain && (
+            <button className="button" data-testid="connect-ai-check-again" onClick={() => connectPanel.refresh()}>
+              {said.checkAgain}
             </button>
           )}
           {view.disconnect && (

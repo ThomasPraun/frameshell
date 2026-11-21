@@ -47,9 +47,13 @@ export function pluginState(plugin: Pick<CatalogPlugin, "installed" | "status">)
   return plugin.status;
 }
 
-/** The official plugins of `catalog` as rows, in catalog order. */
-export function pluginRows(catalog: PluginsView["catalog"]): PluginRow[] {
-  return catalog.plugins.map((plugin) => {
+/**
+ * The official plugins of `catalog` as rows, in catalog order but `first` (plugin names) ahead: a video made from an
+ * idea needs a generator before a transcriber (#752).
+ */
+export function pluginRows(catalog: PluginsView["catalog"], first: readonly string[] = []): PluginRow[] {
+  const ahead = (name: string) => (first.includes(name) ? 0 : 1);
+  return [...catalog.plugins].sort((a, b) => ahead(a.name) - ahead(b.name)).map((plugin) => {
     const state = pluginState(plugin);
     const missing = plugin.downloads.filter((download) => !download.onDisk);
     const download: PluginDownload =
@@ -84,6 +88,26 @@ export function otherPlugins(view: PluginsView): PluginInfo[] {
   return view.declared.filter((plugin) => !official.has(plugin.name));
 }
 
+/** What a managed download is for, as the Downloads list says it (#753). */
+export type DownloadUse = "video" | "transcription" | "live" | "chrome" | "voices" | "faces" | "pick" | "matte";
+
+/** Managed package or model names (`doctor` `downloads`, exact or by prefix) and what they are for. */
+const USES: readonly [RegExp, DownloadUse][] = [
+  [/^ffmpeg$/, "video"],
+  [/^whisper-cpp$|^ggml-large-/, "transcription"],
+  [/^whisper-server$|^ggml-(small|base)-/, "live"],
+  [/^chrome-headless-shell$/, "chrome"],
+  [/^sherpa-onnx$|^pyannote-|^3dspeaker-/, "voices"],
+  [/^onnxruntime-web$|^yunet-|^sface-/, "faces"],
+  [/^mobilesam-/, "pick"],
+  [/^mediapipe-/, "matte"],
+];
+
+/** What the download `name` is for; null for one this app has no words for. */
+export function downloadUse(name: string): DownloadUse | null {
+  return USES.find(([pattern]) => pattern.test(name))?.[1] ?? null;
+}
+
 /** One managed download of this machine, on disk or still to come. */
 export interface DownloadRow {
   name: string;
@@ -95,7 +119,7 @@ export interface DownloadRow {
 
 /**
  * The Downloads section: what is on disk (biggest first, as `doctor` sorts it), then what is not downloaded yet,
- * with a size when an official plugin's catalog entry gives one. Overrides, the person's own installs (Blender) and
+ * with its download size from an official plugin's catalog entry or the pinned build. Overrides, the person's own installs (Blender) and
  * tools with no build for this machine are never listed. `totalBytes` sums what is on disk.
  */
 export function downloadRows(machine: MachineDownloads, catalog: PluginsView["catalog"] | null): { rows: DownloadRow[]; totalBytes: number } {
@@ -112,7 +136,28 @@ export function downloadRows(machine: MachineDownloads, catalog: PluginsView["ca
     }
   }
   for (const binary of machine.binaries) {
-    if (binary.source === "managed" && binary.pinned !== null && !binary.installed) later({ name: binary.package, kind: "package", bytes: null, onDisk: false });
+    if (binary.source === "managed" && binary.pinned !== null && !binary.installed) {
+      later({ name: binary.package, kind: "package", bytes: binary.pinned.bytes > 0 ? binary.pinned.bytes : null, onDisk: false });
+    }
   }
   return { rows, totalBytes: machine.downloads.reduce((total, download) => total + download.bytes, 0) };
+}
+
+/** Longest first line an error shows in full before it is cut at its first sentence. */
+const HEAD_MAX = 140;
+
+/**
+ * A plugin error split for a card: `head` is its first line, or the first sentence of a long first line;
+ * `rest` is everything after, trimmed, or null when nothing is left.
+ */
+export function errorParts(text: string): { head: string; rest: string | null } {
+  const trimmed = text.trim();
+  const lineEnd = trimmed.indexOf("\n");
+  let head = lineEnd < 0 ? trimmed : trimmed.slice(0, lineEnd).trim();
+  if (head.length > HEAD_MAX) {
+    const sentence = /^.{20,}?[.:;](?=\s)/.exec(head);
+    if (sentence) head = sentence[0];
+  }
+  const rest = trimmed.slice(trimmed.indexOf(head) + head.length).trim();
+  return { head, rest: rest === "" ? null : rest };
 }

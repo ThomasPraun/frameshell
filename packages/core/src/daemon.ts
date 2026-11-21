@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { coreVersion } from "./version.js";
 import {
   type ConfigDoc,
   ErrorCode,
@@ -170,6 +171,7 @@ import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
 import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
 import { readTimelineWords } from "./transcripts/timeline-words.js";
+import { announceTranscription } from "./transcripts/announce.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -198,13 +200,13 @@ import { requirementsConfigDocument, requirementsFromState, requirementsState } 
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
+import { scriptLanguage } from "./shoot/language.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
-/** Package version reported in the handshake. */
-export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
-  .version;
+/** Version reported in the handshake: the core package's, or the packaged app's release version ({@link coreVersion}). */
+export const DAEMON_VERSION: string = coreVersion(dirname(createRequire(import.meta.url).resolve("../package.json")));
 
 /** Five minutes: long enough to span an agent's think time between CLI calls. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
@@ -1035,6 +1037,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
+  /** Runs of `transcribe` so far, for the ids of `transcription.progress`. */
+  let transcriptionRuns = 0;
   const transcribing = async <T>(dir: string, work: () => Promise<T>): Promise<T> => {
     const key = canonicalPathSync(dir);
     transcriptions.set(key, (transcriptions.get(key) ?? 0) + 1);
@@ -1076,7 +1080,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             providerId,
             provider,
             model: await configuredModel(config, providerId),
-            language: config.transcription?.language,
+            // The project's language when set; else the script's own (#742), so whisper does not guess from a few seconds.
+            language: config.transcription?.language ?? scriptLanguage(await shoots.script(dir, script)) ?? undefined,
             context: providerContext(transcriberTools(overrides), () => {}).context,
           });
           takeRuns.delete(key);
@@ -1928,6 +1933,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const providerId = provider ?? config.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER;
       const overrides = { dir, binaries: config.binaries };
       const chosenModel = model ?? (await configuredModel(config, providerId));
+      // Every subscriber of the project sees this run, not only its caller (#742: a CLI run was invisible in the app).
+      const announcer = announceTranscription(
+        `t_${++transcriptionRuns}`,
+        relative(dir, resolve(cwd, asset)).split(sep).join("/"),
+        (update) => publishFor("transcription.progress", dir, { project: dir, ...update }),
+        request.progress,
+      );
       return transcribing(dir, () => transcribeAsset({
         projectDir: dir,
         asset: resolve(cwd, asset),
@@ -1938,10 +1950,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         tools: transcriberTools(overrides),
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
-        progress: request.progress,
+        progress: announcer.progress,
         yes,
         confirmation,
-      }));
+      })).then(
+        (result) => {
+          announcer.end();
+          return result;
+        },
+        (error: unknown) => {
+          announcer.end(error);
+          throw error;
+        },
+      );
     },
     "transcribe.speakers": async ({ cwd, asset, speakers }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.

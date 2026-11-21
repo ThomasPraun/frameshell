@@ -60,7 +60,13 @@ export async function runDoctor(binaries: BinaryManager, options: DoctorOptions 
       path: location.path,
       installed: location.installed,
       version,
-      pinned: pinned && { version: pinned.version, origin: pinned.origin, license: pinned.license, accelerator: pinned.accelerator ?? null },
+      pinned: pinned && {
+        version: pinned.version,
+        origin: pinned.origin,
+        license: pinned.license,
+        accelerator: pinned.accelerator ?? null,
+        bytes: pinned.archives.reduce((sum, archive) => sum + archive.size, 0),
+      },
     });
 
     if (location.installed) {
