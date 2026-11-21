@@ -3,7 +3,16 @@
 const en = {
   script: "Shoot script",
   scene: "Scene",
-  noScripts: "No shoot script yet. Ask the agent to write one in scripts/ from your script, marked shoot: true.",
+  noScripts: "No shoot script yet. Write or paste yours here, or ask your AI to write one from your notes.",
+  /** Writing a script in the app when there is none (#737). */
+  write: {
+    label: "Your script",
+    placeholder: "Write or paste what you will say. A line that starts with ## begins a new scene.",
+    save: "Use as shoot script",
+    /** The scene name of a script with no `## ` heading, and its title. */
+    title: "Script",
+    failed: (reason: string) => `Could not save the script: ${reason}`,
+  },
   empty: "This shoot script has nothing to say yet.",
   unreadable: (reason: string) => `Could not read the shoot script: ${reason}`,
   smaller: "Smaller text",
@@ -40,7 +49,14 @@ const en = {
 const es: typeof en = {
   script: "Guion de rodaje",
   scene: "Escena",
-  noScripts: "Todavía no hay guion de rodaje. Pídele al agente que escriba uno en scripts/ a partir de tu guion, marcado shoot: true.",
+  noScripts: "Todavía no hay guion de rodaje. Escribe o pega el tuyo aquí, o pídele a tu IA que escriba uno a partir de tus notas.",
+  write: {
+    label: "Tu guion",
+    placeholder: "Escribe o pega lo que vas a decir. Una línea que empieza con ## abre una nueva escena.",
+    save: "Usar como guion de rodaje",
+    title: "Guion",
+    failed: (reason) => `No se pudo guardar el guion: ${reason}`,
+  },
   empty: "Este guion de rodaje todavía no tiene nada que decir.",
   unreadable: (reason) => `No se pudo leer el guion de rodaje: ${reason}`,
   smaller: "Texto más pequeño",
