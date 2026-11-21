@@ -6,6 +6,7 @@ import {
   MulticamCreateResultSchema,
   MulticamDirectResultSchema,
   ClipReframeResultSchema,
+  ClipZoomResultSchema,
   MulticamFacesResultSchema,
   MulticamGalleryResultSchema,
   MulticamTurnsResultSchema,
@@ -322,6 +323,36 @@ export const timelineMethods = {
       anchor: z.number().min(0).max(1).optional().describe("Fixed horizontal position of the picture in the frame, 0 (left edge) to 1 (right edge); no face detection."),
     }),
     result: ClipReframeResultSchema,
+  },
+  "clip.zoom": {
+    mutating: true,
+    description:
+      "Zoom a screen recording to where the action is (ADR 0048, tutorials): push in where the mouse pointer rests and ease back " +
+      "out when it moves on, from the pointer track Shoot records next to each screen file (`.<name>.pointer.json` in its folder; " +
+      "`pointer` names another file of the same shape). A rest is the pointer staying within a small circle for 0.8 s or more; " +
+      "quick moves never zoom. Each zoom eases in 0.5 s before the pointer arrives, holds while it rests, and eases back 0.4 s after " +
+      "it leaves; rests less than 1.2 s apart stay in one zoom that glides from spot to spot. The zoom brings the spot to the frame's " +
+      "center as far as it can without showing past the picture's edge. It writes `scale`, `x` and `y` keys on the clip (the three " +
+      "move together, ease in-out), replacing the clip's own keys of those three (a warning says so), and starts from its static " +
+      "placement. `scale` is the zoom factor over that placement (default 1.8). One transaction labelled `Zoom <file name>` (yours " +
+      "when one is open): `revert` undoes it, the keys stay editable in the inspector or with `clip.key`, and in review mode it is " +
+      "one proposal. Only the pointer's position is recorded, not its clicks. A clip whose pointer never rests is left as it was, " +
+      "with a warning. Example: `{ clip: \"c_0007\", follow: \"pointer\" }`. Fails with InvalidOperation (not a media clip on a " +
+      "video track, a still picture, no pointer track (record the screen in Shoot, or pass `pointer`), an unreadable track), " +
+      "ClipNotFound, TimelineNotFound.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      clip: z.string().min(1).describe("Id of a media clip on a video track, from `timeline.show`: a screen recording."),
+      follow: z.literal("pointer").describe("What the zoom follows: the recorded mouse pointer (the only kind so far)."),
+      scale: z.number().min(1.1).max(4).optional().describe("Zoom factor over the clip's own scale, 1.1 to 4. Default 1.8."),
+      pointer: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Pointer track to read, relative to `cwd` or absolute, inside the project. Default: the one next to the clip's file."),
+    }),
+    result: ClipZoomResultSchema,
   },
   "segment.prepare": {
     description:

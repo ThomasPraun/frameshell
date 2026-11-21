@@ -351,7 +351,7 @@ export function createShootRecorder() {
         }
         origin = Math.min(...Object.values(starts));
         set({ phase: "recording", startedAt: performance.now() });
-        await api().started(opened, starts);
+        await api().started(opened, starts, performance.timeOrigin);
       } catch (error) {
         set({ error: message(error) });
         if (session) await store.end();

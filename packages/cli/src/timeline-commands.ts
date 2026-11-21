@@ -1,6 +1,7 @@
 import type {
   CaptionsSetResult,
   ClipReframeResult,
+  ClipZoomResult,
   ClipVerifyResult,
   CleanupResult,
   ConfigOperation,
@@ -85,6 +86,14 @@ mutations print the new revision):
                                --format with a format id of the project other than the primary (format list) writes
                                the framing into the clip's override there only; the clip and the other formats keep
                                theirs. An aspect (9:16 always is one) frames the clip itself, for every format
+  clip zoom <clip> --follow pointer [--scale 1.1-4] [--pointer <file>]
+                               Zoom a screen recording to where the action is: pushes in where the mouse pointer
+                               rests (0.8 s or more in one spot) and eases back out when it moves on, from the
+                               pointer track Shoot records next to each screen file. Rests close together share one
+                               zoom that glides between them; quick moves never zoom. --scale is the zoom factor
+                               over the clip's own scale (default 1.8); --pointer reads another track of the same
+                               shape. Writes scale, x and y keys (replacing the clip's own), one transaction,
+                               revert undoes it. Correct the keys with clip key or in the app
   clip verify <clip> [--probes n] [--tolerance 0-255]
                                Check that a generated clip (a motion clip, any adapter with a live preview) paints
                                a pure function of time: captures --probes frames (default 12, 2 to 48) at
@@ -578,6 +587,8 @@ export const TIMELINE_OPTIONS = {
   "tile-width": { type: "string" },
   person: { type: "string" },
   anchor: { type: "string" },
+  follow: { type: "string" },
+  pointer: { type: "string" },
   pauses: { type: "string" },
   "no-pauses": { type: "boolean" },
   breath: { type: "string" },
@@ -641,6 +652,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip remove": [],
   "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to", "format"],
   "clip reframe": ["format", "person", "anchor"],
+  "clip zoom": ["follow", "scale", "pointer"],
   "clip verify": ["probes", "tolerance"],
   "grade analyze": ["at", "from", "to", "samples"],
   "grade looks": [],
@@ -761,6 +773,7 @@ const ARITY: Record<string, [number, number]> = {
   "letterbox set": [1, 1],
   "letterbox clear": [0, 0],
   "clip reframe": [1, 1],
+  "clip zoom": [1, 1],
   "clip verify": [1, 1],
   "grade analyze": [1, 1],
   "grade looks": [0, 0],
@@ -1442,6 +1455,15 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       if (str("person") !== undefined && str("anchor") !== undefined) throw new UsageError("Pass --person or --anchor, not both: they are two ways to place the picture.");
       Object.assign(params, { clip: args[0], format: str("format"), person: str("person"), anchor: num("anchor") });
       break;
+    case "clip zoom": {
+      method = "clip.zoom";
+      const follow = str("follow");
+      if (follow !== "pointer") throw new UsageError("--follow: expected pointer (the mouse pointer Shoot recorded with the screen).");
+      const scale = num("scale");
+      if (scale !== undefined && (scale < 1.1 || scale > 4)) throw new UsageError("--scale: expected a factor from 1.1 to 4.");
+      Object.assign(params, { clip: args[0], follow, scale, pointer: str("pointer") });
+      break;
+    }
     case "clip verify": {
       method = "clip.verify";
       const probes = num("probes");
@@ -1711,6 +1733,7 @@ export async function executeTimeline(
   if (inv.method === "multicam.faces") return formatMulticamFaces(result as MulticamFacesResult);
   if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
+  if (inv.method === "clip.zoom") return formatClipZoom(result as ClipZoomResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
   if (inv.method === "grade.looks") return formatGradeLooks(result as GradeLooksResult);
@@ -1964,6 +1987,15 @@ function formatClipReframe(result: ClipReframeResult): string {
     const moves = result.keys > 0 ? `${result.keys} keys on x/y` : "static, no keys";
     lines.push(`  scale ${scale} · x ${x} · y ${y} at the start · ${moves}`);
   }
+  lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  return `${lines.join("\n")}\n`;
+}
+
+function formatClipZoom(result: ClipZoomResult): string {
+  const rests = `${result.rests} rest${result.rests === 1 ? "" : "s"} of the pointer`;
+  const zooms = result.zooms > 0 ? `: ${result.zooms} zoom${result.zooms === 1 ? "" : "s"} at ${result.scale}x, ${result.keys} keys on scale, x and y` : "";
+  const lines = [`Zoom ${result.clip} from ${result.pointer}, ${rests}${zooms}`];
   lines.push(result.tx ? `revision ${result.revision} · tx ${result.tx}` : `Nothing written · revision ${result.revision}`);
   for (const warning of result.warnings) lines.push(`warning: ${warning}`);
   return `${lines.join("\n")}\n`;
