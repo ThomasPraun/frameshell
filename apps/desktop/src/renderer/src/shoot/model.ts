@@ -76,6 +76,17 @@ export function silentTooLong(since: number | null, now: number): boolean {
   return since !== null && now - since >= SILENCE_WARN_MS;
 }
 
+/**
+ * Loudest microphone level a take or session may reach and still count as nearly silent, dBFS (100 ms RMS windows):
+ * speech close to a working mic peaks around -30 to -15, a muted, far or wrong input stays below this.
+ */
+export const QUIET_DB = -45;
+
+/** True when the loudest level `loudest` (dBFS) of a stretch of recording is under {@link QUIET_DB}. */
+export function tooQuiet(loudest: number): boolean {
+  return loudest < QUIET_DB;
+}
+
 /** Recording time as `m:ss`, or `h:mm:ss` from an hour. */
 export function elapsedLabel(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
