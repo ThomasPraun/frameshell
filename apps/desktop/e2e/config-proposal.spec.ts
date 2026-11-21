@@ -52,6 +52,8 @@ const formatIds = (): string[] => ((JSON.parse(readFileSync(configFile, "utf8"))
 const styleText = (): string => (existsSync(styleFile) ? readFileSync(styleFile, "utf8") : "");
 
 async function click(locator: ReturnType<Page["locator"]>): Promise<void> {
+  // A sidebar tab past the strip's edge (#736: narrower strip on macOS fonts) is scrolled into sight first.
+  await locator.scrollIntoViewIfNeeded();
   const target = await laidOutBox(locator);
   await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
 }

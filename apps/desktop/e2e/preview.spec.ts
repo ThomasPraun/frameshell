@@ -165,3 +165,37 @@ test("reflects a timeline change made during playback without restarting it", as
   expect(third.every((f) => f < 30), `third clip shows its new source range, saw ${third.join(",")}`).toBe(true);
   await expect(playhead()).toHaveText("00:00:04:00");
 });
+
+test("a generated clip's inspector says its render state and why, opens its composition, and toggles motion blur (#746)", async () => {
+  const scroller = page.locator(".timeline-scroller");
+  const rect = await laidOutBox(scroller);
+  // Fitted zoom shows 60 s while the timeline is under 48 s; the lane's middle is 44 px under the top.
+  const x = rect.x + 3.5 * ((await scroller.evaluate((element) => element.scrollWidth)) / 60);
+  await page.mouse.move(x, rect.y + 44);
+  // The lane marks the clip that cannot render, with the reason in its tooltip.
+  await expect(page.locator(".clip-tooltip")).toContainText("Render failed:");
+  await page.mouse.click(x, rect.y + 44);
+  await expect(page.getByTestId("timeline-lanes")).toHaveAttribute("data-selected", "c_gen");
+  const generated = page.getByTestId("generated-control");
+  await expect(page.getByTestId("generated-state")).toHaveText("Cannot render");
+  await expect(page.getByTestId("generated-error")).toContainText("@frameshell/hyperframes");
+  await expect(generated).toContainText("compositions/hyperframes/intro/index.html");
+  // A generated clip has no image to replace.
+  await expect(page.getByRole("button", { name: /Replace image|Use an image instead/ })).toHaveCount(0);
+  // The switch sends `clip.set motionBlur: {}`; with no plugin for the type the daemon refuses it, and says so.
+  await expect(generated.getByRole("button", { name: "Motion blur" })).toHaveAttribute("aria-pressed", "false");
+  await generated.getByRole("button", { name: "Motion blur" }).click();
+  await expect(page.locator(".clip-inspector-error")).toContainText('clip type "hyperframes" is not registered');
+  await generated.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "compositions/hyperframes/intro/index.html" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("a video clip offers an image in its place, not to replace an image (#746)", async () => {
+  const scroller = page.locator(".timeline-scroller");
+  const rect = await laidOutBox(scroller);
+  await page.mouse.click(rect.x + 0.5 * ((await scroller.evaluate((element) => element.scrollWidth)) / 60), rect.y + 44);
+  await expect(page.getByRole("button", { name: "Use an image instead…" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Replace image…" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "Keyframes" })).toContainText("Keyframes");
+  await expect(page.getByRole("group", { name: "Transitions" })).toContainText("Transitions");
+});

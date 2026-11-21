@@ -19,6 +19,7 @@ import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
 import { systemErrorText } from "../system-error.js";
 import { handoffKindOf, handoffNotice } from "../handoff-notice.js";
+import { videoExport } from "../export/store.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
@@ -28,6 +29,7 @@ import { angleKey } from "../timeline/angle-keys.js";
 import { SELECTION_TIMELINE, selection } from "../selection.js";
 import { DockedElsewhere } from "./DetachControls.js";
 import { type UiHost, uiLink, useUiLink } from "../ui-link.js";
+import { registerEditorOpener } from "../editor-opener.js";
 import { EditorArea } from "./EditorArea.js";
 import { LayersPanel } from "./LayersPanel.js";
 import { PreviewPanel } from "./PreviewPanel.js";
@@ -217,7 +219,7 @@ export function Workspace({ project }: { project: ProjectView }) {
 
   // "Chat about this" (SPEC decision 21, ADR 0025): the selection's reference goes to an agent wherever it runs. In an app
   // terminal it is typed at the prompt, unsent (ADR 0012); an agent outside the app gets it in its inbox. With no
-  // agent anywhere it is typed into the last focused terminal, and with no terminal it goes to the clipboard.
+  // agent anywhere it goes to the clipboard and the status bar says to start one (ADR 0048), never to a bare shell.
   // "Copy reference" puts the same lines on the clipboard.
   useEffect(() => agentTargets.start(), [project.dir]);
   useEffect(() => {
@@ -248,12 +250,17 @@ export function Workspace({ project }: { project: ProjectView }) {
               return;
             }
             const panel = terminals.current;
-            if (panel) {
+            // Only an agent's terminal gets it typed (ADR 0048): at a bare shell prompt Enter would run it as a command.
+            if (panel && (target?.kind === "terminal" || panel.agents().length > 0)) {
               if (target?.kind !== "terminal" || !panel.typeInto(target.key, lines, revealTerminal)) panel.type(lines, revealTerminal);
               return;
             }
             await navigator.clipboard.writeText(`${lines.join("\n")}\n`);
-            setNotice(t.workspace.askCopied);
+            if (panel) {
+              // The terminal shows the agent guide, where one starts.
+              revealTerminal();
+              setNotice(t.workspace.askCopiedNoAgent);
+            } else setNotice(t.workspace.askCopied);
           })
           .catch(showError)
           .finally(() => (asking = false));
@@ -343,6 +350,20 @@ export function Workspace({ project }: { project: ProjectView }) {
     };
   }, [showTranscript, image]);
 
+  // View > Shoot and View > Teleprompter (#737): the sidebar opens on that view, also when it was hidden.
+  useEffect(() => {
+    if (image) return;
+    return window.frameshell.menu.onCommand((command) => {
+      if (command !== "showShoot" && command !== "showTeleprompter") return;
+      const sidebarView = command === "showShoot" ? "shoot" : "teleprompter";
+      setLayout((current) => {
+        if (!current) return current;
+        const shown = current.panels.sidebar.collapsed ? togglePanel(current, "sidebar") : current;
+        return { ...shown, sidebarView };
+      });
+    });
+  }, [image]);
+
   // New image from the frame at the playhead (ADR 0017): Mod+Shift+S or File > New Image from Frame; a video project's only.
   useEffect(() => {
     if (image) return;
@@ -375,6 +396,8 @@ export function Workspace({ project }: { project: ProjectView }) {
     if (image) return;
     let running = false;
     return window.frameshell.menu.onCommand((command) => {
+      // File > Export video… (#738): the same export as the preview's button, which shows its progress.
+      if (command === "exportVideo") return void videoExport.start();
       const kind = handoffKindOf(command);
       if (kind === undefined || running) return;
       running = true;
@@ -389,6 +412,12 @@ export function Workspace({ project }: { project: ProjectView }) {
         });
     });
   }, [image]);
+
+  // Panels open project files in this window's editor through one opener (#746: a generated clip's composition).
+  useEffect(() => {
+    registerEditorOpener(browseFile);
+    return () => registerEditorOpener(null);
+  }, [browseFile]);
 
   // What the agent sees of this window (`ui_state`) and how it navigates it. Commands commit synchronously,
   // so the state the agent gets back already shows the opened tab or panel.

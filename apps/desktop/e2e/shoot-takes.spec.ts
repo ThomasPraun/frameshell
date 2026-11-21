@@ -90,6 +90,8 @@ test("T and C record takes that are checked against the script; accept, record a
   // The group id, not the text: a refused End also says "No multicam group: ..." in its warnings.
   await expect(page.getByTestId("shoot-finished")).toHaveAttribute("data-group", /^g_/, { timeout: 60_000 });
   await expect(page.getByTestId("shoot-finished")).not.toContainText("No multicam group");
+  // It names the timeline it wrote: with takes, the shoot's own.
+  await expect(page.getByTestId("shoot-grouped")).toHaveText(/^The session is a multicam group on the timeline “.+” \(timelines\/.+\.json\)\.$/);
 
   const shoot = JSON.parse(readFileSync(join(box.projectDir, "shoots", "launch.json"), "utf8"));
   expect(shoot.takes).toHaveLength(3);

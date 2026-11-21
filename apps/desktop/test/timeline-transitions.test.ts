@@ -4,7 +4,7 @@ import { editLabel } from "../src/main/timeline-editor.js";
 import { operationTitle } from "../src/renderer/src/history/model.js";
 import { RULER_HEIGHT, layoutTimeline } from "../src/renderer/src/timeline/layout.js";
 import { DEFAULT_THEME, type MediaLookup, type Paint2D, paintTimeline } from "../src/renderer/src/timeline/paint.js";
-import { edgeAt, edgeState, keyAt, keyBoxes, keyTimelineTime, keyTimes, clipClock } from "../src/renderer/src/timeline/transitions.js";
+import { edgeAt, edgeState, keyAt, keyBoxes, keyTimelineTime, keyTimes, clipClock, transitionRemove, transitionSet } from "../src/renderer/src/timeline/transitions.js";
 
 // Seam under test: what the timeline shows of transitions and keys (ADR 0018 decision 12), fed `timeline.show` results.
 
@@ -247,5 +247,25 @@ describe("the app's edit labels", () => {
     expect(operationTitle({ op: "transition.set", args: {} })).toBe("Set transition");
     expect(operationTitle({ op: "transition.remove", args: {} })).toBe("Remove transition");
     expect(operationTitle({ op: "clip.key", args: {} })).toBe("Keyframe");
+  });
+});
+
+describe("transition edits from the app (#755)", () => {
+  const audio: Track = { id: "t_a", kind: "audio", name: null, follows: null, clips: [clip("m", 0, 0, 10, { asset: "assets/song.wav" })] };
+  const tracks = [video([clip("v", 0, 0, 10)]), audio];
+
+  it("a fade on the music names the music track only, so the picture at the same edge keeps its own", () => {
+    const layout = layoutTimeline(view(tracks), [], undefined, plenty);
+    const music = layout.rows.find((row) => row.id === "t_a")!;
+    expect(transitionSet(music, 0, { kind: "fade", duration: 0.5 })).toEqual({
+      op: "transition.set",
+      args: { at: 0, kind: "fade", duration: 0.5, tracks: ["t_a"] },
+    });
+  });
+
+  it("removing a transition names the edge's track only", () => {
+    const layout = layoutTimeline(view(tracks), [], undefined, plenty);
+    const picture = layout.rows.find((row) => row.id === "t_v")!;
+    expect(transitionRemove(picture, 10)).toEqual({ op: "transition.remove", args: { at: 10, tracks: ["t_v"] } });
   });
 });

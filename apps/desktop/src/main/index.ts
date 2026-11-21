@@ -7,7 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, release, type } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BaseWindow,
@@ -18,6 +18,7 @@ import {
   app,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   protocol,
@@ -28,8 +29,10 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
+import { showsDevItems, windowListItems } from "./window-menu.js";
+import { createShootShortcut } from "./shoot-shortcut.js";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
+import type { EventParams, MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
   type AssetChange,
   Channel,
@@ -67,11 +70,12 @@ import {
   type AudioOrientation,
   type IdeaBrief,
   type VideoProjectPlan,
+  type WelcomeStart,
 } from "../shared/api.js";
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import { HANDOFF_KINDS, HANDOFFS, isHandoffKind } from "../shared/handoff.js";
-import { downloadSize, sizeText } from "../shared/sizes.js";
+import { sizeText } from "../shared/sizes.js";
 import {
   type CliInstallHost,
   type CliInstallOutcome,
@@ -118,11 +122,11 @@ import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
-import { type DownloadChoice, chooseDownload } from "./transcription-download.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
 import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
 import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { type TimelineMediaDeps, addMediaClips } from "./timeline-media.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
 import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
@@ -133,6 +137,9 @@ import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
 import { UpdatePreferences, updateMode } from "./update-check.js";
 import { Updater } from "./updater.js";
 
+// The app's name in native boxes and the Windows taskbar: the package name otherwise (#742). userData is set
+// explicitly below, so the name does not move it.
+app.setName("Frameshell");
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 // One packaged app per user data dir: a second launch (Open with, a click in Explorer) hands its files to this one
@@ -256,6 +263,8 @@ interface WindowState {
   startDir: string | undefined;
   /** Videos the OS asked to open, waiting for the welcome screen to take them; null when none. */
   offered: VideoProjectPlan | null;
+  /** A File menu "New …" the welcome screen still has to start (#740); null when none. */
+  welcomeStart: WelcomeStart | null;
   /**
    * The project window is closing or reloading: its panel windows close
    * with it but stay detached, so they open again with the project.
@@ -312,6 +321,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     panels: new Map(),
     startDir: projectDir,
     offered: null,
+    welcomeStart: null,
     closingPanels: false,
     shoot: null,
     recoveredShoots: [],
@@ -327,6 +337,8 @@ function createWindow(projectDir?: string): BrowserWindow {
     }),
   };
   windows.set(contents.id, state);
+  rebuildMenuSoon();
+  window.on("focus", rebuildMenuSoon);
 
   // Links (xterm web links) open in the browser; the app window never navigates away. The one popup allowed is a
   // detached panel's blank window (ADR 0012), sandboxed like this one, without a preload.
@@ -364,6 +376,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     revokeLive(state);
     ui.detach(String(contents.id));
     windows.delete(contents.id);
+    rebuildMenuSoon();
   });
 
   const fail = (error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error));
@@ -514,10 +527,12 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
     daemon.subscribe("job.progress", project.dir, {
       onEvent: ({ job }) => {
         if (job.kind === "clip") send(contents, Channel.clipsJob, job);
+        else if (job.kind === "render") send(contents, Channel.timelineExportJob, job);
         else if (job.kind === "people") send(contents, Channel.peopleScanJob, job);
       },
       onResync: () => {
         send(contents, Channel.clipsJob, null);
+        send(contents, Channel.timelineExportJob, null);
         send(contents, Channel.peopleScanJob, null);
       },
     }),
@@ -536,6 +551,18 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
       onResync: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
     }),
+    // #742: a transcription the app did not start (CLI, agent, Transcript view) shows in the status bar too.
+    daemon.subscribe("transcription.progress", project.dir, {
+      onEvent: (update) => showOtherTranscription(project.dir, update),
+      onResync: () => {
+        if (!otherTranscriptions.has(project.dir)) return;
+        otherTranscriptions.delete(project.dir);
+        setups.delete(project.dir);
+        for (const state of windows.values()) {
+          if (state.project?.dir === project.dir) send(state.window.webContents, Channel.projectSetupChanged, null);
+        }
+      },
+    }),
     // ADR 0025: "Chat about this" lists the agents outside the app's terminals and says when they read.
     daemon.subscribe("target.changed", project.dir, {
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.agentsTargetsChanged, change satisfies TargetsChange),
@@ -548,6 +575,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   state.project = project;
   state.recoveredShoots = [];
   state.window.setTitle(`${project.name} — Frameshell`);
+  rebuildMenuSoon();
   void recoverShoots(state, project.dir);
   if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
   void readReview(project.dir).then(() => BrowserWindow.getFocusedWindow() === state.window && syncReviewMenu(state));
@@ -663,6 +691,16 @@ async function pickImageExport(window: BrowserWindow, defaultPath: string): Prom
   return result.canceled ? undefined : result.filePath;
 }
 
+/** Where to save an exported video (MP4), starting at `defaultPath`. */
+async function pickVideoExport(window: BrowserWindow, defaultPath: string): Promise<string | undefined> {
+  const said = text.app.dialogs;
+  const result = await dialog.showSaveDialog(window, { title: said.exportVideo, defaultPath, filters: [{ name: said.videoFile, extensions: ["mp4"] }] });
+  return result.canceled ? undefined : result.filePath;
+}
+
+/** Files the app's Export video wrote this run: the only ones `timelineRevealExport` shows. */
+const exportedVideos = new Set<string>();
+
 /** Where to save an editor hand-off file of `kind`, starting at `defaultPath`. */
 async function pickHandoffExport(window: BrowserWindow, kind: HandoffKind, defaultPath: string): Promise<string | undefined> {
   const said = text.app.dialogs;
@@ -714,6 +752,9 @@ async function createFromVideos(
     if (transcribe && assets.length > 0 && !plan.imageOnly) {
       const background = plan.audioOnly ? { title: plan.name, size: AUDIO_FRAMES[orientation] } : undefined;
       void setUpTranscription(plan.dir, assets, background);
+    } else if (plan.audioOnly && assets.length > 0) {
+      // Audio without a transcript gets no background or subtitles: say why the picture stays empty.
+      reportSetup(plan.dir, { message: text.app.setup.transcriptionSkippedAudio, detail: null, fraction: null, state: "done" });
     }
     return opened;
   } catch (error) {
@@ -753,7 +794,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
+const VIDEO_MENU_ITEMS = ["view-transcript", "view-shoot", "view-teleprompter", "image-from-frame", "export-video", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -853,6 +894,17 @@ async function ensureTranscriptionPlugin(dir: string): Promise<void> {
   }
 }
 
+/**
+ * Bytes a new project still downloads before it transcribes with the built-in provider: `whisper-cli` and the default
+ * model, from the machine's global binaries (#742). The project form shows it next to its "Transcribe" box.
+ */
+async function newProjectTranscriptionDownload(): Promise<number> {
+  const tool = await binaries.locate("whisper-cli");
+  const toolBytes = tool.installed ? 0 : (tool.pinned?.archives.reduce((total, archive) => total + archive.size, 0) ?? 0);
+  const model = await binaries.locateModel(`ggml-${WHISPER_DEFAULT_MODEL}`).catch(() => null);
+  return toolBytes + (model && !model.installed ? model.pinned.size : 0);
+}
+
 /** Bytes whisper-cpp still downloads in the project at `dir` before it transcribes: `whisper-cli` and its model. */
 async function transcriptionDownload(dir: string): Promise<number> {
   const tool = await binaries.locate("whisper-cli", { dir, binaries: await projectBinaries(dir) });
@@ -862,6 +914,33 @@ async function transcriptionDownload(dir: string): Promise<number> {
   const model = await binaries.locateModel(`ggml-${project?.effective ?? WHISPER_DEFAULT_MODEL}`).catch(() => null);
   return toolBytes + (model && !model.installed ? model.pinned.size : 0);
 }
+/** The `transcription.progress` run the status bar shows, by project dir, while it is one the app did not start itself. */
+const otherTranscriptions = new Map<string, string>();
+
+/**
+ * Show a `transcribe` run of the project at `dir` in its status bar, unless a setup of the app is running there (that
+ * setup already shows its own run, with its own words). One run at a time: a second one waits until the first ends.
+ */
+function showOtherTranscription(dir: string, update: EventParams<"transcription.progress">): void {
+  const shown = otherTranscriptions.get(dir);
+  if (shown === undefined && setups.get(dir)?.state === "running") return;
+  if (shown !== undefined && shown !== update.id) return;
+  const said = text.app.setup;
+  const name = update.asset.split("/").pop() ?? update.asset;
+  if (update.state === "running") {
+    otherTranscriptions.set(dir, update.id);
+    reportSetup(dir, { message: `${name}: ${describeProgress(update, said.progress)}`, detail: null, fraction: update.fraction ?? null, state: "running" });
+    return;
+  }
+  otherTranscriptions.delete(dir);
+  reportSetup(
+    dir,
+    update.state === "done"
+      ? { message: said.transcribed(name), detail: null, fraction: null, state: "done" }
+      : { message: said.transcribeFailed(name), detail: update.message, fraction: null, state: "failed" },
+  );
+}
+
 /** Setup of each project created from videos, by project dir, while it runs and as it ended. */
 const setups = new Map<string, ProjectSetup>();
 
@@ -894,25 +973,6 @@ async function confirmTranscription(parent: BrowserWindow | null | undefined, as
   };
   const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
   return response === 0;
-}
-
-/**
- * Ask in a native box before a new project downloads transcription: the size, and that it runs on this machine. Closing
- * the box skips; nothing is downloaded unless the person chose it.
- */
-async function askDownload(parent: BrowserWindow | null | undefined, bytes: number): Promise<DownloadChoice> {
-  const said = text.app.dialogs;
-  const options: Electron.MessageBoxOptions = {
-    type: "question",
-    message: said.transcribeDownloadTitle,
-    detail: said.transcribeDownloadDetail(downloadSize(bytes)),
-    buttons: [said.transcribeDownloadYes, said.transcribeDownloadSkip],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  };
-  const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
-  return response === 0 ? "transcribe" : "skip";
 }
 
 /** `transcribe` of `asset` in project `cwd`, asking the person first when the provider is cloud or paid; null when they declined. */
@@ -952,16 +1012,8 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
   let failure = said.downloadFailed;
   try {
     running(said.starting);
+    // The form asked already (its "Transcribe" box, with the download size): one question, never a second box (#742).
     const parent = [...windows.values()].find((state) => state.project?.dir === dir)?.window;
-    const choice = await chooseDownload(await transcriptionDownload(dir), (bytes) => {
-      running(said.waitingForDownloadAnswer);
-      return askDownload(parent, bytes);
-    });
-    if (choice === "skip") {
-      reportSetup(dir, { message: background ? said.transcriptionSkippedAudio : said.transcriptionSkipped, detail: null, fraction: null, state: "done" });
-      return;
-    }
-    running(said.starting);
     await ensureTranscriptionPlugin(dir);
     for (const asset of assets) {
       failure = said.transcribeFailed(name(asset));
@@ -1015,7 +1067,22 @@ function showProject(dir: string): void {
 
 /** A window on the welcome screen with nothing pending: where what the OS opens goes first. */
 function welcomeWindow(): WindowState | undefined {
-  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered);
+  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered && !state.welcomeStart);
+}
+
+/**
+ * Show the welcome screen (#740): in a window already on it, else a new one; with `start`, it begins that way of
+ * making a project at once (File > New Project from Video…, New Video from an Idea…).
+ */
+function showWelcome(start: WelcomeStart | null): void {
+  const target = welcomeWindow() ?? windows.get(createWindow().webContents.id);
+  if (!target) return;
+  if (start) {
+    target.welcomeStart = start;
+    send(target.window.webContents, Channel.projectStartOffered);
+  }
+  if (target.window.isMinimized()) target.window.restore();
+  target.window.focus();
 }
 
 /**
@@ -1303,6 +1370,9 @@ function shootDeps(root: string) {
 }
 
 /** Keep the project window and its panel windows out of screen captures while it records (ADR 0024 decision 7). */
+/** The global End shortcut, held while a window records (#744). */
+const shootShortcut = createShootShortcut(globalShortcut);
+
 function protectShoot(state: WindowState, on: boolean): void {
   for (const window of [state.window, ...state.panels.keys()]) if (!window.isDestroyed()) window.setContentProtection(on);
 }
@@ -1313,6 +1383,7 @@ function abandonShoot(state: WindowState): void {
   if (!shoot) return;
   state.shoot = null;
   protectShoot(state, false);
+  shootShortcut.release(state);
   void shootChunks
     .flushed()
     .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
@@ -1488,12 +1559,17 @@ function registerShootIpc(): void {
   );
   ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
     outcome(async () => {
-      const shoot = shootOf(stateOf(event.sender), id);
+      const state = stateOf(event.sender);
+      const shoot = shootOf(state, id);
       await markStarted(shoot.root, shoot.session.id, starts ?? {});
       for (const source of shoot.session.sources) {
         const start = starts?.[source.role];
         if (typeof start === "number" && Number.isFinite(start)) source.start = start;
       }
+      // Ends the session from any app, even with Frameshell's windows hidden from captures.
+      return shootShortcut.hold(state, () => {
+        if (!state.window.isDestroyed()) send(state.window.webContents, Channel.shootEndRequested);
+      });
     }),
   );
   ipcMain.handle(Channel.shootChunk, (event, id: unknown, role: ShootRole, data: Uint8Array) =>
@@ -1509,6 +1585,7 @@ function registerShootIpc(): void {
       const shoot = shootOf(state, id);
       state.shoot = null;
       protectShoot(state, false);
+      shootShortcut.release(state);
       try {
         await shootChunks.flushed();
         return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
@@ -1647,6 +1724,13 @@ function registerIpc(): void {
     return openFromWindow(stateOf(event.sender), dir);
   });
 
+  ipcMain.handle(Channel.projectTranscriptionDownload, () => outcome(newProjectTranscriptionDownload));
+  ipcMain.handle(Channel.projectTakeStart, (event) => {
+    const state = stateOf(event.sender);
+    const start = state.welcomeStart;
+    state.welcomeStart = null;
+    return start;
+  });
   ipcMain.handle(Channel.projectTakeOffered, (event) => {
     const state = stateOf(event.sender);
     const plan = state.offered;
@@ -1779,7 +1863,9 @@ function registerIpc(): void {
     return { id, session, shell: shellName };
   });
   ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
+  ipcMain.handle(Channel.terminalList, (event) => stateOf(event.sender).terminals.list());
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
+  ipcMain.handle(Channel.terminalClipboardHasText, async () => (await clipboard.readText()) !== "");
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
     stateOf(event.sender).terminals.resize(id, cols, rows),
   );
@@ -1827,6 +1913,14 @@ function registerIpc(): void {
       return addImageLayers(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], await imageLayerDeps(project.dir));
     }),
   );
+  ipcMain.handle(Channel.timelineAddMedia, (event, timeline: string, assets: string[], target?: { track: string; start: number }) =>
+    outcome(async () => {
+      const { project } = await requireProject(stateOf(event.sender));
+      const aim = target && typeof target.track === "string" && Number.isFinite(target.start) ? { track: target.track, start: Math.max(0, target.start) } : undefined;
+      const deps: TimelineMediaDeps = { request: (method, params) => daemon.request(method, params), alone: (work) => editor.alone(work) };
+      return addMediaClips(project.dir, String(timeline), Array.isArray(assets) ? assets.map(String) : [], deps, aim);
+    }),
+  );
   ipcMain.handle(Channel.timelineCutOut, (event, timeline: string, clip: string, mask: string) =>
     outcome(async () => {
       const { project } = await requireProject(stateOf(event.sender));
@@ -1855,6 +1949,26 @@ function registerIpc(): void {
       const params = { cwd: project.dir, timeline: name, out };
       const { path, warnings } = await daemon.request(HANDOFFS[kind].method, params);
       return { path, warnings };
+    }),
+  );
+  // File > Export video… and the preview's Export video button (#738): main asks where, the daemon renders in the background.
+  ipcMain.handle(Channel.timelineExportVideo, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const name = String(timeline);
+      const base = name === "main" ? projectName(project.name) : `${projectName(project.name)}-${name}`;
+      const chosen = await pickVideoExport(state.window, join(project.dir, "exports", `${base}.mp4`));
+      if (!chosen) return null;
+      const out = extname(chosen) ? chosen : `${chosen}.mp4`;
+      const { job, output, warnings } = await daemon.request("render", { cwd: project.dir, timeline: name, out });
+      exportedVideos.add(output);
+      return { job, output, warnings };
+    }),
+  );
+  ipcMain.handle(Channel.timelineRevealExport, (_event, path: string) =>
+    outcome(async () => {
+      if (exportedVideos.has(String(path))) shell.showItemInFolder(String(path));
     }),
   );
   ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
@@ -2078,6 +2192,8 @@ function buildMenu(): void {
       label: said.file,
       submenu: [
         { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+        { id: "new-from-video", label: said.newFromVideo, accelerator: "CmdOrCtrl+N", click: () => showWelcome("video") },
+        { id: "new-from-idea", label: said.newFromIdea, click: () => showWelcome("idea") },
         { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
         {
@@ -2086,6 +2202,7 @@ function buildMenu(): void {
           accelerator: "CmdOrCtrl+Shift+S",
           click: (_item, focused) => command("imageFromFrame", focused),
         },
+        { id: "export-video", label: said.exportVideo, accelerator: "CmdOrCtrl+E", click: (_item, focused) => command("exportVideo", focused) },
         ...HANDOFF_KINDS.map((kind) => ({
           id: HANDOFFS[kind].menuId,
           label: kind === "otio" ? said.exportOtio : said.exportPremiere,
@@ -2109,6 +2226,8 @@ function buildMenu(): void {
       label: said.view,
       submenu: [
         { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-shoot", label: said.shoot, accelerator: "CmdOrCtrl+Alt+R", click: (_item, focused) => command("showShoot", focused) },
+        { id: "view-teleprompter", label: said.teleprompter, accelerator: "CmdOrCtrl+Alt+P", click: (_item, focused) => command("showTeleprompter", focused) },
         { id: "view-terminal", label: said.terminal, accelerator: "CmdOrCtrl+\\", registerAccelerator: false, click: (_item, focused) => command("toggleTerminal", focused) },
         { type: "separator" },
         {
@@ -2125,10 +2244,14 @@ function buildMenu(): void {
           ],
         },
         { type: "separator" },
-        { role: "reload", label: said.reload },
-        { role: "forceReload", label: said.forceReload },
-        { role: "toggleDevTools", label: said.devTools },
-        { type: "separator" },
+        ...(showsDevItems(app.isPackaged, process.env)
+          ? [
+              { role: "reload" as const, label: said.reload },
+              { role: "forceReload" as const, label: said.forceReload },
+              { role: "toggleDevTools" as const, label: said.devTools },
+              { type: "separator" as const },
+            ]
+          : []),
         { role: "resetZoom", label: said.resetZoom },
         { role: "zoomIn", label: said.zoomIn },
         { role: "zoomOut", label: said.zoomOut },
@@ -2143,12 +2266,15 @@ function buildMenu(): void {
         { role: "minimize", label: said.minimize },
         { role: "zoom", label: said.zoom },
         ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
+        // macOS lists the windows itself.
+        ...(mac ? [] : windowListItems(listedWindows(), focusWindow)),
       ],
     },
     {
       ...(mac ? { role: "help" as const } : {}),
       label: said.help,
       submenu: [
+        { id: "help-welcome", label: said.welcome, click: () => showWelcome(null) },
         { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
         { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
         // macOS has them in the app menu.
@@ -2159,6 +2285,32 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
   syncReviewMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
+}
+
+/** Open project windows for the Window menu, in opening order. */
+function listedWindows() {
+  const focused = BrowserWindow.getFocusedWindow();
+  return [...windows.entries()]
+    .filter(([, state]) => !state.window.isDestroyed())
+    .map(([id, state]) => ({ id, name: state.project?.name ?? state.window.getTitle(), focused: state.window === focused }));
+}
+
+/** Bring window `id` (its `webContents.id`) to the front. */
+function focusWindow(id: number): void {
+  const window = windows.get(id)?.window;
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
+/** Rebuild the menu once the current event is done: the Window menu follows windows opening, closing and focusing. */
+let menuRebuild: NodeJS.Immediate | undefined;
+function rebuildMenuSoon(): void {
+  if (menuRebuild || !app.isReady()) return;
+  menuRebuild = setImmediate(() => {
+    menuRebuild = undefined;
+    buildMenu();
+  });
 }
 
 /**
@@ -2187,7 +2339,8 @@ const appLauncher: Launcher = process.env["FRAMESHELL_OPEN_APP_STAND_IN"]
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the
- * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
+ * renderer reads the new language. Terminals outlive the reload (ADR 0012): the reloaded terminal panel shows them
+ * again (`terminals.list`), agents in them still running; panel windows reopen with their project.
  */
 async function setLanguage(choice: LanguageChoice): Promise<void> {
   languageChoice = choice;

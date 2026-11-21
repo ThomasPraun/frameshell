@@ -51,9 +51,13 @@ test("the Shoot view and the teleprompter say what T and C did, and each take's 
   // Before Start the teleprompter shows no strip.
   await expect(prompter.getByTestId("teleprompter-view")).toBeVisible();
   await expect(prompter.getByTestId("take-status")).toHaveCount(0);
+  // Recognition is ready but does not hear the mic before Start.
+  const liveWord = prompter.getByTestId("teleprompter-live-state");
+  await expect(liveWord).toHaveAttribute("data-word", "ready");
 
   await page.getByTestId("shoot-start").click();
   await expect(page.getByTestId("shoot-elapsed")).toBeVisible();
+  await expect(liveWord).toHaveAttribute("data-word", "listening");
   const strip = prompter.getByTestId("take-status");
   await expect(strip).toHaveAttribute("data-state", "ready");
   await expect(strip).toHaveText("Recording · press T to start a take of “Hook”");
@@ -73,6 +77,9 @@ test("the Shoot view and the teleprompter say what T and C did, and each take's 
   await shot(prompter, "4-teleprompter-analyzing");
   await expect(prompter.getByTestId("take-status-outcome")).toHaveText("Take 1: 1 difference, review in the Shoot view", { timeout: 15_000 });
   await expect(page.getByTestId("take-status-outcome")).toHaveText("Take 1: 1 difference, review below");
+  // The outcome leads to its rows: the scene's chosen take, or the last take's block for differences shown nowhere else.
+  await page.getByTestId("take-status-outcome").click();
+  await expect(page.getByTestId("shoot-deviation").first()).toBeVisible();
   await expect(strip).toContainText("T: new take of “Hook”");
   await shot(prompter, "5-teleprompter-result");
   await shot(page, "5-shoot-result");
@@ -94,6 +101,7 @@ test("the Shoot view and the teleprompter say what T and C did, and each take's 
   await page.waitForTimeout(2500);
   await page.getByTestId("shoot-end").click();
   await expect(page.getByTestId("shoot-finished")).toBeVisible({ timeout: 60_000 });
+  await expect(liveWord).toHaveAttribute("data-word", "ready");
   await expect(strip).toHaveCount(0);
   await expect(page.getByTestId("take-status-outcome")).toHaveText("Take 2: 1 difference, review below", { timeout: 15_000 });
   await shot(page, "6-shoot-after-end");
