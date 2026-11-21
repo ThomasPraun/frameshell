@@ -16,7 +16,7 @@ App-wide rules (strings, renderer never writes, Move to Trash exception): `apps/
 
 | Working on | Read |
 |---|---|
-| New project from video (folder beside video, name clash, clone test), new video from an idea (no footage: brief, formats via `format.add`, prompt in agent guide), audio project background + subtitles, drops, Open with | `video-project.ts`, `idea-project.ts`, `audio-background.ts`, `media-files.ts`, `open-paths.ts` |
+| New project from video (folder beside video, name clash, clone test), new video from an idea (no footage: brief kept in the project as brief.md via daemon `file.write`, read back by `parseBrief`; formats via `format.add`; prompt in agent guide with Copy), audio project background + subtitles, drops, Open with | `video-project.ts`, `idea-project.ts`, `audio-background.ts`, `media-files.ts`, `open-paths.ts` |
 | Cloud transcription ask | `confirmation.ts`, `transcribe-ask.ts`; test `apps/desktop/test/transcribe-ask.test.ts` |
 | Shoot recorder | `shoot-session.ts`, `shoot-capture.ts`, `shoot-shortcut.ts`, `registerShootIpc` in `index.ts` |
 | Live recognition | `live-recognition.ts` |

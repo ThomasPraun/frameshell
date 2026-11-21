@@ -72,6 +72,16 @@ const FIELDS = {
     step: 1,
     decimals: 1,
   },
+  /** An image project's layer (#751): the scale against the picture's own pixels, 100 % = each pixel once. */
+  pictureScale: {
+    label: t.inspector.fieldScale,
+    title: t.inspector.fieldPictureScaleTitle,
+    unit: "%",
+    show: (v) => round(v * 100, 1),
+    store: (v) => (v > 0 ? round(v / 100, 4) : null),
+    step: 1,
+    decimals: 1,
+  },
   opacity: {
     label: t.inspector.fieldOpacity,
     title: t.inspector.fieldOpacityTitle,

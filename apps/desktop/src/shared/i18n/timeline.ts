@@ -11,6 +11,8 @@ const en = {
   dismiss: "Dismiss",
   /** Slot: `{assets}`, the `assets/` folder name. */
   emptyHint: "Drag a video or sound from Files onto the timeline (or right-click it in {assets}: Add to timeline), or ask the agent in the terminal to cut your footage.",
+  /** A video made from an idea, still empty: no footage to cut (#752). */
+  emptyIdea: "Nothing here yet. Ask your agent to make the film from your brief ({brief}); its clips appear here as it builds them.",
   /** Status line after media was put on the timeline from Files; `refused`: file names the daemon refused, with its reason. */
   mediaAdded: (count: number) => (count === 1 ? "Added 1 clip to the timeline." : `Added ${count} clips to the timeline.`),
   mediaRefused: (names: string, message: string) => `Could not add ${names}: ${message}`,
@@ -190,6 +192,7 @@ const es: typeof en = {
   dismiss: "Descartar",
   emptyHint:
     "Arrastra un video o un sonido desde Archivos hasta la línea de tiempo (o haz clic derecho sobre él en {assets}: Agregar a la línea de tiempo), o pídele al agente en la terminal que corte tu material.",
+  emptyIdea: "Todavía no hay nada. Pídele a tu agente que haga la película a partir de tu brief ({brief}); sus clips aparecen aquí a medida que los arma.",
   mediaAdded: (count) => (count === 1 ? "Se agregó 1 clip a la línea de tiempo." : `Se agregaron ${count} clips a la línea de tiempo.`),
   mediaRefused: (names, message) => `No se pudo agregar ${names}: ${message}`,
   keysLabel: (mac) => {

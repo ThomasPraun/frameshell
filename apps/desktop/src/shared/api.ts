@@ -113,6 +113,8 @@ export interface IdeaBrief {
   seconds: number | null;
   /** A page to take the idea from (http or https); null when none. */
   url: string | null;
+  /** What the video is about, in the person's words; null when not said. Absent in briefs from before it existed. */
+  about?: string | null;
 }
 
 /** A way of making a project the File menu starts on the welcome screen: from video files, or from an idea. */
@@ -326,8 +328,12 @@ export interface FrameshellApi {
     revealRecent(dir: string): Promise<void>;
     /** Stop warning that this window's project is in a synced folder; kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
-    /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
-    chooseVideos(): Promise<VideoProjectPlan | null>;
+    /**
+     * Choose videos, audio or pictures with the OS dialog and plan their project: `plan` null when none is media,
+     * `refused` the chosen files that are not (#751: a `.txt` slipped into the plan). Null when cancelled.
+     * Rejects on unreadable files.
+     */
+    chooseVideos(): Promise<{ plan: VideoProjectPlan | null; refused: string[] } | null>;
     /**
      * Plan the project for the videos among `files` (e.g. dropped), optionally
      * in another `parent` or under another `name`. `refused` lists what is not
@@ -370,11 +376,11 @@ export interface FrameshellApi {
     /**
      * Create an empty project for `brief`, without footage, and open it in this window: `project.init` at the
      * size of the first format, then `format.add` for each other one, through the daemon. `parent` is the folder
-     * it goes in (default the videos folder). The brief is kept for {@link takeIdea}.
+     * it goes in (default the videos folder). The brief is kept in the project's `brief.md`, for {@link readIdea}.
      */
     fromIdea(brief: IdeaBrief, parent?: string): Promise<OpenOutcome>;
-    /** The brief this window's project was made from, once: null when it was not made from an idea or already taken. */
-    takeIdea(): Promise<IdeaBrief | null>;
+    /** The brief this window's project was made from (its `brief.md`, #752): null when it was not made from an idea. */
+    readIdea(): Promise<IdeaBrief | null>;
     /**
      * Add built-in format `id` (`1x1`, `4x5`, `9x16`, `16x9`) to this window's project, after the others: daemon
      * `format.add`, journaled like any format change (ADR 0027, 0036). Rejects with the daemon's message.
@@ -489,6 +495,11 @@ export interface FrameshellApi {
      * Resolves with the new track ids.
      */
     addLayers(timeline: string, assets: string[]): Promise<string[]>;
+    /**
+     * Pick pictures with the OS dialog, import them into `assets/` and {@link addLayers} them: the Layers panel's
+     * Add image button (#751). Resolves with the new track ids, or null when cancelled.
+     */
+    addImages(timeline: string): Promise<string[] | null>;
     /**
      * Put media among `assets` (project-relative videos, sounds, stills) on `timeline` as one undoable step (#738): with
      * `target`, from that time on that track (the drop point of a drag from Files); otherwise at the end of the first
@@ -1182,7 +1193,7 @@ export const Channel = {
   projectFromVideos: "project:from-videos",
   projectPlanIdea: "project:plan-idea",
   projectFromIdea: "project:from-idea",
-  projectTakeIdea: "project:take-idea",
+  projectReadIdea: "project:read-idea",
   projectAddFormat: "project:add-format",
   projectSetup: "project:setup",
   projectSetupChanged: "project:setup-changed",
@@ -1226,6 +1237,7 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
+  timelineAddImages: "timeline:add-images",
   timelineAddMedia: "timeline:add-media",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",

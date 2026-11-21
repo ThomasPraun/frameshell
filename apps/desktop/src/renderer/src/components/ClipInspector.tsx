@@ -22,8 +22,9 @@ import { filled, fragileSelector, idRequest } from "../preview/element-edit.js";
 import { useElementMode } from "../preview/element-mode.js";
 import { useTransport } from "../preview/transport.js";
 import { useClipRenders } from "../preview/useClipRenders.js";
-import { useNestedViews, useProjectKind } from "../preview/useProgram.js";
-import { isImagePath } from "../../../shared/media-kinds.js";
+import { useAssets, useNestedViews, useProjectKind, useResolution } from "../preview/useProgram.js";
+import { fitOf } from "../layers/model.js";
+import { isImagePath } from "../../../shared/image-files.js";
 import { GeneratedControl } from "./GeneratedControl.js";
 import { SELECTION_TIMELINE, useSelection } from "../selection.js";
 import { ColourControl } from "./ColourControl.js";
@@ -62,6 +63,8 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
   const { clips } = useSelection();
   const { time: playhead, fps } = useTransport();
   const image = useProjectKind() === "image";
+  const assets = useAssets(image ? (stored?.revision ?? null) : null);
+  const resolution = useResolution();
   const mode = useElementMode();
   const view = useMemo(() => (stored && format ? clipsInFormat(stored, format) : stored), [stored, format]);
   const layout = useMemo(() => (view ? layoutTimeline(view) : null), [view]);
@@ -74,7 +77,15 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
   if (!target) {
     return (
       <div className="clip-inspector is-empty" role="group" aria-label={t.inspector.clipSettings}>
-        <span>{clips.length > 1 ? t.inspector.clipsSelected(clips.length) : t.inspector.selectClip}</span>
+        <span>
+          {image
+            ? clips.length > 1
+              ? t.inspector.layersSelected(clips.length)
+              : t.inspector.selectLayer
+            : clips.length > 1
+              ? t.inspector.clipsSelected(clips.length)
+              : t.inspector.selectClip}
+        </span>
       </div>
     );
   }
@@ -100,16 +111,25 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
   const override = format !== null ? storedOverride(stored, clip.id, format) : null;
   // An image project has no sound (ADR 0017).
   const audible = clip.kind === "media" && !image;
+  const pictureFit = image ? fitOf(assets?.get(typeof clip["asset"] === "string" ? clip["asset"] : "")?.media?.video ?? null, resolution) : null;
+  const layerName = view?.tracks.find((track) => track.clips.some((each) => each.id === clip.id))?.name || clip.name.replace(/(.)\.[^.]+$/, "$1");
   // The same action reads per what the clip shows (#746): a video clip takes an image in its place.
   const replacesVideo = clip.asset !== null && !isImagePath(clip.asset);
   const moved = fill === null && (transform.x !== 0 || transform.y !== 0 || transform.scale !== 1 || transform.opacity !== 1);
 
   return (
     <div className="clip-inspector" role="group" aria-label={t.inspector.settingsOfClip(clip.name)} data-clip={clip.id}>
-      <span className="clip-inspector-name" title={t.inspector.clipOnTrack(clip.id, row.label)}>
-        <span className={`clip-inspector-track track-${row.kind}`}>{row.label}</span>
-        {clip.name}
-      </span>
+      {image ? (
+        // A layer of an image project goes by its layer name, never a track letter and a file name (#751).
+        <span className="clip-inspector-name" data-tip={t.inspector.layerOf(layerName)}>
+          {layerName}
+        </span>
+      ) : (
+        <span className="clip-inspector-name" title={t.inspector.clipOnTrack(clip.id, row.label)}>
+          <span className={`clip-inspector-track track-${row.kind}`}>{row.label}</span>
+          {clip.name}
+        </span>
+      )}
       {clip.kind === "generated" && (
         <GeneratedControl
           clip={clip.id}
@@ -122,9 +142,19 @@ export function ClipInspector({ format = null, fillOf = null }: { format?: strin
       )}
       {placed && (
         <div className="clip-inspector-group" role="group" aria-label={t.inspector.placement}>
-          {(["x", "y", "scale", "opacity"] as const).map((name) => (
-            <NumberField key={name} name={name} stored={keyed(name) ?? transform[name]} onCommit={(value) => setTransform(name, value)} />
-          ))}
+          {(["x", "y", "scale", "opacity"] as const).map((name) =>
+            name === "scale" && pictureFit !== null ? (
+              // An image project's layer: its size against the picture's own pixels, stored as the fit-relative scale.
+              <NumberField
+                key={name}
+                name="pictureScale"
+                stored={round4((keyed(name) ?? transform.scale) * pictureFit)}
+                onCommit={(value) => setTransform(name, round4(value / pictureFit))}
+              />
+            ) : (
+              <NumberField key={name} name={name} stored={keyed(name) ?? transform[name]} onCommit={(value) => setTransform(name, value)} />
+            ),
+          )}
           <button
             className="clip-inspector-button"
             disabled={!moved}
@@ -546,3 +576,9 @@ function ElementAdjustments({
     </div>
   );
 }
+
+/** Four decimals: what a stored scale keeps. */
+function round4(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
+}
+

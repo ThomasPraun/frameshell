@@ -6,6 +6,8 @@ import { HANDOFFS, type HandoffKind } from "../handoff.js";
 const en = {
   imported: (names: string) => `Imported ${names} into assets/.`,
   notMedia: (names: string) => `Not media: ${names}.`,
+  /** Media dropped on an image project that is not a picture: imported, but no layer (#751). */
+  notLayers: (names: string) => `${names} stays in assets/ only: an image project stacks pictures (PNG, JPEG, GIF, WebP).`,
   /** An image project made from a frame opened in its own window (ADR 0017). */
   frameImageOpened: (name: string) => `Opened ${name} in a new window.`,
   /** The timeline saved as an editor hand-off file (ADR 0045, 0047), and how many things the file leaves out. */
@@ -107,6 +109,7 @@ const en = {
 const es: typeof en = {
   imported: (names) => `Se importó ${names} a assets/.`,
   notMedia: (names) => `No es audio, video ni imagen: ${names}.`,
+  notLayers: (names) => `${names} queda solo en assets/: un proyecto de imagen apila imágenes (PNG, JPEG, GIF, WebP).`,
   frameImageOpened: (name) => `${name} se abrió en una ventana nueva.`,
   handoffExported: (name) => `Se exportó ${name}.`,
   handoffExportedWith: (name, count, kind) =>

@@ -3,6 +3,10 @@
 const en = {
   clipSettings: "Clip settings",
   clipsSelected: (count: number) => `${count} clips selected: select one to adjust it`,
+  /** An image project's inspector (ADR 0017): layers, not clips. */
+  selectLayer: "Select a layer to adjust its place, size and opacity",
+  layersSelected: (count: number) => `${count} layers selected: select one to adjust it`,
+  layerOf: (name: string) => `Settings of layer ${name}`,
   selectClip: "Select a clip to adjust its placement and sound",
   settingsOfClip: (name: string) => `Settings of clip ${name}`,
   clipOnTrack: (id: string, track: string) => `${id} on ${track}`,
@@ -49,6 +53,7 @@ const en = {
   fieldYTitle: "Vertical offset from center, project pixels",
   fieldScale: "Scale",
   fieldScaleTitle: "Size relative to fitting the frame",
+  fieldPictureScaleTitle: "Size against the picture's own pixels: 100 % shows each pixel once",
   fieldOpacity: "Opacity",
   fieldOpacityTitle: "0 % is invisible, 100 % opaque",
   fieldGain: "Gain",
@@ -287,6 +292,9 @@ const en = {
 const es: typeof en = {
   clipSettings: "Ajustes del clip",
   clipsSelected: (count) => `${count} clips seleccionados: selecciona uno para ajustarlo`,
+  selectLayer: "Selecciona una capa para ajustar su lugar, tamaño y opacidad",
+  layersSelected: (count) => `${count} capas seleccionadas: selecciona una para ajustarla`,
+  layerOf: (name) => `Ajustes de la capa ${name}`,
   selectClip: "Selecciona un clip para ajustar su ubicación y su sonido",
   settingsOfClip: (name) => `Ajustes del clip ${name}`,
   clipOnTrack: (id, track) => `${id} en ${track}`,
@@ -333,6 +341,7 @@ const es: typeof en = {
   fieldYTitle: "Desplazamiento vertical desde el centro, en píxeles del proyecto",
   fieldScale: "Escala",
   fieldScaleTitle: "Tamaño relativo al ajuste al cuadro",
+  fieldPictureScaleTitle: "Tamaño respecto a los píxeles de la imagen: 100 % muestra cada píxel una vez",
   fieldOpacity: "Opacidad",
   fieldOpacityTitle: "0 % es invisible, 100 % es opaco",
   fieldGain: "Ganancia",

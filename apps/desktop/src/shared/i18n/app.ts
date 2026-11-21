@@ -83,6 +83,7 @@ const en = {
     allFiles: "All files",
     chooseParent: "Choose where the project goes",
     chooseImage: "Choose an image",
+    chooseImages: "Choose pictures to add as layers",
     images: "Images",
     exportImage: "Export image",
     /** An image saved under an extension Frameshell does not write (#749). */
@@ -99,7 +100,7 @@ const en = {
     imageFromFrame: "New image from this frame",
     imageFromFrameDetail: "Makes an image project beside this one, with this frame as its background layer, and opens it in a new window. The video is not changed.",
     /** Folder of an image made from a frame: the project's name and the frame's time. */
-    frameImageFolder: (project: string, stamp: string) => `${project} frame ${stamp}`,
+    frameImageFolder: (project: string, stamp: string, size: string) => `${project} frame ${stamp} ${size}`,
     thumbnailSize: "YouTube thumbnail (1280x720)",
     videoSize: (width: number, height: number) => `Video size (${width}x${height})`,
     squareSize: "Square (1080x1080)",
@@ -132,6 +133,13 @@ const en = {
     transcribeAskChanged: "The file or the price changed since you confirmed, so nothing was sent.",
     transcribeUpload: "Upload and transcribe",
     transcribeNotStarted: "Transcription was not started.",
+    /** Pick in a photo (ADR 0022): its model downloads once, asked first (#751). */
+    pickDownloadTitle: "Download the photo model for Pick?",
+    pickDownloadDetail: (size: string) =>
+      `Pick finds the objects in your pictures with a model that runs on this computer. It is ${size}, downloaded once from Hugging Face; your pictures never leave this computer.`,
+    pickDownloadYes: "Download",
+    pickDownloadDeclined: "the photo model is not downloaded. Turn Pick on again to download it.",
+    pickDownloadFailed: "the photo model could not be downloaded. Check the internet connection and turn Pick on again.",
     ok: "OK",
   },
   setup: {
@@ -275,6 +283,7 @@ const es: typeof en = {
     allFiles: "Todos los archivos",
     chooseParent: "Elegir dónde va el proyecto",
     chooseImage: "Elegir una imagen",
+    chooseImages: "Elige las imágenes que quieres agregar como capas",
     images: "Imágenes",
     exportImage: "Exportar imagen",
     imageExtension: (extension) => `Frameshell guarda imágenes como PNG, JPEG o WebP, no como ${extension}. Elige uno de esos.`,
@@ -289,7 +298,7 @@ const es: typeof en = {
     premiereFile: "Archivo XML de Premiere",
     imageFromFrame: "Nueva imagen desde este fotograma",
     imageFromFrameDetail: "Crea un proyecto de imagen al lado de este, con este fotograma como capa de fondo, y lo abre en una ventana nueva. El video no cambia.",
-    frameImageFolder: (project, stamp) => `${project} fotograma ${stamp}`,
+    frameImageFolder: (project, stamp, size) => `${project} fotograma ${stamp} ${size}`,
     thumbnailSize: "Miniatura de YouTube (1280x720)",
     videoSize: (width, height) => `Tamaño del video (${width}x${height})`,
     squareSize: "Cuadrada (1080x1080)",
@@ -322,6 +331,12 @@ const es: typeof en = {
     transcribeAskChanged: "El archivo o el precio cambiaron desde que confirmaste, así que no se envió nada.",
     transcribeUpload: "Subir y transcribir",
     transcribeNotStarted: "No se inició la transcripción.",
+    pickDownloadTitle: "¿Descargar el modelo de fotos para Elegir?",
+    pickDownloadDetail: (size) =>
+      `Elegir encuentra los objetos de tus imágenes con un modelo que corre en esta computadora. Pesa ${size} y se descarga una vez desde Hugging Face; tus imágenes nunca salen de esta computadora.`,
+    pickDownloadYes: "Descargar",
+    pickDownloadDeclined: "el modelo de fotos no está descargado. Vuelve a activar Elegir para descargarlo.",
+    pickDownloadFailed: "no se pudo descargar el modelo de fotos. Revisa la conexión a internet y vuelve a activar Elegir.",
     ok: "Aceptar",
   },
   setup: {

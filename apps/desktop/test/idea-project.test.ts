@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkIdea, formatSize, planIdeaProject } from "../src/main/idea-project.js";
+import { briefMarkdown, checkIdea, formatSize, parseBrief, planIdeaProject } from "../src/main/idea-project.js";
+import { withScheme } from "../src/shared/web-address.js";
 import { ideaPrompt } from "../src/renderer/src/idea.js";
 
 describe("planIdeaProject", () => {
@@ -29,10 +30,18 @@ describe("checkIdea", () => {
   const brief = { name: "  Reel  ", formats: ["9x16", "16x9"], seconds: 30, url: " https://example.com/a " };
 
   it("trims, keeps the main format first and the others in built-in order, and normalises the address", () => {
-    expect(checkIdea(brief)).toEqual({ name: "Reel", formats: ["9x16", "16x9"], seconds: 30, url: "https://example.com/a" });
+    expect(checkIdea(brief)).toEqual({ name: "Reel", formats: ["9x16", "16x9"], seconds: 30, url: "https://example.com/a", about: null });
     expect(checkIdea({ ...brief, formats: ["1x1", "9x16", "16x9", "4x5"] }).formats).toEqual(["1x1", "16x9", "4x5", "9x16"]);
     // An unknown first id: the first known one in built-in order is the main format.
     expect(checkIdea({ ...brief, formats: ["nope", "9x16", "16x9"] }).formats).toEqual(["16x9", "9x16"]);
+  });
+
+  it("keeps what it is about, trimmed, and puts https:// before a bare host (#752)", () => {
+    expect(checkIdea({ ...brief, about: "  Spring sale, three products. ", url: "www.ejemplo.com/oferta" })).toMatchObject({
+      about: "Spring sale, three products.",
+      url: "https://www.ejemplo.com/oferta",
+    });
+    expect(checkIdea({ ...brief, about: "   " }).about).toBeNull();
   });
 
   it("accepts no length and no address", () => {
@@ -74,5 +83,34 @@ describe("ideaPrompt", () => {
   it("leaves out the length and the address when there are none", () => {
     const prompt = ideaPrompt({ name: "Reel", formats: ["1x1"], seconds: null, url: null });
     expect(prompt).not.toMatch(/Length:|Start from this page/);
+  });
+});
+
+describe("brief.md", () => {
+  const brief = { name: "Spring --> reel", formats: ["9x16", "16x9"], seconds: 90, url: "https://example.com/", about: "Three products,\nupbeat." };
+
+  it("writes the brief in words and reads it back from its first line (#752)", () => {
+    const text = briefMarkdown(brief);
+    expect(text.split("\n")[0]).toMatch(/^<!-- frameshell-brief \{.*\} -->$/);
+    expect(text).toContain("# Spring --> reel");
+    expect(text).toContain("- Formats: 9x16 (main), 16x9");
+    expect(text).toContain("- Length: about 90 seconds");
+    expect(parseBrief(text)).toEqual(brief);
+  });
+
+  it("reads nothing from a file that is not one", () => {
+    expect(parseBrief("# Notes\n")).toBeNull();
+    expect(parseBrief("<!-- frameshell-brief {nope} -->")).toBeNull();
+    expect(parseBrief('<!-- frameshell-brief {"name":"A","formats":["nope"]} -->')).toBeNull();
+  });
+});
+
+describe("withScheme", () => {
+  it("adds https:// to a bare host only", () => {
+    expect(withScheme("www.ejemplo.com")).toBe("https://www.ejemplo.com");
+    expect(withScheme("example.com/a?b=1")).toBe("https://example.com/a?b=1");
+    expect(withScheme("http://example.com")).toBe("http://example.com");
+    expect(withScheme("file:///etc/passwd")).toBe("file:///etc/passwd");
+    expect(withScheme("spring sale")).toBe("spring sale");
   });
 });

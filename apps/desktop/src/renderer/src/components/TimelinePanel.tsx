@@ -87,6 +87,7 @@ import { type MenuItem, contextMenu } from "./ContextMenu.js";
 import { DetachButton } from "./DetachControls.js";
 import { PanelHeader } from "./PanelHeader.js";
 import { TRANSCRIPT_SHORTCUT } from "./TranscriptView.js";
+import { useIdea } from "../idea.js";
 
 /** Timeline the panel follows: the one selections name, the project's `main` until timelines can be switched. */
 const TIMELINE = SELECTION_TIMELINE;
@@ -180,6 +181,8 @@ export function TimelinePanel({
   onDetach?: () => void;
 }) {
   const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
+  /** A video made from an idea: its empty state speaks of the brief, not of footage (#752). */
+  const idea = useIdea();
   const scenes = useSceneSpans(TIMELINE, view?.revision ?? null);
   const [status, setStatus] = useState<Status | null>(null);
   useEffect(() => onMediaAdded((line) => setStatus(line.text ? { tone: line.error ? "error" : "info", text: line.text } : null)), []);
@@ -370,7 +373,7 @@ export function TimelinePanel({
             error && !view ? (
               <p className="timeline-error">{error}</p>
             ) : empty || (layout && layout.rows.length === 0) ? (
-              <p>{rich(t.timeline.emptyHint, { assets: <code>assets/</code> })}</p>
+              <p>{idea ? rich(t.timeline.emptyIdea, { brief: <code>brief.md</code> }) : rich(t.timeline.emptyHint, { assets: <code>assets/</code> })}</p>
             ) : null
           }
         />

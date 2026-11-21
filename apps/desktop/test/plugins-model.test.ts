@@ -168,3 +168,10 @@ describe("official plugin words", () => {
     expect(transcriptionInstallCommand("nobody")).toBe("frameshell plugin catalog");
   });
 });
+
+describe("pluginRows order", () => {
+  it("puts the named plugins first, the rest in catalog order (#752)", () => {
+    const rows = pluginRows(catalog([entry("a"), entry("b"), entry("c")]), ["c"]);
+    expect(rows.map((row) => row.name)).toEqual(["c", "a", "b"]);
+  });
+});
