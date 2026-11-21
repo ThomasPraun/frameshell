@@ -20,7 +20,6 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
-  nativeImage,
   protocol,
   screen,
   session,
@@ -76,7 +75,7 @@ import {
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
 import { HANDOFF_KINDS, HANDOFFS, isHandoffKind } from "../shared/handoff.js";
-import { sizeText } from "../shared/sizes.js";
+import { downloadSize, sizeText } from "../shared/sizes.js";
 import {
   type CliInstallHost,
   type CliInstallOutcome,
@@ -125,9 +124,10 @@ import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
 import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
-import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
+import { frameImageChoices, imageFromFrame } from "./frame-image.js";
 import { exportsFolder, imageExportPath } from "./export-paths.js";
-import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { type ImageLayersDeps, addImageLayers, layerScale } from "./image-layers.js";
+import { imageFileSize } from "./image-size.js";
 import { type TimelineMediaDeps, addMediaClips } from "./timeline-media.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
@@ -660,23 +660,18 @@ async function pickFrameImageSize(window: BrowserWindow, dir: string): Promise<F
   const said = text.app.dialogs;
   const config = await projectConfig(dir);
   const own = config.resolution ?? { width: 1920, height: 1080 };
-  const sizes = [FRAME_IMAGE_SIZES.thumbnail, own, FRAME_IMAGE_SIZES.square, FRAME_IMAGE_SIZES.vertical];
+  const choices = frameImageChoices(own);
+  const label = { thumbnail: said.thumbnailSize, own: said.videoSize(own.width, own.height), square: said.squareSize, vertical: said.verticalSize };
   const { response } = await dialog.showMessageBox(window, {
     type: "question",
     message: said.imageFromFrame,
     detail: said.imageFromFrameDetail,
-    buttons: [
-      said.thumbnailSize,
-      said.videoSize(own.width, own.height),
-      said.squareSize,
-      said.verticalSize,
-      said.cancel,
-    ],
+    buttons: [...choices.map((choice) => label[choice.kind]), said.cancel],
     defaultId: 0,
-    cancelId: 4,
+    cancelId: choices.length,
     noLink: true,
   });
-  return sizes[response];
+  return choices[response]?.size;
 }
 
 /** Where to save an exported image, starting at `defaultPath`; the format follows the extension chosen. */
@@ -838,18 +833,15 @@ function syncReviewMenu(state: WindowState | undefined): void {
   item.checked = state?.project ? (reviewSwitch.get(state.project.dir) ?? false) : false;
 }
 
-/** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read by Electron. */
+/** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read from the files' headers. */
 async function imageLayerDeps(dir: string): Promise<ImageLayersDeps> {
   const config = await projectConfig(dir);
   return {
     request: (method, params) => daemon.request(method, params),
     alone: (work) => editor.alone(work),
     resolution: config.resolution ?? { width: 1920, height: 1080 },
-    // nativeImage reads PNG and JPEG everywhere; another format reads as empty, and that layer fits the frame.
-    imageSize: (asset) => {
-      const size = nativeImage.createFromPath(join(dir, ...asset.split("/"))).getSize();
-      return size.width > 0 && size.height > 0 ? size : null;
-    },
+    // PNG, JPEG, GIF and WebP alike (nativeImage reads PNG and JPEG only); an unreadable one fits the frame.
+    imageSize: (asset) => imageFileSize(join(dir, ...asset.split("/"))),
   };
 }
 
@@ -896,6 +888,19 @@ async function ensureTranscriptionPlugin(dir: string): Promise<void> {
     await daemon.request("plugin.install", { cwd: dir, spec: TRANSCRIPTION_PLUGIN });
   }
 }
+
+/** Bytes the photo model (Pick in image projects, ADR 0022) still downloads: MobileSAM's encoder and decoder. */
+async function segmentDownload(): Promise<number> {
+  let bytes = 0;
+  for (const id of SEGMENT_MODELS) {
+    const model = await binaries.locateModel(id).catch(() => null);
+    if (model && !model.installed) bytes += model.pinned.size;
+  }
+  return bytes;
+}
+
+/** Managed model ids of photo segmentation (`docs/binaries.md` "Photo segmentation"). */
+const SEGMENT_MODELS = ["mobilesam-encoder", "mobilesam-decoder"] as const;
 
 /**
  * Bytes a new project still downloads before it transcribes with the built-in provider: `whisper-cli` and the default
@@ -1743,7 +1748,9 @@ function registerIpc(): void {
   ipcMain.handle(Channel.projectChooseVideos, (event) =>
     outcome(async () => {
       const files = await pickVideos(stateOf(event.sender).window);
-      return files.length > 0 ? planVideoProject(files) : null;
+      if (files.length === 0) return null;
+      const { accepted, refused } = await partitionFiles(files, START_EXTENSIONS);
+      return { plan: accepted.length > 0 ? await planVideoProject(accepted) : null, refused };
     }),
   );
   ipcMain.handle(Channel.projectPlanVideos, (_event, files: string[], place?: { parent?: string; name?: string }) =>
@@ -1913,11 +1920,29 @@ function registerIpc(): void {
       const { project } = await requireProject(state);
       const file = await pickImage(state.window);
       if (!file) return false;
+      const config = await projectConfig(project.dir);
+      const resolution = config.resolution ?? { width: 1920, height: 1080 };
       await replaceClipImage(project.dir, String(timeline), String(clip), file, {
         request: (method, params) => daemon.request(method, params),
         apply: (edits, label) => editor.apply(project.dir, String(timeline), edits, { label }),
+        // An image project's layer shows the new picture at its own size, as a new layer would (#751).
+        ...(config.kind === "image" && { scaleOf: async (path: string) => layerScale(await imageFileSize(path), resolution) }),
       });
       return true;
+    }),
+  );
+  ipcMain.handle(Channel.timelineAddImages, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const picked = await dialog.showOpenDialog(state.window, {
+        title: text.app.dialogs.chooseImages,
+        properties: ["openFile", "multiSelections"],
+        filters: [{ name: text.app.dialogs.images, extensions: [...IMAGE_EXTENSIONS] }],
+      });
+      if (picked.canceled || picked.filePaths.length === 0) return null;
+      const { imported } = await daemon.request("asset.import", { cwd: project.dir, files: picked.filePaths, mode: "copy" });
+      return addImageLayers(project.dir, String(timeline), imported.map((item) => item.asset), await imageLayerDeps(project.dir));
     }),
   );
   ipcMain.handle(Channel.timelineAddLayers, (event, timeline: string, assets: string[]) =>
@@ -2109,9 +2134,32 @@ function registerIpc(): void {
 
   ipcMain.handle(Channel.segmentPrepare, (event, assets: string[]) =>
     outcome(async () => {
-      const { project } = await requireProject(stateOf(event.sender));
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      // The photo model downloads once, on the person's yes, with its size (#751); the e2e stand-in needs none.
+      const missing = process.env["FRAMESHELL_SEGMENT_STAND_IN"] === "1" ? 0 : await segmentDownload();
+      const said = text.app.dialogs;
+      if (missing > 0) {
+        const { response } = await dialog.showMessageBox(state.window, {
+          type: "question",
+          message: said.pickDownloadTitle,
+          detail: said.pickDownloadDetail(downloadSize(missing)),
+          buttons: [said.pickDownloadYes, said.cancel],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (response !== 0) throw new Error(said.pickDownloadDeclined);
+      }
       const onProgress = modelProgressTo(event.sender, Channel.segmentProgress);
-      for (const asset of assets) await daemon.request("segment.prepare", { cwd: project.dir, asset }, { onProgress });
+      try {
+        for (const asset of assets) await daemon.request("segment.prepare", { cwd: project.dir, asset }, { onProgress });
+      } catch (error) {
+        // A failed download reads as one sentence; the daemon's message (a long URL) goes to the log.
+        if (missing === 0) throw error;
+        console.warn("segment.prepare:", (error as Error).message);
+        throw new Error(said.pickDownloadFailed, { cause: error });
+      }
     }),
   );
   ipcMain.handle(Channel.segmentPoint, (event, at: number, x: number, y: number) =>

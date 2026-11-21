@@ -15,6 +15,7 @@ import { useConnectedAgentTargets } from "../ask/connected-targets.js";
 import { agentTargets } from "../ask/agent-targets.js";
 import { chatTargets, targetName } from "../ask/chat-targets.js";
 import { importNotice, useFileDrop } from "../file-drop.js";
+import { isImagePath } from "../../../shared/image-files.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
 import { systemErrorText } from "../system-error.js";
@@ -208,7 +209,8 @@ export function Workspace({ project }: { project: ProjectView }) {
         void window.frameshell.media
           .import(paths)
           .then(async ({ imported, refused }) => {
-            setNotice(importNotice(imported, refused));
+            // An image project stacks pictures only: say which imports are no layer (#751).
+            setNotice(importNotice(imported, refused, image ? imported.filter((path) => !isImagePath(path)) : []));
             if (image && imported.length > 0) await window.frameshell.timeline.addLayers(SELECTION_TIMELINE, imported);
           })
           .catch(showError);

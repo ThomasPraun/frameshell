@@ -326,8 +326,12 @@ export interface FrameshellApi {
     revealRecent(dir: string): Promise<void>;
     /** Stop warning that this window's project is in a synced folder; kept per project in the config dir. */
     dismissSyncWarning(): Promise<void>;
-    /** Choose videos or audio with the OS dialog and plan their project; null when cancelled. Rejects on unreadable files. */
-    chooseVideos(): Promise<VideoProjectPlan | null>;
+    /**
+     * Choose videos, audio or pictures with the OS dialog and plan their project: `plan` null when none is media,
+     * `refused` the chosen files that are not (#751: a `.txt` slipped into the plan). Null when cancelled.
+     * Rejects on unreadable files.
+     */
+    chooseVideos(): Promise<{ plan: VideoProjectPlan | null; refused: string[] } | null>;
     /**
      * Plan the project for the videos among `files` (e.g. dropped), optionally
      * in another `parent` or under another `name`. `refused` lists what is not
@@ -489,6 +493,11 @@ export interface FrameshellApi {
      * Resolves with the new track ids.
      */
     addLayers(timeline: string, assets: string[]): Promise<string[]>;
+    /**
+     * Pick pictures with the OS dialog, import them into `assets/` and {@link addLayers} them: the Layers panel's
+     * Add image button (#751). Resolves with the new track ids, or null when cancelled.
+     */
+    addImages(timeline: string): Promise<string[] | null>;
     /**
      * Put media among `assets` (project-relative videos, sounds, stills) on `timeline` as one undoable step (#738): with
      * `target`, from that time on that track (the drop point of a drag from Files); otherwise at the end of the first
@@ -1226,6 +1235,7 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
+  timelineAddImages: "timeline:add-images",
   timelineAddMedia: "timeline:add-media",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
