@@ -277,7 +277,7 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
  * `toggleTerminal`: close or reopen the terminal panel (View > Terminal, ADR 0025 decision 8).
  * `toggleReview`: turn review mode on or off (File > Review agent changes before applying, ADR 0019).
  */
-export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportOtio" | "exportPremiere" | "toggleReview" | "toggleTerminal";
+export type MenuCommand = "showTranscript" | "imageFromFrame" | "exportVideo" | "exportOtio" | "exportPremiere" | "toggleReview" | "toggleTerminal";
 
 export type { HandoffKind };
 
@@ -453,6 +453,12 @@ export interface FrameshellApi {
      */
     addLayers(timeline: string, assets: string[]): Promise<string[]>;
     /**
+     * Put media among `assets` (project-relative videos, sounds, stills) on `timeline` as one undoable step (#738): with
+     * `target`, from that time on that track (the drop point of a drag from Files); otherwise at the end of the first
+     * track of its kind, adding one when there is none. Resolves with the new clip ids and what the daemon refused.
+     */
+    addMedia(timeline: string, assets: string[], target?: { track: string; start: number }): Promise<{ clips: string[]; refused: { asset: string; message: string }[] }>;
+    /**
      * Cut the part of a photo that `mask` (project-relative grayscale PNG, from a Pick) marks out as a new layer
      * right above it (`image.cutout`, ADR 0022), as one undoable step. Resolves with the new clip id.
      */
@@ -469,6 +475,16 @@ export interface FrameshellApi {
      * the file leaves out, or null when cancelled. Rejects with the daemon's message (an image project has nothing to export).
      */
     exportHandoff(kind: HandoffKind, timeline: string): Promise<{ path: string; warnings: string[] } | null>;
+    /**
+     * Export `timeline` as an MP4 where the user picks in the OS dialog (#738): the daemon's `render`, a background job.
+     * Resolves with the job as it started, the file it writes and what the export leaves out, or null when cancelled.
+     * Rejects with the daemon's message (an empty timeline, clips it cannot render).
+     */
+    exportVideo(timeline: string): Promise<{ job: JobInfo; output: string; warnings: string[] } | null>;
+    /** Called on every change of a video export job of the project (daemon `job.progress`, kind `render`); `null` after a daemon reconnect. */
+    onExportJob(listener: (job: JobInfo | null) => void): () => void;
+    /** Show a file this window exported with {@link exportVideo} in Finder / Explorer / the file manager. */
+    revealExport(path: string): Promise<void>;
     /** Close the open gesture burst's transaction now (a playback ended), so the next edit starts a history entry of its own. */
     settle(): Promise<void>;
     /** Revert the latest `ui` edit not yet undone (a `revert` operation); null when there is none. Rejects on a revert conflict. */
@@ -1153,9 +1169,13 @@ export const Channel = {
   timelineEdit: "timeline:edit",
   timelineReplaceImage: "timeline:replace-image",
   timelineAddLayers: "timeline:add-layers",
+  timelineAddMedia: "timeline:add-media",
   timelineCutOut: "timeline:cut-out",
   timelineExportImage: "timeline:export-image",
   timelineExportHandoff: "timeline:export-handoff",
+  timelineExportVideo: "timeline:export-video",
+  timelineExportJob: "timeline:export-job",
+  timelineRevealExport: "timeline:reveal-export",
   timelineSettle: "timeline:settle",
   timelineUndo: "timeline:undo",
   timelineRedo: "timeline:redo",

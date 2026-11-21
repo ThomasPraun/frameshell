@@ -18,6 +18,7 @@ import { importNotice, useFileDrop } from "../file-drop.js";
 import { imageFromFrame, isFrameImageKey } from "../frame-image.js";
 import { rich, t } from "../i18n.js";
 import { handoffKindOf, handoffNotice } from "../handoff-notice.js";
+import { videoExport } from "../export/store.js";
 import { usePanelWindow } from "../panel-window.js";
 import { transport } from "../preview/transport.js";
 import { useProjectKind } from "../preview/useProgram.js";
@@ -373,6 +374,8 @@ export function Workspace({ project }: { project: ProjectView }) {
     if (image) return;
     let running = false;
     return window.frameshell.menu.onCommand((command) => {
+      // File > Export video… (#738): the same export as the preview's button, which shows its progress.
+      if (command === "exportVideo") return void videoExport.start();
       const kind = handoffKindOf(command);
       if (kind === undefined || running) return;
       running = true;

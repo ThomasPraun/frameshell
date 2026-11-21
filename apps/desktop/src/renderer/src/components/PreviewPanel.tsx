@@ -35,6 +35,7 @@ import { sendClipEdit } from "./clip-edits.js";
 import { elementOf, isTag, listenEverywhere, windowOf } from "../windows.js";
 import { rich, t } from "../i18n.js";
 import { useShootRecording } from "../shoot/recorder.js";
+import { EXPORT_VIDEO_SHORTCUT, useVideoExport, videoExport } from "../export/store.js";
 
 /** Canvas short side, px: the proxies' size (SPEC §6.3), so frames draw 1:1. */
 const CANVAS_SHORT_SIDE = 540;
@@ -244,7 +245,7 @@ export function PreviewPanel({
       <PanelHeader
         actions={
           <>
-            {still && <ExportImageButton disabled={empty} onNotice={setNotice} />}
+            {still ? <ExportImageButton disabled={empty} onNotice={setNotice} /> : <ExportVideoButton disabled={empty} />}
             <DetachButton name={t.workspace.preview.toLowerCase()} detached={detached} onClick={onDetach} testId="preview-detach" />
           </>
         }
@@ -755,6 +756,44 @@ function ExportImageButton({ disabled, onNotice }: { disabled: boolean; onNotice
     >
       {t.preview.exportImage}
     </button>
+  );
+}
+
+/**
+ * Header button of a video project (#738): export the timeline as an MP4 where the user picks, with its progress on the
+ * button, then the file name, what it left out and "Show file"; File > Export video… does the same.
+ */
+function ExportVideoButton({ disabled }: { disabled: boolean }) {
+  const view = useVideoExport();
+  const busy = view.kind === "starting" || view.kind === "running";
+  const label =
+    view.kind === "starting" ? t.preview.exportStarting : view.kind === "running" ? (view.waiting ? t.preview.exportWaiting : t.preview.exporting(view.percent)) : t.preview.exportVideo;
+  return (
+    <>
+      {view.kind === "done" && (
+        <span className="preview-notice" role="status" data-testid="preview-export-done" title={view.output}>
+          {[t.preview.exportedVideo(view.file), ...(view.warnings.length > 0 ? [t.preview.exportLeftOut(view.warnings.join("; "))] : [])].join(" ")}{" "}
+          <button className="link" onClick={() => videoExport.reveal(view.output)}>
+            {t.preview.showExport}
+          </button>
+        </span>
+      )}
+      {view.kind === "failed" && (
+        <span className="preview-notice is-error" role="alert" title={view.message}>
+          {t.preview.exportFailed(view.message)}
+        </span>
+      )}
+      <button
+        className="button preview-export"
+        data-tip={t.preview.exportVideoHint(EXPORT_VIDEO_SHORTCUT)}
+        disabled={disabled || busy}
+        aria-busy={busy || undefined}
+        data-testid="preview-export-video"
+        onClick={() => void videoExport.start()}
+      >
+        {label}
+      </button>
+    </>
   );
 }
 
