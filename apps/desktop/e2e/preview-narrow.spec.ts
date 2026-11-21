@@ -92,6 +92,9 @@ test("a narrow preview with formats keeps every transport button and the whole d
   expect(await within(".preview-play", ".preview-transport")).toBe(true);
   expect(await within(".preview-transport-buttons button:last-child", ".preview-transport")).toBe(true);
   expect(await within(".preview-duration", ".preview-body")).toBe(true);
+  // Whole, not elided: Export video folds to its icon to leave the room.
+  expect(await page.evaluate(() => { const duration = document.querySelector(".preview-duration")!; return duration.scrollWidth <= duration.clientWidth; })).toBe(true);
+  await expect(page.getByRole("button", { name: "Export video" })).toBeVisible();
   expect(await sideways()).toEqual([]);
 });
 
