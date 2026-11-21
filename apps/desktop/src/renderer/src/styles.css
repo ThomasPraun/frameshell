@@ -3137,8 +3137,18 @@ button.track-head:focus-visible {
   }
 
   /* Timecode and duration a little smaller and closer, so the whole duration fits on every platform's metrics. */
+  .preview-body > .panel-header,
   .preview-body > .panel-header .panel-header-content {
-    gap: 6px;
+    gap: 4px;
+  }
+
+  .preview-body > .panel-header .preview-duration::before {
+    content: "/";
+  }
+
+  /* The duration to the second: its frames give way first. */
+  .preview-body > .panel-header .preview-duration-frames {
+    display: none;
   }
 
   .preview-body > .panel-header .timecode,
@@ -3150,7 +3160,7 @@ button.track-head:focus-visible {
   .preview-body .preview-export.is-idle {
     display: inline-grid;
     place-items: center;
-    padding: 2px 6px;
+    padding: 2px 3px;
   }
 
   .preview-body .preview-export.is-idle .preview-export-icon {
