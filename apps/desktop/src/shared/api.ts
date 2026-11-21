@@ -773,8 +773,13 @@ export interface FrameshellApi {
      * Resolves with the session id. Rejects when a session is already recording in this window.
      */
     begin(sources: ShootSourceSpec[]): Promise<string>;
-    /** Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. */
-    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<void>;
+    /**
+     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. Resolves with
+     * whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when another app owns it.
+     */
+    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<boolean>;
+    /** Called when the global End shortcut is pressed while this window records. Returns an unsubscribe function. */
+    onEndRequested(listener: () => void): () => void;
     /** Append one recorded chunk of `role` to its file, in call order per role. */
     chunk(id: string, role: ShootRole, data: Uint8Array): Promise<void>;
     /**
@@ -1104,6 +1109,12 @@ export interface AiAppChange {
   problem: AiAppProblem | null;
 }
 
+/**
+ * The global shortcut that ends a recording shoot from any app (#744), `Mod` standing for ⌘ on macOS and Ctrl
+ * elsewhere. Main registers it only while a session records.
+ */
+export const SHOOT_END_KEYS = "Mod+Alt+Shift+S";
+
 /** IPC channel names; one place so main and preload cannot drift. */
 export const Channel = {
   lang: "app:lang",
@@ -1243,6 +1254,7 @@ export const Channel = {
   shootEnd: "shoot:end",
   shootRecovered: "shoot:recovered",
   shootRecoveredChanged: "shoot:recovered-changed",
+  shootEndRequested: "shoot:end-requested",
   shootCut: "shoot:cut",
   shootCheck: "shoot:check",
   shootStatus: "shoot:status",

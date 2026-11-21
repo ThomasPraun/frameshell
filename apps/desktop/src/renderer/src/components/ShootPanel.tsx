@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { ShootFinish, ShootScreenSource } from "../../../shared/api.js";
+import { SHOOT_END_KEYS, type ShootFinish, type ShootScreenSource } from "../../../shared/api.js";
 import { t } from "../i18n.js";
 import { callSteps, elapsedLabel, meterFill } from "../shoot/model.js";
 import { live, useLiveStatus } from "../shoot/live.js";
 import { shoot, useShoot } from "../shoot/recorder.js";
+import { shortcutLabel } from "../shortcuts.js";
 import { teleprompter } from "../teleprompter/store.js";
 import { ShootTakes } from "./ShootTakes.js";
 import { TranscriptionNotice } from "./TranscriptionNotice.js";
@@ -204,6 +205,11 @@ export function ShootPanel({
           </button>
         )}
         {recording && state.startedAt !== null && <Elapsed since={state.startedAt} />}
+        {recording && state.endShortcut && (
+          <span className="shoot-note" data-testid="shoot-end-shortcut">
+            {t.shoot.endShortcut(shortcutLabel(SHOOT_END_KEYS))}
+          </span>
+        )}
         {state.phase === "ending" && state.endingAt !== null && (
           <Elapsed since={state.endingAt} saving />
         )}

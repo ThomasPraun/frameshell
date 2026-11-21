@@ -47,6 +47,7 @@ const en = {
   ending: "Saving…",
   savingFor: (time: string) => `Saving the files: ${time} so far. A long shoot takes a while.`,
   recording: (time: string) => `Recording ${time}`,
+  endShortcut: (keys: string) => `${keys} ends the shoot from any app.`,
   failed: (reason: string) => `Shoot failed: ${reason}`,
   saved: (folder: string, count: number) => `Saved ${count} ${count === 1 ? "file" : "files"} to ${folder}.`,
   grouped: (timeline: string) =>
@@ -156,6 +157,7 @@ const es: typeof en = {
   ending: "Guardando…",
   savingFor: (time) => `Guardando los archivos: ${time} hasta ahora. Un rodaje largo tarda un poco.`,
   recording: (time) => `Grabando ${time}`,
+  endShortcut: (keys) => `${keys} termina el rodaje desde cualquier app.`,
   failed: (reason) => `El rodaje falló: ${reason}`,
   saved: (folder, count) => (count === 1 ? `Se guardó 1 archivo en ${folder}.` : `Se guardaron ${count} archivos en ${folder}.`),
   grouped: (timeline) =>

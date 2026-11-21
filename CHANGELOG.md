@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A global shortcut ends a recording shoot from any app (#744): Ctrl+Alt+Shift+S (⌘⌥⇧S on macOS), held only while
+  a session records, so remote help or a person in a call app can stop it while Frameshell's windows are hidden from
+  captures. The Shoot view says so while recording; when another app owns the keys, End stays the only way and no
+  hint shows.
+
 - Cut words in the transcript view: select words and press Delete (or Backspace), use "Cut selected words" on the
   toolbar, or "Cut word" in the word's menu. The words leave the timeline as one undo step, later clips move up, and
   each cut edge sits halfway to the next word so no neighbour loses a syllable. The toolbar hint now wraps instead of

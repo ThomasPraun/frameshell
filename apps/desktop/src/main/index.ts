@@ -18,6 +18,7 @@ import {
   app,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   protocol,
@@ -28,6 +29,7 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
+import { createShootShortcut } from "./shoot-shortcut.js";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
 import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
 import {
@@ -1316,6 +1318,9 @@ function shootDeps(root: string) {
 }
 
 /** Keep the project window and its panel windows out of screen captures while it records (ADR 0024 decision 7). */
+/** The global End shortcut, held while a window records (#744). */
+const shootShortcut = createShootShortcut(globalShortcut);
+
 function protectShoot(state: WindowState, on: boolean): void {
   for (const window of [state.window, ...state.panels.keys()]) if (!window.isDestroyed()) window.setContentProtection(on);
 }
@@ -1326,6 +1331,7 @@ function abandonShoot(state: WindowState): void {
   if (!shoot) return;
   state.shoot = null;
   protectShoot(state, false);
+  shootShortcut.release(state);
   void shootChunks
     .flushed()
     .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
@@ -1501,12 +1507,17 @@ function registerShootIpc(): void {
   );
   ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
     outcome(async () => {
-      const shoot = shootOf(stateOf(event.sender), id);
+      const state = stateOf(event.sender);
+      const shoot = shootOf(state, id);
       await markStarted(shoot.root, shoot.session.id, starts ?? {});
       for (const source of shoot.session.sources) {
         const start = starts?.[source.role];
         if (typeof start === "number" && Number.isFinite(start)) source.start = start;
       }
+      // Ends the session from any app, even with Frameshell's windows hidden from captures.
+      return shootShortcut.hold(state, () => {
+        if (!state.window.isDestroyed()) send(state.window.webContents, Channel.shootEndRequested);
+      });
     }),
   );
   ipcMain.handle(Channel.shootChunk, (event, id: unknown, role: ShootRole, data: Uint8Array) =>
@@ -1522,6 +1533,7 @@ function registerShootIpc(): void {
       const shoot = shootOf(state, id);
       state.shoot = null;
       protectShoot(state, false);
+      shootShortcut.release(state);
       try {
         await shootChunks.flushed();
         return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
