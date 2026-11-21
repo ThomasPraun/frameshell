@@ -72,7 +72,7 @@ import { type MatteBadge, matteBadge, plateChoices } from "../timeline/matte.js"
 import { MediaCache } from "../timeline/media.js";
 import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
-import { type EdgeHit, edgeAt } from "../timeline/transitions.js";
+import { type EdgeHit, edgeAt, transitionRemove, transitionSet } from "../timeline/transitions.js";
 import { type PaintMode, clearEdit, laneAt, paintEdits, shotSpans, unpaintEdits } from "../timeline/turn-lanes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
@@ -808,11 +808,11 @@ function TimelineCanvas({
   /** What a stroke does by the keys held: Alt marks the angle silent, Shift keeps the others, else it takes the floor. */
   const paintMode = (event: { altKey: boolean; shiftKey: boolean }): PaintMode => (event.altKey ? "silent" : event.shiftKey ? "add" : "only");
 
-  /** Right-click on a clip edge: add a dissolve or fade there, or take the transition away (every track with an edge at that time). */
+  /** Right-click on a clip edge: add a dissolve or fade there, or take the transition away (on that edge's track only). */
   const edgeItems = (edge: EdgeHit): MenuItem[] => [
-    { label: t.timeline.addDissolve, run: () => send([{ op: "transition.set", args: { at: edge.at, kind: "dissolve" } }], undefined, { label: "Add dissolve" }) },
-    { label: t.timeline.addFade, run: () => send([{ op: "transition.set", args: { at: edge.at, kind: "fade" } }], undefined, { label: "Add fade" }) },
-    { label: t.timeline.removeTransition, disabled: !edge.hasTransition, run: () => send([{ op: "transition.remove", args: { at: edge.at } }], undefined, { label: "Remove transition" }) },
+    { label: t.timeline.addDissolve, run: () => send([transitionSet(edge.row, edge.at, { kind: "dissolve" })], undefined, { label: "Add dissolve" }) },
+    { label: t.timeline.addFade, run: () => send([transitionSet(edge.row, edge.at, { kind: "fade" })], undefined, { label: "Add fade" }) },
+    { label: t.timeline.removeTransition, disabled: !edge.hasTransition, run: () => send([transitionRemove(edge.row, edge.at)], undefined, { label: "Remove transition" }) },
   ];
 
   /** Right-click on a turn lane: take what was painted there back to the measured turns. */
