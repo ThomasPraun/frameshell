@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
+  it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
+  disappear under a running ffmpeg or Chrome (#790).
+
 - A fade or transition chosen in the clip inspector, or from a clip edge's right-click menu, changes only that clip's
   track. Before, a fade on the music also faded the picture when both started at the same time, with nothing on screen
   saying so (#755).

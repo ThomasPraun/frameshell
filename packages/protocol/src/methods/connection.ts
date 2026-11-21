@@ -224,7 +224,7 @@ export const connectionMethods = {
       "(`ggml-large-v3-turbo-q5_0`, ...), every installed version of it. Names and sizes are in `doctor` `downloads`. " +
       "It downloads again the next time something needs it. Machine-wide, not per project. Never touches a `binaries` " +
       "override, a tool Frameshell does not download (Blender) or a model registered with `model.add`. Fails with " +
-      "BinaryInUse while it installs, while jobs or a transcription run, or while the operating system keeps its files " +
+      "BinaryInUse while it installs, while jobs, a transcription or another request (a frame capture, a clip check) run, or while the operating system keeps its files " +
       "open. Remove only on the person's request: it can mean a large download again. Removing what is not on disk " +
       "succeeds with `removed: false`.",
     params: z.strictObject({
