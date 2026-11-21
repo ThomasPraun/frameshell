@@ -178,6 +178,7 @@ const ui = new UiBridge({
 daemon.on("ui.command", (params) => ui.command(params));
 // ADR 0014: the window focused last is the project MCP calls without `cwd` act on; a panel window counts as its project's.
 app.on("browser-window-focus", (_event, focused) => {
+  lastFocused = focused;
   const state = projectWindowOf(focused);
   if (state) ui.focus(String(state.window.webContents.id));
   void syncKindMenu(state);
@@ -2343,13 +2344,24 @@ function buildMenu(): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-  void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
-  syncReviewMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
+  void syncKindMenu(projectWindowOf(menuWindow()));
+  syncReviewMenu(projectWindowOf(menuWindow()));
+}
+
+/** The window the focus event named last; set before `getFocusedWindow()` says so on some window managers. */
+let lastFocused: BrowserWindow | undefined;
+
+/**
+ * The window the menu follows: the one focused last, else the one Electron reports focused. A rebuild right after a
+ * focus event must not read the window that just lost focus (#754: the video-only items followed the wrong window).
+ */
+function menuWindow(): BrowserWindow | null {
+  return lastFocused && !lastFocused.isDestroyed() ? lastFocused : BrowserWindow.getFocusedWindow();
 }
 
 /** Open project windows for the Window menu, in opening order. */
 function listedWindows() {
-  const focused = BrowserWindow.getFocusedWindow();
+  const focused = menuWindow();
   return [...windows.entries()]
     .filter(([, state]) => !state.window.isDestroyed())
     .map(([id, state]) => ({ id, name: state.project?.name ?? state.window.getTitle(), focused: state.window === focused }));
