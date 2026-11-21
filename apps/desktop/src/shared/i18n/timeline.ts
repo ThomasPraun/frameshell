@@ -10,7 +10,10 @@ const en = {
     `Your version is kept at ${preserved}.\n${message}`,
   dismiss: "Dismiss",
   /** Slot: `{assets}`, the `assets/` folder name. */
-  emptyHint: "Ask the agent in the terminal to cut your footage, or drop media into {assets}.",
+  emptyHint: "Drag a video or sound from Files onto the timeline (or right-click it in {assets}: Add to timeline), or ask the agent in the terminal to cut your footage.",
+  /** Status line after media was put on the timeline from Files; `refused`: file names the daemon refused, with its reason. */
+  mediaAdded: (count: number) => (count === 1 ? "Added 1 clip to the timeline." : `Added ${count} clips to the timeline.`),
+  mediaRefused: (names: string, message: string) => `Could not add ${names}: ${message}`,
   keysLabel: (mac: boolean) => {
     const mod = mac ? "Command" : "Control";
     return (
@@ -167,7 +170,10 @@ const es: typeof en = {
     `Se rechazó la edición de timelines/${timeline}.json (${reason}); se restauró la línea de tiempo. ` +
     `Tu versión se conserva en ${preserved}.\n${message}`,
   dismiss: "Descartar",
-  emptyHint: "Pídele al agente en la terminal que corte tu material, o suelta archivos multimedia en {assets}.",
+  emptyHint:
+    "Arrastra un video o un sonido desde Archivos hasta la línea de tiempo (o haz clic derecho sobre él en {assets}: Agregar a la línea de tiempo), o pídele al agente en la terminal que corte tu material.",
+  mediaAdded: (count) => (count === 1 ? "Se agregó 1 clip a la línea de tiempo." : `Se agregaron ${count} clips a la línea de tiempo.`),
+  mediaRefused: (names, message) => `No se pudo agregar ${names}: ${message}`,
   keysLabel: (mac) => {
     const mod = mac ? "Comando" : "Control";
     return (
