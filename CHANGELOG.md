@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
+  ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
+  person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
+  waits, and a status line entry. Read-only: proposals are still accepted in the app (#798).
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
