@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
+  ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
+  person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
+  waits, and a status line entry. Read-only: proposals are still accepted in the app (#798).
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
@@ -100,12 +104,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transparent canvas, coloured by the style's accent and ink, with hits at set times or on the music's beats
   (`onBeats`), so a sound placed on the same beat lands on the same frame (#802).
 
+- `frameshell analyze` prints a short card first (`card.md`, about 300 tokens): every headline number with its
+  MEASURED, ESTIMATED or DECISION label, then the layers to open next with their size (`shots.md`, one line per shot;
+  `analysis.json`, every value). `--full` prints every value as before; the result gains `card` and `layers` (#801).
+
 ### Fixed
 
 - HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
   The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
   earlier frame when only its parent scaled (#808). The real HyperFrames tests whose projects had no
   `frameshell.json` now write one, as every project has; the whole real suite passes in a container (756 tests).
+- Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
+  instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
+  agent there, as ADR 0048 says (#791).
 - The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
   cloud container), as the producer's renders already do; before, they failed there before drawing anything.
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
