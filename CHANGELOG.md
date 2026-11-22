@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
+  ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
+  person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
+  waits, and a status line entry. Read-only: proposals are still accepted in the app (#798).
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
@@ -90,11 +94,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   three lists (safe to change, changes its character, cannot change), at most five changes a round, one frame first,
   before next to after (#803).
 
+- `frameshell history sound <tx|op>` (MCP `history_sound`) proves a sound edit touched only what it meant to: per
+  track, the time ranges where the level moved 1 dB or more between right before and right after the transaction,
+  whether sound came in, went or changed level, and by how many dB. Measured like the sound review, from each clip's
+  envelope with its gain and fades, never mixed (#803).
+
+- Five particle and light overlays for HyperFrames clips, `fx-sparks`, `fx-confetti`, `fx-glow`, `fx-shockwave` and
+  `fx-rays` (`frameshell hyperframes new <name> --template fx-sparks`): seeded, drawn as a pure function of time on a
+  transparent canvas, coloured by the style's accent and ink, with hits at set times or on the music's beats
+  (`onBeats`), so a sound placed on the same beat lands on the same frame (#802).
+
+- `frameshell analyze` prints a short card first (`card.md`, about 300 tokens): every headline number with its
+  MEASURED, ESTIMATED or DECISION label, then the layers to open next with their size (`shots.md`, one line per shot;
+  `analysis.json`, every value). `--full` prints every value as before; the result gains `card` and `layers` (#801).
+
 ### Fixed
 
 - Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
   instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
   agent there, as ADR 0048 says (#791).
+- The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
+  cloud container), as the producer's renders already do; before, they failed there before drawing anything.
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
   it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
   disappear under a running ffmpeg or Chrome (#790).

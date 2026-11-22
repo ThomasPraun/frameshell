@@ -60,6 +60,7 @@ A track synthesized from a seed: drums, bass, chords, a melody from the minor pe
 - Keep the accents rare: one `braaam` or `sting` per film (on the title or the logo), a `swell` into a chapter cut instead of a noise whoosh, a `bell` or `notify` only on a visible badge or message.
 - Leave at least two real silences before the peak of a film. Never put a noise whoosh on every transition.
 - You cannot listen: check the result's `peakDb` and `rmsDb`, and look at the export with `frameshell review` ([critique.md](critique.md)).
+- **Check that a sound edit touched only what you meant:** after `tx commit`, `frameshell history sound <tx>` (MCP `history_sound`) lists each track whose level moved 1 dB or more in that transaction, with the time ranges, whether sound came in (`added`), went (`removed`) or changed level, and the median and largest move in dB; `unchanged` lists the tracks it left alone. A duck that should only touch the music and also shows the voice track, or a range outside the stretch you meant, is a mistake: revert it and redo. Times are the timeline's: a transaction that moved clips shows sound removed in one place and added in another.
 
 ## Let the person choose by ear
 

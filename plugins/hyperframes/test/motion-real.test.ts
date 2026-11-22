@@ -13,6 +13,7 @@ import { BinaryManager, ClipVerifier } from "@frameshell/core";
 import type { RenderTiming } from "@frameshell/plugin-api";
 import { createHyperframesAdapter } from "../src/index.js";
 import { MOTION_RUNTIME, MOTION_RUNTIME_FILE } from "../src/motion-runtime.js";
+import { TEST_CHROME_ARGS } from "./chrome-args.js";
 
 // Opt-in like render-real (FRAMESHELL_TEST_REAL_HYPERFRAMES=1): a composition painted by the motion runtime
 // (ADR 0033), bound through window.__timelines with no data-no-timeline, rendered and played live in managed Chrome.
@@ -242,7 +243,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("motion 
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
       const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/index.html`;
       // Software compositing, as the producer runs Chrome by default.
-      const browser = await puppeteer.launch({ executablePath: await binaries().ensure("chrome-headless-shell"), args: ["--disable-gpu-compositing"] });
+      const browser = await puppeteer.launch({ executablePath: await binaries().ensure("chrome-headless-shell"), args: ["--disable-gpu-compositing", ...TEST_CHROME_ARGS] });
       try {
         // The background is made transparent once per page, as the producer does: puppeteer's `omitBackground` sets it
         // around every capture, which repaints the whole page and hides the threshold.
