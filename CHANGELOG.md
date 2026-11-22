@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review` writes a card first, as `analyze` does (#801, protocol 190): `card.md` in the run folder holds the
+  `requirements.json` verdict, the craft warnings to fix first and the key numbers, each labelled MEASURED, ESTIMATED or
+  DECISION, in about 300 tokens, then `review.json` and `metrics.json` with their size. `frameshell review` prints the
+  card; `--full` prints every sheet path and number as before. The result carries `card` and `layers`.
+
+- `frameshell clip text-fit <clip> [--props json] [--at s,...]` and daemon method `clip.textFit` (MCP
+  `clip_text_fit`, protocol 188): checks in headless Chrome that every line of text of a generated clip fits its box
+  and the frame, at settled times, with props tried over the clip's own for the check only (another language). Exit 1
+  names the element, its text, side and pixels. The batch skill checks each language's texts with it first (#803).
+
+- Audition dialog, opened on music candidates (a `Music n` track's menu): **Play in the mix** plays the timeline from
+  the playhead, or from where the music starts, with only that candidate heard under the picture and the voice. The
+  other candidates are silenced in the preview only; the timeline's mutes are not changed (#803).
+- A first-run checklist in the status bar of a video project (#787): "Getting started 1/4" opens the four steps from a
+  new project to an exported video (connect your AI, bring footage or record, ask for a cut and correct it, export),
+  each ticked from what the project shows, with Connect… and a "How" link to its page on frameshell.dev. It goes away
+  for good in that project once closed or once every step is done.
 - A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
   ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
   person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
@@ -111,6 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Terminal: closing a tab while its shell runs `exit` no longer leaves the shell running. Bash can catch the hang-up as readline finishes the line; a shell still there after 2 s gets SIGKILL (not Windows).
+- HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
+  The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
+  earlier frame when only its parent scaled (#808). The real HyperFrames tests whose projects had no
+  `frameshell.json` now write one, as every project has; the whole real suite passes in a container (756 tests).
 - Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
   instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
   agent there, as ADR 0048 says (#791).
