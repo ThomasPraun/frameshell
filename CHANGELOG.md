@@ -110,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
+  instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
+  agent there, as ADR 0048 says (#791).
 - The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
   cloud container), as the producer's renders already do; before, they failed there before drawing anything.
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
