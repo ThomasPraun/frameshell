@@ -127,6 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Terminal: closing a tab while its shell runs `exit` no longer leaves the shell running. Bash can catch the hang-up as readline finishes the line; a shell still there after 2 s gets SIGKILL (not Windows).
 - HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
   The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
   earlier frame when only its parent scaled (#808). The real HyperFrames tests whose projects had no
