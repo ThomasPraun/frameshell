@@ -837,10 +837,12 @@ export interface FrameshellApi {
      */
     begin(sources: ShootSourceSpec[]): Promise<string>;
     /**
-     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. Resolves with
-     * whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when another app owns it.
+     * Each recorder's `performance.now()` read right before its `start()`, ms: the sources' offsets. `origin` is the
+     * renderer's `performance.timeOrigin`, so main can put the screen's start on the clock of its pointer track.
+     * Resolves with whether the global End shortcut ({@link SHOOT_END_KEYS}) is held for this session; false when
+     * another app owns it.
      */
-    started(id: string, starts: Partial<Record<ShootRole, number>>): Promise<boolean>;
+    started(id: string, starts: Partial<Record<ShootRole, number>>, origin?: number): Promise<boolean>;
     /** Called when the global End shortcut is pressed while this window records. Returns an unsubscribe function. */
     onEndRequested(listener: () => void): () => void;
     /** Append one recorded chunk of `role` to its file, in call order per role. */

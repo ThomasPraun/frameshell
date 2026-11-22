@@ -471,6 +471,18 @@ export {
   reframeTarget,
 } from "./reframe.js";
 export {
+  type PointerRest,
+  ZOOM,
+  type ZoomGeometry,
+  type ZoomKey,
+  type ZoomPlacement,
+  type ZoomPlan,
+  type ZoomSpan,
+  planZoom,
+  pointerRests,
+  zoomPlacement,
+} from "./zoom.js";
+export {
   type DecoderOutput,
   type PhotoInput,
   type PhotoMask,

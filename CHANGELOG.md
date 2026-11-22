@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Zoom a screen recording to where the action is: Shoot now records the mouse pointer's position while it records a
+  whole screen (a hidden `.screen.pointer.json` next to the screen file), and `frameshell clip zoom <clip> --follow
+  pointer` (MCP `clip_zoom`) pushes in where the pointer rests and eases back out when it moves on, as `scale`, `x`
+  and `y` keys in one transaction. Given the Shoot session's `screen` shot, it places the screen file over the shot
+  (muted, on a new `Screen zoom` track) and zooms that. Only the position is recorded, not clicks (ADR 0049, #797; protocol 192).
 - Desktop: the OpenAI plugins take your key in the Plugins view. Paste it under OpenAI transcription or OpenAI
   voiceover and Save: the app encrypts it with the system keychain (Windows DPAPI, macOS Keychain, Linux Secret
   Service), keeps it in its settings folder, and hands it to its own daemon in memory only while the app is open; the

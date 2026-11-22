@@ -118,9 +118,11 @@ import {
   markScript,
   markStarted,
   recoverable,
+  sessionFolder,
   sessionSounds,
   unfinishedSessions,
 } from "./shoot-session.js";
+import { PointerRecorder, pointerTrack, writePointerTrack } from "./shoot-pointer.js";
 import { TimelineEditor } from "./timeline-editor.js";
 import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
@@ -291,7 +293,9 @@ interface WindowState {
    */
   closingPanels: boolean;
   /** Shoot session recording in this window (ADR 0024), with the project it records into; null when none. */
-  shoot: { root: string; session: SessionState } | null;
+  shoot: { root: string; session: SessionState; pointer?: PointerRecorder } | null;
+  /** `display_id` of the screen the window's last `getDisplayMedia` captured; null for a window or the stand-in. */
+  capturedDisplay: string | null;
   /** Sessions of the shown project finished without an End since it opened (crash recovery), oldest first. */
   recoveredShoots: ShootFinish[];
   /** What the window's next `getDisplayMedia` captures (`shoot.pickScreen`); null denies it. */
@@ -346,6 +350,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     shoot: null,
     recoveredShoots: [],
     pickedScreen: null,
+    capturedDisplay: null,
     terminals: new TerminalManager({
       onData: (id, data) => send(contents, Channel.terminalData, id, data),
       onExit: (id, code) => send(contents, Channel.terminalExit, id, code),
@@ -1473,8 +1478,8 @@ function abandonShoot(state: WindowState): void {
   state.shoot = null;
   protectShoot(state, false);
   shootShortcut.release(state);
-  void shootChunks
-    .flushed()
+  void savePointer(shoot)
+    .then(() => shootChunks.flushed())
     .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
     .then((finish) => {
       if (state.project?.dir !== shoot.root) return;
@@ -1504,8 +1509,29 @@ async function recoverShoots(state: WindowState, root: string): Promise<void> {
   }
 }
 
+/** Screen-clock start (wall-clock ms) of each pointer recorder's screen file. */
+const pointerStarts = new WeakMap<PointerRecorder, number>();
+
+/** Bounds of the display `displayId` names (`desktopCapturer` `display_id`); the only display when the id is empty. */
+function capturedBounds(displayId: string | null): Electron.Rectangle | null {
+  if (displayId === null) return null;
+  const displays = screen.getAllDisplays();
+  const found = displays.find((display) => String(display.id) === displayId) ?? (displayId === "" && displays.length === 1 ? displays[0] : undefined);
+  return found?.bounds ?? null;
+}
+
+/** Stop the session's pointer recorder and write its track next to the screen file; a failure only loses the track. */
+async function savePointer(shoot: { root: string; session: SessionState; pointer?: PointerRecorder }): Promise<void> {
+  const recorder = shoot.pointer;
+  const screenSource = shoot.session.sources.find((source) => source.role === "screen");
+  const start = recorder ? pointerStarts.get(recorder) : undefined;
+  if (!recorder || !screenSource || start === undefined) return;
+  recorder.stop();
+  await writePointerTrack(shoot.root, sessionFolder(shoot.session.id), screenSource.file, pointerTrack(recorder.readings, start, recorder.bounds)).catch(() => undefined);
+}
+
 /** The window's recording session `id`; throws for any other id, so the renderer can only write its own files. */
-function shootOf(state: WindowState, id: unknown): { root: string; session: SessionState } {
+function shootOf(state: WindowState, id: unknown): NonNullable<WindowState["shoot"]> {
   if (!isSessionId(id) || state.shoot?.session.id !== id) throw new Error("No such shoot session is recording in this window.");
   return state.shoot;
 }
@@ -1524,7 +1550,10 @@ async function answerDisplayMedia(
   const contents = request.frame ? webContents.fromFrame(request.frame) : undefined;
   const state = contents ? (windows.get(contents.id) ?? panelOwners.get(contents.id)) : undefined;
   const pick = state?.pickedScreen ?? null;
-  if (state) state.pickedScreen = null;
+  if (state) {
+    state.pickedScreen = null;
+    state.capturedDisplay = null;
+  }
   if (!pick || !request.frame) return callback({});
   if (SHOOT_STAND_IN) return callback({ video: request.frame });
   try {
@@ -1535,6 +1564,8 @@ async function answerDisplayMedia(
     const away = pick.id && awayName !== undefined ? { id: pick.id, name: awayName } : undefined;
     const source = listed ?? away;
     if (!source) return callback({});
+    // Only a whole screen gets a pointer track: a window moves under the pointer (ADR 0049).
+    if (state && listed?.id.startsWith("screen:")) state.capturedDisplay = listed.display_id;
     callback(pick.systemAudio ? { video: source, audio: "loopback" } : { video: source });
   } catch {
     callback({});
@@ -1646,7 +1677,7 @@ function registerShootIpc(): void {
       return created.id;
     }),
   );
-  ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
+  ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>, origin: unknown) =>
     outcome(async () => {
       const state = stateOf(event.sender);
       const shoot = shootOf(state, id);
@@ -1654,6 +1685,11 @@ function registerShootIpc(): void {
       for (const source of shoot.session.sources) {
         const start = starts?.[source.role];
         if (typeof start === "number" && Number.isFinite(start)) source.start = start;
+      }
+      const bounds = capturedBounds(stateOf(event.sender).capturedDisplay);
+      if (bounds && typeof origin === "number" && Number.isFinite(origin) && typeof starts?.screen === "number" && !shoot.pointer) {
+        shoot.pointer = new PointerRecorder(bounds, () => screen.getCursorScreenPoint(), () => performance.timeOrigin + performance.now());
+        pointerStarts.set(shoot.pointer, origin + starts.screen);
       }
       // Ends the session from any app, even with Frameshell's windows hidden from captures.
       return shootShortcut.hold(state, () => {
@@ -1676,6 +1712,7 @@ function registerShootIpc(): void {
       protectShoot(state, false);
       shootShortcut.release(state);
       try {
+        await savePointer(shoot);
         await shootChunks.flushed();
         return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
       } finally {

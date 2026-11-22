@@ -375,6 +375,14 @@ export {
   shootSlug,
 } from "./shoot.js";
 export {
+  POINTER_SAMPLE_HZ,
+  PointerTrackSchema,
+  type PointerSample,
+  type PointerTrack,
+  parsePointerTrack,
+  pointerFileOf,
+} from "./pointer.js";
+export {
   PLUGIN_MANIFEST_FILE,
   PLUGIN_MANIFEST_SCHEMA_URL,
   BUILTIN_COMMANDS,

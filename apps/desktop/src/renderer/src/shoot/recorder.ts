@@ -427,7 +427,7 @@ export function createShootRecorder() {
         origin = Math.min(...Object.values(starts));
         sessionWatch = store.watchLevel();
         set({ phase: "recording", startedAt: performance.now(), quiet: false });
-        set({ endShortcut: await api().started(opened, starts) });
+        set({ endShortcut: await api().started(opened, starts, performance.timeOrigin) });
       } catch (error) {
         set({ error: message(error) });
         if (session) await store.end();
