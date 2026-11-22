@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frameshell clip text-fit <clip> [--props json] [--at s,...]` and daemon method `clip.textFit` (MCP
+  `clip_text_fit`, protocol 188): checks in headless Chrome that every line of text of a generated clip fits its box
+  and the frame, at settled times, with props tried over the clip's own for the check only (another language). Exit 1
+  names the element, its text, side and pixels. The batch skill checks each language's texts with it first (#803).
+
 - Audition dialog, opened on music candidates (a `Music n` track's menu): **Play in the mix** plays the timeline from
   the playhead, or from where the music starts, with only that candidate heard under the picture and the voice. The
   other candidates are silenced in the preview only; the timeline's mutes are not changed (#803).

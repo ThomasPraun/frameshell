@@ -72,6 +72,8 @@ export const PROBE_MAX_ELEMENTS = 10;
  *   nothing paints there.
  * - `element(selector)`: the first element matching `selector`, as a
  *   {@link MovableElement}; null when none does or it is not valid.
+ * - `selector(element)`: the selector {@link ProbedElement.selector} names
+ *   `element` by, for other page scripts (`clip.textFit`).
  *
  * An element paints when it is visible (no `display: none`, `visibility:
  * hidden` or zero opacity on it or an ancestor) and draws something itself:
@@ -218,7 +220,8 @@ export const PROBE_SCRIPT = `(function () {
       var element = null;
       try { element = document.querySelector(selector); } catch (error) { element = null; }
       return element ? movable(element) : null;
-    }
+    },
+    selector: selector
   };
 })();`;
 

@@ -392,6 +392,7 @@ export {
   type RenderedClip,
 } from "./clips/renderer.js";
 export { ClipVerifier, type ClipVerifyOptions } from "./clips/verify.js";
+export { type MeasuredText, TEXT_FIT_SCRIPT, TextFitChecker, type TextFitOptions, textFitProblems, textFitTimes } from "./clips/text-fit.js";
 export { type MeasureRequest, type MeasureSource, type MeasuredAngles, measureAngles, resolveSoundOf, syncReport } from "./multicam/measure.js";
 export { type GroupTurns, type SpeakerSource, type TurnsSource, type TurnsTranscript, groupTurns } from "./multicam/group-turns.js";
 export {
