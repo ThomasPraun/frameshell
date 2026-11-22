@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A first-run checklist in the status bar of a video project (#787): "Getting started 1/4" opens the four steps from a
+  new project to an exported video (connect your AI, bring footage or record, ask for a cut and correct it, export),
+  each ticked from what the project shows, with Connect… and a "How" link to its page on frameshell.dev. It goes away
+  for good in that project once closed or once every step is done.
 - A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
   ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
   person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
