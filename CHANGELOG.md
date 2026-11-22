@@ -110,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Terminal: closing a tab while its shell runs `exit` no longer leaves the shell running. Bash can catch the hang-up as readline finishes the line; a shell still there after 2 s gets SIGKILL (not Windows).
 - Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
   instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
   agent there, as ADR 0048 says (#791).
