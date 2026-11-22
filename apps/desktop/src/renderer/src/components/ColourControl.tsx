@@ -1,6 +1,6 @@
 import type { LogHint } from "@frameshell/schema";
 import { GRADE_LIMITS, type NormalizedGrade, logFootageHint } from "@frameshell/schema/grade";
-import { GRADE_LOOKS } from "@frameshell/schema/grade-looks";
+import { GRADE_LOOKS, lookOf } from "@frameshell/schema/grade-looks";
 import { useEffect, useState } from "react";
 import type { EditOptions, TimelineEdit } from "../../../shared/api.js";
 import { cubeFiles } from "../grade/luts.js";
@@ -26,6 +26,9 @@ const LABELS: Record<SliderName, () => { label: string; title: string; unit: str
   saturation: () => ({ label: t.inspector.gradeSaturation, title: t.inspector.gradeSaturationTitle, unit: "" }),
   lutMix: () => ({ label: t.inspector.gradeLutMix, title: t.inspector.gradeLutMixTitle, unit: "" }),
 };
+
+/** Select value of a grade that is no built-in look (numbers adjusted, or set by hand). */
+const CUSTOM_LOOK = "custom";
 
 const NEUTRAL: NormalizedGrade = {
   exposure: GRADE_LIMITS.exposure.default,
@@ -62,6 +65,9 @@ export function ColourControl({
   const set = (fields: Record<string, unknown>) => onSend({ op: "clip.set", args: { clip, grade: fields } }, { label: "Change grade" });
   // A LUT the project no longer holds stays listed, so the select shows what the clip stores.
   const choices = shown.lut !== null && !luts.includes(shown.lut) ? [...luts, shown.lut].sort() : luts;
+  // The look the clip carries stays selected (#746); numbers moved after it read "Adjusted", no grade the prompt.
+  const neutral = SLIDERS.every(({ name }) => shown[name] === NEUTRAL[name]);
+  const look = lookOf(grade)?.name ?? (neutral ? "" : CUSTOM_LOOK);
   return (
     <div className="clip-inspector-group colour-grade" role="group" aria-label={t.inspector.colour}>
       <span className="colour-grade-head">
@@ -86,13 +92,18 @@ export function ColourControl({
           className="clip-field-select"
           aria-label={t.inspector.gradeLook}
           data-testid="grade-look"
-          value=""
+          value={look}
           onChange={(event) => {
             const look = GRADE_LOOKS.find((entry) => entry.name === event.target.value);
             if (look) onSend({ op: "clip.set", args: { clip, grade: { ...look.grade } } }, { label: "Apply look" });
           }}
         >
           <option value="">{t.inspector.gradeLookChoose}</option>
+          {look === CUSTOM_LOOK && (
+            <option value={CUSTOM_LOOK} disabled>
+              {t.inspector.gradeLookCustom}
+            </option>
+          )}
           {GRADE_LOOKS.map((look) => (
             <option key={look.name} value={look.name}>
               {t.inspector.gradeLooks[look.name] ?? look.name}

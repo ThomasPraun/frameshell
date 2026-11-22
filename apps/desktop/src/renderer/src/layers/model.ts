@@ -33,10 +33,13 @@ export function layersOf(view: TimelineView): Layer[] {
     .reverse();
 }
 
-/** Name to show for `layer`: its track name, else its file's name, else its clip type. */
+/** Name to show for `layer`: its track name, else its file's name without the extension (as a new layer is named), else its clip type. */
 export function layerLabel(layer: Layer): string | null {
   if (layer.name) return layer.name;
-  if (layer.asset) return layer.asset.split("/").pop() ?? layer.asset;
+  if (layer.asset) {
+    const file = layer.asset.split("/").pop() ?? layer.asset;
+    return file.replace(/(.)\.[^.]+$/, "$1");
+  }
   const source = layer.clip?.["source"];
   return typeof source === "string" ? (source.split("/").pop() ?? source) : null;
 }
@@ -53,4 +56,13 @@ export function moveLayer(view: TimelineView, track: string, direction: 1 | -1):
     if (view.tracks[at]!.kind === "video") return { op: "track.set", args: { track, index: at } };
   }
   return null;
+}
+
+/**
+ * How big an untransformed picture of `size` shows in a `frame`, against its own pixels: the fit that letterboxes it
+ * (`layerRect`). Null while the picture's size is unknown (the inspector then shows the fit-relative scale).
+ */
+export function fitOf(size: { width: number; height: number } | null, frame: { width: number; height: number }): number | null {
+  if (!size || size.width <= 0 || size.height <= 0) return null;
+  return Math.min(frame.width / size.width, frame.height / size.height);
 }

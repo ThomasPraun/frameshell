@@ -18,9 +18,10 @@ import {
   app,
   desktopCapturer,
   dialog,
+  globalShortcut,
   ipcMain,
-  nativeImage,
   protocol,
+  safeStorage,
   screen,
   session,
   shell,
@@ -28,8 +29,11 @@ import {
   webContents,
 } from "electron";
 import { BinaryManager } from "@frameshell/core/binaries";
+import { showsDevItems, windowListItems } from "./window-menu.js";
+import { createShootShortcut } from "./shoot-shortcut.js";
 import { ErrorCode, RpcError, officialPlugin, officialPluginProviding, resolveAppDirs, resolveSocketPath } from "@frameshell/protocol";
-import type { MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
+import type { EventParams, MethodResult, Progress, TimelineRejection, TimelineViewName, UiView } from "@frameshell/protocol";
+import { BUILTIN_FORMAT_IDS } from "@frameshell/schema/formats";
 import {
   type AssetChange,
   Channel,
@@ -48,6 +52,7 @@ import {
   type TranscribeProgress,
   type TranscribeRun,
   type VoiceoverProgress,
+  type VoiceoverPlaceRun,
   type VoiceoverRun,
   type PeopleChange,
   type PersonTarget,
@@ -67,6 +72,7 @@ import {
   type AudioOrientation,
   type IdeaBrief,
   type VideoProjectPlan,
+  type WelcomeStart,
 } from "../shared/api.js";
 import { type Dict, LANGUAGES, strings } from "../shared/i18n/index.js";
 import { type DetachablePanel, type Layout, normalizeLayout } from "../shared/layout.js";
@@ -86,8 +92,9 @@ import { captureContextFrame } from "./context-frames.js";
 import { describeProgress } from "./setup-progress.js";
 import { helperDaemonLauncher } from "./daemon-launcher.js";
 import { DaemonLink, type LinkSubscription } from "./daemon-link.js";
+import { OpenAiKeyStore, STAND_IN_CIPHER } from "./openai-key.js";
 import { detectAgents, extraAgentDirs, loginShellPath, startCommand } from "./agent-catalog.js";
-import { aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
+import { aiAppStatus, aiApps, aiAppsPlace, changeAiApp } from "./ai-apps.js";
 import { type Launcher, openDesktopApp, standInLauncher, systemLauncher } from "./desktop-apps.js";
 import { editMenu } from "./edit-menu.js";
 import { type LanguageChoice, readLanguageChoice, uiLanguage, writeLanguageChoice } from "./language.js";
@@ -119,14 +126,16 @@ import { TerminalManager } from "./terminals.js";
 import { projectPathOf, trashDetail, trashRefusal } from "./trash.js";
 import { type TranscribeAsk, formatLength, runTranscribe, transcribePrice } from "./transcribe-ask.js";
 import { type DownloadChoice, chooseDownload } from "./transcription-download.js";
-import { APP_TRANSCRIPTION_PROVIDER, canceledRun, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
+import { APP_TRANSCRIPTION_PROVIDER, canceledRun, missingVoice, placeRefusal, progressOf, runVoiceover, startOf, verifyPlanOf } from "./voiceover.js";
 import { UiBridge } from "./ui-bridge.js";
-import { FRAME_IMAGE_SIZES, imageFromFrame } from "./frame-image.js";
-import { type ImageLayersDeps, addImageLayers } from "./image-layers.js";
+import { frameImageChoices, imageFromFrame } from "./frame-image.js";
+import { exportsFolder, imageExportPath } from "./export-paths.js";
+import { type ImageLayersDeps, addImageLayers, layerScale } from "./image-layers.js";
+import { imageFileSize } from "./image-size.js";
 import { type TimelineMediaDeps, addMediaClips } from "./timeline-media.js";
 import { IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, START_EXTENSIONS, isAudioFile, isImageFile, partitionFiles } from "./media-files.js";
 import { launchPaths, pathBatcher } from "./open-paths.js";
-import { checkIdea, formatSize, planIdeaProject } from "./idea-project.js";
+import { BRIEF_FILE, briefMarkdown, checkIdea, formatSize, parseBrief, planIdeaProject } from "./idea-project.js";
 import { planVideoProject, projectName } from "./video-project.js";
 import { replaceClipImage } from "./replace-image.js";
 import { type FrameSize, addAudioBackground, renderBackgroundTo } from "./audio-background.js";
@@ -134,6 +143,9 @@ import { stopStaleDaemon, versionChanged } from "./stale-daemon.js";
 import { UpdatePreferences, updateMode } from "./update-check.js";
 import { Updater } from "./updater.js";
 
+// The app's name in native boxes and the Windows taskbar: the package name otherwise (#742). userData is set
+// explicitly below, so the name does not move it.
+app.setName("Frameshell");
 // One resolver for all user-level storage: Electron state (Chromium profile, layouts, recents, CLI shim) is data.
 app.setPath("userData", join(resolveAppDirs(process.env).dataDir, "desktop"));
 // One packaged app per user data dir: a second launch (Open with, a click in Explorer) hands its files to this one
@@ -145,8 +157,21 @@ const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
 // Spawning the daemon reuses process.execPath (Electron): run it as plain Node. Spawned from a utility process so it
 // never holds this process's stdio handles.
+// ADR 0050: the OpenAI key typed in Plugins, encrypted by the OS; e2e has no keyring and uses a stand-in.
+const openAiKey = new OpenAiKeyStore(
+  join(resolveAppDirs(process.env).configDir, "openai-key.bin"),
+  () => (process.env.FRAMESHELL_KEYCHAIN_STAND_IN === "1" ? STAND_IN_CIPHER : safeStorage),
+  process.env,
+  () => text.plugins.key,
+);
 const daemon = new DaemonLink({
   socketPath,
+  // Every new connection (a restarted daemon too) gets the saved key, in memory only; the environment wins.
+  onConnected: async (conn) => {
+    await app.whenReady();
+    const key = await openAiKey.read();
+    if (key !== null) await conn.request("credentials.provide", { name: "OPENAI_API_KEY", value: key });
+  },
   client: `desktop/${APP_VERSION}`,
   env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   launch: helperDaemonLauncher(() =>
@@ -170,6 +195,7 @@ const ui = new UiBridge({
 daemon.on("ui.command", (params) => ui.command(params));
 // ADR 0014: the window focused last is the project MCP calls without `cwd` act on; a panel window counts as its project's.
 app.on("browser-window-focus", (_event, focused) => {
+  lastFocused = focused;
   const state = projectWindowOf(focused);
   if (state) ui.focus(String(state.window.webContents.id));
   void syncKindMenu(state);
@@ -257,6 +283,8 @@ interface WindowState {
   startDir: string | undefined;
   /** Videos the OS asked to open, waiting for the welcome screen to take them; null when none. */
   offered: VideoProjectPlan | null;
+  /** A File menu "New …" the welcome screen still has to start (#740); null when none. */
+  welcomeStart: WelcomeStart | null;
   /**
    * The project window is closing or reloading: its panel windows close
    * with it but stay detached, so they open again with the project.
@@ -313,6 +341,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     panels: new Map(),
     startDir: projectDir,
     offered: null,
+    welcomeStart: null,
     closingPanels: false,
     shoot: null,
     recoveredShoots: [],
@@ -328,6 +357,8 @@ function createWindow(projectDir?: string): BrowserWindow {
     }),
   };
   windows.set(contents.id, state);
+  rebuildMenuSoon();
+  window.on("focus", rebuildMenuSoon);
 
   // Links (xterm web links) open in the browser; the app window never navigates away. The one popup allowed is a
   // detached panel's blank window (ADR 0012), sandboxed like this one, without a preload.
@@ -365,6 +396,7 @@ function createWindow(projectDir?: string): BrowserWindow {
     revokeLive(state);
     ui.detach(String(contents.id));
     windows.delete(contents.id);
+    rebuildMenuSoon();
   });
 
   const fail = (error: unknown) => dialog.showErrorBox("Frameshell", String((error as Error)?.message ?? error));
@@ -539,6 +571,18 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
       onEvent: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
       onResync: () => send(contents, Channel.timelineChanged, { timeline: null } satisfies TimelineChange),
     }),
+    // #742: a transcription the app did not start (CLI, agent, Transcript view) shows in the status bar too.
+    daemon.subscribe("transcription.progress", project.dir, {
+      onEvent: (update) => showOtherTranscription(project.dir, update),
+      onResync: () => {
+        if (!otherTranscriptions.has(project.dir)) return;
+        otherTranscriptions.delete(project.dir);
+        setups.delete(project.dir);
+        for (const state of windows.values()) {
+          if (state.project?.dir === project.dir) send(state.window.webContents, Channel.projectSetupChanged, null);
+        }
+      },
+    }),
     // ADR 0025: "Chat about this" lists the agents outside the app's terminals and says when they read.
     daemon.subscribe("target.changed", project.dir, {
       onEvent: ({ project: _project, ...change }) => send(contents, Channel.agentsTargetsChanged, change satisfies TargetsChange),
@@ -551,6 +595,7 @@ async function openInWindow(state: WindowState, dir: string): Promise<OpenOutcom
   state.project = project;
   state.recoveredShoots = [];
   state.window.setTitle(`${project.name} — Frameshell`);
+  rebuildMenuSoon();
   void recoverShoots(state, project.dir);
   if (BrowserWindow.getFocusedWindow() === state.window) void syncKindMenu(state);
   void readReview(project.dir).then(() => BrowserWindow.getFocusedWindow() === state.window && syncReviewMenu(state));
@@ -632,23 +677,18 @@ async function pickFrameImageSize(window: BrowserWindow, dir: string): Promise<F
   const said = text.app.dialogs;
   const config = await projectConfig(dir);
   const own = config.resolution ?? { width: 1920, height: 1080 };
-  const sizes = [FRAME_IMAGE_SIZES.thumbnail, own, FRAME_IMAGE_SIZES.square, FRAME_IMAGE_SIZES.vertical];
+  const choices = frameImageChoices(own);
+  const label = { thumbnail: said.thumbnailSize, own: said.videoSize(own.width, own.height), square: said.squareSize, vertical: said.verticalSize };
   const { response } = await dialog.showMessageBox(window, {
     type: "question",
     message: said.imageFromFrame,
     detail: said.imageFromFrameDetail,
-    buttons: [
-      said.thumbnailSize,
-      said.videoSize(own.width, own.height),
-      said.squareSize,
-      said.verticalSize,
-      said.cancel,
-    ],
+    buttons: [...choices.map((choice) => label[choice.kind]), said.cancel],
     defaultId: 0,
-    cancelId: 4,
+    cancelId: choices.length,
     noLink: true,
   });
-  return sizes[response];
+  return choices[response]?.size;
 }
 
 /** Where to save an exported image, starting at `defaultPath`; the format follows the extension chosen. */
@@ -672,9 +712,6 @@ async function pickVideoExport(window: BrowserWindow, defaultPath: string): Prom
   const result = await dialog.showSaveDialog(window, { title: said.exportVideo, defaultPath, filters: [{ name: said.videoFile, extensions: ["mp4"] }] });
   return result.canceled ? undefined : result.filePath;
 }
-
-/** Files the app's Export video wrote this run: the only ones `timelineRevealExport` shows. */
-const exportedVideos = new Set<string>();
 
 /** Where to save an editor hand-off file of `kind`, starting at `defaultPath`. */
 async function pickHandoffExport(window: BrowserWindow, kind: HandoffKind, defaultPath: string): Promise<string | undefined> {
@@ -727,6 +764,9 @@ async function createFromVideos(
     if (transcribe && assets.length > 0 && !plan.imageOnly) {
       const background = plan.audioOnly ? { title: plan.name, size: AUDIO_FRAMES[orientation] } : undefined;
       void setUpTranscription(plan.dir, assets, background);
+    } else if (plan.audioOnly && assets.length > 0) {
+      // Audio without a transcript gets no background or subtitles: say why the picture stays empty.
+      reportSetup(plan.dir, { message: text.app.setup.transcriptionSkippedAudio, detail: null, fraction: null, state: "done" });
     }
     return opened;
   } catch (error) {
@@ -734,8 +774,8 @@ async function createFromVideos(
   }
 }
 
-/** Briefs of projects made from an idea, by project folder, until the project's window takes them. */
-const ideas = new Map<string, IdeaBrief>();
+/** Files this app exported (videos, images, hand-off files): the ones "Show in folder" may reveal (#738, #749). */
+const written = new Set<string>();
 
 /** Folder new ideas go in unless the person picks another: the OS videos folder. */
 function ideaParent(parent?: string): string {
@@ -744,16 +784,17 @@ function ideaParent(parent?: string): string {
 
 /**
  * Create the empty project of an idea and open it. The first format sets the project's size, the other
- * ones go in with `format.add`, so they are journaled like any format change (ADR 0027, 0036).
+ * ones go in with `format.add`, so they are journaled like any format change (ADR 0027, 0036). The brief is
+ * kept in the project as {@link BRIEF_FILE} (#752), written by the daemon: it outlives a restart, and the agent reads it.
  */
 async function createFromIdea(state: WindowState, raw: IdeaBrief, parent?: string): Promise<OpenOutcome> {
   try {
-    const brief = checkIdea(raw);
-    const plan = await planIdeaProject({ parent: ideaParent(parent), name: brief.name });
+    const brief = checkIdea(raw, text.welcome);
+    const plan = await planIdeaProject({ parent: ideaParent(parent), name: brief.name }, text.welcome.untitledVideo);
     const [primary, ...others] = brief.formats;
     await daemon.request("project.init", { dir: plan.dir, name: plan.name, resolution: formatSize(primary ?? "16x9") });
     for (const id of others) await daemon.request("format.add", { cwd: plan.dir, id });
-    ideas.set(plan.dir, brief);
+    await daemon.request("file.write", { path: join(plan.dir, BRIEF_FILE), content: briefMarkdown(brief) });
     return await openFromWindow(state, plan.dir);
   } catch (error) {
     return { status: "error", message: (error as Error).message };
@@ -766,7 +807,7 @@ async function projectConfig(dir: string): Promise<{ resolution?: FrameSize; kin
 }
 
 /** Menu items of video projects only (ADR 0017): an image project's window disables them. */
-const VIDEO_MENU_ITEMS = ["view-transcript", "image-from-frame", "export-video", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
+const VIDEO_MENU_ITEMS = ["view-transcript", "view-shoot", "view-teleprompter", "image-from-frame", "export-video", ...HANDOFF_KINDS.map((kind) => HANDOFFS[kind].menuId)];
 
 /** Enable the video-only menu items for the project in `state`'s window, the focused one. */
 async function syncKindMenu(state: WindowState | undefined): Promise<void> {
@@ -807,18 +848,15 @@ function syncReviewMenu(state: WindowState | undefined): void {
   item.checked = state?.project ? (reviewSwitch.get(state.project.dir) ?? false) : false;
 }
 
-/** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read by Electron. */
+/** What {@link addImageLayers} needs, for the project at `dir`: its frame size, and image sizes read from the files' headers. */
 async function imageLayerDeps(dir: string): Promise<ImageLayersDeps> {
   const config = await projectConfig(dir);
   return {
     request: (method, params) => daemon.request(method, params),
     alone: (work) => editor.alone(work),
     resolution: config.resolution ?? { width: 1920, height: 1080 },
-    // nativeImage reads PNG and JPEG everywhere; another format reads as empty, and that layer fits the frame.
-    imageSize: (asset) => {
-      const size = nativeImage.createFromPath(join(dir, ...asset.split("/"))).getSize();
-      return size.width > 0 && size.height > 0 ? size : null;
-    },
+    // PNG, JPEG, GIF and WebP alike (nativeImage reads PNG and JPEG only); an unreadable one fits the frame.
+    imageSize: (asset) => imageFileSize(join(dir, ...asset.split("/"))),
   };
 }
 
@@ -866,6 +904,30 @@ async function ensureTranscriptionPlugin(dir: string): Promise<void> {
   }
 }
 
+/** Bytes the photo model (Pick in image projects, ADR 0022) still downloads: MobileSAM's encoder and decoder. */
+async function segmentDownload(): Promise<number> {
+  let bytes = 0;
+  for (const id of SEGMENT_MODELS) {
+    const model = await binaries.locateModel(id).catch(() => null);
+    if (model && !model.installed) bytes += model.pinned.size;
+  }
+  return bytes;
+}
+
+/** Managed model ids of photo segmentation (`docs/binaries.md` "Photo segmentation"). */
+const SEGMENT_MODELS = ["mobilesam-encoder", "mobilesam-decoder"] as const;
+
+/**
+ * Bytes a new project still downloads before it transcribes with the built-in provider: `whisper-cli` and the default
+ * model, from the machine's global binaries (#742). The project form shows it next to its "Transcribe" box.
+ */
+async function newProjectTranscriptionDownload(): Promise<number> {
+  const tool = await binaries.locate("whisper-cli");
+  const toolBytes = tool.installed ? 0 : (tool.pinned?.archives.reduce((total, archive) => total + archive.size, 0) ?? 0);
+  const model = await binaries.locateModel(`ggml-${WHISPER_DEFAULT_MODEL}`).catch(() => null);
+  return toolBytes + (model && !model.installed ? model.pinned.size : 0);
+}
+
 /** Bytes whisper-cpp still downloads in the project at `dir` before it transcribes: `whisper-cli` and its model. */
 async function transcriptionDownload(dir: string): Promise<number> {
   const tool = await binaries.locate("whisper-cli", { dir, binaries: await projectBinaries(dir) });
@@ -875,6 +937,33 @@ async function transcriptionDownload(dir: string): Promise<number> {
   const model = await binaries.locateModel(`ggml-${project?.effective ?? WHISPER_DEFAULT_MODEL}`).catch(() => null);
   return toolBytes + (model && !model.installed ? model.pinned.size : 0);
 }
+/** The `transcription.progress` run the status bar shows, by project dir, while it is one the app did not start itself. */
+const otherTranscriptions = new Map<string, string>();
+
+/**
+ * Show a `transcribe` run of the project at `dir` in its status bar, unless a setup of the app is running there (that
+ * setup already shows its own run, with its own words). One run at a time: a second one waits until the first ends.
+ */
+function showOtherTranscription(dir: string, update: EventParams<"transcription.progress">): void {
+  const shown = otherTranscriptions.get(dir);
+  if (shown === undefined && setups.get(dir)?.state === "running") return;
+  if (shown !== undefined && shown !== update.id) return;
+  const said = text.app.setup;
+  const name = update.asset.split("/").pop() ?? update.asset;
+  if (update.state === "running") {
+    otherTranscriptions.set(dir, update.id);
+    reportSetup(dir, { message: `${name}: ${describeProgress(update, said.progress)}`, detail: null, fraction: update.fraction ?? null, state: "running" });
+    return;
+  }
+  otherTranscriptions.delete(dir);
+  reportSetup(
+    dir,
+    update.state === "done"
+      ? { message: said.transcribed(name), detail: null, fraction: null, state: "done" }
+      : { message: said.transcribeFailed(name), detail: update.message, fraction: null, state: "failed" },
+  );
+}
+
 /** Setup of each project created from videos, by project dir, while it runs and as it ended. */
 const setups = new Map<string, ProjectSetup>();
 
@@ -965,16 +1054,8 @@ async function setUpTranscription(dir: string, assets: string[], background?: { 
   let failure = said.downloadFailed;
   try {
     running(said.starting);
+    // The form asked already (its "Transcribe" box, with the download size): one question, never a second box (#742).
     const parent = [...windows.values()].find((state) => state.project?.dir === dir)?.window;
-    const choice = await chooseDownload(await transcriptionDownload(dir), (bytes) => {
-      running(said.waitingForDownloadAnswer);
-      return askDownload(parent, bytes);
-    });
-    if (choice === "skip") {
-      reportSetup(dir, { message: background ? said.transcriptionSkippedAudio : said.transcriptionSkipped, detail: null, fraction: null, state: "done" });
-      return;
-    }
-    running(said.starting);
     await ensureTranscriptionPlugin(dir);
     for (const asset of assets) {
       failure = said.transcribeFailed(name(asset));
@@ -1028,7 +1109,22 @@ function showProject(dir: string): void {
 
 /** A window on the welcome screen with nothing pending: where what the OS opens goes first. */
 function welcomeWindow(): WindowState | undefined {
-  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered);
+  return [...windows.values()].find((state) => !state.project && !state.startDir && !state.offered && !state.welcomeStart);
+}
+
+/**
+ * Show the welcome screen (#740): in a window already on it, else a new one; with `start`, it begins that way of
+ * making a project at once (File > New Project from Video…, New Video from an Idea…).
+ */
+function showWelcome(start: WelcomeStart | null): void {
+  const target = welcomeWindow() ?? windows.get(createWindow().webContents.id);
+  if (!target) return;
+  if (start) {
+    target.welcomeStart = start;
+    send(target.window.webContents, Channel.projectStartOffered);
+  }
+  if (target.window.isMinimized()) target.window.restore();
+  target.window.focus();
 }
 
 /**
@@ -1102,6 +1198,12 @@ async function outcome<T>(work: () => Promise<T>): Promise<Outcome<T>> {
   }
 }
 
+/** A speech provider as the person reads it: the official plugin's title when one provides it, else its id. */
+function speechProviderName(id: string): string {
+  const official = officialPluginProviding("speech-provider", id);
+  return (official && text.plugins.about[official.name]?.title) || id;
+}
+
 /**
  * Voiceover in the app (ADR 0034 decisions 20 and 22): generate with progress and Cancel, the misread check only where it
  * needs no download nobody agreed to, and place the takes on the main timeline. The renderer shows it all; the cost
@@ -1120,7 +1222,7 @@ function registerVoiceoverIpc(): void {
       return verifyPlanOf({ provider, pluginInstalled, bytes });
     }),
   );
-  ipcMain.handle(Channel.voiceoverGenerate, (event, path: string, verify: boolean) =>
+  ipcMain.handle(Channel.voiceoverGenerate, (event, path: string, verify: boolean, provider: unknown) =>
     outcome(async (): Promise<VoiceoverRun> => {
       const dir = await dirOf(event.sender);
       const said = text.app.dialogs;
@@ -1131,14 +1233,21 @@ function registerVoiceoverIpc(): void {
           (confirmed) =>
             daemon.request(
               "voiceover.generate",
-              { cwd: dir, script: path, yes: confirmed !== null, ...(confirmed ? { confirmation: confirmed.confirmation } : {}), verify },
+              {
+                cwd: dir,
+                script: path,
+                yes: confirmed !== null,
+                ...(confirmed ? { confirmation: confirmed.confirmation } : {}),
+                verify,
+                ...(typeof provider === "string" && provider !== "" ? { provider } : {}),
+              },
               { onProgress: (update) => send(event.sender, Channel.voiceoverProgress, progressOf(update)) },
             ),
           async (ask) => {
-            send(event.sender, Channel.voiceoverProgress, { stage: "confirm", line: null, fraction: null } satisfies VoiceoverProgress);
+            send(event.sender, Channel.voiceoverProgress, { stage: "confirm", line: null, fraction: null, place: null } satisfies VoiceoverProgress);
             const { response } = await box({
               type: "warning",
-              message: said.voiceoverCostTitle(ask.provider, ask.lines),
+              message: said.voiceoverCostTitle(speechProviderName(ask.provider), ask.lines),
               detail: `${ask.changed ? `${said.voiceoverCostChanged}\n\n` : ""}${ask.cost === null ? said.voiceoverCostUnknown : said.voiceoverCostKnown(ask.cost)}`,
               buttons: [said.voiceoverGenerate, said.cancel],
               defaultId: 1,
@@ -1152,6 +1261,8 @@ function registerVoiceoverIpc(): void {
       } catch (error) {
         const stopped = canceledRun(error);
         if (stopped) return { status: "canceled", kept: stopped.kept };
+        const voice = missingVoice(error);
+        if (voice) return { status: "no-voice", missing: voice.missing, available: voice.available.map((id) => ({ id, name: speechProviderName(id) })) };
         throw error;
       }
     }),
@@ -1166,7 +1277,14 @@ function registerVoiceoverIpc(): void {
   ipcMain.handle(Channel.voiceoverPlace, (event, path: string, start: string, replace: boolean) =>
     outcome(async () => {
       const at = startOf(start);
-      return daemon.request("voiceover.place", { cwd: await dirOf(event.sender), timeline: "main", script: path, ...(at !== undefined ? { start: at } : {}), replace });
+      try {
+        const result = await daemon.request("voiceover.place", { cwd: await dirOf(event.sender), timeline: "main", script: path, ...(at !== undefined ? { start: at } : {}), replace });
+        return { status: "placed", result } satisfies VoiceoverPlaceRun;
+      } catch (error) {
+        const reason = placeRefusal(error);
+        if (reason.kind === "other") throw error;
+        return { status: "refused", reason } satisfies VoiceoverPlaceRun;
+      }
     }),
   );
 }
@@ -1175,11 +1293,19 @@ function registerVoiceoverIpc(): void {
 function registerModelIpc(): void {
   const dirOf = async (sender: WebContents) => (await requireProject(stateOf(sender))).project.dir;
   ipcMain.handle(Channel.modelsList, (event) => outcome(async () => daemon.request("model.list", { cwd: await dirOf(event.sender) })));
-  // The transcript view's Transcribe button (only for a provider other than whisper.cpp): asks in a native box first.
+  // The transcript view's Transcribe button: whisper.cpp asks before its first download (as a new project does, #756),
+  // a cloud or paid provider asks before uploading, both in a native box.
   ipcMain.handle(Channel.transcribeRun, (event, asset: string) =>
     outcome(async (): Promise<TranscribeRun> => {
       const cwd = await dirOf(event.sender);
-      const done = await transcribeConfirmed(cwd, asset, BrowserWindow.fromWebContents(event.sender), (update) =>
+      const parent = BrowserWindow.fromWebContents(event.sender);
+      const { project } = await daemon.request("model.list", { cwd });
+      if ((project?.provider ?? APP_TRANSCRIPTION_PROVIDER) === APP_TRANSCRIPTION_PROVIDER) {
+        const choice = await chooseDownload(await transcriptionDownload(cwd), (bytes) => askDownload(parent, bytes));
+        if (choice === "skip") return { status: "declined" };
+        await ensureTranscriptionPlugin(cwd);
+      }
+      const done = await transcribeConfirmed(cwd, asset, parent, (update) =>
         send(event.sender, Channel.transcribeProgress, { asset, message: describeProgress(update, text.app.setup.progress), fraction: update.fraction ?? null } satisfies TranscribeProgress),
       );
       return done ? { status: "done" } : { status: "declined" };
@@ -1246,6 +1372,23 @@ function registerPluginsIpc(): void {
     outcome(async (): Promise<MachineDownloads> => {
       const { dataDir, downloads, binaries } = await daemon.request("doctor", { cwd: await dirOf(event.sender) });
       return { dataDir, downloads, binaries };
+    }),
+  );
+  ipcMain.handle(Channel.pluginsKeyState, () => outcome(() => openAiKey.state()));
+  ipcMain.handle(Channel.pluginsSaveKey, (_event, key: unknown) =>
+    outcome(async () => {
+      if (typeof key !== "string") throw new Error(text.plugins.key.empty);
+      await openAiKey.save(key);
+      const saved = await openAiKey.read();
+      if (saved !== null) await daemon.request("credentials.provide", { name: "OPENAI_API_KEY", value: saved });
+      return openAiKey.state();
+    }),
+  );
+  ipcMain.handle(Channel.pluginsRemoveKey, () =>
+    outcome(async () => {
+      await openAiKey.remove();
+      await daemon.request("credentials.provide", { name: "OPENAI_API_KEY", value: null });
+      return openAiKey.state();
     }),
   );
   ipcMain.handle(Channel.pluginsRemoveDownload, (event, name: string, bytes: number) =>
@@ -1316,6 +1459,9 @@ function shootDeps(root: string) {
 }
 
 /** Keep the project window and its panel windows out of screen captures while it records (ADR 0024 decision 7). */
+/** The global End shortcut, held while a window records (#744). */
+const shootShortcut = createShootShortcut(globalShortcut);
+
 function protectShoot(state: WindowState, on: boolean): void {
   for (const window of [state.window, ...state.panels.keys()]) if (!window.isDestroyed()) window.setContentProtection(on);
 }
@@ -1326,6 +1472,7 @@ function abandonShoot(state: WindowState): void {
   if (!shoot) return;
   state.shoot = null;
   protectShoot(state, false);
+  shootShortcut.release(state);
   void shootChunks
     .flushed()
     .then(() => finishSession(shoot.root, shoot.session.id, true, shootDeps(shoot.root)))
@@ -1501,12 +1648,17 @@ function registerShootIpc(): void {
   );
   ipcMain.handle(Channel.shootStarted, (event, id: unknown, starts: Partial<Record<ShootRole, number>>) =>
     outcome(async () => {
-      const shoot = shootOf(stateOf(event.sender), id);
+      const state = stateOf(event.sender);
+      const shoot = shootOf(state, id);
       await markStarted(shoot.root, shoot.session.id, starts ?? {});
       for (const source of shoot.session.sources) {
         const start = starts?.[source.role];
         if (typeof start === "number" && Number.isFinite(start)) source.start = start;
       }
+      // Ends the session from any app, even with Frameshell's windows hidden from captures.
+      return shootShortcut.hold(state, () => {
+        if (!state.window.isDestroyed()) send(state.window.webContents, Channel.shootEndRequested);
+      });
     }),
   );
   ipcMain.handle(Channel.shootChunk, (event, id: unknown, role: ShootRole, data: Uint8Array) =>
@@ -1522,6 +1674,7 @@ function registerShootIpc(): void {
       const shoot = shootOf(state, id);
       state.shoot = null;
       protectShoot(state, false);
+      shootShortcut.release(state);
       try {
         await shootChunks.flushed();
         return await finishSession(shoot.root, shoot.session.id, false, shootDeps(shoot.root));
@@ -1614,6 +1767,12 @@ function registerIpc(): void {
     if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
     return changeAiApp(id, false, aiAppsAt);
   });
+  ipcMain.handle(Channel.agentsShowFile, async (_event, id: unknown, file: unknown) => {
+    if (!isAiAppId(id)) throw new Error(`not an AI app: ${String(id)}`);
+    // Only a settings file the app's own status names: the renderer never picks a path to reveal.
+    const status = await aiAppStatus(id, aiAppsAt);
+    if (typeof file === "string" && status.files.includes(file)) shell.showItemInFolder(file);
+  });
   ipcMain.handle(Channel.agentsOpenApp, (_event, id: unknown, phrase: unknown) => {
     if (!isDesktopAppId(id)) throw new Error(`not a desktop AI app: ${String(id)}`);
     return openDesktopApp(id, typeof phrase === "string" ? phrase : "", {
@@ -1660,6 +1819,13 @@ function registerIpc(): void {
     return openFromWindow(stateOf(event.sender), dir);
   });
 
+  ipcMain.handle(Channel.projectTranscriptionDownload, () => outcome(newProjectTranscriptionDownload));
+  ipcMain.handle(Channel.projectTakeStart, (event) => {
+    const state = stateOf(event.sender);
+    const start = state.welcomeStart;
+    state.welcomeStart = null;
+    return start;
+  });
   ipcMain.handle(Channel.projectTakeOffered, (event) => {
     const state = stateOf(event.sender);
     const plan = state.offered;
@@ -1669,7 +1835,9 @@ function registerIpc(): void {
   ipcMain.handle(Channel.projectChooseVideos, (event) =>
     outcome(async () => {
       const files = await pickVideos(stateOf(event.sender).window);
-      return files.length > 0 ? planVideoProject(files) : null;
+      if (files.length === 0) return null;
+      const { accepted, refused } = await partitionFiles(files, START_EXTENSIONS);
+      return { plan: accepted.length > 0 ? await planVideoProject(accepted) : null, refused };
     }),
   );
   ipcMain.handle(Channel.projectPlanVideos, (_event, files: string[], place?: { parent?: string; name?: string }) =>
@@ -1697,14 +1865,20 @@ function registerIpc(): void {
       ),
   );
   ipcMain.handle(Channel.projectPlanIdea, (_event, place?: { parent?: string; name?: string }) =>
-    outcome(() => planIdeaProject({ parent: ideaParent(place?.parent), name: place?.name ?? "" })),
+    outcome(() => planIdeaProject({ parent: ideaParent(place?.parent), name: place?.name ?? "" }, text.welcome.untitledVideo)),
   );
   ipcMain.handle(Channel.projectFromIdea, (event, brief: IdeaBrief, parent?: string) => createFromIdea(stateOf(event.sender), brief, parent));
-  ipcMain.handle(Channel.projectTakeIdea, (event) => {
+  ipcMain.handle(Channel.projectAddFormat, (event, id: unknown) =>
+    outcome(async () => {
+      if (typeof id !== "string" || !BUILTIN_FORMAT_IDS.includes(id)) throw new Error(`Not a built-in format: ${String(id)}`);
+      await daemon.request("format.add", { cwd: (await requireProject(stateOf(event.sender))).project.dir, id });
+    }),
+  );
+  ipcMain.handle(Channel.projectReadIdea, async (event) => {
     const dir = stateOf(event.sender).project?.dir;
-    const brief = dir ? (ideas.get(dir) ?? null) : null;
-    if (dir) ideas.delete(dir);
-    return brief;
+    if (!dir) return null;
+    const content = await readFile(join(dir, BRIEF_FILE), "utf8").catch(() => null);
+    return content === null ? null : parseBrief(content);
   });
   ipcMain.handle(Channel.projectSetup, async (event) => {
     const { project } = await requireProject(stateOf(event.sender));
@@ -1766,6 +1940,10 @@ function registerIpc(): void {
     }),
   );
   registerVoiceoverIpc();
+  // Only a file this app just exported: the renderer never names an arbitrary path to open in the file manager.
+  ipcMain.handle(Channel.exportsReveal, (_event, path: string) => {
+    if (written.has(String(path))) shell.showItemInFolder(String(path));
+  });
   ipcMain.handle(Channel.filesReveal, async (event, path: string) => {
     const { project } = await requireProject(stateOf(event.sender));
     shell.showItemInFolder(projectPathOf(project.dir, path));
@@ -1792,7 +1970,9 @@ function registerIpc(): void {
     return { id, session, shell: shellName };
   });
   ipcMain.handle(Channel.terminalAttach, (event, id: string) => stateOf(event.sender).terminals.attach(id));
+  ipcMain.handle(Channel.terminalList, (event) => stateOf(event.sender).terminals.list());
   ipcMain.on(Channel.terminalWrite, (event, id: string, data: string) => stateOf(event.sender).terminals.write(id, data));
+  ipcMain.handle(Channel.terminalClipboardHasText, async () => (await clipboard.readText()) !== "");
   ipcMain.on(Channel.terminalResize, (event, id: string, cols: number, rows: number) =>
     stateOf(event.sender).terminals.resize(id, cols, rows),
   );
@@ -1827,11 +2007,29 @@ function registerIpc(): void {
       const { project } = await requireProject(state);
       const file = await pickImage(state.window);
       if (!file) return false;
+      const config = await projectConfig(project.dir);
+      const resolution = config.resolution ?? { width: 1920, height: 1080 };
       await replaceClipImage(project.dir, String(timeline), String(clip), file, {
         request: (method, params) => daemon.request(method, params),
         apply: (edits, label) => editor.apply(project.dir, String(timeline), edits, { label }),
+        // An image project's layer shows the new picture at its own size, as a new layer would (#751).
+        ...(config.kind === "image" && { scaleOf: async (path: string) => layerScale(await imageFileSize(path), resolution) }),
       });
       return true;
+    }),
+  );
+  ipcMain.handle(Channel.timelineAddImages, (event, timeline: string) =>
+    outcome(async () => {
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      const picked = await dialog.showOpenDialog(state.window, {
+        title: text.app.dialogs.chooseImages,
+        properties: ["openFile", "multiSelections"],
+        filters: [{ name: text.app.dialogs.images, extensions: [...IMAGE_EXTENSIONS] }],
+      });
+      if (picked.canceled || picked.filePaths.length === 0) return null;
+      const { imported } = await daemon.request("asset.import", { cwd: project.dir, files: picked.filePaths, mode: "copy" });
+      return addImageLayers(project.dir, String(timeline), imported.map((item) => item.asset), await imageLayerDeps(project.dir));
     }),
   );
   ipcMain.handle(Channel.timelineAddLayers, (event, timeline: string, assets: string[]) =>
@@ -1859,9 +2057,13 @@ function registerIpc(): void {
     outcome(async () => {
       const state = stateOf(event.sender);
       const { project } = await requireProject(state);
-      const out = await pickImageExport(state.window, join(project.dir, "exports", `${projectName(project.name)}.png`));
-      if (!out) return null;
-      return (await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out })).path;
+      const picked = await pickImageExport(state.window, join(await exportsFolder(project.dir), `${projectName(project.name)}.png`));
+      if (!picked) return null;
+      const out = imageExportPath(picked);
+      if (!out) throw new Error(text.app.dialogs.imageExtension(extname(picked)));
+      const { path } = await daemon.request("frame", { cwd: project.dir, timeline: String(timeline), at: 0, out });
+      written.add(path);
+      return path;
     }),
   );
   ipcMain.handle(Channel.timelineExportHandoff, (event, kind: string, timeline: string) =>
@@ -1870,11 +2072,12 @@ function registerIpc(): void {
       const state = stateOf(event.sender);
       const { project } = await requireProject(state);
       const name = String(timeline);
-      const out = await pickHandoffExport(state.window, kind, join(project.dir, "exports", `${name}.${HANDOFFS[kind].extension}`));
+      const out = await pickHandoffExport(state.window, kind, join(await exportsFolder(project.dir), `${name}.${HANDOFFS[kind].extension}`));
       if (!out) return null;
       // The daemon writes the file: the app never writes project files, and OTIO's relative media paths start from the folder picked.
       const params = { cwd: project.dir, timeline: name, out };
       const { path, warnings } = await daemon.request(HANDOFFS[kind].method, params);
+      written.add(path);
       return { path, warnings };
     }),
   );
@@ -1889,13 +2092,8 @@ function registerIpc(): void {
       if (!chosen) return null;
       const out = extname(chosen) ? chosen : `${chosen}.mp4`;
       const { job, output, warnings } = await daemon.request("render", { cwd: project.dir, timeline: name, out });
-      exportedVideos.add(output);
+      written.add(output);
       return { job, output, warnings };
-    }),
-  );
-  ipcMain.handle(Channel.timelineRevealExport, (_event, path: string) =>
-    outcome(async () => {
-      if (exportedVideos.has(String(path))) shell.showItemInFolder(String(path));
     }),
   );
   ipcMain.handle(Channel.projectImageFromFrame, (event, timeline: string, at: number) =>
@@ -1908,6 +2106,7 @@ function registerIpc(): void {
         request: (method, params) => daemon.request(method, params),
         layers: imageLayerDeps,
         tempDir: app.getPath("temp"),
+        folderName: text.app.dialogs.frameImageFolder,
       });
       createWindow(dir);
       return dir;
@@ -2022,9 +2221,32 @@ function registerIpc(): void {
 
   ipcMain.handle(Channel.segmentPrepare, (event, assets: string[]) =>
     outcome(async () => {
-      const { project } = await requireProject(stateOf(event.sender));
+      const state = stateOf(event.sender);
+      const { project } = await requireProject(state);
+      // The photo model downloads once, on the person's yes, with its size (#751); the e2e stand-in needs none.
+      const missing = process.env["FRAMESHELL_SEGMENT_STAND_IN"] === "1" ? 0 : await segmentDownload();
+      const said = text.app.dialogs;
+      if (missing > 0) {
+        const { response } = await dialog.showMessageBox(state.window, {
+          type: "question",
+          message: said.pickDownloadTitle,
+          detail: said.pickDownloadDetail(downloadSize(missing)),
+          buttons: [said.pickDownloadYes, said.cancel],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (response !== 0) throw new Error(said.pickDownloadDeclined);
+      }
       const onProgress = modelProgressTo(event.sender, Channel.segmentProgress);
-      for (const asset of assets) await daemon.request("segment.prepare", { cwd: project.dir, asset }, { onProgress });
+      try {
+        for (const asset of assets) await daemon.request("segment.prepare", { cwd: project.dir, asset }, { onProgress });
+      } catch (error) {
+        // A failed download reads as one sentence; the daemon's message (a long URL) goes to the log.
+        if (missing === 0) throw error;
+        console.warn("segment.prepare:", (error as Error).message);
+        throw new Error(said.pickDownloadFailed, { cause: error });
+      }
     }),
   );
   ipcMain.handle(Channel.segmentPoint, (event, at: number, x: number, y: number) =>
@@ -2118,6 +2340,8 @@ function buildMenu(): void {
       label: said.file,
       submenu: [
         { label: said.openFolder, accelerator: "CmdOrCtrl+O", click: () => void openFolder() },
+        { id: "new-from-video", label: said.newFromVideo, accelerator: "CmdOrCtrl+N", click: () => showWelcome("video") },
+        { id: "new-from-idea", label: said.newFromIdea, click: () => showWelcome("idea") },
         { label: said.newWindow, accelerator: "CmdOrCtrl+Shift+N", click: () => createWindow() },
         { type: "separator" },
         {
@@ -2150,6 +2374,8 @@ function buildMenu(): void {
       label: said.view,
       submenu: [
         { id: "view-transcript", label: said.transcript, accelerator: "CmdOrCtrl+Shift+T", click: (_item, focused) => command("showTranscript", focused) },
+        { id: "view-shoot", label: said.shoot, accelerator: "CmdOrCtrl+Alt+R", click: (_item, focused) => command("showShoot", focused) },
+        { id: "view-teleprompter", label: said.teleprompter, accelerator: "CmdOrCtrl+Alt+P", click: (_item, focused) => command("showTeleprompter", focused) },
         { id: "view-terminal", label: said.terminal, accelerator: "CmdOrCtrl+\\", registerAccelerator: false, click: (_item, focused) => command("toggleTerminal", focused) },
         { type: "separator" },
         {
@@ -2166,10 +2392,14 @@ function buildMenu(): void {
           ],
         },
         { type: "separator" },
-        { role: "reload", label: said.reload },
-        { role: "forceReload", label: said.forceReload },
-        { role: "toggleDevTools", label: said.devTools },
-        { type: "separator" },
+        ...(showsDevItems(app.isPackaged, process.env)
+          ? [
+              { role: "reload" as const, label: said.reload },
+              { role: "forceReload" as const, label: said.forceReload },
+              { role: "toggleDevTools" as const, label: said.devTools },
+              { type: "separator" as const },
+            ]
+          : []),
         { role: "resetZoom", label: said.resetZoom },
         { role: "zoomIn", label: said.zoomIn },
         { role: "zoomOut", label: said.zoomOut },
@@ -2184,12 +2414,15 @@ function buildMenu(): void {
         { role: "minimize", label: said.minimize },
         { role: "zoom", label: said.zoom },
         ...(mac ? [{ type: "separator" as const }, { role: "front" as const, label: said.front }] : [{ role: "close" as const, label: said.close }]),
+        // macOS lists the windows itself.
+        ...(mac ? [] : windowListItems(listedWindows(), focusWindow)),
       ],
     },
     {
       ...(mac ? { role: "help" as const } : {}),
       label: said.help,
       submenu: [
+        { id: "help-welcome", label: said.welcome, click: () => showWelcome(null) },
         { id: "help-copy-diagnostics", label: said.copyDiagnostics, click: () => void copyDiagnostics() },
         { id: "help-report-problem", label: said.reportProblem, click: () => void shell.openExternal(BUG_REPORT_URL) },
         // macOS has them in the app menu.
@@ -2198,8 +2431,45 @@ function buildMenu(): void {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-  void syncKindMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
-  syncReviewMenu(projectWindowOf(BrowserWindow.getFocusedWindow()));
+  void syncKindMenu(projectWindowOf(menuWindow()));
+  syncReviewMenu(projectWindowOf(menuWindow()));
+}
+
+/** The window the focus event named last; set before `getFocusedWindow()` says so on some window managers. */
+let lastFocused: BrowserWindow | undefined;
+
+/**
+ * The window the menu follows: the one focused last, else the one Electron reports focused. A rebuild right after a
+ * focus event must not read the window that just lost focus (#754: the video-only items followed the wrong window).
+ */
+function menuWindow(): BrowserWindow | null {
+  return lastFocused && !lastFocused.isDestroyed() ? lastFocused : BrowserWindow.getFocusedWindow();
+}
+
+/** Open project windows for the Window menu, in opening order. */
+function listedWindows() {
+  const focused = menuWindow();
+  return [...windows.entries()]
+    .filter(([, state]) => !state.window.isDestroyed())
+    .map(([id, state]) => ({ id, name: state.project?.name ?? state.window.getTitle(), focused: state.window === focused }));
+}
+
+/** Bring window `id` (its `webContents.id`) to the front. */
+function focusWindow(id: number): void {
+  const window = windows.get(id)?.window;
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
+/** Rebuild the menu once the current event is done: the Window menu follows windows opening, closing and focusing. */
+let menuRebuild: NodeJS.Immediate | undefined;
+function rebuildMenuSoon(): void {
+  if (menuRebuild || !app.isReady()) return;
+  menuRebuild = setImmediate(() => {
+    menuRebuild = undefined;
+    buildMenu();
+  });
 }
 
 /**
@@ -2228,7 +2498,8 @@ const appLauncher: Launcher = process.env["FRAMESHELL_OPEN_APP_STAND_IN"]
 
 /**
  * Switch the UI language: save the choice, rebuild the menus, and reload the project windows so the
- * renderer reads the new language. Terminals outlive the reload (ADR 0012); panel windows reopen with their project.
+ * renderer reads the new language. Terminals outlive the reload (ADR 0012): the reloaded terminal panel shows them
+ * again (`terminals.list`), agents in them still running; panel windows reopen with their project.
  */
 async function setLanguage(choice: LanguageChoice): Promise<void> {
   languageChoice = choice;

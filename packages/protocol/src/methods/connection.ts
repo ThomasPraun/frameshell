@@ -62,6 +62,22 @@ export const connectionMethods = {
     }),
     result: z.object({}),
   },
+  "credentials.provide": {
+    description:
+      "Hand the daemon a secret the app keeps for the person (ADR 0050), or take it back with null. The daemon holds it " +
+      "in memory only, as its own environment variable, while the connection that gave it is open. A daemon started " +
+      "with the variable already in its environment ignores it: the environment wins.",
+    internal: true,
+    params: z.strictObject({
+      name: z.enum(["OPENAI_API_KEY"]).describe("Which secret: the environment variable it stands for."),
+      value: z.string().trim().min(1).max(1000).nullable().describe("The secret; null forgets the one this connection gave."),
+    }),
+    result: z.object({
+      source: z
+        .enum(["environment", "app", "none"])
+        .describe("Where the daemon now takes the secret from: its own environment, this app, or nowhere."),
+    }),
+  },
   status: {
     description:
       "Report daemon state and the Frameshell project enclosing a directory, searching upwards from it: its jobs, " +
@@ -224,7 +240,7 @@ export const connectionMethods = {
       "(`ggml-large-v3-turbo-q5_0`, ...), every installed version of it. Names and sizes are in `doctor` `downloads`. " +
       "It downloads again the next time something needs it. Machine-wide, not per project. Never touches a `binaries` " +
       "override, a tool Frameshell does not download (Blender) or a model registered with `model.add`. Fails with " +
-      "BinaryInUse while it installs, while jobs or a transcription run, or while the operating system keeps its files " +
+      "BinaryInUse while it installs, while jobs, a transcription or another request (a frame capture, a clip check) run, or while the operating system keeps its files " +
       "open. Remove only on the person's request: it can mean a large download again. Removing what is not on disk " +
       "succeeds with `removed: false`.",
     params: z.strictObject({
@@ -325,7 +341,7 @@ export const connectionMethods = {
               onDisk: z.boolean().describe("Already downloaded: using the plugin will not download it again."),
             }),
           ),
-          downloadBytes: z.int().describe("Sum of `bytes` of the downloads not yet on disk: what first use would fetch (managed downloads; the plugin's own npm package is not counted). whisper-cpp lists its default model; a project configured for another model downloads that one."),
+          downloadBytes: z.int().describe("Sum of `bytes` of the downloads not yet on disk: what first use would fetch (managed downloads; the plugin's own npm package is not counted). whisper-cpp lists the model the project transcribes with: its `transcription.model`, else this machine's default, else the plugin's default (a model registered with `model.add` is on disk)."),
           installed: z.boolean().describe("The project pins it in `frameshell.json`."),
           pin: z.string().nullable().describe("Pinned spec; null when not installed."),
           status: z.enum(["loaded", "error", "untrusted"]).nullable().describe("As `plugin.list`; null when not installed."),

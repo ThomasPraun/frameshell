@@ -280,6 +280,10 @@ describe("frameshell tx, history and revert", () => {
     const listing = frameshell(["history"]).stdout;
     expect(listing).toContain(`${tx}  cli:agent "add overlays"  2 ops`);
     expect(listing).toContain(`  ${first.operation.id}  track.add`);
+    // Two empty tracks play nothing: the transaction changed no sound (tracks of earlier tests are heard, unchanged).
+    expect(frameshell(["history", "sound", tx]).stdout).toMatch(new RegExp(`^${tx} changed no sound on main\\.\\n`));
+    expect(frameshell(["history", "sound"]).stderr).toContain("`frameshell history sound` takes one argument");
+    expect(frameshell(["history", "extra"]).stderr).toContain("`frameshell history` takes no argument");
 
     const reverted = frameshell(["revert", tx], project, "agent");
     expect(reverted.code).toBe(0);

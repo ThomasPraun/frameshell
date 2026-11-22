@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { t } from "../i18n.js";
+import { lang, t } from "../i18n.js";
 import { useShoot } from "../shoot/recorder.js";
-import { type DeviationInfo, currentScene, lineMarks } from "../shoot/takes-model.js";
+import { type DeviationInfo, currentScene, lineMarks, sceneTitle, unshownDeviations } from "../shoot/takes-model.js";
 import { takes, useTakes } from "../shoot/takes.js";
 import { windowOf } from "../windows.js";
 import { contextMenu } from "./ContextMenu.js";
 import { TakeStatus } from "./TakeStatus.js";
+import { WriteScript } from "./WriteScript.js";
 
 /**
  * The Shoot view's takes (ADR 0023, 0024): the shoot script, its scenes with their state, and the current scene's
@@ -25,9 +26,19 @@ export function ShootTakes() {
   const deviations = chosen?.deviations.filter((deviation) => deviation.scene === scene) ?? [];
   const sceneTakes = status?.takes.filter((take) => take.scene === scene || (scene !== null && take.scenes.includes(scene))) ?? [];
   const pending = deviations.filter((deviation) => !deviation.accepted);
+  // The take cut last, with the differences the scene view above does not show (other scenes, speech outside them).
+  const lastTake = state.last?.id ? (status?.takes.find((take) => take.id === state.last!.id && take.state === "analyzed") ?? null) : null;
+  const lastRows = lastTake ? unshownDeviations(lastTake, chosen?.id ?? null, scene) : [];
 
   if (state.scripts === null) return null;
-  if (state.scripts.length === 0) return <p className="shoot-note">{t.shoot.noScript}</p>;
+  if (state.scripts.length === 0) {
+    return (
+      <div className="shoot-no-script">
+        <p className="shoot-note">{t.shoot.noScript}</p>
+        <WriteScript />
+      </div>
+    );
+  }
 
   return (
     <section className="shoot-takes" data-testid="shoot-takes">
@@ -173,6 +184,17 @@ export function ShootTakes() {
           </div>
         </div>
       )}
+      {lastTake && lastRows.length > 0 && (
+        <div className="shoot-last" data-testid="shoot-last-take" data-take={lastTake.id}>
+          <h4 className="shoot-current-title">{t.shoot.lastTake(state.last!.number, sceneTitle(status, lastTake.scene))}</h4>
+          {lastRows.map((deviation) => (
+            <div key={deviation.id} className="shoot-line">
+              <span className="shoot-speaker">{deviation.scene === null ? t.shoot.outsideScenes : sceneTitle(status, deviation.scene)}: </span>
+              <DeviationRow take={lastTake.id} deviation={deviation} />
+            </div>
+          ))}
+        </div>
+      )}
       {state.error && <p className="shoot-error">{t.shoot.failed(state.error)}</p>}
     </section>
   );
@@ -203,5 +225,5 @@ function takeLabel(sceneTakes: readonly { id: string; recordedAt: string }[], id
 function time(iso: string | undefined): string {
   if (!iso) return "";
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

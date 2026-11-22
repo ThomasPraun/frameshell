@@ -6,7 +6,8 @@ import { launch, sandbox } from "./harness.js";
 
 // Plugins view with no network: the official catalog of a fresh project, the trust banner once frameshell.json
 // declares a plugin (never trusted here, so no plugin code runs or installs), and the machine's downloads from a
-// data dir holding stand-in files. Message boxes are stubbed in main; no OpenAI key reaches the daemon.
+// data dir holding stand-in files. Message boxes are stubbed in main. The OpenAI key field (ADR 0050) saves a fake
+// key through the keychain stand-in (CI has no keyring); nothing is sent to OpenAI.
 const box = sandbox("demo");
 const FFMPEG = join(box.dataDir, "binaries", "ffmpeg", "0-e2e");
 const MODEL = join(box.dataDir, "models", "ggml-large-v3-turbo-q5_0", "0-e2e");
@@ -33,7 +34,7 @@ test.beforeAll(async () => {
   writeFileSync(join(FFMPEG, "ffmpeg.bin"), Buffer.alloc(3_000_000));
   mkdirSync(MODEL, { recursive: true });
   writeFileSync(join(MODEL, "model.bin"), Buffer.alloc(2_000_000));
-  ({ app, page } = await launch(box, { env: { OPENAI_API_KEY: "" } }));
+  ({ app, page } = await launch(box, { env: { OPENAI_API_KEY: "", FRAMESHELL_KEYCHAIN_STAND_IN: "1" } }));
   await page.getByRole("tab", { name: "Plugins" }).click();
 });
 
@@ -57,9 +58,33 @@ test("lists every official plugin with what it needs, costs and downloads, nothi
 
   const openai = plugin("@frameshell/openai-transcription");
   await expect(openai).toContainText("the audio leaves this computer and OpenAI bills your own key per use");
-  await expect(openai).toContainText("Key not set. Set OPENAI_API_KEY in your system environment");
+  await expect(openai).toContainText("Key not set. Paste it below");
   await expect(plugin("@frameshell/openai-speech")).toContainText("the text goes to OpenAI");
   await expect(plugin("@frameshell/blender")).toContainText("Needs your own Blender");
+});
+
+test("saves the OpenAI key typed in the view, encrypted, and the engine then has it; Remove forgets it", async () => {
+  const key = "sk-e2e-0123456789abcdef";
+  const transcription = plugin("@frameshell/openai-transcription");
+  const speech = plugin("@frameshell/openai-speech");
+  await transcription.getByTestId("openai-key-input").fill(key);
+  await transcription.getByTestId("openai-key-save").click();
+  await expect(page.getByTestId("plugins-notice")).toContainText("Key saved.");
+  for (const card of [transcription, speech]) {
+    await expect(card.getByTestId("plugin-need")).toContainText("Key saved in this app, encrypted by your system.");
+    await expect(card.getByTestId("plugin-need")).not.toHaveClass(/is-unmet/);
+    await expect(card.getByTestId("openai-key-form")).toHaveCount(0);
+    await expect(card.getByTestId("openai-key-remove")).toBeVisible();
+  }
+  await expect(page.getByTestId("plugins-panel")).not.toContainText(key);
+  const stored = readFileSync(join(box.configDir, "openai-key.bin"), "utf8");
+  expect(stored).not.toContain(key);
+
+  await transcription.getByTestId("openai-key-remove").click();
+  await expect(page.getByTestId("plugins-notice")).toContainText("Key removed from this app.");
+  await expect(transcription.getByTestId("plugin-need")).toContainText("Key not set. Paste it below");
+  await expect(transcription.getByTestId("plugin-need")).toHaveClass(/is-unmet/);
+  expect(existsSync(join(box.configDir, "openai-key.bin"))).toBe(false);
 });
 
 test("lists this machine's downloads and removes one after a confirm", async () => {

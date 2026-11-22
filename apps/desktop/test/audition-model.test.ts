@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   AUDITION_MAX,
   candidateFiles,
+  candidateTracks,
+  mixStart,
+  soloOf,
+  withSolo,
   dbText,
   isSoundPath,
   matchGains,
@@ -39,8 +43,13 @@ describe("which files", () => {
     expect(isSoundPath("assets/sound/pop-1a2b.WAV")).toBe(true);
     expect(isSoundPath("assets/clip.mp4")).toBe(false);
     expect(isSoundPath("assets/wav")).toBe(false);
-    expect(soundFiles(["b.mp3", "a.png", "b.mp3", "c.flac"])).toEqual(["b.mp3", "c.flac"]);
-    expect(soundFiles(Array.from({ length: 40 }, (_, i) => `s${i}.wav`))).toHaveLength(AUDITION_MAX);
+    expect(soundFiles(["b.mp3", "a.png", "b.mp3", "c.flac"])).toEqual([
+      "b.mp3",
+      "c.flac",
+    ]);
+    expect(
+      soundFiles(Array.from({ length: 40 }, (_, i) => `s${i}.wav`)),
+    ).toHaveLength(AUDITION_MAX);
   });
 
   it("takes a folder's own sounds, not its subfolders'", () => {
@@ -49,17 +58,52 @@ describe("which files", () => {
       name: "sound",
       path: "assets/sound",
       children: [
-        { kind: "file" as const, name: "whoosh.wav", path: "assets/sound/whoosh.wav" },
-        { kind: "file" as const, name: "notes.md", path: "assets/sound/notes.md" },
-        { kind: "file" as const, name: "click.wav", path: "assets/sound/click.wav" },
-        { kind: "dir" as const, name: "old", path: "assets/sound/old", children: [{ kind: "file" as const, name: "a.wav", path: "assets/sound/old/a.wav" }] },
+        {
+          kind: "file" as const,
+          name: "whoosh.wav",
+          path: "assets/sound/whoosh.wav",
+        },
+        {
+          kind: "file" as const,
+          name: "notes.md",
+          path: "assets/sound/notes.md",
+        },
+        {
+          kind: "file" as const,
+          name: "click.wav",
+          path: "assets/sound/click.wav",
+        },
+        {
+          kind: "dir" as const,
+          name: "old",
+          path: "assets/sound/old",
+          children: [
+            {
+              kind: "file" as const,
+              name: "a.wav",
+              path: "assets/sound/old/a.wav",
+            },
+          ],
+        },
       ],
     };
-    expect(soundFilesIn(folder)).toEqual(["assets/sound/click.wav", "assets/sound/whoosh.wav"]);
+    expect(soundFilesIn(folder)).toEqual([
+      "assets/sound/click.wav",
+      "assets/sound/whoosh.wav",
+    ]);
   });
 
   it("finds the music candidates by rank from one of their tracks", () => {
-    const track = (kind: string, name: string | null, asset: string | null) => ({ kind, name, clips: asset ? [{ asset }] : [] });
+    const track = (
+      kind: string,
+      name: string | null,
+      asset: string | null,
+    ) => ({
+      id: `t_${name}`,
+      kind,
+      name,
+      clips: asset ? [{ asset, start: 0, end: 10 }] : [],
+    });
     const rows = [
       track("video", "Music 9", "assets/a.mp4"),
       track("audio", "Music 2", "assets/music/b.mp3"),
@@ -67,7 +111,10 @@ describe("which files", () => {
       track("audio", "Music 1", "assets/music/a.mp3"),
       track("audio", "Music 3", null),
     ];
-    expect(candidateFiles(rows, rows[1]!)).toEqual(["assets/music/a.mp3", "assets/music/b.mp3"]);
+    expect(candidateFiles(rows, rows[1]!)).toEqual([
+      "assets/music/a.mp3",
+      "assets/music/b.mp3",
+    ]);
     expect(candidateFiles(rows, rows[2]!)).toEqual([]);
     expect(candidateFiles(rows.slice(0, 3), rows[1]!)).toEqual([]);
   });
@@ -82,5 +129,55 @@ describe("spectrogram colours", () => {
     const [r] = spectrogramColour(-40, -96);
     expect(r).toBeGreaterThan(8);
     expect(r).toBeLessThan(255);
+  });
+});
+
+describe("in the mix (#803)", () => {
+  const row = (
+    id: string,
+    name: string,
+    asset: string,
+    start: number,
+    end: number,
+  ) => ({ id, kind: "audio", name, clips: [{ asset, start, end }] });
+  const rows = [
+    row("t_v", "Voice", "assets/voice.wav", 0, 30),
+    row("t_2", "Music 2", "assets/music/b.mp3", 4, 20),
+    row("t_1", "Music 1", "assets/music/a.mp3", 2, 18),
+  ];
+  const tracks = candidateTracks(rows, rows[1]!);
+
+  it("pairs each candidate with its track, by rank", () => {
+    expect(tracks).toEqual([
+      { file: "assets/music/a.mp3", track: "t_1" },
+      { file: "assets/music/b.mp3", track: "t_2" },
+    ]);
+  });
+
+  it("starts at the playhead inside the music, else where the music starts", () => {
+    expect(mixStart(rows, tracks, 10)).toBe(10);
+    expect(mixStart(rows, tracks, 0.5)).toBe(2);
+    expect(mixStart(rows, tracks, 25)).toBe(2);
+    expect(mixStart(rows, [], 10)).toBeNull();
+  });
+
+  it("solos one candidate in the preview's view, leaving every other track as stored", () => {
+    const view = {
+      tracks: [
+        { id: "t_v", muted: true },
+        { id: "t_1" },
+        { id: "t_2", muted: true },
+      ],
+    };
+    const solo = soloOf(tracks, "assets/music/b.mp3")!;
+    expect(solo).toEqual({ keep: "t_2", mute: ["t_1"] });
+    expect(withSolo(view, solo).tracks).toEqual([
+      { id: "t_v", muted: true },
+      { id: "t_1", muted: true },
+      { id: "t_2" },
+    ]);
+    expect(withSolo(view, null)).toBe(view);
+    expect(withSolo(view, soloOf(tracks, "assets/music/a.mp3"))).toBe(view);
+    expect(soloOf(tracks, "assets/other.wav")).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 // What the voiceover dialog shows (ADR 0034 decision 22), from the daemon's results; pure, so it is tested without the app.
 import type { VoiceoverGenerateResult } from "@frameshell/protocol";
 import type { Dict } from "../../../shared/i18n/index.js";
-import type { VoiceoverProgress } from "../../../shared/api.js";
+import type { VoiceoverPlaceRun, VoiceoverProgress } from "../../../shared/api.js";
 
 /** The dialog's strings. */
 export type VoiceoverStrings = Dict["voiceover"];
@@ -14,6 +14,10 @@ type Line = VoiceoverGenerateResult["lines"][number];
 /** One line of the report. */
 export interface LineRow {
   id: string;
+  /** Place in the script, 1-based: how the dialog names the line. */
+  number: number;
+  /** The take, project-relative. */
+  file: string;
   display: string;
   state: Line["state"];
   /** The misread check of the line; `none` when it did not run. */
@@ -23,8 +27,10 @@ export interface LineRow {
 
 /** The lines of a result as report rows, in script order. */
 export function lineRows(result: VoiceoverGenerateResult): LineRow[] {
-  return result.lines.map((line) => ({
+  return result.lines.map((line, index) => ({
     id: line.id,
+    number: index + 1,
+    file: line.file,
     display: line.display,
     state: line.state,
     status: line.check?.status ?? "none",
@@ -54,7 +60,7 @@ export function checkNote(result: VoiceoverGenerateResult, asked: CheckAsked): C
   return { kind: "why", reason: verification.reason ?? "" };
 }
 
-/** The sentence under a running generation's progress bar. */
+/** The sentence under a running generation's progress bar: lines by number, never by id (#756). */
 export function progressText(progress: VoiceoverProgress | null, said: VoiceoverStrings): string {
   if (!progress) return said.working;
   switch (progress.stage) {
@@ -63,9 +69,9 @@ export function progressText(progress: VoiceoverProgress | null, said: Voiceover
     case "download":
       return said.downloading;
     case "speak":
-      return progress.line ? said.saying(progress.line) : said.working;
+      return progress.place ? said.saying(progress.place.index, progress.place.total) : said.working;
     case "verify":
-      return progress.line ? said.checking(progress.line) : said.checkingAll;
+      return progress.place ? said.checking(progress.place.index, progress.place.total) : said.checkingAll;
   }
 }
 
@@ -74,4 +80,20 @@ export function differenceText(misread: LineRow["misreads"][number], said: Voice
   const kind = said.misreadKind[misread.kind as keyof VoiceoverStrings["misreadKind"]] ?? misread.kind;
   const heard = misread.heard === "" ? "" : ` · ${said.heard}: ${misread.heard}`;
   return `${kind}: ${said.expected}: ${misread.expected}${heard}${misread.maybeTranscription ? ` (${said.maybeTranscription})` : ""}`;
+}
+
+/** Why placing was refused, as the dialog says it. */
+export function refusalText(reason: Extract<VoiceoverPlaceRun, { status: "refused" }>["reason"], said: VoiceoverStrings): string {
+  switch (reason.kind) {
+    case "replace":
+      return said.refused.replace;
+    case "before-zero":
+      return said.refused.beforeZero;
+    case "no-tempo":
+      return said.refused.noTempo;
+    case "unknown-time":
+      return said.refused.unknownTime(reason.value);
+    case "other":
+      return reason.message;
+  }
 }

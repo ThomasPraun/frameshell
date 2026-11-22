@@ -23,7 +23,7 @@ Only `whisper-1` gives word timestamps, so it is the only model this plugin uses
 
 ## The key
 
-The key is read from the **`OPENAI_API_KEY` environment variable** at every call. It is never written to a project file, the history, a progress message or an error, and error texts from OpenAI are scrubbed of anything that looks like a key before they are shown.
+In the app, paste the key in the field of the **Plugins** view and Save: it is encrypted by your system's keychain and handed to the daemon in memory (ADR 0050). The plugin reads it from the **`OPENAI_API_KEY` environment variable** of the daemon at every call; a variable set in the environment wins over a saved key. It is never written to a project file, the history, a progress message or an error, and error texts from OpenAI are scrubbed of anything that looks like a key before they are shown.
 
 The variable must exist in the environment the Frameshell **daemon** was started from: see the [`@frameshell/openai-speech` README](../openai-speech/README.md#the-key) for how to set it on macOS, Windows and Linux. The same key serves both plugins.
 
