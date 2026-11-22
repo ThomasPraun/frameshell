@@ -100,6 +100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transparent canvas, coloured by the style's accent and ink, with hits at set times or on the music's beats
   (`onBeats`), so a sound placed on the same beat lands on the same frame (#802).
 
+- `frameshell analyze` prints a short card first (`card.md`, about 300 tokens): every headline number with its
+  MEASURED, ESTIMATED or DECISION label, then the layers to open next with their size (`shots.md`, one line per shot;
+  `analysis.json`, every value). `--full` prints every value as before; the result gains `card` and `layers` (#801).
+
 ### Fixed
 
 - The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
