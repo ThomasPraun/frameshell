@@ -402,14 +402,15 @@ export class ClipRenderer {
    * when to ask again. `clipId` is flattened as in {@link status}. Reads
    * only: never renders. Throws ClipNotFound, LiveUnavailable, or
    * OutsideProject when the page's `root` or `entry` leaves the project or
-   * `entry` leaves `root`.
+   * `entry` leaves `root`. `props`, when given, are merged over the clip's own for this page only (`clip.textFit`
+   * tries another language); nothing is written.
    */
-  async live(root: string, id: string, clipId: string): Promise<ClipLiveResult> {
+  async live(root: string, id: string, clipId: string, props?: Record<string, unknown>): Promise<ClipLiveResult> {
     const { timeline } = await this.#options.load(root, id);
     const flat = await resolveNested(root, timeline, this.#options.readNested);
     const clips = generatedClips(flat);
-    const clip = clips.find((placed) => placed.clip.id === clipId)?.clip;
-    if (!clip) {
+    const found = clips.find((placed) => placed.clip.id === clipId)?.clip;
+    if (!found) {
       const ids = clips.map((placed) => placed.clip.id);
       throw new RpcError(
         ErrorCode.ClipNotFound,
@@ -417,6 +418,7 @@ export class ClipRenderer {
         { clip: clipId },
       );
     }
+    const clip = props ? { ...found, props: { ...found.props, ...props } } : found;
     const unavailable = (details: string) =>
       new RpcError(ErrorCode.LiveUnavailable, `${clip.type} clip ${clipId} cannot be shown live: ${details}`, {
         clip: clipId,

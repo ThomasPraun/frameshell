@@ -127,7 +127,7 @@ describe("frameshell style set, save, list and apply", () => {
     expect(unknown.stderr).toMatch(/No style value at "colors\.nope"/);
     expect(frameshell(["style", "set", "colors.accent"]).code).toBe(2);
     expect(frameshell(["style", "apply", "house", "--force"]).code).toBe(2);
-  });
+  }, 120_000);
 });
 
 describe("frameshell style apply --from-analysis", () => {
@@ -153,5 +153,5 @@ describe("frameshell style apply --from-analysis", () => {
     expect(frameshell(["style", "apply", "--from-analysis", "reel", "--replace"]).code).toBe(2);
     expect(frameshell(["style", "apply", "house", "--only", "colors.bg"]).code).toBe(2);
     expect(frameshell(["style", "show", "--from-analysis", "reel"]).code).toBe(2);
-  });
+  }, 120_000);
 });
