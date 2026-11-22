@@ -114,6 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
+  The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
+  earlier frame when only its parent scaled (#808). The real HyperFrames tests whose projects had no
+  `frameshell.json` now write one, as every project has; the whole real suite passes in a container (756 tests).
 - Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
   instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
   agent there, as ADR 0048 says (#791).
