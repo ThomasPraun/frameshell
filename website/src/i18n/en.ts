@@ -316,6 +316,8 @@ export const en = {
     spec: "Specification",
     mcp: "MCP server",
     license: "License",
+    signing: "Code signing policy",
+    privacy: "Privacy",
     legal: 'Apache License 2.0. "Frameshell" and its logo are trademarks of the project; forks must use a different name.',
   },
   ruler: { label: "Sections" },

@@ -6,9 +6,11 @@
 /**
  * How the build is signed.
  * - `notarized`: macOS, Developer ID signed and notarized.
- * - `unsigned`: macOS without secrets, or Windows (beta, never signed at v0.1).
+ * - `signpath`: Windows, signed through SignPath (ADR 0051). This run builds only the unpacked app; the workflow
+ *   signs it, runs `package.mjs --installer` and signs the installer.
+ * - `unsigned`: macOS or Windows without signing configuration.
  * - `not-applicable`: Linux packages carry no code signature.
- * @typedef {"notarized" | "unsigned" | "not-applicable"} SigningMode
+ * @typedef {"notarized" | "signpath" | "unsigned" | "not-applicable"} SigningMode
  */
 
 /**
@@ -19,6 +21,8 @@
  * @property {string | undefined} appleApiKeyBase64 `.p8` key content. The runner writes it to a file and sets `APPLE_API_KEY` to that path.
  * @property {SigningMode} signing
  * @property {string} executable Unpacked app executable for the smoke test, relative to `apps/desktop`.
+ * @property {string | undefined} installer Windows installer this run writes, relative to `apps/desktop`. Undefined on
+ *   macOS and Linux, and when the run builds no installer (`--dir`, or the SignPath app phase).
  * @property {string} summary Markdown for the job summary. Holds no secret values.
  * @property {string[]} errors Configuration problems. Non-empty: the runner must not build.
  */
@@ -37,37 +41,101 @@ const EXECUTABLES = {
 const PLATFORM_FLAG = { darwin: "--mac", linux: "--linux", win32: "--win" };
 
 /**
+ * SignPath settings (ADR 0051). The token is a repository secret; the workflow passes only whether it exists
+ * (`SIGNPATH_API_TOKEN_SET`), so the token never reaches electron-builder. The others are repository variables.
+ */
+const SIGNPATH_SETTINGS = ["SIGNPATH_API_TOKEN_SET", "SIGNPATH_ORGANIZATION_ID", "SIGNPATH_PROJECT_SLUG", "SIGNPATH_SIGNING_POLICY_SLUG"];
+
+/**
  * Plan one packaging run.
  *
  * Version: tag `v1.2.3[-pre]` gives `1.2.3[-pre]`; other CI refs give `0.0.0-ci.<run>`; no CI gives `0.0.0-local`.
  * macOS signs and notarizes only when the certificate and one notarization method are complete. No macOS
  * secret at all: unsigned build plus a warning. Partial secrets: an error, never a silent unsigned release.
+ * Windows signs through SignPath only when all its settings exist; partial settings are an error too. Signing
+ * happens in two runs: the app phase builds the unpacked app (the workflow signs it), then the `installer` phase
+ * builds the NSIS installer from that signed app with `--prepackaged` (the workflow signs it too).
  *
- * @param {{ platform: ReleasePlatform, arch: "arm64" | "x64", env: Record<string, string | undefined>, dirOnly?: boolean }} input
+ * @param {{ platform: ReleasePlatform, arch: "arm64" | "x64", env: Record<string, string | undefined>, dirOnly?: boolean, installer?: boolean }} input
  *   `dirOnly`: stop at the unpacked app for the host arch (local checks), no installers.
+ *   `installer`: Windows only, the SignPath installer phase: package the already unpacked (and signed) app.
  * @returns {ReleasePlan}
  */
-export function planRelease({ platform, arch, env, dirOnly = false }) {
+export function planRelease({ platform, arch, env, dirOnly = false, installer = false }) {
   /** @type {string[]} */
   const errors = [];
   const version = releaseVersion(env, errors);
   const args = [PLATFORM_FLAG[platform], "--publish", "never", `-c.extraMetadata.version=${version}`];
+  const executable = EXECUTABLES[platform][arch];
+
+  if (installer) {
+    if (platform !== "win32") errors.push("--installer is for the Windows SignPath phase only.");
+    if (dirOnly) errors.push("--installer and --dir exclude each other.");
+    args.push("--prepackaged", executable.slice(0, executable.lastIndexOf("/")), `--${arch}`);
+    return {
+      version,
+      args,
+      env: {},
+      appleApiKeyBase64: undefined,
+      signing: "signpath",
+      executable,
+      installer: windowsInstaller(version, arch),
+      // The app phase already wrote the summary.
+      summary: "",
+      errors,
+    };
+  }
+
   if (dirOnly) args.push("--dir", `--${arch}`);
 
   const signing = platform === "darwin" ? macSigning(env, errors) : undefined;
   if (signing?.mode === "unsigned") args.push("-c.mac.identity=null", "-c.mac.notarize=false");
 
-  const mode = signing?.mode ?? (platform === "win32" ? "unsigned" : "not-applicable");
+  const windows = platform === "win32" ? windowsSigning(env, errors) : undefined;
+  // SignPath app phase: the installer is built after the app is signed.
+  if (windows === "signpath" && !dirOnly) args.push("--dir", `--${arch}`);
+
+  const mode = signing?.mode ?? windows ?? "not-applicable";
   return {
     version,
     args,
     env: signing?.env ?? {},
     appleApiKeyBase64: signing?.appleApiKeyBase64,
     signing: mode,
-    executable: EXECUTABLES[platform][arch],
+    executable,
+    installer: platform === "win32" && !dirOnly && windows !== "signpath" ? windowsInstaller(version, arch) : undefined,
     summary: summaryFor(platform, version, mode, signing?.method),
     errors,
   };
+}
+
+/**
+ * The NSIS installer's path, from `artifactName` in `electron-builder.yml`.
+ * @param {string} version
+ * @param {"arm64" | "x64"} arch
+ */
+function windowsInstaller(version, arch) {
+  return `release/Frameshell-${version}-win-${arch}.exe`;
+}
+
+/**
+ * @param {Record<string, string | undefined>} env
+ * @param {string[]} errors
+ * @returns {SigningMode}
+ */
+function windowsSigning(env, errors) {
+  // GitHub passes unset variables as "" and the token flag as "false".
+  const has = (/** @type {string} */ name) => Boolean(env[name]) && env[name] !== "false";
+  const present = SIGNPATH_SETTINGS.filter(has);
+  if (present.length === 0) return "unsigned";
+  if (present.length < SIGNPATH_SETTINGS.length) {
+    for (const name of SIGNPATH_SETTINGS.filter((name) => !has(name))) {
+      const label = name === "SIGNPATH_API_TOKEN_SET" ? "The SIGNPATH_API_TOKEN secret" : `The ${name} variable`;
+      errors.push(`${label} is missing (SignPath signing is partly configured).`);
+    }
+    return "unsigned";
+  }
+  return "signpath";
 }
 
 /**
@@ -164,10 +232,13 @@ function summaryFor(platform, version, mode, method) {
       "> **Unsigned macOS build.** No signing secrets are configured, so this DMG is neither signed nor notarized " +
         "and Gatekeeper will block it on first launch. See `docs/release.md` to add the secrets.",
     );
+  } else if (platform === "win32" && mode === "signpath") {
+    lines.push("App and installer signed through SignPath (certificate by SignPath Foundation).");
   } else if (platform === "win32") {
     lines.push(
       "> [!WARNING]",
-      "> **Unsigned Windows beta.** Windows SmartScreen warns on first run (\"More info\" → \"Run anyway\").",
+      "> **Unsigned Windows beta.** Windows SmartScreen warns on first run (\"More info\" → \"Run anyway\"). " +
+        "See `docs/release.md` to set up SignPath signing.",
     );
   } else {
     lines.push("AppImage and .deb. Linux packages are not code-signed.");

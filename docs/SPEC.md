@@ -52,7 +52,7 @@ Out of scope: a manual, Premiere-style NLE for multi-hour 4K footage (color grad
 | 13 | Plugins | **Node/TS packages** + `frameshell-plugin.json`; official adapters built on the same API; GitHub topic discovery; per-project pinning; project trust | herdr-style zero-friction ecosystem; API proven by first-party plugins; every plugin teaches the agent via its skill | Curated marketplace, UI extension points in MVP |
 | 14 | Scripts | **Markdown with optional conventions** (`##` = scene, optional frontmatter); clips carry `scriptRef` | Free writing; traceability when useful; generation stays with the agent | Structured script format |
 | 15 | Agent changes | **Applied immediately, grouped in transactions**; history with author; diff review; revert whole tx or single ops. Opt-in **review mode** per project, off by default (ADR 0019): changes not made in the app wait as one proposal per transaction, accepted or rejected whole | Keeps autonomy (agent works for an hour unattended) and adds review afterwards; `history --since` lets the agent resume from human edits; who wants to see changes first turns one switch | Plain undo, review as the default, a per-transaction opt-in chosen by the agent |
-| 16 | Platforms | **macOS + Linux stable, Windows beta**; CI on all three from day one | Focus plus early detection of OS assumptions; signing cost only on macOS at v0.1 | macOS only, all three stable |
+| 16 | Platforms | **macOS + Linux stable, Windows beta**; CI on all three from day one | Focus plus early detection of OS assumptions; signing cost only on macOS at v0.1. Windows app and installer signed for free through SignPath Foundation when configured (ADR 0051) | macOS only, all three stable |
 | 17 | Layout | **Terminal right (full height), preview + editor tabs center, timeline bottom, explorer/history/plugins left**. Any panel can be **detached** into its own window (sharing the project window's state) and docked back, or maximized in place (ADR 0012) | Agent, preview and timeline visible together; a second monitor holds the preview or the agent | Terminal tabbed with timeline, free docking |
 | 18 | MVP | **End-to-end Case B scenario + one adapter (HyperFrames)** | Validates the core loop with a real workflow; HyperFrames is Apache 2.0, HTML, agent-friendly | Feature-list MVP, Remotion first |
 | 19 | Core process | **`frameshelld` daemon** per user, JSON-RPC + events over local socket; UI and CLI are clients | Renders survive closing the window; single writer; agent works with app closed; MCP/cloud become more clients | Core inside Electron, dual cores with file locks |
@@ -188,7 +188,7 @@ The compiler is a pure function (timeline → plan → ffmpeg args) tested with 
 | Tests | Vitest; golden files for compiler; short smoke renders in CI |
 | Repo | pnpm workspaces monorepo |
 | CI | GitHub Actions: macOS, Linux, Windows |
-| Packaging | macOS signed + notarized DMG; Linux AppImage/.deb; Windows unsigned (beta) |
+| Packaging | macOS signed + notarized DMG; Linux AppImage/.deb; Windows NSIS (beta), signed through SignPath Foundation when configured (ADR 0051) |
 | Docs | TSDoc in code; `CHANGELOG.md` (Keep a Changelog + SemVer); repo `CLAUDE.md` as router |
 | UI language | English, i18n-ready (Spanish as first translation) |
 

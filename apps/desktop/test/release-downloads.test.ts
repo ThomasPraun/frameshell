@@ -24,6 +24,12 @@ describe("downloadsSection (#740)", () => {
     expect(section.startsWith("## Download")).toBe(true);
   });
 
+  it("names the code signing policy on the download page, as SignPath Foundation asks (ADR 0051)", () => {
+    const section = downloadsSection(assets, "ThomasPraun/frameshell", "v0.19.0");
+    expect(section).toContain("[Code signing policy](https://github.com/ThomasPraun/frameshell/blob/main/CODE_SIGNING_POLICY.md)");
+    expect(section).toContain("[Privacy policy](https://github.com/ThomasPraun/frameshell/blob/main/PRIVACY.md)");
+  });
+
   it("leaves out what is missing, and says nothing without installers", () => {
     expect(downloadsSection(["Frameshell-1.0.0-win-x64.exe"], "o/r", "v1.0.0")).not.toContain("macOS");
     expect(downloadsSection(["SHA256SUMS.txt"], "o/r", "v1.0.0")).toBe("");
