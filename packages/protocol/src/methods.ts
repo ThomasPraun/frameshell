@@ -513,6 +513,10 @@ export type ClipCompareResult = MethodResult<"clip.compare">;
 export type ClipVerifyParams = MethodParams<"clip.verify">;
 /** Result of `clip.verify`. */
 export type ClipVerifyResult = MethodResult<"clip.verify">;
+/** `clip.textFit` params. */
+export type ClipTextFitParams = MethodParams<"clip.textFit">;
+/** Result of `clip.textFit`. */
+export type ClipTextFitResult = MethodResult<"clip.textFit">;
 /** `grade.analyze` params. */
 export type GradeAnalyzeParams = MethodParams<"grade.analyze">;
 /** Result of `grade.analyze`. */

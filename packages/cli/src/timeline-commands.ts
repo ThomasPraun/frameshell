@@ -1,6 +1,7 @@
 import type {
   CaptionsSetResult,
   ClipReframeResult,
+  ClipTextFitResult,
   ClipVerifyResult,
   CleanupResult,
   ConfigOperation,
@@ -93,6 +94,15 @@ mutations print the new revision):
                                the pixels: more than --tolerance of 255 on a channel (default 2) fails, exit 1,
                                naming the worst frame, pixel and element. Also warns when every probe is the same
                                picture (the clip never moves). Takes up to a minute; writes nothing, renders nothing
+  clip text-fit <clip> [--props json] [--at s,s,...]
+                               Check that every line of text of a generated clip fits its box and the frame:
+                               opens its live page at the project resolution, seeks to --at (composition seconds,
+                               1 to 12; default 50, 70 and 90 percent of the clip, once the words have settled)
+                               and measures each visible element with text of its own. Text past the frame edge is
+                               outside; text past the box that holds it (a button, a fixed-width line) overflows.
+                               --props tries props over the clip's own for the check only (another language:
+                               --props '{"cta":"Pruébalo hoy"}'); nothing is written or rendered. Exit 1 when
+                               something does not fit. Words drawn on a canvas or in SVG are not measured
   grade analyze <clip> [--at s | --from s --to s] [--samples n]
                                Measure the clip's source picture (before its own grade) with ffmpeg signalstats and
                                suggest a bounded correction: exposure, white balance, contrast, saturation, in the
@@ -643,6 +653,7 @@ const ALLOWED: Record<string, string[]> = {
   "clip key": ["prop", "at", "value", "ease", "remove", "clear", "snap-to", "format"],
   "clip reframe": ["format", "person", "anchor"],
   "clip verify": ["probes", "tolerance"],
+  "clip text-fit": ["props", "at"],
   "grade analyze": ["at", "from", "to", "samples"],
   "grade looks": [],
   "grade compare": ["look", "at", "out", "tile-width", "format"],
@@ -763,6 +774,7 @@ const ARITY: Record<string, [number, number]> = {
   "letterbox clear": [0, 0],
   "clip reframe": [1, 1],
   "clip verify": [1, 1],
+  "clip text-fit": [1, 1],
   "grade analyze": [1, 1],
   "grade looks": [0, 0],
   "grade compare": [1, 1],
@@ -1452,6 +1464,17 @@ export function parseTimelineCommand(positionals: string[], values: Values): Tim
       Object.assign(params, { clip: args[0], probes, tolerance });
       break;
     }
+    case "clip text-fit": {
+      method = "clip.textFit";
+      const at = list("at")?.flatMap((raw) => raw.split(",")).map((raw) => {
+        const value = Number(raw);
+        if (raw.trim() === "" || !Number.isFinite(value) || value < 0) throw new UsageError(`--at: expected composition seconds such as 2.5,3; got "${raw}".`);
+        return value;
+      });
+      if (at !== undefined && (at.length < 1 || at.length > 12)) throw new UsageError(`--at: 1 to 12 times, got ${at.length}.`);
+      Object.assign(params, { clip: args[0], props: json("props"), at });
+      break;
+    }
     case "grade analyze": {
       method = "grade.analyze";
       const samples = num("samples");
@@ -1677,7 +1700,7 @@ export async function executeTimeline(
     // Compact on purpose: agents read this, and indentation roughly doubles its tokens.
     return json ? `${JSON.stringify(result)}\n` : formatTimeline(result as TimelineView);
   }
-  if (inv.method === "clip.verify" && !(result as ClipVerifyResult).ok && exit) exit.code = 1;
+  if ((inv.method === "clip.verify" || inv.method === "clip.textFit") && !(result as { ok: boolean }).ok && exit) exit.code = 1;
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
   if (inv.method === "track.list") return formatTracks(result as Parameters<typeof formatTracks>[0]);
   if (inv.method === "marker.list") return formatMarkers(result as MarkerListResult);
@@ -1722,6 +1745,7 @@ export async function executeTimeline(
   if (inv.method === "captions.set") return formatCaptions(result as CaptionsSetResult);
   if (inv.method === "clip.reframe") return formatClipReframe(result as ClipReframeResult);
   if (inv.method === "clip.verify") return formatClipVerify(result as ClipVerifyResult);
+  if (inv.method === "clip.textFit") return formatClipTextFit(result as ClipTextFitResult);
   if (inv.method === "grade.analyze") return formatGradeAnalyze(result as GradeAnalyzeResult);
   if (inv.method === "grade.looks") return formatGradeLooks(result as GradeLooksResult);
   if (inv.method === "grade.compare") return formatGradeCompare(result as GradeCompareResult);
@@ -1754,6 +1778,23 @@ export function formatClipVerify(result: ClipVerifyResult): string {
   if (!result.ok) {
     lines.push("The picture depends on the order frames are painted. Look for CSS transitions, timers, requestAnimationFrame, Date, unseeded random, will-change or 3D transforms on that element.");
   }
+  return `${lines.join("\n")}\n`;
+}
+
+/** `clip text-fit` for people: the verdict, then one line per problem, worst first. */
+export function formatClipTextFit(result: ClipTextFitResult): string {
+  const tried = result.tried.length > 0 ? ` · trying ${result.tried.join(", ")}` : "";
+  const lines = [
+    `${result.ok ? "OK" : "FAIL"} · ${result.type} clip ${result.clip} of ${result.timeline} · ${result.lines} text element${result.lines === 1 ? "" : "s"} at ` +
+      `${result.size.width}x${result.size.height}, ${result.at.join(" ")} s${tried}` +
+      (result.ok ? "" : ` · ${result.problems.length} do${result.problems.length === 1 ? "es" : ""} not fit`),
+  ];
+  for (const problem of result.problems) {
+    const what = problem.kind === "outside" ? "past the frame" : "past its box";
+    lines.push(`  ${problem.selector} "${problem.text}" ${what} by ${problem.by} px on the ${problem.side} at ${problem.at.toFixed(3)} s`);
+  }
+  for (const warning of result.warnings) lines.push(`warning: ${warning}`);
+  if (!result.ok) lines.push("Shorten the text, or give the clip a smaller size or a wider box for it (its props, or clip set --elements).");
   return `${lines.join("\n")}\n`;
 }
 
