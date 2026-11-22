@@ -54,6 +54,8 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("element
       const dir = join(project, "compositions", "hyperframes", "els");
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "index.html"), COMPOSITION);
+      // Every project the daemon hands the adapter has one; `render` reads its resolution.
+      writeFileSync(join(project, "frameshell.json"), JSON.stringify({ resolution: { width: 160, height: 90 } }));
       const manager = binaries();
       const ffmpeg = await manager.ensure("ffmpeg");
       const adapter = createHyperframesAdapter({ projectDir: project });
