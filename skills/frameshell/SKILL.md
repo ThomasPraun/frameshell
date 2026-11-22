@@ -36,6 +36,13 @@ What the person asks for decides the tools. Frameshell has optional plugins and 
 - Never install a plugin, start a download, pass `--trust` or spend money (`--yes`) without the person's yes to that specific step. A person who wants none of it gets a plain edit.
 - `frameshell doctor` lists what is already on disk. Free the space of a download (`doctor --remove <name>`) only when the person asks; it downloads again on next use.
 
+## Talking to the person
+
+- **Say what you measured, never what you sensed.** You cannot listen to a mix or watch a video: you read numbers, frames and words. Write "the voice sits 4 dB over the music" or "frame 12.0 s shows the title cut off", never "I listened" or "I watched it". When nothing was measured, say it is a guess.
+- **A note is a wish or a complaint; ask which before you change anything.** "The music is loud" can mean "lower it here" or "I'd like a quieter track". When the note does not say what to change, ask in one line, then change only that.
+- **Ask before you start a kind of film.** For any new film (explainer, product promo, whiteboard, tutorial, reel), get four answers first: the goal (who watches it and what they do after), references (a link, a frame, a past film), the format (platform, aspect, formats) and the length. Read `frameshell style show` first and never ask what `style.json` already answers. Reels and motion films have their own intake ([reels.md](reference/reels.md#intake), [motion-films.md](reference/motion-films.md#1-intake)).
+- **A storyboard before anything paid.** Before a paid run (a cloud voice, a generated clip from a paid service, a paid track), show the person the plan it serves: the scenes in order with their times, and which ones the paid item fills. Their OK on that plan comes before the cost question, never in its place.
+
 ## Resume from the human's edits
 
 When the user says they changed something, or just "continue":

@@ -1,4 +1,4 @@
-// Pointer zoom (`clip.zoom`, ADR 0048): push in where the pointer of a screen recording rests, ease back out when it
+// Pointer zoom (`clip.zoom`, ADR 0049): push in where the pointer of a screen recording rests, ease back out when it
 // moves on. Pure: samples in, keys out; the layer model is `layerRect` in @frameshell/schema.
 import type { KeyEase, PointerSample } from "@frameshell/schema";
 

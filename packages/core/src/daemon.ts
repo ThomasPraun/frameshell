@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { type Server, type Socket, createServer } from "node:net";
 import { readFile } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { coreVersion } from "./version.js";
 import {
   type ConfigDoc,
   ErrorCode,
@@ -173,6 +174,7 @@ import { energySnapper } from "./timeline/snap.js";
 import { snapRequest, tempoGrid } from "./timeline/tempo.js";
 import { type GridLoader, type WordLoader, onceWords, resolveTimeRefArg, resolveTimeRefAsync } from "./timeline/time-ref.js";
 import { readTimelineWords } from "./transcripts/timeline-words.js";
+import { announceTranscription } from "./transcripts/announce.js";
 import { BeatsWatcher } from "./media/beats-watcher.js";
 import { type AudioExtractor, extractAudioWithFfmpeg } from "./transcripts/audio.js";
 import { type Diarizer, diarizeAsset } from "./transcripts/speakers.js";
@@ -185,6 +187,7 @@ import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { readNestedFile, resolveNested } from "./timeline/nested.js";
+import { compareSound } from "./review/sound-diff.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { type VerifyServices, canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
@@ -201,13 +204,13 @@ import { requirementsConfigDocument, requirementsFromState, requirementsState } 
 import { AnalyzeService } from "./analyze/service.js";
 import { GradeAnalyzer } from "./grade/analyze.js";
 import { ClipComparer } from "./clips/compare.js";
+import { scriptLanguage } from "./shoot/language.js";
 import { GradeComparer } from "./grade/compare.js";
 import { BrandService, type BrandServiceOptions } from "./brand/capture.js";
 import { checkCaptureUrl } from "./brand/policy.js";
 
-/** Package version reported in the handshake. */
-export const DAEMON_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string })
-  .version;
+/** Version reported in the handshake: the core package's, or the packaged app's release version ({@link coreVersion}). */
+export const DAEMON_VERSION: string = coreVersion(dirname(createRequire(import.meta.url).resolve("../package.json")));
 
 /** Five minutes: long enough to span an agent's think time between CLI calls. */
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
@@ -308,6 +311,12 @@ type Handlers = {
 };
 
 /**
+ * Methods `binaries.remove` does not wait for: the removal itself, the handshake, and the waits that only block on
+ * the person (they hold no download).
+ */
+const NOT_USING_DOWNLOADS: ReadonlySet<string> = new Set(["handshake", "binaries.remove", "proposal.wait", "inbox.wait"]);
+
+/**
  * Start frameshelld on `socketPath`.
  *
  * Rejects with code `EADDRINUSE` when a live daemon already owns the socket,
@@ -320,6 +329,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const startedAt = Date.now();
   const clients = new Set<Socket>();
+  /**
+   * Requests running now, on any connection, that may use a managed download (a frame capture, a clip check, an
+   * import's probe): every method but {@link NOT_USING_DOWNLOADS}. `binaries.remove` waits for them as for jobs.
+   */
+  let requestsRunning = 0;
   const dirs = options.dirs ?? resolveAppDirs();
   const binaries = options.binaries ?? new BinaryManager(dirs);
   const encoderCache = new EncoderCache(binaries.dataDir);
@@ -1038,6 +1052,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   });
   /** Transcriptions and export verifies running, per canonical project root: `gc` leaves their WAVs alone meanwhile. */
   const transcriptions = new Map<string, number>();
+  /** Runs of `transcribe` so far, for the ids of `transcription.progress`. */
+  let transcriptionRuns = 0;
   const transcribing = async <T>(dir: string, work: () => Promise<T>): Promise<T> => {
     const key = canonicalPathSync(dir);
     transcriptions.set(key, (transcriptions.get(key) ?? 0) + 1);
@@ -1079,7 +1095,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
             providerId,
             provider,
             model: await configuredModel(config, providerId),
-            language: config.transcription?.language,
+            // The project's language when set; else the script's own (#742), so whisper does not guess from a few seconds.
+            language: config.transcription?.language ?? scriptLanguage(await shoots.script(dir, script)) ?? undefined,
             context: providerContext(transcriberTools(overrides), () => {}).context,
           });
           takeRuns.delete(key);
@@ -1734,9 +1751,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       return { ...(await runDoctor(binaries, { project, install, reprobe, encoders: encoderCache, ...(format ? { format } : {}) })), skill: found ? await coreSkillState(found.dir) : null };
     },
     "binaries.remove": async ({ name }) => {
-      // Jobs and transcriptions do not say which downloads they use, so any of them blocks a removal.
+      // Jobs, transcriptions and one-off requests do not say which downloads they use, so any of them blocks a removal.
       if (jobs.busy || clipJobs.busy || transcriptions.size > 0) {
         throw inUse(name, "busy", "Jobs or a transcription are running or queued and may use it. See `frameshell status`; remove it when they finish (`job cancel` stops one).");
+      }
+      if (requestsRunning > 0) {
+        throw inUse(name, "busy", "Another request is running and may use it (a frame capture, a clip check, an import). Try again once it finishes.");
       }
       return binaries.remove(name);
     },
@@ -1752,7 +1772,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     "plugin.list": async ({ cwd }) => plugins.list(await root(cwd)),
     "plugin.catalog": async ({ cwd }) => {
       const dir = await root(cwd);
-      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir) });
+      const config = (await readEnclosingProject(dir))?.config;
+      const registered = new Set((await models.list()).models.map((model) => model.id));
+      const chosenModel = async (provider: string) => {
+        const own = (config?.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER) === provider ? config?.transcription?.model : undefined;
+        const id = own ?? (await models.defaultFor(provider));
+        return id === undefined ? undefined : { id, registered: registered.has(id) };
+      };
+      return buildCatalog({ binaries, project: (await projectBinaries(dir))!, listed: await plugins.list(dir), chosenModel });
     },
     "plugin.install": async ({ cwd, spec }) => {
       const dir = await root(cwd);
@@ -1924,6 +1951,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const providerId = provider ?? config.transcription?.provider ?? DEFAULT_TRANSCRIPTION_PROVIDER;
       const overrides = { dir, binaries: config.binaries };
       const chosenModel = model ?? (await configuredModel(config, providerId));
+      // Every subscriber of the project sees this run, not only its caller (#742: a CLI run was invisible in the app).
+      const announcer = announceTranscription(
+        `t_${++transcriptionRuns}`,
+        relative(dir, resolve(cwd, asset)).split(sep).join("/"),
+        (update) => publishFor("transcription.progress", dir, { project: dir, ...update }),
+        request.progress,
+      );
       return transcribing(dir, () => transcribeAsset({
         projectDir: dir,
         asset: resolve(cwd, asset),
@@ -1934,10 +1968,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         tools: transcriberTools(overrides),
         media: { derivedAudio: (rel, onProgress) => media.derivedAudio(dir, rel, onProgress) },
         extractAudio: options.extractAudio,
-        progress: request.progress,
+        progress: announcer.progress,
         yes,
         confirmation,
-      }));
+      })).then(
+        (result) => {
+          announcer.end();
+          return result;
+        },
+        (error: unknown) => {
+          announcer.end(error);
+          throw error;
+        },
+      );
     },
     "transcribe.speakers": async ({ cwd, asset, speakers }, _caller, request) => {
       await projects.requireEnclosing(cwd); // Throws ProjectNotFound.
@@ -3428,6 +3471,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         return { timeline, target, clips: [] };
       }
     },
+    "history.sound": async ({ cwd, timeline, target }) => {
+      const dir = await root(cwd);
+      let states: Awaited<ReturnType<typeof timelines.statesAround>>;
+      try {
+        states = await timelines.statesAround(dir, timeline, target);
+      } catch (error) {
+        if (!(error instanceof RpcError && error.code === ErrorCode.HistoryNotFound && (await configJournal.has(dir, target)))) throw error;
+        const holding = await timelinesHolding(dir, target);
+        if (holding.length > 0) throw historyElsewhere(target, timeline, holding);
+        // A config-only target (ADR 0036) changed no sound.
+        return { timeline, target, tracks: [], unchanged: [], unheard: [] };
+      }
+      const { before, after, fps } = states;
+      const sound = await compareSound({
+        before: await resolveNested(dir, before, undefined, fps),
+        after: await resolveNested(dir, after, undefined, fps),
+        fps,
+        profile: (asset) => energy.profile(dir, asset),
+      });
+      return { timeline, target, ...sound };
+    },
     revert: async ({ cwd, timeline, target }, caller) => {
       const dir = await root(cwd);
       if (await configJournal.has(dir, target)) return revertConfig(dir, cwd, timeline, target, caller);
@@ -3865,9 +3929,16 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
           closed: closedConnection.signal,
         };
         const handler = handlers[method] as (p: typeof params, c: Caller, r: RequestContext) => Promise<unknown>;
-        const result = await (idempotencyKey === null
-          ? handler(params, caller, context)
-          : replays.run(authorOf(caller), idempotencyKey, method, params, () => handler(params, caller, context)));
+        const counted = !NOT_USING_DOWNLOADS.has(method);
+        if (counted) requestsRunning++;
+        let result: unknown;
+        try {
+          result = await (idempotencyKey === null
+            ? handler(params, caller, context)
+            : replays.run(authorOf(caller), idempotencyKey, method, params, () => handler(params, caller, context)));
+        } finally {
+          if (counted) requestsRunning--;
+        }
         return request.id === undefined ? undefined : { jsonrpc: "2.0" as const, id, result };
       } catch (error) {
         if (request.id === undefined) return undefined;

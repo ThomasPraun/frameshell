@@ -327,7 +327,7 @@ export const timelineMethods = {
   "clip.zoom": {
     mutating: true,
     description:
-      "Zoom a screen recording to where the action is (ADR 0048, tutorials): push in where the mouse pointer rests and ease back " +
+      "Zoom a screen recording to where the action is (ADR 0049, tutorials): push in where the mouse pointer rests and ease back " +
       "out when it moves on, from the pointer track Shoot records next to each screen file (`.<name>.pointer.json` in its folder; " +
       "`pointer` names another file of the same shape). A rest is the pointer staying within a small circle for 0.8 s or more; " +
       "quick moves never zoom. Each zoom eases in 0.5 s before the pointer arrives, holds while it rests, and eases back 0.4 s after " +

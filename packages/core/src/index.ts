@@ -52,7 +52,7 @@ export {
   peopleScanWorker,
   scanFrameSize,
   scanPeopleFaces,
-  shrinkFrame,
+  resizeFrame,
   similarityTransform,
 } from "./people/scan.js";
 export { PEOPLE_DIR, type StoredFaceScan, classifyFaceScan, faceScanKey, readFaceScan, writeFaceScan } from "./people/scan-cache.js";

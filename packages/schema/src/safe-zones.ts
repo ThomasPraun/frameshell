@@ -60,3 +60,26 @@ export const SAFE_ZONES: Readonly<Record<PlatformId, SafeZone>> = {
     source: "No UI covers a played video: titles stay 5 % inside every edge (#457).",
   },
 };
+
+/** Pixels each edge of a frame a platform's UI covers. */
+export interface ZoneInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/**
+ * The edges of `zone` in pixels of a `frame`-sized picture: the platform's reference numbers scaled per axis, rounded.
+ * One scaling for `review`'s safe sheet and the app's preview overlay.
+ */
+export function zoneInsets(zone: Pick<SafeZone, "width" | "height" | "top" | "right" | "bottom" | "left">, frame: { width: number; height: number }): ZoneInsets {
+  const x = frame.width / zone.width;
+  const y = frame.height / zone.height;
+  return { top: Math.round(zone.top * y), right: Math.round(zone.right * x), bottom: Math.round(zone.bottom * y), left: Math.round(zone.left * x) };
+}
+
+/** Whether the platform's reference frame and a `frame` are both vertical or both not (square counts as not vertical). */
+export function sameOrientation(zone: Pick<SafeZone, "width" | "height">, frame: { width: number; height: number }): boolean {
+  return zone.height > zone.width === frame.height > frame.width;
+}

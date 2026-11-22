@@ -155,7 +155,7 @@ describe("voiceover.generate", () => {
     await expect(generate({ provider: "openai" })).rejects.toMatchObject({ code: ErrorCode.SpeechProviderNotFound, message: expect.stringContaining("frameshell plugin install @frameshell/openai-speech") });
     await expect(generate({ voice: "soprano" })).rejects.toMatchObject({ code: ErrorCode.InvalidParams, message: expect.stringContaining("voices: tone, low") });
     writeFileSync(join(root, "scripts", "launch-vo.md"), script(LINES, []));
-    await expect(generate()).rejects.toMatchObject({ code: ErrorCode.InvalidParams, message: expect.stringContaining("available: stand-in") });
+    await expect(generate()).rejects.toMatchObject({ code: ErrorCode.InvalidParams, message: expect.stringContaining("available: stand-in"), data: expect.objectContaining({ available: ["stand-in"] }) });
   });
 });
 
@@ -344,8 +344,21 @@ describe("voiceover.generate progress", () => {
       mkdirSync(join(dir, "scripts"), { recursive: true });
       writeFileSync(join(dir, "scripts", "vo.md"), script(LINES, ["provider: reporting"]));
       const fractions: number[] = [];
-      await client.request("voiceover.generate", { cwd: dir, script: "scripts/vo.md", verify: false }, { onProgress: (update) => update.stage === "speak" && fractions.push(update.fraction ?? Number.NaN) });
+      const places: string[] = [];
+      await client.request(
+        "voiceover.generate",
+        { cwd: dir, script: "scripts/vo.md", verify: false },
+        {
+          onProgress: (update) => {
+            if (update.stage !== "speak") return;
+            fractions.push(update.fraction ?? Number.NaN);
+            places.push(`${update.values?.["index"]}/${update.values?.["total"]}`);
+          },
+        },
+      );
       expect(fractions).toEqual([0, 0.25, 0.5, 0.75]);
+      // Each report says which line of how many, the provider's own included (the app shows "Line 1 of 2").
+      expect(places).toEqual(["1/2", "1/2", "2/2", "2/2"]);
     } finally {
       client.close();
       await local.close();

@@ -3,7 +3,7 @@
 // misread check's plan and where placing starts.
 import { ErrorCode, type Progress, RpcError, type VoiceoverGenerateResult, formatCost, timeRefOf } from "@frameshell/protocol";
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
-import type { VoiceoverProgress, VoiceoverVerifyPlan } from "../shared/api.js";
+import type { VoiceoverPlaceRun, VoiceoverProgress, VoiceoverVerifyPlan } from "../shared/api.js";
 import { type Confirmed, isAsk, runConfirmed } from "./confirmation.js";
 
 /** Transcription provider the app can set up and size a download for (`transcriptionDownload` in `main/index.ts`). */
@@ -23,8 +23,43 @@ export function verifyPlanOf(facts: { provider: string; pluginInstalled: boolean
 export function progressOf(update: Progress): VoiceoverProgress {
   const line = typeof update.values?.["line"] === "string" ? update.values["line"] : null;
   const fraction = update.fraction === undefined ? null : update.fraction;
-  if (update.stage?.includes("download")) return { stage: "download", line: null, fraction };
-  return { stage: update.stage === "speak" ? "speak" : "verify", line, fraction };
+  if (update.stage?.includes("download")) return { stage: "download", line: null, fraction, place: null };
+  const index = update.values?.["index"];
+  const total = update.values?.["total"];
+  const place = typeof index === "number" && typeof total === "number" ? { index, total } : null;
+  return { stage: update.stage === "speak" ? "speak" : "verify", line, fraction, place };
+}
+
+/**
+ * A generation that could not start for want of a voice (#756): no provider named in the script (`available` = the
+ * providers there are, from the error), or the named one not in this project (`missing`). Null for any other error.
+ */
+export function missingVoice(error: unknown): { missing: string | null; available: string[] } | null {
+  if (!(error instanceof RpcError)) return null;
+  const data = error.data as { provider?: unknown; available?: unknown; issues?: { path?: unknown[] }[] } | undefined;
+  const available = Array.isArray(data?.available) ? data.available.filter((id): id is string => typeof id === "string") : [];
+  if (error.code === ErrorCode.SpeechProviderNotFound) return { missing: typeof data?.provider === "string" ? data.provider : null, available };
+  if (error.code === ErrorCode.InvalidParams && data?.issues?.[0]?.path?.[0] === "provider") return { missing: null, available };
+  return null;
+}
+
+/** Why `voiceover.place` refused, in terms the dialog words itself (#756); `other` keeps the daemon's message. */
+export type PlaceRefusal = Extract<VoiceoverPlaceRun, { status: "refused" }>["reason"];
+
+/** What a refusal of `voiceover.place` was about. */
+export function placeRefusal(error: unknown): PlaceRefusal {
+  const message = (error as Error)?.message ?? String(error);
+  if (!(error instanceof RpcError)) return { kind: "other", message };
+  const data = error.data as { field?: unknown; value?: unknown; hint?: unknown; reason?: unknown; issues?: { path?: unknown[] }[] } | undefined;
+  if (error.code === ErrorCode.InvalidParams && data?.issues?.some((issue) => issue.path?.[0] === "start")) return { kind: "before-zero" };
+  if (error.code !== ErrorCode.InvalidOperation) return { kind: "other", message };
+  if (data?.field === "replace") return { kind: "replace" };
+  if (data?.field === "start") {
+    const said = `${typeof data.reason === "string" ? data.reason : ""} ${typeof data.hint === "string" ? data.hint : ""}`;
+    if (/tempo/i.test(said)) return { kind: "no-tempo" };
+    return { kind: "unknown-time", value: typeof data.value === "string" ? data.value : String(data.value ?? "") };
+  }
+  return { kind: "other", message };
 }
 
 /** The takes kept by a generation that Cancel stopped (`voiceover.cancel`); null for any other error. */
@@ -42,7 +77,8 @@ export function canceledRun(error: unknown): { kept: number } | null {
 export function startOf(typed: string): number | string | undefined {
   const text = typed.trim();
   if (text === "") return undefined;
-  return timeRefOf(text);
+  // A decimal comma, as Spanish writes it (#756): "2,5" is 2.5 seconds, never a marker.
+  return timeRefOf(/^-?\d+,\d+$/.test(text) ? text.replace(",", ".") : text);
 }
 
 /** What the person is asked to confirm: the provider, how many lines it would say, and the estimate. */

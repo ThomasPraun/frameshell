@@ -1,4 +1,4 @@
-// Pointer track of a Shoot screen recording (ADR 0048): the mouse pointer's position over the captured screen, polled
+// Pointer track of a Shoot screen recording (ADR 0049): the mouse pointer's position over the captured screen, polled
 // while the session records and written next to the screen file at End, for `clip zoom --follow pointer`.
 import { join } from "node:path";
 import { writeJsonAtomic } from "@frameshell/core/fs-util";

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { type ParseResult, formatIssues } from "./common.js";
 
 /**
- * A pointer track (ADR 0048): where the mouse pointer was over a screen recording, sampled while it recorded. Shoot
+ * A pointer track (ADR 0049): where the mouse pointer was over a screen recording, sampled while it recorded. Shoot
  * writes one next to each screen file it records; `clip.zoom` reads it to push in where the pointer rests.
  */
 export const PointerTrackSchema = z.strictObject({

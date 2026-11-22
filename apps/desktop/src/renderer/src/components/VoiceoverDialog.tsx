@@ -1,9 +1,11 @@
 import { DEFAULT_TRANSCRIPTION_PROVIDER } from "@frameshell/schema";
-import { useId, useRef, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n.js";
 import { transcriptionInstallCommand } from "../plugins/install-command.js";
-import { type LineRow, checkNote, differenceText, lineCounts, lineRows, progressText } from "../voiceover/model.js";
+import { mediaSrc } from "../preview/media-src.js";
+import { showSidebarView } from "../sidebar-request.js";
+import { type LineRow, checkNote, differenceText, lineCounts, lineRows, progressText, refusalText } from "../voiceover/model.js";
 import { type DialogState, type PlaceForm, voiceoverDialog } from "../voiceover/store.js";
 import { useModal } from "./modal.js";
 
@@ -14,14 +16,17 @@ const said = t.voiceover;
  * said, the misread report, and the form that places them on the timeline. Mount once, in the project window; a
  * dialog opened from a detached panel's window is drawn there through a portal.
  */
-export function VoiceoverDialogHost() {
+export function VoiceoverDialogHost({ mediaUrl }: { /** Base URL of the project's media, to play the takes; null with no project. */ mediaUrl: string | null }) {
   const state = useSyncExternalStore(voiceoverDialog.subscribe, voiceoverDialog.get);
+  useEffect(() => {
+    if (!state) stopTake();
+  }, [state === null]);
   if (!state) return null;
-  const element = <VoiceoverDialog state={state} />;
+  const element = <VoiceoverDialog state={state} mediaUrl={mediaUrl} />;
   return state.view === window ? element : createPortal(element, state.view.document.body);
 }
 
-function VoiceoverDialog({ state }: { state: DialogState }) {
+function VoiceoverDialog({ state, mediaUrl }: { state: DialogState; mediaUrl: string | null }) {
   const title = useId();
   const box = useRef<HTMLDivElement>(null);
   const { run, place } = state;
@@ -45,7 +50,7 @@ function VoiceoverDialog({ state }: { state: DialogState }) {
         <h2 id={title} className="voiceover-title">
           {said.title(name)}
         </h2>
-        <RunSection state={state} />
+        <RunSection state={state} mediaUrl={mediaUrl} />
         {place && <PlaceSection place={place} />}
         <div className="voiceover-actions">
           <button className="button" data-testid="voiceover-close" disabled={running} onClick={() => voiceoverDialog.close()}>
@@ -57,7 +62,7 @@ function VoiceoverDialog({ state }: { state: DialogState }) {
   );
 }
 
-function RunSection({ state }: { state: DialogState }) {
+function RunSection({ state, mediaUrl }: { state: DialogState; mediaUrl: string | null }) {
   const { run } = state;
   switch (run.kind) {
     case "none":
@@ -100,9 +105,66 @@ function RunSection({ state }: { state: DialogState }) {
       );
     case "stopped":
       return (
-        <p className="voiceover-note" role="status" data-testid="voiceover-stopped">
-          {said.stopped(run.kept)}
-        </p>
+        <section className="voiceover-section">
+          <p className="voiceover-note" role="status" data-testid="voiceover-stopped">
+            {said.stopped(run.kept)}
+          </p>
+          <p className="voiceover-hint">{said.continueHint}</p>
+          <div className="voiceover-actions">
+            <button className="button primary" data-testid="voiceover-continue" onClick={() => void voiceoverDialog.continueRun()}>
+              {said.continueRun}
+            </button>
+          </div>
+        </section>
+      );
+    case "voice":
+      return (
+        <section className="voiceover-section" data-testid="voiceover-voice">
+          <h3 className="voiceover-heading">{said.noVoiceTitle}</h3>
+          {run.missing && <p className="voiceover-note">{said.noVoiceMissing(run.missing)}</p>}
+          {run.available.length > 0 ? (
+            <>
+              <p className="voiceover-note">{said.chooseVoice}</p>
+              <div className="voiceover-form">
+                <label htmlFor={`${state.script}-voice`}>{said.voiceLabel}</label>
+                <select
+                  id={`${state.script}-voice`}
+                  className="voiceover-input"
+                  data-testid="voiceover-voice-pick"
+                  value={run.chosen}
+                  onChange={(event) => voiceoverDialog.pickVoice(event.target.value)}
+                >
+                  {run.available.map((voice) => (
+                    <option key={voice.id} value={voice.id}>
+                      {voice.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="voiceover-actions">
+                <button className="button primary" data-testid="voiceover-voice-generate" onClick={() => void voiceoverDialog.generateWithVoice()}>
+                  {said.generate}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="voiceover-note">{said.noVoiceBody}</p>
+              <div className="voiceover-actions">
+                <button
+                  className="button primary"
+                  data-testid="voiceover-open-plugins"
+                  onClick={() => {
+                    showSidebarView("plugins");
+                    voiceoverDialog.close();
+                  }}
+                >
+                  {said.openPlugins}
+                </button>
+              </div>
+            </>
+          )}
+        </section>
       );
     case "failed":
       return (
@@ -130,7 +192,7 @@ function RunSection({ state }: { state: DialogState }) {
           <h3 className="voiceover-heading">{said.linesHeading}</h3>
           <ul className="voiceover-lines">
             {lineRows(result).map((row) => (
-              <LineItem key={row.id} row={row} />
+              <LineItem key={row.id} row={row} mediaUrl={mediaUrl} />
             ))}
           </ul>
           {result.warnings.length > 0 && (
@@ -149,11 +211,58 @@ function RunSection({ state }: { state: DialogState }) {
   }
 }
 
-function LineItem({ row }: { row: LineRow }) {
+/** The take playing in the report, one at a time. */
+let playing: { audio: HTMLAudioElement; file: string } | null = null;
+const playingListeners = new Set<() => void>();
+
+function stopTake(): void {
+  playing?.audio.pause();
+  playing = null;
+  for (const listener of playingListeners) listener();
+}
+
+/** Play the take at `src` (`file` names it), stopping any other; a second press on the same take stops it. */
+function toggleTake(file: string, src: string): void {
+  if (playing?.file === file) return stopTake();
+  stopTake();
+  const audio = new Audio(src);
+  playing = { audio, file };
+  audio.addEventListener("ended", () => playing?.audio === audio && stopTake(), { once: true });
+  void audio.play().catch(() => playing?.audio === audio && stopTake());
+  for (const listener of playingListeners) listener();
+}
+
+function usePlayingTake(): string | null {
+  return useSyncExternalStore(
+    (listener) => {
+      playingListeners.add(listener);
+      return () => playingListeners.delete(listener);
+    },
+    () => playing?.file ?? null,
+  );
+}
+
+function LineItem({ row, mediaUrl }: { row: LineRow; mediaUrl: string | null }) {
+  const on = usePlayingTake() === row.file;
+  const label = on ? said.stopLine(row.number) : said.playLine(row.number);
   return (
     <li className={`voiceover-line is-${row.status}`} data-testid={`voiceover-line-${row.id}`} data-status={row.status}>
       <div className="voiceover-line-head">
-        <code>{row.id}</code>
+        {mediaUrl && (
+          <button
+            className="icon-button"
+            data-testid="voiceover-line-play"
+            aria-label={label}
+            aria-pressed={on}
+            data-tip={label}
+            onClick={() => toggleTake(row.file, mediaSrc(mediaUrl, row.file))}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              {on ? <rect x="4.5" y="4.5" width="7" height="7" fill="currentColor" /> : <path d="M5 3.5L12.5 8L5 12.5Z" fill="currentColor" />}
+            </svg>
+          </button>
+        )}
+        <span className="voiceover-line-number">{row.number}</span>
         <span className="voiceover-line-text">{row.display}</span>
         <span className="voiceover-line-state">{said.state[row.state]}</span>
         <span className={`voiceover-chip is-${row.status}`}>{said.check[row.status]}</span>
@@ -202,7 +311,7 @@ function PlaceSection({ place }: { place: PlaceForm }) {
         <p id={hintId} className="voiceover-hint">
           {said.startHint}
         </p>
-        <label className="voiceover-check">
+        <label className={`voiceover-check${place.refusal?.kind === "replace" ? " is-asked" : ""}`} data-testid="voiceover-replace-label">
           <input type="checkbox" data-testid="voiceover-replace" checked={place.replace} disabled={place.busy} onChange={(event) => voiceoverDialog.edit({ replace: event.target.checked })} />
           {said.replaceLabel}
         </label>
@@ -222,6 +331,11 @@ function PlaceSection({ place }: { place: PlaceForm }) {
               ))}
             </ul>
           )}
+        </div>
+      )}
+      {place.refusal && (
+        <div role="alert" data-testid="voiceover-place-refused" data-reason={place.refusal.kind}>
+          <p className="voiceover-error">{refusalText(place.refusal, said)}</p>
         </div>
       )}
       {place.error && (

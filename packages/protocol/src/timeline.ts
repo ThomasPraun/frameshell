@@ -1295,7 +1295,7 @@ export const ClipZoomResultSchema = z.object({
   timeline: z.string(),
   revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
   clip: z.string(),
-  pointer: z.string().describe("Project-relative pointer track read (ADR 0048)."),
+  pointer: z.string().describe("Project-relative pointer track read (ADR 0049)."),
   scale: z.number().describe("Zoom factor over the clip's own scale."),
   rests: z.int().describe("Spots the pointer rested on, within the clip's stretch of its file."),
   zooms: z.int().describe("Zooms written: each pushes in once and eases back out once; rests close together share one zoom that glides between them."),

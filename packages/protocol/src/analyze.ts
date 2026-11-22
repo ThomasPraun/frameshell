@@ -473,6 +473,21 @@ export interface AnalyzeResultShape {
   warnings: string[];
   /** MEASURED, ESTIMATED or DECISION for every value: the key is the path of a field (`shots[].ink`, `events`), and covers everything inside it. */
   labels: Record<string, AnalyzeLabel>;
+  /** `card.md` as text: the short card to read first (#801). */
+  card: string;
+  /** The files of the analysis to read after the card, smallest first, with their size. */
+  layers: AnalyzeLayer[];
+}
+
+/** One file of an analysis an agent can read, with its size, so it opens only what it needs (#801). */
+export interface AnalyzeLayer {
+  /** File name inside the analysis folder, e.g. `shots.md`. */
+  file: string;
+  bytes: number;
+  /** About how many tokens it costs to read: `bytes` ÷ 4, rounded up. */
+  tokens: number;
+  /** What it holds, in a few words. */
+  holds: string;
 }
 
 const ColorSchema = z.object({
@@ -775,6 +790,14 @@ export const AnalyzeResultSchema: z.ZodType<AnalyzeResultShape> = z.object({
         "Never applied: show them to the person (take the grammar, never the content) and apply what they agree to with `style.apply` `{ analysis: <name>, paths: [...] }` (one journaled change; `revert` undoes it) or `style.set`. Empty when nothing fits.",
     ),
   warnings: z.array(z.string()).describe("What could not be measured (no sound, no beat, sound too long for the beat detector…); empty when none."),
+  card: z
+    .string()
+    .describe(
+      "`card.md`: the short card of the analysis (about 300 tokens), each line labelled MEASURED, ESTIMATED or DECISION, ending with the layers to open next. Read it first; the CLI prints only it unless `--full`.",
+    ),
+  layers: z
+    .array(z.object({ file: z.string(), bytes: z.int(), tokens: z.int(), holds: z.string() }))
+    .describe("The files of the analysis folder to read after the card, smallest first: `shots.md` (one line per shot), `analysis.json` (every value), with bytes and an estimate of tokens."),
   labels: LabelsSchema.describe("MEASURED (read from the frames or the sound), ESTIMATED (a heuristic's hint: check the frames it names) or DECISION (a choice of the run) for every value: the key is the path of a field (`shots[].ink`, `events`) and covers all inside it; the most specific key wins. Say these words when you report a number."),
 });
 
@@ -818,6 +841,8 @@ export const ANALYZE_RESULT_LABELS: Readonly<Record<string, AnalyzeLabel>> = {
   sheets: "MEASURED",
   suggestions: "DECISION",
   warnings: "MEASURED",
+  card: "DECISION",
+  layers: "DECISION",
 };
 
 /** Facts of one of the two films `analyze.diff` compares. */
