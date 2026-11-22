@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zoom a screen recording to where the action is: Shoot now records the mouse pointer's position while it records a
   whole screen (a hidden `.screen.pointer.json` next to the screen file), and `frameshell clip zoom <clip> --follow
   pointer` (MCP `clip_zoom`) pushes in where the pointer rests and eases back out when it moves on, as `scale`, `x`
-  and `y` keys in one transaction. Only the position is recorded, not clicks (ADR 0049, #797).
+  and `y` keys in one transaction. Given the Shoot session's `screen` shot, it places the screen file over the shot
+  (muted, on a new `Screen zoom` track) and zooms that. Only the position is recorded, not clicks (ADR 0049, #797).
 - A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
   ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
   person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal

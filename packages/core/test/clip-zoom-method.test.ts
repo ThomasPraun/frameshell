@@ -102,4 +102,41 @@ describe("clip.zoom", () => {
     },
     MEDIA_TIMEOUT,
   );
+
+  it(
+    "zooms a Shoot screen shot by placing its screen file over it, muted, on a new track; refuses a grid shot",
+    async () => {
+      const made = await solo.request("multicam.create", {
+        cwd: project,
+        assets: ["assets/screen.mp4", "assets/plain.mp4"],
+        offsets: [1, 0],
+        screens: [1],
+        name: "Shoot",
+      });
+      await expect(solo.request("clip.zoom", { cwd: project, clip: made.clip, follow: "pointer" })).rejects.toMatchObject({
+        code: ErrorCode.InvalidOperation,
+        message: expect.stringMatching(/is a grid shot/),
+      });
+      const file = JSON.parse(await readFile(join(project, "timelines", "main.json"), "utf8")) as Timeline;
+      const angle = file.groups!.find((group) => group.id === made.group)!.angles.find((candidate) => candidate.screen)!;
+      await solo.request("shot.set", { cwd: project, clip: made.clip, shot: "screen", angles: [angle.id] });
+      const shot = (await clipOf(made.clip)) as unknown as { start: number };
+      const result = await solo.request("clip.zoom", { cwd: project, clip: made.clip, follow: "pointer", scale: 2 });
+      expect(result).toMatchObject({ rests: 1, zooms: 1, keys: 4 });
+      expect(result.clip).not.toBe(made.clip);
+      expect(result.warnings[0]).toMatch(/placed over it/);
+      const after = JSON.parse(await readFile(join(project, "timelines", "main.json"), "utf8")) as Timeline;
+      const programIndex = after.tracks.findIndex((candidate) => candidate.id === made.track);
+      const above = after.tracks[programIndex + 1] as { name?: string; clips: Clip[] };
+      expect(above.name).toBe("Screen zoom");
+      const placed = above.clips[0] as Clip & { keys: Record<string, unknown[]>; audio?: { muted?: boolean } };
+      // The screen file starts 1 s into the group clock, so the clip starts 1 s into the shot.
+      expect(placed).toMatchObject({ id: result.clip, asset: "assets/screen.mp4", start: shot.start + 1, in: 0, out: 8, audio: { muted: true } });
+      expect(placed.keys.scale).toHaveLength(4);
+      await solo.request("revert", { cwd: project, target: result.tx! });
+      const reverted = JSON.parse(await readFile(join(project, "timelines", "main.json"), "utf8")) as Timeline;
+      expect(reverted.tracks).toHaveLength(after.tracks.length - 1);
+    },
+    MEDIA_TIMEOUT,
+  );
 });

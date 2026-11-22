@@ -93,7 +93,8 @@ mutations print the new revision):
                                zoom that glides between them; quick moves never zoom. --scale is the zoom factor
                                over the clip's own scale (default 1.8); --pointer reads another track of the same
                                shape. Writes scale, x and y keys (replacing the clip's own), one transaction,
-                               revert undoes it. Correct the keys with clip key or in the app
+                               revert undoes it. Correct the keys with clip key or in the app. A Shoot screen
+                               shot: its screen file is placed over it (muted, new track Screen zoom), then zoomed
   clip verify <clip> [--probes n] [--tolerance 0-255]
                                Check that a generated clip (a motion clip, any adapter with a live preview) paints
                                a pure function of time: captures --probes frames (default 12, 2 to 48) at

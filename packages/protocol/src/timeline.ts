@@ -1294,7 +1294,7 @@ export type ClipReframeResult = z.output<typeof ClipReframeResultSchema>;
 export const ClipZoomResultSchema = z.object({
   timeline: z.string(),
   revision: z.int().describe("Revision after the last write; the one read at the start when nothing was written."),
-  clip: z.string(),
+  clip: z.string().describe("Clip zoomed: the one given, or the media clip placed over a screen shot."),
   pointer: z.string().describe("Project-relative pointer track read (ADR 0049)."),
   scale: z.number().describe("Zoom factor over the clip's own scale."),
   rests: z.int().describe("Spots the pointer rested on, within the clip's stretch of its file."),

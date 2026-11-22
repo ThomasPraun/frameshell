@@ -38,6 +38,8 @@ import {
   CREDITS_FILE,
   type CaptionPhrase,
   type DuckSettings,
+  type AnyClip,
+  type MediaClip,
   type MulticamGroup,
   type ProgramTrack,
   type FormatEntry,
@@ -56,6 +58,7 @@ import {
   parseRequirementsFile,
   parseStyleFile,
   parsePointerTrack,
+  isShotClip,
   parseTimeline,
   pointerFileOf,
   projectFormats,
@@ -103,7 +106,7 @@ import { measureAngles, syncReport } from "./multicam/measure.js";
 import { analyseGallery } from "./multicam/gallery.js";
 import { FACE_SAMPLE_HZ, type FacePoint, type FaceScanner, proposeReframeKeys, yunetWorkerScanner } from "./multicam/faces.js";
 import { planReframe, reframeTarget } from "./reframe.js";
-import { ZOOM, planZoom } from "./zoom.js";
+import { ZOOM, planZoom, screenShotOf } from "./zoom.js";
 import {
   FACE_DETECTION_MODEL,
   FACE_RECOGNITION_MODEL,
@@ -3192,11 +3195,25 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const dir = await root(cwd);
       const invalid = (reason: string, field: string) => new RpcError(ErrorCode.InvalidOperation, `clip.zoom: ${reason}`, { op: "clip.zoom", reason, field });
       const { timeline: loaded } = await loadFor(dir, timeline, caller);
-      const clip = loaded.tracks.flatMap((track) => (track.kind === "video" ? track.clips : [])).find((candidate) => candidate.id === clipId);
+      // A Shoot screen shot (ADR 0049 decision 7): its screen file goes over the shot as a media clip, which is zoomed.
+      const screenShot = screenShotOf(loaded, clipId);
+      const clip: MediaClip | undefined =
+        screenShot?.clip ??
+        loaded.tracks
+          .flatMap((track) => (track.kind === "video" ? track.clips : []))
+          .find((candidate): candidate is MediaClip => candidate.id === clipId && isMediaClip(candidate));
       if (!clip) {
-        throw new RpcError(ErrorCode.ClipNotFound, `clip.zoom: no clip "${clipId}" on a video track of timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
+        const found = loaded.tracks.flatMap((track): AnyClip[] => ("clips" in track ? track.clips : [])).find((candidate) => candidate.id === clipId);
+        if (found && isShotClip(found)) {
+          throw invalid(
+            `shot ${clipId} is a ${found.shot} shot: only a \`screen\` shot, or a \`solo\` shot of a screen recording, is zoomed (the screen file goes over it). ` +
+              `Place the screen file as a media clip on a video track (frameshell clip add <track> <file> --start <s> --in <s> --out <s>) and zoom that clip.`,
+            "clip",
+          );
+        }
+        if (found) throw invalid(`clip ${clipId} is not a media clip: only screen recordings are zoomed.`, "clip");
+        throw new RpcError(ErrorCode.ClipNotFound, `clip.zoom: no clip "${clipId}" in timeline ${loaded.id}. List clip ids with "frameshell timeline show".`, { clip: clipId });
       }
-      if (!isMediaClip(clip)) throw invalid(`clip ${clipId} is not a media clip: only screen recordings are zoomed.`, "clip");
       const probe = await media.probe(dir, clip.asset);
       if (!probe.video || probe.video.still) throw invalid(`${clip.asset} has no moving picture to zoom.`, "clip");
       if (!probe.video.width || !probe.video.height) throw invalid(`${clip.asset} has no readable picture size.`, "clip");
@@ -3248,7 +3265,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         );
         return nothing();
       }
-      if (clip.keys?.x || clip.keys?.y || clip.keys?.scale) warnings.push(`${clip.id} had its own x, y or scale keys: replaced.`);
+      if (!screenShot && (clip.keys?.x || clip.keys?.y || clip.keys?.scale)) warnings.push(`${clip.id} had its own x, y or scale keys: replaced.`);
       // Every write joins one transaction, so one revert undoes the zoom even from a sessionless client.
       const key = authorOf(caller);
       const next = transactions.next(key, { standalone: true });
@@ -3261,15 +3278,29 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         await transactions.applied(key, tx);
         written.push(result.operation.id);
         revision = result.revision;
+        return result;
       };
       await transactions.touching(key, tx, { root: dir, timeline });
+      let target = clip.id;
       try {
+        if (screenShot) {
+          // Muted: the group already plays every angle's sound under every shot.
+          const added = await apply({ op: "track.add", args: { kind: "video", name: "Screen zoom", index: screenShot.index + 1 } } as OperationRequest);
+          const placed = await apply({
+            op: "clip.add",
+            args: { track: added.changes.added[0]!, type: "media", asset: clip.asset, start: clip.start, in: clip.in, out: clip.out, muted: true },
+          } as OperationRequest);
+          target = placed.changes.added[0]!;
+          warnings.push(
+            `${clipId} is a shot of the multicam group: its screen file ${clip.asset} was placed over it as ${target} (muted, on a new video track "Screen zoom"), and ${target} is zoomed.`,
+          );
+        }
         for (const prop of ["x", "y", "scale"] as const) {
-          if (clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: clip.id, prop, clear: true } } as OperationRequest);
+          if (!screenShot && clip.keys?.[prop]) await apply({ op: "clip.key", args: { clip: target, prop, clear: true } } as OperationRequest);
         }
         for (const prop of ["scale", "x", "y"] as const) {
           for (const point of plan.keys) {
-            await apply({ op: "clip.key", args: { clip: clip.id, prop, time: point.time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
+            await apply({ op: "clip.key", args: { clip: target, prop, time: point.time, value: point[prop], ...(point.ease ? { ease: point.ease } : {}) } } as OperationRequest);
           }
         }
       } catch (error) {
@@ -3278,7 +3309,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         throw error;
       }
       await settle(key, tx);
-      return { ...nothing(), revision, zooms: plan.zooms, keys: plan.keys.length, operations: written, tx: tx.id };
+      return { ...nothing(), clip: target, revision, zooms: plan.zooms, keys: plan.keys.length, operations: written, tx: tx.id };
     },
     "multicam.turns": async ({ cwd, timeline, group }, caller) => {
       const dir = await root(cwd);

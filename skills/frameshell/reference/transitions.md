@@ -107,7 +107,7 @@ frameshell clip zoom <clip> --follow pointer             # push in where the mou
 frameshell clip zoom <clip> --follow pointer --scale 1.5 # gentler zoom (1.1 to 4, default 1.8)
 ```
 
-- For tutorials and demos recorded in Shoot: each screen file has a pointer track next to it (`assets/shoot/<id>/.screen.pointer.json`, position only, no clicks). The clip must be a media clip of that file on a video track: place it with `clip add <track> assets/shoot/<id>/screen.webm` (a multicam `screen` shot is not zoomed). `--pointer <file>` reads a track of the same shape from another recorder.
+- For tutorials and demos recorded in Shoot: each screen file has a pointer track next to it (`assets/shoot/<id>/.screen.pointer.json`, position only, no clicks). Pass a media clip of that file on a video track, or the Shoot session's `screen` shot itself: the screen file is then placed over the shot (muted, new track `Screen zoom`) and that clip is zoomed (`clip` in the output). A `pip` or grid shot is refused. `--pointer <file>` reads a track of the same shape from another recorder.
 - A rest is the pointer staying in one spot for 0.8 s or more; quick moves never zoom. Rests close together share one zoom that glides between spots. The spot comes to the frame's center as far as the picture's edge allows.
 - It writes `scale`, `x` and `y` keys (they move together, ease in-out) in one transaction, replacing the clip's own keys of those three (`warning:`); `revert <tx>` undoes it, `clip key` or the inspector edit the keys after. Read `rests` and `zooms`: no rest leaves the clip as it was. Check a zoom with `frame --at <s> --out <file.png>` in the middle of one.
 

@@ -1,6 +1,6 @@
 // Pointer zoom (`clip.zoom`, ADR 0049): push in where the pointer of a screen recording rests, ease back out when it
 // moves on. Pure: samples in, keys out; the layer model is `layerRect` in @frameshell/schema.
-import type { KeyEase, PointerSample } from "@frameshell/schema";
+import type { KeyEase, MediaClip, PointerSample, Timeline } from "@frameshell/schema";
 
 /** Tuning of the pointer zoom. Times in seconds, distances in units of the picture's height. */
 export const ZOOM = Object.freeze({
@@ -183,4 +183,34 @@ function clamp(value: number, limit: number): number {
 
 function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000;
+}
+
+/** A Shoot screen shot to zoom: its screen file as the media clip that goes over it, and the program track's stack index. */
+export interface ScreenShot {
+  /** Not yet in the timeline: id of the shot, the screen file over the shot's stretch of the group clock, muted. */
+  clip: MediaClip;
+  /** Stack index of the program track; the clip goes on a new video track right above it. */
+  index: number;
+}
+
+/**
+ * The screen shot `clipId` of a program track of `timeline` (ADR 0049 decision 7): a `screen` shot, or a `solo` shot of a
+ * screen angle. Its screen file covers the shot as a media clip (source = group clock - the angle's offset, cut where the
+ * file starts). Null for any other clip, a shot of another layout, or a shot the file does not reach.
+ */
+export function screenShotOf(timeline: Timeline, clipId: string): ScreenShot | null {
+  for (const [index, track] of timeline.tracks.entries()) {
+    if (track.kind !== "program") continue;
+    const shot = track.clips.find((candidate) => candidate.id === clipId);
+    if (!shot) continue;
+    const angle = timeline.groups?.find((group) => group.id === track.group)?.angles.find((candidate) => candidate.id === shot.angles[0]);
+    if (!angle || !(shot.shot === "screen" || (shot.shot === "solo" && angle.screen === true))) return null;
+    const late = Math.max(0, angle.offset - shot.in);
+    const from = shot.in + late - angle.offset;
+    const to = shot.out - angle.offset;
+    if (to <= from) return null;
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    return { clip: { id: shot.id, type: "media", asset: angle.asset, start: round(shot.start + late), in: round(from), out: round(to) } as MediaClip, index };
+  }
+  return null;
 }

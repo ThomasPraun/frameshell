@@ -46,8 +46,13 @@ be reviewed in the PR. **Accepted by the owner on 2026-11-21: position only, no 
    at the same times (ease in-out on every key that starts a move), replacing the clip's own keys of those three
    (as `clip.reframe` does, with a warning), in one transaction `Zoom <file name>`, one proposal in review mode.
    No rest: nothing written, a warning. Protocol 185.
-7. **Media clips only.** A Shoot session becomes a multicam group, whose screen angle is never cut by a shot. To zoom,
-   the agent places the screen file as a media clip (`clip add`); zooming a multicam `screen` shot is not built.
+7. **Media clips, and Shoot screen shots through one.** A Shoot session becomes a multicam group, and shots take no
+   keys. `clip.zoom` on a `screen` shot (or a `solo` shot of a screen angle) places the angle's file over the shot as a
+   media clip (same group-clock stretch, muted: the group already plays every angle's sound) on a new video track
+   `Screen zoom` right above the program track, and zooms that clip, all in the one transaction. Other layouts are
+   refused: a `pip` inset or a grid tile would be covered. Keys on shots themselves are not built. *Amended 2026-11-22
+   after the Lenovo test of #810: a tutorial recorded in Shoot is the main case, and placing the file by hand was the
+   one step left to the agent.*
 
 ## Considered options
 

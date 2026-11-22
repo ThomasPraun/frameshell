@@ -337,13 +337,15 @@ export const timelineMethods = {
       "placement. `scale` is the zoom factor over that placement (default 1.8). One transaction labelled `Zoom <file name>` (yours " +
       "when one is open): `revert` undoes it, the keys stay editable in the inspector or with `clip.key`, and in review mode it is " +
       "one proposal. Only the pointer's position is recorded, not its clicks. A clip whose pointer never rests is left as it was, " +
-      "with a warning. Example: `{ clip: \"c_0007\", follow: \"pointer\" }`. Fails with InvalidOperation (not a media clip on a " +
-      "video track, a still picture, no pointer track (record the screen in Shoot, or pass `pointer`), an unreadable track), " +
+      "with a warning. A Shoot `screen` shot (or a `solo` shot of a screen angle) of a multicam group is zoomed too: its screen " +
+      "file is placed over the shot as a muted media clip on a new video track `Screen zoom` right above the program track, in the " +
+      "same transaction, and that clip is zoomed (`clip` in the result is its id). Example: `{ clip: \"c_0007\", follow: \"pointer\" }`. " +
+      "Fails with InvalidOperation (not a media clip on a video track nor a screen shot, a shot of another layout, a still picture, no pointer track (record the screen in Shoot, or pass `pointer`), an unreadable track), " +
       "ClipNotFound, TimelineNotFound.",
     params: z.strictObject({
       cwd: CwdParam,
       timeline: TimelineIdSchema,
-      clip: z.string().min(1).describe("Id of a media clip on a video track, from `timeline.show`: a screen recording."),
+      clip: z.string().min(1).describe("Id of a media clip on a video track, or of a Shoot `screen` shot, from `timeline.show`: a screen recording."),
       follow: z.literal("pointer").describe("What the zoom follows: the recorded mouse pointer (the only kind so far)."),
       scale: z.number().min(1.1).max(4).optional().describe("Zoom factor over the clip's own scale, 1.1 to 4. Default 1.8."),
       pointer: z
