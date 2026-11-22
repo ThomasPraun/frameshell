@@ -95,8 +95,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whether sound came in, went or changed level, and by how many dB. Measured like the sound review, from each clip's
   envelope with its gain and fades, never mixed (#803).
 
+- Five particle and light overlays for HyperFrames clips, `fx-sparks`, `fx-confetti`, `fx-glow`, `fx-shockwave` and
+  `fx-rays` (`frameshell hyperframes new <name> --template fx-sparks`): seeded, drawn as a pure function of time on a
+  transparent canvas, coloured by the style's accent and ink, with hits at set times or on the music's beats
+  (`onBeats`), so a sound placed on the same beat lands on the same frame (#802).
+
 ### Fixed
 
+- The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
+  cloud container), as the producer's renders already do; before, they failed there before drawing anything.
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
   it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
   disappear under a running ffmpeg or Chrome (#790).
