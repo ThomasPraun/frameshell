@@ -131,6 +131,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MEASURED, ESTIMATED or DECISION label, then the layers to open next with their size (`shots.md`, one line per shot;
   `analysis.json`, every value). `--full` prints every value as before; the result gains `card` and `layers` (#801).
 
+### Changed
+
+- HyperFrames generated clips render with HyperFrames 0.9.72 (was 0.9.30). It is a version older than a day, so
+  installs keep npm's minimum release age with no exceptions for HyperFrames (#800).
+
 ### Fixed
 
 - Terminal: closing a tab while its shell runs `exit` no longer leaves the shell running. Bash can catch the hang-up as readline finishes the line; a shell still there after 2 s gets SIGKILL (not Windows).
