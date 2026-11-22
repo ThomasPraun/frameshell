@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Windows code signing through SignPath Foundation (ADR 0051): once its secret and variables are set, the Release
+  workflow signs `Frameshell.exe`, builds the installer from the signed app and signs the installer too, each after
+  the maintainer approves it on signpath.io. Without them Windows stays unsigned, as before. New
+  `CODE_SIGNING_POLICY.md` and `PRIVACY.md`, linked from the README, the release notes and frameshell.dev; setup in
+  `docs/release.md`.
 - Zoom a screen recording to where the action is: Shoot now records the mouse pointer's position while it records a
   whole screen (a hidden `.screen.pointer.json` next to the screen file), and `frameshell clip zoom <clip> --follow
   pointer` (MCP `clip_zoom`) pushes in where the pointer rests and eases back out when it moves on, as `scale`, `x`

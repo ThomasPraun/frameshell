@@ -27,7 +27,19 @@ export function downloadsSection(files, repo, tag) {
     return file ? [`| ${label} | [${file}](https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(file)}) |`] : [];
   });
   if (lines.length === 0) return "";
-  return ["## Download", "", "| Your computer | File |", "|---|---|", ...lines, "", "The other files are for automatic updates and checksums.", ""].join("\n");
+  return [
+    "## Download",
+    "",
+    "| Your computer | File |",
+    "|---|---|",
+    ...lines,
+    "",
+    "The other files are for automatic updates and checksums.",
+    // SignPath Foundation asks for the policy to be named on the download page (ADR 0051).
+    `[Code signing policy](https://github.com/${repo}/blob/main/CODE_SIGNING_POLICY.md) · ` +
+      `[Privacy policy](https://github.com/${repo}/blob/main/PRIVACY.md)`,
+    "",
+  ].join("\n");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

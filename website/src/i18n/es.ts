@@ -315,6 +315,8 @@ export const es: Dict = {
     spec: "Especificación",
     mcp: "Servidor MCP",
     license: "Licencia",
+    signing: "Política de firma de código",
+    privacy: "Privacidad",
     legal: "Licencia Apache 2.0. «Frameshell» y su logo son marcas del proyecto; los forks deben usar otro nombre.",
   },
   ruler: { label: "Secciones" },

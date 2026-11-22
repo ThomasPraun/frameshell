@@ -20,6 +20,9 @@ const t = strings(lang).footer;
       <a href={`${REPO}/blob/main/docs/SPEC.md`}>{t.spec}</a>
       <a href={`${REPO}/blob/main/docs/mcp.md`}>{t.mcp}</a>
       <a href={`${REPO}/blob/main/LICENSE`}>{t.license}</a>
+      {/* SignPath Foundation asks for "Code signing policy" on the home page (ADR 0051). */}
+      <a href={`${REPO}/blob/main/CODE_SIGNING_POLICY.md`}>{t.signing}</a>
+      <a href={`${REPO}/blob/main/PRIVACY.md`}>{t.privacy}</a>
     </nav>
   </div>
   <p class="wrap legal">
