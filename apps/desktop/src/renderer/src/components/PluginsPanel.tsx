@@ -303,7 +303,7 @@ function PluginItem({ row, busy, keyState, onInstall, onRemove, onSaveKey, onRem
 }
 
 /**
- * The OpenAI key field (ADR 0048): a password input with Save while no key is set and this computer can encrypt one,
+ * The OpenAI key field (ADR 0050): a password input with Save while no key is set and this computer can encrypt one,
  * Remove once one is saved here, nothing when the key comes from the environment. What was typed is dropped after a
  * save; the saved key never comes back to this view.
  */
@@ -415,7 +415,7 @@ function stateText(state: PluginRow["state"]): string {
 
 /**
  * What the plugin needs, and whether this machine has it. The key's value is never read here: only where it comes
- * from (`key`, ADR 0048) and whether the engine has one (`need.met`).
+ * from (`key`, ADR 0050) and whether the engine has one (`need.met`).
  */
 function needText(row: PluginRow, key: OpenAiKeyState | null): string {
   const said = t.plugins.need;

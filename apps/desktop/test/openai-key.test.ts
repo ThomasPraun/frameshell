@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type KeyCipher, OpenAiKeyStore, STAND_IN_CIPHER } from "../src/main/openai-key.js";
 
-// The OpenAI key kept by the app (ADR 0048): encrypted on disk, the environment wins, never in an error.
+// The OpenAI key kept by the app (ADR 0050): encrypted on disk, the environment wins, never in an error.
 
 const KEY = "sk-proj-abcdef0123456789";
 const file = () => join(realpathSync(mkdtempSync(join(tmpdir(), "frameshell-key-"))), "config", "openai-key.bin");

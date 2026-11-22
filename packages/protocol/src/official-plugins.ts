@@ -18,6 +18,11 @@ export interface OfficialDownload {
   id: string;
   /** What the download is, for a person. */
   what: string;
+  /**
+   * Set on the default model of a transcription provider: a project or machine that picks another model of
+   * `provider` downloads managed model `prefix` + that model instead, and `plugin.catalog` reports that one.
+   */
+  chosenModel?: { provider: string; prefix: string };
 }
 
 /** One official plugin: what it is for, what it needs and what it downloads. */
@@ -60,7 +65,7 @@ export const OFFICIAL_PLUGINS: readonly OfficialPlugin[] = [
     cloud: false,
     downloads: [
       { kind: "binary", id: "whisper-cpp", what: "whisper.cpp speech recognizer (a GPU build when this machine has one)" },
-      { kind: "model", id: "ggml-large-v3-turbo-q5_0", what: "Speech model large-v3-turbo, 5-bit" },
+      { kind: "model", id: "ggml-large-v3-turbo-q5_0", what: "Speech model large-v3-turbo, 5-bit", chosenModel: { provider: "whisper-cpp", prefix: "ggml-" } },
     ],
   },
   {

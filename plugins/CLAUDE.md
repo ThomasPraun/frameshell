@@ -17,7 +17,7 @@ Each plugin = own npm package; `files` whitelist (`node scripts/plugins-npm.mjs 
 
 ## Cloud providers (next cloud provider = same shape, own plugin)
 
-- Key from `OPENAI_API_KEY` env, read per call; the app may put it there in the daemon (`credentials.provide`, key field in Plugins, ADR 0048). Plugins never read a key file. Every network text through `scrub`; never in errors/progress/files.
+- Key from `OPENAI_API_KEY` env, read per call; the app may put it there in the daemon (`credentials.provide`, key field in Plugins, ADR 0050). Plugins never read a key file. Every network text through `scrub`; never in errors/progress/files.
 - `scrub` of openai-transcription = hand copy of openai-speech's + parity test (`openai-transcription/test`).
 - Price from one table `MODEL_PRICES` with source + date; unknown model = `estimate` throws. Speech: price per character; model env `FRAMESHELL_OPENAI_SPEECH_MODEL` in `version`. Transcription: `whisper-1` only.
 - Tests stub HTTP server only, never real API.

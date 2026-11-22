@@ -773,7 +773,7 @@ export interface FrameshellApi {
      * daemon's message, e.g. BinaryInUse.
      */
     removeDownload(name: string, bytes: number): Promise<BinariesRemoveResult | null>;
-    /** Where the OpenAI key comes from (ADR 0048); never the key itself. */
+    /** Where the OpenAI key comes from (ADR 0050); never the key itself. */
     keyState(): Promise<OpenAiKeyState>;
     /**
      * Encrypt and keep the OpenAI key typed in the Plugins view, then hand it to the daemon. Rejects when this
@@ -1058,7 +1058,7 @@ export interface PluginsView {
 }
 
 /**
- * Where the OpenAI key comes from (ADR 0048): the environment (wins), the key saved in this app, or nowhere.
+ * Where the OpenAI key comes from (ADR 0050): the environment (wins), the key saved in this app, or nowhere.
  * `storable` is false when this computer cannot encrypt a key, so the view offers no field.
  */
 export interface OpenAiKeyState {

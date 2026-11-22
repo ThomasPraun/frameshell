@@ -3,13 +3,13 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { OpenAiKeyState } from "../shared/api.js";
 
-/** Environment variable the OpenAI plugins read; a value there wins over a saved key (ADR 0048 decision 4). */
+/** Environment variable the OpenAI plugins read; a value there wins over a saved key (ADR 0050 decision 4). */
 export const OPENAI_KEY_VARIABLE = "OPENAI_API_KEY";
 
 /** The subset of Electron's `safeStorage` the key store uses; tests and the e2e stand-in pass their own. */
 export interface KeyCipher {
   isEncryptionAvailable(): boolean;
-  /** Linux only in Electron: `basic_text` means a fixed key, so nothing is stored (ADR 0048 decision 2). */
+  /** Linux only in Electron: `basic_text` means a fixed key, so nothing is stored (ADR 0050 decision 2). */
   getSelectedStorageBackend?(): string;
   encryptString(plain: string): Buffer;
   decryptString(encrypted: Buffer): string;
@@ -43,7 +43,7 @@ const ENGLISH: KeyMessages = {
 };
 
 /**
- * The OpenAI key typed in the Plugins view (ADR 0048): encrypted by `cipher` into `file` (in `configDir`), decrypted
+ * The OpenAI key typed in the Plugins view (ADR 0050): encrypted by `cipher` into `file` (in `configDir`), decrypted
  * only here in main and handed to the daemon. Never returns the key to the renderer and never puts it in an error.
  */
 export class OpenAiKeyStore {

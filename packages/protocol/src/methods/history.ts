@@ -3,6 +3,7 @@ import { ProposalConfigChangeSchema } from "../config.js";
 import {
   ConfigOperationSchema,
   HistoryDiffResultSchema,
+  HistorySoundResultSchema,
   HistoryResultSchema,
   TransactionInfoSchema,
 } from "../history.js";
@@ -110,6 +111,23 @@ export const historyMethods = {
       target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to diff."),
     }),
     result: HistoryDiffResultSchema,
+  },
+  "history.sound": {
+    description:
+      "What a transaction (`tx_…`) or a single operation (`op_…`) did to a timeline's sound, per track: each track whose " +
+      "level moved by 1 dB or more, with the time ranges, whether the sound came in, went or changed level, and by how " +
+      "many dB. Use it after a sound edit (a duck, a gain, a music move, an effect placed) to prove it touched only the " +
+      "tracks and times you meant. Compares the timeline right before and right after the target; later operations do " +
+      "not change the answer. Nothing is mixed: each clip is read from its asset's 10 ms envelope with its gain, keys " +
+      "and fades, so it is measured, never heard. Times are the timeline's: a change that also moved clips shows as " +
+      "sound removed in one place and added in another. A config-only target changed no sound: `tracks` is empty. " +
+      "Fails like `history.diff`.",
+    params: z.strictObject({
+      cwd: CwdParam,
+      timeline: TimelineIdSchema,
+      target: z.union([TxIdSchema, OpIdSchema]).describe("Transaction id `tx_…` or operation id `op_…` to compare around."),
+    }),
+    result: HistorySoundResultSchema,
   },
   revert: {
     mutating: true,

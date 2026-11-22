@@ -55,7 +55,7 @@ describe("DaemonLink", () => {
     expect(status.daemon.uptimeMs).toBeLessThan(5_000);
   });
 
-  it("runs onConnected on every new connection before requests use it, a restarted daemon too (ADR 0048)", async () => {
+  it("runs onConnected on every new connection before requests use it, a restarted daemon too (ADR 0050)", async () => {
     const path = socketPath();
     let env: Record<string, string | undefined> = {};
     let daemon: Daemon = await startDaemon({ socketPath: path, env });

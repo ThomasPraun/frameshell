@@ -40,7 +40,7 @@ const en = {
     blenderMissing: "Blender not found on this computer. Install it from blender.org, then come back here.",
     openaiKey: "Needs your own OpenAI API key.",
     keySet: "Key set. Frameshell never shows it.",
-    /** ADR 0048: where the key comes from. */
+    /** ADR 0050: where the key comes from. */
     keyFromEnvironment: (variable: string) => `Key from the ${variable} environment variable, which wins over a key saved here.`,
     keySaved: "Key saved in this app, encrypted by your system. Frameshell never shows it again.",
     keyMissing: "Key not set. Paste it below: Frameshell encrypts it with your system's keychain and hands it only to its own engine.",
@@ -72,7 +72,7 @@ const en = {
   /** While an install runs (#740: ~45 s with nothing moving): how long so far, and why it takes a while. */
   installingFor: (seconds: number) => `Installing… ${seconds} s`,
   installingNote: "Frameshell downloads the plugin and what it needs with npm. The first install can take a minute or two.",
-  /** The OpenAI key field (ADR 0048), one key for every OpenAI plugin on this computer. */
+  /** The OpenAI key field (ADR 0050), one key for every OpenAI plugin on this computer. */
   key: {
     label: "OpenAI API key",
     placeholder: "sk-…",

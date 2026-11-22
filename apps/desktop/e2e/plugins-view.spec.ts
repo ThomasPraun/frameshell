@@ -6,7 +6,7 @@ import { launch, sandbox } from "./harness.js";
 
 // Plugins view with no network: the official catalog of a fresh project, the trust banner once frameshell.json
 // declares a plugin (never trusted here, so no plugin code runs or installs), and the machine's downloads from a
-// data dir holding stand-in files. Message boxes are stubbed in main. The OpenAI key field (ADR 0048) saves a fake
+// data dir holding stand-in files. Message boxes are stubbed in main. The OpenAI key field (ADR 0050) saves a fake
 // key through the keychain stand-in (CI has no keyring); nothing is sent to OpenAI.
 const box = sandbox("demo");
 const FFMPEG = join(box.dataDir, "binaries", "ffmpeg", "0-e2e");

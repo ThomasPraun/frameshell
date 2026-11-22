@@ -32,7 +32,7 @@ export interface DaemonLinkOptions {
   launch?: DaemonLauncher;
   /**
    * Per-connection setup run on every new connection before any request uses it, e.g. handing the daemon the saved
-   * OpenAI key (`credentials.provide`, ADR 0048). A failure is swallowed: the connection is still used.
+   * OpenAI key (`credentials.provide`, ADR 0050). A failure is swallowed: the connection is still used.
    */
   onConnected?: (conn: DaemonConnection) => Promise<void>;
 }

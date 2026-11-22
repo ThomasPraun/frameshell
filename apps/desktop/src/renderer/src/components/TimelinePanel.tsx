@@ -1,4 +1,8 @@
-import type { ClipDiff, MatteStateInfo, OperationResult } from "@frameshell/protocol";
+import type {
+  ClipDiff,
+  MatteStateInfo,
+  OperationResult,
+} from "@frameshell/protocol";
 import { type Clip, MARKER_LABEL_MAX } from "@frameshell/schema";
 import {
   type DragEvent,
@@ -13,12 +17,17 @@ import {
   useRef,
   useState,
 } from "react";
-import type { EditOptions, HistoryCommand, TimelineEdit } from "../../../shared/api.js";
+import type {
+  EditOptions,
+  HistoryCommand,
+  TimelineEdit,
+} from "../../../shared/api.js";
 import { turnsKey } from "../angles/model.js";
 import { useGroupsTurns } from "../angles/useTurns.js";
 import { askItems, openAskMenu } from "../ask/ask-agent.js";
-import { candidateFiles } from "../audition/model.js";
-import { auditionItems, revealItem } from "../file-commands.js";
+import { candidateTracks, mixStart } from "../audition/model.js";
+import { auditionDialog } from "../audition/store.js";
+import { revealItem } from "../file-commands.js";
 import { diffCounts, labelText, undoneTitle } from "../history/model.js";
 import { editsText, handleTimelineHistory } from "../history-commands.js";
 import { rich, t } from "../i18n.js";
@@ -29,14 +38,33 @@ import { showSide, useReview } from "../review/store.js";
 import { useProposalMarks } from "../review/useProposalMarks.js";
 import { sourceSeconds } from "../preview/program.js";
 import { transport } from "../preview/transport.js";
-import { useAssets, useNestedViews, useProjectFormats, useProjectKind } from "../preview/useProgram.js";
+import {
+  useAssets,
+  useNestedViews,
+  useProjectFormats,
+  useProjectKind,
+} from "../preview/useProgram.js";
 import { useClipRenders } from "../preview/useClipRenders.js";
 import { withRenders } from "../timeline/render-marks.js";
 import { canOpenFiles, openInEditor } from "../editor-opener.js";
 import { useMatteStatus } from "../preview/useSubjectMattes.js";
-import { SELECTION_TIMELINE, type SelectedScene, revealSeek, selection, useSelection } from "../selection.js";
-import { type CueBox, cueBoxAt, cueBoxes, cueSelection } from "../subtitles/model.js";
-import { type SubtitlesState, useSubtitles } from "../subtitles/useSubtitles.js";
+import {
+  SELECTION_TIMELINE,
+  type SelectedScene,
+  revealSeek,
+  selection,
+  useSelection,
+} from "../selection.js";
+import {
+  type CueBox,
+  cueBoxAt,
+  cueBoxes,
+  cueSelection,
+} from "../subtitles/model.js";
+import {
+  type SubtitlesState,
+  useSubtitles,
+} from "../subtitles/useSubtitles.js";
 import {
   type DragPreview,
   type EditCommand,
@@ -73,13 +101,41 @@ import {
   zoomAround,
   zoomLimits,
 } from "../timeline/layout.js";
-import { type MatteBadge, matteBadge, plateChoices } from "../timeline/matte.js";
+import {
+  type MatteBadge,
+  matteBadge,
+  plateChoices,
+} from "../timeline/matte.js";
 import { MediaCache } from "../timeline/media.js";
-import { DEFAULT_THEME, type DragGhost, type TimelineTheme, type TurnStroke, clipBadges, paintTimeline } from "../timeline/paint.js";
+import {
+  DEFAULT_THEME,
+  type DragGhost,
+  type TimelineTheme,
+  type TurnStroke,
+  clipBadges,
+  paintTimeline,
+} from "../timeline/paint.js";
 import { useSceneSpans } from "../timeline/scenes.js";
-import { type EdgeHit, edgeAt, transitionRemove, transitionSet } from "../timeline/transitions.js";
-import { addToTimeline, carriesMedia, droppedMedia, onMediaAdded } from "../timeline/media-drag.js";
-import { type PaintMode, clearEdit, laneAt, paintEdits, shotSpans, unpaintEdits } from "../timeline/turn-lanes.js";
+import {
+  type EdgeHit,
+  edgeAt,
+  transitionRemove,
+  transitionSet,
+} from "../timeline/transitions.js";
+import {
+  addToTimeline,
+  carriesMedia,
+  droppedMedia,
+  onMediaAdded,
+} from "../timeline/media-drag.js";
+import {
+  type PaintMode,
+  clearEdit,
+  laneAt,
+  paintEdits,
+  shotSpans,
+  unpaintEdits,
+} from "../timeline/turn-lanes.js";
 import { useTimelineView } from "../timeline/useTimelineView.js";
 import { useTranscripts } from "../transcript/useTranscripts.js";
 import { uiLink } from "../ui-link.js";
@@ -124,9 +180,23 @@ interface ViewState {
 type Gesture =
   | { kind: "scrub"; pointer: number }
   /** Drag over an angle's turn lane: paints who speaks over the time swept. */
-  | { kind: "paint"; pointer: number; row: TrackRow; angle: string; time: number; clientX: number; moving: boolean }
+  | {
+      kind: "paint";
+      pointer: number;
+      row: TrackRow;
+      angle: string;
+      time: number;
+      clientX: number;
+      moving: boolean;
+    }
   /** Drag over empty lane space: selects the time range swept. */
-  | { kind: "range"; pointer: number; time: number; clientX: number; moving: boolean }
+  | {
+      kind: "range";
+      pointer: number;
+      time: number;
+      clientX: number;
+      moving: boolean;
+    }
   | {
       kind: "clip";
       pointer: number;
@@ -151,7 +221,36 @@ interface Status {
 }
 
 /** Queue one daemon call of the panel; `done` gets its result, null when refused. */
-type RunCall = (work: () => Promise<OperationResult | null>, done?: (result: OperationResult | null) => void, clips?: number) => void;
+/**
+ * On a `Music <rank>` track of `music.candidates`: hear every candidate side by side (ADR 0038), and each in the mix
+ * from the playhead, or from where the music starts when the playhead is outside it (#803).
+ */
+function candidateItems(
+  rows: readonly TrackRow[],
+  row: TrackRow,
+  view: Window,
+): MenuItem[] {
+  const tracks = candidateTracks(rows, row);
+  const from = mixStart(rows, tracks, transport.get().time);
+  if (tracks.length === 0 || from === null) return [];
+  return [
+    {
+      label: t.audition.candidatesItem(tracks.length),
+      run: () =>
+        void auditionDialog.open(
+          tracks.map((entry) => entry.file),
+          view,
+          { tracks, from },
+        ),
+    },
+  ];
+}
+
+type RunCall = (
+  work: () => Promise<OperationResult | null>,
+  done?: (result: OperationResult | null) => void,
+  clips?: number,
+) => void;
 
 /**
  * Canvas timeline of the project's main timeline (SPEC §10): tracks and clips
@@ -184,33 +283,72 @@ export function TimelinePanel({
   /** Open a project file in the editor: the timeline's own file when it cannot be read (#757). */
   onOpenFile?: (path: string) => void;
 }) {
-  const { view, error, rejection, dismissRejection } = useTimelineView(TIMELINE);
+  const { view, error, rejection, dismissRejection } =
+    useTimelineView(TIMELINE);
   /** A video made from an idea: its empty state speaks of the brief, not of footage (#752). */
   const idea = useIdea();
   const scenes = useSceneSpans(TIMELINE, view?.revision ?? null);
   const [status, setStatus] = useState<Status | null>(null);
-  useEffect(() => onMediaAdded((line) => setStatus(line.text ? { tone: line.error ? "error" : "info", text: line.text } : null)), []);
+  useEffect(
+    () =>
+      onMediaAdded((line) =>
+        setStatus(
+          line.text
+            ? { tone: line.error ? "error" : "info", text: line.text }
+            : null,
+        ),
+      ),
+    [],
+  );
   // Program tracks whose turn lanes are open, and the turns they draw (measured again when anything they hear changes).
   const [lanesOpen, setLanesOpen] = useState<ReadonlySet<string>>(new Set());
   const { sources, hashes } = useTranscripts();
   const wanted = useMemo(() => {
     const groups = new Map<string, string>();
     for (const track of view?.tracks ?? []) {
-      if (track.kind !== "program" || !lanesOpen.has(track.id) || !track.group) continue;
-      const group = view?.groups?.find((candidate) => candidate.id === track.group);
-      if (group) groups.set(group.id, turnsKey(group.angles, sources, hashes, group.mics, group.painted));
+      if (track.kind !== "program" || !lanesOpen.has(track.id) || !track.group)
+        continue;
+      const group = view?.groups?.find(
+        (candidate) => candidate.id === track.group,
+      );
+      if (group)
+        groups.set(
+          group.id,
+          turnsKey(group.angles, sources, hashes, group.mics, group.painted),
+        );
     }
     return groups;
   }, [view, lanesOpen, sources, hashes]);
   const measured = useGroupsTurns(wanted, true);
-  const turnLanes = useMemo(() => ({ open: lanesOpen, turns: new Map([...measured].map(([group, found]) => [group, found.turns])) }), [lanesOpen, measured]);
+  const turnLanes = useMemo(
+    () => ({
+      open: lanesOpen,
+      turns: new Map(
+        [...measured].map(([group, found]) => [group, found.turns]),
+      ),
+    }),
+    [lanesOpen, measured],
+  );
   const assets = useAssets(view?.revision ?? null);
   // A nested clip's handles are its timeline's seconds outside the window (ADR 0018 decision 5).
   const nested = useNestedViews(view ?? null);
-  const transitions = useMemo(() => ({ sourceDuration: (clip: Clip) => (assets ? sourceSeconds(clip, assets, nested) : undefined) }), [assets, nested]);
+  const transitions = useMemo(
+    () => ({
+      sourceDuration: (clip: Clip) =>
+        assets ? sourceSeconds(clip, assets, nested) : undefined,
+    }),
+    [assets, nested],
+  );
   const renders = useClipRenders(view ?? null, nested);
   const layout = useMemo(
-    () => (view ? withRenders(layoutTimeline(view, scenes, turnLanes, transitions), renders, t.timeline.renderFailed) : null),
+    () =>
+      view
+        ? withRenders(
+            layoutTimeline(view, scenes, turnLanes, transitions),
+            renders,
+            t.timeline.renderFailed,
+          )
+        : null,
     [view, scenes, turnLanes, transitions, renders],
   );
   const empty = layout !== null && layout.clipCount === 0;
@@ -224,7 +362,8 @@ export function TimelinePanel({
       }),
     [],
   );
-  const turnsError = [...measured.values()].find((found) => found.error !== null)?.error ?? null;
+  const turnsError =
+    [...measured.values()].find((found) => found.error !== null)?.error ?? null;
   /** Edits, undo and redo run one after another, in the order they were made. */
   const queue = useRef<Promise<void>>(Promise.resolve());
   const fpsRef = useRef(30);
@@ -249,22 +388,39 @@ export function TimelinePanel({
 
   const undoRedo = useCallback(
     (direction: HistoryCommand) =>
-      run(async () => {
-        const result = await window.frameshell.timeline[direction](TIMELINE);
-        if (!result) setStatus({ tone: "info", text: direction === "undo" ? t.timeline.nothingToUndo : t.timeline.nothingToRedo });
-        return result;
-      }, (result) => {
-        // Say what came back or went, as History names it (#748: "Undo saved" said nothing).
-        const target = result?.operation.args["target"];
-        if (typeof target !== "string") return;
-        window.frameshell.history.list(TIMELINE).then(
-          (history) => {
-            const title = undoneTitle(history.transactions, target);
-            if (title) setStatus({ tone: "info", text: direction === "undo" ? t.timeline.undone(title) : t.timeline.redone(title) });
-          },
-          () => {},
-        );
-      }),
+      run(
+        async () => {
+          const result = await window.frameshell.timeline[direction](TIMELINE);
+          if (!result)
+            setStatus({
+              tone: "info",
+              text:
+                direction === "undo"
+                  ? t.timeline.nothingToUndo
+                  : t.timeline.nothingToRedo,
+            });
+          return result;
+        },
+        (result) => {
+          // Say what came back or went, as History names it (#748: "Undo saved" said nothing).
+          const target = result?.operation.args["target"];
+          if (typeof target !== "string") return;
+          window.frameshell.history.list(TIMELINE).then(
+            (history) => {
+              const title = undoneTitle(history.transactions, target);
+              if (title)
+                setStatus({
+                  tone: "info",
+                  text:
+                    direction === "undo"
+                      ? t.timeline.undone(title)
+                      : t.timeline.redone(title),
+                });
+            },
+            () => {},
+          );
+        },
+      ),
     [run],
   );
 
@@ -272,7 +428,9 @@ export function TimelinePanel({
   // A key handled here is prevented, so it never also reaches the menu; one in a text field is left to the field.
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
-      const command = event.defaultPrevented ? null : historyShortcut(event, isMac);
+      const command = event.defaultPrevented
+        ? null
+        : historyShortcut(event, isMac);
       if (!command || editsText(event.target)) return;
       event.preventDefault();
       undoRedo(command);
@@ -289,8 +447,15 @@ export function TimelinePanel({
   useEffect(() => {
     const picked = selection.get().scene;
     if (!picked) return;
-    const box = scenes.find((candidate) => candidate.script === picked.script && candidate.slug === picked.slug);
-    selection.retainScene(box ? { range: { from: box.start, to: box.end }, clips: box.clips } : null);
+    const box = scenes.find(
+      (candidate) =>
+        candidate.script === picked.script && candidate.slug === picked.slug,
+    );
+    selection.retainScene(
+      box
+        ? { range: { from: box.start, to: box.end }, clips: box.clips }
+        : null,
+    );
   }, [scenes]);
 
   // The History panel's pick, marked on the lanes: what that transaction or operation did.
@@ -304,10 +469,20 @@ export function TimelinePanel({
   const proposalTx = proposed?.tx ?? null;
   const seenProposal = useRef<string | null>(null);
   useEffect(() => {
-    if (proposalTx !== null && proposalTx !== seenProposal.current && selection.get().history !== null) selection.clear();
+    if (
+      proposalTx !== null &&
+      proposalTx !== seenProposal.current &&
+      selection.get().history !== null
+    )
+      selection.clear();
     seenProposal.current = proposalTx;
   }, [proposalTx]);
-  const marks = history !== null ? (diff?.target === history ? diff.clips : null) : (proposed?.marks ?? null);
+  const marks =
+    history !== null
+      ? diff?.target === history
+        ? diff.clips
+        : null
+      : (proposed?.marks ?? null);
 
   useEffect(() => {
     if (!status) return;
@@ -318,16 +493,32 @@ export function TimelinePanel({
   return (
     <>
       <PanelHeader
-        actions={onDetach && <DetachButton name={t.workspace.timeline.toLowerCase()} detached={detached} onClick={onDetach} testId="timeline-detach" />}
+        actions={
+          onDetach && (
+            <DetachButton
+              name={t.workspace.timeline.toLowerCase()}
+              detached={detached}
+              onClick={onDetach}
+              testId="timeline-detach"
+            />
+          )
+        }
         onCollapse={onToggle}
-        collapseLabel={collapsed ? t.timeline.showTimeline : t.timeline.hideTimeline}
+        collapseLabel={
+          collapsed ? t.timeline.showTimeline : t.timeline.hideTimeline
+        }
         collapseKey={panelShortcut("timeline")}
         collapseSide={collapsed ? "up" : "down"}
       >
         <span className="panel-title">{t.workspace.timeline}</span>
         <span className="panel-meta">{TIMELINE}</span>
-        <span className={`timeline-status${status?.tone === "error" || (!status && turnsError) ? " timeline-status-error" : ""}`} role="status" aria-live="polite">
-          {status?.text ?? (turnsError ? t.timeline.turnsFailed(turnsError) : "")}
+        <span
+          className={`timeline-status${status?.tone === "error" || (!status && turnsError) ? " timeline-status-error" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {status?.text ??
+            (turnsError ? t.timeline.turnsFailed(turnsError) : "")}
         </span>
         {history !== null ? (
           <DiffLegend target={history} title={historyTitle} marks={marks} />
@@ -335,14 +526,21 @@ export function TimelinePanel({
           proposed && (
             <DiffLegend
               target={proposed.tx}
-              title={proposalLabel ? labelText(proposalLabel) : t.review.untitled}
+              title={
+                proposalLabel ? labelText(proposalLabel) : t.review.untitled
+              }
               marks={proposed.marks}
               onStop={() => showSide("before")}
             />
           )
         )}
         {onShowTranscript && (
-          <button className="link" aria-label={t.timeline.showTranscript} data-tip={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)} onClick={onShowTranscript}>
+          <button
+            className="link"
+            aria-label={t.timeline.showTranscript}
+            data-tip={t.timeline.transcriptTitle(TRANSCRIPT_SHORTCUT)}
+            onClick={onShowTranscript}
+          >
             {t.workspace.transcript}
           </button>
         )}
@@ -355,7 +553,12 @@ export function TimelinePanel({
       {!collapsed && rejection && (
         <div className="editor-notice is-error timeline-rejection" role="alert">
           <span>
-            {t.timeline.rejected(rejection.timeline, rejection.reason, rejection.preserved, rejection.message)}
+            {t.timeline.rejected(
+              rejection.timeline,
+              rejection.reason,
+              rejection.preserved,
+              rejection.message,
+            )}
           </span>
           <button className="link" onClick={dismissRejection}>
             {t.timeline.dismiss}
@@ -377,7 +580,13 @@ export function TimelinePanel({
             error && !view ? (
               <TimelineUnreadable error={error} onOpenFile={onOpenFile} />
             ) : empty || (layout && layout.rows.length === 0) ? (
-              <p>{idea ? rich(t.timeline.emptyIdea, { brief: <code>brief.md</code> }) : rich(t.timeline.emptyHint, { assets: <code>assets/</code> })}</p>
+              <p>
+                {idea
+                  ? rich(t.timeline.emptyIdea, { brief: <code>brief.md</code> })
+                  : rich(t.timeline.emptyHint, {
+                      assets: <code>assets/</code>,
+                    })}
+              </p>
             ) : null
           }
         />
@@ -393,11 +602,21 @@ const TIMELINE_FILE = `timelines/${TIMELINE}.json`;
  * The timeline could not be read (#757): a sentence instead of the daemon's validation dump (kept under Details), and
  * the ways out: open the file to fix it, or History to go back to an earlier version.
  */
-function TimelineUnreadable({ error, onOpenFile }: { error: string; onOpenFile: ((path: string) => void) | undefined }) {
+function TimelineUnreadable({
+  error,
+  onOpenFile,
+}: {
+  error: string;
+  onOpenFile: ((path: string) => void) | undefined;
+}) {
   // The daemon names the file by its full path, with backslashes on Windows.
   const file = error.replaceAll("\\", "/").includes(TIMELINE_FILE);
   return (
-    <div className="timeline-error" role="alert" data-testid="timeline-unreadable">
+    <div
+      className="timeline-error"
+      role="alert"
+      data-testid="timeline-unreadable"
+    >
       <p>{file ? t.timeline.unreadable(TIMELINE_FILE) : t.timeline.notShown}</p>
       <details>
         <summary>{t.timeline.details}</summary>
@@ -405,11 +624,19 @@ function TimelineUnreadable({ error, onOpenFile }: { error: string; onOpenFile: 
       </details>
       <div className="timeline-error-actions">
         {file && onOpenFile && (
-          <button className="button" data-testid="timeline-open-file" onClick={() => onOpenFile(TIMELINE_FILE)}>
+          <button
+            className="button"
+            data-testid="timeline-open-file"
+            onClick={() => onOpenFile(TIMELINE_FILE)}
+          >
             {t.timeline.openTimelineFile}
           </button>
         )}
-        <button className="button" data-testid="timeline-show-history" onClick={() => showSidebarView("history")}>
+        <button
+          className="button"
+          data-testid="timeline-show-history"
+          onClick={() => showSidebarView("history")}
+        >
           {t.timeline.showHistory}
         </button>
       </div>
@@ -455,57 +682,146 @@ function TimelineCanvas({
   const scroller = useRef<HTMLDivElement>(null);
   const sizer = useRef<HTMLDivElement>(null);
   const heads = useRef<HTMLDivElement>(null);
-  const state = useRef<ViewState>({ pxPerSecond: 10, fit: "panel", scrollLeft: 0, scrollTop: 0, width: 0, height: 0 });
+  const state = useRef<ViewState>({
+    pxPerSecond: 10,
+    fit: "panel",
+    scrollLeft: 0,
+    scrollTop: 0,
+    width: 0,
+    height: 0,
+  });
   const frame = useRef(0);
   /** Window whose `requestAnimationFrame` gave {@link frame}: the canvas's own (ADR 0012), so a cancel reaches it. */
   const frameView = useRef<Window>(window);
   const paints = useRef(0);
   const theme = useRef<TimelineTheme>(DEFAULT_THEME);
-  const { clips: selectedClips, range, spans, reveal, track: selectedTrack, scene: selectedScene } = useSelection();
+  const {
+    clips: selectedClips,
+    range,
+    spans,
+    reveal,
+    track: selectedTrack,
+    scene: selectedScene,
+  } = useSelection();
   const selected = useMemo(() => new Set(selectedClips), [selectedClips]);
   const projectFormats = useProjectFormats();
   /** Formats other than the primary: a clip with an override in one is marked (ADR 0027). */
-  const formats = useMemo(() => new Set(projectFormats.slice(1).map((format) => format.id)), [projectFormats]);
+  const formats = useMemo(
+    () => new Set(projectFormats.slice(1).map((format) => format.id)),
+    [projectFormats],
+  );
   const subtitles = useSubtitles();
-  const cues = useMemo(() => new Map(subtitles.tracks.map((track) => [track.track, cueBoxes(track, subtitles.fps)] as const)), [subtitles]);
+  const cues = useMemo(
+    () =>
+      new Map(
+        subtitles.tracks.map(
+          (track) => [track.track, cueBoxes(track, subtitles.fps)] as const,
+        ),
+      ),
+    [subtitles],
+  );
   const [snapping, setSnapping] = useState(true);
   const gesture = useRef<Gesture | null>(null);
   /** Ghost drawn from a drag until the daemon's new revision shows the clip there. */
   const ghost = useRef<{ drag: DragGhost; until: number | null } | null>(null);
   /** Stroke being painted on a turn lane; the lanes keep showing it until the daemon's new revision does. */
-  const stroke = useRef<{ stroke: TurnStroke; until: number | null } | null>(null);
+  const stroke = useRef<{ stroke: TurnStroke; until: number | null } | null>(
+    null,
+  );
   /** Edge drags ripple trim (R; Shift held at the press inverts it for that drag). */
   const [rippling, setRippling] = useState(false);
   /**
    * Nudges sent but not yet shown: where they put each clip, how many calls
    * are pending, and the latest revision they produced.
    */
-  const inFlight = useRef<{ starts: Map<string, number>; pending: number; until: number } | null>(null);
-  const latest = useRef({ layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene, formats });
-  latest.current = { layout, fps, selected, range, spans, revision, snapping, rippling, diff, cues, selectedTrack, selectedScene, formats };
+  const inFlight = useRef<{
+    starts: Map<string, number>;
+    pending: number;
+    until: number;
+  } | null>(null);
+  const latest = useRef({
+    layout,
+    fps,
+    selected,
+    range,
+    spans,
+    revision,
+    snapping,
+    rippling,
+    diff,
+    cues,
+    selectedTrack,
+    selectedScene,
+    formats,
+  });
+  latest.current = {
+    layout,
+    fps,
+    selected,
+    range,
+    spans,
+    revision,
+    snapping,
+    rippling,
+    diff,
+    cues,
+    selectedTrack,
+    selectedScene,
+    formats,
+  };
   const lanesEl = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{ row: TrackRow; clip: ClipBox; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{
+    row: TrackRow;
+    clip: ClipBox;
+    x: number;
+    y: number;
+  } | null>(null);
   /** Track whose header shows a name input (track menu "Rename track"). */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** Marker name input over the marker lane (ruler menu): a new marker at `at`, or `marker` renamed; `x` in canvas px. */
-  const [naming, setNaming] = useState<{ marker: MarkerBox | null; at: number; x: number } | null>(null);
-  const [dragging, setDragging] = useState<{ preview: DragPreview; x: number; y: number } | null>(null);
+  const [naming, setNaming] = useState<{
+    marker: MarkerBox | null;
+    at: number;
+    x: number;
+  } | null>(null);
+  const [dragging, setDragging] = useState<{
+    preview: DragPreview;
+    x: number;
+    y: number;
+  } | null>(null);
 
   /** Forget nudges in flight once none is pending and the shown timeline has their last revision. */
   const settleNudges = useCallback(() => {
     const flight = inFlight.current;
-    if (flight && flight.pending === 0 && (latest.current.revision ?? -1) >= flight.until) inFlight.current = null;
+    if (
+      flight &&
+      flight.pending === 0 &&
+      (latest.current.revision ?? -1) >= flight.until
+    )
+      inFlight.current = null;
   }, []);
 
   const draw = useCallback(() => {
     frame.current = 0;
     const element = canvas.current;
     const context = element?.getContext("2d");
-    const { layout: current, fps: rate, selected: chosen, range: words, spans: personSpans, diff: marks, cues: subtitleCues, selectedTrack: track, selectedScene: chosenScene, formats: marked } = latest.current;
+    const {
+      layout: current,
+      fps: rate,
+      selected: chosen,
+      range: words,
+      spans: personSpans,
+      diff: marks,
+      cues: subtitleCues,
+      selectedTrack: track,
+      selectedScene: chosenScene,
+      formats: marked,
+    } = latest.current;
     const at = transport.get().time;
     const view = state.current;
     if (!element || !context || view.width === 0) return;
-    const ratio = (element.ownerDocument.defaultView ?? window).devicePixelRatio || 1;
+    const ratio =
+      (element.ownerDocument.defaultView ?? window).devicePixelRatio || 1;
     const pixelWidth = Math.round(view.width * ratio);
     const pixelHeight = Math.round(view.height * ratio);
     if (element.width !== pixelWidth || element.height !== pixelHeight) {
@@ -538,7 +854,8 @@ function TimelineCanvas({
     performance.measure(PAINT_MEASURE, { start: started });
     // User Timing buffers are unbounded: keep only recent paints.
     if (++paints.current % 500 === 0) performance.clearMeasures(PAINT_MEASURE);
-    if (heads.current) heads.current.style.transform = `translateY(${-view.scrollTop}px)`;
+    if (heads.current)
+      heads.current.style.transform = `translateY(${-view.scrollTop}px)`;
     // Written per paint, outside React: tests and DevTools see when waveforms or thumbnails arrive.
     element.parentElement?.setAttribute("data-media-drawn", String(mediaDrawn));
     // Scroll, zoom and resize all repaint: the agent's `ui_state.visible` follows (throttled there).
@@ -567,15 +884,29 @@ function TimelineCanvas({
           ? fitZoom(duration, view.width)
           : Math.min(limits.max, Math.max(limits.min, view.pxPerSecond));
     const width = contentWidth(duration, view.pxPerSecond, view.width);
-    const height = Math.max(latest.current.layout?.height ?? RULER_HEIGHT, view.height);
+    const height = Math.max(
+      latest.current.layout?.height ?? RULER_HEIGHT,
+      view.height,
+    );
     if (sizer.current) {
       sizer.current.style.width = `${width}px`;
       sizer.current.style.height = `${height}px`;
     }
-    view.scrollLeft = clampScroll(view.scrollLeft, duration, view.pxPerSecond, view.width);
-    view.scrollTop = Math.min(view.scrollTop, Math.max(0, height - view.height));
+    view.scrollLeft = clampScroll(
+      view.scrollLeft,
+      duration,
+      view.pxPerSecond,
+      view.width,
+    );
+    view.scrollTop = Math.min(
+      view.scrollTop,
+      Math.max(0, height - view.height),
+    );
     const box = scroller.current;
-    if (box && (box.scrollLeft !== view.scrollLeft || box.scrollTop !== view.scrollTop)) {
+    if (
+      box &&
+      (box.scrollLeft !== view.scrollLeft || box.scrollTop !== view.scrollTop)
+    ) {
       box.scrollLeft = view.scrollLeft;
       box.scrollTop = view.scrollTop;
     }
@@ -588,7 +919,13 @@ function TimelineCanvas({
       const duration = latest.current.layout?.duration ?? 0;
       // The native scroller may have moved since its last scroll event: anchor on where it is now.
       if (scroller.current) view.scrollLeft = scroller.current.scrollLeft;
-      const next = zoomAround(view, factor, anchorX, zoomLimits(duration, view.width, latest.current.fps), duration);
+      const next = zoomAround(
+        view,
+        factor,
+        anchorX,
+        zoomLimits(duration, view.width, latest.current.fps),
+        duration,
+      );
       Object.assign(view, next, { fit: false });
       settle();
     },
@@ -604,21 +941,48 @@ function TimelineCanvas({
   useLayoutEffect(() => {
     // A revision at or past the one a drag produced shows the clip where its ghost was.
     const pending = ghost.current;
-    if (pending?.until != null && revision !== null && revision >= pending.until) ghost.current = null;
+    if (
+      pending?.until != null &&
+      revision !== null &&
+      revision >= pending.until
+    )
+      ghost.current = null;
     const painting = stroke.current;
-    if (painting?.until != null && revision !== null && revision >= painting.until) stroke.current = null;
+    if (
+      painting?.until != null &&
+      revision !== null &&
+      revision >= painting.until
+    )
+      stroke.current = null;
     settleNudges();
     settle();
     if (frame.current) frameView.current.cancelAnimationFrame(frame.current);
     draw();
-  }, [layout, revision, selected, range, spans, diff, cues, selectedTrack, selectedScene, formats, settle, settleNudges, draw]);
+  }, [
+    layout,
+    revision,
+    selected,
+    range,
+    spans,
+    diff,
+    cues,
+    selectedTrack,
+    selectedScene,
+    formats,
+    settle,
+    settleNudges,
+    draw,
+  ]);
 
   // `ui_state.visible`: read from the live scroll and zoom when published, null once the lanes unmount.
   useEffect(() => {
     uiLink.setViewport(() => {
       const view = state.current;
       if (view.width === 0 || view.pxPerSecond <= 0) return null;
-      return { from: view.scrollLeft / view.pxPerSecond, to: (view.scrollLeft + view.width) / view.pxPerSecond };
+      return {
+        from: view.scrollLeft / view.pxPerSecond,
+        to: (view.scrollLeft + view.width) / view.pxPerSecond,
+      };
     });
     return () => uiLink.setViewport(null);
   }, []);
@@ -630,8 +994,15 @@ function TimelineCanvas({
         const view = state.current;
         const x = time * view.pxPerSecond - view.scrollLeft;
         // Playing pages ahead; a jump from elsewhere (agent `ui_seek`, preview keys) centers the playhead.
-        if (gesture.current?.kind !== "scrub" && view.width > 0 && (x < 0 || x > view.width - 16)) {
-          view.scrollLeft = Math.max(0, time * view.pxPerSecond - view.width * (playing ? 0.1 : 0.5));
+        if (
+          gesture.current?.kind !== "scrub" &&
+          view.width > 0 &&
+          (x < 0 || x > view.width - 16)
+        ) {
+          view.scrollLeft = Math.max(
+            0,
+            time * view.pxPerSecond - view.width * (playing ? 0.1 : 0.5),
+          );
           settle();
         }
         lanesEl.current?.setAttribute("data-playhead", String(time));
@@ -646,7 +1017,10 @@ function TimelineCanvas({
     const current = latest.current.layout;
     if (!reveal || !box || !current) return;
     const follow = (clip: { start: number } | null) => {
-      const time = revealSeek(reveal, clip, { playing: transport.get().playing, fps: latest.current.fps });
+      const time = revealSeek(reveal, clip, {
+        playing: transport.get().playing,
+        fps: latest.current.fps,
+      });
       if (time !== null) transport.seek(time);
     };
     if (reveal.range) {
@@ -655,14 +1029,21 @@ function TimelineCanvas({
       follow(null);
       const view = state.current;
       view.scrollLeft = box.scrollLeft;
-      if (from * view.pxPerSecond < view.scrollLeft || to * view.pxPerSecond > view.scrollLeft + view.width) {
+      if (
+        from * view.pxPerSecond < view.scrollLeft ||
+        to * view.pxPerSecond > view.scrollLeft + view.width
+      ) {
         view.scrollLeft = Math.max(0, from * view.pxPerSecond - view.width / 4);
       }
       settle();
       return;
     }
-    let row = current.rows.find((candidate) => candidate.clips.some((clip) => clip.id === reveal.clip));
-    let clip: { start: number; end: number } | undefined = row?.clips.find((candidate) => candidate.id === reveal.clip);
+    let row = current.rows.find((candidate) =>
+      candidate.clips.some((clip) => clip.id === reveal.clip),
+    );
+    let clip: { start: number; end: number } | undefined = row?.clips.find(
+      (candidate) => candidate.id === reveal.clip,
+    );
     // Gone from the timeline (a transaction removed it): look where it was.
     if ((!row || !clip) && reveal.place) {
       const { place } = reveal;
@@ -678,16 +1059,19 @@ function TimelineCanvas({
     view.scrollTop = box.scrollTop;
     const x0 = clip.start * view.pxPerSecond;
     const x1 = clip.end * view.pxPerSecond;
-    if (x0 < view.scrollLeft || x1 > view.scrollLeft + view.width) view.scrollLeft = Math.max(0, x0 - view.width / 4);
+    if (x0 < view.scrollLeft || x1 > view.scrollLeft + view.width)
+      view.scrollLeft = Math.max(0, x0 - view.width / 4);
     const lanes = view.height - current.head;
     const top = row.top - current.head;
-    if (top < view.scrollTop || top + row.height > view.scrollTop + lanes) view.scrollTop = Math.max(0, top);
+    if (top < view.scrollTop || top + row.height > view.scrollTop + lanes)
+      view.scrollTop = Math.max(0, top);
     settle();
   }, [reveal, settle]);
 
   useEffect(() => {
     const style = getComputedStyle(document.documentElement);
-    const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+    const read = (name: string, fallback: string) =>
+      style.getPropertyValue(name).trim() || fallback;
     theme.current = {
       ...DEFAULT_THEME,
       ruler: read("--bg-panel", DEFAULT_THEME.ruler),
@@ -701,9 +1085,14 @@ function TimelineCanvas({
       video: read("--track-video", DEFAULT_THEME.video),
       audio: read("--track-audio", DEFAULT_THEME.audio),
       subtitles: read("--track-sub", DEFAULT_THEME.subtitles),
-      angles: DEFAULT_THEME.angles.map((fallback, index) => read(`--angle-${index + 1}`, fallback)),
+      angles: DEFAULT_THEME.angles.map((fallback, index) =>
+        read(`--angle-${index + 1}`, fallback),
+      ),
       markers: Object.fromEntries(
-        Object.entries(DEFAULT_THEME.markers).map(([name, fallback]) => [name, read(`--marker-${name}`, fallback)]),
+        Object.entries(DEFAULT_THEME.markers).map(([name, fallback]) => [
+          name,
+          read(`--marker-${name}`, fallback),
+        ]),
       ) as TimelineTheme["markers"],
       diffAdded: read("--diff-added", DEFAULT_THEME.diffAdded),
       diffMoved: read("--diff-moved", DEFAULT_THEME.diffMoved),
@@ -719,12 +1108,18 @@ function TimelineCanvas({
     const box = scroller.current;
     if (!box) return;
     const measure = () => {
-      if (state.current.width === box.clientWidth && state.current.height === box.clientHeight) return;
+      if (
+        state.current.width === box.clientWidth &&
+        state.current.height === box.clientHeight
+      )
+        return;
       state.current.width = box.clientWidth;
       state.current.height = box.clientHeight;
       settle();
     };
-    const observer = new (box.ownerDocument.defaultView ?? window).ResizeObserver(measure);
+    const observer = new (
+      box.ownerDocument.defaultView ?? window
+    ).ResizeObserver(measure);
     observer.observe(box);
     // Scrollbars appearing or going change the client box without resizing the element.
     observer.observe(sizer.current!);
@@ -739,7 +1134,10 @@ function TimelineCanvas({
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
-      zoom(Math.exp(-event.deltaY * scale * 0.0025), event.clientX - box.getBoundingClientRect().left);
+      zoom(
+        Math.exp(-event.deltaY * scale * 0.0025),
+        event.clientX - box.getBoundingClientRect().left,
+      );
     };
     box.addEventListener("wheel", onWheel, { passive: false });
     return () => box.removeEventListener("wheel", onWheel);
@@ -749,13 +1147,19 @@ function TimelineCanvas({
   // Listening first: an event during the initial read is replayed over it.
   useEffect(() => {
     const media = mediaRef.current!;
-    const off = window.frameshell.media.onChanged((change) => media.apply(change));
+    const off = window.frameshell.media.onChanged((change) =>
+      media.apply(change),
+    );
     void media.refresh();
     return off;
   }, []);
 
   const send = useCallback(
-    (edits: TimelineEdit[], done?: (result: OperationResult | null) => void, options: EditOptions = {}) => {
+    (
+      edits: TimelineEdit[],
+      done?: (result: OperationResult | null) => void,
+      options: EditOptions = {},
+    ) => {
       if (edits.length === 0) {
         done?.(null);
         return;
@@ -763,19 +1167,34 @@ function TimelineCanvas({
       // One call per command: main applies its edits as one transaction, one undo step.
       // A stroke over several shots is several ops but one painted turn: the status counts it once.
       const strokes = edits.every((edit) => edit.op === "multicam.paint");
-      run(() => window.frameshell.timeline.edit(TIMELINE, edits, options), done, strokes ? 1 : edits.length);
+      run(
+        () => window.frameshell.timeline.edit(TIMELINE, edits, options),
+        done,
+        strokes ? 1 : edits.length,
+      );
     },
     [run],
   );
 
   /** Run `kind` on clips `ids` (default: the selection as this render saw it). */
-  const command = (kind: EditCommand, ids: readonly string[] = selectedClips) => {
+  const command = (
+    kind: EditCommand,
+    ids: readonly string[] = selectedClips,
+  ) => {
     const current = latest.current;
     if (!current.layout) return;
     // Nudges build on those still on their way: a held key moves on from where the last press put the clips.
     const nudging = kind.kind === "nudge";
-    const base = nudging && inFlight.current ? withStarts(current.layout, inFlight.current.starts) : current.layout;
-    const edits = commandEdits(kind, { layout: base, selected: ids, playhead: transport.get().time, fps: current.fps });
+    const base =
+      nudging && inFlight.current
+        ? withStarts(current.layout, inFlight.current.starts)
+        : current.layout;
+    const edits = commandEdits(kind, {
+      layout: base,
+      selected: ids,
+      playhead: transport.get().time,
+      fps: current.fps,
+    });
     if (edits.length === 0) {
       onStatus({ tone: "info", text: nothingToDo(kind, ids.length > 0) });
       return;
@@ -784,10 +1203,18 @@ function TimelineCanvas({
       send(edits);
       return;
     }
-    const flight = (inFlight.current ??= { starts: new Map(), pending: 0, until: -1 });
+    const flight = (inFlight.current ??= {
+      starts: new Map(),
+      pending: 0,
+      until: -1,
+    });
     // On the frame grid, as the daemon stores it: 3-decimal seconds would drift over a long held key.
     for (const edit of edits) {
-      if (edit.op === "clip.move" && typeof edit.args.start === "number") flight.starts.set(edit.args.clip, Math.round(edit.args.start * current.fps) / current.fps);
+      if (edit.op === "clip.move" && typeof edit.args.start === "number")
+        flight.starts.set(
+          edit.args.clip,
+          Math.round(edit.args.start * current.fps) / current.fps,
+        );
     }
     flight.pending++;
     send(
@@ -858,17 +1285,26 @@ function TimelineCanvas({
     else if (event.code === "KeyM" && !event.shiftKey) markPlayhead();
     else if (event.key === "Escape") {
       if (!cancelDrag()) selection.clear();
-    } else if (event.code === "KeyS" && !event.shiftKey) command({ kind: "split" });
-    else if (event.code === "BracketLeft") command({ kind: "trim", side: "head" });
-    else if (event.code === "BracketRight") command({ kind: "trim", side: "tail" });
-    else if (event.code === "Comma") command({ kind: "nudge", frames: -frames });
+    } else if (event.code === "KeyS" && !event.shiftKey)
+      command({ kind: "split" });
+    else if (event.code === "BracketLeft")
+      command({ kind: "trim", side: "head" });
+    else if (event.code === "BracketRight")
+      command({ kind: "trim", side: "tail" });
+    else if (event.code === "Comma")
+      command({ kind: "nudge", frames: -frames });
     else if (event.code === "Period") command({ kind: "nudge", frames });
-    else if (event.key === "Delete" || event.key === "Backspace") command({ kind: "delete", ripple: event.shiftKey });
+    else if (event.key === "Delete" || event.key === "Backspace")
+      command({ kind: "delete", ripple: event.shiftKey });
     else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       const step = event.shiftKey ? 1 : 1 / latest.current.fps;
-      seek(transport.get().time + (event.key === "ArrowLeft" ? -step : step), true);
+      seek(
+        transport.get().time + (event.key === "ArrowLeft" ? -step : step),
+        true,
+      );
     } else if (event.key === "Home") seek(0, true);
-    else if (event.key === "End") seek(latest.current.layout?.duration ?? 0, true);
+    else if (event.key === "End")
+      seek(latest.current.layout?.duration ?? 0, true);
     else if (event.code === "KeyN") setSnapping((on) => !on);
     else if (event.code === "KeyR") setRippling((on) => !on);
     else return;
@@ -877,7 +1313,10 @@ function TimelineCanvas({
 
   /** Select every clip of known or unknown length (not subtitle cues): the start of a group move. */
   const selectAllClips = () => {
-    const ids = latest.current.layout?.rows.flatMap((row) => row.clips.map((clip) => clip.id)) ?? [];
+    const ids =
+      latest.current.layout?.rows.flatMap((row) =>
+        row.clips.map((clip) => clip.id),
+      ) ?? [];
     if (ids.length > 0) selection.selectClips(ids, "timeline");
   };
 
@@ -890,7 +1329,8 @@ function TimelineCanvas({
     return x >= box.clientWidth || y >= box.clientHeight ? null : { x, y };
   };
 
-  const timeAt = (x: number) => (x + state.current.scrollLeft) / state.current.pxPerSecond;
+  const timeAt = (x: number) =>
+    (x + state.current.scrollLeft) / state.current.pxPerSecond;
 
   /** Media dragged from Files (#738): the timeline takes it, unless this is an image project (layers, not time). */
   const onMediaDragOver = (event: DragEvent) => {
@@ -910,26 +1350,61 @@ function TimelineCanvas({
     const rect = box.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const contentY = event.clientY - rect.top + state.current.scrollTop;
-    const row = layout.rows.find((candidate) => contentY >= candidate.top && contentY < candidate.top + candidate.height);
-    const target = row && (row.kind === "video" || row.kind === "audio") ? { track: row.id, start: onGrid(timeAt(x)) } : undefined;
+    const row = layout.rows.find(
+      (candidate) =>
+        contentY >= candidate.top &&
+        contentY < candidate.top + candidate.height,
+    );
+    const target =
+      row && (row.kind === "video" || row.kind === "audio")
+        ? { track: row.id, start: onGrid(timeAt(x)) }
+        : undefined;
     void addToTimeline(paths, target);
   };
 
   /** On the frame grid, as a stroke on a turn lane names frames the agent can address. */
-  const onGrid = (time: number) => Math.max(0, Math.round(time * latest.current.fps) / latest.current.fps);
+  const onGrid = (time: number) =>
+    Math.max(0, Math.round(time * latest.current.fps) / latest.current.fps);
 
   /** What a stroke does by the keys held: Alt marks the angle silent, Shift keeps the others, else it takes the floor. */
-  const paintMode = (event: { altKey: boolean; shiftKey: boolean }): PaintMode => (event.altKey ? "silent" : event.shiftKey ? "add" : "only");
+  const paintMode = (event: {
+    altKey: boolean;
+    shiftKey: boolean;
+  }): PaintMode => (event.altKey ? "silent" : event.shiftKey ? "add" : "only");
 
   /** Right-click on a clip edge: add a dissolve or fade there, or take the transition away (on that edge's track only). */
   const edgeItems = (edge: EdgeHit): MenuItem[] => [
-    { label: t.timeline.addDissolve, run: () => send([transitionSet(edge.row, edge.at, { kind: "dissolve" })], undefined, { label: "Add dissolve" }) },
-    { label: t.timeline.addFade, run: () => send([transitionSet(edge.row, edge.at, { kind: "fade" })], undefined, { label: "Add fade" }) },
-    { label: t.timeline.removeTransition, disabled: !edge.hasTransition, run: () => send([transitionRemove(edge.row, edge.at)], undefined, { label: "Remove transition" }) },
+    {
+      label: t.timeline.addDissolve,
+      run: () =>
+        send(
+          [transitionSet(edge.row, edge.at, { kind: "dissolve" })],
+          undefined,
+          { label: "Add dissolve" },
+        ),
+    },
+    {
+      label: t.timeline.addFade,
+      run: () =>
+        send([transitionSet(edge.row, edge.at, { kind: "fade" })], undefined, {
+          label: "Add fade",
+        }),
+    },
+    {
+      label: t.timeline.removeTransition,
+      disabled: !edge.hasTransition,
+      run: () =>
+        send([transitionRemove(edge.row, edge.at)], undefined, {
+          label: "Remove transition",
+        }),
+    },
   ];
 
   /** Right-click on a turn lane: take what was painted there back to the measured turns. */
-  const openLaneMenu = (event: MouseEvent, hit: NonNullable<ReturnType<typeof laneAt>>) => {
+  const openLaneMenu = (
+    event: MouseEvent,
+    hit: NonNullable<ReturnType<typeof laneAt>>,
+  ) => {
     event.preventDefault();
     const { row, lane, time } = hit;
     const group = row.group ?? "";
@@ -941,9 +1416,22 @@ function TimelineCanvas({
       event.clientY,
       [
         ...askItems(),
-        { label: t.timeline.backToMeasured, separated: true, disabled: here.length === 0, run: () => send(here) },
-        { label: t.timeline.clearAnglePainted(lane.angle.name), disabled: lane.painted.length === 0, run: () => send([clearEdit(group, lane.angle.id)]) },
-        { label: t.timeline.clearAllPainted, disabled: row.lanes.every((other) => other.painted.length === 0), run: () => send([clearEdit(group, null)]) },
+        {
+          label: t.timeline.backToMeasured,
+          separated: true,
+          disabled: here.length === 0,
+          run: () => send(here),
+        },
+        {
+          label: t.timeline.clearAnglePainted(lane.angle.name),
+          disabled: lane.painted.length === 0,
+          run: () => send([clearEdit(group, lane.angle.id)]),
+        },
+        {
+          label: t.timeline.clearAllPainted,
+          disabled: row.lanes.every((other) => other.painted.length === 0),
+          run: () => send([clearEdit(group, null)]),
+        },
       ],
       windowOf(event.target),
     );
@@ -961,7 +1449,9 @@ function TimelineCanvas({
     if (at.y < layout.sceneTop) {
       transport.pause();
       // A marker on its lane takes the playhead exactly to it; the rest of the lane scrubs like the ruler.
-      const marker = onMarkerLane(layout, at.y) ? markerAt(layout, state.current, at.x, at.y) : null;
+      const marker = onMarkerLane(layout, at.y)
+        ? markerAt(layout, state.current, at.x, at.y)
+        : null;
       if (marker) {
         seek(marker.at, false);
         return;
@@ -997,24 +1487,39 @@ function TimelineCanvas({
     }
     const grab = grabAt(layout, state.current, at.x, at.y);
     if (!grab) {
-      const row = layout.rows.find((candidate) => at.y + state.current.scrollTop >= candidate.top && at.y + state.current.scrollTop < candidate.top + candidate.height);
+      const row = layout.rows.find(
+        (candidate) =>
+          at.y + state.current.scrollTop >= candidate.top &&
+          at.y + state.current.scrollTop < candidate.top + candidate.height,
+      );
       if (row?.kind === "subtitles") {
         pickSubtitle(row.id, timeAt(at.x));
         return;
       }
       selection.clear();
-      gesture.current = { kind: "range", pointer: event.pointerId, time: timeAt(at.x), clientX: event.clientX, moving: false };
+      gesture.current = {
+        kind: "range",
+        pointer: event.pointerId,
+        time: timeAt(at.x),
+        clientX: event.clientX,
+        moving: false,
+      };
       box.setPointerCapture(event.pointerId);
       return;
     }
     // Shift on an edge may start a ripple trim: whether it toggles the selection waits for the release.
-    const toggle = event.shiftKey && grab.part !== "body" && !event.metaKey && !event.ctrlKey;
+    const toggle =
+      event.shiftKey &&
+      grab.part !== "body" &&
+      !event.metaKey &&
+      !event.ctrlKey;
     if ((event.shiftKey || event.metaKey || event.ctrlKey) && !toggle) {
       selection.toggleClip(grab.clip.id, "timeline");
       return;
     }
     // Pressing a selected clip keeps the others selected until release: the press may start a drag.
-    if (!toggle && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
+    if (!toggle && !selected.has(grab.clip.id))
+      selection.selectClips([grab.clip.id], "timeline");
     gesture.current = {
       kind: "clip",
       pointer: event.pointerId,
@@ -1033,30 +1538,53 @@ function TimelineCanvas({
 
   /** A scene span of the band pressed: its time range is selected, with the scene and its clips (Chat about this names `<script>#<slug>`). */
   const pickScene = (scene: SceneBox) =>
-    selection.selectScene({ script: scene.script, slug: scene.slug, title: scene.title }, scene.clips, {
-      range: { from: scene.start, to: scene.end },
-      origin: "timeline",
-    });
+    selection.selectScene(
+      { script: scene.script, slug: scene.slug, title: scene.title },
+      scene.clips,
+      {
+        range: { from: scene.start, to: scene.end },
+        origin: "timeline",
+      },
+    );
 
   /** A subtitle lane pressed at `time`: its cue's words (the playhead goes there), else the track alone. */
   const pickSubtitle = (track: string, time: number) => {
     const box = cueBoxAt(latest.current.cues.get(track) ?? [], time);
-    const picked = box ? cueSelection(box.cue, subtitles.fps, subtitles.transcriptOf) : null;
-    if (picked && picked.words.length > 0) selection.selectWords(picked.words, picked.range, "timeline", { reveal: true, track });
+    const picked = box
+      ? cueSelection(box.cue, subtitles.fps, subtitles.transcriptOf)
+      : null;
+    if (picked && picked.words.length > 0)
+      selection.selectWords(picked.words, picked.range, "timeline", {
+        reveal: true,
+        track,
+      });
     else selection.selectTrack(track, "timeline");
   };
 
   /** Add a subtitle track following `track`, or else the likeliest track, then select it for its style. */
   const addSubtitles = (track?: string) => {
-    const follows = track ?? subtitleSource(latest.current.layout, selectedClips, subtitles);
+    const follows =
+      track ?? subtitleSource(latest.current.layout, selectedClips, subtitles);
     if (!follows) {
       onStatus({ tone: "info", text: t.timeline.addTrackFirst });
       return;
     }
-    send([{ op: "track.add", args: { kind: "subtitles", follows, style: { preset: "big-keyword" } } }], (result) => {
-      const added = result?.changes.added[0];
-      if (added) selection.selectTrack(added, "timeline");
-    });
+    send(
+      [
+        {
+          op: "track.add",
+          args: {
+            kind: "subtitles",
+            follows,
+            style: { preset: "big-keyword" },
+          },
+        },
+      ],
+      (result) => {
+        const added = result?.changes.added[0];
+        if (added) selection.selectTrack(added, "timeline");
+      },
+    );
   };
 
   const onPointerMove = (event: PointerEvent) => {
@@ -1070,31 +1598,59 @@ function TimelineCanvas({
       return;
     }
     if (current?.kind === "paint") {
-      if (!current.moving && Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX) return;
+      if (
+        !current.moving &&
+        Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX
+      )
+        return;
       current.moving = true;
-      stroke.current = { stroke: { row: current.row.id, angle: current.angle, from: current.time, to: onGrid(timeAt(x)), mode: paintMode(event) }, until: null };
+      stroke.current = {
+        stroke: {
+          row: current.row.id,
+          angle: current.angle,
+          from: current.time,
+          to: onGrid(timeAt(x)),
+          mode: paintMode(event),
+        },
+        until: null,
+      };
       schedule();
       return;
     }
     if (current?.kind === "range") {
-      if (!current.moving && Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX) return;
+      if (
+        !current.moving &&
+        Math.abs(event.clientX - current.clientX) < DRAG_THRESHOLD_PX
+      )
+        return;
       current.moving = true;
       // Frame grid, inside the timeline: a range names frames the agent can address.
       const rate = latest.current.fps;
-      const onGrid = (time: number) => Math.min(layout.duration, Math.max(0, Math.round(time * rate) / rate));
+      const onGrid = (time: number) =>
+        Math.min(layout.duration, Math.max(0, Math.round(time * rate) / rate));
       const [a, b] = [onGrid(current.time), onGrid(timeAt(x))];
-      selection.selectRange({ from: Math.min(a, b), to: Math.max(a, b) }, "timeline");
+      selection.selectRange(
+        { from: Math.min(a, b), to: Math.max(a, b) },
+        "timeline",
+      );
       return;
     }
     if (current?.kind === "clip") {
-      const travel = Math.max(Math.abs(event.clientX - current.clientX), Math.abs(event.clientY - current.clientY));
+      const travel = Math.max(
+        Math.abs(event.clientX - current.clientX),
+        Math.abs(event.clientY - current.clientY),
+      );
       if (!current.moving && travel < DRAG_THRESHOLD_PX) return;
       current.moving = true;
       const view = state.current;
       // Alt inverts snapping for this drag position.
       const snap = latest.current.snapping !== event.altKey;
       // A body drag of a selected clip moves the whole selection; none of it snaps to itself.
-      const group = current.grab.part === "body" && latest.current.selected.has(current.grab.clip.id) ? [...latest.current.selected] : [];
+      const group =
+        current.grab.part === "body" &&
+        latest.current.selected.has(current.grab.clip.id)
+          ? [...latest.current.selected]
+          : [];
       const exclude = new Set([current.grab.clip.id, ...group]);
       const preview = dragPreview({
         layout,
@@ -1102,7 +1658,12 @@ function TimelineCanvas({
         delta: timeAt(x) - current.time,
         y: y + view.scrollTop,
         fps: latest.current.fps,
-        snap: snap ? { points: snapPoints(layout, transport.get().time, exclude), tolerance: SNAP_PX / view.pxPerSecond } : null,
+        snap: snap
+          ? {
+              points: snapPoints(layout, transport.get().time, exclude),
+              tolerance: SNAP_PX / view.pxPerSecond,
+            }
+          : null,
         ripple: current.ripple,
         group,
       });
@@ -1113,8 +1674,16 @@ function TimelineCanvas({
       return;
     }
     const grab = grabAt(layout, state.current, x, y);
-    scroller.current!.style.cursor = grab ? (grab.part === "body" ? "grab" : "ew-resize") : laneAt(layout, state.current, x, y) ? "crosshair" : "";
-    setHover((was) => (grab ? { row: grab.row, clip: grab.clip, x, y } : was ? null : was));
+    scroller.current!.style.cursor = grab
+      ? grab.part === "body"
+        ? "grab"
+        : "ew-resize"
+      : laneAt(layout, state.current, x, y)
+        ? "crosshair"
+        : "";
+    setHover((was) =>
+      grab ? { row: grab.row, clip: grab.clip, x, y } : was ? null : was,
+    );
   };
 
   const onPointerUp = (event: PointerEvent) => {
@@ -1129,9 +1698,19 @@ function TimelineCanvas({
         schedule();
         return;
       }
-      const row = latest.current.layout?.rows.find((candidate) => candidate.id === current.row.id) ?? current.row;
+      const row =
+        latest.current.layout?.rows.find(
+          (candidate) => candidate.id === current.row.id,
+        ) ?? current.row;
       const { from, to } = drawn.stroke;
-      const edits = paintEdits(row.group ?? "", current.angle, shotSpans(row.clips), from, to, paintMode(event));
+      const edits = paintEdits(
+        row.group ?? "",
+        current.angle,
+        shotSpans(row.clips),
+        from,
+        to,
+        paintMode(event),
+      );
       if (edits.length === 0) {
         stroke.current = null;
         schedule();
@@ -1142,7 +1721,8 @@ function TimelineCanvas({
       send(edits, (result) => {
         if (stroke.current !== drawn) return;
         // Keep the stroke until the feed shows the result; drop it at once when refused or already shown.
-        if (result && (latest.current.revision ?? -1) < result.revision) drawn.until = result.revision;
+        if (result && (latest.current.revision ?? -1) < result.revision)
+          drawn.until = result.revision;
         else stroke.current = null;
         schedule();
       });
@@ -1151,8 +1731,10 @@ function TimelineCanvas({
     if (current.kind !== "clip") return;
     if (!current.moving) {
       // A click (no drag) on a clip of a multi-selection selects just it; Shift on an edge toggles it.
-      if (current.toggle) selection.toggleClip(current.grab.clip.id, "timeline");
-      else if (!event.shiftKey && !event.metaKey && !event.ctrlKey) selection.selectClips([current.grab.clip.id], "timeline");
+      if (current.toggle)
+        selection.toggleClip(current.grab.clip.id, "timeline");
+      else if (!event.shiftKey && !event.metaKey && !event.ctrlKey)
+        selection.selectClips([current.grab.clip.id], "timeline");
       return;
     }
     const edits = current.preview ? dragEdits(current.preview) : [];
@@ -1161,7 +1743,10 @@ function TimelineCanvas({
       schedule();
       // Sent, one member's refusal would leave the others moved: say why instead.
       if (current.preview?.blocked && current.preview.others.length > 0) {
-        onStatus({ tone: "error", text: t.timeline.notMoved(current.preview.others.length + 1) });
+        onStatus({
+          tone: "error",
+          text: t.timeline.notMoved(current.preview.others.length + 1),
+        });
       }
       return;
     }
@@ -1169,7 +1754,8 @@ function TimelineCanvas({
     send(edits, (result) => {
       if (ghost.current !== drawn || !drawn) return;
       // Keep the ghost until the feed shows the result; drop it at once when refused or already shown.
-      if (result && (latest.current.revision ?? -1) < result.revision) drawn.until = result.revision;
+      if (result && (latest.current.revision ?? -1) < result.revision)
+        drawn.until = result.revision;
       else ghost.current = null;
       schedule();
     });
@@ -1186,8 +1772,19 @@ function TimelineCanvas({
   const clipItems = (clip: ClipBox, ids: readonly string[]): MenuItem[] => {
     const current = latest.current;
     const can = (kind: EditCommand) =>
-      current.layout !== null && commandEdits(kind, { layout: current.layout, selected: ids, playhead: transport.get().time, fps: current.fps }).length > 0;
-    const item = (label: string, shortcut: string, kind: EditCommand, extra: Partial<MenuItem> = {}): MenuItem => ({
+      current.layout !== null &&
+      commandEdits(kind, {
+        layout: current.layout,
+        selected: ids,
+        playhead: transport.get().time,
+        fps: current.fps,
+      }).length > 0;
+    const item = (
+      label: string,
+      shortcut: string,
+      kind: EditCommand,
+      extra: Partial<MenuItem> = {},
+    ): MenuItem => ({
       label,
       shortcut,
       disabled: !can(kind),
@@ -1196,14 +1793,36 @@ function TimelineCanvas({
     });
     const file = clip.asset ?? clip.source;
     return [
-      item(t.timeline.splitAtPlayhead, "S", { kind: "split" }, { separated: true }),
+      item(
+        t.timeline.splitAtPlayhead,
+        "S",
+        { kind: "split" },
+        { separated: true },
+      ),
       item(t.timeline.trimStartToPlayhead, "[", { kind: "trim", side: "head" }),
       item(t.timeline.trimEndToPlayhead, "]", { kind: "trim", side: "tail" }),
       ...(file ? [revealItem(file, true)] : []),
       // A generated clip's composition opens in this window's editor (#746).
-      ...(clip.kind === "generated" && clip.source && canOpenFiles() ? [{ label: t.timeline.openComposition, run: () => void openInEditor(clip.source!) }] : []),
-      item(t.timeline.deleteClips(ids.length), DELETE_KEY, { kind: "delete", ripple: false }, { separated: true, danger: true }),
-      item(t.timeline.rippleDeleteClips(ids.length), RIPPLE_DELETE_KEY, { kind: "delete", ripple: true }, { danger: true }),
+      ...(clip.kind === "generated" && clip.source && canOpenFiles()
+        ? [
+            {
+              label: t.timeline.openComposition,
+              run: () => void openInEditor(clip.source!),
+            },
+          ]
+        : []),
+      item(
+        t.timeline.deleteClips(ids.length),
+        DELETE_KEY,
+        { kind: "delete", ripple: false },
+        { separated: true, danger: true },
+      ),
+      item(
+        t.timeline.rippleDeleteClips(ids.length),
+        RIPPLE_DELETE_KEY,
+        { kind: "delete", ripple: true },
+        { danger: true },
+      ),
     ];
   };
 
@@ -1215,12 +1834,22 @@ function TimelineCanvas({
   });
 
   /** Mute or hide a track, or turn it back: the header switches and menu. */
-  const setTrack = (row: TrackRow, change: { muted: boolean } | { hidden: boolean }) => send([{ op: "track.set", args: { track: row.id, ...change } }]);
+  const setTrack = (
+    row: TrackRow,
+    change: { muted: boolean } | { hidden: boolean },
+  ) => send([{ op: "track.set", args: { track: row.id, ...change } }]);
 
   /** Add a video or audio track on top of the stack. */
   const addTrackItems = (separated: boolean): MenuItem[] => [
-    { label: t.timeline.addVideoTrack, separated, run: () => send([{ op: "track.add", args: { kind: "video" } }]) },
-    { label: t.timeline.addAudioTrack, run: () => send([{ op: "track.add", args: { kind: "audio" } }]) },
+    {
+      label: t.timeline.addVideoTrack,
+      separated,
+      run: () => send([{ op: "track.add", args: { kind: "video" } }]),
+    },
+    {
+      label: t.timeline.addAudioTrack,
+      run: () => send([{ op: "track.add", args: { kind: "audio" } }]),
+    },
   ];
 
   /**
@@ -1230,11 +1859,28 @@ function TimelineCanvas({
   const behindItems = (row: TrackRow): MenuItem[] => {
     const current = latest.current.layout;
     if (image || !current) return [];
-    const set = (behind: string | null) => send([{ op: "track.set", args: { track: row.id, behind } }]);
-    const plates = plateChoices(current, row).filter((plate) => plate.id !== row.behind);
+    const set = (behind: string | null) =>
+      send([{ op: "track.set", args: { track: row.id, behind } }]);
+    const plates = plateChoices(current, row).filter(
+      (plate) => plate.id !== row.behind,
+    );
     return [
-      ...plates.map((plate, index): MenuItem => ({ label: t.timeline.behindPerson(plate.label), separated: index === 0, run: () => set(plate.id) })),
-      ...(row.behind !== null ? [{ label: t.timeline.stopBehindPerson, separated: plates.length === 0, run: () => set(null) }] : []),
+      ...plates.map(
+        (plate, index): MenuItem => ({
+          label: t.timeline.behindPerson(plate.label),
+          separated: index === 0,
+          run: () => set(plate.id),
+        }),
+      ),
+      ...(row.behind !== null
+        ? [
+            {
+              label: t.timeline.stopBehindPerson,
+              separated: plates.length === 0,
+              run: () => set(null),
+            },
+          ]
+        : []),
     ];
   };
 
@@ -1242,7 +1888,8 @@ function TimelineCanvas({
   const openTrackMenu = (event: MouseEvent, row: TrackRow) => {
     event.preventDefault();
     // Selected clips stay selected (#757): the menu acts on the track by id, and Chat about this then speaks of them.
-    if (selection.get().clips.length === 0) selection.selectTrack(row.id, "timeline");
+    if (selection.get().clips.length === 0)
+      selection.selectTrack(row.id, "timeline");
     const clipTrack = row.kind === "video" || row.kind === "audio";
     // The track as the person named it; the A1 / V1 label only when it has no name (#757).
     const title = row.name ?? row.label;
@@ -1252,26 +1899,57 @@ function TimelineCanvas({
       event.clientY,
       [
         ...askItems(),
-        { label: t.timeline.renameTrack, separated: true, run: () => setRenaming(row.id) },
+        {
+          label: t.timeline.renameTrack,
+          separated: true,
+          run: () => setRenaming(row.id),
+        },
         ...(row.kind !== "subtitles" && !image
-          ? [{ label: row.muted ? t.timeline.unmuteTrack : t.timeline.muteTrack, run: () => setTrack(row, { muted: !row.muted }) }]
+          ? [
+              {
+                label: row.muted
+                  ? t.timeline.unmuteTrack
+                  : t.timeline.muteTrack,
+                run: () => setTrack(row, { muted: !row.muted }),
+              },
+            ]
           : []),
         ...(row.kind === "video" || row.kind === "program"
-          ? [{ label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack, run: () => setTrack(row, { hidden: !row.hidden }) }]
+          ? [
+              {
+                label: row.hidden ? t.timeline.showTrack : t.timeline.hideTrack,
+                run: () => setTrack(row, { hidden: !row.hidden }),
+              },
+            ]
           : []),
         ...behindItems(row),
         // On a `Music <rank>` track of `music.candidates`: hear every candidate side by side (ADR 0038).
-        ...auditionItems(candidateFiles(latest.current.layout?.rows ?? [], row), t.audition.candidatesItem, windowOf(event.target)),
+        ...candidateItems(
+          latest.current.layout?.rows ?? [],
+          row,
+          windowOf(event.target),
+        ),
         // Once a subtitle track follows this one the menu stops offering it; the toolbar still adds a second.
         ...(clipTrack && unsubtitled(latest.current.layout).includes(row)
-          ? [{ label: t.timeline.addSubtitlesOf(title), run: () => addSubtitles(row.id) }]
+          ? [
+              {
+                label: t.timeline.addSubtitlesOf(title),
+                run: () => addSubtitles(row.id),
+              },
+            ]
           : []),
         ...(image ? [] : addTrackItems(true)),
         {
           label: t.timeline.deleteTrack(title, clips),
           separated: true,
           danger: true,
-          run: () => send([{ op: "track.remove", args: { track: row.id, ...(clips > 0 ? { force: true } : {}) } }]),
+          run: () =>
+            send([
+              {
+                op: "track.remove",
+                args: { track: row.id, ...(clips > 0 ? { force: true } : {}) },
+              },
+            ]),
         },
       ],
       windowOf(event.target),
@@ -1287,18 +1965,28 @@ function TimelineCanvas({
     if (image || !current) return [];
     const marker = markerAt(current, state.current, x, y);
     const at = onGrid(timeAt(x));
-    const left = (time: number) => time * state.current.pxPerSecond - state.current.scrollLeft;
+    const left = (time: number) =>
+      time * state.current.pxPerSecond - state.current.scrollLeft;
     return [
-      { label: t.timeline.addMarker, separated: true, run: () => setNaming({ marker: null, at, x: left(at) }) },
+      {
+        label: t.timeline.addMarker,
+        separated: true,
+        run: () => setNaming({ marker: null, at, x: left(at) }),
+      },
       markPlayheadItem(),
       ...(marker
         ? [
-            { label: t.timeline.renameMarker(marker.label), run: () => setNaming({ marker, at: marker.at, x: left(marker.at) }) },
+            {
+              label: t.timeline.renameMarker(marker.label),
+              run: () =>
+                setNaming({ marker, at: marker.at, x: left(marker.at) }),
+            },
             {
               label: t.timeline.deleteMarker(marker.label),
               separated: true,
               danger: true,
-              run: () => send([{ op: "marker.remove", args: { marker: marker.id } }]),
+              run: () =>
+                send([{ op: "marker.remove", args: { marker: marker.id } }]),
             },
           ]
         : []),
@@ -1312,10 +2000,18 @@ function TimelineCanvas({
     const at = onGrid(transport.get().time);
     const x = at * view.pxPerSecond - view.scrollLeft;
     // Off screen: the input sits at the nearer edge, still naming the marker at the playhead.
-    setNaming({ marker: null, at, x: Math.min(Math.max(0, x), Math.max(0, view.width - 160)) });
+    setNaming({
+      marker: null,
+      at,
+      x: Math.min(Math.max(0, x), Math.max(0, view.width - 160)),
+    });
   };
 
-  const markPlayheadItem = (): MenuItem => ({ label: t.timeline.addMarkerAtPlayhead, shortcut: "M", run: markPlayhead });
+  const markPlayheadItem = (): MenuItem => ({
+    label: t.timeline.addMarkerAtPlayhead,
+    shortcut: "M",
+    run: markPlayhead,
+  });
 
   /** Save the name typed for a marker: a new one at its time, or the renamed one; an empty or unchanged name does nothing. */
   const nameMarker = (typed: string) => {
@@ -1323,19 +2019,28 @@ function TimelineCanvas({
     setNaming(null);
     const label = typed.trim();
     if (!chosen || label === "" || label === chosen.marker?.label) return;
-    send([chosen.marker ? { op: "marker.set", args: { marker: chosen.marker.id, label } } : { op: "marker.add", args: { at: chosen.at, label } }]);
+    send([
+      chosen.marker
+        ? { op: "marker.set", args: { marker: chosen.marker.id, label } }
+        : { op: "marker.add", args: { at: chosen.at, label } },
+    ]);
   };
 
   /** Save the name typed in a track header; an empty name clears it. */
   const rename = (row: TrackRow, typed: string) => {
     setRenaming(null);
     const name = typed.trim() || null;
-    if (name !== row.name) send([{ op: "track.set", args: { track: row.id, name } }]);
+    if (name !== row.name)
+      send([{ op: "track.set", args: { track: row.id, name } }]);
   };
 
   /** Header of `row` while it is renamed: an input in place of its name. */
   const renameHead = (row: TrackRow) => (
-    <div key={row.id} className={`track-head track-${row.kind}`} style={{ height: row.height }}>
+    <div
+      key={row.id}
+      className={`track-head track-${row.kind}`}
+      style={{ height: row.height }}
+    >
       <span className="track-id">{row.label}</span>
       <input
         className="track-name-input"
@@ -1348,7 +2053,8 @@ function TimelineCanvas({
         onKeyDown={(event) => {
           event.stopPropagation();
           if (event.key === "Escape") setRenaming(null);
-          else if (event.key === "Enter") rename(row, event.currentTarget.value);
+          else if (event.key === "Enter")
+            rename(row, event.currentTarget.value);
         }}
       />
     </div>
@@ -1370,34 +2076,87 @@ function TimelineCanvas({
       return;
     }
     const edge = layout && !image ? edgeAt(layout, state.current, x, y) : null;
-    const grab = layout && y >= layout.head ? grabAt(layout, state.current, x, y) : null;
+    const grab =
+      layout && y >= layout.head ? grabAt(layout, state.current, x, y) : null;
     const scene = layout && !grab ? sceneAt(layout, state.current, x, y) : null;
     if (scene) pickScene(scene);
-    else if (grab && !edge && !selected.has(grab.clip.id)) selection.selectClips([grab.clip.id], "timeline");
+    else if (grab && !edge && !selected.has(grab.clip.id))
+      selection.selectClips([grab.clip.id], "timeline");
     const onClip = grab && !edge ? grab.clip : null;
-    const ids = onClip ? (selected.has(onClip.id) ? selectedClips : [onClip.id]) : [];
+    const ids = onClip
+      ? selected.has(onClip.id)
+        ? selectedClips
+        : [onClip.id]
+      : [];
     const empty = !edge && !onClip && !scene && !image;
-    openAskMenu(event, edge ? edgeItems(edge) : onClip ? clipItems(onClip, ids) : empty ? [...addTrackItems(true), addSubtitlesItem(), ...(image ? [] : [markPlayheadItem()])] : []);
+    openAskMenu(
+      event,
+      edge
+        ? edgeItems(edge)
+        : onClip
+          ? clipItems(onClip, ids)
+          : empty
+            ? [
+                ...addTrackItems(true),
+                addSubtitlesItem(),
+                ...(image ? [] : [markPlayheadItem()]),
+              ]
+            : [],
+    );
   };
 
   return (
     <div className="timeline-body">
       <div className="timeline-heads">
         <div className="ruler-spacer">
-          <div className="timeline-zoom" role="group" aria-label={t.timeline.zoomGroup}>
-            <button className="icon-button" aria-label={t.timeline.zoomOut} data-tip={t.timeline.zoomOutTitle} onClick={() => zoom(1 / ZOOM_STEP)}>
+          <div
+            className="timeline-zoom"
+            role="group"
+            aria-label={t.timeline.zoomGroup}
+          >
+            <button
+              className="icon-button"
+              aria-label={t.timeline.zoomOut}
+              data-tip={t.timeline.zoomOutTitle}
+              onClick={() => zoom(1 / ZOOM_STEP)}
+            >
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4 8h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M4 8h8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
               </svg>
             </button>
-            <button className="icon-button" aria-label={t.timeline.zoomFit} data-tip={t.timeline.zoomFitTitle} onClick={fit}>
+            <button
+              className="icon-button"
+              aria-label={t.timeline.zoomFit}
+              data-tip={t.timeline.zoomFitTitle}
+              onClick={fit}
+            >
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
               </svg>
             </button>
-            <button className="icon-button" aria-label={t.timeline.zoomIn} data-tip={t.timeline.zoomInTitle} onClick={() => zoom(ZOOM_STEP)}>
+            <button
+              className="icon-button"
+              aria-label={t.timeline.zoomIn}
+              data-tip={t.timeline.zoomInTitle}
+              onClick={() => zoom(ZOOM_STEP)}
+            >
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4 8h8M8 4v8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M4 8h8M8 4v8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
               </svg>
             </button>
             <button
@@ -1408,7 +2167,12 @@ function TimelineCanvas({
               onClick={() => setSnapping((on) => !on)}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4 2.5v6a4 4 0 0 0 8 0v-6M4 5.5h2.5M9.5 5.5H12" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M4 2.5v6a4 4 0 0 0 8 0v-6M4 5.5h2.5M9.5 5.5H12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
               </svg>
             </button>
             <button
@@ -1419,7 +2183,12 @@ function TimelineCanvas({
               onClick={() => setRippling((on) => !on)}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M2 4.5h5v7H2M9 4.5h5v7H9M7 8h2M11.5 8l-1.5-1.5M11.5 8L10 9.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <path
+                  d="M2 4.5h5v7H2M9 4.5h5v7H9M7 8h2M11.5 8l-1.5-1.5M11.5 8L10 9.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
               </svg>
             </button>
             <button
@@ -1430,19 +2199,42 @@ function TimelineCanvas({
               onClick={() => addSubtitles()}
             >
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M4.5 9.5h3.5M9.5 9.5h2M4.5 7h1.5M7.5 7h4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                <rect
+                  x="1.75"
+                  y="3.25"
+                  width="12.5"
+                  height="9.5"
+                  rx="1.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M4.5 9.5h3.5M9.5 9.5h2M4.5 7h1.5M7.5 7h4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
               </svg>
             </button>
           </div>
         </div>
         {layout && layout.markers.length > 0 && (
-          <div className="scene-spacer" style={{ height: layout.sceneTop - RULER_HEIGHT }} data-tip={t.timeline.markersTitle} data-testid="marker-lane-head">
+          <div
+            className="scene-spacer"
+            style={{ height: layout.sceneTop - RULER_HEIGHT }}
+            data-tip={t.timeline.markersTitle}
+            data-testid="marker-lane-head"
+          >
             {t.timeline.markers}
           </div>
         )}
         {layout && layout.scenes.length > 0 && (
-          <div className="scene-spacer" style={{ height: layout.head - layout.sceneTop }} data-tip={t.timeline.scenesTitle}>
+          <div
+            className="scene-spacer"
+            style={{ height: layout.head - layout.sceneTop }}
+            data-tip={t.timeline.scenesTitle}
+          >
             {t.timeline.scenes}
           </div>
         )}
@@ -1450,7 +2242,12 @@ function TimelineCanvas({
           <div ref={heads}>
             {layout?.rows.map((row) =>
               row.kind === "program" ? (
-                <div key={row.id} className="program-head" style={{ height: row.height + row.lanesHeight }} data-lanes={row.lanes.length > 0 ? "open" : "closed"}>
+                <div
+                  key={row.id}
+                  className="program-head"
+                  style={{ height: row.height + row.lanesHeight }}
+                  data-lanes={row.lanes.length > 0 ? "open" : "closed"}
+                >
                   {renaming === row.id ? (
                     renameHead(row)
                   ) : (
@@ -1465,7 +2262,9 @@ function TimelineCanvas({
                     >
                       <span className="track-id">{row.label}</span>
                       <span className="track-label">{row.name ?? ""}</span>
-                      <TrackState matte={layout ? matteBadge(layout, row, mattes) : null} />
+                      <TrackState
+                        matte={layout ? matteBadge(layout, row, mattes) : null}
+                      />
                     </button>
                   )}
                   {renaming !== row.id && (
@@ -1473,21 +2272,37 @@ function TimelineCanvas({
                       row={row}
                       image={image}
                       onSet={(change) => setTrack(row, change)}
-                      style={{ top: (row.height - TOGGLE_SIZE) / 2, right: row.angles.length > 0 ? 30 : 6 }}
+                      style={{
+                        top: (row.height - TOGGLE_SIZE) / 2,
+                        right: row.angles.length > 0 ? 30 : 6,
+                      }}
                     />
                   )}
                   {row.angles.length > 0 && (
                     <button
                       className={`icon-button turn-lanes-toggle${lanesOpen.has(row.id) ? " on" : ""}`}
                       aria-pressed={lanesOpen.has(row.id)}
-                      aria-label={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.showTurnLanes}
-                      data-tip={lanesOpen.has(row.id) ? t.timeline.hideTurnLanes : t.timeline.turnLanesTitle(trackName(row), isMac)}
+                      aria-label={
+                        lanesOpen.has(row.id)
+                          ? t.timeline.hideTurnLanes
+                          : t.timeline.showTurnLanes
+                      }
+                      data-tip={
+                        lanesOpen.has(row.id)
+                          ? t.timeline.hideTurnLanes
+                          : t.timeline.turnLanesTitle(trackName(row), isMac)
+                      }
                       data-testid="turn-lanes-toggle"
                       data-track={row.id}
                       onClick={() => onToggleLanes(row.id)}
                     >
                       <svg viewBox="0 0 16 16" aria-hidden="true">
-                        <path d="M2 4.5h4M8 4.5h6M2 8h7M11 8h3M2 11.5h2M6 11.5h8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                        <path
+                          d="M2 4.5h4M8 4.5h6M2 8h7M11 8h3M2 11.5h2M6 11.5h8"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                        />
                       </svg>
                     </button>
                   )}
@@ -1495,7 +2310,12 @@ function TimelineCanvas({
                     <div
                       key={lane.angle.id}
                       className="turn-lane-head"
-                      style={{ height: lane.height, "--angle-color": `var(--angle-${lane.angle.color + 1})` } as React.CSSProperties}
+                      style={
+                        {
+                          height: lane.height,
+                          "--angle-color": `var(--angle-${lane.angle.color + 1})`,
+                        } as React.CSSProperties
+                      }
                       title={t.timeline.turnLaneTitle(lane.angle.name)}
                       aria-label={t.timeline.turnLaneLabel(lane.angle.name)}
                       data-testid="turn-lane-head"
@@ -1520,7 +2340,9 @@ function TimelineCanvas({
                   onContextMenu={(event) => openTrackMenu(event, row)}
                 >
                   <span className="track-id">{row.label}</span>
-                  <span className="track-label">{row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?")}</span>
+                  <span className="track-label">
+                    {row.name ?? t.timeline.wordsOf(row.followsLabel ?? "?")}
+                  </span>
                 </button>
               ) : (
                 <div
@@ -1533,8 +2355,14 @@ function TimelineCanvas({
                 >
                   <span className="track-id">{row.label}</span>
                   <span className="track-label">{row.name ?? ""}</span>
-                  <TrackState matte={layout ? matteBadge(layout, row, mattes) : null} />
-                  <TrackToggles row={row} image={image} onSet={(change) => setTrack(row, change)} />
+                  <TrackState
+                    matte={layout ? matteBadge(layout, row, mattes) : null}
+                  />
+                  <TrackToggles
+                    row={row}
+                    image={image}
+                    onSet={(change) => setTrack(row, change)}
+                  />
                 </div>
               ),
             )}
@@ -1549,7 +2377,11 @@ function TimelineCanvas({
         data-selected={selectedClips.join(" ")}
         data-diff={diff?.map((mark) => `${mark.change}:${mark.clip}`).join(" ")}
         data-range={range ? `${range.from}-${range.to}` : undefined}
-        data-spans={spans.length > 0 ? spans.map((span) => `${span.from}-${span.to}`).join(" ") : undefined}
+        data-spans={
+          spans.length > 0
+            ? spans.map((span) => `${span.from}-${span.to}`).join(" ")
+            : undefined
+        }
         ref={lanesEl}
         data-playhead={transport.get().time}
         data-dragging={dragging ? dragging.preview.part : undefined}
@@ -1591,12 +2423,23 @@ function TimelineCanvas({
             onKeyDown={(event) => {
               event.stopPropagation();
               if (event.key === "Escape") setNaming(null);
-              else if (event.key === "Enter") nameMarker(event.currentTarget.value);
+              else if (event.key === "Enter")
+                nameMarker(event.currentTarget.value);
             }}
           />
         )}
-        {dragging ? <DragTooltip {...dragging} fps={fps} /> : hover && <ClipTooltip hover={hover} fps={fps} formats={formats} />}
-        <ClipList layout={layout} fps={fps} selected={selected} cues={cues} scene={selectedScene} />
+        {dragging ? (
+          <DragTooltip {...dragging} fps={fps} />
+        ) : (
+          hover && <ClipTooltip hover={hover} fps={fps} formats={formats} />
+        )}
+        <ClipList
+          layout={layout}
+          fps={fps}
+          selected={selected}
+          cues={cues}
+          scene={selectedScene}
+        />
       </div>
     </div>
   );
@@ -1613,12 +2456,37 @@ function MatteChip({ matte }: { matte: MatteBadge }) {
           ? t.timeline.matteReady(matte.plate)
           : t.timeline.behindPlate(matte.plate);
   return (
-    <span className="track-matte" data-testid="track-matte" data-state={matte.state} data-plate={matte.plate} role="img" aria-label={label} data-tip={label}>
+    <span
+      className="track-matte"
+      data-testid="track-matte"
+      data-state={matte.state}
+      data-plate={matte.plate}
+      role="img"
+      aria-label={label}
+      data-tip={label}
+    >
       <svg viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="5.5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M3 14c0-3 2.3-4.8 5-4.8s5 1.8 5 4.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle
+          cx="8"
+          cy="5.5"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+        />
+        <path
+          d="M3 14c0-3 2.3-4.8 5-4.8s5 1.8 5 4.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
       </svg>
-      {matte.state === "preparing" && matte.progress !== null && <span className="track-matte-text">{Math.round(matte.progress * 100)}%</span>}
+      {matte.state === "preparing" && matte.progress !== null && (
+        <span className="track-matte-text">
+          {Math.round(matte.progress * 100)}%
+        </span>
+      )}
       {matte.state === "failed" && <span className="track-matte-text">!</span>}
     </span>
   );
@@ -1654,7 +2522,13 @@ function TrackToggles({
   const picture = row.kind === "video" || row.kind === "program";
   if (!sound && !picture) return null;
   return (
-    <span className="track-toggles" style={style} data-testid="track-toggles" data-muted={row.muted} data-hidden={row.hidden}>
+    <span
+      className="track-toggles"
+      style={style}
+      data-testid="track-toggles"
+      data-muted={row.muted}
+      data-hidden={row.hidden}
+    >
       {sound && (
         <button
           type="button"
@@ -1666,11 +2540,29 @@ function TrackToggles({
           onClick={() => onSet({ muted: !row.muted })}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <path
+              d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinejoin="round"
+            />
             {row.muted ? (
-              <path d="M10.5 6l4 4M14.5 6l-4 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path
+                d="M10.5 6l4 4M14.5 6l-4 4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
             ) : (
-              <path d="M10.75 5.75a3.25 3.25 0 0 1 0 4.5M12.75 4a5.75 5.75 0 0 1 0 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path
+                d="M10.75 5.75a3.25 3.25 0 0 1 0 4.5M12.75 4a5.75 5.75 0 0 1 0 8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
             )}
           </svg>
         </button>
@@ -1686,11 +2578,30 @@ function TrackToggles({
           onClick={() => onSet({ hidden: !row.hidden })}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <path
+              d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinejoin="round"
+            />
             {row.hidden ? (
-              <path d="M3 13L13 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path
+                d="M3 13L13 3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
             ) : (
-              <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+              <circle
+                cx="8"
+                cy="8"
+                r="2"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              />
             )}
           </svg>
         </button>
@@ -1715,16 +2626,33 @@ function DiffLegend({
   const counts = marks ? diffCounts(marks) : null;
   return (
     <span className="timeline-diff-legend" data-history={target}>
-      <span className="panel-meta timeline-diff-title" title={t.timeline.changesOf(title ?? target, target)}>
+      <span
+        className="panel-meta timeline-diff-title"
+        title={t.timeline.changesOf(title ?? target, target)}
+      >
         {title ?? ""}
       </span>
       {counts &&
         (["added", "removed", "moved", "changed"] as const)
           .filter((kind) => counts[kind] > 0)
-          .map((kind) => <span key={kind} className={`diff-count diff-${kind}`}>{t.history[kind](counts[kind])}</span>)}
-      <button className="icon-button" aria-label={t.timeline.stopShowing} data-tip={t.timeline.stopShowingTitle} onClick={onStop}>
+          .map((kind) => (
+            <span key={kind} className={`diff-count diff-${kind}`}>
+              {t.history[kind](counts[kind])}
+            </span>
+          ))}
+      <button
+        className="icon-button"
+        aria-label={t.timeline.stopShowing}
+        data-tip={t.timeline.stopShowingTitle}
+        onClick={onStop}
+      >
         <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path
+            d="M4 4l8 8M12 4l-8 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
         </svg>
       </button>
     </span>
@@ -1740,7 +2668,12 @@ function toGhost(preview: DragPreview): DragGhost {
     end: preview.end,
     blocked: preview.blocked,
     guide: preview.snapped?.time ?? null,
-    others: preview.others.map((member) => ({ clip: member.clip.id, row: member.row.id, start: member.start, end: member.end })),
+    others: preview.others.map((member) => ({
+      clip: member.clip.id,
+      row: member.row.id,
+      start: member.start,
+      end: member.end,
+    })),
   };
 }
 
@@ -1750,13 +2683,28 @@ function describe(result: OperationResult, fps: number, clips: number): Status {
   if (rough) {
     return {
       tone: "error",
-      text: t.timeline.roughSnap(rough.window, formatTimecode(rough.applied, fps)),
+      text: t.timeline.roughSnap(
+        rough.window,
+        formatTimecode(rough.applied, fps),
+      ),
     };
   }
-  const moved = result.snaps.find((snap) => Math.abs(snap.applied - snap.requested) >= 0.0005);
-  if (moved) return { tone: "info", text: t.timeline.edgeSnapped(formatDuration(Math.abs(moved.applied - moved.requested))) };
+  const moved = result.snaps.find(
+    (snap) => Math.abs(snap.applied - snap.requested) >= 0.0005,
+  );
+  if (moved)
+    return {
+      tone: "info",
+      text: t.timeline.edgeSnapped(
+        formatDuration(Math.abs(moved.applied - moved.requested)),
+      ),
+    };
   const label = OP_LABELS[result.operation.op] ?? result.operation.op;
-  return { tone: "info", text: clips > 1 ? t.timeline.savedMany(label, clips) : t.timeline.saved(label) };
+  return {
+    tone: "info",
+    text:
+      clips > 1 ? t.timeline.savedMany(label, clips) : t.timeline.saved(label),
+  };
 }
 
 const OP_LABELS: Record<string, string> = {
@@ -1781,11 +2729,23 @@ const OP_LABELS: Record<string, string> = {
  * the same words only once every clip track has one. Null when there is no
  * clip track.
  */
-function subtitleSource(layout: TimelineLayout | null, selectedClips: readonly string[], subtitles: SubtitlesState): string | null {
+function subtitleSource(
+  layout: TimelineLayout | null,
+  selectedClips: readonly string[],
+  subtitles: SubtitlesState,
+): string | null {
   const open = unsubtitled(layout);
-  const rows = open.length > 0 ? open : (layout?.rows.filter(isClipTrack) ?? []);
-  const picked = rows.find((row) => row.clips.some((clip) => selectedClips.includes(clip.id)));
-  const transcribed = rows.find((row) => row.clips.some((clip) => clip.asset !== null && subtitles.transcriptOf(clip.asset) !== null));
+  const rows =
+    open.length > 0 ? open : (layout?.rows.filter(isClipTrack) ?? []);
+  const picked = rows.find((row) =>
+    row.clips.some((clip) => selectedClips.includes(clip.id)),
+  );
+  const transcribed = rows.find((row) =>
+    row.clips.some(
+      (clip) =>
+        clip.asset !== null && subtitles.transcriptOf(clip.asset) !== null,
+    ),
+  );
   // Rows list the top video layer first: the base track is the last video row.
   const base = rows.filter((row) => row.kind === "video").at(-1) ?? rows[0];
   return (picked ?? transcribed ?? base)?.id ?? null;
@@ -1799,7 +2759,11 @@ function isClipTrack(row: TrackRow): boolean {
 /** Clip tracks that no subtitle track follows yet, in row order. */
 function unsubtitled(layout: TimelineLayout | null): TrackRow[] {
   const rows = layout?.rows ?? [];
-  const followed = new Set(rows.flatMap((row) => (row.kind === "subtitles" && row.follows ? [row.follows] : [])));
+  const followed = new Set(
+    rows.flatMap((row) =>
+      row.kind === "subtitles" && row.follows ? [row.follows] : [],
+    ),
+  );
   return rows.filter((row) => isClipTrack(row) && !followed.has(row.id));
 }
 
@@ -1808,31 +2772,60 @@ function nothingToDo(command: EditCommand, anySelected: boolean): string {
   switch (command.kind) {
     case "split":
     case "trim":
-      return anySelected ? t.timeline.noSelectedUnderPlayhead : t.timeline.noClipUnderPlayhead;
+      return anySelected
+        ? t.timeline.noSelectedUnderPlayhead
+        : t.timeline.noClipUnderPlayhead;
     case "nudge":
     case "delete":
-      return anySelected ? t.timeline.nothingToChange : t.timeline.selectClipFirst;
+      return anySelected
+        ? t.timeline.nothingToChange
+        : t.timeline.selectClipFirst;
   }
 }
 
-function ClipTooltip({ hover, fps, formats }: { hover: { row: TrackRow; clip: ClipBox; x: number; y: number }; fps: number; formats: ReadonlySet<string> }) {
+function ClipTooltip({
+  hover,
+  fps,
+  formats,
+}: {
+  hover: { row: TrackRow; clip: ClipBox; x: number; y: number };
+  fps: number;
+  formats: ReadonlySet<string>;
+}) {
   const { row, clip } = hover;
   const adjusted = markedFormats(clip, formats);
   return (
-    <div className="clip-tooltip" style={{ left: hover.x + 12, top: hover.y + 14 }} role="tooltip">
+    <div
+      className="clip-tooltip"
+      style={{ left: hover.x + 12, top: hover.y + 14 }}
+      role="tooltip"
+    >
       <strong>{clip.name}</strong>
       <span>
-        {t.timeline.range(formatTimecode(clip.start, fps), formatTimecode(clip.end, fps))}
+        {t.timeline.range(
+          formatTimecode(clip.start, fps),
+          formatTimecode(clip.end, fps),
+        )}
       </span>
       <span className="clip-tooltip-faint">
-        {clip.problem ? clip.problem : t.timeline.clipDetail(formatDuration(clip.end - clip.start), row.label, clipKindName(clip))}
+        {clip.problem
+          ? clip.problem
+          : t.timeline.clipDetail(
+              formatDuration(clip.end - clip.start),
+              row.label,
+              clipKindName(clip),
+            )}
       </span>
       {clip.renderError && (
         <span className="clip-tooltip-danger" data-testid="clip-tooltip-render">
           {clip.renderError}
         </span>
       )}
-      {adjusted.length > 0 && <span data-testid="clip-tooltip-formats">{t.timeline.formatOverrides(adjusted.join(", "))}</span>}
+      {adjusted.length > 0 && (
+        <span data-testid="clip-tooltip-formats">
+          {t.timeline.formatOverrides(adjusted.join(", "))}
+        </span>
+      )}
     </div>
   );
 }
@@ -1840,7 +2833,8 @@ function ClipTooltip({ hover, fps, formats }: { hover: { row: TrackRow; clip: Cl
 /** What a clip is, for its tooltip: nothing for media (the name is its file), the plugin type of a generated clip. */
 function clipKindName(clip: ClipBox): string | null {
   if (clip.kind === "media") return null;
-  if (clip.kind === "generated") return t.timeline.clipKinds.generated(clip.type);
+  if (clip.kind === "generated")
+    return t.timeline.clipKinds.generated(clip.type);
   return t.timeline.clipKinds[clip.kind];
 }
 
@@ -1850,22 +2844,58 @@ function trackName(row: TrackRow): string {
 }
 
 /** Where the dragged clip or edge would land, next to the pointer. */
-function DragTooltip({ preview, x, y, fps }: { preview: DragPreview; x: number; y: number; fps: number }) {
+function DragTooltip({
+  preview,
+  x,
+  y,
+  fps,
+}: {
+  preview: DragPreview;
+  x: number;
+  y: number;
+  fps: number;
+}) {
   const { part, clip, row } = preview;
-  const moved = preview.others.length > 0 ? t.timeline.clipsCount(preview.others.length + 1) : clip.name;
+  const moved =
+    preview.others.length > 0
+      ? t.timeline.clipsCount(preview.others.length + 1)
+      : clip.name;
   const title =
-    part === "body" ? t.timeline.moveTitle(moved) : (part === "head" ? t.timeline.trimStart : t.timeline.trimEnd)(preview.ripple, clip.name);
+    part === "body"
+      ? t.timeline.moveTitle(moved)
+      : (part === "head" ? t.timeline.trimStart : t.timeline.trimEnd)(
+          preview.ripple,
+          clip.name,
+        );
   // A ripple head trim keeps the clip's left edge: its source in moves instead.
-  const shift = part === "head" && preview.ripple ? (preview.edge - clip.start) * clip.speed : null;
+  const shift =
+    part === "head" && preview.ripple
+      ? (preview.edge - clip.start) * clip.speed
+      : null;
   const time = part === "tail" ? preview.end : preview.start;
   return (
-    <div className="clip-tooltip drag-tooltip" style={{ left: x + 12, top: y + 14 }} role="tooltip">
+    <div
+      className="clip-tooltip drag-tooltip"
+      style={{ left: x + 12, top: y + 14 }}
+      role="tooltip"
+    >
       <strong>{title}</strong>
       <span>
-        {shift !== null ? t.timeline.sourceIn(shift < 0 ? "-" : "+", formatDuration(Math.abs(shift))) : formatTimecode(time, fps)}
-        {part === "body" && row.id !== preview.from.id ? t.timeline.onTrack(row.label) : ""}
+        {shift !== null
+          ? t.timeline.sourceIn(
+              shift < 0 ? "-" : "+",
+              formatDuration(Math.abs(shift)),
+            )
+          : formatTimecode(time, fps)}
+        {part === "body" && row.id !== preview.from.id
+          ? t.timeline.onTrack(row.label)
+          : ""}
       </span>
-      <span className={preview.blocked ? "clip-tooltip-danger" : "clip-tooltip-faint"}>
+      <span
+        className={
+          preview.blocked ? "clip-tooltip-danger" : "clip-tooltip-faint"
+        }
+      >
         {preview.blocked
           ? t.timeline.overlapRefused
           : preview.snapped
@@ -1881,7 +2911,9 @@ function snappedText(point: SnapPoint): string {
   if (point.kind === "marker") return t.timeline.snappedMarker(point.label);
   if (point.kind === "beat") return t.timeline.snappedBeat;
   if (point.kind === "bar") return t.timeline.snappedBar;
-  return point.kind === "playhead" ? t.timeline.snappedPlayhead : t.timeline.snappedEdge;
+  return point.kind === "playhead"
+    ? t.timeline.snappedPlayhead
+    : t.timeline.snappedEdge;
 }
 
 /** The canvas is opaque to assistive tech: the same markers, clips and subtitle cues as a list, selection included, for screen readers and tests. */
@@ -1902,8 +2934,17 @@ function ClipList({
   return (
     <ul className="sr-only" aria-label={t.timeline.clipListLabel}>
       {layout.grid && (
-        <li data-grid={layout.grid.low ? "low" : "on"} data-beats={layout.grid.beats.length} data-bars={layout.grid.bars.length} data-bpm={layout.grid.bpm}>
-          {t.timeline.gridItem(layout.grid.bpm, layout.grid.meter, layout.grid.low)}
+        <li
+          data-grid={layout.grid.low ? "low" : "on"}
+          data-beats={layout.grid.beats.length}
+          data-bars={layout.grid.bars.length}
+          data-bpm={layout.grid.bpm}
+        >
+          {t.timeline.gridItem(
+            layout.grid.bpm,
+            layout.grid.meter,
+            layout.grid.low,
+          )}
         </li>
       )}
       {layout.markers.map((marker) => (
@@ -1914,8 +2955,21 @@ function ClipList({
       {layout.scenes.map((box) => {
         const chosen = scene?.script === box.script && scene.slug === box.slug;
         return (
-          <li key={`${box.script}#${box.slug}`} data-scene={`${box.script}#${box.slug}`} data-filled={box.clips.length > 0} data-source={box.source} data-selected={chosen || undefined}>
-            {t.timeline.sceneItem(box.title, formatTimecode(box.start, fps), formatTimecode(box.end, fps), box.clips.length, chosen, box.source === "planned")}
+          <li
+            key={`${box.script}#${box.slug}`}
+            data-scene={`${box.script}#${box.slug}`}
+            data-filled={box.clips.length > 0}
+            data-source={box.source}
+            data-selected={chosen || undefined}
+          >
+            {t.timeline.sceneItem(
+              box.title,
+              formatTimecode(box.start, fps),
+              formatTimecode(box.end, fps),
+              box.clips.length,
+              chosen,
+              box.source === "planned",
+            )}
           </li>
         );
       })}
@@ -1927,10 +2981,16 @@ function ClipList({
               </li>
             ))
           : row.clips.map((clip) => (
-              <li key={clip.id} data-clip={clip.id} data-selected={selected.has(clip.id) || undefined}>
+              <li
+                key={clip.id}
+                data-clip={clip.id}
+                data-selected={selected.has(clip.id) || undefined}
+              >
                 {`${row.label}: ${clip.name}, ${formatTimecode(clip.start, fps)} to ${formatTimecode(clip.end, fps)}`}
                 {clip.problem ? `, ${clip.problem}` : ""}
-                {clipBadges(clip).map((badge) => `, ${badge}`).join("")}
+                {clipBadges(clip)
+                  .map((badge) => `, ${badge}`)
+                  .join("")}
                 {selected.has(clip.id) ? `, ${t.timeline.selected}` : ""}
               </li>
             )),

@@ -157,7 +157,7 @@ const APP_VERSION = app.getVersion();
 const socketPath = resolveSocketPath(process.env);
 // Spawning the daemon reuses process.execPath (Electron): run it as plain Node. Spawned from a utility process so it
 // never holds this process's stdio handles.
-// ADR 0048: the OpenAI key typed in Plugins, encrypted by the OS; e2e has no keyring and uses a stand-in.
+// ADR 0050: the OpenAI key typed in Plugins, encrypted by the OS; e2e has no keyring and uses a stand-in.
 const openAiKey = new OpenAiKeyStore(
   join(resolveAppDirs(process.env).configDir, "openai-key.bin"),
   () => (process.env.FRAMESHELL_KEYCHAIN_STAND_IN === "1" ? STAND_IN_CIPHER : safeStorage),

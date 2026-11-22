@@ -18,7 +18,7 @@ Install pins the exact version in the project's `frameshell.json` and links the 
 
 ## The key
 
-In the app, the easiest way is the **Plugins** view: paste the key in the field under the plugin and Save. The app encrypts it with your system's keychain (Windows DPAPI, the macOS Keychain, the Linux Secret Service), keeps it only in its settings folder, and hands it to the Frameshell daemon in memory while the app is open (ADR 0048). The CLI in the app's terminals uses it too. A key in the environment variable below wins over a saved one.
+In the app, the easiest way is the **Plugins** view: paste the key in the field under the plugin and Save. The app encrypts it with your system's keychain (Windows DPAPI, the macOS Keychain, the Linux Secret Service), keeps it only in its settings folder, and hands it to the Frameshell daemon in memory while the app is open (ADR 0050). The CLI in the app's terminals uses it too. A key in the environment variable below wins over a saved one.
 
 The plugin reads the key from the **`OPENAI_API_KEY` environment variable** of the daemon at every call. It is never written to a project file, the history, a progress message or an error, and error texts from OpenAI are scrubbed of anything that looks like a key before they are shown.
 

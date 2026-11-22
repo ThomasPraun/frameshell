@@ -27,6 +27,10 @@ const en = {
   use: "Show in Explorer",
   useHint: "Selects the file in the Explorer and closes the dialog",
   seekHint: "Click to play from here",
+  /** Music candidates (#803): the timeline plays with only this candidate heard. */
+  playInMix: "Play in the mix",
+  stopInMix: "Stop the mix",
+  inMixHint: "Plays the timeline from the music with only this candidate heard, at the level they were set to",
   skipped: (name: string, reason: string) => `${name} was left out: ${reason}`,
   close: "Close",
 };
@@ -56,6 +60,9 @@ const es: typeof en = {
   use: "Mostrar en el Explorador",
   useHint: "Selecciona el archivo en el Explorador y cierra el diálogo",
   seekHint: "Haz clic para reproducir desde aquí",
+  playInMix: "Escuchar en la mezcla",
+  stopInMix: "Detener la mezcla",
+  inMixHint: "Reproduce la línea de tiempo desde la música con solo esta candidata, al nivel en que quedaron",
   skipped: (name, reason) => `${name} quedó fuera: ${reason}`,
   close: "Cerrar",
 };

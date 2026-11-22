@@ -1,11 +1,11 @@
-/** Secrets the app may hand the daemon (ADR 0048): the environment variable each stands for. */
+/** Secrets the app may hand the daemon (ADR 0050): the environment variable each stands for. */
 export type CredentialName = "OPENAI_API_KEY";
 
 /** Where the daemon takes a secret from now. */
 export type CredentialSource = "environment" | "app" | "none";
 
 /**
- * Secrets handed over with `credentials.provide` (ADR 0048), kept only in `env` (the daemon's own environment, which
+ * Secrets handed over with `credentials.provide` (ADR 0050), kept only in `env` (the daemon's own environment, which
  * the plugins read at each call) while the connection that gave them is open. A variable already set when the
  * daemon started wins: it is never overwritten or removed. Never logs, journals or returns a value.
  */

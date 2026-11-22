@@ -5,7 +5,7 @@ import { ProvidedCredentials } from "../src/credentials.js";
 import { type Daemon, startDaemon } from "../src/index.js";
 import { tempDir, uniqueSocketPath } from "./helpers.js";
 
-// Seam under test: the daemon over its socket (ADR 0048). The app hands it the OpenAI key with `credentials.provide`;
+// Seam under test: the daemon over its socket (ADR 0050). The app hands it the OpenAI key with `credentials.provide`;
 // the daemon keeps it in its environment while that connection is open, and its own environment wins.
 
 let daemon: Daemon | undefined;

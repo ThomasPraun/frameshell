@@ -44,6 +44,11 @@ const WINDOWS_POLL_MS = 2000;
  * (Claude Code, Codex, ...) show as `node` until they set their process title.
  */
 const TITLE_SETTLE_MS = 5000;
+/**
+ * How long a killed shell has to exit after the hang-up before it gets SIGKILL (not Windows). Bash can catch the
+ * hang-up while readline is finishing a line and go back to its prompt, so the tab would never close.
+ */
+const KILL_GRACE_MS = 2000;
 /** Longest {@link TerminalManager.killAll} waits for shells to exit: quitting must not hang on one. */
 const EXIT_WAIT_MS = 5000;
 
@@ -327,6 +332,17 @@ export class TerminalManager {
     } catch {
       // Already gone.
       return Promise.resolve();
+    }
+    if (process.platform !== "win32") {
+      const pty = entry.pty;
+      const force = setTimeout(() => {
+        try {
+          if (processExists(pty.pid)) pty.kill("SIGKILL");
+        } catch {
+          // Gone meanwhile.
+        }
+      }, KILL_GRACE_MS);
+      void entry.exited.then(() => clearTimeout(force));
     }
     return entry.exited;
   }

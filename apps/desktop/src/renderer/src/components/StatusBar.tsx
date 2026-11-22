@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectSetup, ProjectView } from "../../../shared/api.js";
 import { useAgentTargets } from "../ask/agent-targets.js";
+import { FirstRun } from "./FirstRun.js";
 import { pendingTargets } from "../ask/chat-targets.js";
 import { t } from "../i18n.js";
 import { useAgentNotice } from "../ui-link.js";
@@ -15,7 +16,8 @@ const AGENT_NOTICE_MS = 6_000;
  * the background `setup` of a new project, briefly what the agent
  * just did to the view (MCP navigation), references sent to agents outside
  * the app: waiting, then read, and how many each has not read, and the
- * connected agents while the terminal panel is closed (ADR 0025).
+ * connected agents while the terminal panel is closed (ADR 0025), and the
+ * first-run checklist until it is done or closed (#787).
  */
 export function StatusBar({
   project,
@@ -70,6 +72,7 @@ export function StatusBar({
         frameshelld {project.daemon.version}, pid {project.daemon.pid}
       </span>
       {activeFile && <span className="status-item">{activeFile}</span>}
+      <FirstRun project={project} />
       <span className="status-spacer" />
       {setup && (
         <span
