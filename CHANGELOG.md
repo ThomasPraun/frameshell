@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review` writes a card first, as `analyze` does (#801, protocol 190): `card.md` in the run folder holds the
+  `requirements.json` verdict, the craft warnings to fix first and the key numbers, each labelled MEASURED, ESTIMATED or
+  DECISION, in about 300 tokens, then `review.json` and `metrics.json` with their size. `frameshell review` prints the
+  card; `--full` prints every sheet path and number as before. The result carries `card` and `layers`.
+
 - A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
   ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
   person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal

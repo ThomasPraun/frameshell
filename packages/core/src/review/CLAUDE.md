@@ -1,6 +1,6 @@
 # Review (`review`: sheets, metrics, requirements; #457)
 
-Files: `plan.ts` pure, `sheet.ts`, `source.ts`, `service.ts`, `metrics.ts`, `requirements.ts`, `sound.ts`, `speed.ts`, `chart.ts`, `behind.ts` (pure), `safe.ts` pure, `placement.ts`, `sync.ts`, `loop.ts`, `delivery.ts` pure, `onsets.ts` (file decodes), `thresholds.ts`. Wire `packages/protocol/src/review.ts`; CLI `packages/cli/src/review-commands.ts`; MCP `reviewed` in `packages/mcp/src/server.ts` (returns images); skill `skills/frameshell/reference/critique.md`.
+Files: `card.ts` pure (`card.md`, #801: verdict + warnings + labelled numbers, layers via analyze `layer`), `plan.ts` pure, `sheet.ts`, `source.ts`, `service.ts`, `metrics.ts`, `requirements.ts`, `sound.ts`, `speed.ts`, `chart.ts`, `behind.ts` (pure), `safe.ts` pure, `placement.ts`, `sync.ts`, `loop.ts`, `delivery.ts` pure, `onsets.ts` (file decodes), `thresholds.ts`. Wire `packages/protocol/src/review.ts`; CLI `packages/cli/src/review-commands.ts`; MCP `reviewed` in `packages/mcp/src/server.ts` (returns images); skill `skills/frameshell/reference/critique.md`.
 
 ## Sheets
 
