@@ -4,9 +4,12 @@ import { styleValue } from "./style-commands.js";
 import { UsageError } from "./timeline-commands.js";
 
 /** Help text of `review`, in `frameshell --help`. */
-export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,beats,cuts,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop] [--crop-at x,y[,size] [--clip id]] [--pop t] [--onion clip] [--speed clip]
+export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,b] [--sheets contact,safe,phone,motion,seam,beats,cuts,metrics] [--platform p] [--every s] [--format id] [--preset p] [--loop] [--crop-at x,y[,size] [--clip id]] [--pop t] [--onion clip] [--speed clip] [--full]
                                Look at the film before showing it: write contact sheets and strips into
-                               .frameshell/review/<n>/ (last 10 kept; project files untouched) and print their paths.
+                               .frameshell/review/<n>/ (last 10 kept; project files untouched). Prints the card
+                               (card.md: the verdict, the craft warnings to fix first and the key numbers, each labelled
+                               MEASURED, ESTIMATED or DECISION, about 300 tokens; then review.json and metrics.json with
+                               their size and the images); --full prints every sheet path and number.
                                contact = frames at clip starts and ends, cuts, markers, subtitle cues and the deepest
                                zoom plus one every --every s (default 0.5), labelled with their time; phone = one frame
                                per second at 360 px wide; motion = the two fastest moments as 12 consecutive frames;
@@ -63,7 +66,7 @@ export const REVIEW_USAGE = `  review [--timeline id] [--file video] [--range a,
 
 /** Flags `review` takes besides the global ones. */
 export const REVIEW_FLAGS: Record<string, readonly string[]> = {
-  review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop", "crop-at", "clip", "pop", "onion", "speed"],
+  review: ["timeline", "file", "range", "sheets", "platform", "every", "format", "preset", "loop", "crop-at", "clip", "pop", "onion", "speed", "full"],
   "review require": ["clip"],
   "review waive": ["clip", "remove"],
 };
@@ -86,6 +89,8 @@ export interface ReviewInvocation {
   pop?: number | string;
   onion?: string;
   speed?: string;
+  /** Print every sheet path and number instead of the card (CLI only; the daemon writes every layer either way). */
+  full?: true;
 }
 
 /** A parsed `review require` or `review waive`. */
@@ -110,6 +115,7 @@ export interface ReviewOptions {
   pop?: string | undefined;
   onion?: string | undefined;
   speed?: string | undefined;
+  full?: boolean | undefined;
 }
 
 /** `--crop-at x,y[,size]` (with `--clip`): fractions 0 to 1, size above 0; throws `UsageError` for any other. */
@@ -204,6 +210,7 @@ export function parseReview(rest: string[], options: ReviewOptions): ReviewInvoc
     ...(pop !== undefined ? { pop } : {}),
     ...(options.onion ? { onion: options.onion.trim() } : {}),
     ...(options.speed ? { speed: options.speed.trim() } : {}),
+    ...(options.full ? { full: true as const } : {}),
   };
 }
 
@@ -232,11 +239,13 @@ function requirementsChanged(what: string, result: RequirementsChange): string {
 
 /** Run a parsed `review`; human output unless `json`. */
 export async function executeReview(conn: DaemonConnection, inv: ReviewInvocation, cwd: string, json: boolean, outcome: { code: number }): Promise<string> {
-  const { kind: _kind, ...params } = inv;
+  const { kind: _kind, full, ...params } = inv;
   const result = await conn.request("review", { cwd, ...params });
   // What `requirements.json` states and the film misses fails the command; warnings alone never do.
   if (result.metrics?.requirements && result.metrics.requirements.failed > 0) outcome.code = 1;
-  return json ? `${JSON.stringify(result, null, 2)}\n` : formatReview(result);
+  if (json) return `${JSON.stringify(result, null, 2)}\n`;
+  // The card first (#801), as `analyze` prints it: every path and number only when asked.
+  return full ? formatReview(result) : `${result.card}\nFolder: ${result.dir} (--full prints every sheet path and number)\n`;
 }
 
 function formatReview(result: ReviewResult): string {

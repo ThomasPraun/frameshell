@@ -196,7 +196,7 @@ describe("review method", () => {
       const only = await conn.request("review", { cwd: project, sheets: ["metrics"], from: 0, to: 1 });
       expect(only.sheets).toEqual([]);
       expect(only.metrics).not.toBeNull();
-      expect(readdirSync(only.dir).sort()).toEqual(["metrics.json", "review.json"]);
+      expect(readdirSync(only.dir).sort()).toEqual(["card.md", "metrics.json", "review.json"]);
       const none = await conn.request("review", { cwd: project, sheets: ["seam"], from: 0, to: 1 });
       expect(none.metrics).toBeNull();
       expect(existsSync(join(none.dir, "metrics.json"))).toBe(false);

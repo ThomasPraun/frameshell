@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review` writes a card first, as `analyze` does (#801, protocol 190): `card.md` in the run folder holds the
+  `requirements.json` verdict, the craft warnings to fix first and the key numbers, each labelled MEASURED, ESTIMATED or
+  DECISION, in about 300 tokens, then `review.json` and `metrics.json` with their size. `frameshell review` prints the
+  card; `--full` prints every sheet path and number as before. The result carries `card` and `layers`.
+
 - `frameshell clip text-fit <clip> [--props json] [--at s,...]` and daemon method `clip.textFit` (MCP
   `clip_text_fit`, protocol 188): checks in headless Chrome that every line of text of a generated clip fits its box
   and the frame, at settled times, with props tried over the clip's own for the check only (another language). Exit 1
