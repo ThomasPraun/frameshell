@@ -216,7 +216,7 @@ describe("template pip-card", () => {
 });
 
 describe("templates that put their steps on beats (onBeats)", () => {
-  const stepped = ["checklist", "notification-stack", "work-cards"];
+  const stepped = ["checklist", "fx-confetti", "fx-glow", "fx-rays", "fx-shockwave", "fx-sparks", "notification-stack", "work-cards"];
 
   it("are the ones that declare onBeats, off by default, with one shared copy of the step schedule", async () => {
     expect(TEMPLATES.filter((t) => placeholderVariables(t).some((v) => v.id === "onBeats")).map((t) => t.id).sort()).toEqual(stepped);

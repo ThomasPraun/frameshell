@@ -13,13 +13,16 @@ Look at what the person gave you before you run anything. Each kind needs a diff
 ## 1. Measure it
 
 ```sh
-frameshell analyze references/reel.mp4 --json
+frameshell analyze references/reel.mp4
 ```
+
+It prints the **card** (`card.md`, about 300 tokens): every headline number with its label, then the layers with their size. Read the card, then open only what the question needs: `shots.md` (one line per shot), `analysis.json` (every value), the sheets. `--full` prints every value instead; `--json` the whole result (`card` and `layers` included).
 
 MCP: `analyze { file: "references/reel.mp4" }` returns the sheets as images and the numbers as JSON. The video can be anywhere on disk (a download folder is fine); it is only read. A 1-minute 1080p video takes about 35 seconds (a background `analyze` job; MCP `job_list`). It writes `.frameshell/analysis/<name>/` (`<name>`: the file name in lower case; `--name` picks another; a new run with the same name replaces the folder; it is regenerable and never touches project files):
 
 - `contact*.png`: a frame every 0.5 s (2 per second), 30 to a sheet, with the first frame of each shot marked `cut` (`4.00 cut`). Look at these first: they show the pacing, the layouts and where text sits.
 - `shots*.png` and `frames/shot-<n>.jpg`: the middle frame of every shot, labelled `#<shot> <start>`. One JPEG per shot (640 px) to open when a shot matters.
+- `card.md`: the card above; `shots.md`: one line per shot (times, three colours, brightness and warmth, ink).
 - `analysis.json`: everything below, plus the beat lists (`tempo.beats`, `tempo.downbeats`).
 
 ## 2. Read the numbers
