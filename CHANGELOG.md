@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audition dialog, opened on music candidates (a `Music n` track's menu): **Play in the mix** plays the timeline from
   the playhead, or from where the music starts, with only that candidate heard under the picture and the voice. The
   other candidates are silenced in the preview only; the timeline's mutes are not changed (#803).
+- A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
+  ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
+  person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
+  waits, and a status line entry. Read-only: proposals are still accepted in the app (#798).
 - A generated clip's inspector opens with its own section: plugin type, live render state, the whole reason of a
   failed render (or where to trust the project's plugins), its composition with Open, and a Motion blur switch with
   the blurred render's state. The clip's context menu has "Open composition" (#746).
@@ -87,8 +91,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table, as macOS and Linux do from the foreground process, so Chat about this types at it without Connect Claude Code
   (ADR 0048, #743).
 
+- The agent skill has rules for talking to the person: say what was measured, never "I listened" or "I watched"; ask
+  whether a note is a wish or a complaint before changing anything; ask the goal, references, format and length before
+  any new kind of film; show the storyboard before any paid run. `project-model.md` adds how to make a style your own:
+  three lists (safe to change, changes its character, cannot change), at most five changes a round, one frame first,
+  before next to after (#803).
+
+- `frameshell history sound <tx|op>` (MCP `history_sound`) proves a sound edit touched only what it meant to: per
+  track, the time ranges where the level moved 1 dB or more between right before and right after the transaction,
+  whether sound came in, went or changed level, and by how many dB. Measured like the sound review, from each clip's
+  envelope with its gain and fades, never mixed (#803).
+
+- Five particle and light overlays for HyperFrames clips, `fx-sparks`, `fx-confetti`, `fx-glow`, `fx-shockwave` and
+  `fx-rays` (`frameshell hyperframes new <name> --template fx-sparks`): seeded, drawn as a pure function of time on a
+  transparent canvas, coloured by the style's accent and ink, with hits at set times or on the music's beats
+  (`onBeats`), so a sound placed on the same beat lands on the same frame (#802).
+
+- `frameshell analyze` prints a short card first (`card.md`, about 300 tokens): every headline number with its
+  MEASURED, ESTIMATED or DECISION label, then the layers to open next with their size (`shots.md`, one line per shot;
+  `analysis.json`, every value). `--full` prints every value as before; the result gains `card` and `layers` (#801).
+
 ### Fixed
 
+- The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
+  cloud container), as the producer's renders already do; before, they failed there before drawing anything.
+- Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using
+  it, such as a frame capture or a clip check, as it already did for jobs and transcriptions. Before, the file could
+  disappear under a running ffmpeg or Chrome (#790).
+- The Plugins view, `frameshell plugin catalog` and the MCP catalog size the speech model the project transcribes
+  with (its model, else this machine's default) instead of always whisper-cpp's default; a model added with
+  `model add` counts as already on disk (#789).
 - Desktop, Spanish and every language: History names entries by their title, never their id. A revert reads
   "Revertir «Mover clip»", the timeline's change legend names the entry and gives way to the counts, and a terminal
   session's id moves to the author's tooltip. The app's own journal labels ("Move clip", "Apply look", "Delete 2 clips")
