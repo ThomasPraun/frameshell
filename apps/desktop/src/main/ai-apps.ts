@@ -19,7 +19,7 @@ import {
   geminiState,
 } from "@frameshell/cli";
 import { AI_APP_IDS, type AiAppChange, type AiAppId, type AiAppProblem, type AiAppStatus, type AiApps } from "../shared/api.js";
-import { SERVER_KEY, claudeDesktopConfigPath, claudeDesktopState, connectClaudeDesktop, disconnectClaudeDesktop, serverEntry } from "./claude-desktop.js";
+import { SERVER_KEY, claudeDesktopConfig, claudeDesktopState, connectClaudeDesktop, disconnectClaudeDesktop, serverEntry } from "./claude-desktop.js";
 
 /** Where the AI apps keep their settings, and the `frameshell` command they are told to run. */
 export interface AiAppsPlace {
@@ -50,12 +50,13 @@ interface Connector {
 function connectorOf(id: AiAppId, { home, env, setup }: AiAppsPlace): Connector | null {
   switch (id) {
     case "claude-desktop": {
-      const file = claudeDesktopConfigPath(setup.platform, home, env);
-      if (!file) return null;
+      const config = claudeDesktopConfig(setup.platform, home, env);
+      if (!config) return null;
+      const { file, installDir } = config;
       const entry = serverEntry(setup.command, setup.platform);
       return {
         files: [file],
-        state: () => claudeDesktopState(file, entry),
+        state: () => claudeDesktopState(file, entry, installDir),
         connect: async () => [await connectClaudeDesktop(file, entry)],
         disconnect: async () => [await disconnectClaudeDesktop(file)],
       };

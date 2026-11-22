@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   InvalidConfigError,
+  claudeDesktopConfig,
   claudeDesktopConfigPath,
   claudeDesktopState,
   connectClaudeDesktop,
@@ -27,9 +28,24 @@ describe("claudeDesktopConfigPath", () => {
     expect(claudeDesktopConfigPath("darwin", "/Users/ana", {})).toBe(
       "/Users/ana/Library/Application Support/Claude/claude_desktop_config.json",
     );
-    expect(claudeDesktopConfigPath("win32", "C:\\Users\\ana", { APPDATA: "D:\\Roaming" })).toBe("D:\\Roaming\\Claude\\claude_desktop_config.json");
-    expect(claudeDesktopConfigPath("win32", "C:\\Users\\ana", {})).toBe("C:\\Users\\ana\\AppData\\Roaming\\Claude\\claude_desktop_config.json");
+    const none = () => [];
+    expect(claudeDesktopConfigPath("win32", "C:\\Users\\ana", { APPDATA: "D:\\Roaming" }, none)).toBe("D:\\Roaming\\Claude\\claude_desktop_config.json");
+    expect(claudeDesktopConfigPath("win32", "C:\\Users\\ana", {}, none)).toBe("C:\\Users\\ana\\AppData\\Roaming\\Claude\\claude_desktop_config.json");
     expect(claudeDesktopConfigPath("linux", "/home/ana", {})).toBeUndefined();
+  });
+
+  it("uses the Microsoft Store package's private AppData on Windows, which the packaged app reads (#735)", () => {
+    const listed: string[] = [];
+    const list = (dir: string) => {
+      listed.push(dir);
+      return ["Microsoft.WindowsTerminal_8wekyb3d8bbwe", "Claude_pzs8sxrjxfjjc"];
+    };
+    expect(claudeDesktopConfig("win32", "C:\\Users\\ana", { APPDATA: "C:\\Users\\ana\\AppData\\Roaming" }, list)).toEqual({
+      file: "C:\\Users\\ana\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\claude_desktop_config.json",
+      installDir: "C:\\Users\\ana\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc",
+    });
+    expect(listed).toEqual(["C:\\Users\\ana\\AppData\\Local\\Packages"]);
+    expect(claudeDesktopConfig("win32", "C:\\Users\\ana", { LOCALAPPDATA: "E:\\Local" }, () => ["Claude_x"])?.installDir).toBe("E:\\Local\\Packages\\Claude_x");
   });
 });
 
@@ -110,5 +126,11 @@ describe("claudeDesktopState", () => {
       connected: false,
       different: false,
     });
+  });
+
+  it("reports Claude Desktop installed when its package folder exists, before it ever wrote a config", async () => {
+    const pkg = await mkdtemp(join(tmpdir(), "fs-claude-pkg-"));
+    const file = join(pkg, "LocalCache", "Roaming", "Claude", "claude_desktop_config.json");
+    expect(await claudeDesktopState(file, entry, pkg)).toEqual({ installed: true, connected: false, different: false });
   });
 });

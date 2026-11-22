@@ -110,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Connect your AI: Claude Desktop installed from the Microsoft Store on Windows no longer shows as not installed. Frameshell finds its `Claude_*` package and writes the config where the packaged app reads it (`LocalCache\Roaming\Claude`) (#735).
 - Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
   instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
   agent there, as ADR 0048 says (#791).
