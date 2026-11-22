@@ -41,7 +41,7 @@ describe("frameshell plugin catalog", () => {
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
     for (const plugin of OFFICIAL_PLUGINS) expect(stdout).toContain(`${plugin.name}  not installed`);
     expect(stdout).toContain("needs: Nothing: it runs on this computer and uploads nothing.");
-    expect(stdout).toMatch(/needs: Your own OpenAI API key .* \[not found yet\]/);
+    expect(stdout).toMatch(/needs: Your own OpenAI API key, saved in the Plugins view .* \[not found yet\]/);
     expect(stdout).toContain("paid per use, data leaves this computer");
     expect(stdout).toMatch(/download: \d+ MB on first use \(whisper-cpp \d+ MB, ggml-large-v3-turbo-q5_0 574 MB\)/);
     expect(stdout).toContain("install: frameshell plugin install @frameshell/blender");

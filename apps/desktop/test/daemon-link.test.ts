@@ -55,6 +55,51 @@ describe("DaemonLink", () => {
     expect(status.daemon.uptimeMs).toBeLessThan(5_000);
   });
 
+  it("runs onConnected on every new connection before requests use it, a restarted daemon too (ADR 0050)", async () => {
+    const path = socketPath();
+    let env: Record<string, string | undefined> = {};
+    let daemon: Daemon = await startDaemon({ socketPath: path, env });
+    cleanups.push(() => daemon.close());
+    let connected = 0;
+    const daemonLink = new DaemonLink({
+      socketPath: path,
+      client: "desktop/test",
+      env: { ...process.env, FRAMESHELL_SOCKET: path },
+      onConnected: async (conn) => {
+        connected += 1;
+        await conn.request("credentials.provide", { name: "OPENAI_API_KEY", value: "sk-link-test" });
+      },
+    });
+    cleanups.push(() => daemonLink.close());
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "frameshell-link-")));
+    await daemonLink.request("status", { cwd });
+    expect(env.OPENAI_API_KEY).toBe("sk-link-test");
+
+    await daemon.close();
+    env = {};
+    daemon = await startDaemon({ socketPath: path, env });
+    await daemonLink.request("status", { cwd });
+    expect(connected).toBe(2);
+    expect(env.OPENAI_API_KEY).toBe("sk-link-test");
+  });
+
+  it("still connects when onConnected fails", async () => {
+    const path = socketPath();
+    const daemon = await startDaemon({ socketPath: path });
+    cleanups.push(() => daemon.close());
+    const daemonLink = new DaemonLink({
+      socketPath: path,
+      client: "desktop/test",
+      env: { ...process.env, FRAMESHELL_SOCKET: path },
+      onConnected: async () => {
+        throw new Error("no keychain");
+      },
+    });
+    cleanups.push(() => daemonLink.close());
+    const status = await daemonLink.request("status", { cwd: realpathSync(tmpdir()) });
+    expect(status.caller.client).toBe("desktop/test");
+  });
+
   it("waits for a cold daemon slower to listen than two CLI start timeouts (10 s each)", { timeout: 90_000 }, async () => {
     const path = socketPath();
     const daemonLink = new DaemonLink({

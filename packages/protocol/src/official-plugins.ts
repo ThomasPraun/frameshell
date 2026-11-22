@@ -47,7 +47,7 @@ export interface OfficialPlugin {
 
 /** Equals `KEY_VARIABLE` of both OpenAI plugins; `official-plugins.test.ts` checks it. */
 const OPENAI_VARIABLE = "OPENAI_API_KEY";
-const OPENAI_KEY = `Your own OpenAI API key in the ${OPENAI_VARIABLE} environment variable, paid per use to OpenAI`;
+const OPENAI_KEY = `Your own OpenAI API key, saved in the Plugins view of the app or set in the ${OPENAI_VARIABLE} environment variable, paid per use to OpenAI`;
 
 /**
  * The one list of official plugins. The daemon's install hints, the `plugin.catalog` method (CLI, MCP and app) and

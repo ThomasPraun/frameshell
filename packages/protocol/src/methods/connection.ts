@@ -62,6 +62,22 @@ export const connectionMethods = {
     }),
     result: z.object({}),
   },
+  "credentials.provide": {
+    description:
+      "Hand the daemon a secret the app keeps for the person (ADR 0050), or take it back with null. The daemon holds it " +
+      "in memory only, as its own environment variable, while the connection that gave it is open. A daemon started " +
+      "with the variable already in its environment ignores it: the environment wins.",
+    internal: true,
+    params: z.strictObject({
+      name: z.enum(["OPENAI_API_KEY"]).describe("Which secret: the environment variable it stands for."),
+      value: z.string().trim().min(1).max(1000).nullable().describe("The secret; null forgets the one this connection gave."),
+    }),
+    result: z.object({
+      source: z
+        .enum(["environment", "app", "none"])
+        .describe("Where the daemon now takes the secret from: its own environment, this app, or nowhere."),
+    }),
+  },
   status: {
     description:
       "Report daemon state and the Frameshell project enclosing a directory, searching upwards from it: its jobs, " +
