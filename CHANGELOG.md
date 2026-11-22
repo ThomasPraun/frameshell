@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audition dialog, opened on music candidates (a `Music n` track's menu): **Play in the mix** plays the timeline from
   the playhead, or from where the music starts, with only that candidate heard under the picture and the voice. The
   other candidates are silenced in the preview only; the timeline's mutes are not changed (#803).
+- A first-run checklist in the status bar of a video project (#787): "Getting started 1/4" opens the four steps from a
+  new project to an exported video (connect your AI, bring footage or record, ask for a cut and correct it, export),
+  each ticked from what the project shows, with Connect… and a "How" link to its page on frameshell.dev. It goes away
+  for good in that project once closed or once every step is done.
 - A Claude Code mod (`mods/frameshell`, installed with `/plugin install frameshell --marketplace
   ThomasPraun/frameshell`): a pane beside the chat with the project's jobs, the review proposal waiting for the
   person and a frame of the timeline (`/frameshell frame <seconds>`), a band above the prompt while a proposal
@@ -113,6 +117,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- HyperFrames `end-card` template: a frame painted after a seek from another time matches the same frame painted cold.
+  The slow push is folded into each line's own pose, since Chrome kept the call to action's raster at the scale of an
+  earlier frame when only its parent scaled (#808). The real HyperFrames tests whose projects had no
+  `frameshell.json` now write one, as every project has; the whole real suite passes in a container (756 tests).
+- Chat about this with no agent and the terminal folded puts the reference on the clipboard and opens Connect your AI,
+  instead of unfolding a shell someone who does not code cannot use. With the terminal on screen it says to start an
+  agent there, as ADR 0048 says (#791).
 - The real HyperFrames tests start their own headless Chrome without its sandbox when they run as root (a CI or
   cloud container), as the producer's renders already do; before, they failed there before drawing anything.
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using

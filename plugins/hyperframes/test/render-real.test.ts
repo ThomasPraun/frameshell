@@ -94,6 +94,7 @@ describe.runIf(process.env["FRAMESHELL_TEST_REAL_HYPERFRAMES"] === "1")("real Hy
         { id: "left", type: "color", label: "Left", default: "#ff0000" },
         { id: "right", type: "color", label: "Right", default: "#ff0000" },
       ];
+      writeFileSync(join(project, "frameshell.json"), JSON.stringify({ resolution: { width: 160, height: 90 } }));
       writeFileSync(
         join(dir, "index.html"),
         `<!doctype html>
