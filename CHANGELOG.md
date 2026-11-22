@@ -90,6 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   three lists (safe to change, changes its character, cannot change), at most five changes a round, one frame first,
   before next to after (#803).
 
+- `frameshell history sound <tx|op>` (MCP `history_sound`) proves a sound edit touched only what it meant to: per
+  track, the time ranges where the level moved 1 dB or more between right before and right after the transaction,
+  whether sound came in, went or changed level, and by how many dB. Measured like the sound review, from each clip's
+  envelope with its gain and fades, never mixed (#803).
+
 ### Fixed
 
 - Removing a download (`frameshell doctor --remove`, the app's Downloads) waits while a one-off request may be using

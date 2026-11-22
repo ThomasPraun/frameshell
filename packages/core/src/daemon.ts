@@ -184,6 +184,7 @@ import { AgentTargets } from "./targets/inbox.js";
 import { writeContext } from "./context.js";
 import { InspectService } from "./inspect/service.js";
 import { readNestedFile, resolveNested } from "./timeline/nested.js";
+import { compareSound } from "./review/sound-diff.js";
 import type { SpeechProvider } from "@frameshell/plugin-api";
 import { COMMAND_SPEECH_PROVIDER, commandNotConfigured, readCommandSpeechProvider } from "./voiceover/command.js";
 import { type VerifyServices, canceledBeforeStart as voiceoverCanceledBeforeStart, generateVoiceover } from "./voiceover/generate.js";
@@ -3374,6 +3375,27 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         // A config-only target (ADR 0036) changed no clips.
         return { timeline, target, clips: [] };
       }
+    },
+    "history.sound": async ({ cwd, timeline, target }) => {
+      const dir = await root(cwd);
+      let states: Awaited<ReturnType<typeof timelines.statesAround>>;
+      try {
+        states = await timelines.statesAround(dir, timeline, target);
+      } catch (error) {
+        if (!(error instanceof RpcError && error.code === ErrorCode.HistoryNotFound && (await configJournal.has(dir, target)))) throw error;
+        const holding = await timelinesHolding(dir, target);
+        if (holding.length > 0) throw historyElsewhere(target, timeline, holding);
+        // A config-only target (ADR 0036) changed no sound.
+        return { timeline, target, tracks: [], unchanged: [], unheard: [] };
+      }
+      const { before, after, fps } = states;
+      const sound = await compareSound({
+        before: await resolveNested(dir, before, undefined, fps),
+        after: await resolveNested(dir, after, undefined, fps),
+        fps,
+        profile: (asset) => energy.profile(dir, asset),
+      });
+      return { timeline, target, ...sound };
     },
     revert: async ({ cwd, timeline, target }, caller) => {
       const dir = await root(cwd);
