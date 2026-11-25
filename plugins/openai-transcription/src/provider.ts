@@ -10,13 +10,24 @@ export const PROVIDER_ID = "openai";
 export const KEY_VARIABLE = "OPENAI_API_KEY";
 /** Environment variable that points at another server speaking the same API (a proxy, a local stand-in). */
 export const BASE_URL_VARIABLE = "FRAMESHELL_OPENAI_TRANSCRIPTION_BASE_URL";
-/** The one model of this version: the only OpenAI transcription model with word timestamps (ADR 0046). */
-export const DEFAULT_MODEL = "whisper-1";
+/**
+ * The default model: OpenAI's replacement for `whisper-1`. It gives text without word times, so the host times it with
+ * whisper.cpp on this machine (ADR 0046 decision 11).
+ */
+export const DEFAULT_MODEL = "gpt-transcribe";
+/** The one model with word timestamps from the service; OpenAI retires it on {@link WORD_TIMED_MODEL_SHUTDOWN}. */
+export const WORD_TIMED_MODEL = "whisper-1";
+/** Day OpenAI stops serving {@link WORD_TIMED_MODEL}. */
+export const WORD_TIMED_MODEL_SHUTDOWN = "2027-02-26";
+/** Models that answer with text and no word times: listed `textOnly`, the host lays their text over its own timing. */
+export const TEXT_ONLY_MODELS: ReadonlySet<string> = new Set([DEFAULT_MODEL]);
 /** Real API address; the request goes to `<base>/v1/audio/transcriptions`. */
 export const DEFAULT_BASE_URL = "https://api.openai.com";
-/** The note every result carries (ADR 0046 decision 7). */
+/** The note every `whisper-1` result carries (ADR 0046 decision 7). */
 export const TIMING_NOTE =
   "Word times come from OpenAI as the service gives them, coarser than whisper.cpp's alignment: check cuts by ear or with `transcribe --verify`.";
+/** The note every `whisper-1` result carries until OpenAI retires it. */
+export const RETIREMENT_NOTE = `OpenAI retires ${WORD_TIMED_MODEL} on ${WORD_TIMED_MODEL_SHUTDOWN}: the default model, ${DEFAULT_MODEL}, replaces it (times from whisper.cpp on this machine).`;
 /**
  * Longest piece sent in one request. OpenAI takes at most 25 MB; 10 minutes of the host's 16 kHz mono 16-bit WAV is
  * 19.2 MB.
@@ -24,7 +35,7 @@ export const TIMING_NOTE =
 const PIECE_SECONDS = 600;
 /** How far before a piece's limit its cut may move to find a pause. */
 const SEARCH_SECONDS = 20;
-/** Characters of the text before a piece sent as its `prompt`: whisper-1 reads at most 224 tokens of it. */
+/** Characters of the text before a piece sent as its `prompt`: whisper-1 reads at most 224 tokens of it; kept for both models. */
 const PROMPT_CHARACTERS = 200;
 /** Most of an upstream error body kept in a message. */
 const BODY_LIMIT = 300;
@@ -56,8 +67,9 @@ export interface ServiceWord {
 }
 
 /**
- * The `openai` transcription provider (ADR 0046): the host's WAV to timed words through OpenAI's `whisper-1`, paid
- * with the person's own key. `remote` and `estimate` make the host ask the person before any audio is sent. The key
+ * The `openai` transcription provider (ADR 0046): the host's WAV to text through OpenAI's `gpt-transcribe` (the host
+ * times it, decision 11), or to timed words through `whisper-1` until OpenAI retires it, paid with the person's own
+ * key. `remote` and `estimate` make the host ask the person before any audio is sent. The key
  * comes from `OPENAI_API_KEY` at each call and goes only into the `Authorization` header; every text that leaves
  * this provider (errors, progress) is scrubbed of it.
  */
@@ -72,7 +84,7 @@ export function createOpenAiTranscriptionProvider(options: OpenAiTranscriptionOp
   return {
     id: PROVIDER_ID,
     remote: true,
-    models: Object.keys(MODEL_PRICES).map((id) => ({ id })),
+    models: Object.keys(MODEL_PRICES).map((id) => (TEXT_ONLY_MODELS.has(id) ? { id, textOnly: true } : { id })),
     defaultModel: DEFAULT_MODEL,
     estimate({ seconds }, { model = DEFAULT_MODEL }): TranscriptionEstimate {
       const minutes = seconds / 60;
@@ -80,6 +92,13 @@ export function createOpenAiTranscriptionProvider(options: OpenAiTranscriptionOp
     },
     async transcribe(audio, { language, model = DEFAULT_MODEL, prompt }, context): Promise<TranscriptionResult> {
       priceOf(model);
+      const textOnly = TEXT_ONLY_MODELS.has(model);
+      if (textOnly && context.timesText !== true) {
+        throw new Error(
+          `${model} gives text without word times, and this Frameshell cannot time it on this machine: update Frameshell, ` +
+            `or pass \`--model ${WORD_TIMED_MODEL}\` until ${WORD_TIMED_MODEL_SHUTDOWN}`,
+        );
+      }
       const key = env()[KEY_VARIABLE]?.trim();
       if (!key) throw new Error(`${KEY_VARIABLE} is not set`);
       const url = endpoint();
@@ -88,6 +107,7 @@ export function createOpenAiTranscriptionProvider(options: OpenAiTranscriptionOp
       const ranges = pieceRanges(pcm, options.pieceSeconds ?? PIECE_SECONDS, SEARCH_SECONDS);
       const asked = language?.split(/[-_]/)[0]?.toLowerCase() || undefined;
       const words: TranscriptWord[] = [];
+      const texts: string[] = [];
       let heardLanguage: string | undefined;
       let before = prompt ?? "";
       for (const [index, range] of ranges.entries()) {
@@ -100,12 +120,25 @@ export function createOpenAiTranscriptionProvider(options: OpenAiTranscriptionOp
         const form = new FormData();
         form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "audio.wav");
         form.append("model", model);
-        form.append("response_format", "verbose_json");
-        form.append("timestamp_granularities[]", "word");
-        if (asked) form.append("language", asked);
+        if (textOnly) {
+          // gpt-transcribe: `languages[]` replaces `language` (sending both is refused); plain `json` answer.
+          form.append("response_format", "json");
+          if (asked) form.append("languages[]", asked);
+        } else {
+          form.append("response_format", "verbose_json");
+          form.append("timestamp_granularities[]", "word");
+          if (asked) form.append("language", asked);
+        }
         const lead = before.trim().slice(-PROMPT_CHARACTERS);
         if (lead) form.append("prompt", lead);
         const response = await request(http(), url, form, key, model, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+        if (textOnly) {
+          const answer = await readTextAnswer(response, key);
+          texts.push(answer.text.trim());
+          heardLanguage ??= answer.language;
+          before = answer.text;
+          continue;
+        }
         const answer = await readAnswer(response, key);
         const offset = range.from / pcm.sampleRate;
         words.push(...timedWords(answer.words, answer.text, offset));
@@ -114,7 +147,9 @@ export function createOpenAiTranscriptionProvider(options: OpenAiTranscriptionOp
       }
       context.progress({ message: "OpenAI answered", fraction: 1, stage: "transcribe" });
       const reported = asked ?? heardLanguage;
-      return { model, words, notes: [TIMING_NOTE], ...(reported ? { language: reported } : {}) };
+      const heard = reported ? { language: reported } : {};
+      if (textOnly) return { model, words: [], text: texts.filter(Boolean).join(" "), ...heard };
+      return { model, words, notes: [TIMING_NOTE, RETIREMENT_NOTE], ...heard };
     },
   };
 }
@@ -124,11 +159,26 @@ function priceOf(model: string) {
   const price = MODEL_PRICES[model];
   if (!price) {
     throw new Error(
-      `the OpenAI provider transcribes only with ${Object.keys(MODEL_PRICES).join(", ")} (word timestamps, a known price), not "${model}": ` +
+      `the OpenAI provider transcribes only with ${Object.keys(MODEL_PRICES).join(" or ")} (a known price, words it can time), not "${model}": ` +
         `pass \`--model ${DEFAULT_MODEL}\``,
     );
   }
   return price;
+}
+
+/** The text and first detected language of a `gpt-transcribe` `json` answer; throws a scrubbed error without text. */
+async function readTextAnswer(response: Response, key: string): Promise<{ text: string; language: string | undefined }> {
+  const body = await response.text();
+  let parsed: { text?: unknown; languages?: unknown };
+  try {
+    parsed = JSON.parse(body) as typeof parsed;
+  } catch {
+    throw new Error(`OpenAI answered with something that is not JSON: ${scrub(body.trim(), key)}`);
+  }
+  if (typeof parsed.text !== "string") throw new Error("OpenAI answered without the text");
+  const first = Array.isArray(parsed.languages) ? (parsed.languages[0] as { code?: unknown } | undefined)?.code : undefined;
+  const language = typeof first === "string" && first.trim() ? first.trim().toLowerCase().split(/[-_]/)[0] : undefined;
+  return { text: parsed.text, language: languageCode(language) ?? language };
 }
 
 /** The part of a `verbose_json` answer this provider reads; throws a scrubbed error when it lacks word timestamps. */
@@ -213,8 +263,12 @@ async function failure(response: Response, key: string, model: string): Promise<
   const detail = scrub(upstream.message, key);
   const suffix = detail ? `: ${detail}` : "";
   if ((status === 404 || status === 400) && (upstream.code === "model_not_found" || (status === 404 && RETIRED_MODEL.test(upstream.message)))) {
+    const wayOut =
+      model === DEFAULT_MODEL
+        ? "Update @frameshell/openai-transcription or use `--provider whisper-cpp`"
+        : `Use \`--model ${DEFAULT_MODEL}\` (the default), update @frameshell/openai-transcription, or use \`--provider whisper-cpp\``;
     return new Error(
-      `OpenAI no longer serves the model "${scrub(model, key)}" (retired, removed, or not available to this key, HTTP ${status}); this provider only uses ${DEFAULT_MODEL}. Update @frameshell/openai-transcription or use \`--provider whisper-cpp\`${suffix}`,
+      `OpenAI no longer serves the model "${scrub(model, key)}" (retired, removed, or not available to this key, HTTP ${status}). ${wayOut}${suffix}`,
     );
   }
   if (status === 404) return new Error(`OpenAI answered not found (HTTP 404): check ${BASE_URL_VARIABLE}${suffix}`);

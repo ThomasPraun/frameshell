@@ -200,6 +200,7 @@ export { type MachineFacts, machineProfile, readMachineFacts } from "./encoders/
 export { ENCODER_PREFERENCE, type EncodeTarget, tierFps, tierVideoArgs, videoToolboxKbps } from "./encoders/tiers.js";
 export { type PluginSpec, parsePluginSpec } from "./plugins/spec.js";
 export {
+  type LocalTiming,
   type TranscribeAssetOptions,
   type TranscriberMedia,
   type TranscriberTools,
@@ -211,6 +212,7 @@ export {
 export { type TranscriptionRun, confirmTranscription, isLocalFreeTranscription, requireLocalTranscription } from "./transcripts/consent.js";
 export { MODEL_REGISTRY_FILE, ModelRegistry, detectModelFormat } from "./transcripts/model-registry.js";
 export { type TimedWord, type WordHearing, alignWords } from "./transcripts/align.js";
+export { type TimedText, type TimedTextWord, alignTokens, textWords, timeText } from "./transcripts/text-timing.js";
 export { type VerifyExportOptions, verifyExport } from "./transcripts/verify.js";
 export { type DiarizeAssetOptions, type DiarizeRequest, type Diarizer, diarizeAsset, parseDiarization, sherpaDiarizer } from "./transcripts/speakers.js";
 export {

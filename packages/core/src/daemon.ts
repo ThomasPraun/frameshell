@@ -1994,6 +1994,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         progress: announcer.progress,
         yes,
         confirmation,
+        // A text-only cloud model: whisper.cpp times its words here, with this machine's default model (ADR 0046 d11).
+        localTiming: async () => ({
+          provider: await localTranscription(dir, DEFAULT_TRANSCRIPTION_PROVIDER, asset),
+          providerId: DEFAULT_TRANSCRIPTION_PROVIDER,
+          model: await models.defaultFor(DEFAULT_TRANSCRIPTION_PROVIDER),
+        }),
       })).then(
         (result) => {
           announcer.end();
